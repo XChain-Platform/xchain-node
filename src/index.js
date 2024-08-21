@@ -22,7 +22,8 @@ const DB_MODULE_NAME = "db"
 const XChainModule = {
 	XCHAIN_ENCODER: "xchain-encoder",
 	XCHAIN_DECODER: "xchain-decoder",
-	XCHAIN_ADDRESS_INDEXER: "xchain-address-indexer"//,
+	XCHAIN_ADDRESS_INDEXER: "xchain-address-indexer",
+	XCHAIN_REGTEST_MINER: "xchain-regtest-miner"//,
 	//XCHAIN_EXPLORER: "xchain-explorer"
 }
 
@@ -40,14 +41,16 @@ var installedModules = {}
 	"xchain-encoder": "https://github.com/XChain-platform/xchain-encoder",
 	"xchain-decoder": "https://github.com/XChain-platform/xchain-decoder",
 	"xchain-address-indexer": "https://github.com/XChain-platform/xchain-address-indexer",
-	"xchain-explorer": "https://github.com/XChain-platform/xchain-explorer"
+	"xchain-explorer": "https://github.com/XChain-platform/xchain-explorer",
+	"xchain-regtest-miner": "https://github.com/XChain-platform/xchain-regtest-miner"
 }*/
 
 const modulesUrls = {
 	"xchain-encoder": "git@github.com:XChain-platform/xchain-encoder.git",
 	"xchain-decoder": "git@github.com:XChain-platform/xchain-decoder.git",
 	"xchain-address-indexer": "git@github.com:XChain-platform/xchain-address-indexer.git",
-	"xchain-explorer": "git@github.com:XChain-platform/xchain-explorer.git"
+	"xchain-explorer": "git@github.com:XChain-platform/xchain-explorer.git",
+	"xchain-regtest-miner": "git@github.com:XChain-platform/xchain-regtest-miner.git"
 }
 
 const Coin = {
@@ -67,6 +70,15 @@ const db = new LevelUpStore(DB_NAME, dataDir)
 
 async function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createDirectories(){
+	if (!fs.existsSync(dataDir)){
+		fs.mkdirSync(dataDir)
+	}
+	if (!fs.existsSync(moduleDir)){
+		fs.mkdirSync(moduleDir)
+	}
 }
 
 function stringToXChainModule(moduleString){
@@ -732,10 +744,15 @@ async function buildAndUp(module, coin, network){
 						}
 						break
 					case XChainModule.XCHAIN_ADDRESS_INDEXER:
-						if ("ADDRESS_INDEXER" in environmentVariables){
-							portLine = "-p "+environmentVariables["ADDRESS_INDEXER"]+":3000"
+						if ("ADDRESS_INDEXER_PORT" in environmentVariables){
+							portLine = "-p "+environmentVariables["ADDRESS_INDEXER_PORT"]+":3000"
 						}
-						break						
+						break
+					case XChainModule.XCHAIN_REGTEST_MINER:
+						if ("REGTEST_MINER_PORT" in environmentVariables){
+							portLine = "-p "+environmentVariables["REGTEST_MINER_PORT"]+":3000"
+						}
+						break	
 				}		
 
 				
@@ -848,24 +865,13 @@ async function getCryptoNode(coin, network, version){
 	})
 }
 
-async function start(){
-	await db.createDatabase()
-	try {
-		await checkDockerInstalledAndReachable()
-	} catch(err){
-		throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
-	}
-	
-	await startInterface()
-}
-
 async function getStatus(coin, network, printStatus = false){
 	await loadInstalledModules(coin, network)
 	
 	let coins = Object.keys(installedModules)
 	
 	if (coins.length > 0){
-		if (printStatus){console.log("Modules installed:")}
+		//if (printStatus){console.log("Modules installed:")}
 		
 		for (let nextCoin in installedModules){
 			let nextCoinNetworks = installedModules[nextCoin]
@@ -887,11 +893,17 @@ async function getStatus(coin, network, printStatus = false){
 							nextCoinNetworkModules[nextCoinNetworkModule]["status"] = containerStatus
 		
 							if (!titlePrinted){
-								if (printStatus){console.log("["+(nextCoin+" - "+nextCoinNetwork).toUpperCase()+"]")}
+								if (printStatus){console.log("\x1b[37m["+(nextCoin+" - "+nextCoinNetwork).toUpperCase()+"]\x1b[37m")}
 								titlePrinted = true
 							}
 		
-							if (printStatus){console.log("  "+nextCoinNetworkModule+" ("+containerStatus["State"]["Status"]+")")}
+							if (printStatus){
+								if (containerStatus["State"]["Status"] == "Exited"){
+									console.log(" \x1b[31m"+nextCoinNetworkModule+" ("+containerStatus["State"]["Status"]+")\x1b[37m")
+								} else {
+									console.log(" \x1b[32m"+nextCoinNetworkModule+" ("+containerStatus["State"]["Status"]+")\x1b[37m")
+								}
+							}
 						} catch(err){
 							//console.log("Error inspecting the container. ")
 							//console.log(err)
@@ -1074,6 +1086,13 @@ async function installNode(coin, network){
 	console.log("Building xchain-address-indexer...")
 	await buildAndUp(XChainModule.XCHAIN_ADDRESS_INDEXER, coin, network)
 	
+	if (network == Network.REGTEST){
+		console.log("Downloading xchain-regtest-miner...")
+		await cloneGit(XChainModule.XCHAIN_REGTEST_MINER, true)
+		console.log("Building xchain-regtest_miner...")
+		await buildAndUp(XChainModule.XCHAIN_REGTEST_MINER, coin, network)
+	}
+	
 	try {
 		await setDatabaseParameters()
 	} catch(err){
@@ -1084,250 +1103,343 @@ async function installNode(coin, network){
 }
 
 async function modulesSelectionInterface(coin, network){
-	let modulesStatus = await getStatus(coin, network, false)
+	return new Promise(async (resolve, reject) => {
+		let modulesStatus = await getStatus(coin, network, false)
 	
-	let moduleChoices = []
-	let actionModules = {}
-	
-	if ((coin in modulesStatus) && (network in modulesStatus[coin])){
-		//Add the database module to the coin
-		if (("" in modulesStatus) && ("" in modulesStatus[""]) && ("db" in modulesStatus[""][""])){
-			modulesStatus[coin][network]["db"] = modulesStatus[""][""]["db"]
-		}
-	
-		let allModules = Object.values(XChainModule)
-		allModules.push(DB_MODULE_NAME)
-	
-		for (let nextModuleIndex in modulesStatus[coin][network]){
-			let key = nextModuleIndex+" ("+modulesStatus[coin][network][nextModuleIndex]["status"]["State"]["Status"]+")"
-			
-			moduleChoices.push({
-				name:key,
-				value:nextModuleIndex
-			})
-			
-			actionModules[key] = {
-				"value":nextModuleIndex, 
-				"container_id": modulesStatus[coin][network][nextModuleIndex]["container_id"], 
-				"status":modulesStatus[coin][network][nextModuleIndex]["status"]["State"]["Status"]
+		let moduleChoices = []
+		let actionModules = {}
+		
+		let onlyOneModuleUsingDatabase = false //If the module database is used by many modules, then it can't be removed
+		
+		if ((coin in modulesStatus) && (network in modulesStatus[coin])){
+			onlyOneModuleUsingDatabase = !((modulesStatus.length > 2) || (modulesStatus[coin].length > 1)) //If the database module exists, it will count as one		
+		
+			//Add the database module to the coin
+			if (("" in modulesStatus) && ("" in modulesStatus[""]) && ("db" in modulesStatus[""][""])){
+				modulesStatus[coin][network]["db"] = modulesStatus[""][""]["db"]
+			}
+		
+			let allModules = Object.values(XChainModule)
+			if (network != Network.REGTEST){
+				let regtestMinerIndex = allModules.indexOf(XChainModule.XCHAIN_REGTEST_MINER)
+				
+				if (regtestMinerIndex >= 0){
+					allModules.splice(regtestMinerIndex, 1)
+				}
 			}
 			
-			var moduleIndex = allModules.indexOf(nextModuleIndex)
-			if (moduleIndex !== -1) {
-				allModules.splice(moduleIndex, 1)
+			allModules.push(NODE_MODULE_NAME)
+			allModules.push(DB_MODULE_NAME)
+		
+			for (let nextModuleIndex in modulesStatus[coin][network]){
+				//let key = nextModuleIndex+" ("+modulesStatus[coin][network][nextModuleIndex]["status"]["State"]["Status"]+")"
+				let moduleStatus = modulesStatus[coin][network][nextModuleIndex]["status"]["State"]["Status"]
+				let key = ""
+				
+				if (moduleStatus == "exited"){
+					key = "\x1b[31m"+nextModuleIndex+" ("+moduleStatus+")"+"\x1b[37m"
+				} else {
+					key = "\x1b[32m"+nextModuleIndex+" ("+moduleStatus+")"+"\x1b[37m"
+				}
+				
+				moduleChoices.push({
+					name:key,
+					value:nextModuleIndex
+				})
+				
+				actionModules[key] = {
+					"value":nextModuleIndex, 
+					"container_id": modulesStatus[coin][network][nextModuleIndex]["container_id"], 
+					"status":moduleStatus
+				}
+				
+				var moduleIndex = allModules.indexOf(nextModuleIndex)
+				if (moduleIndex !== -1) {
+					allModules.splice(moduleIndex, 1)
+				}
 			}
-		}
-		
-		for (let nextModuleIndex in allModules){
-			let nextModule = allModules[nextModuleIndex]
-			let key = nextModule+" (missing)"
-				
-			moduleChoices.push({
-				name: key,
-				value: nextModule
-			})
-				
-			actionModules[key] = {
-				"value":nextModule, 
-				"status":"missing"
-			}			
-		}
-		
-		moduleChoices.push(
-			{name:"Uninstall all the modules", value:"Uninstall all the modules"}
-		)
-	} else {
-		moduleChoices.push(
-			{name:"Install the node", value:"Install the node"}
-		)
-	}
-	
-	let modulesSelect = new Select({
-		name: 'action',
-		message: 'In which module do you want to perform actions?',
-		choices: moduleChoices
-	})
-	
-	modulesSelect.run().then(
-		async (moduleAnswer) => {
-			if (moduleAnswer == "Uninstall all the modules"){
-				for (nextKey in actionModules){
-					let nextActionModule = actionModules[nextKey]
-					
-					if (nextActionModule["status"] != "missing"){
-						if (nextActionModule["status"] != "exited"){
-							try {
-								await killContainer(nextActionModule["container_id"])
-								await removeContainer(nextActionModule["container_id"])
-								//TODO: remove module from database
-							} catch (err){
-								console.log("There was a problem trying to kill a container")
-							}
-						}
-					}
-				}
-			} else if (moduleAnswer == "Install the node"){
-				try {
-					await installNode(coin, network)
-				} catch(err){
-					console.log("There was a problem installing the node")
-					console.log(err)
-				}
-			} else if (moduleAnswer in actionModules){
-				let selectedModuleStatus = actionModules[moduleAnswer]["status"]
 			
-				if (selectedModuleStatus != "missing"){
-					let moduleActions = []
+			for (let nextModuleIndex in allModules){
+				let nextModule = allModules[nextModuleIndex]
+				let key = "\x1b[34m"+nextModule+" (missing)"+"\x1b[37m"
 					
-					if (actionModules[moduleAnswer]["value"] != DB_MODULE_NAME){
-						moduleActions.push({name: "Uninstall",	value: "uninstall"})
-					}
+				moduleChoices.push({
+					name: key,
+					value: nextModule
+				})
 					
-					if (selectedModuleStatus == "exited"){
-						moduleActions.push({name: "Restart", value: "restart"})
-					}
-					
-					moduleActions.push({name: "Return",	value: "return"})
-					
-					let modulesActionSelect = new Select({
-						name: 'action',
-						message: 'What do you want to do with the selected module?',
-						choices: moduleActions
+				actionModules[key] = {
+					"value":nextModule, 
+					"status":"missing"
+				}			
+			}
+			
+			moduleChoices.push(
+				{name:"Uninstall all the modules", value:"Uninstall all the modules"}
+			)
+			moduleChoices.push(
+				{name:"Return", value:"return"}
+			)
+		} else {
+			moduleChoices.push(
+				{name:"Install the node", value:"Install the node"}
+			)
+			moduleChoices.push(
+				{name:"Return", value:"return"}
+			)
+		}
+		
+		let modulesSelect = new Select({
+			name: 'action',
+			message: 'In which module do you want to perform actions?',
+			choices: moduleChoices
+		})
+		
+		modulesSelect.run().then(
+			async (moduleAnswer) => {
+				if (moduleAnswer == "Return"){
+					resolve({
+						menuFunction:mainMenu, 
+						parameters:[]
 					})
-					
-					modulesActionSelect.run().then(
-						async (moduleActionAnswer) => {
-							if (moduleActionAnswer == "Uninstall"){
+				} else if (moduleAnswer == "Uninstall all the modules"){
+					for (nextKey in actionModules){
+						let nextActionModule = actionModules[nextKey]
+						
+						if ((nextActionModule["value"] != DB_MODULE_NAME) || (onlyOneModuleUsingDatabase)){
+							if (nextActionModule["status"] != "missing"){
 								try {
-									if (selectedModuleStatus != "exited"){
-										await killContainer(actionModules[moduleAnswer]["container_id"])
+									if (nextActionModule["status"] != "exited"){
+										await killContainer(nextActionModule["container_id"])
 									}
-									
-									await removeContainer(actionModules[moduleAnswer]["container_id"])
+									await removeContainer(nextActionModule["container_id"])
 									//TODO: remove module from database
 								} catch (err){
-									console.log(err)
-									console.log("There was a problem trying to kill/remove a container")
-								}	
-							} else if (moduleActionAnswer == "Restart"){
-								try {
-									await restartContainer(actionModules[moduleAnswer]["container_id"])
-								} catch (err){
-									console.log(err)
-									console.log("There was a problem trying to restart a container")
-								}	
+									console.log("There was a problem trying to kill a container")
+								}
 							}
 						}
-					)
-				} else {
-					let moduleActions = [
-						{name: "Install",	value: "install"},
-						{name: "Return",	value: "return"}
-					]
+					}
 					
-					let modulesActionSelect = new Select({
-						name: 'action',
-						message: 'What do you want to do with the selected module?',
-						choices: moduleActions
+					resolve({
+						menuFunction:modulesSelectionInterface, 
+						parameters:[coin, network]
 					})
+				} else if (moduleAnswer == "Install the node"){
+					try {
+						await installNode(coin, network)
+					} catch(err){
+						console.log("There was a problem installing the node")
+						console.log(err)
+					}
 					
-					modulesActionSelect.run().then(
-						async (moduleActionAnswer) => {
-							if (moduleActionAnswer == "Install"){
-								try {
-									await installModule(coin, network, actionModules[moduleAnswer]["value"])
-								} catch (err){
-									console.log(err)
-									console.log("There was a problem trying to install the module")
-								}	
+					resolve({
+						menuFunction:modulesSelectionInterface, 
+						parameters:[coin, network]
+					})
+				} else if (moduleAnswer in actionModules){
+					let selectedModuleStatus = actionModules[moduleAnswer]["status"]
+				
+					if (selectedModuleStatus != "missing"){
+						let moduleActions = []
+						
+						if (actionModules[moduleAnswer]["value"] != DB_MODULE_NAME){
+							moduleActions.push({name: "Uninstall",	value: "uninstall"})
+						}
+						
+						if (selectedModuleStatus == "exited"){
+							moduleActions.push({name: "Restart", value: "restart"})
+						}
+						
+						moduleActions.push({name: "Return",	value: "return"})
+						
+						let modulesActionSelect = new Select({
+							name: 'action',
+							message: 'What do you want to do with the selected module?',
+							choices: moduleActions
+						})
+						
+						modulesActionSelect.run().then(
+							async (moduleActionAnswer) => {
+								if (moduleActionAnswer == "Uninstall"){
+									try {
+										if (selectedModuleStatus != "exited"){
+											await killContainer(actionModules[moduleAnswer]["container_id"])
+										}
+										
+										await removeContainer(actionModules[moduleAnswer]["container_id"])
+										//TODO: remove module from database
+									} catch (err){
+										console.log(err)
+										console.log("There was a problem trying to kill/remove a container")
+									}
+								} else if (moduleActionAnswer == "Restart"){
+									try {
+										await restartContainer(actionModules[moduleAnswer]["container_id"])
+									} catch (err){
+										console.log(err)
+										console.log("There was a problem trying to restart a container")
+									}
+								} 
+								
+								resolve({
+									menuFunction:modulesSelectionInterface, 
+									parameters:[coin, network]
+								})
 							}
+						)
+					} else {
+						let moduleActions = [
+							{name: "Install",	value: "install"},
+							{name: "Return",	value: "return"}
+						]
+						
+						let modulesActionSelect = new Select({
+							name: 'action',
+							message: 'What do you want to do with the selected module?',
+							choices: moduleActions
+						})
+						
+						modulesActionSelect.run().then(
+							async (moduleActionAnswer) => {
+								if (moduleActionAnswer == "Install"){
+									try {
+										await installModule(coin, network, actionModules[moduleAnswer]["value"])
+									} catch (err){
+										console.log(err)
+										console.log("There was a problem trying to install the module")
+									}	
+								}
+								
+								resolve({
+									menuFunction:modulesSelectionInterface, 
+									parameters:[coin, network]
+								})
+							}
+						)
+					}
+				}
+			}
+		)
+	})
+}
+
+function exit(){
+	process.exit()
+}
+
+
+function mainMenu(){
+	return new Promise(async (resolve, reject) => {
+		let coinPrompt = new Select({
+			name: "coin",
+			message: "Select the coin",
+			choices: Object.values(Coin)
+		})
+		
+		
+		let networkPrompt = new Select({
+			name: "network",
+			message: "Select the network",
+			choices: Object.values(Network)
+		})
+		
+		let modulesStatus = await getStatus(null, null, true)
+		let moduleCoinsChoices = []
+		
+		for (let nextCoinIndex in modulesStatus){
+			//let nextCoin = modulesStatus[nextCoinIndex]
+			
+			moduleCoinsChoices.push({
+				name:nextCoinIndex,
+				value:nextCoinIndex
+			})
+		}
+			
+		let modulesCoins = new Select({
+			name: 'action',
+			message: 'Select a coin to check the installed modules',
+			choices: moduleCoinsChoices
+		})
+		
+		
+		let prompt = new Select({
+			name: 'action',
+			message: 'Select a coin and a network to check the status and install/uninstall modules',
+			choices: 
+				Object.values(Coin).concat(
+					[
+						{name:'Configure database network parameters',value:'configure_database'},
+						{name:'Exit',value:'exit'}
+					]
+				)
+		});
+
+		prompt.run().then(
+			async (answer) => {
+				if (answer == "Exit"){
+					console.log("Bye!")
+					resolve({
+						menuFunction:exit,
+						parameters:[]
+					})
+				} else if (answer == "Configure database network parameters"){
+					try {
+						await setDatabaseParameters()
+					} catch(err){
+						console.log("WARNING! The database parameters couldn't be set")
+						console.log(err)
+					}
+					
+					resolve({
+						menuFunction:mainMenu, 
+						parameters:[]
+					})
+				} else {
+					networkPrompt.run().then(
+						async (networkAnswer) => {
+							resolve({
+								menuFunction:modulesSelectionInterface, 
+								parameters:[answer, networkAnswer]
+							})
 						}
 					)
 				}
 			}
-		}
-	)
+		).catch(
+			console.log(console.error)
+		)
+	})
 }
+
+
+
 
 const startInterface = async() => {
 	console.log("Xchain-Node ver 0.0.0")
 	console.log("")
 	
-	let coinPrompt = new Select({
-		name: "coin",
-		message: "Select the coin",
-		choices: Object.values(Coin)
-	})
+	let menuFunction = mainMenu
+	let parameters = []
+	let menuFunctionParameters
 	
-	
-	let networkPrompt = new Select({
-		name: "network",
-		message: "Select the network",
-		choices: Object.values(Network)
-	})
-	
-	let modulesStatus = await getStatus(null, null, true)
-	let moduleCoinsChoices = []
-	
-	for (let nextCoinIndex in modulesStatus){
-		//let nextCoin = modulesStatus[nextCoinIndex]
-		
-		moduleCoinsChoices.push({
-			name:nextCoinIndex,
-			value:nextCoinIndex
-		})
+	while (true){
+		menuFunctionParameters = await menuFunction(...parameters)
+		menuFunction = menuFunctionParameters["menuFunction"]
+		parameters = menuFunctionParameters["parameters"]
 	}
-		
-	let modulesCoins = new Select({
-		name: 'action',
-		message: 'Select a coin to check the installed modules',
-		choices: moduleCoinsChoices
-	})
-	
-	
-	let prompt = new Select({
-		name: 'action',
-		message: 'Select a coin and a network to check the status and install/uninstall modules',
-		choices: 
-			Object.values(Coin).concat(
-				[
-					{name:'Configure database network parameters',value:'configure_database'},
-					{name:'Exit',value:'exit'}
-				]
-			)
-		
-		
-		/*[
-			{name:'Install a new node or modules',value:'installNode'}, 
-			{name:'Uninstall modules',value:'checkModules'},
-			{name:'Exit',value:'exit'}
-		]*/
-	});
+}
 
-	prompt.run().then(
-		async (answer) => {
-			if (answer == "Exit"){
-				console.log("Bye!")
-			} else if (answer == "Configure database network parameters"){
-				try {
-					await setDatabaseParameters()
-				} catch(err){
-					console.log("WARNING! The database parameters couldn't be set")
-					console.log(err)
-				}
-			} else {
-				networkPrompt.run().then(
-					async (networkAnswer) => {
-						await modulesSelectionInterface(answer, networkAnswer)
-					
-						//await installNode(coinAnswer, networkAnswer)
-					}
-				)
-			}
-		}
-	).catch(
-		console.log(console.error)
-	)
+async function start(){
+	createDirectories()
+	await db.createDatabase()
+	try {
+		await checkDockerInstalledAndReachable()
+	} catch(err){
+		throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
+	}
+	
+	await startInterface()
 }
 
 start()
