@@ -14,7 +14,7 @@ const { prompt, Select, Password } = require('enquirer');
 
 
 const NODE_PREFIX = process.env.NODE_PREFIX
-const DB_NAME = process.env.DB_NAME ?? "xchain_node"
+const DB_NAME = (process.env.DB_NAME == null?"xchain_node":process.env.DB_NAME)
 
 const NODE_MODULE_NAME = "node"
 const DB_MODULE_NAME = "db"
