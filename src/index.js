@@ -8,6 +8,7 @@ const readline = require('readline')
 const path = require("path")
 const LevelUpStore = require('./LevelUpDb.js')
 const mariadb = require('mariadb')
+const semver = require('semver')
 
 //Console interface
 const { prompt, Select, Password } = require('enquirer');
@@ -17,7 +18,7 @@ const NODE_PREFIX = process.env.NODE_PREFIX
 const DB_NAME = (process.env.DB_NAME == null?"xchain_node":process.env.DB_NAME)
 
 const NODE_MODULE_NAME = "node"
-const DB_MODULE_NAME = "db"
+const DB_MODULE_NAME = "database"
 
 const XChainModule = {
 	XCHAIN_ENCODER: "xchain-encoder",
@@ -34,6 +35,9 @@ const configDir = path.join(__dirname,"..","config")
 
 
 const dbRootPasswords = {}
+
+
+const nodeVersion = process.versions.node
 
 var installedModules = {}
 
@@ -295,21 +299,23 @@ async function getDefaultConfig(module, coin, network){
 	
 	//Read the default config file
 	let defaultConfig = {}
-	const configFileStream = fs.createReadStream(configDir+"/"+coin+"-"+network)
-	
-	const rl = readline.createInterface({
-		input: configFileStream,
-		crlfDelay: Infinity
-	})
-	
-	for await (const line of rl) {
-		let lineSplit = line.split("=")
+	if ((coin != "") && (network != "")){
+		const configFileStream = fs.createReadStream(configDir+"/"+coin+"-"+network)
 		
-		if (lineSplit.length == 2){
-			let key = lineSplit[0]
-			let value = lineSplit[1]
+		const rl = readline.createInterface({
+			input: configFileStream,
+			crlfDelay: Infinity
+		})
+		
+		for await (const line of rl) {
+			let lineSplit = line.split("=")
 			
-			defaultConfig[key] = value
+			if (lineSplit.length == 2){
+				let key = lineSplit[0]
+				let value = lineSplit[1]
+				
+				defaultConfig[key] = value
+			}
 		}
 	}
 	
@@ -666,12 +672,17 @@ async function buildDatabaseModule(coin, network){
 				portLine = "-p "+environmentVariables["DB_PORT"]+":3306"
 			}
 			
+			let networkLine = ""
+			if ((coin != "") && (network != "")){
+				networkLine = '--network '+getDockerNetwork(coin, network)
+			}
+			
 			//Download the latest mariadb from the hub
 			exec('docker pull mariadb:latest ', (error, stdout, stderr) => {
 				//Put a new name on the downloaded image
 				exec('docker tag mariadb:latest '+container_prefix, (error, stdout, stderr) => {
 					// Create the container with docker up
-					let dockerCommand = 'docker run -d --hostname mariadb --network '+getDockerNetwork(coin, network)+' '+portLine+' --env MYSQL_ROOT_PASSWORD='+mariadbRootPassword+' '+container_prefix
+					let dockerCommand = 'docker run -d --hostname mariadb '+networkLine+' '+portLine+' --env MYSQL_ROOT_PASSWORD='+mariadbRootPassword+' '+container_prefix
 					console.log("Creating container of module "+DB_MODULE_NAME)
 					exec(dockerCommand, async (error, stdout, stderr) => {
 						if (error) {
@@ -848,10 +859,20 @@ async function getCryptoNode(coin, network, version){
 						await decompressTarGz(filePath)
 						
 						if (fs.existsSync(destination+"/bitcoin")){
-							fs.rmSync(destination+"/bitcoin", { recursive: true, force: true })
+							if (semver.gte(nodeVersion,"14.14.0")){
+								fs.rmSync(destination+"/bitcoin", {recursive: true, force: true})	
+							} else {
+								fs.rmdirSync(destination+"/bitcoin", {recursive: true})
+							}
 						}
 						
-						fs.cpSync(destination+"/bitcoin-"+version,destination+"/bitcoin", {recursive:true})
+						/*if (semver.gte(nodeVersion,"14.14.0")){
+							fs.cpSync(destination+"/bitcoin-"+version,destination+"/bitcoin", {recursive:true})
+						} else {
+							fs.copyFileSync(destination+"/bitcoin-"+version,destination+"/bitcoin")
+						}*/
+						
+						fs.renameSync(destination+"/bitcoin-"+version,destination+"/bitcoin")
 					} catch (err) {
 						reject(err)
 					}
@@ -1369,7 +1390,7 @@ function mainMenu(){
 			choices: 
 				Object.values(Coin).concat(
 					[
-						{name:'Configure database network parameters',value:'configure_database'},
+						{name:'Install/Configure database',value:'configure_database'},
 						{name:'Exit',value:'exit'}
 					]
 				)
@@ -1383,8 +1404,9 @@ function mainMenu(){
 						menuFunction:exit,
 						parameters:[]
 					})
-				} else if (answer == "Configure database network parameters"){
+				} else if (answer == "Install/Configure database"){
 					try {
+						await buildDatabaseModule("","")
 						await setDatabaseParameters()
 					} catch(err){
 						console.log("WARNING! The database parameters couldn't be set")
