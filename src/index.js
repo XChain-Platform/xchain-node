@@ -286,7 +286,7 @@ async function getDefaultConfig(module, coin, network){
 		"NODE_PASSWORD":"rpc",
 		"ADDRESS_INDEXER_URL":getDockerContainerImageName(XChainModule.XCHAIN_ADDRESS_INDEXER, coin, network),
 		"ADDRESS_INDEXER_API_PORT":3001,
-		"DECODER_DB_NAME":"xchain_decoder_"+network,
+		"DECODER_DB_NAME":"xchain_decoder_"+coin+"_"+network,
 		"DB_URL":DB_MODULE_NAME,
 		//"DB_PORT":3306,
 		"DECODER_DB_USER":"xchain_decoder_"+coin+"_"+network,
@@ -1136,8 +1136,8 @@ async function modulesSelectionInterface(coin, network){
 			onlyOneModuleUsingDatabase = !((modulesStatus.length > 2) || (modulesStatus[coin].length > 1)) //If the database module exists, it will count as one		
 		
 			//Add the database module to the coin
-			if (("" in modulesStatus) && ("" in modulesStatus[""]) && ("db" in modulesStatus[""][""])){
-				modulesStatus[coin][network]["db"] = modulesStatus[""][""]["db"]
+			if (("" in modulesStatus) && ("" in modulesStatus[""]) && (DB_MODULE_NAME in modulesStatus[""][""])){
+				modulesStatus[coin][network][DB_MODULE_NAME] = modulesStatus[""][""][DB_MODULE_NAME]
 			}
 		
 			let allModules = Object.values(XChainModule)
