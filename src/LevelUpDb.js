@@ -44,20 +44,22 @@ class LevelUpStore {
 				let dataArray = dataString.split(";")
 				
 				//Find its transaction and input(if it exists)
-				let module = dataArray[0]
-				let coinData = dataArray[1]
-				let networkData = dataArray[2]
-				
-				if (((coin == null) && (network == null))
-					|| ((coin == coinData) && (network == networkData))
-					|| ((coinData == "") && (networkData == ""))
-				){
-					modules.push({
-						module: module,
-						network: networkData,
-						coin: coinData,
-						container_id: data.value.toString("utf-8")
-					})
+				if (dataArray.length == 3){
+					let module = dataArray[0]
+					let coinData = dataArray[1]
+					let networkData = dataArray[2]
+					
+					if (((coin == null) && (network == null))
+						|| ((coin == coinData) && (network == networkData))
+						|| ((coinData == "") && (networkData == ""))
+					){
+						modules.push({
+							module: module,
+							network: networkData,
+							coin: coinData,
+							container_id: data.value.toString("utf-8")
+						})
+					}
 				}
 			})
 
@@ -100,6 +102,7 @@ class LevelUpStore {
 				return value.toString("utf-8")
 			}
 		} catch(err){
+			//console.log(err)
 		}
 		
 		return null

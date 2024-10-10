@@ -24,8 +24,8 @@ const XChainModule = {
 	XCHAIN_ENCODER: "xchain-encoder",
 	XCHAIN_DECODER: "xchain-decoder",
 	XCHAIN_ADDRESS_INDEXER: "xchain-address-indexer",
-	XCHAIN_REGTEST_MINER: "xchain-regtest-miner"//,
-	//XCHAIN_EXPLORER: "xchain-explorer"
+	XCHAIN_REGTEST_MINER: "xchain-regtest-miner",
+	XCHAIN_INDEXER: "xchain-indexer"
 }
 
 const moduleDir = path.join(__dirname,"..","modules")
@@ -45,7 +45,7 @@ var installedModules = {}
 	"xchain-encoder": "https://github.com/XChain-platform/xchain-encoder",
 	"xchain-decoder": "https://github.com/XChain-platform/xchain-decoder",
 	"xchain-address-indexer": "https://github.com/XChain-platform/xchain-address-indexer",
-	"xchain-explorer": "https://github.com/XChain-platform/xchain-explorer",
+	"xchain-indexer": "https://github.com/XChain-platform/xchain-indexer",
 	"xchain-regtest-miner": "https://github.com/XChain-platform/xchain-regtest-miner"
 }*/
 
@@ -53,7 +53,7 @@ const modulesUrls = {
 	"xchain-encoder": "git@github.com:XChain-platform/xchain-encoder.git",
 	"xchain-decoder": "git@github.com:XChain-platform/xchain-decoder.git",
 	"xchain-address-indexer": "git@github.com:XChain-platform/xchain-address-indexer.git",
-	"xchain-explorer": "git@github.com:XChain-platform/xchain-explorer.git",
+	"xchain-indexer": "git@github.com:XChain-platform/xchain-indexer.git",
 	"xchain-regtest-miner": "git@github.com:XChain-platform/xchain-regtest-miner.git"
 }
 
@@ -211,6 +211,19 @@ async function getStatusFromContainer(containerId){
 	})
 }
 
+async function getDockerNetworkInspect(dockerNetwork){
+	return new Promise((resolve, reject) => {
+		exec('docker network inspect '+dockerNetwork, (error, stdout, stderr) => {
+			if (error){
+				reject(error)
+			} else {
+				resolve(JSON.parse(stdout)[0])
+			}
+		})
+	})
+}
+
+
 function getDockerNetwork(coin, network){
 	return NODE_PREFIX+"_"+coin+"_"+network
 }
@@ -287,14 +300,24 @@ async function getDefaultConfig(module, coin, network){
 		"ADDRESS_INDEXER_URL":getDockerContainerImageName(XChainModule.XCHAIN_ADDRESS_INDEXER, coin, network),
 		"ADDRESS_INDEXER_API_PORT":3001,
 		"DECODER_DB_NAME":"xchain_decoder_"+coin+"_"+network,
-		"DB_URL":DB_MODULE_NAME,
-		//"DB_PORT":3306,
+		//"DECODER_DB_HOST":DB_MODULE_NAME,
+		"DECODER_DB_HOST":"mariadb",
+		"DECODER_DB_PORT":3306,
 		"DECODER_DB_USER":"xchain_decoder_"+coin+"_"+network,
-		"DB_PASSWORD":"xchain_password",
+		"DECODER_DB_PASS":"xchain_password",
 		"DECODER_URL":getDockerContainerImageName(XChainModule.XCHAIN_DECODER, coin, network),
 		"DECODER_API_PORT":3002,
 		"ENCODER_URL":getDockerContainerImageName(XChainModule.XCHAIN_ENCODER, coin, network),
-		"ENCODER_API_PORT":3003
+		"ENCODER_API_PORT":3003,
+		"INDEXER_API_PORT":3004,
+		"INDEXER_COIN":coin,
+		"INDEXER_NETWORK":network,
+		//"INDEXER_DB_HOST":DB_MODULE_NAME,
+		"INDEXER_DB_HOST":"mariadb",
+		"INDEXER_DB_PORT":3306,
+		"INDEXER_DB_NAME":"xchain_indexer_"+coin+"_"+network,
+		"INDEXER_DB_USER":"xchain_indexer_"+coin+"_"+network,
+		"INDEXER_DB_PASS":"xchain_password"
 	}
 	
 	//Read the default config file
@@ -445,9 +468,42 @@ async function setDatabaseParameters(){
 				//Verify if mariadb container is in the docker network of this coin and network
 				try {
 					await addContainerToNetwork(DB_MODULE_NAME, nextCoin, nextNetwork)
-					await addUserPasswordToDatabase(XChainModule.XCHAIN_ENCODER, nextCoin, nextNetwork)
+					
+					let moduleContainerId = await db.getModuleContainer(XChainModule.XCHAIN_DECODER, nextCoin, nextNetwork)
+					if (moduleContainerId != null){
+						let defaultConfig = await getDefaultConfig(XChainModule.XCHAIN_DECODER, nextCoin, nextNetwork)					
+						await addUserPasswordToDatabase(
+							XChainModule.XCHAIN_DECODER,
+							nextCoin,
+							nextNetwork,
+							defaultConfig["DECODER_DB_NAME"],
+							defaultConfig["DECODER_DB_USER"],
+							defaultConfig["DECODER_DB_PASS"]
+						)
+					}
+					moduleContainerId = await db.getModuleContainer(XChainModule.XCHAIN_INDEXER, nextCoin, nextNetwork)
+					if (moduleContainerId != null){
+						let defaultConfig = await getDefaultConfig(XChainModule.XCHAIN_INDEXER, nextCoin, nextNetwork)					
+						await addUserPasswordToDatabase(
+							XChainModule.XCHAIN_INDEXER,
+							nextCoin,
+							nextNetwork,
+							defaultConfig["INDEXER_DB_NAME"],
+							defaultConfig["INDEXER_DB_USER"],
+							defaultConfig["INDEXER_DB_PASS"]
+						)
+						await addUserPasswordToDatabase(
+							XChainModule.XCHAIN_INDEXER,
+							nextCoin,
+							nextNetwork,
+							defaultConfig["DECODER_DB_NAME"],
+							defaultConfig["DECODER_DB_USER"],
+							defaultConfig["DECODER_DB_PASS"]
+						)
+					}
 				} catch(err) {
-					console.log("There was a problem adding de database container to the docker network of "+coin+" "+network+"")
+					console.log(err)
+					console.log("There was a problem adding de database container to the docker network of "+nextCoin+" "+nextNetwork+"")
 					reject(err)
 				}
 			}
@@ -457,7 +513,26 @@ async function setDatabaseParameters(){
 	})
 }
 
-async function addUserPasswordToDatabase(module, coin, network, inDocker = true){
+async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, command, commandOptions = ""){
+	return new Promise(async (resolve,reject)=>{
+		let dockerCommand = 'docker exec -i '+mariadbContainerId+' mariadb -u root -p'+mariadbRootPassword+' -e "'+command+'"'
+		
+		
+		if (commandOptions != ""){
+			dockerCommand = dockerCommand + " " + commandOptions
+		}
+		
+		exec(dockerCommand, (error, stdout, stderr) => {
+			if (error){
+				reject(error)
+			} else {
+				resolve(stdout.trim())
+			}
+		})
+	})	
+}
+
+async function addUserPasswordToDatabase(module, coin, network, databaseName, user, userPassword, inDocker = true){
 	return new Promise(async (resolve,reject)=>{
 		if (!(coin in dbRootPasswords)){
 			await askMariadbRootPassword(coin, network)
@@ -467,85 +542,69 @@ async function addUserPasswordToDatabase(module, coin, network, inDocker = true)
 		let moduleContainerId = await db.getModuleContainer(module, coin, network)
 		let containerStatus = await getStatusFromContainer(moduleContainerId)
 		let dockerNetwork = getDockerNetwork(coin, network)
-		let gatewayIp = containerStatus["NetworkSettings"]["Networks"][dockerNetwork]["Gateway"]
+		let docketNetworkInspect = await getDockerNetworkInspect(dockerNetwork)
+		
+		let gatewayIp = docketNetworkInspect["IPAM"]["Config"][0]["Gateway"]
 		let gatewayIpSplit = gatewayIp.split(".")
-		gatewayIp = gatewayIpSplit[0]+"."+gatewayIpSplit[1]+"."+gatewayIpSplit[2]+".0"
+		gatewayIp = gatewayIpSplit[0]+"."+gatewayIpSplit[1]+".0.0"
 		
-		let defaultConfig = await getDefaultConfig(module, coin, network)
-	
-		let databaseName = defaultConfig["DECODER_DB_NAME"]
-		let user = defaultConfig["DECODER_DB_USER"]
-		let userPassword = defaultConfig["DB_PASSWORD"]
+		let host = gatewayIp+"/255.255.255.0"
+		let mariadbUser = "'"+user+"'@'"+host+"'"
 		
-		let mariadbUser = "'"+user+"'@'"+gatewayIp+"/255.255.255.0'"
-		let query1 = "CREATE USER IF NOT EXISTS "+mariadbUser+" IDENTIFIED BY '"+userPassword+"'"
-		let query2 = "CREATE DATABASE IF NOT EXISTS "+databaseName+""
-		let query3 = "GRANT ALL PRIVILEGES ON "+databaseName+".* TO "+mariadbUser
-		let query4 = "FLUSH PRIVILEGES"
-	
 		//This means mariadb is inside a docker container, we will execute the queries using docker command
 		if (inDocker){
 			try {
 				await checkIfDatabaseIsReady("root", mariadbRootPassword)
+			
+		
+				let mariadbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+				
+				let databaseCount = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+					"SELECT COUNT(SCHEMA_NAME) FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '"+databaseName+"'", "-B -N"
+				)
+				if (databaseCount == 0){
+					await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+						"CREATE DATABASE IF NOT EXISTS "+databaseName+""
+					)	
+					console.log("Database "+databaseName+" created!")
+				}
+				
+				let userCount = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+					"SELECT COUNT(*) FROM mysql.user WHERE user = '"+user+"' AND host = '"+host+"' AND password = PASSWORD('"+userPassword+"')", "-B -N"
+				)
+				if (userCount == 0){
+					await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+						"CREATE USER IF NOT EXISTS "+mariadbUser+" IDENTIFIED BY '"+userPassword+"'"
+					)
+					console.log("User "+mariadbUser+" created!")
+				}
+				
+				let userGrants = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+					"SHOW GRANTS FOR "+mariadbUser+"", "-B -N"
+				)	
+				userGrants = userGrants.replace("`","'")
+				userGrants = userGrants.split("\n")
+				if (!userGrants.includes(mariadbContainerId, mariadbRootPassword,
+					"GRANT ALL PRIVILEGES ON '"+databaseName+"'.* TO "+mariadbUser
+				)){
+					await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+						"GRANT ALL PRIVILEGES ON "+databaseName+".* TO "+mariadbUser
+					)	
+					await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+						"FLUSH PRIVILEGES"
+					)	
+					console.log("Permissions granted to "+mariadbUser+"!")
+				}
+
+				resolve(true)
 			} catch(err) {
+				console.log(err)
 				reject(err)
 				return
 			}
-		
-			let mariadbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
-			
-			let dockerCommand = 'docker exec -i '+mariadbContainerId+' mariadb -u root -p'+mariadbRootPassword+' -e "'
-		
-			exec(dockerCommand+query1+'"', (error, stdout, stderr) => {
-				if (error){
-					reject(error)
-				} else {
-					exec(dockerCommand+query2+'"', (error, stdout, stderr) => {
-						if (error){
-							reject(error)
-						} else {
-							exec(dockerCommand+query3+'"', async (error, stdout, stderr) => {
-								if (error){
-									reject(error)
-								} else {
-									exec(dockerCommand+query4+'"', async (error, stdout, stderr) => {
-										if (error){
-											reject(error)
-										} else {
-											console.log("User "+mariadbUser+" was added to the database")
-											resolve(true)
-										}
-									})
-								}
-							})
-						}
-					})
-				}
-			})
-		
 		//This means mariadb was not installed by this xchain-node, we will use the root password to add our user
 		} else {
-			let connectionParams = {
-				host: url,
-				port: port,
-				user: "root",
-				password: rootPassword
-			}
-			
-			try {
-				let connection = await mariadb.createConnection(connectionParams)
-				
-				await connection.query(query1)
-				await connection.query(query2)
-				await connection.query(query3)
-				
-				console.log("User "+mariadbUser+" was added to the database")
-				
-				resolve(true)
-			} catch (err){
-				console.log(err)
-				reject(err)
-			}
+			//TODO: add user, create database and grant privileges to a remote mariadb
 		}
 	})
 }
@@ -946,7 +1005,11 @@ async function getStatus(coin, network, printStatus = false){
 				}
 				
 				if (Object.keys(nextCoinNetworkModules).length == 0){
-					delete installedModules[nextCoin][nextCoinNetwork]
+					if ((nextCoinNetwork == null) || (nextCoinNetwork == undefined)){
+						delete installedModules[nextCoin][undefined]
+					} else {
+						delete installedModules[nextCoin][nextCoinNetwork]
+					}
 				}
 			}
 			
@@ -1064,11 +1127,8 @@ async function installModule(coin, network, module){
 				await cloneGit(module, true)
 				await buildAndUp(module, coin, network)
 				
-				if (module == XChainModule.XCHAIN_DECODER){
-					console.log("Adding database module to the docker network")
-					await addContainerToNetwork(DB_MODULE_NAME, coin, network)
-					console.log("Adding decoder user to the database")
-					await addUserPasswordToDatabase(module, coin, network)
+				if ((module == XChainModule.XCHAIN_DECODER) || (module == XChainModule.XCHAIN_INDEXER)){
+					await setDatabaseParameters()
 				}
 				
 				resolve(true)
@@ -1113,6 +1173,11 @@ async function installNode(coin, network){
 		console.log("Building xchain-regtest_miner...")
 		await buildAndUp(XChainModule.XCHAIN_REGTEST_MINER, coin, network)
 	}
+	
+	console.log("Downloading xchain-indexer...")
+	await cloneGit(XChainModule.XCHAIN_INDEXER, true)
+	console.log("Building xchain-indexer...")
+	await buildAndUp(XChainModule.XCHAIN_INDEXER, coin, network)
 	
 	try {
 		await setDatabaseParameters()
