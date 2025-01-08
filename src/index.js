@@ -23,7 +23,7 @@ const DB_MODULE_NAME = "database"
 const XChainModule = {
 	XCHAIN_ENCODER: "xchain-encoder",
 	XCHAIN_DECODER: "xchain-decoder",
-	XCHAIN_ADDRESS_INDEXER: "xchain-address-indexer",
+	XCHAIN_UTXO_TRACKER: "xchain-utxo-tracker",
 	XCHAIN_REGTEST_MINER: "xchain-regtest-miner",
 	XCHAIN_INDEXER: "xchain-indexer"
 }
@@ -44,7 +44,7 @@ var installedModules = {}
 /*const modulesUrls = {
 	"xchain-encoder": "https://github.com/XChain-platform/xchain-encoder",
 	"xchain-decoder": "https://github.com/XChain-platform/xchain-decoder",
-	"xchain-address-indexer": "https://github.com/XChain-platform/xchain-address-indexer",
+	"xchain-utxo-tracker": "https://github.com/XChain-platform/xchain-utxo-tracker",
 	"xchain-indexer": "https://github.com/XChain-platform/xchain-indexer",
 	"xchain-regtest-miner": "https://github.com/XChain-platform/xchain-regtest-miner"
 }*/
@@ -52,7 +52,7 @@ var installedModules = {}
 const modulesUrls = {
 	"xchain-encoder": "git@github.com:XChain-platform/xchain-encoder.git",
 	"xchain-decoder": "git@github.com:XChain-platform/xchain-decoder.git",
-	"xchain-address-indexer": "git@github.com:XChain-platform/xchain-address-indexer.git",
+	"xchain-utxo-tracker": "git@github.com:XChain-platform/xchain-utxo-tracker.git",
 	"xchain-indexer": "git@github.com:XChain-platform/xchain-indexer.git",
 	"xchain-regtest-miner": "git@github.com:XChain-platform/xchain-regtest-miner.git"
 }
@@ -297,8 +297,8 @@ async function getDefaultConfig(module, coin, network){
 		"NODE_PORT":(network==Network.MAINNET?8332:(network==Network.TESTNET?18332:18444)),
 		"NODE_USER":"rpc",
 		"NODE_PASSWORD":"rpc",
-		"ADDRESS_INDEXER_URL":getDockerContainerImageName(XChainModule.XCHAIN_ADDRESS_INDEXER, coin, network),
-		"ADDRESS_INDEXER_API_PORT":3001,
+		"UTXO_TRACKER_URL":getDockerContainerImageName(XChainModule.XCHAIN_UTXO_TRACKER_, coin, network),
+		"UTXO_TRACKER_API_PORT":3001,
 		"DECODER_DB_NAME":"xchain_decoder_"+coin+"_"+network,
 		//"DECODER_DB_HOST":DB_MODULE_NAME,
 		"DECODER_DB_HOST":"mariadb",
@@ -813,9 +813,9 @@ async function buildAndUp(module, coin, network){
 							portLine = "-p "+environmentVariables["ENCODER_PORT"]+":3000"
 						}
 						break
-					case XChainModule.XCHAIN_ADDRESS_INDEXER:
-						if ("ADDRESS_INDEXER_PORT" in environmentVariables){
-							portLine = "-p "+environmentVariables["ADDRESS_INDEXER_PORT"]+":3000"
+					case XChainModule.XCHAIN_UTXO_TRACKER:
+						if ("UTXO_TRACKER_PORT" in environmentVariables){
+							portLine = "-p "+environmentVariables["UTXO_TRACKER_PORT"]+":3000"
 						}
 						break
 					case XChainModule.XCHAIN_REGTEST_MINER:
@@ -1162,10 +1162,10 @@ async function installNode(coin, network){
 	console.log("Building xchain-decoder container...")
 	await buildAndUp(XChainModule.XCHAIN_DECODER, coin, network)
 	
-	console.log("Downloading xchain-address-indexer...")
-	await cloneGit(XChainModule.XCHAIN_ADDRESS_INDEXER, true)
-	console.log("Building xchain-address-indexer...")
-	await buildAndUp(XChainModule.XCHAIN_ADDRESS_INDEXER, coin, network)
+	console.log("Downloading xchain-utxo-tracker...")
+	await cloneGit(XChainModule.XCHAIN_UTXO_TRACKER, true)
+	console.log("Building xchain-utxo-tracker...")
+	await buildAndUp(XChainModule.XCHAIN_UTXO_TRACKER, coin, network)
 	
 	if (network == Network.REGTEST){
 		console.log("Downloading xchain-regtest-miner...")
