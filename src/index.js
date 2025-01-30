@@ -9,6 +9,7 @@ const path = require("path")
 const LevelUpStore = require('./LevelUpDb.js')
 const mariadb = require('mariadb')
 const semver = require('semver')
+const axios = require('axios')
 
 //Console interface
 const { prompt, Select, Password } = require('enquirer');
@@ -20,6 +21,7 @@ const DB_NAME = (process.env.DB_NAME == null?"xchain_node":process.env.DB_NAME)
 const NODE_MODULE_NAME = "node"
 const DB_MODULE_NAME = "database"
 
+
 const XChainModule = {
 	XCHAIN_ENCODER: "xchain-encoder",
 	XCHAIN_DECODER: "xchain-decoder",
@@ -28,11 +30,21 @@ const XChainModule = {
 	XCHAIN_INDEXER: "xchain-indexer"
 }
 
-const moduleDir = path.join(__dirname,"..","modules")
+const projectFolders = {
+	"xchain-encoder":"XChainEncoder",
+	"xchain-decoder":"XChainDecoder",
+	"xchain-utxo-tracker": "XChainUtxoTracker",
+	"xchain-regtest-miner": "XChainRegtestMiner",
+	"xchain-indexer": "XChainIndexer"
+}
+
+
+const moduleDir = path.join(__dirname, "..", "modules")
+const tmpDir = path.join(__dirname, "..", "tmp")
 const cryptoNodesDir = path.join(__dirname,"..","crypto_nodes")
 const dataDir = path.join(__dirname,"..","data")
 const configDir = path.join(__dirname,"..","config")
-
+const containersFilesDir = path.join(tmpDir, "containers_files")
 
 const dbRootPasswords = {}
 
@@ -48,6 +60,8 @@ var installedModules = {}
 	"xchain-indexer": "https://github.com/XChain-platform/xchain-indexer",
 	"xchain-regtest-miner": "https://github.com/XChain-platform/xchain-regtest-miner"
 }*/
+
+var remoteModuleVersions = {}
 
 const modulesUrls = {
 	"xchain-encoder": "git@github.com:XChain-platform/xchain-encoder.git",
@@ -82,6 +96,12 @@ function createDirectories(){
 	}
 	if (!fs.existsSync(moduleDir)){
 		fs.mkdirSync(moduleDir)
+	}
+	if (!fs.existsSync(tmpDir)) {
+		fs.mkdirSync(tmpDir)
+	}
+	if (!fs.existsSync(containersFilesDir)) {
+		fs.mkdirSync(containersFilesDir)
 	}
 }
 
@@ -124,12 +144,94 @@ async function checkDockerInstalledAndReachable(){
 	})
 }
 
+async function checkAllRemoteVersions(){
+	return Promise.all([
+		getRemoteModuleVersion(XChainModule.XCHAIN_ENCODER),
+		getRemoteModuleVersion(XChainModule.XCHAIN_DECODER),
+		getRemoteModuleVersion(XChainModule.XCHAIN_UTXO_TRACKER),
+		getRemoteModuleVersion(XChainModule.XCHAIN_REGTEST_MINER),
+		getRemoteModuleVersion(XChainModule.XCHAIN_INDEXER)
+	])
+}
+
+async function getRemoteModuleVersion(module) {
+	return new Promise(async (resolve, reject) => {
+		await cloneGit(module, false, true)
+		let packageJsonFilePath = getModuleTmpDir(module) + "/package.json"
+
+		if (fs.existsSync(packageJsonFilePath)) {
+			fs.readFile(packageJsonFilePath, 'utf8', (err, data) => {
+				if (err) {
+					reject("There was a problem reading the package.json file of remote module " + module)
+					return;
+				}
+				try {
+					let packageJsonFile = JSON.parse(data)
+					remoteModuleVersions[module] = packageJsonFile["version"]
+					resolve(packageJsonFile["version"])
+				} catch (error) {
+					reject("There was a problem parsing with json the package.json file of remote module " + module)
+				}
+			})
+		} else {
+			reject("There was a problem parsing with json the package.json file of remote module " + module + ": There is no file")
+        }
+	})
+}
+
+async function getLocalModuleVersion(module){
+	return new Promise(async (resolve, reject) => {
+		let packageJsonFilePath = getModuleDir(module) + "/package.json"
+		if (fs.existsSync(packageJsonFilePath)) {
+			fs.readFile(packageJsonFilePath, 'utf8', (err, data) => {
+				if (err) {
+					reject("There was a problem reading the package.json file of local module " + module + ":" + err)
+					return;
+				}
+				try {
+					let packageJsonFile = JSON.parse(data)
+
+					if ("version" in packageJsonFile) {
+						resolve(packageJsonFile["version"])
+					} else {
+						reject("Couldn't find version info in the package.json file of local module "+module)
+                    }
+				} catch (error) {
+					reject("There was a problem parsing with json the package.json file of local module " + module +":" + error)
+				}
+			})
+		} else {
+			reject("There was a problem parsing with json the package.json file of local module " + module + ": There is no file")
+        }
+	})
+}
+
+async function getContainerModuleVersion(module, coin, network, containerId) {
+	return new Promise(async (resolve, reject) => {
+		let packageJsonFilePath = "/" + projectFolders[module] + "/package.json"
+
+		//if (module == XChainModule.XCHAIN_INDEXER) {
+		//	packageJsonFilePath = "/XChainIndexer/package.json"
+        //}
+
+		try {
+			let containerVersion = await getDockerContainerFileData(containerId, packageJsonFilePath)
+			let containerVersionJson = JSON.parse(containerVersion)
+			resolve(containerVersionJson["version"])
+		} catch (err) {
+			reject("There was an error trying to get the package.json file from the module container "+module+" ("+coin+" "+network+"): "+err)
+        }
+	})
+}
+
+
 function checkIfModuleExists(module){
 	let moduleDir = getModuleDir(module)
 	
 	result = fs.existsSync(moduleDir)
 		&& fs.existsSync(moduleDir+"/Dockerfile")
 		&& fs.existsSync(moduleDir+"/src")
+		&& fs.existsSync(moduleDir+"/package.json")
 	
 	return result
 }
@@ -173,6 +275,10 @@ function getModuleDir(module){
 	return moduleDir+"/"+module
 }
 
+function getModuleTmpDir(module) {
+	return tmpDir + "/" + module
+}
+
 function getCryptoNodeDir(coin, network){
 	return cryptoNodesDir+"/"+Coin[coin]
 }
@@ -181,6 +287,22 @@ function removeModuleDir(module){
 	let moduleDir = getModuleDir(module)
 	
 	fs.rmSync(moduleDir, {recursive:true})
+}
+
+function removeModuleTmpDir(module) {
+	let moduleTmpDir = getModuleTmpDir(module)
+
+	if (fs.existsSync(moduleTmpDir)) {
+		fs.rmSync(moduleTmpDir, { recursive: true })
+	}
+}
+
+function createModuleTmpDir(module) {
+	let moduleTmpDir = getModuleTmpDir(module)
+
+	if (!fs.existsSync(moduleTmpDir)) {
+		fs.mkdirSync(moduleTmpDir)
+	}
 }
 
 function moduleDirExists(module){
@@ -193,6 +315,32 @@ function getDockerContainerImageNamePrefix(module, coin, network){
 	} else {
 		return NODE_PREFIX + "_" + coin + "-" + network
 	}
+}
+
+async function getDockerContainerFileData(containerId, filePath) {
+	return new Promise((resolve, reject) => {
+		exec('docker cp ' + containerId + ":" + filePath + " " + containersFilesDir, (error, stdout, stderr) => {
+			if (error) {
+				reject(error)
+			} else {
+				let data = fs.readFileSync(path.join(containersFilesDir, path.basename(filePath)), 'utf8');
+
+				resolve(data)
+			}
+		})
+	})
+}
+
+async function getDockerContainerFileCat(containerId, path) {
+	return new Promise((resolve, reject) => {
+		exec('docker exec -i ' + containerId+" cat "+path, (error, stdout, stderr) => {
+			if (error) {
+				reject(error)
+			} else {
+				resolve(stdout)
+			}
+		})
+	})
 }
 
 function getDockerContainerImageName(module, coin, network){
@@ -776,7 +924,7 @@ async function buildDatabaseModule(coin, network){
 	})
 }
 
-async function buildAndUp(module, coin, network){
+async function buildAndUp(module, coin, network, overwrite_container_id=null){
 	return new Promise(async (resolve,reject)=>{
 		if (checkIfModuleExists(module)){
 		
@@ -795,7 +943,7 @@ async function buildAndUp(module, coin, network){
 			let container_prefix = getDockerContainerImageName(module, coin, network)// NODE_PREFIX + "_" + coin + "-" + network
 	
 			console.log("Building image of module "+module+" in "+coin+" "+network)
-			exec('docker build . -t '+container_prefix, {cwd:moduleDir}, (error, stdout, stderr) => {
+			exec('docker build . -t '+container_prefix, {cwd:moduleDir}, async (error, stdout, stderr) => {
 				if (error) {
 					console.error(`Error creating Docker image: ${error.message}`);
 					return;
@@ -825,7 +973,16 @@ async function buildAndUp(module, coin, network){
 						break	
 				}		
 
-				
+				if (overwrite_container_id) {
+					try {
+						await killContainer(overwrite_container_id)
+					} catch {
+						//This try..catch prevents an error if the container is not running
+					}
+					await removeContainer(overwrite_container_id)
+                }
+
+
 				// Create the container with docker up
 				let dockerCommand = 'docker run -d --network '+getDockerNetwork(coin, network)+' '+environmentVariablesLine+' '+portLine+' -t '+container_prefix
 				console.log("Creating container of module "+module+" in "+coin+" "+network)
@@ -853,20 +1010,32 @@ async function buildAndUp(module, coin, network){
 	})
 }
 
-async function cloneGit(module, rewrite=false){
+async function cloneGit(module, rewrite = false, useTmp = false){
 	return new Promise((resolve,reject)=>{
-		if (moduleDirExists(module)){
-			if (rewrite){
-				removeModuleDir(module)
-			} else {
-				reject("Module directory already exists")
+		if (useTmp) {
+			removeModuleTmpDir(module)
+			createModuleTmpDir(module)
+		} else {
+			if (moduleDirExists(module)) {
+				if (rewrite) {
+					removeModuleDir(module)
+				} else {
+					reject("Module directory already exists")
+				}
 			}
 		}
 		
 		if (module in modulesUrls){
 			let gitUrl = modulesUrls[module]
-			let destination = getModuleDir(module)
-			
+
+			let destination = ""
+
+			if (useTmp) {
+				destination = getModuleTmpDir(module)
+			} else {
+				destination = getModuleDir(module)
+			}
+
 			exec(`git clone ${gitUrl} ${destination}`, (error, stdout, stderr) => {
 				if (error) {
 					reject(`Error cloning project: ${error.message}`)
@@ -977,11 +1146,32 @@ async function getStatus(coin, network, printStatus = false){
 								titlePrinted = true
 							}
 		
-							if (printStatus){
-								if (containerStatus["State"]["Status"] == "Exited"){
-									console.log(" \x1b[31m"+nextCoinNetworkModule+" ("+containerStatus["State"]["Status"]+")\x1b[37m")
+							if (printStatus) {
+								let moduleRemoteVersion = "-"
+								try {
+									moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule]
+								} catch (e) {
+									//Nothing yet
+								}
+								let moduleLocalVersion = "-"
+								try {
+									moduleLocalVersion = await getLocalModuleVersion(nextCoinNetworkModule)
+								} catch (e) {
+									//Nothing yet
+                                }
+								let moduleContainerVersion = "-"
+								try {
+									moduleContainerVersion = await getContainerModuleVersion(nextCoinNetworkModule, nextCoin, nextCoinNetwork, containerId)
+								} catch (e) {
+									//Nothing yet
+                                }
+								let versionString = " {remote:" + moduleRemoteVersion + ", local:" + moduleLocalVersion + ", container:" + moduleContainerVersion+"}"
+
+
+								if (containerStatus["State"]["Status"] == "Exited") {
+									console.log(" \x1b[31m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "")
 								} else {
-									console.log(" \x1b[32m"+nextCoinNetworkModule+" ("+containerStatus["State"]["Status"]+")\x1b[37m")
+									console.log(" \x1b[32m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "")
 								}
 							}
 						} catch(err){
@@ -1105,7 +1295,7 @@ async function killContainer(containerId){
 	})
 }
 
-async function installModule(coin, network, module){
+async function installModule(coin, network, module, remoteUpdate=false, overwrite_container_id=null){
 	return new Promise(async (resolve, reject) => {
 		if (module == NODE_MODULE_NAME){
 			try {
@@ -1124,8 +1314,11 @@ async function installModule(coin, network, module){
 			}
 		} else {
 			try {
-				await cloneGit(module, true)
-				await buildAndUp(module, coin, network)
+				if (remoteUpdate) {
+					await cloneGit(module, true)
+                }
+				
+				await buildAndUp(module, coin, network, overwrite_container_id)
 				
 				if ((module == XChainModule.XCHAIN_DECODER) || (module == XChainModule.XCHAIN_INDEXER)){
 					await setDatabaseParameters()
@@ -1153,6 +1346,10 @@ async function installNode(coin, network){
 	await buildCryptoNode(coin, network)
 	
 	console.log("Downloading xchain-encoder...")
+	let localXchainEncoderVersion = await getLocalModuleVersion(XChainModule.XCHAIN_ENCODER)
+	let remoteXchainEncoderVersion = await getRemoteModuleVersion(XChainModule.XCHAIN_ENCODER)
+	let containerXchainEncoderVersion = await getContainerModuleVersion(XChainModule.XCHAIN_ENCODER)
+	
 	await cloneGit(XChainModule.XCHAIN_ENCODER, true)
 	console.log("Building xchain-encoder container...")
 	await buildAndUp(XChainModule.XCHAIN_ENCODER, coin, network)
@@ -1325,18 +1522,111 @@ async function modulesSelectionInterface(coin, network){
 					})
 				} else if (moduleAnswer in actionModules){
 					let selectedModuleStatus = actionModules[moduleAnswer]["status"]
-				
-					if (selectedModuleStatus != "missing"){
+
+					//Getting all module versions
+					let remoteModuleVersion = "0"
+					try {
+						remoteModuleVersion = await remoteModuleVersions[actionModules[moduleAnswer]["value"]]
+					} catch {
+						//Nothing yet
+                    }
+					let localeModuleVersion = "0"
+					try {
+						localeModuleVersion = await getLocalModuleVersion(actionModules[moduleAnswer]["value"])
+					} catch {
+						//Nothing yet
+                    }
+
+					if (selectedModuleStatus != "missing") {
+						let containerModuleVersion = "0"
+						try {
+							containerModuleVersion = await getContainerModuleVersion(actionModules[moduleAnswer]["value"], coin, network, actionModules[moduleAnswer]["container_id"])
+						} catch {
+							//Nothing yet
+                        }
+
 						let moduleActions = []
-						
-						if (actionModules[moduleAnswer]["value"] != DB_MODULE_NAME){
-							moduleActions.push({name: "Uninstall",	value: "uninstall"})
-						}
 						
 						if (selectedModuleStatus == "exited"){
 							moduleActions.push({name: "Restart", value: "restart"})
 						}
 						
+						if (semver.valid(localeModuleVersion)) {
+							if (semver.valid(remoteModuleVersion) && semver.gt(remoteModuleVersion, localeModuleVersion)) {
+								moduleActions.push({ name: "Update locale version", value: "update locale version" })
+							}
+
+							if (semver.valid(containerModuleVersion)) {
+								if (semver.gt(localeModuleVersion, containerModuleVersion)) {
+									moduleActions.push({ name: "Update Container", value: "update container" })
+								} else if (semver.lt(localeModuleVersion, containerModuleVersion) || semver.eq(localeModuleVersion, containerModuleVersion)) {
+									moduleActions.push({ name: "Reinstall", value: "reinstall" })
+								}
+							} else {
+								moduleActions.push({ name: "Install Local Version in Container", value: "install local version in container" })
+                            }
+						} else {
+							if (semver.valid(remoteModuleVersion)) {
+								moduleActions.push({ name: "Update locale version", value: "update locale version" })
+							}
+                        }
+
+						let modulesActionSelect = new Select({
+							name: 'action',
+							message: 'What do you want to do with the selected module?',
+							choices: moduleActions
+						})
+
+						if (actionModules[moduleAnswer]["value"] != DB_MODULE_NAME) {
+							moduleActions.push({ name: "Uninstall", value: "uninstall" })
+						}
+
+						moduleActions.push({ name: "Return", value: "return" })
+
+						modulesActionSelect.run().then(
+							async (moduleActionAnswer) => {
+								if (moduleActionAnswer == "Uninstall") {
+									try {
+										if (selectedModuleStatus != "exited") {
+											await killContainer(actionModules[moduleAnswer]["container_id"])
+										}
+
+										await removeContainer(actionModules[moduleAnswer]["container_id"])
+										//TODO: remove module from database
+									} catch (err) {
+										console.log(err)
+										console.log("There was a problem trying to kill/remove a container")
+									}
+								} else if (moduleActionAnswer == "Restart") {
+									try {
+										await restartContainer(actionModules[moduleAnswer]["container_id"])
+									} catch (err) {
+										console.log(err)
+										console.log("There was a problem trying to restart a container")
+									}
+								} else if (moduleActionAnswer == "Update locale version") {
+									await cloneGit(actionModules[moduleAnswer]["value"], true, false)
+									//Not developed yet
+								} else if ((moduleActionAnswer == "Update container version") || (moduleActionAnswer == "Install Local Version in Container")) {
+									//Not developed yet
+									await installModule(coin, network, actionModules[moduleAnswer]["value"], false, actionModules[moduleAnswer]["container_id"])
+								}
+								
+								resolve({
+									menuFunction:modulesSelectionInterface, 
+									parameters:[coin, network]
+								})
+							}
+						)
+					} else {
+						let moduleActions = []
+
+						if (localeModuleVersion != "0") {
+							moduleActions.push({ name: "Install from local", value: "install from local" })
+						} else {
+							moduleActions.push({ name: "Install", value: "install"})
+                        }
+
 						moduleActions.push({name: "Return",	value: "return"})
 						
 						let modulesActionSelect = new Select({
@@ -1347,55 +1637,22 @@ async function modulesSelectionInterface(coin, network){
 						
 						modulesActionSelect.run().then(
 							async (moduleActionAnswer) => {
-								if (moduleActionAnswer == "Uninstall"){
+								if (moduleActionAnswer == "Install") {
 									try {
-										if (selectedModuleStatus != "exited"){
-											await killContainer(actionModules[moduleAnswer]["container_id"])
-										}
-										
-										await removeContainer(actionModules[moduleAnswer]["container_id"])
-										//TODO: remove module from database
-									} catch (err){
-										console.log(err)
-										console.log("There was a problem trying to kill/remove a container")
-									}
-								} else if (moduleActionAnswer == "Restart"){
-									try {
-										await restartContainer(actionModules[moduleAnswer]["container_id"])
-									} catch (err){
-										console.log(err)
-										console.log("There was a problem trying to restart a container")
-									}
-								} 
-								
-								resolve({
-									menuFunction:modulesSelectionInterface, 
-									parameters:[coin, network]
-								})
-							}
-						)
-					} else {
-						let moduleActions = [
-							{name: "Install",	value: "install"},
-							{name: "Return",	value: "return"}
-						]
-						
-						let modulesActionSelect = new Select({
-							name: 'action',
-							message: 'What do you want to do with the selected module?',
-							choices: moduleActions
-						})
-						
-						modulesActionSelect.run().then(
-							async (moduleActionAnswer) => {
-								if (moduleActionAnswer == "Install"){
-									try {
-										await installModule(coin, network, actionModules[moduleAnswer]["value"])
-									} catch (err){
+										await installModule(coin, network, actionModules[moduleAnswer]["value"], true)
+									} catch (err) {
 										console.log(err)
 										console.log("There was a problem trying to install the module")
-									}	
-								}
+									}
+								} else if (moduleActionAnswer == "Install from local"){
+									try {
+										await installModule(coin, network, actionModules[moduleAnswer]["value"], false)
+									} catch (err) {
+										console.log(err)
+										console.log("There was a problem trying to install the module from local")
+									}
+
+                                }
 								
 								resolve({
 									menuFunction:modulesSelectionInterface, 
@@ -1519,6 +1776,7 @@ const startInterface = async() => {
 
 async function start(){
 	createDirectories()
+	await checkAllRemoteVersions()
 	await db.createDatabase()
 	try {
 		await checkDockerInstalledAndReachable()
