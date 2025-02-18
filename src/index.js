@@ -1299,7 +1299,7 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
 	return new Promise(async (resolve, reject) => {
 		if (module == NODE_MODULE_NAME){
 			try {
-				await getCryptoNode(coin, network, "27.0")
+				await getCryptoNode(coin, network, "28.1")
 				await buildCryptoNode(coin, network)
 				resolve(true)
 			} catch (err){
@@ -1342,13 +1342,13 @@ async function installNode(coin, network){
 	await buildDatabaseModule(coin, network)
 	
 	console.log("Installing bitcoin node...")
-	await getCryptoNode(coin, network, "27.0")
+	await getCryptoNode(coin, network, "28.1")
 	await buildCryptoNode(coin, network)
 	
 	console.log("Downloading xchain-encoder...")
-	let localXchainEncoderVersion = await getLocalModuleVersion(XChainModule.XCHAIN_ENCODER)
-	let remoteXchainEncoderVersion = await getRemoteModuleVersion(XChainModule.XCHAIN_ENCODER)
-	let containerXchainEncoderVersion = await getContainerModuleVersion(XChainModule.XCHAIN_ENCODER)
+	//let localXchainEncoderVersion = await getLocalModuleVersion(XChainModule.XCHAIN_ENCODER)
+	//let remoteXchainEncoderVersion = await getRemoteModuleVersion(XChainModule.XCHAIN_ENCODER)
+	//let containerXchainEncoderVersion = await getContainerModuleVersion(XChainModule.XCHAIN_ENCODER)
 	
 	await cloneGit(XChainModule.XCHAIN_ENCODER, true)
 	console.log("Building xchain-encoder container...")
