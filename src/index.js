@@ -526,7 +526,7 @@ async function getDefaultConfig(module, coin, network){
         "NODE_PORT":(network==Network.MAINNET?8332:(network==Network.TESTNET?18332:18444)),
         "NODE_USER":"rpc",
         "NODE_PASSWORD":"rpc",
-        "UTXO_TRACKER_URL":getDockerContainerImageName(XChainModule.XCHAIN_UTXO_TRACKER_, coin, network),
+        "UTXO_TRACKER_URL":getDockerContainerImageName(XChainModule.XCHAIN_UTXO_TRACKER, coin, network),
         "UTXO_TRACKER_API_PORT":3001,
         "UTXO_TRACKER_PORT":3001,
         "DECODER_DB_NAME":"xchain_decoder_"+coin+"_"+network,
