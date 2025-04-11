@@ -606,6 +606,7 @@ async function buildCryptoNode(coin, network, bitcoinVer=null){
             // Create the container with docker up
             let dockerCommand = 
                 'docker run -d '
+                +'-v '+dataDir+"/"+NODE_MODULE_NAME+"/"+coin+"/"+network+":/.root/."+coin+" "
                 +'--hostname '+NODE_MODULE_NAME+' '
                 +'--network '+getDockerNetwork(coin, network)+' '
                 + (defaultExposedPort ? '-p ' + defaultExposedPort + ':8332 ' : "")
@@ -1036,6 +1037,7 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
                 }
                 
                 let portLine = ""
+                let volumeLine = ""
                 switch(module){
                     case XChainModule.XCHAIN_DECODER:
                         if (("DECODER_PORT" in environmentVariables) && ("DECODER_API_PORT" in environmentVariables)){
@@ -1051,6 +1053,8 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
                         if (("UTXO_TRACKER_PORT" in environmentVariables) && ("UTXO_TRACKER_API_PORT" in environmentVariables)){
                             portLine = "-p "+environmentVariables["UTXO_TRACKER_PORT"]+":"+environmentVariables["UTXO_TRACKER_API_PORT"]
                         }
+                        
+                        volumeLine = "-v "+module+"_"+coin+"-"+network+"-data:/data/xchain-utxo-tracker "
                         break
                     case XChainModule.XCHAIN_REGTEST_MINER:
                         if ("REGTEST_MINER_PORT" in environmentVariables){
@@ -1070,7 +1074,13 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
 
 
                 // Create the container with docker up
-                let dockerCommand = 'docker run -d --hostname '+container_prefix+' --network '+getDockerNetwork(coin, network)+' '+environmentVariablesLine+' '+portLine+' -t '+container_prefix
+                let dockerCommand = 'docker run '
+                    +'-d --hostname '+container_prefix+' '
+                    +volumeLine
+                    +'--network '+getDockerNetwork(coin, network)+' '
+                    +environmentVariablesLine+' '
+                    +portLine+' '
+                    +'-t '+container_prefix
                 console.log("Creating container of module "+module+" in "+coin+" "+network)
                 exec(dockerCommand, {cwd:moduleDir}, async (error, stdout, stderr) => {
                     if (error) {
@@ -1876,15 +1886,15 @@ async function scanModules(){
                         &&(separatedImageName[0] == DB_MODULE_NAME)){
                         
                     } else if (separatedImageName.length == 2){
-						let {coin,network} = stringToNetwork(separatedImageName[0])
+                        let {coin,network} = stringToNetwork(separatedImageName[0])
                         coin = Coin[coin]
-						network = Network[network]
+                        network = Network[network]
                         if ((coin != null) && (network != null)){
                             let module = stringToXChainModule(separatedImageName[1])
-							
+                            
                             
                             if (module != null){
-								module = XChainModule[module]
+                                module = XChainModule[module]
                                 let moduleDb = await db.getModuleContainer(module, coin, network)
                                 
                                 if (moduleDb == null){//It's not in the database
