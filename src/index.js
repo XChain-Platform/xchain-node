@@ -588,6 +588,7 @@ async function buildCryptoNode(coin, network, bitcoinVer=null){
     return new Promise(async (resolve,reject)=>{
         let defaultConfig = await getDefaultConfig(NODE_MODULE_NAME, coin, network)
         let defaultExposedPort = defaultConfig["NODE_EXPOSED_PORT"]
+        let defaultNodePort = defaultConfig["NODE_PORT"]
     
         let container_prefix = getDockerContainerImageName(NODE_MODULE_NAME, coin, network)
         let nodeDir = cryptoNodesDir+"/"+coin
@@ -609,7 +610,7 @@ async function buildCryptoNode(coin, network, bitcoinVer=null){
                 +'-v '+dataDir+"/"+NODE_MODULE_NAME+"/"+coin+"/"+network+":/.root/."+coin+" "
                 +'--hostname '+NODE_MODULE_NAME+' '
                 +'--network '+getDockerNetwork(coin, network)+' '
-                + (defaultExposedPort ? '-p ' + defaultExposedPort + ':8332 ' : "")
+                + (defaultExposedPort && defaultNodePort ? '-p ' + defaultExposedPort + ':'+defaultNodePort+' ' : "")
                 +' -e CRYPTO_NODE_VERSION='+bitcoinVer+' '
                 +'-t '+container_prefix
             console.log("Creating container of "+coin+" "+network+" node")
@@ -1892,9 +1893,15 @@ async function scanModules(){
                         if ((coin != null) && (network != null)){
                             let module = stringToXChainModule(separatedImageName[1])
                             
-                            
                             if (module != null){
                                 module = XChainModule[module]
+                            } else {
+                                if (separatedImageName[1] == NODE_MODULE_NAME){
+                                    module = NODE_MODULE_NAME
+                                }
+                            }
+                            
+                            if (module != null){
                                 let moduleDb = await db.getModuleContainer(module, coin, network)
                                 
                                 if (moduleDb == null){//It's not in the database

@@ -1,0 +1,15 @@
+NETWORK=dogecoin-mainnet
+NODE_URL=node
+NODE_EXPOSED_PORT=3100
+NODE_USER=rpc
+NODE_PASSWORD=rpc
+UTXO_TRACKER_PORT=3101
+DB_NAME=xchain_decoder
+DB_URL=mariadb
+DB_USER=xchain_user
+DB_PASSWORD=xchain_password
+DECODER_URL=localhost
+DECODER_PORT=3102
+ENCODER_URL=localhost
+ENCODER_PORT=3103
+AUX_POW=1
