@@ -7,6 +7,7 @@ const fs = require("fs");
 const readline = require('readline')
 const path = require("path")
 const LevelUpStore = require('./LevelUpDb.js')
+const GitHubDownloader = require('./GitHubDownloader.js')
 const mariadb = require('mariadb')
 const semver = require('semver')
 const axios = require('axios')
@@ -42,6 +43,7 @@ const projectFolders = {
 
 const moduleDir = path.join(__dirname, "..", "modules")
 const tmpDir = path.join(__dirname, "..", "tmp")
+const srcDir = path.join(__dirname, "..", "src")
 const cryptoNodesDir = path.join(__dirname,"..","crypto_nodes")
 const dataDir = path.join(__dirname,"..","data")
 const configDir = path.join(__dirname,"..","config")
@@ -86,6 +88,7 @@ const Network = {
 
 //Initializing db
 const db = new LevelUpStore(DB_NAME, dataDir)
+const gitHubDownloader = new GitHubDownloader(srcDir+"/github_hashes.json")
 
 async function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -184,14 +187,15 @@ async function checkRemoteNodeVersion(coin) {
     let githubProjectVersion = null
     switch (coin) {
         case Coin.BITCOIN:
-            githubProjectVersion = await getGithubProjectVersion("bitcoin", "bitcoin")
+            githubProjectVersion = await gitHubDownloader.getLatestCompatibleVersion("bitcoin", "bitcoin", true)
+			//await getGithubProjectVersion("bitcoin", "bitcoin")
             break
         case Coin.DOGECOIN:
-            githubProjectVersion = await getGithubProjectVersion("dogecoin", "dogecoin")
-            break
+            githubProjectVersion = await gitHubDownloader.getLatestCompatibleVersion("dogecoin", "dogecoin", true)
+			break
         case Coin.LITECOIN:
-            githubProjectVersion = await getGithubProjectVersion("litecoin-project", "litecoin")
-            break
+            githubProjectVersion = await gitHubDownloader.getLatestCompatibleVersion("litecoin-project", "litecoin", true)
+			break
     }
 
     remoteModuleVersions["node_"+coin] = githubProjectVersion
@@ -1207,46 +1211,9 @@ async function getCryptoNode(coin, network, version){
                 })
             })
         } else if (coin == Coin.DOGECOIN) {
-            console.log("Downloading dogecoin node...")
-            const destination = cryptoNodesDir + "/dogecoin"
-            const filePath = destination + "/dogecoin" + version + ".tar.gz"
-
-            //Download dogecoin core
-            const dogecoinNodeFile = fs.createWriteStream(filePath)
-            const downloadUrl = "https://github.com/dogecoin/dogecoin/releases/download/v" + version + "/dogecoin-" + version + "-x86_64-linux-gnu.tar.gz"
-            
-            const request = https.get(downloadUrl, { headers: { 'User-Agent': 'Node.js' } }, function (response) {
-                response.pipe(dogecoinNodeFile)
-
-                dogecoinNodeFile.on("error", async () => {
-                    console.log("An error happened while trying to download the dogecoin node")
-                })
-
-                //After download completed close filestream
-                dogecoinNodeFile.on("finish", async () => {
-                    dogecoinNodeFile.close()
-
-                    try {
-                        console.log("Decompressing dogecoin node files...")
-                        await decompressTarGz(filePath)
-
-                        if (fs.existsSync(destination + "/dogecoin")) {
-                            if (semver.gte(nodeVersion, "14.14.0")) {
-                                fs.rmSync(destination + "/dogecoin", { recursive: true, force: true })
-                            } else {
-                                fs.rmdirSync(destination + "/dogecoin", { recursive: true })
-                            }
-                        }
-
-                        fs.renameSync(destination + "/dogecoin-" + version, destination + "/dogecoin")
-                        fs.writeFileSync(destination + "/dogecoin/" + NODE_VERSION_FILE_NAME, version)
-                    } catch (err) {
-                        reject(err)
-                    }
-
-                    resolve(true)
-                })
-            })
+            await gitHubDownloader.downloadRepoVersion("dogecoin", "dogecoin", version, {outputPath:cryptoNodesDir+"/dogecoin"})
+        } else if (coin == Coin.LITECOIN) {
+			await gitHubDownloader.downloadRepoVersion("litecoin-project", "litecoin", version, {outputPath:cryptoNodesDir+"/litecoin"})
         } else {
             reject("There's no support for "+coin+" in "+network+" network yet")
         }
@@ -1293,7 +1260,7 @@ async function getStatus(coin, network, printStatus = false){
                                 let moduleRemoteVersion = "-"
                                 try {
                                     if (nextCoinNetworkModule == NODE_MODULE_NAME) {
-                                        moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule + "_" + nextCoin]["version"]
+                                        moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule + "_" + nextCoin]["tag_name"].substring(1)
                                     } else {
                                         moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule]
                                     }
@@ -1524,8 +1491,13 @@ async function installNode(coin, network){
     }
 
     if (localNodeVersion == null) {
-        let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + "_" + coin]["version"]
-        await getCryptoNode(coin, network, remoteNodeVersion)
+        let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + "_" + coin]["tag_name"]
+        
+		if (remoteNodeVersion != null){
+			await getCryptoNode(coin, network, remoteNodeVersion)
+		} else {
+			throw Error("There is no valid version to download for the $coin/$network node")
+		}
     }
     await buildCryptoNode(coin, network)
     
