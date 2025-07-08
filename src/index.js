@@ -1605,14 +1605,29 @@ async function updateHub(){
                 
                     for (let nextModule in lastStatus[nextCoin][nextNetwork]){
                         let config = null
-                        if (nextModule == XChainModule.XCHAIN_DECODER){
-                            config = {
-                                "host":defaultConfigCoinNetwork["DECODER_URL"],
-                                "port":defaultConfigCoinNetwork["DECODER_PORT"],
-                                "name":defaultConfigCoinNetwork["DECODER_DB_NAME"],
-                                "user":defaultConfigCoinNetwork["DECODER_DB_USER"],
-                                "pass":defaultConfigCoinNetwork["DECODER_DB_PASS"]
-                            }
+                        
+                        switch (nextModule){
+                            case XChainModule.XCHAIN_DECODER:
+                                config = {
+                                    "host":defaultConfigCoinNetwork["DECODER_URL"],
+                                    "port":defaultConfigCoinNetwork["DECODER_PORT"],
+                                    "name":defaultConfigCoinNetwork["DECODER_DB_NAME"],
+                                    "user":defaultConfigCoinNetwork["DECODER_DB_USER"],
+                                    "pass":defaultConfigCoinNetwork["DECODER_DB_PASS"]
+                                }
+                                break
+                            case XChainModule.XCHAIN_ENCODER:
+                                config = {
+                                    "host":defaultConfigCoinNetwork["ENCODER_URL"],
+                                    "port":defaultConfigCoinNetwork["ENCODER_PORT"]
+                                }
+                                break
+                            case XChainModule.XCHAIN_UTXO_TRACKER:
+                                config = {
+                                    "host":defaultConfigCoinNetwork["UTXO_TRACKER_URL"],
+                                    "port":defaultConfigCoinNetwork["UTXO_TRACKER_PORT"]
+                                }
+                                break   
                         }
                         
                         if (config != null){
