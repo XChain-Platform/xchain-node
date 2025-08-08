@@ -178,6 +178,225 @@ async function checkAllRemoteVersions(){
     ])
 }
 
+async function getBootstrapFilesList(coin, network, module){
+    return new Promise(async (resolve, reject)=>{
+        let defaultConfig = await getDefaultConfig(module, coin, network)
+        let fileList = []
+            
+        try {
+            let directory = null
+            
+            switch(module){
+                case XChainModule.XCHAIN_UTXO_TRACKER:
+                    directory = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"];
+                    break
+                case XChainModule.XCHAIN_DECODER:
+                    directory = defaultConfig["DECODER_BOOTSTRAP_VOLUME"];
+                    break
+            }
+            
+            let bootstrapFiles = await fs.promises.readdir(directory);
+            
+            for (const nextFileName of bootstrapFiles) {
+                const filePath = path.join(directory, nextFileName);
+                const stats = await fs.promises.stat(filePath);
+                if (stats.isFile()) {
+                    fileList.push(nextFileName)
+                }
+            }
+
+            resolve(fileList)
+        } catch (err) {
+            console.log(err)
+            reject(err)
+        }
+    })
+}
+
+async function waitForBootstrap(moduleUrl, taskId){
+    return new Promise(async (resolve, reject) => {
+        let lastProgress = -1
+    
+        while(true){
+            const data = {
+                jsonrpc: '2.0',
+                method: 'getbootstrapstatus',
+                params: {"taskid":taskId},
+                id: 1
+            }
+        
+            let response = null
+            try{
+                response = await axios.post(moduleUrl, data)
+            } catch (err){
+                console.log(err)
+                throw new Error("There was an error trying to get the status of a bootstrap ("+taskId+")")
+            }
+            
+            // Verify if there is a result and return it
+            if (response.data.result) {
+                let progress = response.data.result.progress
+                
+                if (progress != lastProgress){
+                    console.log("Bootstrap progress..."+progress)
+                    lastProgress = progress
+                }
+                
+                if (progress >= 100){
+                    resolve(true)
+                }
+            } else {
+                reject("There was an error trying to get the status of a bootstrap")
+                throw new Error('Error trying to get bootstrap status');
+            }
+        
+        
+            await sleep(5000) //Check status every 5 seconds
+        }
+    })
+}
+
+async function waitForBootstrapRestore(moduleUrl, taskId){
+    return new Promise(async (resolve, reject) => {
+        let lastProgress = -1
+    
+        while(true){
+            const data = {
+                jsonrpc: '2.0',
+                method: 'getbootstraprestorestatus',
+                params: {"taskid":taskId},
+                id: 1
+            }
+        
+            let response = null
+            try{
+                response = await axios.post(moduleUrl, data)
+            } catch (err){
+                console.log(err)
+                throw new Error("There was an error trying to get the status of a bootstrap restore ("+taskId+")")
+            }
+            
+            // Verify if there is a result and return it
+            if (response.data.result) {
+                let progress = response.data.result.progress
+                
+                if (progress != lastProgress){
+                    console.log("Bootstrap restore progress..."+progress)
+                    lastProgress = progress
+                }
+                
+                if (progress >= 100){
+                    resolve(true)
+                }
+            } else {
+                reject("There was an error trying to get the status of a bootstrap restore")
+                throw new Error('Error trying to get bootstrap restore status');
+            }
+            
+            await sleep(5000) //Check status every 5 seconds
+        }
+    })
+}
+
+async function restoreBootstrap(coin, network, module, fileName){
+    return new Promise(async (resolve, reject) => {
+        let defaultConfig = await getDefaultConfig(module, coin, network)
+        
+        switch (module){
+            case XChainModule.XCHAIN_UTXO_TRACKER:
+                let port = defaultConfig["UTXO_TRACKER_PORT"]
+                let moduleDockerVolume = defaultConfig["UTXO_TRACKER_DOCKER_VOLUME"]
+                let moduleUrl = "http://localhost:"+port
+                
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'restorebootstrap',
+                    params: {"filename":fileName},
+                    id: 1
+                }
+                
+                let response = null
+                try{
+                    response = await axios.post(moduleUrl, data)
+                } catch (err){
+                    reject(err)
+                    return null
+                }
+                
+                // Verify if there is a result and return it
+                if (response.data.result.task_id) {
+                    let bootstrapRestored = await waitForBootstrapRestore(moduleUrl, response.data.result.task_id)
+                
+                    if (bootstrapRestored){
+                        resolve(true)
+                    } else {
+                        reject(false)
+                    }
+                } else {
+                    throw new Error('Error trying to restore a bootstrap');
+                }
+                
+                break
+        }
+    })
+}
+
+async function makeBootstrap(coin, network, module){
+    return new Promise(async (resolve, reject) => {
+        let defaultConfig = await getDefaultConfig(module, coin, network)
+        
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        const dateTimeString = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+                
+        let fileName = network+"_"+module+"_"+dateTimeString
+                
+        
+        switch (module){
+            case XChainModule.XCHAIN_UTXO_TRACKER:
+                let port = defaultConfig["UTXO_TRACKER_PORT"]
+                let moduleDockerVolume = defaultConfig["UTXO_TRACKER_DOCKER_VOLUME"]
+                let moduleUrl = "http://localhost:"+port
+                
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'getbootstrap',
+                    params: {"filename":fileName},
+                    id: 1
+                }
+                
+                let response = null
+                try{
+                    response = await axios.post(moduleUrl, data)
+                } catch (err){
+                    reject(err)
+                    return null
+                }
+                
+                // Verify if there is a result and return it
+                if (response.data.result.task_id) {
+                    await waitForBootstrap(moduleUrl, response.data.result.task_id)
+                
+                    //Check if file exists
+                    if (fs.existsSync(moduleDockerVolume+"/"+fileName)){
+                        resolve(true)
+                    } else {
+                        reject(false)
+                    }
+                } else {
+                    throw new Error('Error trying to make a bootstrap');
+                }
+                
+                break
+        }
+    })  
+}
+
 async function getGithubProjectVersion(owner, repoName) {
     let githubRepoUrl = "https://api.github.com/repos/"+owner+"/"+repoName+"/releases/latest"
 
@@ -547,6 +766,7 @@ async function getDefaultConfig(module, coin, network){
             "UTXO_TRACKER_URL":getDockerContainerImageName(XChainModule.XCHAIN_UTXO_TRACKER, coin, network),
             "UTXO_TRACKER_API_PORT":3001,
             "UTXO_TRACKER_PORT":3001,
+            "UTXO_TRACKER_BOOTSTRAP_VOLUME":dataDir+"/"+coin+"/"+network+"/"+module+"/bootstrap/",
             "DECODER_DB_NAME":"xchain_decoder_"+coin+"_"+network,
             //"DECODER_DB_HOST":DB_MODULE_NAME,
             "DECODER_DB_HOST":"mariadb",
@@ -556,6 +776,7 @@ async function getDefaultConfig(module, coin, network){
             "DECODER_URL":getDockerContainerImageName(XChainModule.XCHAIN_DECODER, coin, network),
             "DECODER_API_PORT":3002,
             "DECODER_PORT":3002,
+            "DECODER_BOOTSTRAP_VOLUME":dataDir+"/"+coin+"/"+network+"/"+module+"/bootstrap/",
             "ENCODER_URL":getDockerContainerImageName(XChainModule.XCHAIN_ENCODER, coin, network),
             "ENCODER_API_PORT":3003,
             "ENCODER_PORT":3003,
@@ -1138,6 +1359,9 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
                         if (("DECODER_PORT" in environmentVariables) && ("DECODER_API_PORT" in environmentVariables)){
                             portLine = "-p "+environmentVariables["DECODER_PORT"]+":"+environmentVariables["DECODER_API_PORT"]
                         }
+                        volumeLine = 
+                            "-v "+module+"_"+coin+"-"+network+"-bootstrap:/bootstrap/xchain-decoder "
+                            +"-v "+environmentVariables["DECODER_BOOTSTRAP_VOLUME"]+":/bootstrap/xchain-decoder "
                         break
                     case XChainModule.XCHAIN_ENCODER:
                         if (("ENCODER_PORT" in environmentVariables) && ("ENCODER_API_PORT" in environmentVariables)){
@@ -1149,7 +1373,10 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
                             portLine = "-p "+environmentVariables["UTXO_TRACKER_PORT"]+":"+environmentVariables["UTXO_TRACKER_API_PORT"]
                         }
                         
-                        volumeLine = "-v "+module+"_"+coin+"-"+network+"-data:/data/xchain-utxo-tracker "
+                        volumeLine = 
+                            "-v "+module+"_"+coin+"-"+network+"-data:/data/xchain-utxo-tracker "
+                            +"-v "+environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"]+":/bootstrap/xchain-utxo-tracker "
+                        
                         break
                     case XChainModule.XCHAIN_REGTEST_MINER:
                         if ("REGTEST_MINER_PORT" in environmentVariables){
@@ -1421,7 +1648,9 @@ async function getStatus(coin, network, printStatus = false){
                     }
                     
                     if (Object.keys(nextCoinNetworkModules).length == 0){
-                        if ((nextCoinNetwork == null) || (nextCoinNetwork == undefined)){
+                        if ((nextCoinNetwork == null) && (nextCoinNetwork == null)){
+                            delete installedModules[null][null]
+                        } else if ((nextCoinNetwork == null) || (nextCoinNetwork == undefined)){
                             delete installedModules[nextCoin][undefined]
                         } else {
                             delete installedModules[nextCoin][nextCoinNetwork]
@@ -1781,6 +2010,40 @@ async function installNode(coin, network){
     return true
 }
 
+async function restoreBootstrapInterface(coin, network, module){
+    return new Promise(async (resolve, reject) => {
+        let bootstrapFiles = await getBootstrapFilesList(coin, network, module)
+        
+        let moduleChoices = []
+        
+        for (let nextFileName of bootstrapFiles){
+            moduleChoices.push(
+                {name:nextFileName, value:nextFileName}
+            )
+        }
+        
+        moduleChoices.push(
+            {name:"Return", value:"return"}
+        )
+        
+        let modulesSelect = new Select({
+            name: 'action',
+            message: 'Which bootstrap do you want to restore?',
+            choices: moduleChoices
+        })
+        
+        modulesSelect.run().then(
+            async (moduleAnswer) => {
+                if (moduleAnswer == "Return"){
+                    resolve(true)
+                } else {
+                    await restoreBootstrap(coin, network, module, moduleAnswer)
+                }
+            }
+        )
+    })
+}
+
 async function modulesSelectionInterface(coin, network){
     return new Promise(async (resolve, reject) => {
         //let modulesStatus = await getStatus(coin, network, false)
@@ -1988,6 +2251,12 @@ async function modulesSelectionInterface(coin, network){
 
                         if (actionModules[moduleAnswer]["value"] != DB_MODULE_NAME) {
                             moduleActions.push({ name: "Uninstall", value: "uninstall" })
+                            
+                            if (actionModules[moduleAnswer]["value"] == XChainModule.XCHAIN_UTXO_TRACKER){
+                                moduleActions.push({ name: "Make Bootstrap", value: "make_bootstrap"})
+                                moduleActions.push({ name: "Restore Bootstrap", value: "restore_bootstrap"})
+                            }
+                            
                         }
 
                         moduleActions.push({ name: "Return", value: "return" })
@@ -2019,6 +2288,11 @@ async function modulesSelectionInterface(coin, network){
                                 } else if ((moduleActionAnswer == "Update container version") || (moduleActionAnswer == "Install Local Version in Container")) {
                                     //Not developed yet
                                     await installModule(coin, network, actionModules[moduleAnswer]["value"], false, actionModules[moduleAnswer]["container_id"])
+                                } else if (moduleActionAnswer == "Make Bootstrap") {
+                                    //Not developed yet
+                                    await makeBootstrap(coin, network, actionModules[moduleAnswer]["value"])
+                                } else if (moduleActionAnswer == "Restore Bootstrap"){
+                                    await restoreBootstrapInterface(coin, network, actionModules[moduleAnswer]["value"])
                                 }
                                 
                                 resolve({
