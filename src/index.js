@@ -85,6 +85,12 @@ const Coin = {
     LITECOIN: "litecoin"
 }
 
+const CoinTickerSymbol = {
+    "bitcoin": "BTC",
+    "dogecoin": "DOGE",
+    "litecoin": "LTC"
+}
+
 const Network = {
     MAINNET: "mainnet",
     TESTNET: "testnet",
@@ -724,11 +730,11 @@ async function addContainerToNetwork(module, coin, network){
         let containerStatus = await getStatusFromContainer(moduleContainerId)
         
         if (!(getDockerNetwork(coin, network) in containerStatus["NetworkSettings"]["Networks"])){
-            exec('docker network connect '+getDockerNetwork(coin, network)+' '+moduleContainerId+'', (error, stdout, stderr) => {
+            exec('docker network connect '+getDockerNetwork(coin, network)+' '+moduleContainerId+'', async (error, stdout, stderr) => {
                 if (error){
                     reject(error)
                 } else {
-                    statusChanged()
+                    await statusChanged()
                     resolve(true)
                 }
             })
@@ -782,7 +788,7 @@ async function getDefaultConfig(module, coin, network){
             "ENCODER_PORT":3003,
             "INDEXER_API_PORT":3004,
             "INDEXER_PORT":3004,
-            "INDEXER_COIN":coin,
+            "INDEXER_COIN":CoinTickerSymbol[coin],
             "INDEXER_NETWORK":network,
             //"INDEXER_DB_HOST":DB_MODULE_NAME,
             "INDEXER_DB_HOST":"mariadb",
@@ -872,7 +878,7 @@ async function buildCryptoNode(coin, network, bitcoinVer=null){
                     let containerId = stdoutTrimmed
                     
                     if (await db.insertModuleContainer(NODE_MODULE_NAME, coin, network, containerId)){
-                        statusChanged()
+                        await statusChanged()
                         resolve(containerId)
                     } else {
                         reject("There was a problem trying to store the container's id")
@@ -1305,7 +1311,7 @@ async function buildDatabaseModule(coin, network){
                             
                             //There will be only a single mariadb container for all coins
                             if (await db.insertModuleContainer(DB_MODULE_NAME, "", "", containerId)){
-                                statusChanged()
+                                await statusChanged()
                                 resolve(containerId)
                             } else {
                                 reject("There was a problem trying to store the container's id")
@@ -1317,7 +1323,7 @@ async function buildDatabaseModule(coin, network){
         } else {
             try{
                 await addContainerToNetwork(DB_MODULE_NAME, coin, network)
-                statusChanged()
+                await statusChanged()
                 resolve(true)
             } catch (err){
                 console.log(err)
@@ -1360,8 +1366,7 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
                             portLine = "-p "+environmentVariables["DECODER_PORT"]+":"+environmentVariables["DECODER_API_PORT"]
                         }
                         volumeLine = 
-                            "-v "+module+"_"+coin+"-"+network+"-bootstrap:/bootstrap/xchain-decoder "
-                            +"-v "+environmentVariables["DECODER_BOOTSTRAP_VOLUME"]+":/bootstrap/xchain-decoder "
+                            "-v "+environmentVariables["DECODER_BOOTSTRAP_VOLUME"]+":/bootstrap/xchain-decoder "
                         break
                     case XChainModule.XCHAIN_ENCODER:
                         if (("ENCODER_PORT" in environmentVariables) && ("ENCODER_API_PORT" in environmentVariables)){
@@ -1420,7 +1425,7 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
                         let containerId = stdoutTrimmed
                         
                         if (await db.insertModuleContainer(module, coin, network, containerId)){
-                            statusChanged()
+                            await statusChanged()
                             resolve(containerId)
                         } else {
                             reject("There was a problem trying to store the container's id")
@@ -1549,128 +1554,134 @@ async function statusChanged(){
 }
 
 async function getStatus(coin, network, printStatus = false){
-    if (statusUpdated){
-        return lastStatus
-    } else {
-        await loadInstalledModules(coin, network)
-        
-        let coins = Object.keys(installedModules)
-        
-        if (coins.length > 0){
-            //if (printStatus){console.log("Modules installed:")}
+    return new Promise(async (resolve, reject) => {
+        if (statusUpdated){
+            resolve(lastStatus)
+        } else {
+            await loadInstalledModules(coin, network)
             
-            for (let nextCoin in installedModules) {
-                if (!((NODE_MODULE_NAME + "_" + nextCoin) in remoteModuleVersions)) {
-                    await checkRemoteNodeVersion(nextCoin)
-                }
-
-                let nextCoinNetworks = installedModules[nextCoin]
+            let coins = Object.keys(installedModules)
+            
+            if (coins.length > 0){
+                //if (printStatus){console.log("Modules installed:")}
                 
-                for (let nextCoinNetwork in nextCoinNetworks){
-                    let nextCoinNetworkModules = installedModules[nextCoin][nextCoinNetwork]
-                    let nextCoinNetworkModulesKeys = Object.keys(nextCoinNetworkModules)
+                for (let nextCoin in installedModules) {
+                    if (!((NODE_MODULE_NAME + "_" + nextCoin) in remoteModuleVersions)) {
+                        await checkRemoteNodeVersion(nextCoin)
+                    }
+
+                    let nextCoinNetworks = installedModules[nextCoin]
                     
-                    let titlePrinted = false
-                    if (nextCoinNetworkModulesKeys.length > 0){
-                        let coinNetworkModulesForElimination = []
-                    
-                        for (let nextCoinNetworkModule in nextCoinNetworkModules){
-                            let containerId = nextCoinNetworkModules[nextCoinNetworkModule]["container_id"]
+                    for (let nextCoinNetwork in nextCoinNetworks){
+                        let nextCoinNetworkModules = installedModules[nextCoin][nextCoinNetwork]
+                        let nextCoinNetworkModulesKeys = Object.keys(nextCoinNetworkModules)
+                        
+                        let titlePrinted = false
+                        if (nextCoinNetworkModulesKeys.length > 0){
+                            let coinNetworkModulesForElimination = []
+                        
+                            for (let nextCoinNetworkModule in nextCoinNetworkModules){
+                                let containerId = nextCoinNetworkModules[nextCoinNetworkModule]["container_id"]
+                                
+                                try {
+                                    let containerStatus = await getStatusFromContainer(containerId)
+                
+                                    nextCoinNetworkModules[nextCoinNetworkModule]["status"] = containerStatus
+                
+                                    if (!titlePrinted){
+                                        if (printStatus){console.log("\x1b[37m["+(nextCoin+" - "+nextCoinNetwork).toUpperCase()+"]\x1b[37m")}
+                                        titlePrinted = true
+                                    }
+                
+                                    if (printStatus) {
+                                        let moduleRemoteVersion = "-"
+                                        try {
+                                            if (nextCoinNetworkModule == NODE_MODULE_NAME) {
+                                                moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule + "_" + nextCoin]["tag_name"].substring(1)
+                                            } else {
+                                                moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule]
+                                            }
+                                        } catch (e) {
+                                            //Nothing yet
+                                        }
+                                        let moduleLocalVersion = "-"
+                                        try {
+                                            if (nextCoinNetworkModule == NODE_MODULE_NAME) {
+                                                moduleLocalVersion = await getLocalNodeVersion(nextCoin, nextCoinNetwork)
+                                            } else {
+                                                moduleLocalVersion = await getLocalModuleVersion(nextCoinNetworkModule)
+                                            }
+                                        } catch (e) {
+                                            //Nothing yet
+                                        }
+                                        let moduleContainerVersion = "-"
+                                        try {
+                                            if (nextCoinNetworkModule == NODE_MODULE_NAME) {
+                                                moduleContainerVersion = await getContainerNodeVersion(nextCoin, nextCoinNetwork, containerId)
+                                            } else {
+                                                moduleContainerVersion = await getContainerModuleVersion(nextCoinNetworkModule, nextCoin, nextCoinNetwork, containerId)
+                                            }
+                                        } catch (e) {
+                                            //Nothing yet
+                                        }
+                                        let versionString = " {remote:" + moduleRemoteVersion + ", local:" + moduleLocalVersion + ", container:" + moduleContainerVersion+"}"
+
+
+                                        if (containerStatus["State"]["Status"] == "Exited") {
+                                            console.log(" \x1b[31m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "")
+                                        } else {
+                                            console.log(" \x1b[32m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "")
+                                        }
+                                    }
+                                } catch(err){
+                                    //console.log("Error inspecting the container. ")
+                                    //console.log(err)
+                                    //TODO: add the module to a list for elimination or indicate that the module is missing
+                                    
+                                    
+                                    //console.log("There was an error inspecting the container")
+                                    coinNetworkModulesForElimination.push(nextCoinNetworkModule)
+                                    
+                                }
+                            }
                             
-                            try {
-                                let containerStatus = await getStatusFromContainer(containerId)
-            
-                                nextCoinNetworkModules[nextCoinNetworkModule]["status"] = containerStatus
-            
-                                if (!titlePrinted){
-                                    if (printStatus){console.log("\x1b[37m["+(nextCoin+" - "+nextCoinNetwork).toUpperCase()+"]\x1b[37m")}
-                                    titlePrinted = true
-                                }
-            
-                                if (printStatus) {
-                                    let moduleRemoteVersion = "-"
-                                    try {
-                                        if (nextCoinNetworkModule == NODE_MODULE_NAME) {
-                                            moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule + "_" + nextCoin]["tag_name"].substring(1)
-                                        } else {
-                                            moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule]
-                                        }
-                                    } catch (e) {
-                                        //Nothing yet
-                                    }
-                                    let moduleLocalVersion = "-"
-                                    try {
-                                        if (nextCoinNetworkModule == NODE_MODULE_NAME) {
-                                            moduleLocalVersion = await getLocalNodeVersion(nextCoin, nextCoinNetwork)
-                                        } else {
-                                            moduleLocalVersion = await getLocalModuleVersion(nextCoinNetworkModule)
-                                        }
-                                    } catch (e) {
-                                        //Nothing yet
-                                    }
-                                    let moduleContainerVersion = "-"
-                                    try {
-                                        if (nextCoinNetworkModule == NODE_MODULE_NAME) {
-                                            moduleContainerVersion = await getContainerNodeVersion(nextCoin, nextCoinNetwork, containerId)
-                                        } else {
-                                            moduleContainerVersion = await getContainerModuleVersion(nextCoinNetworkModule, nextCoin, nextCoinNetwork, containerId)
-                                        }
-                                    } catch (e) {
-                                        //Nothing yet
-                                    }
-                                    let versionString = " {remote:" + moduleRemoteVersion + ", local:" + moduleLocalVersion + ", container:" + moduleContainerVersion+"}"
-
-
-                                    if (containerStatus["State"]["Status"] == "Exited") {
-                                        console.log(" \x1b[31m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "")
-                                    } else {
-                                        console.log(" \x1b[32m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "")
-                                    }
-                                }
-                            } catch(err){
-                                //console.log("Error inspecting the container. ")
-                                //console.log(err)
-                                //TODO: add the module to a list for elimination or indicate that the module is missing
+                            //Delete all modules with status problem (they don't exist anymore as docker containers)
+                            for (let nextEliminationIndex in coinNetworkModulesForElimination){
+                                let nextElimination = coinNetworkModulesForElimination[nextEliminationIndex]
                                 
-                                
-                                //console.log("There was an error inspecting the container")
-                                coinNetworkModulesForElimination.push(nextCoinNetworkModule)
-                                
+                                delete nextCoinNetworkModules[nextElimination]
                             }
                         }
                         
-                        //Delete all modules with status problem (they don't exist anymore as docker containers)
-                        for (let nextEliminationIndex in coinNetworkModulesForElimination){
-                            let nextElimination = coinNetworkModulesForElimination[nextEliminationIndex]
-                            
-                            delete nextCoinNetworkModules[nextElimination]
+                        if (Object.keys(nextCoinNetworkModules).length == 0){
+                            if ((nextCoinNetwork == null) && (nextCoinNetwork == null)){
+                                delete installedModules[null][null]
+                            } else if ((nextCoinNetwork == "null") || (nextCoinNetwork == "null")){
+                                if (("null" in installedModules) && ("null" in installedModules["null"])){
+                                    delete installedModules["null"]["null"]
+                                }
+                            } else if ((nextCoinNetwork == null) || (nextCoinNetwork == undefined)){
+                                delete installedModules[nextCoin][undefined]
+                            } else {
+                                delete installedModules[nextCoin][nextCoinNetwork]
+                            }
                         }
                     }
                     
-                    if (Object.keys(nextCoinNetworkModules).length == 0){
-                        if ((nextCoinNetwork == null) && (nextCoinNetwork == null)){
-                            delete installedModules[null][null]
-                        } else if ((nextCoinNetwork == null) || (nextCoinNetwork == undefined)){
-                            delete installedModules[nextCoin][undefined]
-                        } else {
-                            delete installedModules[nextCoin][nextCoinNetwork]
-                        }
-                    }
+                    if (Object.keys(nextCoinNetworks).length == 0){
+                        delete installedModules[nextCoin]
+                    } 
                 }
                 
-                if (Object.keys(nextCoinNetworks).length == 0){
-                    delete installedModules[nextCoin]
-                } 
+                if (printStatus){console.log("")}
             }
             
-            if (printStatus){console.log("")}
+            lastStatus = installedModules
+            statusUpdated = true
+            
+            resolve(installedModules)
         }
-        
-        lastStatus = installedModules
-        statusUpdated = true
-        
-        return installedModules
-    }
+    })
 }
 
 async function loadInstalledModules(coin, network) {
@@ -1702,15 +1713,15 @@ async function loadInstalledModules(coin, network) {
 }
 
 async function restartContainer(containerId){
-    return new Promise((resolve, reject) => {
-        exec('docker restart '+containerId, (error, stdout, stderr) => {
+    return new Promise(async (resolve, reject) => {
+        exec('docker restart '+containerId, async (error, stdout, stderr) => {
             if (error){
                 reject(error)
             } else {
                 let response = stdout.trim()
                 
                 if (response == containerId){
-                    statusChanged()
+                    await statusChanged()
                     resolve(true)
                 } else {
                     reject("There was an error trying to restart a docker container")
@@ -1721,15 +1732,15 @@ async function restartContainer(containerId){
 }
 
 async function removeContainer(containerId){
-    return new Promise((resolve, reject) => {
-        exec('docker rm '+containerId, (error, stdout, stderr) => {
+    return new Promise(async (resolve, reject) => {
+        exec('docker rm '+containerId, async (error, stdout, stderr) => {
             if (error){
                 reject(error)
             } else {
                 let response = stdout.trim()
                 
                 if (response == containerId){
-                    statusChanged()
+                    await statusChanged()
                     resolve(true)
                 } else {
                     reject("There was an error trying to remove a docker container")
@@ -1740,15 +1751,15 @@ async function removeContainer(containerId){
 }
 
 async function killContainer(containerId){
-    return new Promise((resolve, reject) => {
-        exec('docker kill '+containerId, (error, stdout, stderr) => {
+    return new Promise(async (resolve, reject) => {
+        exec('docker kill '+containerId, async (error, stdout, stderr) => {
             if (error){
                 reject(error)
             } else {
                 let response = stdout.trim()
                 
                 if (response == containerId){
-                    statusChanged()
+                    await statusChanged()
                     resolve(true)
                 } else {
                     reject("There was an error trying to kill a docker container")
@@ -1778,12 +1789,12 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
             }
 
             await buildCryptoNode(coin, network)
-            statusChanged()
+            await statusChanged()
             resolve(true)
         } else if (module == DB_MODULE_NAME) {
             try {
                 await buildDatabaseModule(coin, network)
-                statusChanged()                 
+                await statusChanged()                 
                 resolve(true)
             } catch (err){
                 reject(err)
@@ -1806,7 +1817,7 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
                 if ((module == XChainModule.XCHAIN_DECODER) || (module == XChainModule.XCHAIN_INDEXER)){
                     await setDatabaseParameters()
                 }
-                statusChanged()
+                await statusChanged()
                 resolve(true)
             } catch (err){
                 reject(err)
@@ -1903,7 +1914,9 @@ async function installHubModule(){
         } else {
             console.log("Checking if hub module is installed")
             if (statusUpdated){
-                if (lastStatus[""][""][HUB_MODULE_NAME]){
+                let hubModuleHasStatus = lastStatus?.[""]?.[""]?.[HUB_MODULE_NAME]
+    
+                if (hubModuleHasStatus !== undefined){
                     resolve(true)
                     return true
                 }
@@ -2005,7 +2018,7 @@ async function installNode(coin, network){
     }
     
     
-    statusChanged()
+    await statusChanged()
                     
     return true
 }
@@ -2530,7 +2543,13 @@ async function start(){
     } catch (err) {
         throw new Error("There was an error trying to install the hub module")
     }
-    await updateHub() //Force a hub update
+    
+    try{
+        await updateHub() //Force a hub update
+    } catch (err){
+        console.log(err)
+        throw new Error("There was an error trying to update the hub module")
+    }
     
     try {
         await checkDockerInstalledAndReachable()
