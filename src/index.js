@@ -31,7 +31,8 @@ const XChainModule = {
     XCHAIN_DECODER: "xchain-decoder",
     XCHAIN_UTXO_TRACKER: "xchain-utxo-tracker",
     XCHAIN_REGTEST_MINER: "xchain-regtest-miner",
-    XCHAIN_INDEXER: "xchain-indexer"
+    XCHAIN_INDEXER: "xchain-indexer",
+    XCHAIN_E2E_TEST: "xchain-e2e-test"
 }
 
 const projectFolders = {
@@ -40,7 +41,8 @@ const projectFolders = {
     "xchain-utxo-tracker": "XChainUtxoTracker",
     "xchain-regtest-miner": "XChainRegtestMiner",
     "xchain-indexer": "XChainIndexer",
-    "xchain-hub": "XChainHub"
+    "xchain-hub": "XChainHub",
+    "xchain-e2e-test": "XChainE2ETest"
 }
 
 
@@ -65,7 +67,8 @@ var installedModules = {}
     "xchain-utxo-tracker": "https://github.com/XChain-platform/xchain-utxo-tracker",
     "xchain-indexer": "https://github.com/XChain-platform/xchain-indexer",
     "xchain-regtest-miner": "https://github.com/XChain-platform/xchain-regtest-miner",
-    "xchain-hub": "https://github.com/XChain-platform/xchain-hub"
+    "xchain-hub": "https://github.com/XChain-platform/xchain-hub",
+    "xchain-e2e-test": "https://github.com/XChain-platform/xchain-e2e-test"
 }*/
 
 var remoteModuleVersions = {}
@@ -76,7 +79,8 @@ const modulesUrls = {
     "xchain-utxo-tracker": "git@github.com:XChain-platform/xchain-utxo-tracker.git",
     "xchain-indexer": "git@github.com:XChain-platform/xchain-indexer.git",
     "xchain-regtest-miner": "git@github.com:XChain-platform/xchain-regtest-miner.git",
-    "xchain-hub": "git@github.com:XChain-platform/xchain-hub.git"
+    "xchain-hub": "git@github.com:XChain-platform/xchain-hub.git",
+    "xchain-e2e-test": "git@github.com:XChain-platform/xchain-e2e-test.git"
 }
 
 const Coin = {
@@ -786,6 +790,7 @@ async function getDefaultConfig(module, coin, network){
             "ENCODER_URL":getDockerContainerImageName(XChainModule.XCHAIN_ENCODER, coin, network),
             "ENCODER_API_PORT":3003,
             "ENCODER_PORT":3003,
+            "INDEXER_HOST":getDockerContainerImageName(XChainModule.XCHAIN_INDEXER, coin, network),
             "INDEXER_API_PORT":3004,
             "INDEXER_PORT":3004,
             "INDEXER_COIN":CoinTickerSymbol[coin],
@@ -799,6 +804,13 @@ async function getDefaultConfig(module, coin, network){
             "HUB_HOST":"127.0.0.1",
             "HUB_PORT":10000
         }
+        
+        if (network == "regtest"){
+            defaultValues["REGTEST_MINER_URL"] = getDockerContainerImageName(XChainModule.XCHAIN_REGTEST_MINER, coin, network)
+            defaultValues["REGTEST_MINER_API_PORT"] = 3005,
+            defaultValues["REGTEST_MINER_PORT"] = 3005
+        }
+        
     } else {
         defaultValues = {
             "HUB_HOST":"127.0.0.1",
@@ -1334,7 +1346,7 @@ async function buildDatabaseModule(coin, network){
     })
 }
 
-async function buildAndUp(module, coin, network, overwrite_container_id=null){
+async function buildAndUp(module, coin, network, overwrite_container_id=null, onlyExecution=false){
     return new Promise(async (resolve,reject)=>{
         if (checkIfModuleExists(module)){
         
@@ -1383,9 +1395,14 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
                             +"-v "+environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"]+":/bootstrap/xchain-utxo-tracker "
                         
                         break
+                    case XChainModule.XCHAIN_INDEXER:
+                        if (("INDEXER_PORT" in environmentVariables) && ("INDEXER_API_PORT" in environmentVariables)){
+                            portLine = "-p "+environmentVariables["INDEXER_PORT"]+":"+environmentVariables["INDEXER_API_PORT"]
+                        }
+                        break
                     case XChainModule.XCHAIN_REGTEST_MINER:
                         if ("REGTEST_MINER_PORT" in environmentVariables){
-                            portLine = "-p "+environmentVariables["REGTEST_MINER_PORT"]+":3000"
+                            portLine = "-p "+environmentVariables["REGTEST_MINER_PORT"]+":"+environmentVariables["REGTEST_MINER_API_PORT"]
                         }
                         break
                     case HUB_MODULE_NAME:
@@ -1424,11 +1441,15 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null){
                     if (stdoutTrimmed.length == 64){
                         let containerId = stdoutTrimmed
                         
-                        if (await db.insertModuleContainer(module, coin, network, containerId)){
-                            await statusChanged()
-                            resolve(containerId)
+                        if (!onlyExecution){
+                            if (await db.insertModuleContainer(module, coin, network, containerId)){
+                                await statusChanged()
+                                resolve(containerId)
+                            } else {
+                                reject("There was a problem trying to store the container's id")
+                            }
                         } else {
-                            reject("There was a problem trying to store the container's id")
+                            resolve(containerId)
                         }
                     }
                 });
@@ -1769,7 +1790,7 @@ async function killContainer(containerId){
     })
 }
 
-async function installModule(coin, network, module, remoteUpdate=false, overwrite_container_id=null){
+async function installModule(coin, network, module, remoteUpdate=false, overwrite_container_id=null, onlyExecution=false){
     return new Promise(async (resolve, reject) => {
         if (module == NODE_MODULE_NAME) {
             let localNodeVersion = null
@@ -1812,13 +1833,16 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
                     await cloneGit(module, true)
                 }
                 
-                await buildAndUp(module, coin, network, overwrite_container_id)
+                let containerId = await buildAndUp(module, coin, network, overwrite_container_id, onlyExecution)
                 
                 if ((module == XChainModule.XCHAIN_DECODER) || (module == XChainModule.XCHAIN_INDEXER)){
                     await setDatabaseParameters()
                 }
-                await statusChanged()
-                resolve(true)
+                
+                if (!onlyExecution){
+                    await statusChanged()
+                }
+                resolve(containerId)
             } catch (err){
                 reject(err)
             }
@@ -1847,10 +1871,26 @@ async function updateHub(){
                         let config = null
                         
                         switch (nextModule){
+                            case DB_MODULE_NAME:
+                                config = {
+                                    "host":"mariadb",
+                                    "port":3306
+                                }
+                                break
+                            case NODE_MODULE_NAME:
+                                config = {
+                                    "host":defaultConfigCoinNetwork["NODE_URL"],
+                                    "port":defaultConfigCoinNetwork["NODE_PORT"],
+                                    "server_port":defaultConfigCoinNetwork["NODE_EXPOSED_PORT"],
+                                    "user":defaultConfigCoinNetwork["NODE_USER"],
+                                    "pass":defaultConfigCoinNetwork["NODE_PASSWORD"]
+                                }
+                                break
                             case XChainModule.XCHAIN_DECODER:
                                 config = {
                                     "host":defaultConfigCoinNetwork["DECODER_URL"],
-                                    "port":defaultConfigCoinNetwork["DECODER_PORT"],
+                                    "port":defaultConfigCoinNetwork["DECODER_API_PORT"],
+                                    "server_port":defaultConfigCoinNetwork["DECODER_PORT"],
                                     "name":defaultConfigCoinNetwork["DECODER_DB_NAME"],
                                     "user":defaultConfigCoinNetwork["DECODER_DB_USER"],
                                     "pass":defaultConfigCoinNetwork["DECODER_DB_PASS"]
@@ -1859,13 +1899,32 @@ async function updateHub(){
                             case XChainModule.XCHAIN_ENCODER:
                                 config = {
                                     "host":defaultConfigCoinNetwork["ENCODER_URL"],
-                                    "port":defaultConfigCoinNetwork["ENCODER_PORT"]
+                                    "port":defaultConfigCoinNetwork["ENCODER_API_PORT"],
+                                    "server_port":defaultConfigCoinNetwork["ENCODER_PORT"]
+                                }
+                                break
+                            case XChainModule.XCHAIN_INDEXER:
+                                config = {
+                                    "host":defaultConfigCoinNetwork["INDEXER_HOST"],
+                                    "port":defaultConfigCoinNetwork["INDEXER_API_PORT"],
+                                    "server_port":defaultConfigCoinNetwork["INDEXER_PORT"],
+                                    "name":defaultConfigCoinNetwork["INDEXER_DB_NAME"],
+                                    "user":defaultConfigCoinNetwork["INDEXER_DB_USER"],
+                                    "pass":defaultConfigCoinNetwork["INDEXER_DB_PASS"]
                                 }
                                 break
                             case XChainModule.XCHAIN_UTXO_TRACKER:
                                 config = {
                                     "host":defaultConfigCoinNetwork["UTXO_TRACKER_URL"],
-                                    "port":defaultConfigCoinNetwork["UTXO_TRACKER_PORT"]
+                                    "port":defaultConfigCoinNetwork["UTXO_TRACKER_API_PORT"],
+                                    "server_port":defaultConfigCoinNetwork["UTXO_TRACKER_PORT"]
+                                }
+                                break
+                            case XChainModule.XCHAIN_REGTEST_MINER:
+                                config = {
+                                    "host":defaultConfigCoinNetwork["REGTEST_MINER_URL"],
+                                    "port":defaultConfigCoinNetwork["REGTEST_MINER_API_PORT"],
+                                    "server_port":defaultConfigCoinNetwork["REGTEST_MINER_PORT"]
                                 }
                                 break   
                         }
@@ -2076,6 +2135,15 @@ async function modulesSelectionInterface(coin, network){
             }
         
             let allModules = Object.values(XChainModule)
+            
+            //Remove e2eTest module from all networks, TODO: get the list of installable modules
+            let e2eTestIndex = allModules.indexOf(XChainModule.XCHAIN_E2E_TEST)
+                
+            if (e2eTestIndex >= 0){
+                allModules.splice(e2eTestIndex, 1)
+            }
+            
+            //Leave regtest miner only for REGTEST network
             if (network != Network.REGTEST){
                 let regtestMinerIndex = allModules.indexOf(XChainModule.XCHAIN_REGTEST_MINER)
                 
@@ -2145,6 +2213,10 @@ async function modulesSelectionInterface(coin, network){
             )
         }
         
+        if (network == Network.REGTEST){
+            moduleChoices.splice(moduleChoices.length-2, 0, {name:"Perform an E2E test", value:"e2etest"})
+        }
+        
         let modulesSelect = new Select({
             name: 'action',
             message: 'In which module do you want to perform actions?',
@@ -2187,6 +2259,19 @@ async function modulesSelectionInterface(coin, network){
                     } catch(err){
                         console.log("There was a problem installing the node")
                         console.log(err)
+                    }
+                    
+                    resolve({
+                        menuFunction:modulesSelectionInterface, 
+                        parameters:[coin, network]
+                    })
+                } else if (moduleAnswer == "Perform an E2E test"){
+                    try {
+                        let containerId = await installModule(coin, network, XChainModule.XCHAIN_E2E_TEST, true)
+                        console.log("The e2e test was performed in container "+containerId)
+                    } catch (err) {
+                        console.log(err)
+                        console.log("There was a problem trying to install the e2e test module")
                     }
                     
                     resolve({
