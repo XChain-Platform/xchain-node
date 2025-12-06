@@ -2344,9 +2344,13 @@ async function modulesSelectionInterface(coin, network){
                         }
                         
                         if (semver.valid(localeModuleVersion)) {
-                            if (semver.valid(remoteModuleVersion) && semver.gt(remoteModuleVersion, localeModuleVersion)) {
-                                moduleActions.push({ name: "Update locale version", value: "update locale version" })
-                            }
+                            if (semver.valid(remoteModuleVersion)){
+                                if (semver.gt(remoteModuleVersion, localeModuleVersion)) {
+                                    moduleActions.push({ name: "Update locale version", value: "update locale version" })
+                                } else if (semver.eq(remoteModuleVersion, localeModuleVersion)) {
+                                    moduleActions.push({ name: "Reinstall from remote", value: "reinstall from remote" })
+                                }
+                            } 
 
                             if (semver.valid(containerModuleVersion)) {
                                 if (semver.gt(localeModuleVersion, containerModuleVersion)) {
@@ -2413,6 +2417,10 @@ async function modulesSelectionInterface(coin, network){
                                     await makeBootstrap(coin, network, actionModules[moduleAnswer]["value"])
                                 } else if (moduleActionAnswer == "Restore Bootstrap"){
                                     await restoreBootstrapInterface(coin, network, actionModules[moduleAnswer]["value"])
+                                } else if (moduleActionAnswer == "Reinstall from remote"){
+                                    //Rewrite module dir
+                                    await cloneGit(actionModules[moduleAnswer]["value"], true)
+                                    await installModule(coin, network, actionModules[moduleAnswer]["value"], false, actionModules[moduleAnswer]["container_id"])
                                 }
                                 
                                 resolve({
