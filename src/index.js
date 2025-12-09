@@ -2051,6 +2051,10 @@ async function installNode(coin, network){
     }
 
     if (localNodeVersion == null) {
+        if (!(NODE_MODULE_NAME + "_" + coin in remoteModuleVersions)){
+            await checkRemoteNodeVersion(coin)
+        }
+    
         let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + "_" + coin]["tag_name"]
         
         if (remoteNodeVersion != null){
