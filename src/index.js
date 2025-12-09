@@ -48,6 +48,8 @@ const HUB_MODULE_NAME = "xchain-hub"
 
 const NODE_VERSION_FILE_NAME = "__VERSION__.txt"
 
+const SEP = "-"
+
 const XChainModule = {
     XCHAIN_ENCODER: "xchain-encoder",
     XCHAIN_DECODER: "xchain-decoder",
@@ -386,7 +388,7 @@ async function makeBootstrap(coin, network, module){
         const seconds = String(now.getSeconds()).padStart(2, '0');
         const dateTimeString = `${year}${month}${day}_${hours}${minutes}${seconds}`;
                 
-        let fileName = network+"_"+module+"_"+dateTimeString
+        let fileName = network+SEP+module+SEP+dateTimeString
                 
         
         switch (module){
@@ -459,7 +461,7 @@ async function checkRemoteNodeVersion(coin) {
             break
     }
 
-    remoteModuleVersions["node_"+coin] = githubProjectVersion
+    remoteModuleVersions["node"+SEP+coin] = githubProjectVersion
 }
 
 async function getRemoteModuleVersion(module) {
@@ -659,7 +661,7 @@ function getDockerContainerImageNamePrefix(module, coin, network){
     if ((module == DB_MODULE_NAME) || (module == HUB_MODULE_NAME)){
         return NODE_PREFIX
     } else {
-        return NODE_PREFIX + "_" + coin + "-" + network
+        return NODE_PREFIX + SEP + coin + SEP + network
     }
 }
 
@@ -690,7 +692,7 @@ async function getDockerContainerFileCat(containerId, path) {
 }
 
 function getDockerContainerImageName(module, coin, network){
-    return getDockerContainerImageNamePrefix(module, coin, network) + "_" + module
+    return getDockerContainerImageNamePrefix(module, coin, network) + SEP + module
 }
 
 async function getStatusFromContainer(containerId){
@@ -719,7 +721,7 @@ async function getDockerNetworkInspect(dockerNetwork){
 
 
 function getDockerNetwork(coin, network){
-    return NODE_PREFIX+"_"+coin+"_"+network
+    return NODE_PREFIX+SEP+coin+SEP+network
 }
 
 async function createDockerNetwork(coin, network){
@@ -799,12 +801,12 @@ async function getDefaultConfig(module, coin, network){
             "UTXO_TRACKER_API_PORT":3001,
             "UTXO_TRACKER_PORT":3001,
             "UTXO_TRACKER_BOOTSTRAP_VOLUME":dataDir+"/"+coin+"/"+network+"/"+module+"/bootstrap/",
-            "DECODER_DB_NAME":"xchain_decoder_"+coin+"_"+network,
+            "DECODER_DB_NAME":"xchain"+SEP+"decoder"+SEP+coin+SEP+network,
             //"DECODER_DB_HOST":DB_MODULE_NAME,
             "DECODER_DB_HOST":"mariadb",
             "DECODER_DB_PORT":3306,
-            "DECODER_DB_USER":"xchain_decoder_"+coin+"_"+network,
-            "DECODER_DB_PASS":"xchain_password",
+            "DECODER_DB_USER":"xchain"+SEP+"decoder"+SEP+coin+SEP+network,
+            "DECODER_DB_PASS":"xchain"+SEP+"password",
             "DECODER_URL":getDockerContainerImageName(XChainModule.XCHAIN_DECODER, coin, network),
             "DECODER_API_PORT":3002,
             "DECODER_PORT":3002,
@@ -820,9 +822,9 @@ async function getDefaultConfig(module, coin, network){
             //"INDEXER_DB_HOST":DB_MODULE_NAME,
             "INDEXER_DB_HOST":"mariadb",
             "INDEXER_DB_PORT":3306,
-            "INDEXER_DB_NAME":"xchain_indexer_"+coin+"_"+network,
-            "INDEXER_DB_USER":"xchain_indexer_"+coin+"_"+network,
-            "INDEXER_DB_PASS":"xchain_password",
+            "INDEXER_DB_NAME":"xchain"+SEP+"indexer"+SEP+coin+SEP+network,
+            "INDEXER_DB_USER":"xchain"+SEP+"indexer"+SEP+coin+SEP+network,
+            "INDEXER_DB_PASS":"xchain"+SEP+"password",
             "HUB_HOST":"127.0.0.1",
             "HUB_PORT":10000
         }
@@ -1413,7 +1415,7 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null, on
                         }
                         
                         volumeLine = 
-                            "-v "+module+"_"+coin+"-"+network+"-data:/data/xchain-utxo-tracker "
+                            "-v "+module+SEP+coin+"-"+network+"-data:/data/xchain-utxo-tracker "
                             +"-v "+environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"]+":/bootstrap/xchain-utxo-tracker "
                         
                         break
@@ -1614,7 +1616,7 @@ async function getStatus(coin, network, printStatus = false){
                 //if (printStatus){console.log("Modules installed:")}
                 
                 for (let nextCoin in installedModules) {
-                    if (!((NODE_MODULE_NAME + "_" + nextCoin) in remoteModuleVersions)) {
+                    if (!((NODE_MODULE_NAME + SEP + nextCoin) in remoteModuleVersions)) {
                         await checkRemoteNodeVersion(nextCoin)
                     }
 
@@ -1645,7 +1647,7 @@ async function getStatus(coin, network, printStatus = false){
                                         let moduleRemoteVersion = "-"
                                         try {
                                             if (nextCoinNetworkModule == NODE_MODULE_NAME) {
-                                                moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule + "_" + nextCoin]["tag_name"].substring(1)
+                                                moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule + SEP + nextCoin]["tag_name"].substring(1)
                                             } else {
                                                 moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule]
                                             }
@@ -1829,7 +1831,7 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
 
             if (localNodeVersion == null) {
                 try {
-                    let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + "_" + coin]["version"]
+                    let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + SEP + coin]["version"]
                     await getCryptoNode(coin, network, remoteNodeVersion)
                 } catch (err) {
                     reject(err)
@@ -1880,7 +1882,7 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
 }
 
 async function updateHub(){
-    console.log("Updating hub...")
+    console.log("Updating xchain-hub...")
     
     return new Promise(async (resolve, reject) => {
         let defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
@@ -1975,7 +1977,7 @@ async function updateHub(){
             try {
                 await hubConnector.updateConfig(jsonConfig)
             } catch (err){
-                reject("There was a problem trying to update a config in the hub module")
+                reject("There was a problem trying to update a config in the xchain-hub module")
             }
             
             resolve(true)
@@ -1989,7 +1991,7 @@ async function installHubModule(){
     return new Promise(async (resolve, reject) => {
         let defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
         
-        console.log("Checking if hub module is running")
+        console.log("Checking if xchain-hub module is running")
         let hubConnector = new HubConnector(defaultConfig["HUB_HOST"], defaultConfig["HUB_PORT"])
         
         let pingHub = await hubConnector.ping()
@@ -1998,7 +2000,7 @@ async function installHubModule(){
             resolve(true)
             return true //The hub is already installed and running
         } else {
-            console.log("Checking if hub module is installed")
+            console.log("Checking if xchain-hub module is installed")
             if (statusUpdated){
                 let hubModuleHasStatus = lastStatus?.[""]?.[""]?.[HUB_MODULE_NAME]
     
@@ -2008,14 +2010,14 @@ async function installHubModule(){
                 }
             }
             
-            //TODO: Checking if hub module is installed
+            //TODO: Checking if xchain-hub module is installed
             console.log("Downloading xchain-hub...")
             await cloneGit(HUB_MODULE_NAME, true)
-            console.log("Installing hub module...")
+            console.log("Installing xchain-hub module...")
             await buildAndUp(HUB_MODULE_NAME, null, null)
             await getStatus(null, null, false)
             
-            console.log("Waiting for the hub to respond")
+            console.log("Waiting for the xchain-hub to respond")
             
             let tries = 10
             
@@ -2056,11 +2058,11 @@ async function installNode(coin, network){
     }
 
     if (localNodeVersion == null) {
-        if (!(NODE_MODULE_NAME + "_" + coin in remoteModuleVersions)){
+        if (!(NODE_MODULE_NAME + SEP + coin in remoteModuleVersions)){
             await checkRemoteNodeVersion(coin)
         }
     
-        let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + "_" + coin]["tag_name"]
+        let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + SEP + coin]["tag_name"]
         
         if (remoteNodeVersion != null){
             await getCryptoNode(coin, network, remoteNodeVersion)
@@ -2316,7 +2318,7 @@ async function modulesSelectionInterface(coin, network){
                     let remoteModuleVersion = "0"
                     try {
                         if (actionModules[moduleAnswer]["value"] == NODE_MODULE_NAME) {
-                            remoteModuleVersion = await remoteModuleVersions[actionModules[moduleAnswer]["value"] + "_" + coin]["version"]
+                            remoteModuleVersion = await remoteModuleVersions[actionModules[moduleAnswer]["value"] + SEP + coin]["version"]
                         } else {
                             remoteModuleVersion = await remoteModuleVersions[actionModules[moduleAnswer]["value"]]
                         }
@@ -2505,22 +2507,25 @@ async function scanModules(){
                 
                 if (imageName.startsWith(NODE_PREFIX)){
                     imageName = imageName.substr(NODE_PREFIX.length+1)// +1 because of the additional underscore ("_")
-                    let separatedImageName = imageName.split("_")
+                    let separatedImageName = imageName.split(SEP)
                     
                     if ((separatedImageName.length == 1)
                         &&(separatedImageName[0] == DB_MODULE_NAME)){
                         
-                    } else if (separatedImageName.length == 2){
-                        let {coin,network} = stringToNetwork(separatedImageName[0])
-                        coin = Coin[coin]
-                        network = Network[network]
+                    } else if (separatedImageName.length == 3){//coin + network + node
+                        //let {coin,network} = stringToNetwork(separatedImageName[0])
+                        //coin = Coin[coin]
+                        //network = Network[network]
+                        coin = Coin[separatedImageName[0]]
+                        network = Coin[separatedImageName[1]]
+                        
                         if ((coin != null) && (network != null)){
-                            let module = stringToXChainModule(separatedImageName[1])
+                            let module = stringToXChainModule(separatedImageName[2])
                             
                             if (module != null){
                                 module = XChainModule[module]
                             } else {
-                                if (separatedImageName[1] == NODE_MODULE_NAME){
+                                if (separatedImageName[2] == NODE_MODULE_NAME){
                                     module = NODE_MODULE_NAME
                                 }
                             }
@@ -2530,7 +2535,7 @@ async function scanModules(){
                                 
                                 if (moduleDb == null){//It's not in the database
                                     await db.insertModuleContainer(module, coin, network, nextContainer.ID)
-                                    console.log("Added "+coin+"-"+network+"_"+module+" ("+nextContainer.ID+")")
+                                    console.log("Added "+coin+"-"+network+SEP+module+" ("+nextContainer.ID+")")
                                 }
                             }
                         }
