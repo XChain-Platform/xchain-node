@@ -1536,6 +1536,11 @@ async function decompressTarGz(file){
 async function getCryptoNode(coin, network, version){
     return new Promise(async (resolve,reject)=>{
         if (coin == Coin.BITCOIN){
+            //Remove the "v" at the start of the version
+            if (version.startsWith("v")){
+                version = version.substring(1)
+            }
+            
             console.log("Downloading bitcoin node...")
             const destination = cryptoNodesDir+"/bitcoin"
             const filePath = destination+"/bitcoin"+version+".tar.gz"
