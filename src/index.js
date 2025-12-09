@@ -1590,8 +1590,10 @@ async function getCryptoNode(coin, network, version){
             })
         } else if (coin == Coin.DOGECOIN) {
             await gitHubDownloader.downloadRepoVersion("dogecoin", "dogecoin", version, {outputPath:cryptoNodesDir+"/dogecoin"})
+            resolve(true)
         } else if (coin == Coin.LITECOIN) {
             await gitHubDownloader.downloadRepoVersion("litecoin-project", "litecoin", version, {outputPath:cryptoNodesDir+"/litecoin"})
+            resolve(true)
         } else {
             reject("There's no support for "+coin+" in "+network+" network yet")
         }
