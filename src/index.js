@@ -894,7 +894,7 @@ async function buildCryptoNode(coin, network, bitcoinVer=null){
             // Create the container with docker up
             let dockerCommand = 
                 'docker run -d '
-                +'-v '+dataDir+"/"+NODE_MODULE_NAME+"/"+coin+"/"+network+":/.root/."+coin+" "
+                +'-v '+dataDir+"/"+NODE_MODULE_NAME+"/"+coin+"/"+network+":/root/."+coin+" "
                 +'--hostname '+NODE_MODULE_NAME+' '
                 +'--network '+getDockerNetwork(coin, network)+' '
                 + (defaultExposedPort && defaultNodePort ? '-p ' + defaultExposedPort + ':'+defaultNodePort+' ' : "")
