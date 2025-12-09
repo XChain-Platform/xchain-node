@@ -1295,9 +1295,9 @@ async function askMariadbRootPassword(coin, network){
                 resolve(answer)
             }
         ).catch(
-            async()=>{
-                console.log("An error has ocurred")
-                reject(console.error)
+            async(error)=>{
+                console.log("An error has ocurred asking for database password")
+                reject(error)
             }
         )
     })
@@ -2637,9 +2637,9 @@ function mainMenu(){
                     )
                 }
             }
-        ).catch(
-            console.log(console.error)
-        )
+        ).catch(error=>{
+            console.log("An error has ocurred in Enquirer:",error)
+        })
     })
 }
 
