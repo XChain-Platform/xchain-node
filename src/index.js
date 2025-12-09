@@ -39,7 +39,7 @@ const HubConnector = require('./HubConnector.js')
 const { prompt, Select, Password } = require('enquirer');
 
 
-const NODE_PREFIX = process.env.NODE_PREFIX
+const NODE_PREFIX = (process.env.NODE_PREFIX?process.env.NODE_PREFIX:"xchain-node")
 const DB_NAME = (process.env.DB_NAME == null?"xchain_node":process.env.DB_NAME)
 
 const NODE_MODULE_NAME = "node"
@@ -2052,7 +2052,7 @@ async function installNode(coin, network){
     try {
         localNodeVersion = await getLocalNodeVersion(coin, network)
     } catch (err) {
-        console.log(err)
+        //console.log(err)
     }
 
     if (localNodeVersion == null) {
@@ -2250,7 +2250,7 @@ async function modulesSelectionInterface(coin, network){
         
         let modulesSelect = new Select({
             name: 'action',
-            message: 'In which module do you want to perform actions?',
+            message: 'In which ('+coin+'/'+network+') module do you want to perform actions?',
             choices: moduleChoices
         })
         
