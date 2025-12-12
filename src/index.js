@@ -49,6 +49,7 @@ const HUB_MODULE_NAME = "xchain-hub"
 const NODE_VERSION_FILE_NAME = "__VERSION__.txt"
 
 const SEP = "-"
+const DB_SEP = "_"
 
 const XChainModule = {
     XCHAIN_ENCODER: "xchain-encoder",
@@ -801,11 +802,11 @@ async function getDefaultConfig(module, coin, network){
             "UTXO_TRACKER_API_PORT":3001,
             "UTXO_TRACKER_PORT":3001,
             "UTXO_TRACKER_BOOTSTRAP_VOLUME":dataDir+"/"+coin+"/"+network+"/"+module+"/bootstrap/",
-            "DECODER_DB_NAME":"xchain"+SEP+"decoder"+SEP+coin+SEP+network,
+            "DECODER_DB_NAME":"xchain"+DB_SEP+"decoder"+DB_SEP+coin+DB_SEP+network,
             //"DECODER_DB_HOST":DB_MODULE_NAME,
             "DECODER_DB_HOST":"mariadb",
             "DECODER_DB_PORT":3306,
-            "DECODER_DB_USER":"xchain"+SEP+"decoder"+SEP+coin+SEP+network,
+            "DECODER_DB_USER":"xchain"+DB_SEP+"decoder"+DB_SEP+coin+DB_SEP+network,
             "DECODER_DB_PASS":"xchain"+SEP+"password",
             "DECODER_URL":getDockerContainerImageName(XChainModule.XCHAIN_DECODER, coin, network),
             "DECODER_API_PORT":3002,
@@ -822,8 +823,8 @@ async function getDefaultConfig(module, coin, network){
             //"INDEXER_DB_HOST":DB_MODULE_NAME,
             "INDEXER_DB_HOST":"mariadb",
             "INDEXER_DB_PORT":3306,
-            "INDEXER_DB_NAME":"xchain"+SEP+"indexer"+SEP+coin+SEP+network,
-            "INDEXER_DB_USER":"xchain"+SEP+"indexer"+SEP+coin+SEP+network,
+            "INDEXER_DB_NAME":"xchain"+DB_SEP+"indexer"+DB_SEP+coin+DB_SEP+network,
+            "INDEXER_DB_USER":"xchain"+DB_SEP+"indexer"+DB_SEP+coin+DB_SEP+network,
             "INDEXER_DB_PASS":"xchain"+SEP+"password",
             "HUB_HOST":"127.0.0.1",
             "HUB_PORT":10000
