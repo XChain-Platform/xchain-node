@@ -6,7 +6,7 @@ COPY ./dogecoin /dogecoin
 WORKDIR /dogecoin
 RUN install -m 0755 -o root -g root -t /usr/local/bin /dogecoin/bin/*
 
-RUN mkdir /root/.dogecoin/ 
-COPY ./$CONF_FILE /root/.dogecoin/dogecoin.conf
+RUN mkdir /etc/dogecoin/
+COPY ./$CONF_FILE /etc/dogecoin/dogecoin.conf
 
-CMD ["dogecoind"]
+CMD ["dogecoind","-conf=/etc/dogecoin/dogecoin.conf"]
