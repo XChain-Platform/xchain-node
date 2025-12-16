@@ -24,6 +24,8 @@ const dotenv = require('dotenv')
 dotenv.config()
 
 const { exec } = require('child_process')
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const { https } = require('follow-redirects');
 const fs = require("fs");
 const readline = require('readline')
@@ -79,8 +81,7 @@ const dataDir = path.join(__dirname,"..","data")
 const configDir = path.join(__dirname,"..","config")
 const containersFilesDir = path.join(tmpDir, "containers_files")
 
-const dbRootPasswords = {}
-
+var dbRootPassword = null
 
 const nodeVersion = process.versions.node
 
@@ -958,7 +959,7 @@ async function checkIfDatabaseIsReady(user, userPassword){
 
         if (isReady){
             resolve(true)
-        } else { 
+        } else {
             resolve(false)
         }
     })
@@ -1061,10 +1062,7 @@ async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPasswo
 
 async function addUserPasswordToDatabase(module, coin, network, databaseName, user, userPassword, inDocker = true){
     return new Promise(async (resolve,reject)=>{
-        if (!(coin in dbRootPasswords)){
-            await askMariadbRootPassword(coin, network)
-        }
-        let mariadbRootPassword = dbRootPasswords[coin]//[network]
+        let mariadbRootPassword = await askMariadbRootPassword(coin, network)
         
         let moduleContainerId = await db.getModuleContainer(module, coin, network)
         let containerStatus = await getStatusFromContainer(moduleContainerId)
@@ -1138,75 +1136,18 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
 
 async function checkIfDatabaseModuleExists(coin, network){
     return new Promise(async (resolve,reject)=>{
-        let defaultConfig = await getDefaultConfig(DB_MODULE_NAME, coin, network)
-        
-        if (
-            (("DB_URL" in defaultConfig) && (defaultConfig["DB_URL"] != "mariadb"))
-            && ("DB_PORT" in defaultConfig)
-            && ("DECODER_DB_USER" in defaultConfig)
-            && ("DB_PASSWORD" in defaultConfig)
-        ){
-            let connectionParams = {
-                host: defaultConfig["DB_URL"],
-                port: defaultConfig["DB_PORT"],
-                user: defaultConfig["DECODER_DB_USER"],
-                password: defaultConfig["DB_PASSWORD"]
-            }
-                
-            let tries = 3
-            let connected = false
+        try {
+            let dbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
             
-            while (tries > 0){
-                try {
-                    let connection = await mariadb.createConnection(connectionParams)
-                    connected = true
-                    break
-                } catch(err){
-                    if ("code" in err){
-                        if (err["code"] == 'ECONNREFUSED'){
-                            //Couldn't reach the server, could be temporary, let's try again
-                            tries = tries - 1
-                            //Let's try some more
-                            await sleep(1000) //Waiting one second  
-                        } else if (err["code"] == 'ER_ACCESS_DENIED_ERROR'){
-                            console.log("The user doesn't exist in the database")
-                            
-                            //Mariadb server seems installed, let the user configure the access
-                        } else {
-                            //console.log(err)
-                            break
-                        }
-                    } 
-                }
-            }
-                
-            if (connected){
-                resolve(true)
+            let containerStatus = await getStatusFromContainer(dbContainerId)
+            
+            if (("State" in containerStatus) && ("Status" in containerStatus["State"])){
+                resolve(dbContainerId)
             } else {
-                reject("Couldn't connect")
-                
-                //The connection failed, it means the database doesn't exist or is down.
-                //Let's check first if there's a docker container with a database installed by this xchain-node
-                //await getAllContainerFromModule(DB_MODULE_NAME, coin, network)
+                resolve(null)
             }
-            
-        } else {
-            //Because there are no parameters to connect to a remote database. Then the database must be on a docker container
-        
-            try {
-                let dbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
-                
-                let containerStatus = await getStatusFromContainer(dbContainerId)
-                
-                if (("State" in containerStatus) && ("Status" in containerStatus["State"])){
-                    resolve(true)
-                } else {
-                    resolve(false)
-                }
-            } catch (err) {
-                resolve(false)
-            }
-            //reject("Some database config values are missing. Check that the config has DB_URL, DB_PORT, DECODER_DB_USER and DB_PASSWORD and try again.")
+        } catch (err) {
+            resolve(null)
         }
     })
 }
@@ -1279,28 +1220,44 @@ async function checkIfHubModuleExists(){
 
 async function askMariadbRootPassword(coin, network){
     return new Promise(async (resolve,reject)=>{
-        let prompt = new Password({
-            name: 'password',
-            message: 'The password for the root user of mariadb is needed in order to create the database container and/or adding new users. What password do you want to set?'
-        })
-        
-        prompt.run().then(
-            async(answer) => {
-                /*if (!(coin in dbRootPasswords)){
-                    dbRootPasswords[coin] = {}
-                }*/
+        if (dbRootPassword){
+            resolve(dbRootPassword)
+        } else {
+            let dbContainerId = await checkIfDatabaseModuleExists(coin, network)
+            const commandLine = "docker exec "+dbContainerId+" mariadb-admin -u root -p"
+
+            while (!dbRootPassword){
+                let messageLine = 'The password for the root user of mariadb is needed in order to create the database container and/or adding new users. What password do you want to set?'
+                if (dbContainerId){
+                    messageLine = 'Please, type the password for the root user of mariadb to add new users'
+                }
                 
-                //dbRootPasswords[coin][network] = answer
-                dbRootPasswords[coin] = answer
+                let prompt = new Password({
+                    name: 'password',
+                    message: messageLine
+                })
                 
-                resolve(answer)
+                try {
+                    let answer = await prompt.run()
+                    
+                    if (dbContainerId){
+                        const { stdout, stderr } = await execAsync(commandLine+answer+" ping")
+                        if (stdout.includes('mysqld is alive')) {
+                            dbRootPassword = answer
+                            resolve(answer)
+                        } else {
+                            console.log("❌ Wrong password, please try again");
+                        }
+                    } else {
+                        dbRootPassword = answer
+                        resolve(answer)
+                    }
+                } catch (err){
+                    console.log("An error has ocurred asking for database password")
+                    reject(err)                 
+                }
             }
-        ).catch(
-            async(error)=>{
-                console.log("An error has ocurred asking for database password")
-                reject(error)
-            }
-        )
+        }
     })
     
 }
