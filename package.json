@@ -10,7 +10,8 @@
   "main": "src/index.js",
   "dependencies": {
     "axios": "^1.6.7",
-    "commander": "^12.1.0",
+    "commander": "^14.0.2",
+    "chalk": "^5.6.0",
     "dotenv": "^16.4.5",
     "enquirer": "^2.4.1",
     "ink": "^5.0.1",

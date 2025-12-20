@@ -36,6 +36,8 @@ const mariadb = require('mariadb')
 const semver = require('semver')
 const axios = require('axios')
 const HubConnector = require('./HubConnector.js')
+const { Command } = require('commander');
+const { version } = require('../package.json');
 
 //Console interface
 const { prompt, Select, Password } = require('enquirer');
@@ -733,6 +735,7 @@ async function createDockerNetwork(coin, network){
         //Check if network exists
         exec('docker network inspect '+network_name, (error, stdout, stderr) => {
             if (error){//It means the network doesn't exist
+                console.log("Creating docker network "+network_name)
                 exec('docker network create '+network_name, (error, stdout, stderr) => {
                     if (error){
                         console.log(error)
@@ -758,8 +761,9 @@ async function addContainerToNetwork(module, coin, network){
         
         //Check if the module is connected to the network already
         let containerStatus = await getStatusFromContainer(moduleContainerId)
-        
+
         if (!(getDockerNetwork(coin, network) in containerStatus["NetworkSettings"]["Networks"])){
+            console.log("Connecting module "+module+" to network "+getDockerNetwork(coin, network))
             exec('docker network connect '+getDockerNetwork(coin, network)+' '+moduleContainerId+'', async (error, stdout, stderr) => {
                 if (error){
                     reject(error)
@@ -1265,6 +1269,8 @@ async function askMariadbRootPassword(coin, network){
 async function buildDatabaseModule(coin, network){
     return new Promise(async (resolve,reject)=>{
         if (!(await checkIfDatabaseModuleExists(coin, network))){
+            console.log("Installing mariadb database...")
+        
             //The mariadb container is about to be created, so first the user will be asked for the root password for mariadb
             let mariadbRootPassword = await askMariadbRootPassword(coin, network)
             
@@ -1603,37 +1609,45 @@ async function getStatus(coin, network, printStatus = false){
                                         titlePrinted = true
                                     }
                 
+                                    let moduleRemoteVersion = "-"
+                                    try {
+                                        if (nextCoinNetworkModule == NODE_MODULE_NAME) {
+                                            moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule + SEP + nextCoin]["tag_name"].substring(1)
+                                        } else {
+                                            moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule]
+                                        }
+                                        
+                                        nextCoinNetworkModules[nextCoinNetworkModule]["remote_version"] = moduleRemoteVersion
+                                    } catch (e) {
+                                        //Nothing yet
+                                    }
+                                    let moduleLocalVersion = "-"
+                                    try {
+                                        if (nextCoinNetworkModule == NODE_MODULE_NAME) {
+                                            moduleLocalVersion = await getLocalNodeVersion(nextCoin, nextCoinNetwork)
+                                        } else {
+                                            moduleLocalVersion = await getLocalModuleVersion(nextCoinNetworkModule)
+                                        }
+                                        
+                                        nextCoinNetworkModules[nextCoinNetworkModule]["local_version"] = moduleLocalVersion
+                                    } catch (e) {
+                                        //Nothing yet
+                                    }
+                                    let moduleContainerVersion = "-"
+                                    try {
+                                        if (nextCoinNetworkModule == NODE_MODULE_NAME) {
+                                            moduleContainerVersion = await getContainerNodeVersion(nextCoin, nextCoinNetwork, containerId)
+                                        } else {
+                                            moduleContainerVersion = await getContainerModuleVersion(nextCoinNetworkModule, nextCoin, nextCoinNetwork, containerId)
+                                        }
+                                        
+                                        nextCoinNetworkModules[nextCoinNetworkModule]["container_version"] = moduleContainerVersion
+                                    } catch (e) {
+                                        //Nothing yet
+                                    }
+                                        
                                     if (printStatus) {
-                                        let moduleRemoteVersion = "-"
-                                        try {
-                                            if (nextCoinNetworkModule == NODE_MODULE_NAME) {
-                                                moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule + SEP + nextCoin]["tag_name"].substring(1)
-                                            } else {
-                                                moduleRemoteVersion = remoteModuleVersions[nextCoinNetworkModule]
-                                            }
-                                        } catch (e) {
-                                            //Nothing yet
-                                        }
-                                        let moduleLocalVersion = "-"
-                                        try {
-                                            if (nextCoinNetworkModule == NODE_MODULE_NAME) {
-                                                moduleLocalVersion = await getLocalNodeVersion(nextCoin, nextCoinNetwork)
-                                            } else {
-                                                moduleLocalVersion = await getLocalModuleVersion(nextCoinNetworkModule)
-                                            }
-                                        } catch (e) {
-                                            //Nothing yet
-                                        }
-                                        let moduleContainerVersion = "-"
-                                        try {
-                                            if (nextCoinNetworkModule == NODE_MODULE_NAME) {
-                                                moduleContainerVersion = await getContainerNodeVersion(nextCoin, nextCoinNetwork, containerId)
-                                            } else {
-                                                moduleContainerVersion = await getContainerModuleVersion(nextCoinNetworkModule, nextCoin, nextCoinNetwork, containerId)
-                                            }
-                                        } catch (e) {
-                                            //Nothing yet
-                                        }
+                                        
                                         let versionString = " {remote:" + moduleRemoteVersion + ", local:" + moduleLocalVersion + ", container:" + moduleContainerVersion+"}"
 
 
@@ -1782,25 +1796,32 @@ async function killContainer(containerId){
 async function installModule(coin, network, module, remoteUpdate=false, overwrite_container_id=null, onlyExecution=false){
     return new Promise(async (resolve, reject) => {
         if (module == NODE_MODULE_NAME) {
-            let localNodeVersion = null
-            try {
-                localNodeVersion = await getLocalNodeVersion(coin, network)
-            } catch (err) {
-                //Nothing localNodeVersion will be null
-            }
-
-            if (localNodeVersion == null) {
+            let containerNodeVersion = lastStatus?.coin?.network?.module?.["container_version"] ?? null
+            
+            //If there's no container version it's assumed that the node is not installed yet
+            if (!containerNodeVersion || remoteUpdate){
+                let localNodeVersion = null
                 try {
-                    let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + SEP + coin]["version"]
-                    await getCryptoNode(coin, network, remoteNodeVersion)
+                    localNodeVersion = await getLocalNodeVersion(coin, network)
                 } catch (err) {
-                    reject(err)
+                    //Nothing localNodeVersion will be null
                 }
-            }
 
-            await buildCryptoNode(coin, network)
-            await statusChanged()
-            resolve(true)
+                if (localNodeVersion == null) {
+                    try {
+                        let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + SEP + coin]["version"]
+                        await getCryptoNode(coin, network, remoteNodeVersion)
+                    } catch (err) {
+                        reject(err)
+                    }
+                }
+
+                await buildCryptoNode(coin, network)
+                await statusChanged()
+                resolve(true)
+            } else {
+                resolve(false)
+            }
         } else if (module == DB_MODULE_NAME) {
             try {
                 await buildDatabaseModule(coin, network)
@@ -1810,30 +1831,36 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
                 reject(err)
             }
         } else {
-            let localModuleVersion = null
-            try {
-                localModuleVersion = await getLocalModuleVersion(module)
-            } catch (err) {
-                //Nothing localModuleVersion will be null
-            }
+            let containerNodeVersion = lastStatus?.coin?.network?.module?.["container_version"] ?? null
+            
+            if (!containerNodeVersion || remoteUpdate){
+                let localModuleVersion = null
+                try {
+                    localModuleVersion = await getLocalModuleVersion(module)
+                } catch (err) {
+                    //Nothing localModuleVersion will be null
+                }
 
-            try {
-                if (remoteUpdate || (localModuleVersion == null)) {
-                    await cloneGit(module, true)
+                try {
+                    if (remoteUpdate || (localModuleVersion == null)) {
+                        await cloneGit(module, true)
+                    }
+                    
+                    let containerId = await buildAndUp(module, coin, network, overwrite_container_id, onlyExecution)
+                    
+                    if ((module == XChainModule.XCHAIN_DECODER) || (module == XChainModule.XCHAIN_INDEXER)){
+                        await setDatabaseParameters()
+                    }
+                    
+                    if (!onlyExecution){
+                        await statusChanged()
+                    }
+                    resolve(containerId)
+                } catch (err){
+                    reject(err)
                 }
-                
-                let containerId = await buildAndUp(module, coin, network, overwrite_container_id, onlyExecution)
-                
-                if ((module == XChainModule.XCHAIN_DECODER) || (module == XChainModule.XCHAIN_INDEXER)){
-                    await setDatabaseParameters()
-                }
-                
-                if (!onlyExecution){
-                    await statusChanged()
-                }
-                resolve(containerId)
-            } catch (err){
-                reject(err)
+            } else {
+                resolve(false)
             }
         }
         
@@ -2000,6 +2027,30 @@ async function installHubModule(){
             reject("Couldn't install hub module")
         }
     })
+}
+
+async function installModules(branch, modules, coins, networks){
+    if (!modules){
+        modules = Object.values(XChainModule)
+    }
+    if (!coins){
+        coins = Object.values(Coin)
+    }
+    if (!networks){
+        networks = Object.values(Network)
+    }
+    
+    
+    for (let nextCoin of coins){
+        for (let nextNetwork of networks){
+            await buildDatabaseModule(nextCoin, nextNetwork)
+            await createDockerNetwork(nextCoin, nextNetwork)
+            
+            for (let nextModule of modules){
+                await installModule(nextCoin, nextNetwork, nextModule)
+            }
+        }
+    }
 }
 
 async function installNode(coin, network){
@@ -2621,10 +2672,16 @@ const startInterface = async() => {
     }
 }
 
-async function start(){
+async function preCheck(){
+    try {
+        await checkDockerInstalledAndReachable()
+        } catch(err){
+        throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
+    }
+    
     createDirectories()
-    await checkAllRemoteVersions()
     await db.createDatabase()
+    await checkAllRemoteVersions()
     await getStatus(null, null, false)
     
     try {
@@ -2640,13 +2697,57 @@ async function start(){
         throw new Error("There was an error trying to update the hub module")
     }
     
-    try {
-        await checkDockerInstalledAndReachable()
-    } catch(err){
-        throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
-    }
-    
-    await startInterface()
+    return true
+}
+
+async function start(){
+    const program = new Command();
+
+    program
+        .name('xchain-node')
+        .version(version, '-v, --version', 'Shows xchain-node version')
+        .option('-i, --interactive', 'Interactive mode')
+        .action(async(options) => {
+            if (options.interactive) {
+                await preCheck()
+                return startInterface()
+            }
+            
+            program.help() //Shows help when there is no parameters
+        })
+
+    program
+        .command('install <branch> <services> [chain] [network]')
+        .description('Installs a xchain module')
+        .action(async (branch, services, chain, network) => {
+            console.log("Checking/creating xchain-node structure")
+            try {
+                await preCheck()
+            } catch (err){
+                console.log("There was an error checking the xchain-node structure")
+                console.log(err)
+                return false
+            }
+            console.log("Installing..."+[branch, services, chain, network]);
+            
+            
+            if (services == "all"){
+                services = null
+            } else if (services){
+                services = [services]
+            }
+            
+            if (chain){
+                chain = [chain]
+            }
+            if (network){
+                network = [network]
+            }
+            
+            return installModules(branch, services, chain, network)
+        });
+
+    program.parse(process.argv);
 }
 
 start()
