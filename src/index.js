@@ -343,7 +343,7 @@ async function restoreBootstrap(coin, network, module, fileName){
         switch (module){
             case XChainModule.XCHAIN_UTXO_TRACKER:
                 let port = defaultConfig["UTXO_TRACKER_PORT"]
-                let moduleDockerVolume = defaultConfig["UTXO_TRACKER_DOCKER_VOLUME"]
+                let moduleDockerVolume = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"]
                 let moduleUrl = "http://localhost:"+port
                 
                 const data = {
@@ -398,7 +398,7 @@ async function makeBootstrap(coin, network, module){
         switch (module){
             case XChainModule.XCHAIN_UTXO_TRACKER:
                 let port = defaultConfig["UTXO_TRACKER_PORT"]
-                let moduleDockerVolume = defaultConfig["UTXO_TRACKER_DOCKER_VOLUME"]
+                let moduleDockerVolume = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"]
                 let moduleUrl = "http://localhost:"+port
                 
                 const data = {
@@ -422,6 +422,7 @@ async function makeBootstrap(coin, network, module){
                 
                     //Check if file exists
                     if (fs.existsSync(moduleDockerVolume+"/"+fileName)){
+                        console.log("The bootstrap file is in "+moduleDockerVolume+fileName)
                         resolve(true)
                     } else {
                         reject(false)
