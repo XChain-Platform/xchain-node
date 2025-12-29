@@ -38,6 +38,7 @@ const axios = require('axios')
 const HubConnector = require('./HubConnector.js')
 const { Command } = require('commander');
 const { version } = require('../package.json');
+const HelpText = require('./HelpText.js')
 
 //Console interface
 const { prompt, Select, Password } = require('enquirer');
@@ -2701,25 +2702,31 @@ async function preCheck(){
     return true
 }
 
+
+
 async function start(){
     const program = new Command();
 
+    // No Parameters given (xchain-node)
     program
         .name('xchain-node')
         .version(version, '-v, --version', 'Shows xchain-node version')
         .option('-i, --interactive', 'Interactive mode')
+        .addHelpText('after', HelpText.default)
         .action(async(options) => {
-            if (options.interactive) {
-                await preCheck()
-                return startInterface()
+            if (options.interactive){
+                await preCheck();
+                return startInterface();
             }
-            
-            program.help() //Shows help when there is no parameters
-        })
+            // Shows help when there is no parameters
+            program.help(); 
+        });
 
+    // Install
     program
-        .command('install <branch> <services> [chain] [network]')
-        .description('Installs a xchain module')
+        .command('install <branch> <service> [chain] [network]')
+        .description('Installs XChain services')
+        .addHelpText('after', HelpText.install)
         .action(async (branch, services, chain, network) => {
             console.log("Checking/creating xchain-node structure")
             try {
@@ -2730,7 +2737,6 @@ async function start(){
                 return false
             }
             console.log("Installing..."+[branch, services, chain, network]);
-            
             
             if (services == "all"){
                 services = null
@@ -2746,6 +2752,115 @@ async function start(){
             }
             
             return installModules(branch, services, chain, network)
+        });
+
+    // Uninstall
+    program
+        .command('uninstall <service> [chain] [network]')
+        .description('Uninstall XChain services')
+        .addHelpText('after', HelpText.uninstall)
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Update
+    program
+        .command('update <service> [chain] [network]')
+        .description('Update XChain services')
+        .addHelpText('after', HelpText.update)
+        .action(async (options) => {
+            // coming soon
+        });
+
+
+    // Start
+    program
+        .command('start <service> [chain] [network]')
+        .description('Start XChain service')
+        .addHelpText('after', HelpText.services)
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Stop
+    program
+        .command('stop <service> [chain] [network]')
+        .description('Stop XChain service')
+        .addHelpText('after', HelpText.services)
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Restart
+    program
+        .command('restart <service> [chain] [network]')
+        .description('Restart XChain service')
+        .addHelpText('after', HelpText.services)
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Rollback
+    program
+        .command('rollback <block_index> <service> <chain> <network>')
+        .description('Rollback XChain service to a set block_index')
+        .addHelpText('after', HelpText.rollback)
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Bootstrap
+    program
+        .command('bootstrap <action> <service> <chain> <network>')
+        .description('Create and restore XChain service bootstraps')
+        .addHelpText('after', HelpText.bootstrap)
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Process List (ps)
+    program
+        .command('ps')
+        .description('List installed XChain services and status')
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Tail Logs
+    program
+        .command('tail <service> [chain] [network]')
+        .description('Tail XChain service logs')
+        .addHelpText('after', HelpText.logs)
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Full Logs
+    program
+        .command('logs <service> [chain] [network]')
+        .description('Display full XChain service logs')
+        .addHelpText('after', HelpText.logs)
+        .action(async (options) => {
+            // coming soon
+        });
+
+
+    // Execute
+    program
+        .command('exec <service> <chain> <network> <command>')
+        .description('Execute command on XChain service container')
+        .addHelpText('after', HelpText.exec)
+        .action(async (options) => {
+            // coming soon
+        });
+
+    // Shell
+    program
+        .command('shell <service> <chain> <network>')
+        .description('Shell into a XChain service container')
+        .addHelpText('after', HelpText.shell)
+        .action(async (options) => {
+            // coming soon
         });
 
     program.parse(process.argv);
