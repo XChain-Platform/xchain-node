@@ -38,7 +38,6 @@ const axios = require('axios')
 const HubConnector = require('./HubConnector.js')
 const { Command } = require('commander');
 const { version } = require('../package.json');
-const HelpText = require('./HelpText.js')
 
 //Console interface
 const { prompt, Select, Password } = require('enquirer');
@@ -2707,12 +2706,12 @@ async function preCheck(){
 async function start(){
     const program = new Command();
 
+
     // No Parameters given (xchain-node)
     program
         .name('xchain-node')
         .version(version, '-v, --version', 'Shows xchain-node version')
         .option('-i, --interactive', 'Interactive mode')
-        .addHelpText('after', HelpText.default)
         .action(async(options) => {
             if (options.interactive){
                 await preCheck();
@@ -2724,10 +2723,13 @@ async function start(){
 
     // Install
     program
-        .command('install <branch> <service> [chain] [network]')
+        .command('install')
         .description('Installs XChain services')
-        .addHelpText('after', HelpText.install)
-        .action(async (branch, services, chain, network) => {
+        .argument('<branch>',  '(master, develop)')
+        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (branch, service, chain, network) => {
             console.log("Checking/creating xchain-node structure")
             try {
                 await preCheck()
@@ -2736,12 +2738,11 @@ async function start(){
                 console.log(err)
                 return false
             }
-            console.log("Installing..."+[branch, services, chain, network]);
-            
-            if (services == "all"){
-                services = null
-            } else if (services){
-                services = [services]
+            console.log("Installing..." + [branch, service, chain, network]);
+            if (service == "all"){
+                service = null
+            } else if (service){
+                service = [service]
             }
             
             if (chain){
@@ -2750,71 +2751,28 @@ async function start(){
             if (network){
                 network = [network]
             }
-            
-            return installModules(branch, services, chain, network)
+            return installModules(branch, service, chain, network)
         });
 
     // Uninstall
     program
-        .command('uninstall <service> [chain] [network]')
+        .command('uninstall')
         .description('Uninstall XChain services')
-        .addHelpText('after', HelpText.uninstall)
-        .action(async (options) => {
+        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
             // coming soon
         });
 
     // Update
     program
-        .command('update <service> [chain] [network]')
+        .command('update')
         .description('Update XChain services')
-        .addHelpText('after', HelpText.update)
-        .action(async (options) => {
-            // coming soon
-        });
-
-
-    // Start
-    program
-        .command('start <service> [chain] [network]')
-        .description('Start XChain service')
-        .addHelpText('after', HelpText.services)
-        .action(async (options) => {
-            // coming soon
-        });
-
-    // Stop
-    program
-        .command('stop <service> [chain] [network]')
-        .description('Stop XChain service')
-        .addHelpText('after', HelpText.services)
-        .action(async (options) => {
-            // coming soon
-        });
-
-    // Restart
-    program
-        .command('restart <service> [chain] [network]')
-        .description('Restart XChain service')
-        .addHelpText('after', HelpText.services)
-        .action(async (options) => {
-            // coming soon
-        });
-
-    // Rollback
-    program
-        .command('rollback <block_index> <service> <chain> <network>')
-        .description('Rollback XChain service to a set block_index')
-        .addHelpText('after', HelpText.rollback)
-        .action(async (options) => {
-            // coming soon
-        });
-
-    // Bootstrap
-    program
-        .command('bootstrap <action> <service> <chain> <network>')
-        .description('Create and restore XChain service bootstraps')
-        .addHelpText('after', HelpText.bootstrap)
-        .action(async (options) => {
+        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
             // coming soon
         });
 
@@ -2826,42 +2784,114 @@ async function start(){
             // coming soon
         });
 
+    // Start
+    program
+        .command('start')
+        .description('Start XChain service')
+        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
+            // coming soon
+        });
+
+    // Stop
+    program
+        .command('stop')
+        .description('Stop XChain service')
+        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
+            // coming soon
+        });
+
+    // Restart
+    program
+        .command('restart')
+        .description('Restart XChain service')
+        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
+            // coming soon
+        });
+
     // Tail Logs
     program
-        .command('tail <service> [chain] [network]')
+        .command('tail')
         .description('Tail XChain service logs')
-        .addHelpText('after', HelpText.logs)
-        .action(async (options) => {
+        .argument('[service]', '(node, database, xchain-hub, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
             // coming soon
         });
 
     // Full Logs
     program
-        .command('logs <service> [chain] [network]')
+        .command('logs')
         .description('Display full XChain service logs')
-        .addHelpText('after', HelpText.logs)
-        .action(async (options) => {
+        .argument('[service]', '(node, database, xchain-hub, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
             // coming soon
         });
 
-
     // Execute
     program
-        .command('exec <service> <chain> <network> <command>')
+        .command('exec')
         .description('Execute command on XChain service container')
-        .addHelpText('after', HelpText.exec)
-        .action(async (options) => {
+        .argument('<service>', '(node, database, xchain-hub, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer)')
+        .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
+        .argument('<network>', '(mainnet, testnet, regtest)')
+        .argument('<command>', 'The shell command to execute')
+        .action(async (service, chain, network, command) => {
             // coming soon
         });
 
     // Shell
     program
-        .command('shell <service> <chain> <network>')
+        .command('shell')
         .description('Shell into a XChain service container')
-        .addHelpText('after', HelpText.shell)
-        .action(async (options) => {
+        .argument('<service>', '(node, database, xchain-hub, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer)')
+        .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
+        .argument('<network>', '(mainnet, testnet, regtest)')
+        .action(async (service, chain, network) => {
             // coming soon
         });
+
+    // Rollback
+    program
+        .command('rollback')
+        .description('Rollback XChain service to a set block_index')
+        .argument('<block_index>', 'The index of the last known good block')
+        .argument('<service>',     '(xchain-decoder, xchain-utxo-tracker, xchain-indexer, all)')
+        .argument('<chain>',       '(bitcoin, litecoin, dogecoin)')
+        .argument('<network>',     '(mainnet, testnet, regtest)')
+        .action(async (block_index, service, chain, network) => {
+            // coming soon
+        });
+
+    // Bootstrap
+    program
+        .command('bootstrap')
+        .description('Create / Restore XChain service bootstraps')
+        .argument('<action>',  '(create, restore)')
+        .argument('<service>', '(xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-hub)')
+        .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
+        .argument('<network>', '(mainnet, testnet, regtest)')
+        .addHelpText('after', `
+Notes:
+    Bootstrap files are written to and restored from ~/xchain-node/bootstraps/<chain>/<network>/<service>/bootstrap-<block_index>.tgz
+    bootstrap create generates a bootstrap file in the above directory
+    bootstrap restore downloads a bootstrap file to the above directory and restores it`)
+        .action(async (action, service, chain, network) => {
+            // coming soon
+        });
+
+
 
     program.parse(process.argv);
 }
