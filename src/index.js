@@ -38,6 +38,7 @@ const axios = require('axios')
 const HubConnector = require('./HubConnector.js')
 const { Command } = require('commander');
 const { version } = require('../package.json');
+const ExplorerConnector = require('./ExplorerConnector.js')
 
 //Console interface
 const { prompt, Select, Password } = require('enquirer');
@@ -49,6 +50,7 @@ const DB_NAME = (process.env.DB_NAME == null?"xchain_node":process.env.DB_NAME)
 const NODE_MODULE_NAME = "node"
 const DB_MODULE_NAME = "database"
 const HUB_MODULE_NAME = "xchain-hub"
+const EXPLORER_MODULE_NAME = "xchain-explorer"
 
 const NODE_VERSION_FILE_NAME = "__VERSION__.txt"
 
@@ -71,6 +73,7 @@ const projectFolders = {
     "xchain-regtest-miner": "XChainRegtestMiner",
     "xchain-indexer": "XChainIndexer",
     "xchain-hub": "XChainHub",
+    "xchain-explorer": "XChainExplorer",
     "xchain-e2e-test": "XChainE2ETest"
 }
 
@@ -96,6 +99,7 @@ var installedModules = {}
     "xchain-indexer": "https://github.com/XChain-platform/xchain-indexer",
     "xchain-regtest-miner": "https://github.com/XChain-platform/xchain-regtest-miner",
     "xchain-hub": "https://github.com/XChain-platform/xchain-hub",
+    "xchain-explorer": "https://github.com/XChain-platform/xchain-explorer",
     "xchain-e2e-test": "https://github.com/XChain-platform/xchain-e2e-test"
 }*/
 
@@ -108,6 +112,7 @@ const modulesUrls = {
     "xchain-indexer": "git@github.com:XChain-platform/xchain-indexer.git",
     "xchain-regtest-miner": "git@github.com:XChain-platform/xchain-regtest-miner.git",
     "xchain-hub": "git@github.com:XChain-platform/xchain-hub.git",
+    "xchain-explorer": "git@github.com:XChain-platform/xchain-explorer.git",
     "xchain-e2e-test": "git@github.com:XChain-platform/xchain-e2e-test.git"
 }
 
@@ -212,7 +217,8 @@ async function checkAllRemoteVersions(){
         getRemoteModuleVersion(XChainModule.XCHAIN_DECODER),
         getRemoteModuleVersion(XChainModule.XCHAIN_UTXO_TRACKER),
         getRemoteModuleVersion(XChainModule.XCHAIN_REGTEST_MINER),
-        getRemoteModuleVersion(XChainModule.XCHAIN_INDEXER)
+        getRemoteModuleVersion(XChainModule.XCHAIN_INDEXER),
+        getRemoteModuleVersion(EXPLORER_MODULE_NAME)
     ])
 }
 
@@ -663,11 +669,23 @@ function moduleDirExists(module){
 }
 
 function getDockerContainerImageNamePrefix(module, coin, network){
-    if ((module == DB_MODULE_NAME) || (module == HUB_MODULE_NAME)){
+    if ((module == DB_MODULE_NAME) || (module == HUB_MODULE_NAME) || (module == EXPLORER_MODULE_NAME)){
         return NODE_PREFIX
     } else {
         return NODE_PREFIX + SEP + coin + SEP + network
     }
+}
+
+async function stringToDockerContainerFile(containerId, dataString, filePath) {
+    return new Promise((resolve, reject) => {
+        exec("docker exec -i ${containerId} sh -c 'cat > ${filePath}'", { input: dataString }, (error, stdout, stderr) => {
+            if (error) {
+                reject(error)
+            } else {
+                resolve(true)
+            }
+        })
+    })
 }
 
 async function getDockerContainerFileData(containerId, filePath) {
@@ -845,7 +863,12 @@ async function getDefaultConfig(module, coin, network){
     } else {
         defaultValues = {
             "HUB_HOST":"127.0.0.1",
-            "HUB_PORT":10000
+            "HUB_PORT":10000,
+            "EXPLORER_API_HOST":"127.0.0.1",
+            "EXPLORER_API_USER":false,
+            "EXPLORER_API_PASS":false,
+            "EXPLORER_API_PORT_HTTP":18080,
+            "EXPLORER_API_PORT_HTTPS":18081
         }   
     }
     
@@ -989,10 +1012,11 @@ async function getInstalledCoinsAndNetworks(){
     return result
 }
 
-
 async function setDatabaseParameters(){
     return new Promise(async (resolve,reject)=>{
         let installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
+        
+        let explorerContainerId = await db.getModuleContainer(XChainModule.XCHAIN_EXPLORER, null, null)
         
         for (let nextCoin in installedCoinsAndNetworks){
             for (let nextNetworkIndex in installedCoinsAndNetworks[nextCoin]){
@@ -1032,6 +1056,26 @@ async function setDatabaseParameters(){
                             defaultConfig["DECODER_DB_NAME"],
                             defaultConfig["DECODER_DB_USER"],
                             defaultConfig["DECODER_DB_PASS"]
+                        )
+                    }
+                    moduleContainerId = await db.getModuleContainer(XChainModule.XCHAIN_EXPLORER, nextCoin, nextNetwork)
+                    if (moduleContainerId != null){
+                        let defaultConfig = await getDefaultConfig(XChainModule.XCHAIN_EXPLORER, nextCoin, nextNetwork)                  
+                        await addUserPasswordToDatabase(
+                            XChainModule.XCHAIN_EXPLORER,
+                            nextCoin,
+                            nextNetwork,
+                            defaultConfig["EXPLORER_DB_NAME"],
+                            defaultConfig["EXPLORER_DB_USER"],
+                            defaultConfig["EXPLORER_DB_PASS"]
+                        )
+                        await addUserPasswordToDatabase(
+                            XChainModule.XCHAIN_INDEXER,
+                            nextCoin,
+                            nextNetwork,
+                            defaultConfig["EXPLORER_DB_NAME"],
+                            defaultConfig["EXPLORER_DB_USER"],
+                            defaultConfig["EXPLORER_DB_PASS"]
                         )
                     }
                 } catch(err) {
@@ -1389,6 +1433,11 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null, on
                             portLine = "-p "+environmentVariables["INDEXER_PORT"]+":"+environmentVariables["INDEXER_API_PORT"]
                         }
                         break
+                    case XChainModule.XCHAIN_EXPLORER:
+                        if (("EXPLORER_PORT" in environmentVariables) && ("EXPLORER_API_PORT" in environmentVariables)){
+                            portLine = "-p "+environmentVariables["EXPLORER_PORT"]+":"+environmentVariables["EXPLORER_API_PORT"]
+                        }
+                        break
                     case XChainModule.XCHAIN_REGTEST_MINER:
                         if ("REGTEST_MINER_PORT" in environmentVariables){
                             portLine = "-p "+environmentVariables["REGTEST_MINER_PORT"]+":"+environmentVariables["REGTEST_MINER_API_PORT"]
@@ -1398,7 +1447,14 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null, on
                         coin = ""
                         network = ""
                         portLine = "-p "+environmentVariables["HUB_PORT"]+":3000"
-                        break   
+                        break
+                    case EXPLORER_MODULE_NAME:
+                        coin = ""
+                        network = ""
+                        portLine = 
+                            "-p "+environmentVariables["EXPLORER_API_PORT_HTTP"]+":"+environmentVariables["EXPLORER_API_PORT_HTTP"]
+                            +" -p "+environmentVariables["EXPLORER_API_PORT_HTTPS"]+":"+environmentVariables["EXPLORER_API_PORT_HTTPS"]
+                        break
                 }       
 
                 if (overwrite_container_id) {
@@ -1483,7 +1539,7 @@ async function cloneGit(module, rewrite = false, useTmp = false){
                 }
             })
         } else {
-            reject("module doesn't have a url")
+            reject("module doesn't have an url")
         }
     })
 }
@@ -1831,6 +1887,14 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
             } catch (err){
                 reject(err)
             }
+        } else if (module == EXPLORER_MODULE_NAME) {
+            try {
+                await installExplorerModule()
+                await statusChanged()                 
+                resolve(true)
+            } catch (err){
+                reject(err)
+            }
         } else {
             let containerNodeVersion = lastStatus?.coin?.network?.module?.["container_version"] ?? null
             
@@ -1870,107 +1934,166 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
 }
 
 async function updateHub(){
-    console.log("Updating xchain-hub...")
+    await updateHubOrExplorer("xchain-hub")
     
+    return true 
+}
+
+async function updateExplorer(){
+    await updateHubOrExplorer("xchain-explorer")
+    
+    return true 
+}
+
+async function updateHubOrExplorer(module){
     return new Promise(async (resolve, reject) => {
-        let defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
-        let hubConnector = new HubConnector(defaultConfig["HUB_HOST"], defaultConfig["HUB_PORT"])
-        await getStatus(null, null, false)
+        if (["xchain-hub","xchain-explorer"].includes(module)){
+            console.log("Updating "+module+"...")
         
-        if (statusUpdated){
-            let jsonConfig = {}
-                    
-            for (let nextCoin in lastStatus){
-                for (let nextNetwork in lastStatus[nextCoin]){
-                    let defaultConfigCoinNetwork = await getDefaultConfig("", nextCoin, nextNetwork)
+            let defaultConfig = await getDefaultConfig(module, null, null)
+            let moduleConnector = null
+            
+            if (module == "xchain-hub"){
+                moduleConnector = new HubConnector(defaultConfig["HUB_HOST"], defaultConfig["HUB_PORT"])
+            } else {
+                moduleConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
+            }
+            
+            await getStatus(null, null, false)
+            
+            if (statusUpdated){
+                let jsonConfig = {}
                 
-                    for (let nextModule in lastStatus[nextCoin][nextNetwork]){
-                        let config = null
+                if (module == "xchain-explorer"){
+                    jsonConfig["configs"] = []
+                    jsonConfig = jsonConfig["configs"]
+                }
+                
+                for (let nextCoin in lastStatus){
+                    for (let nextNetwork in lastStatus[nextCoin]){
+                        let defaultConfigCoinNetwork = await getDefaultConfig("", nextCoin, nextNetwork)
                         
-                        switch (nextModule){
-                            case DB_MODULE_NAME:
-                                config = {
-                                    "host":"mariadb",
-                                    "port":3306
-                                }
-                                break
-                            case NODE_MODULE_NAME:
-                                config = {
-                                    "host":defaultConfigCoinNetwork["NODE_URL"],
-                                    "port":defaultConfigCoinNetwork["NODE_PORT"],
-                                    "server_port":defaultConfigCoinNetwork["NODE_EXPOSED_PORT"],
-                                    "user":defaultConfigCoinNetwork["NODE_USER"],
-                                    "pass":defaultConfigCoinNetwork["NODE_PASSWORD"]
-                                }
-                                break
-                            case XChainModule.XCHAIN_DECODER:
-                                config = {
-                                    "host":defaultConfigCoinNetwork["DECODER_URL"],
-                                    "port":defaultConfigCoinNetwork["DECODER_API_PORT"],
-                                    "server_port":defaultConfigCoinNetwork["DECODER_PORT"],
-                                    "name":defaultConfigCoinNetwork["DECODER_DB_NAME"],
-                                    "user":defaultConfigCoinNetwork["DECODER_DB_USER"],
-                                    "pass":defaultConfigCoinNetwork["DECODER_DB_PASS"]
-                                }
-                                break
-                            case XChainModule.XCHAIN_ENCODER:
-                                config = {
-                                    "host":defaultConfigCoinNetwork["ENCODER_URL"],
-                                    "port":defaultConfigCoinNetwork["ENCODER_API_PORT"],
-                                    "server_port":defaultConfigCoinNetwork["ENCODER_PORT"]
-                                }
-                                break
-                            case XChainModule.XCHAIN_INDEXER:
-                                config = {
-                                    "host":defaultConfigCoinNetwork["INDEXER_HOST"],
-                                    "port":defaultConfigCoinNetwork["INDEXER_API_PORT"],
-                                    "server_port":defaultConfigCoinNetwork["INDEXER_PORT"],
-                                    "name":defaultConfigCoinNetwork["INDEXER_DB_NAME"],
-                                    "user":defaultConfigCoinNetwork["INDEXER_DB_USER"],
-                                    "pass":defaultConfigCoinNetwork["INDEXER_DB_PASS"]
-                                }
-                                break
-                            case XChainModule.XCHAIN_UTXO_TRACKER:
-                                config = {
-                                    "host":defaultConfigCoinNetwork["UTXO_TRACKER_URL"],
-                                    "port":defaultConfigCoinNetwork["UTXO_TRACKER_API_PORT"],
-                                    "server_port":defaultConfigCoinNetwork["UTXO_TRACKER_PORT"]
-                                }
-                                break
-                            case XChainModule.XCHAIN_REGTEST_MINER:
-                                config = {
-                                    "host":defaultConfigCoinNetwork["REGTEST_MINER_URL"],
-                                    "port":defaultConfigCoinNetwork["REGTEST_MINER_API_PORT"],
-                                    "server_port":defaultConfigCoinNetwork["REGTEST_MINER_PORT"]
-                                }
-                                break   
+                        if (module == "xchain-explorer"){
+                            let nextConfigObject = {
+                                "coin": nextCoin,
+                                "network": nextNetwork
+                            }
+                            jsonConfig.push(nextConfigObject)
                         }
                         
-                        if (config != null){
-                            if (!(nextCoin in jsonConfig)){
-                                jsonConfig[nextCoin] = {}
+                        for (let nextModule in lastStatus[nextCoin][nextNetwork]){
+                            
+                            
+                            switch (nextModule){
+                                case DB_MODULE_NAME:
+                                    config = {
+                                        "host":"mariadb",
+                                        "port":3306
+                                    }
+                                    break
+                                case NODE_MODULE_NAME:
+                                    config = {
+                                        "host":defaultConfigCoinNetwork["NODE_URL"],
+                                        "port":defaultConfigCoinNetwork["NODE_PORT"],
+                                        "server_port":defaultConfigCoinNetwork["NODE_EXPOSED_PORT"],
+                                        "user":defaultConfigCoinNetwork["NODE_USER"],
+                                        "pass":defaultConfigCoinNetwork["NODE_PASSWORD"]
+                                    }
+                                    break
+                                case XChainModule.XCHAIN_DECODER:
+                                    config = {
+                                        "host":defaultConfigCoinNetwork["DECODER_URL"],
+                                        "port":defaultConfigCoinNetwork["DECODER_API_PORT"],
+                                        "server_port":defaultConfigCoinNetwork["DECODER_PORT"],
+                                        "name":defaultConfigCoinNetwork["DECODER_DB_NAME"],
+                                        "user":defaultConfigCoinNetwork["DECODER_DB_USER"],
+                                        "pass":defaultConfigCoinNetwork["DECODER_DB_PASS"]
+                                    }
+                                    break
+                                case XChainModule.XCHAIN_ENCODER:
+                                    config = {
+                                        "host":defaultConfigCoinNetwork["ENCODER_URL"],
+                                        "port":defaultConfigCoinNetwork["ENCODER_API_PORT"],
+                                        "server_port":defaultConfigCoinNetwork["ENCODER_PORT"]
+                                    }
+                                    break
+                                case XChainModule.XCHAIN_INDEXER:
+                                    config = {
+                                        "host":defaultConfigCoinNetwork["INDEXER_HOST"],
+                                        "port":defaultConfigCoinNetwork["INDEXER_API_PORT"],
+                                        "server_port":defaultConfigCoinNetwork["INDEXER_PORT"],
+                                        "name":defaultConfigCoinNetwork["INDEXER_DB_NAME"],
+                                        "user":defaultConfigCoinNetwork["INDEXER_DB_USER"],
+                                        "pass":defaultConfigCoinNetwork["INDEXER_DB_PASS"]
+                                    }
+                                    break
+                                case XChainModule.XCHAIN_EXPLORER:
+                                    config = {
+                                        "host":defaultConfigCoinNetwork["EXPLORER_HOST"],
+                                        "port":defaultConfigCoinNetwork["EXPLORER_API_PORT"],
+                                        "server_port":defaultConfigCoinNetwork["EXPLORER_PORT"],
+                                        "name":defaultConfigCoinNetwork["EXPLORER_DB_NAME"],
+                                        "user":defaultConfigCoinNetwork["EXPLORER_DB_USER"],
+                                        "pass":defaultConfigCoinNetwork["EXPLORER_DB_PASS"]
+                                    }
+                                    break
+                                case XChainModule.XCHAIN_UTXO_TRACKER:
+                                    config = {
+                                        "host":defaultConfigCoinNetwork["UTXO_TRACKER_URL"],
+                                        "port":defaultConfigCoinNetwork["UTXO_TRACKER_API_PORT"],
+                                        "server_port":defaultConfigCoinNetwork["UTXO_TRACKER_PORT"]
+                                    }
+                                    break
+                                case XChainModule.XCHAIN_REGTEST_MINER:
+                                    config = {
+                                        "host":defaultConfigCoinNetwork["REGTEST_MINER_URL"],
+                                        "port":defaultConfigCoinNetwork["REGTEST_MINER_API_PORT"],
+                                        "server_port":defaultConfigCoinNetwork["REGTEST_MINER_PORT"]
+                                    }
+                                    break   
                             }
-                            if (!(nextNetwork in jsonConfig[nextCoin])){
-                                jsonConfig[nextCoin][nextNetwork] = {}
+                            
+                            if (config != null){
+                                if (module == "xchain-explorer"){
+                                    nextConfigObject[nextModule] = config
+                                } else {
+                                    if (!(nextCoin in jsonConfig)){
+                                        jsonConfig[nextCoin] = {}
+                                    }
+                                    if (!(nextNetwork in jsonConfig[nextCoin])){
+                                        jsonConfig[nextCoin][nextNetwork] = {}
+                                    }
+                                    if (!(nextModule in jsonConfig[nextCoin][nextNetwork])){
+                                        jsonConfig[nextCoin][nextNetwork][nextModule] = {}
+                                    }
+                                    jsonConfig[nextCoin][nextNetwork][nextModule] = config
+                                }
                             }
-                            if (!(nextModule in jsonConfig[nextCoin][nextNetwork])){
-                                jsonConfig[nextCoin][nextNetwork][nextModule] = {}
-                            }
-                            jsonConfig[nextCoin][nextNetwork][nextModule] = config
                         }
                     }
                 }
+                
+                if (module == "xchain-explorer"){
+                    try {
+                        let explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
+                        await stringToDockerContainerFile(explorerContainerId, JSON.stringify(jsonConfig), "/XChainExplorer/src/config.json")
+                    } catch (err) {
+                        reject("There was a problem trying to update a config in the "+module+" module")
+                    }
+                } else {    
+                    try {
+                        await moduleConnector.updateConfig(jsonConfig)
+                    } catch (err){
+                        reject("There was a problem trying to update a config in the "+module+" module")
+                    }
+                }
+                
+                resolve(true)
+            } else {
+                reject("The status is not updated")
             }
-            
-            try {
-                await hubConnector.updateConfig(jsonConfig)
-            } catch (err){
-                reject("There was a problem trying to update a config in the xchain-hub module")
-            }
-            
-            resolve(true)
         } else {
-            reject("The status is not updated")
+            reject("Only the xchain-hub or the xchain-explorer could be updated")
         }
     })
 }
@@ -2052,6 +2175,60 @@ async function installModules(branch, modules, coins, networks){
             }
         }
     }
+}
+
+async function installExplorerModule(){
+    return new Promise(async (resolve, reject) => {
+        let defaultConfig = await getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+        
+        console.log("Checking if xchain-explorer module is running")
+        let explorerConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
+        
+        let pingExplorer = await explorerConnector.ping()
+        
+        if (pingExplorer){
+            resolve(true)
+            return true //The explorer is already installed and running
+        } else {
+            console.log("Checking if xchain-explorer module is installed")
+            if (statusUpdated){
+                let explorerModuleHasStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
+    
+                if (explorerModuleHasStatus !== undefined){
+                    resolve(true)
+                    return true
+                }
+            }
+            
+            console.log("Downloading xchain-explorer...")
+            await cloneGit(EXPLORER_MODULE_NAME, true)
+            console.log("Installing xchain-explorer module...")
+            await buildAndUp(EXPLORER_MODULE_NAME, null, null)
+            await getStatus(null, null, false)
+            
+            console.log("Waiting for the xchain-explorer to respond")
+            
+            let tries = 10
+            
+            while (tries > 0){
+                pingExplorer = await explorerConnector.ping()
+                
+                if (pingExplorer){
+                    //pass data to the explorer
+                    await updateExplorer()
+                
+                    resolve(true)
+                    return true
+                } else {
+                    
+                }
+                
+                tries = tries - 1
+            }
+            
+            reject("Couldn't install the explorer module")
+        }
+    })
 }
 
 async function installNode(coin, network){
@@ -2559,6 +2736,21 @@ async function scanModules(){
     })
 }
 
+function xchainExplorerInterface(){
+    return new Promise(async (resolve, reject) => {
+        
+    
+    
+        let explorerActionsPrompt = new Select({
+            name: "explorerAction",
+            message: "Select an action to take with the xchain-explorer",
+            choices: [
+                {name:'Install/Configure database',value:'configure_database'}
+            ]
+        })
+    })
+}
+
 function mainMenu(){
     return new Promise(async (resolve, reject) => {
         let coinPrompt = new Select({
@@ -2625,6 +2817,11 @@ function mainMenu(){
                     
                     resolve({
                         menuFunction:mainMenu, 
+                        parameters:[]
+                    })
+                } else if (answer == "xchain-explorer"){
+                    resolve({
+                        menuFunction:xchainExplorerInterface, 
                         parameters:[]
                     })
                 } else if (answer == "Scan already installed modules"){ 
