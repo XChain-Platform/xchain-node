@@ -52,6 +52,7 @@ const DB_NAME                = (process.env.DB_NAME == null) ? "xchain_node" : p
 const NODE_MODULE_NAME       = "node";
 const DB_MODULE_NAME         = "database";
 const HUB_MODULE_NAME        = "xchain-hub";
+const EXPLORER_MODULE_NAME   = "xchain-explorer"
 const NODE_VERSION_FILE_NAME = "__VERSION__.txt";
 const SEP                    = "-";
 const DB_SEP                 = "_";
@@ -65,7 +66,6 @@ const cryptoNodesDir     = path.join(__dirname,"..","crypto_nodes")
 const dataDir            = path.join(__dirname,"..","data")
 const configDir          = path.join(__dirname,"..","config")
 const containersFilesDir = path.join(tmpDir, "containers_files")
-const EXPLORER_MODULE_NAME = "xchain-explorer"
 
 // Parse in the node version
 const nodeVersion = process.versions.node;
@@ -93,24 +93,13 @@ const projectFolders = {
     "xchain-decoder":       "XChainDecoder",
     "xchain-utxo-tracker":  "XChainUtxoTracker",
     "xchain-regtest-miner": "XChainRegtestMiner",
-    "xchain-indexer": "XChainIndexer",
-    "xchain-hub": "XChainHub",
-    "xchain-explorer": "XChainExplorer",
-    "xchain-e2e-test": "XChainE2ETest"
+    "xchain-indexer":       "XChainIndexer",
+    "xchain-hub":           "XChainHub",
+    "xchain-explorer":      "XChainExplorer",
+    "xchain-e2e-test":      "XChainE2ETest"
 }
 
-
-const moduleDir = path.join(__dirname, "..", "modules")
-const tmpDir = path.join(__dirname, "..", "tmp")
-const srcDir = path.join(__dirname, "..", "src")
-const cryptoNodesDir = path.join(__dirname,"..","crypto_nodes")
-const dataDir = path.join(__dirname,"..","data")
-const configDir = path.join(__dirname,"..","config")
-const containersFilesDir = path.join(tmpDir, "containers_files")
-
 var dbRootPassword = null
-
-const nodeVersion = process.versions.node
 
 var installedModules = {}
 
@@ -188,10 +177,10 @@ function stringToCoin(coinString){
     return null;
 }
 
-function stringToXChainService(moduleString){
-    for (let nextXchainModuleIndex in XChainService){
-        if (XChainService[nextXchainModuleIndex] == moduleString){
-            return nextXchainModuleIndex
+function stringToXChainService(serviceString){
+    for (let nextXchainServiceIndex in XChainService){
+        if (XChainService[nextXchainServiceIndex] == serviceString){
+            return nextXchainServiceIndex
         }
     }
     
@@ -233,7 +222,7 @@ async function checkAllRemoteVersions(){
         getRemoteModuleVersion(XChainService.XCHAIN_DECODER),
         getRemoteModuleVersion(XChainService.XCHAIN_UTXO_TRACKER),
         getRemoteModuleVersion(XChainService.XCHAIN_REGTEST_MINER),
-        getRemoteModuleVersion(XChainService.XCHAIN_INDEXER)
+        getRemoteModuleVersion(XChainService.XCHAIN_INDEXER),
         getRemoteModuleVersion(EXPLORER_MODULE_NAME)
     ])
 }
@@ -736,13 +725,17 @@ function getDockerContainerImageName(module, coin, network){
 
 async function getStatusFromContainer(containerId){
     return new Promise((resolve, reject) => {
-        exec('docker inspect '+containerId, (error, stdout, stderr) => {
-            if (error){
-                reject(error)
-            } else {
-                resolve(JSON.parse(stdout)[0])
-            }
-        })
+        try {
+            exec('docker inspect '+containerId, (error, stdout, stderr) => {
+                if (error){
+                    reject(error)
+                } else {
+                    resolve(JSON.parse(stdout)[0])
+                }
+            })
+        } catch (err){
+            reject(err)
+        }
     })
 }
 
@@ -788,10 +781,15 @@ async function createDockerNetwork(coin, network){
 
 async function addContainerToNetwork(module, coin, network){
     return new Promise(async (resolve, reject) => {
+        let noCoinModules = 
+            (module == DB_MODULE_NAME || 
+            module == HUB_MODULE_NAME || 
+            module == EXPLORER_MODULE_NAME)
+    
         let moduleContainerId = await db.getModuleContainer(
             module, 
-            (module == DB_MODULE_NAME?"":coin), 
-            (module == DB_MODULE_NAME?"":network)
+            (noCoinModules?"":coin), 
+            (noCoinModules?"":network)
         )
         
         //Check if the module is connected to the network already
@@ -878,13 +876,15 @@ async function getDefaultConfig(module, coin, network){
         
     } else {
         defaultValues = {
-            "HUB_HOST":"127.0.0.1",
+            "HUB_HOST":getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
             "HUB_PORT":10000,
-            "EXPLORER_API_HOST":"127.0.0.1",
+            "EXPLORER_API_HOST":getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""),
             "EXPLORER_API_USER":false,
             "EXPLORER_API_PASS":false,
-            "EXPLORER_API_PORT_HTTP":18080,
-            "EXPLORER_API_PORT_HTTPS":18081
+            "EXPLORER_API_PORT_HTTP":8080,
+            "EXPLORER_PORT_HTTP":18080,
+            "EXPLORER_API_PORT_HTTPS":8081,
+            "EXPLORER_PORT_HTTPS":18081
         }   
     }
     
@@ -1032,7 +1032,7 @@ async function setDatabaseParameters(){
     return new Promise(async (resolve,reject)=>{
         let installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
         
-        let explorerContainerId = await db.getModuleContainer(XChainModule.XCHAIN_EXPLORER, null, null)
+        let explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, null, null)
         
         for (let nextCoin in installedCoinsAndNetworks){
             for (let nextNetworkIndex in installedCoinsAndNetworks[nextCoin]){
@@ -1074,11 +1074,12 @@ async function setDatabaseParameters(){
                             defaultConfig["DECODER_DB_PASS"]
                         )
                     }
-                    moduleContainerId = await db.getModuleContainer(XChainModule.XCHAIN_EXPLORER, nextCoin, nextNetwork)
+                    moduleContainerId = await db.getModuleContainer(XChainService.XCHAIN_EXPLORER, nextCoin, nextNetwork)
                     if (moduleContainerId != null){
-                        let defaultConfig = await getDefaultConfig(XChainModule.XCHAIN_EXPLORER, nextCoin, nextNetwork)                  
+                        let defaultConfig = await getDefaultConfig(XChainService.XCHAIN_EXPLORER, nextCoin, nextNetwork)                  
+                        await addContainerToNetwork(XCHAIN_EXPLORER, nextCoin, nextNetwork)
                         await addUserPasswordToDatabase(
-                            XChainModule.XCHAIN_EXPLORER,
+                            XChainService.XCHAIN_EXPLORER,
                             nextCoin,
                             nextNetwork,
                             defaultConfig["EXPLORER_DB_NAME"],
@@ -1086,7 +1087,7 @@ async function setDatabaseParameters(){
                             defaultConfig["EXPLORER_DB_PASS"]
                         )
                         await addUserPasswordToDatabase(
-                            XChainModule.XCHAIN_INDEXER,
+                            XChainService.XCHAIN_INDEXER,
                             nextCoin,
                             nextNetwork,
                             defaultConfig["EXPLORER_DB_NAME"],
@@ -1172,11 +1173,9 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 let userGrants = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                     "SHOW GRANTS FOR "+mariadbUser+"", "-B -N"
                 )   
-                userGrants = userGrants.replace("`","'")
+                userGrants = userGrants.replaceAll("`","'")
                 userGrants = userGrants.split("\n")
-                if (!userGrants.includes(mariadbContainerId, mariadbRootPassword,
-                    "GRANT ALL PRIVILEGES ON '"+databaseName+"'.* TO "+mariadbUser
-                )){
+                if (!userGrants.includes("GRANT ALL PRIVILEGES ON '"+databaseName+"'.* TO "+mariadbUser)){
                     await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                         "GRANT ALL PRIVILEGES ON "+databaseName+".* TO "+mariadbUser
                     )   
@@ -1462,14 +1461,14 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null, on
                     case HUB_MODULE_NAME:
                         coin = ""
                         network = ""
-                        portLine = "-p "+environmentVariables["HUB_PORT"]+":3000"
+                        portLine = "-p "+environmentVariables["HUB_PORT"]+":"+environmentVariables["HUB_PORT"]
                         break
                     case EXPLORER_MODULE_NAME:
                         coin = ""
                         network = ""
                         portLine = 
-                            "-p "+environmentVariables["EXPLORER_API_PORT_HTTP"]+":"+environmentVariables["EXPLORER_API_PORT_HTTP"]
-                            +" -p "+environmentVariables["EXPLORER_API_PORT_HTTPS"]+":"+environmentVariables["EXPLORER_API_PORT_HTTPS"]
+                            "-p "+environmentVariables["EXPLORER_PORT_HTTP"]+":"+environmentVariables["EXPLORER_API_PORT_HTTP"]
+                            +" -p "+environmentVariables["EXPLORER_PORT_HTTPS"]+":"+environmentVariables["EXPLORER_API_PORT_HTTPS"]
                         break
                 }       
 
@@ -1640,6 +1639,7 @@ async function getCryptoNode(coin, network, version){
 async function statusChanged(){
     statusUpdated = false
     await updateHub()
+    await updateExplorer()
 }
 
 async function getStatus(coin, network, printStatus = false){
@@ -1906,7 +1906,7 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
         } else if (module == EXPLORER_MODULE_NAME) {
             try {
                 await installExplorerModule()
-                await statusChanged()                 
+                await statusChanged()   
                 resolve(true)
             } catch (err){
                 reject(err)
@@ -1950,13 +1950,51 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
 }
 
 async function updateHub(){
-    await updateHubOrExplorer("xchain-hub")
+    //Updating xchain-explorer networks
+    console.log("Updating hub")
+    let installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
+    let hubContainerId = await db.getModuleContainer(HUB_MODULE_NAME, "", "")
+        
+    if (hubContainerId){   
+        for (let nextCoin in installedCoinsAndNetworks){
+            for (let nextNetworkIndex in installedCoinsAndNetworks[nextCoin]){
+                let nextNetwork = installedCoinsAndNetworks[nextCoin][nextNetworkIndex]
+                
+                try{
+                    await addContainerToNetwork(HUB_MODULE_NAME, nextCoin, nextNetwork)
+                } catch (err){
+                    console.log("There was an error trying to connect the xchain-hub to the "+nextCoin+"/"+nextNetwork+" network")
+                }
+            }
+        }
+        
+        await updateHubOrExplorer("xchain-hub")
+    }
     
-    return true 
+    return true
 }
 
 async function updateExplorer(){
-    await updateHubOrExplorer("xchain-explorer")
+    //Updating xchain-explorer networks
+    console.log("Updating explorer")
+    let installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
+    let explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
+        
+    if (explorerContainerId){   
+        for (let nextCoin in installedCoinsAndNetworks){
+            for (let nextNetworkIndex in installedCoinsAndNetworks[nextCoin]){
+                let nextNetwork = installedCoinsAndNetworks[nextCoin][nextNetworkIndex]
+                
+                try{
+                    await addContainerToNetwork(EXPLORER_MODULE_NAME, nextCoin, nextNetwork)
+                } catch (err){
+                    console.log("There was an error trying to connect the xchain-explorer to the "+nextCoin+"/"+nextNetwork+" network")
+                }
+            }
+        }
+        
+        await updateHubOrExplorer("xchain-explorer")
+    }
     
     return true 
 }
@@ -1970,9 +2008,9 @@ async function updateHubOrExplorer(module){
             let moduleConnector = null
             
             if (module == "xchain-hub"){
-                moduleConnector = new HubConnector(defaultConfig["HUB_HOST"], defaultConfig["HUB_PORT"])
+                moduleConnector = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
             } else {
-                moduleConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
+                moduleConnector = new ExplorerConnector("127.0.0.1", defaultConfig["EXPLORER_PORT"])
             }
             
             await getStatus(null, null, false)
@@ -1989,8 +2027,9 @@ async function updateHubOrExplorer(module){
                     for (let nextNetwork in lastStatus[nextCoin]){
                         let defaultConfigCoinNetwork = await getDefaultConfig("", nextCoin, nextNetwork)
                         
+                        let nextConfigObject = null
                         if (module == "xchain-explorer"){
-                            let nextConfigObject = {
+                            nextConfigObject = {
                                 "coin": nextCoin,
                                 "network": nextNetwork
                             }
@@ -2170,8 +2209,11 @@ async function installHubModule(){
 }
 
 async function installModules(branch, modules, coins, networks){
+    let explorerModuleIndex = modules.indexOf(EXPLORER_MODULE_NAME)
     if (!modules){
         modules = Object.values(XChainService)
+    } else if (explorerModuleIndex >= 0){
+        modules.splice(explorerModuleIndex, 1)
     }
     if (!coins){
         coins = Object.values(Coin)
@@ -2180,16 +2222,19 @@ async function installModules(branch, modules, coins, networks){
         networks = Object.values(Network)
     }
     
-    
     for (let nextCoin of coins){
         for (let nextNetwork of networks){
-            await buildDatabaseModule(nextCoin, nextNetwork)
             await createDockerNetwork(nextCoin, nextNetwork)
+            await buildDatabaseModule(nextCoin, nextNetwork)
             
             for (let nextModule of modules){
                 await installModule(nextCoin, nextNetwork, nextModule)
             }
         }
+    }
+    
+    if (explorerModuleIndex >= 0){
+        await installModule(null, null, EXPLORER_MODULE_NAME)
     }
 }
 
@@ -2888,17 +2933,23 @@ const startInterface = async() => {
 
 async function preCheck(){
     try {
+        console.log("Checking if Docker is installed")
         await checkDockerInstalledAndReachable()
         } catch(err){
         throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
     }
     
+    console.log("Checking/Creating directories")
     createDirectories()
+    console.log("Checking/Creating database")
     await db.createDatabase()
+    console.log("Getting all remote project versions")
     await checkAllRemoteVersions()
+    console.log("Getting modules status")
     await getStatus(null, null, false)
     
     try {
+        console.log("Checking/Installing hub module")
         await installHubModule()
     } catch (err) {
         throw new Error("There was an error trying to install the hub module")
@@ -2906,6 +2957,7 @@ async function preCheck(){
     
     try{
         await updateHub() //Force a hub update
+        await updateExplorer() //Force a explorer update
     } catch (err){
         console.log(err)
         throw new Error("There was an error trying to update the hub module")
@@ -2956,6 +3008,8 @@ async function parse(){
             console.log("Installing..." + [branch, service, chain, network]);
             if (service == "all"){
                 service = null
+            } else if (service == "explorer"){
+                service = [EXPLORER_MODULE_NAME]
             } else if (service){
                 service = [service]
             }
