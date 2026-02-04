@@ -1382,8 +1382,10 @@ async function buildDatabaseModule(coin, network){
             })
         } else {
             try{
-                await addContainerToNetwork(DB_MODULE_NAME, coin, network)
-                await statusChanged()
+                if (coin && network){
+                    await addContainerToNetwork(DB_MODULE_NAME, coin, network)
+                    await statusChanged()
+                }
                 resolve(true)
             } catch (err){
                 console.log(err)
@@ -1866,6 +1868,38 @@ async function killContainer(containerId){
     })
 }
 
+async function uninstallModule(coin, network, module){
+    return new Promise(async (resolve, reject) => {
+        let modulesStatus = await getStatus(null, null, false)
+        if (module != DB_MODULE_NAME){//This is to prevent the removing of data
+            let moduleStatus = modulesStatus?.[(coin??"")]?.[network??""]?.[module]
+            if (moduleStatus !== undefined){
+                console.log("Uninstalling "+module+" ("+coin+"/"+network+")")
+                try {
+                    if (moduleStatus["status"]["State"]["Status"] != "exited"){
+                        await killContainer(moduleStatus["container_id"])
+                    }
+                    await removeContainer(moduleStatus["container_id"])
+                    let removedModuleContainerId = await db.removeModuleContainer(module, coin, network)
+                    
+                    if (removedModuleContainerId){
+                        resolve(removedModuleContainerId)
+                    } else {
+                        reject("There was a problem trying to remove a container from the database")
+                    }
+                } catch (err){
+                    reject("There was a problem trying to kill a container")
+                }
+            } else {
+                //If the module doesn't have status is because is missing
+                resolve(true)
+            }
+        } else {
+            reject("The database must be manually removed")
+        }
+    })
+}
+
 async function installModule(coin, network, module, remoteUpdate=false, overwrite_container_id=null, onlyExecution=false){
     return new Promise(async (resolve, reject) => {
         if (module == NODE_MODULE_NAME) {
@@ -1976,24 +2010,30 @@ async function updateHub(){
 
 async function updateExplorer(){
     //Updating xchain-explorer networks
-    console.log("Updating explorer")
-    let installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
-    let explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
-        
-    if (explorerContainerId){   
-        for (let nextCoin in installedCoinsAndNetworks){
-            for (let nextNetworkIndex in installedCoinsAndNetworks[nextCoin]){
-                let nextNetwork = installedCoinsAndNetworks[nextCoin][nextNetworkIndex]
-                
-                try{
-                    await addContainerToNetwork(EXPLORER_MODULE_NAME, nextCoin, nextNetwork)
-                } catch (err){
-                    console.log("There was an error trying to connect the xchain-explorer to the "+nextCoin+"/"+nextNetwork+" network")
+    let explorerStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
+    
+    if (explorerStatus !== undefined){
+        console.log("Updating explorer")
+        let installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
+        let explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
+            
+        if (explorerContainerId){   
+            for (let nextCoin in installedCoinsAndNetworks){
+                for (let nextNetworkIndex in installedCoinsAndNetworks[nextCoin]){
+                    let nextNetwork = installedCoinsAndNetworks[nextCoin][nextNetworkIndex]
+                    
+                    try{
+                        await addContainerToNetwork(EXPLORER_MODULE_NAME, nextCoin, nextNetwork)
+                    } catch (err){
+                        
+                    
+                        console.log("There was an error trying to connect the xchain-explorer to the "+nextCoin+"/"+nextNetwork+" network")
+                    }
                 }
             }
+            
+            //await updateHubOrExplorer("xchain-explorer")
         }
-        
-        await updateHubOrExplorer("xchain-explorer")
     }
     
     return true 
@@ -2060,6 +2100,8 @@ async function updateHubOrExplorer(module){
                                         "host":defaultConfigCoinNetwork["DECODER_URL"],
                                         "port":defaultConfigCoinNetwork["DECODER_API_PORT"],
                                         "server_port":defaultConfigCoinNetwork["DECODER_PORT"],
+                                        "db_host":defaultConfigCoinNetwork["DECODER_DB_HOST"],
+                                        "db_port":defaultConfigCoinNetwork["DECODER_DB_PORT"],
                                         "name":defaultConfigCoinNetwork["DECODER_DB_NAME"],
                                         "user":defaultConfigCoinNetwork["DECODER_DB_USER"],
                                         "pass":defaultConfigCoinNetwork["DECODER_DB_PASS"]
@@ -2077,6 +2119,8 @@ async function updateHubOrExplorer(module){
                                         "host":defaultConfigCoinNetwork["INDEXER_HOST"],
                                         "port":defaultConfigCoinNetwork["INDEXER_API_PORT"],
                                         "server_port":defaultConfigCoinNetwork["INDEXER_PORT"],
+                                        "db_host":defaultConfigCoinNetwork["INDEXER_DB_HOST"],
+                                        "db_port":defaultConfigCoinNetwork["INDEXER_DB_PORT"],
                                         "name":defaultConfigCoinNetwork["INDEXER_DB_NAME"],
                                         "user":defaultConfigCoinNetwork["INDEXER_DB_USER"],
                                         "pass":defaultConfigCoinNetwork["INDEXER_DB_PASS"]
@@ -2208,11 +2252,17 @@ async function installHubModule(){
     })
 }
 
-async function installModules(branch, modules, coins, networks){
-    let explorerModuleIndex = modules.indexOf(EXPLORER_MODULE_NAME)
+function defineCommandParameters(branch, modules, coins, networks){
+    let explorerModuleWasAdded = true
+    if (modules){
+        let explorerModuleIndex = modules.indexOf(EXPLORER_MODULE_NAME)
+        explorerModuleWasAdded = (explorerModuleIndex >= 0)
+    }
     if (!modules){
         modules = Object.values(XChainService)
-    } else if (explorerModuleIndex >= 0){
+        modules.push(NODE_MODULE_NAME)
+    } else if (explorerModuleWasAdded){
+        //If the explorer module is on the list, it gets removed, it will be installed apart
         modules.splice(explorerModuleIndex, 1)
     }
     if (!coins){
@@ -2221,6 +2271,12 @@ async function installModules(branch, modules, coins, networks){
     if (!networks){
         networks = Object.values(Network)
     }
+    
+    return {branch, modules, coins, networks, explorerModuleWasAdded}
+}
+
+async function installModules(branch, modules, coins, networks){
+    ({branch, modules, coins, networks, explorerModuleWasAdded} = defineCommandParameters(branch, modules, coins, networks))
     
     for (let nextCoin of coins){
         for (let nextNetwork of networks){
@@ -2233,8 +2289,28 @@ async function installModules(branch, modules, coins, networks){
         }
     }
     
-    if (explorerModuleIndex >= 0){
+    if (explorerModuleWasAdded){
         await installModule(null, null, EXPLORER_MODULE_NAME)
+    }
+}
+
+async function uninstallModules(modules, coins, networks){
+    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
+
+    for (let nextCoin of coins){
+        for (let nextNetwork of networks){
+            for (let nextModule of modules){
+                try {
+                    await uninstallModule(nextCoin, nextNetwork, nextModule)
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
+    }
+    
+    if (explorerModuleWasAdded){
+        await uninstallModule(null, null, EXPLORER_MODULE_NAME)
     }
 }
 
@@ -3031,7 +3107,30 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            // coming soon
+            console.log("Checking xchain-node structure")
+            try {
+                await preCheck()
+            } catch (err){
+                console.log("There was an error checking the xchain-node structure")
+                console.log(err)
+                return false
+            }
+            console.log("Uninstalling..." + [service, chain, network]);
+            if (service == "all"){
+                service = null
+            } else if (service == "explorer"){
+                service = [EXPLORER_MODULE_NAME]
+            } else if (service){
+                service = [service]
+            }
+            
+            if (chain){
+                chain = [chain]
+            }
+            if (network){
+                network = [network]
+            }
+            return uninstallModules(service, chain, network)
         });
 
     // Update
