@@ -39,6 +39,7 @@ const HubConnector                 = require('./HubConnector.js')
 const { Command }                  = require('commander');
 const { version }                  = require('../package.json');
 const ExplorerConnector            = require('./ExplorerConnector.js')
+const DockerManager                = require('./DockerManager.js')
 
 //Console interface
 const { prompt, Select, Password } = require('enquirer');
@@ -151,6 +152,7 @@ const CoinTickerSymbol = {
 // Initializing the database
 const db               = new LevelUpStore(DB_NAME, dataDir)
 const gitHubDownloader = new GitHubDownloader(srcDir+"/github_hashes.json")
+const dockerManager    = new DockerManager()
 
 async function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -2314,6 +2316,41 @@ async function uninstallModules(modules, coins, networks){
     }
 }
 
+async function logModules(modules, coins, networks){
+    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
+    
+    let moduleContainerIds = []
+    for (let nextCoin of coins){
+        for (let nextNetwork of networks){
+            for (let nextModule of modules){
+                try {
+                    let moduleContainerId = await db.getModuleContainer(
+                        nextModule, 
+                        nextCoin, 
+                        nextNetwork
+                    )
+                    moduleContainerIds.push({name:getDockerContainerImageName(nextModule, nextCoin, nextNetwork),id:moduleContainerId})
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
+    }
+    
+    if (explorerModuleWasAdded){
+        let moduleContainerId = await db.getModuleContainer(
+            EXPLORER_MODULE_NAME, 
+            "", 
+            ""
+        )
+        moduleContainerIds.push(moduleContainerId)
+    }
+    
+    await dockerManager.startDockerMonitor(moduleContainerIds)
+    return true
+}
+
+
 async function installExplorerModule(){
     return new Promise(async (resolve, reject) => {
         let defaultConfig = await getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
@@ -3204,7 +3241,29 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            // coming soon
+            try {
+                await preCheck()
+            } catch (err){
+                console.log("There was an error checking the xchain-node structure")
+                console.log(err)
+                return false
+            }
+            if (service == "all"){
+                service = null
+            } else if (service == "explorer"){
+                service = [EXPLORER_MODULE_NAME]
+            } else if (service){
+                service = [service]
+            }
+            
+            if (chain){
+                chain = [chain]
+            }
+            if (network){
+                network = [network]
+            }
+            await logModules(service, chain, network)
+            return process.exit(0)
         });
 
     // Execute
