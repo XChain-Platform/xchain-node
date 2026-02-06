@@ -81,7 +81,7 @@ class DockerManager {
                 })
 
                 // Execute docker command
-                const child = spawn('docker', ['logs', '--tail', '100', (follow?'-f':''), id["id"]]);
+                const child = spawn('docker', ['logs', '--tail', '100', (follow?'-f':null), id["id"]].filter(item => item != null));
                 children.push(child)
 
                 child.stdout.on('data', (data) => {
