@@ -31,7 +31,7 @@ class DockerManager {
     /**
     * Monitors multiple containers in divided panels.
     */
-    async startDockerMonitor(containerIds) {
+    async startDockerMonitor(containerIds, follow) {
         return new Promise((resolve, reject) => {
             const children = [] // The process will be stored here
             // Validations
@@ -81,7 +81,7 @@ class DockerManager {
                 })
 
                 // Execute docker command
-                const child = spawn('docker', ['logs', '--tail', '100', '-f', id["id"]]);
+                const child = spawn('docker', ['logs', '--tail', '100', (follow?'-f':''), id["id"]]);
                 children.push(child)
 
                 child.stdout.on('data', (data) => {
@@ -121,6 +121,60 @@ class DockerManager {
                     reject(error)
                 } else {
                     resolve(JSON.parse(stdout)[0])
+                }
+            })
+        })
+    }
+    
+    async stopContainer(containerId){
+        return new Promise(async (resolve, reject) => {
+            exec('docker stop '+containerId, async (error, stdout, stderr) => {
+                if (error){
+                    reject(error)
+                } else {
+                    let response = stdout.trim()
+                    
+                    if (response == containerId){
+                        resolve(true)
+                    } else {
+                        reject("There was an error trying to stop the docker container ("+containerId+")")
+                    }
+                }
+            })
+        })
+    }
+    
+    async restartContainer(containerId){
+        return new Promise(async (resolve, reject) => {
+            exec('docker restart '+containerId, async (error, stdout, stderr) => {
+                if (error){
+                    reject(error)
+                } else {
+                    let response = stdout.trim()
+                    
+                    if (response == containerId){
+                        resolve(true)
+                    } else {
+                        reject("There was an error trying to restart the docker container ("+containerId+")")
+                    }
+                }
+            })
+        })
+    }
+    
+    async startContainer(containerId){
+        return new Promise(async (resolve, reject) => {
+            exec('docker start '+containerId, async (error, stdout, stderr) => {
+                if (error){
+                    reject(error)
+                } else {
+                    let response = stdout.trim()
+                    
+                    if (response == containerId){
+                        resolve(true)
+                    } else {
+                        reject("There was an error trying to restart the docker container ("+containerId+")")
+                    }
                 }
             })
         })

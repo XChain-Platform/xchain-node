@@ -77,6 +77,7 @@ var installedModules     = {};
 var remoteModuleVersions = {};
 var statusUpdated        = false;
 var lastStatus           = null;
+var printedStatus        = "";
 
 // Define list of XChain services
 const XChainService = {
@@ -1649,8 +1650,12 @@ async function statusChanged(){
 async function getStatus(coin, network, printStatus = false){
     return new Promise(async (resolve, reject) => {
         if (statusUpdated){
+            if (printStatus){
+                console.log(lastPrintedStatus)
+            }
             resolve(lastStatus)
         } else {
+            lastPrintedStatus = ""
             await loadInstalledModules(coin, network)
             
             let coins = Object.keys(installedModules)
@@ -1682,7 +1687,8 @@ async function getStatus(coin, network, printStatus = false){
                                     nextCoinNetworkModules[nextCoinNetworkModule]["status"] = containerStatus
                 
                                     if (!titlePrinted){
-                                        if (printStatus){console.log("\x1b[37m["+(nextCoin+" - "+nextCoinNetwork).toUpperCase()+"]\x1b[37m")}
+                                        lastPrintedStatus = lastPrintedStatus +
+                                            "\x1b[37m["+(nextCoin+" - "+nextCoinNetwork).toUpperCase()+"]\x1b[37m\n"
                                         titlePrinted = true
                                     }
                 
@@ -1723,17 +1729,17 @@ async function getStatus(coin, network, printStatus = false){
                                         //Nothing yet
                                     }
                                         
-                                    if (printStatus) {
-                                        
-                                        let versionString = " {remote:" + moduleRemoteVersion + ", local:" + moduleLocalVersion + ", container:" + moduleContainerVersion+"}"
+                                    let versionString = " {remote:" + moduleRemoteVersion + ", local:" + moduleLocalVersion + ", container:" + moduleContainerVersion+"}"
 
 
-                                        if (containerStatus["State"]["Status"] == "Exited") {
-                                            console.log(" \x1b[31m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "")
-                                        } else {
-                                            console.log(" \x1b[32m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "")
-                                        }
+                                    if (containerStatus["State"]["Status"] == "Exited") {
+                                        lastPrintedStatus = lastPrintedStatus +
+                                            " \x1b[31m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "\n"
+                                    } else {
+                                        lastPrintedStatus = lastPrintedStatus +
+                                            " \x1b[32m" + nextCoinNetworkModule + " (" + containerStatus["State"]["Status"] + ")\x1b[37m " + versionString + "\n"
                                     }
+                                    
                                 } catch(err){
                                     //console.log("Error inspecting the container. ")
                                     //console.log(err)
@@ -1774,7 +1780,11 @@ async function getStatus(coin, network, printStatus = false){
                     } 
                 }
                 
-                if (printStatus){console.log("")}
+                lastPrintedStatus = lastPrintedStatus + "\n"
+                
+                if (printStatus){
+                    console.log(lastPrintedStatus)
+                }
             }
             
             lastStatus = installedModules
@@ -2316,7 +2326,7 @@ async function uninstallModules(modules, coins, networks){
     }
 }
 
-async function logModules(modules, coins, networks){
+async function logModules(modules, coins, networks, follow=true){
     ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
     
     let moduleContainerIds = []
@@ -2346,10 +2356,120 @@ async function logModules(modules, coins, networks){
         moduleContainerIds.push(moduleContainerId)
     }
     
-    await dockerManager.startDockerMonitor(moduleContainerIds)
+    await dockerManager.startDockerMonitor(moduleContainerIds, follow)
     return true
 }
 
+async function restartModules(modules, coins, networks){
+    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
+    
+    let moduleContainerIds = []
+    for (let nextCoin of coins){
+        for (let nextNetwork of networks){
+            for (let nextModule of modules){
+                try {
+                    let moduleContainerId = await db.getModuleContainer(
+                        nextModule, 
+                        nextCoin, 
+                        nextNetwork
+                    )
+                    await dockerManager.restartContainer(moduleContainerId)
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
+    }
+    
+    if (explorerModuleWasAdded){
+        try {
+            let moduleContainerId = await db.getModuleContainer(
+                EXPLORER_MODULE_NAME, 
+                "", 
+                ""
+            )
+            await dockerManager.restartContainer(moduleContainerId)
+        } catch (err) {
+            console.log(err)
+        }   
+    }
+    
+    return true
+}
+
+async function stopModules(modules, coins, networks){
+    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
+    
+    let moduleContainerIds = []
+    for (let nextCoin of coins){
+        for (let nextNetwork of networks){
+            for (let nextModule of modules){
+                try {
+                    let moduleContainerId = await db.getModuleContainer(
+                        nextModule, 
+                        nextCoin, 
+                        nextNetwork
+                    )
+                    await dockerManager.stopContainer(moduleContainerId)
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
+    }
+    
+    if (explorerModuleWasAdded){
+        try {
+            let moduleContainerId = await db.getModuleContainer(
+                EXPLORER_MODULE_NAME, 
+                "", 
+                ""
+            )
+            await dockerManager.stopContainer(moduleContainerId)
+        } catch (err) {
+            console.log(err)
+        }   
+    }
+    
+    return true
+}
+
+async function startModules(modules, coins, networks){
+    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
+    
+    let moduleContainerIds = []
+    for (let nextCoin of coins){
+        for (let nextNetwork of networks){
+            for (let nextModule of modules){
+                try {
+                    let moduleContainerId = await db.getModuleContainer(
+                        nextModule, 
+                        nextCoin, 
+                        nextNetwork
+                    )
+                    await dockerManager.startContainer(moduleContainerId)
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
+    }
+    
+    if (explorerModuleWasAdded){
+        try {
+            let moduleContainerId = await db.getModuleContainer(
+                EXPLORER_MODULE_NAME, 
+                "", 
+                ""
+            )
+            await dockerManager.startContainer(moduleContainerId)
+        } catch (err) {
+            console.log(err)
+        }   
+    }
+    
+    return true
+}
 
 async function installExplorerModule(){
     return new Promise(async (resolve, reject) => {
@@ -3085,6 +3205,17 @@ async function preCheck(){
 async function parse(){
     const program = new Command();
 
+    //this will be executed only if the command inserted by the user was valid
+    program.hook('preAction', async (thisCommand, actionCommand) => {
+        //try{
+            console.log("Checking xchain-node structure")
+            await preCheck();
+        //} catch (err){
+        //  console.log("There was an error checking the xchain-node structure")
+        //    console.log(err)              
+        //}
+    });
+
     // No Parameters given (xchain-node)
     program
         .name('xchain-node')
@@ -3110,14 +3241,14 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (branch, service, chain, network) => {
-            console.log("Checking/creating xchain-node structure")
+            /*console.log("Checking/creating xchain-node structure")
             try {
                 await preCheck()
             } catch (err){
                 console.log("There was an error checking the xchain-node structure")
                 console.log(err)
                 return false
-            }
+            }*/
             console.log("Installing..." + [branch, service, chain, network]);
             if (service == "all"){
                 service = null
@@ -3144,14 +3275,14 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            console.log("Checking xchain-node structure")
+            /*console.log("Checking xchain-node structure")
             try {
                 await preCheck()
             } catch (err){
                 console.log("There was an error checking the xchain-node structure")
                 console.log(err)
                 return false
-            }
+            }*/
             console.log("Uninstalling..." + [service, chain, network]);
             if (service == "all"){
                 service = null
@@ -3186,7 +3317,9 @@ async function parse(){
         .command('ps')
         .description('List installed XChain services and status')
         .action(async (options) => {
-            // coming soon
+            console.log("Getting status...");
+            await getStatus(null, null, true)
+            return process.exit(0)
         });
 
     // Start
@@ -3197,7 +3330,22 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            // coming soon
+            console.log("Starting..." + [service, chain, network]);
+            if (service == "all"){
+                service = null
+            } else if (service == "explorer"){
+                service = [EXPLORER_MODULE_NAME]
+            } else if (service){
+                service = [service]
+            }
+            
+            if (chain){
+                chain = [chain]
+            }
+            if (network){
+                network = [network]
+            }
+            return startModules(service, chain, network)
         });
 
     // Stop
@@ -3208,7 +3356,22 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            // coming soon
+            console.log("Stopping..." + [service, chain, network]);
+            if (service == "all"){
+                service = null
+            } else if (service == "explorer"){
+                service = [EXPLORER_MODULE_NAME]
+            } else if (service){
+                service = [service]
+            }
+            
+            if (chain){
+                chain = [chain]
+            }
+            if (network){
+                network = [network]
+            }
+            return stopModules(service, chain, network)
         });
 
     // Restart
@@ -3219,7 +3382,22 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            // coming soon
+            console.log("Restarting..." + [service, chain, network]);
+            if (service == "all"){
+                service = null
+            } else if (service == "explorer"){
+                service = [EXPLORER_MODULE_NAME]
+            } else if (service){
+                service = [service]
+            }
+            
+            if (chain){
+                chain = [chain]
+            }
+            if (network){
+                network = [network]
+            }
+            return restartModules(service, chain, network)
         });
 
     // Tail Logs
@@ -3230,7 +3408,22 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            // coming soon
+            if (service == "all"){
+                service = null
+            } else if (service == "explorer"){
+                service = [EXPLORER_MODULE_NAME]
+            } else if (service){
+                service = [service]
+            }
+            
+            if (chain){
+                chain = [chain]
+            }
+            if (network){
+                network = [network]
+            }
+            await logModules(service, chain, network, false)
+            return process.exit(0)
         });
 
     // Full Logs
@@ -3241,13 +3434,6 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            try {
-                await preCheck()
-            } catch (err){
-                console.log("There was an error checking the xchain-node structure")
-                console.log(err)
-                return false
-            }
             if (service == "all"){
                 service = null
             } else if (service == "explorer"){
