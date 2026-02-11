@@ -2097,7 +2097,7 @@ async function updateHubOrExplorer(module){
                         }
                         
                         for (let nextModule in lastStatus[nextCoin][nextNetwork]){
-                            
+                            let config = null
                             
                             switch (nextModule){
                                 case DB_MODULE_NAME:
