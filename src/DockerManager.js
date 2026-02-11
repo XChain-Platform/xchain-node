@@ -18,7 +18,7 @@
  ********************************************************************/
 
 // Load required libraries
-const { exec, spawn }   = require('child_process')
+const { exec, spawn, spawnSync }   = require('child_process')
 const blessed    = require('blessed')
 
 const MAX_CONTAINERS = 6;
@@ -177,6 +177,29 @@ class DockerManager {
                     }
                 }
             })
+        })
+    }
+    
+    async execContainer(containerId, command){
+        return new Promise(async (resolve, reject) => {
+            exec('docker exec -i '+containerId+' '+command, async (error, stdout, stderr) => {
+                if (error){
+                    reject(error)
+                } else {
+                    let response = stdout.trim()
+                    resolve(response)
+                }
+            })
+        })
+    }
+    
+    async shellContainer(containerId){
+        return new Promise(async (resolve, reject) => {
+            spawnSync('docker', ['exec', '-it', containerId, 'bash'], {
+                stdio: 'inherit' 
+            })
+            
+            resolve(true)
         })
     }
 }

@@ -89,6 +89,11 @@ const XChainService = {
     XCHAIN_E2E_TEST:      "xchain-e2e-test"
 };
 
+const REGTEST_MODULES = [
+    XChainService.XCHAIN_REGTEST_MINER,
+    XChainService.XCHAIN_E2E_TEST
+]
+
 // Define list of project folders
 const projectFolders = {
     "xchain-encoder":       "XChainEncoder",
@@ -1914,6 +1919,9 @@ async function uninstallModule(coin, network, module){
 
 async function installModule(coin, network, module, remoteUpdate=false, overwrite_container_id=null, onlyExecution=false){
     return new Promise(async (resolve, reject) => {
+        if (coin == ""){coin = null};
+        if (network == ""){network = null};
+    
         if (module == NODE_MODULE_NAME) {
             let containerNodeVersion = lastStatus?.coin?.network?.module?.["container_version"] ?? null
             
@@ -2264,54 +2272,107 @@ async function installHubModule(){
     })
 }
 
-function defineCommandParameters(branch, modules, coins, networks){
-    let explorerModuleWasAdded = true
-    if (modules){
-        let explorerModuleIndex = modules.indexOf(EXPLORER_MODULE_NAME)
-        explorerModuleWasAdded = (explorerModuleIndex >= 0)
-    }
-    if (!modules){
-        modules = Object.values(XChainService)
-        modules.push(NODE_MODULE_NAME)
-    } else if (explorerModuleWasAdded){
-        //If the explorer module is on the list, it gets removed, it will be installed apart
-        modules.splice(explorerModuleIndex, 1)
-    }
-    if (!coins){
+function filterCommandParameters(branch, modules, coins, networks){
+    let servicesList = {}
+    let addExplorer = false
+    
+    if (coins){
+        coins = [coins]
+    } else {
         coins = Object.values(Coin)
     }
-    if (!networks){
+    
+    if (networks){
+        networks = [networks]
+    } else {
         networks = Object.values(Network)
     }
     
-    return {branch, modules, coins, networks, explorerModuleWasAdded}
-}
-
-async function installModules(branch, modules, coins, networks){
-    ({branch, modules, coins, networks, explorerModuleWasAdded} = defineCommandParameters(branch, modules, coins, networks))
+    if (modules == "all"){
+        modules = Object.values(XChainService) 
+        modules.push(NODE_MODULE_NAME)
+        addExplorer = true
+    } else if (modules == "explorer"){
+        addExplorer = true
+        coins = [] //only explorer will be added
+        //modules = [EXPLORER_MODULE_NAME]
+    } else if (modules == "node"){
+        modules = [NODE_MODULE_NAME]
+    } else if (modules){
+        modules = [modules]
+    }
+    
+    if (addExplorer){
+        servicesList[""] = {}
+        servicesList[""][""] = []
+        servicesList[""][""].push(EXPLORER_MODULE_NAME)
+    }
     
     for (let nextCoin of coins){
+        if (!(nextCoin in servicesList)){
+            servicesList[nextCoin] = {}
+        }
+    
         for (let nextNetwork of networks){
-            await createDockerNetwork(nextCoin, nextNetwork)
-            await buildDatabaseModule(nextCoin, nextNetwork)
-            
+            if (!(nextNetwork in servicesList[nextCoin])){
+                servicesList[nextCoin][nextNetwork] = []
+            }
+    
             for (let nextModule of modules){
+                if (!REGTEST_MODULES.includes(nextModule) || (nextNetwork == Network.REGTEST)){
+                    servicesList[nextCoin][nextNetwork].push(nextModule)
+                }
+            }
+        }
+    }
+    
+    return servicesList
+}
+
+async function installModules(servicesList){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            if ((nextCoin) && (nextNetwork)){
+                await createDockerNetwork(nextCoin, nextNetwork)
+                await buildDatabaseModule(nextCoin, nextNetwork)
+            }
+            
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
                 await installModule(nextCoin, nextNetwork, nextModule)
             }
         }
     }
     
-    if (explorerModuleWasAdded){
-        await installModule(null, null, EXPLORER_MODULE_NAME)
-    }
+    return true
 }
 
-async function uninstallModules(modules, coins, networks){
-    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
+async function updateModules(servicesList){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
+                //Get module container id
+                let moduleContainerId = await db.getModuleContainer(
+                    nextModule, 
+                    nextCoin, 
+                    nextNetwork
+                )
+            
+                //Get the last version from git
+                await cloneGit(nextModule, true, false)
+                
+                //Install module and remove old container
+                await installModule(nextCoin, nextNetwork, nextModule, false, moduleContainerId)
+            }
+        }
+    }
+    
+    return true
+}
 
-    for (let nextCoin of coins){
-        for (let nextNetwork of networks){
-            for (let nextModule of modules){
+async function uninstallModules(servicesList){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
                 try {
                     await uninstallModule(nextCoin, nextNetwork, nextModule)
                 } catch (err) {
@@ -2321,18 +2382,14 @@ async function uninstallModules(modules, coins, networks){
         }
     }
     
-    if (explorerModuleWasAdded){
-        await uninstallModule(null, null, EXPLORER_MODULE_NAME)
-    }
+    return true
 }
 
-async function logModules(modules, coins, networks, follow=true){
-    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
-    
+async function logModules(servicesList, follow=true){
     let moduleContainerIds = []
-    for (let nextCoin of coins){
-        for (let nextNetwork of networks){
-            for (let nextModule of modules){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
                 try {
                     let moduleContainerId = await db.getModuleContainer(
                         nextModule, 
@@ -2347,26 +2404,14 @@ async function logModules(modules, coins, networks, follow=true){
         }
     }
     
-    if (explorerModuleWasAdded){
-        let moduleContainerId = await db.getModuleContainer(
-            EXPLORER_MODULE_NAME, 
-            "", 
-            ""
-        )
-        moduleContainerIds.push(moduleContainerId)
-    }
-    
     await dockerManager.startDockerMonitor(moduleContainerIds, follow)
     return true
 }
 
-async function restartModules(modules, coins, networks){
-    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
-    
-    let moduleContainerIds = []
-    for (let nextCoin of coins){
-        for (let nextNetwork of networks){
-            for (let nextModule of modules){
+async function restartModules(servicesList){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
                 try {
                     let moduleContainerId = await db.getModuleContainer(
                         nextModule, 
@@ -2381,29 +2426,13 @@ async function restartModules(modules, coins, networks){
         }
     }
     
-    if (explorerModuleWasAdded){
-        try {
-            let moduleContainerId = await db.getModuleContainer(
-                EXPLORER_MODULE_NAME, 
-                "", 
-                ""
-            )
-            await dockerManager.restartContainer(moduleContainerId)
-        } catch (err) {
-            console.log(err)
-        }   
-    }
-    
     return true
 }
 
-async function stopModules(modules, coins, networks){
-    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
-    
-    let moduleContainerIds = []
-    for (let nextCoin of coins){
-        for (let nextNetwork of networks){
-            for (let nextModule of modules){
+async function stopModules(servicesList){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
                 try {
                     let moduleContainerId = await db.getModuleContainer(
                         nextModule, 
@@ -2418,29 +2447,13 @@ async function stopModules(modules, coins, networks){
         }
     }
     
-    if (explorerModuleWasAdded){
-        try {
-            let moduleContainerId = await db.getModuleContainer(
-                EXPLORER_MODULE_NAME, 
-                "", 
-                ""
-            )
-            await dockerManager.stopContainer(moduleContainerId)
-        } catch (err) {
-            console.log(err)
-        }   
-    }
-    
     return true
 }
 
-async function startModules(modules, coins, networks){
-    ({branch, modules, coins, networks, nodeWasAdded, explorerModuleWasAdded} = defineCommandParameters(null, modules, coins, networks))
-    
-    let moduleContainerIds = []
-    for (let nextCoin of coins){
-        for (let nextNetwork of networks){
-            for (let nextModule of modules){
+async function startModules(servicesList){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
                 try {
                     let moduleContainerId = await db.getModuleContainer(
                         nextModule, 
@@ -2455,21 +2468,53 @@ async function startModules(modules, coins, networks){
         }
     }
     
-    if (explorerModuleWasAdded){
-        try {
-            let moduleContainerId = await db.getModuleContainer(
-                EXPLORER_MODULE_NAME, 
-                "", 
-                ""
-            )
-            await dockerManager.startContainer(moduleContainerId)
-        } catch (err) {
-            console.log(err)
-        }   
+    return true
+}
+
+async function execModules(servicesList, command){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
+                try {
+                    let moduleContainerId = await db.getModuleContainer(
+                        nextModule, 
+                        nextCoin, 
+                        nextNetwork
+                    )
+                    let execStdOut = await dockerManager.execContainer(moduleContainerId, command)
+                    console.log(execStdOut)
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
     }
     
     return true
 }
+
+async function shellModule(servicesList){
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
+                try {
+                    let moduleContainerId = await db.getModuleContainer(
+                        nextModule, 
+                        nextCoin, 
+                        nextNetwork
+                    )
+                    await dockerManager.shellContainer(moduleContainerId)
+                    return true
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
+    }
+    
+    return true
+}
+
 
 async function installExplorerModule(){
     return new Promise(async (resolve, reject) => {
@@ -2840,7 +2885,7 @@ async function modulesSelectionInterface(coin, network){
                         if (semver.valid(localeModuleVersion)) {
                             if (semver.valid(remoteModuleVersion)){
                                 if (semver.gt(remoteModuleVersion, localeModuleVersion)) {
-                                    moduleActions.push({ name: "Update locale version", value: "update locale version" })
+                                    moduleActions.push({ name: "Update local version", value: "update locale version" })
                                 } else if (semver.eq(remoteModuleVersion, localeModuleVersion)) {
                                     moduleActions.push({ name: "Reinstall from remote", value: "reinstall from remote" })
                                 }
@@ -3241,30 +3286,9 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (branch, service, chain, network) => {
-            /*console.log("Checking/creating xchain-node structure")
-            try {
-                await preCheck()
-            } catch (err){
-                console.log("There was an error checking the xchain-node structure")
-                console.log(err)
-                return false
-            }*/
-            console.log("Installing..." + [branch, service, chain, network]);
-            if (service == "all"){
-                service = null
-            } else if (service == "explorer"){
-                service = [EXPLORER_MODULE_NAME]
-            } else if (service){
-                service = [service]
-            }
-            
-            if (chain){
-                chain = [chain]
-            }
-            if (network){
-                network = [network]
-            }
-            return installModules(branch, service, chain, network)
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await installModules(serviceList)
+            return process.exit(0)
         });
 
     // Uninstall
@@ -3275,30 +3299,9 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            /*console.log("Checking xchain-node structure")
-            try {
-                await preCheck()
-            } catch (err){
-                console.log("There was an error checking the xchain-node structure")
-                console.log(err)
-                return false
-            }*/
-            console.log("Uninstalling..." + [service, chain, network]);
-            if (service == "all"){
-                service = null
-            } else if (service == "explorer"){
-                service = [EXPLORER_MODULE_NAME]
-            } else if (service){
-                service = [service]
-            }
-            
-            if (chain){
-                chain = [chain]
-            }
-            if (network){
-                network = [network]
-            }
-            return uninstallModules(service, chain, network)
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await uninstallModules(serviceList)
+            return process.exit(0)
         });
 
     // Update
@@ -3309,7 +3312,9 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            // coming soon
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await updateModules(serviceList)
+            return process.exit(0)
         });
 
     // Process List (ps)
@@ -3317,7 +3322,6 @@ async function parse(){
         .command('ps')
         .description('List installed XChain services and status')
         .action(async (options) => {
-            console.log("Getting status...");
             await getStatus(null, null, true)
             return process.exit(0)
         });
@@ -3330,22 +3334,9 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            console.log("Starting..." + [service, chain, network]);
-            if (service == "all"){
-                service = null
-            } else if (service == "explorer"){
-                service = [EXPLORER_MODULE_NAME]
-            } else if (service){
-                service = [service]
-            }
-            
-            if (chain){
-                chain = [chain]
-            }
-            if (network){
-                network = [network]
-            }
-            return startModules(service, chain, network)
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await startModules(serviceList)
+            return process.exit(0)
         });
 
     // Stop
@@ -3356,22 +3347,9 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            console.log("Stopping..." + [service, chain, network]);
-            if (service == "all"){
-                service = null
-            } else if (service == "explorer"){
-                service = [EXPLORER_MODULE_NAME]
-            } else if (service){
-                service = [service]
-            }
-            
-            if (chain){
-                chain = [chain]
-            }
-            if (network){
-                network = [network]
-            }
-            return stopModules(service, chain, network)
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await stopModules(serviceList)
+            return process.exit(0)
         });
 
     // Restart
@@ -3382,22 +3360,9 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            console.log("Restarting..." + [service, chain, network]);
-            if (service == "all"){
-                service = null
-            } else if (service == "explorer"){
-                service = [EXPLORER_MODULE_NAME]
-            } else if (service){
-                service = [service]
-            }
-            
-            if (chain){
-                chain = [chain]
-            }
-            if (network){
-                network = [network]
-            }
-            return restartModules(service, chain, network)
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await restartModules(serviceList)
+            return process.exit(0)
         });
 
     // Tail Logs
@@ -3408,21 +3373,8 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            if (service == "all"){
-                service = null
-            } else if (service == "explorer"){
-                service = [EXPLORER_MODULE_NAME]
-            } else if (service){
-                service = [service]
-            }
-            
-            if (chain){
-                chain = [chain]
-            }
-            if (network){
-                network = [network]
-            }
-            await logModules(service, chain, network, false)
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await logModules(serviceList, false)
             return process.exit(0)
         });
 
@@ -3434,21 +3386,8 @@ async function parse(){
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            if (service == "all"){
-                service = null
-            } else if (service == "explorer"){
-                service = [EXPLORER_MODULE_NAME]
-            } else if (service){
-                service = [service]
-            }
-            
-            if (chain){
-                chain = [chain]
-            }
-            if (network){
-                network = [network]
-            }
-            await logModules(service, chain, network)
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await logModules(serviceList)
             return process.exit(0)
         });
 
@@ -3461,6 +3400,9 @@ async function parse(){
         .argument('<network>', '(mainnet, testnet, regtest)')
         .argument('<command>', 'The shell command to execute')
         .action(async (service, chain, network, command) => {
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await execModules(serviceList, command)
+            return process.exit(0)
             // coming soon
         });
 
@@ -3472,7 +3414,14 @@ async function parse(){
         .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet, testnet, regtest)')
         .action(async (service, chain, network) => {
-            // coming soon
+            if (service == "all"){
+                console.log("The shell command can't be used for multiple containers")
+                return process.exit(0)
+            }
+            
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await shellModule(serviceList)
+            return process.exit(0)
         });
 
     // Rollback
@@ -3501,7 +3450,11 @@ Notes:
     bootstrap create generates a bootstrap file in the above directory
     bootstrap restore downloads a bootstrap file to the above directory and restores it`)
         .action(async (action, service, chain, network) => {
-            // coming soon
+            if (action == "create"){
+                await makeBootstrap(chain, network, service)
+            } else {
+                await restoreBootstrapInterface(chain, network, service)
+            }
         });
 
 
