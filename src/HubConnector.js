@@ -60,9 +60,15 @@ class HubConnector {
             params: {config:newConfigJson},
             id: 1
         }
-        
-        // Make the request to the node
-        const response = await axios.post(this.url, data)
+        let response = null
+        try {
+            // Make the request to the node
+            response = await axios.post(this.url, data)
+        } catch (err) {
+            //console.log(err)
+            //console.log("There was an error trying to update the config in the hub")
+            return false
+        }
 
         // Verify if there is a result and return it
         if (response.data && response.data.result) {

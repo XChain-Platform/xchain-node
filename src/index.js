@@ -761,7 +761,9 @@ async function getDockerNetworkInspect(dockerNetwork){
 
 
 function getDockerNetwork(coin, network){
-    return NODE_PREFIX+SEP+coin+SEP+network
+    return NODE_PREFIX +
+        (coin != ""?SEP+coin:"") +
+        (network != ""?SEP+network:"")
 }
 
 async function createDockerNetwork(coin, network){
@@ -873,6 +875,7 @@ async function getDefaultConfig(module, coin, network){
             "INDEXER_DB_USER":"xchain"+DB_SEP+"indexer"+DB_SEP+coin+DB_SEP+network,
             "INDEXER_DB_PASS":"xchain"+SEP+"password",
             "HUB_HOST":"127.0.0.1",
+            "HUB_API_HOST":getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
             "HUB_PORT":10000
         }
         
@@ -884,8 +887,11 @@ async function getDefaultConfig(module, coin, network){
         
     } else {
         defaultValues = {
-            "HUB_HOST":getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
+            "HUB_HOST":"127.0.0.1",
+            "HUB_API_HOST":getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
             "HUB_PORT":10000,
+            "EXPLORER_HOST":"127.0.0.1",
+            "EXPLORER_PORT":18080,
             "EXPLORER_API_HOST":getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""),
             "EXPLORER_API_USER":false,
             "EXPLORER_API_PASS":false,
@@ -1496,7 +1502,7 @@ async function buildAndUp(module, coin, network, overwrite_container_id=null, on
                 let dockerCommand = 'docker run '
                     +'-d --hostname '+container_prefix+' '
                     +volumeLine
-                    +(coin && network?'--network '+getDockerNetwork(coin, network)+' ':"")
+                    +'--network '+getDockerNetwork(coin, network)+' '
                     +environmentVariablesLine+' '
                     +portLine+' '
                     +'-t '+container_prefix
@@ -1936,7 +1942,7 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
 
                 if (localNodeVersion == null) {
                     try {
-                        let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + SEP + coin]["version"]
+                        let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + SEP + coin]["tag_name"]
                         await getCryptoNode(coin, network, remoteNodeVersion)
                     } catch (err) {
                         reject(err)
@@ -2005,7 +2011,6 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
 
 async function updateHub(){
     //Updating xchain-explorer networks
-    console.log("Updating hub")
     let installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
     let hubContainerId = await db.getModuleContainer(HUB_MODULE_NAME, "", "")
         
@@ -2033,7 +2038,6 @@ async function updateExplorer(){
     let explorerStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
     
     if (explorerStatus !== undefined){
-        console.log("Updating explorer")
         let installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
         let explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
             
@@ -2062,8 +2066,7 @@ async function updateExplorer(){
 async function updateHubOrExplorer(module){
     return new Promise(async (resolve, reject) => {
         if (["xchain-hub","xchain-explorer"].includes(module)){
-            console.log("Updating "+module+"...")
-        
+            //console.log("Updating "+module+"...")
             let defaultConfig = await getDefaultConfig(module, null, null)
             let moduleConnector = null
             
@@ -2199,11 +2202,27 @@ async function updateHubOrExplorer(module){
                     } catch (err) {
                         reject("There was a problem trying to update a config in the "+module+" module")
                     }
-                } else {    
-                    try {
-                        await moduleConnector.updateConfig(jsonConfig)
-                    } catch (err){
-                        reject("There was a problem trying to update a config in the "+module+" module")
+                } else {
+                    let hubUpdated = false
+                    let tries = 3
+                    while (!hubUpdated){
+                        try {
+                            hubUpdated = await moduleConnector.updateConfig(jsonConfig)
+                        } catch (err){
+                            //console.error(err)
+                        }
+                        
+                        tries--
+                        
+                        if (tries <= 0){
+                            reject("There was a problem trying to update a config in the "+module+" module")
+                            break
+                        }
+                        
+                        if (!hubUpdated){
+                            console.log("There was a problem trying to update a config in the "+module+" module. Trying again in 3 seconds...")
+                            await sleep(3000)
+                        }
                     }
                 }
                 
@@ -2276,13 +2295,13 @@ function filterCommandParameters(branch, modules, coins, networks){
     let servicesList = {}
     let addExplorer = false
     
-    if (coins){
+    if (coins && coins != "all"){
         coins = [coins]
     } else {
         coins = Object.values(Coin)
     }
     
-    if (networks){
+    if (networks && networks != "all"){
         networks = [networks]
     } else {
         networks = Object.values(Network)
@@ -2559,7 +2578,7 @@ async function installExplorerModule(){
                     resolve(true)
                     return true
                 } else {
-                    
+                    await sleep(1000)
                 }
                 
                 tries = tries - 1
@@ -3227,6 +3246,13 @@ async function preCheck(){
     await getStatus(null, null, false)
     
     try {
+        await createDockerNetwork("", "")
+    } catch(err){
+        throw new Error("There was an error trying to create the base xchain network")
+    }
+    
+    try {
+    
         console.log("Checking/Installing hub module")
         await installHubModule()
     } catch (err) {
@@ -3414,8 +3440,8 @@ async function parse(){
         .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet, testnet, regtest)')
         .action(async (service, chain, network) => {
-            if (service == "all"){
-                console.log("The shell command can't be used for multiple containers")
+            if ((service == "all") || (chain == "all") || (network == "all")){
+                console.log("The shell command can't be used for multiple containers, 'all' is invalid")
                 return process.exit(0)
             }
             
