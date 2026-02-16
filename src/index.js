@@ -689,6 +689,15 @@ function getDockerContainerImageNamePrefix(module, coin, network){
     }
 }
 
+function getModuleDatabaseName(module, coin, network){
+    let moduleName = module.slice("xchain-".length)
+    
+    return "XChain" + DB_SEP +
+        CoinTickerSymbol[coin] + DB_SEP +
+        network.charAt(0).toUpperCase() + network.slice(1) + DB_SEP +
+        moduleName.charAt(0).toUpperCase() + moduleName.slice(1)
+}
+
 async function stringToDockerContainerFile(containerId, dataString, filePath) {
     return new Promise((resolve, reject) => {
         exec("docker exec -i ${containerId} sh -c 'cat > ${filePath}'", { input: dataString }, (error, stdout, stderr) => {
@@ -850,7 +859,7 @@ async function getDefaultConfig(module, coin, network){
             "UTXO_TRACKER_API_PORT":3001,
             "UTXO_TRACKER_PORT":3001,
             "UTXO_TRACKER_BOOTSTRAP_VOLUME":dataDir+"/"+coin+"/"+network+"/"+module+"/bootstrap/",
-            "DECODER_DB_NAME":"xchain"+DB_SEP+"decoder"+DB_SEP+coin+DB_SEP+network,
+            "DECODER_DB_NAME":getModuleDatabaseName(XChainService.XCHAIN_DECODER,coin,network),
             //"DECODER_DB_HOST":DB_MODULE_NAME,
             "DECODER_DB_HOST":"mariadb",
             "DECODER_DB_PORT":3306,
@@ -871,7 +880,7 @@ async function getDefaultConfig(module, coin, network){
             //"INDEXER_DB_HOST":DB_MODULE_NAME,
             "INDEXER_DB_HOST":"mariadb",
             "INDEXER_DB_PORT":3306,
-            "INDEXER_DB_NAME":"xchain"+DB_SEP+"indexer"+DB_SEP+coin+DB_SEP+network,
+            "INDEXER_DB_NAME":getModuleDatabaseName(XChainService.XCHAIN_INDEXER,coin,network),
             "INDEXER_DB_USER":"xchain"+DB_SEP+"indexer"+DB_SEP+coin+DB_SEP+network,
             "INDEXER_DB_PASS":"xchain"+SEP+"password",
             "HUB_HOST":"127.0.0.1",
@@ -1153,7 +1162,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
         let gatewayIpSplit = gatewayIp.split(".")
         gatewayIp = gatewayIpSplit[0]+"."+gatewayIpSplit[1]+".0.0"
         
-        let host = gatewayIp+"/255.255.255.0"
+        let host = gatewayIp+"/255.255.0.0"
         let mariadbUser = "'"+user+"'@'"+host+"'"
         
         //This means mariadb is inside a docker container, we will execute the queries using docker command
@@ -2204,7 +2213,7 @@ async function updateHubOrExplorer(module){
                     }
                 } else {
                     let hubUpdated = false
-                    let tries = 3
+                    let tries = 10
                     while (!hubUpdated){
                         try {
                             hubUpdated = await moduleConnector.updateConfig(jsonConfig)
