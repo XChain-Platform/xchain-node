@@ -2263,6 +2263,19 @@ async function installHubModule(){
                 let hubModuleHasStatus = lastStatus?.[""]?.[""]?.[HUB_MODULE_NAME]
     
                 if (hubModuleHasStatus !== undefined){
+                    let hubModuleStatus = hubModuleHasStatus["status"]["State"]["Status"]
+                    
+                    if (hubModuleStatus == "exited"){
+                        console.log("The hub module container status is 'exited'. Restarting it...")
+                        let hubContainerId = hubModuleHasStatus["container_id"]
+                        let hubWasRestarted = await dockerManager.restartContainer(hubContainerId)
+                        
+                        if (hubWasRestarted !== true){
+                            reject(false)
+                            return false
+                        }
+                    }
+                
                     resolve(true)
                     return true
                 }
