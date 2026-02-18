@@ -2595,7 +2595,13 @@ async function installExplorerModule(){
                 
                 if (pingExplorer){
                     //pass data to the explorer
-                    await updateExplorer()
+                    try {
+                        await updateExplorer()
+                    } catch (err){
+                        tries = tries - 1
+                        await sleep(1000)
+                        continue
+                    }
                 
                     resolve(true)
                     return true
