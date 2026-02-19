@@ -1951,6 +1951,9 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
 
                 if (localNodeVersion == null) {
                     try {
+                        if (!(NODE_MODULE_NAME + SEP + coin in remoteModuleVersions)){
+                            await checkRemoteNodeVersion(coin)
+                        }
                         let remoteNodeVersion = remoteModuleVersions[NODE_MODULE_NAME + SEP + coin]["tag_name"]
                         await getCryptoNode(coin, network, remoteNodeVersion)
                     } catch (err) {
