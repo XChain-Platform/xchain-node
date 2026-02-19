@@ -202,6 +202,21 @@ class DockerManager {
             resolve(true)
         })
     }
+    
+    async logContainer(containerId, follow = true){
+        return new Promise(async (resolve, reject) => {
+            let parameters = ['logs', '--tail', '10', containerId]
+            if (follow){
+                parameters.splice(3, 0, "--follow")
+            }
+        
+            spawnSync('docker', parameters, {
+                stdio: 'inherit' 
+            })
+            
+            resolve(true)
+        })
+    }
 }
 
 module.exports = DockerManager

@@ -2445,6 +2445,38 @@ async function logModules(servicesList, follow=true){
         }
     }
     
+    if (moduleContainerIds.length > 0){
+        let moduleName = moduleContainerIds[0]["name"]
+        console.log("")
+        console.log("")
+        console.log("####"+moduleName+" LOGS####")
+        console.log("")
+        await dockerManager.logContainer(moduleContainerIds[0]["id"], follow)
+    } else {
+        console.log("No service was selected")
+    }
+    return true
+}
+
+async function monitorModules(servicesList, follow=true){
+    let moduleContainerIds = []
+    for (let nextCoin in servicesList){
+        for (let nextNetwork in servicesList[nextCoin]){
+            for (let nextModule of servicesList[nextCoin][nextNetwork]){
+                try {
+                    let moduleContainerId = await db.getModuleContainer(
+                        nextModule, 
+                        nextCoin, 
+                        nextNetwork
+                    )
+                    moduleContainerIds.push({name:getDockerContainerImageName(nextModule, nextCoin, nextNetwork),id:moduleContainerId})
+                } catch (err) {
+                    console.log(err)
+                }
+            }
+        }
+    }
+    
     await dockerManager.startDockerMonitor(moduleContainerIds, follow)
     return true
 }
@@ -3428,7 +3460,7 @@ async function parse(){
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
             serviceList = filterCommandParameters(null, service, chain, network)
-            await logModules(serviceList, false)
+            await logModules(serviceList)
             return process.exit(0)
         });
 
@@ -3441,9 +3473,37 @@ async function parse(){
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
             serviceList = filterCommandParameters(null, service, chain, network)
-            await logModules(serviceList)
+            await logModules(serviceList, false)
             return process.exit(0)
         });
+
+    // Monitor the logs
+    program
+        .command('monitor')
+        .description('Display service logs in split spaces on the screen')
+        .argument('[service]', '(node, database, xchain-hub, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await monitorModules(serviceList, false)
+            return process.exit(0)
+        });
+
+    // MonitorTail Logs
+    program
+        .command('tailmonitor')
+        .description('Display service logs in split spaces on the screen')
+        .argument('[service]', '(node, database, xchain-hub, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
+            serviceList = filterCommandParameters(null, service, chain, network)
+            await monitorModules(serviceList)
+            return process.exit(0)
+        });
+
+    
 
     // Execute
     program
