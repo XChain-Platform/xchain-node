@@ -205,9 +205,9 @@ class DockerManager {
     
     async logContainer(containerId, follow = true){
         return new Promise(async (resolve, reject) => {
-            let parameters = ['logs', '--tail', '10', containerId]
+            let parameters = ['logs', containerId]
             if (follow){
-                parameters.splice(3, 0, "--follow")
+                parameters.splice(3, 0, '--tail', '10', "--follow")
             }
         
             spawnSync('docker', parameters, {
