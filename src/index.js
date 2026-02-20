@@ -1949,7 +1949,7 @@ async function installModule(coin, network, module, remoteUpdate=false, overwrit
                     //Nothing localNodeVersion will be null
                 }
 
-                if (localNodeVersion == null) {
+                if (localNodeVersion == null || remoteUpdate) {
                     try {
                         if (!(NODE_MODULE_NAME + SEP + coin in remoteModuleVersions)){
                             await checkRemoteNodeVersion(coin)
@@ -2401,11 +2401,15 @@ async function updateModules(servicesList){
                     nextNetwork
                 )
             
-                //Get the last version from git
-                await cloneGit(nextModule, true, false)
-                
-                //Install module and remove old container
-                await installModule(nextCoin, nextNetwork, nextModule, false, moduleContainerId)
+                if (nextModule == NODE_MODULE_NAME){
+                    await installModule(nextCoin, nextNetwork, nextModule, true, moduleContainerId)
+                } else {
+                    //Get the last version from git
+                    await cloneGit(nextModule, true, false)
+                    
+                    //Install module and remove old container
+                    await installModule(nextCoin, nextNetwork, nextModule, false, moduleContainerId)
+                }
             }
         }
     }
