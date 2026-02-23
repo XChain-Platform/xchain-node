@@ -301,6 +301,8 @@ async function waitForBootstrap(moduleUrl, taskId){
                 
                 if (progress >= 100){
                     resolve(true)
+                } else if (progress < 0){
+                    reject("There was an error creating the bootstrap")
                 }
             } else {
                 reject("There was an error trying to get the status of a bootstrap")
@@ -344,6 +346,8 @@ async function waitForBootstrapRestore(moduleUrl, taskId){
                 
                 if (progress >= 100){
                     resolve(true)
+                } else if (progress < 0){
+                    reject(false)
                 }
             } else {
                 reject("There was an error trying to get the status of a bootstrap restore")
@@ -2756,7 +2760,13 @@ async function restoreBootstrapInterface(coin, network, module){
                 if (moduleAnswer == "Return"){
                     resolve(true)
                 } else {
-                    await restoreBootstrap(coin, network, module, moduleAnswer)
+                    let bootstrapRestored = await restoreBootstrap(coin, network, module, moduleAnswer)
+                    
+                    if (bootstrapRestored){
+                        resolve(true)
+                    } else {
+                        reject(false)
+                    }
                 }
             }
         )
@@ -3576,6 +3586,8 @@ Notes:
             } else {
                 await restoreBootstrapInterface(chain, network, service)
             }
+            
+            return process.exit(0)
         });
 
 
