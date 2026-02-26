@@ -207,33 +207,21 @@ async function buildDatabaseModule(coin, network) {
         const portLine = ("DB_PORT" in environmentVariables) ? "-p " + environmentVariables["DB_PORT"] + ":3306" : ""
         const networkLine = (coin !== "" && network !== "") ? '--network ' + getDockerNetwork(coin, network) : ""
 
-        return new Promise((resolve, reject) => {
-            exec('docker pull mariadb:latest', (error) => {
-                exec('docker tag mariadb:latest ' + containerPrefix, (error2) => {
-                    const dockerCommand = 'docker run -d --hostname mariadb ' + networkLine + ' ' + portLine + ' --env MYSQL_ROOT_PASSWORD=' + mariadbRootPassword + ' ' + containerPrefix
-                    console.log("Creating container of module " + DB_MODULE_NAME)
-                    exec(dockerCommand, async (error3, stdout) => {
-                        if (error3) {
-                            reject("Error creating the container: " + error3.message)
-                            return
-                        }
-                        try {
-                            const containerId = stdout.trim()
-                            if (containerId.length === 64) {
-                                if (await db.insertModuleContainer(DB_MODULE_NAME, "", "", containerId)) {
-                                    await statusChanged()
-                                    resolve(containerId)
-                                } else {
-                                    reject("There was a problem trying to store the container's id")
-                                }
-                            }
-                        } catch (err) {
-                            reject(err)
-                        }
-                    })
-                })
-            })
-        })
+        await execAsync('docker pull mariadb:latest')
+        await execAsync('docker tag mariadb:latest ' + containerPrefix)
+
+        const dockerCommand = 'docker run -d --hostname mariadb ' + networkLine + ' ' + portLine + ' --env MYSQL_ROOT_PASSWORD=' + mariadbRootPassword + ' ' + containerPrefix
+        console.log("Creating container of module " + DB_MODULE_NAME)
+        const { stdout } = await execAsync(dockerCommand)
+        const containerId = stdout.trim()
+        if (containerId.length === 64) {
+            if (await db.insertModuleContainer(DB_MODULE_NAME, "", "", containerId)) {
+                await statusChanged()
+                return containerId
+            } else {
+                throw "There was a problem trying to store the container's id"
+            }
+        }
     } else {
         try {
             if (coin && network) {
