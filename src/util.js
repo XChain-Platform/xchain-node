@@ -71,7 +71,7 @@ module.exports = {
     },
 
     downloadUrlFileRedirect: async function (path, url, maxRedirections=3) {
-        return new Promise(async (resolve, reject) => {
+        return new Promise((resolve, reject) => {
             let redirectionsCount = 0
             while (newUrl != null) {
                 try {
@@ -92,7 +92,7 @@ module.exports = {
     },
 
     downloadUrlFile: async function (path, url) {
-        return new Promise(async (resolve, reject) => {
+        return new Promise((resolve, reject) => {
             const downloadedFile = fs.createWriteStream(path)
 
             const request = https.get(url, function (response) {

@@ -1,0 +1,349 @@
+/*********************************************************************
+ * XChain Node - Docker Service
+ * Low-level Docker utilities (network, container operations)
+ ********************************************************************/
+
+const { exec, spawn, spawnSync } = require('child_process')
+const { promisify } = require('util')
+const execAsync   = promisify(exec)
+const fs          = require('fs')
+const path        = require('path')
+const blessed     = require('blessed')
+
+const MAX_CONTAINERS = 6
+
+const { containersFilesDir }     = require('../config/constants')
+
+async function checkDockerInstalledAndReachable() {
+    return new Promise((resolve, reject) => {
+        exec('docker --version', (error, stdout) => {
+            if (error) {
+                reject("Couldn't use the command docker --version")
+                return
+            }
+            const result = stdout.split(" ")
+            if (result.length !== 5) {
+                reject("The format returned by docker --version is unknown")
+                return
+            }
+            exec('docker ps -a', (error2) => {
+                if (error2) {
+                    reject("Couldn't execute docker ps, is this user in the docker group")
+                } else {
+                    resolve(true)
+                }
+            })
+        })
+    })
+}
+
+async function getStatusFromContainer(containerId) {
+    return new Promise((resolve, reject) => {
+        try {
+            exec('docker inspect ' + containerId, (error, stdout) => {
+                if (error) {
+                    reject(error)
+                } else {
+                    resolve(JSON.parse(stdout)[0])
+                }
+            })
+        } catch (err) {
+            reject(err)
+        }
+    })
+}
+
+async function getDockerNetworkInspect(dockerNetwork) {
+    return new Promise((resolve, reject) => {
+        exec('docker network inspect ' + dockerNetwork, (error, stdout) => {
+            if (error) {
+                reject(error)
+            } else {
+                resolve(JSON.parse(stdout)[0])
+            }
+        })
+    })
+}
+
+async function createDockerNetwork(networkName) {
+    return new Promise((resolve, reject) => {
+        exec('docker network inspect ' + networkName, (error) => {
+            if (error) {
+                // Network doesn't exist — create it
+                console.log("Creating docker network " + networkName)
+                exec('docker network create ' + networkName, (err2) => {
+                    if (err2) {
+                        console.log(err2)
+                        reject(false)
+                    } else {
+                        resolve(true)
+                    }
+                })
+            } else {
+                resolve(true)
+            }
+        })
+    })
+}
+
+async function addContainerToNetwork(containerId, networkName) {
+    const containerStatus = await getStatusFromContainer(containerId)
+
+    return new Promise((resolve, reject) => {
+        if (!(networkName in containerStatus["NetworkSettings"]["Networks"])) {
+            console.log("Connecting container " + containerId + " to network " + networkName)
+            exec('docker network connect ' + networkName + ' ' + containerId, (error) => {
+                if (error) {
+                    reject(error)
+                } else {
+                    resolve(true)
+                }
+            })
+        } else {
+            resolve(true)
+        }
+    })
+}
+
+async function getAllContainerFromModule(module, coin, network) {
+    const { getDockerContainerImageName } = require('./ConfigService')
+    return new Promise((resolve) => {
+        const imageName = getDockerContainerImageName(module, coin, network)
+        exec('docker ps --no-trunc -q -a -f "ancestor=' + imageName + '"', () => {
+            resolve(true)
+        })
+    })
+}
+
+async function getDockerContainerFileData(containerId, filePath) {
+    return new Promise((resolve, reject) => {
+        exec('docker cp ' + containerId + ":" + filePath + " " + containersFilesDir, (error) => {
+            if (error) {
+                reject(error)
+            } else {
+                const data = fs.readFileSync(path.join(containersFilesDir, path.basename(filePath)), 'utf8')
+                resolve(data)
+            }
+        })
+    })
+}
+
+async function getDockerContainerFileCat(containerId, filePath) {
+    return new Promise((resolve, reject) => {
+        exec('docker exec -i ' + containerId + " cat " + filePath, (error, stdout) => {
+            if (error) {
+                reject(error)
+            } else {
+                resolve(stdout)
+            }
+        })
+    })
+}
+
+async function stringToDockerContainerFile(containerId, dataString, filePath) {
+    return new Promise((resolve, reject) => {
+        exec("docker exec -i ${containerId} sh -c 'cat > ${filePath}'", { input: dataString }, (error) => {
+            if (error) {
+                reject(error)
+            } else {
+                resolve(true)
+            }
+        })
+    })
+}
+
+async function restartContainer(containerId) {
+    return new Promise((resolve, reject) => {
+        exec('docker restart ' + containerId, async (error, stdout) => {
+            if (error) {
+                reject(error)
+                return
+            }
+            if (stdout.trim() === containerId) {
+                resolve(true)
+            } else {
+                reject("There was an error trying to restart a docker container")
+            }
+        })
+    })
+}
+
+async function removeContainer(containerId) {
+    return new Promise((resolve, reject) => {
+        exec('docker rm ' + containerId, async (error, stdout) => {
+            if (error) {
+                reject(error)
+                return
+            }
+            if (stdout.trim() === containerId) {
+                resolve(true)
+            } else {
+                reject("There was an error trying to remove a docker container")
+            }
+        })
+    })
+}
+
+async function stopContainer(containerId) {
+    return new Promise((resolve, reject) => {
+        exec('docker stop ' + containerId, (error, stdout) => {
+            if (error) {
+                reject(error)
+            } else if (stdout.trim() === containerId) {
+                resolve(true)
+            } else {
+                reject("There was an error trying to stop the docker container (" + containerId + ")")
+            }
+        })
+    })
+}
+
+async function startContainer(containerId) {
+    return new Promise((resolve, reject) => {
+        exec('docker start ' + containerId, (error, stdout) => {
+            if (error) {
+                reject(error)
+            } else if (stdout.trim() === containerId) {
+                resolve(true)
+            } else {
+                reject("There was an error trying to start the docker container (" + containerId + ")")
+            }
+        })
+    })
+}
+
+async function execContainer(containerId, command) {
+    return new Promise((resolve, reject) => {
+        exec('docker exec -i ' + containerId + ' ' + command, (error, stdout) => {
+            if (error) {
+                reject(error)
+            } else {
+                resolve(stdout.trim())
+            }
+        })
+    })
+}
+
+async function shellContainer(containerId) {
+    return new Promise((resolve) => {
+        spawnSync('docker', ['exec', '-it', containerId, 'bash'], { stdio: 'inherit' })
+        resolve(true)
+    })
+}
+
+async function logContainer(containerId, follow = true) {
+    return new Promise((resolve) => {
+        let parameters = ['logs', containerId]
+        if (follow) {
+            parameters.splice(1, 0, '--tail', '10', '--follow')
+        }
+        spawnSync('docker', parameters, { stdio: 'inherit' })
+        resolve(true)
+    })
+}
+
+async function startDockerMonitor(containerIds, follow) {
+    return new Promise((resolve, reject) => {
+        const children = []
+        if (!containerIds || containerIds.length === 0) {
+            reject("No container was selected to get the logs")
+            return
+        }
+
+        const idsToMonitor = containerIds.slice(0, MAX_CONTAINERS)
+        const n = idsToMonitor.length
+
+        const screen = blessed.screen({
+            smartCSR: true,
+            title: 'XChain Containers Logs',
+            warnings: true
+        })
+
+        blessed.text({
+            parent: screen,
+            top: 0,
+            left: 'center',
+            content: ` Monitoring ${n} containers (Q - Exit) `,
+            style: { bg: 'blue', fg: 'white', bold: true }
+        })
+
+        idsToMonitor.forEach((id, index) => {
+            const heightPercentage = 100 / n
+
+            const logger = blessed.log({
+                parent: screen,
+                top: `${heightPercentage * index}%`,
+                left: 0,
+                width: '100%',
+                height: `${heightPercentage}%`,
+                label: ` [ ${id["name"]} ] `,
+                border: { type: 'line' },
+                style: {
+                    border: { fg: 'cyan' },
+                    label: { fg: 'yellow' }
+                }
+            })
+
+            const child = spawn('docker', ['logs', '--tail', '100', (follow ? '-f' : null), id["id"]].filter(item => item != null))
+            children.push(child)
+
+            child.stdout.on('data', (data) => {
+                logger.log(data.toString().trim())
+            })
+
+            child.stderr.on('data', (data) => {
+                logger.log(`{red-fg}${data.toString().trim()}{/red-fg}`)
+            })
+
+            child.on('error', (err) => {
+                logger.log(`{red-fg}Error: ${err.message}{/red-fg}`)
+            })
+        })
+
+        screen.key(['escape', 'q', 'C-c'], () => {
+            children.forEach(child => child.kill())
+            screen.destroy()
+            resolve(true)
+        })
+
+        screen.on('resize', () => screen.render())
+        screen.render()
+    })
+}
+
+async function killContainer(containerId) {
+    return new Promise((resolve, reject) => {
+        exec('docker kill ' + containerId, async (error, stdout) => {
+            if (error) {
+                reject(error)
+                return
+            }
+            if (stdout.trim() === containerId) {
+                resolve(true)
+            } else {
+                reject("There was an error trying to kill a docker container")
+            }
+        })
+    })
+}
+
+module.exports = {
+    checkDockerInstalledAndReachable,
+    getStatusFromContainer,
+    getDockerNetworkInspect,
+    createDockerNetwork,
+    addContainerToNetwork,
+    getAllContainerFromModule,
+    getDockerContainerFileData,
+    getDockerContainerFileCat,
+    stringToDockerContainerFile,
+    stopContainer,
+    startContainer,
+    restartContainer,
+    removeContainer,
+    killContainer,
+    execContainer,
+    shellContainer,
+    logContainer,
+    startDockerMonitor
+}
