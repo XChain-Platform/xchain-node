@@ -217,14 +217,18 @@ async function buildDatabaseModule(coin, network) {
                             reject("Error creating the container: " + error3.message)
                             return
                         }
-                        const containerId = stdout.trim()
-                        if (containerId.length === 64) {
-                            if (await db.insertModuleContainer(DB_MODULE_NAME, "", "", containerId)) {
-                                await statusChanged()
-                                resolve(containerId)
-                            } else {
-                                reject("There was a problem trying to store the container's id")
+                        try {
+                            const containerId = stdout.trim()
+                            if (containerId.length === 64) {
+                                if (await db.insertModuleContainer(DB_MODULE_NAME, "", "", containerId)) {
+                                    await statusChanged()
+                                    resolve(containerId)
+                                } else {
+                                    reject("There was a problem trying to store the container's id")
+                                }
                             }
+                        } catch (err) {
+                            reject(err)
                         }
                     })
                 })
