@@ -11,19 +11,17 @@
   "dependencies": {
     "axios": "^1.6.7",
     "blessed": "^0.1.81",
-    "commander": "^14.0.2",
     "chalk": "^5.6.0",
+    "commander": "^14.0.2",
     "dotenv": "^16.4.5",
     "enquirer": "^2.4.1",
-    "ink": "^5.0.1",
-    "inquirer": "^9.2.23",
+    "follow-redirects": "^1.15.9",
     "leveldown": "^6.1.1",
     "levelup": "^5.1.1",
     "mariadb": "3.1.1",
-    "semver": "^7.6.3",
-    "follow-redirects": "^1.15.9"
+    "semver": "^7.6.3"
   },
-  "bin":{
-    "xchain_node":"./src/index.js"
+  "bin": {
+    "xchain_node": "./src/index.js"
   }
 }
