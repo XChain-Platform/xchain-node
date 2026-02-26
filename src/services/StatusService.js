@@ -1,0 +1,181 @@
+/*********************************************************************
+ * XChain Node - Status Service
+ * Tracks installed modules and container status
+ ********************************************************************/
+
+const {
+    NODE_MODULE_NAME, SEP, Coin, Network
+} = require('../config/constants')
+const {
+    db,
+    getInstalledModules, setInstalledModules, resetInstalledModules,
+    getRemoteModuleVersions,
+    isStatusUpdated, setStatusUpdated,
+    getLastStatus, setLastStatus,
+    getLastPrintedStatus, setLastPrintedStatus, appendLastPrintedStatus
+} = require('../state')
+const { getStatusFromContainer }         = require('./DockerService')
+const { checkRemoteNodeVersion }         = require('./VersionService')
+const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./VersionService')
+
+async function statusChanged() {
+    setStatusUpdated(false)
+    // Lazy requires to avoid circular dependency
+    const { updateHub }      = require('./HubService')
+    const { updateExplorer } = require('./ExplorerService')
+    await updateHub()
+    await updateExplorer()
+}
+
+async function getInstalledCoinsAndNetworks() {
+    const modulesStatus = await getStatus(null, null, false)
+    const result = {}
+
+    for (const nextCoin in modulesStatus) {
+        if (Object.values(Coin).includes(nextCoin)) {
+            result[nextCoin] = []
+            for (const nextNetwork in modulesStatus[nextCoin]) {
+                if (Object.values(Network).includes(nextNetwork)) {
+                    result[nextCoin].push(nextNetwork)
+                }
+            }
+        }
+    }
+
+    return result
+}
+
+async function loadInstalledModules(coin, network) {
+    await checkRemoteNodeVersion(coin, network)
+    const modules = await db.getAllModuleContainers(coin, network)
+
+    for (const nextModule of modules) {
+        const { module, coin: c, network: n, container_id } = nextModule
+        const installedModules = getInstalledModules()
+
+        if (!(c in installedModules)) installedModules[c] = {}
+        if (!(n in installedModules[c])) installedModules[c][n] = {}
+        if (!(module in installedModules[c][n])) installedModules[c][n][module] = {}
+
+        installedModules[c][n][module]["container_id"] = container_id
+    }
+}
+
+async function getStatus(coin, network, printStatus = false) {
+    if (isStatusUpdated()) {
+        if (printStatus) console.log(getLastPrintedStatus())
+        return getLastStatus()
+    }
+
+    setLastPrintedStatus("")
+    resetInstalledModules()
+    await loadInstalledModules(coin, network)
+
+    const installedModules = getInstalledModules()
+    const remoteModuleVersions = getRemoteModuleVersions()
+
+    if (Object.keys(installedModules).length > 0) {
+        for (const nextCoin in installedModules) {
+            if (!(NODE_MODULE_NAME + SEP + nextCoin in remoteModuleVersions)) {
+                await checkRemoteNodeVersion(nextCoin)
+            }
+
+            const nextCoinNetworks = installedModules[nextCoin]
+
+            for (const nextCoinNetwork in nextCoinNetworks) {
+                const nextCoinNetworkModules = installedModules[nextCoin][nextCoinNetwork]
+                const moduleKeys = Object.keys(nextCoinNetworkModules)
+
+                let titlePrinted = false
+                if (moduleKeys.length > 0) {
+                    const toRemove = []
+
+                    for (const nextModule in nextCoinNetworkModules) {
+                        const containerId = nextCoinNetworkModules[nextModule]["container_id"]
+                        try {
+                            const containerStatus = await getStatusFromContainer(containerId)
+                            nextCoinNetworkModules[nextModule]["status"] = containerStatus
+
+                            if (!titlePrinted) {
+                                appendLastPrintedStatus("\x1b[37m[" + (nextCoin + " - " + nextCoinNetwork).toUpperCase() + "]\x1b[37m\n")
+                                titlePrinted = true
+                            }
+
+                            let remoteVersion = "-"
+                            try {
+                                if (nextModule === NODE_MODULE_NAME) {
+                                    remoteVersion = remoteModuleVersions[nextModule + SEP + nextCoin]["tag_name"].substring(1)
+                                } else {
+                                    remoteVersion = remoteModuleVersions[nextModule]
+                                }
+                                nextCoinNetworkModules[nextModule]["remote_version"] = remoteVersion
+                            } catch { /* not available yet */ }
+
+                            let localVersion = "-"
+                            try {
+                                if (nextModule === NODE_MODULE_NAME) {
+                                    localVersion = await getLocalNodeVersion(nextCoin, nextCoinNetwork)
+                                } else {
+                                    localVersion = await getLocalModuleVersion(nextModule)
+                                }
+                                nextCoinNetworkModules[nextModule]["local_version"] = localVersion
+                            } catch { /* not available yet */ }
+
+                            let containerVersion = "-"
+                            try {
+                                if (nextModule === NODE_MODULE_NAME) {
+                                    containerVersion = await getContainerNodeVersion(nextCoin, nextCoinNetwork, containerId)
+                                } else {
+                                    containerVersion = await getContainerModuleVersion(nextModule, nextCoin, nextCoinNetwork, containerId)
+                                }
+                                nextCoinNetworkModules[nextModule]["container_version"] = containerVersion
+                            } catch { /* not available yet */ }
+
+                            const versionString = " {remote:" + remoteVersion + ", local:" + localVersion + ", container:" + containerVersion + "}"
+                            const state = containerStatus["State"]["Status"]
+                            const color = state === "Exited" ? "\x1b[31m" : "\x1b[32m"
+                            appendLastPrintedStatus(" " + color + nextModule + " (" + state + ")\x1b[37m " + versionString + "\n")
+
+                        } catch {
+                            toRemove.push(nextModule)
+                        }
+                    }
+
+                    for (const mod of toRemove) {
+                        delete nextCoinNetworkModules[mod]
+                    }
+                }
+
+                if (Object.keys(nextCoinNetworkModules).length === 0) {
+                    if (nextCoinNetwork === null || nextCoinNetwork === undefined) {
+                        delete installedModules[nextCoin][nextCoinNetwork]
+                    } else if (nextCoinNetwork === "null") {
+                        if ("null" in installedModules && "null" in installedModules["null"]) {
+                            delete installedModules["null"]["null"]
+                        }
+                    } else {
+                        delete installedModules[nextCoin][nextCoinNetwork]
+                    }
+                }
+            }
+
+            if (Object.keys(nextCoinNetworks).length === 0) {
+                delete installedModules[nextCoin]
+            }
+        }
+
+        appendLastPrintedStatus("\n")
+        if (printStatus) console.log(getLastPrintedStatus())
+    }
+
+    setLastStatus(installedModules)
+    setStatusUpdated(true)
+    return installedModules
+}
+
+module.exports = {
+    statusChanged,
+    getStatus,
+    loadInstalledModules,
+    getInstalledCoinsAndNetworks
+}
