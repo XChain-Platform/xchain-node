@@ -80,6 +80,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             try {
                 let portLine = ""
                 let volumeLine = ""
+                let ulimitLine = ""
 
                 switch (module) {
                     case XChainService.XCHAIN_DECODER:
@@ -99,6 +100,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         }
                         volumeLine = "-v " + module + SEP + coin + "-" + network + "-data:/data/xchain-utxo-tracker "
                             + "-v " + environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"] + ":/bootstrap/xchain-utxo-tracker "
+                        ulimitLine = "--ulimit nofile=2048:2048 "
                         break
                     case XChainService.XCHAIN_INDEXER:
                         if ("INDEXER_PORT" in environmentVariables && "INDEXER_API_PORT" in environmentVariables) {
@@ -133,6 +135,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 const dockerCommand = 'docker run '
                     + '-d --hostname ' + containerPrefix + ' '
                     + volumeLine
+                    + ulimitLine
                     + '--network ' + getDockerNetwork(coin, network) + ' '
                     + environmentVariablesLine + ' '
                     + portLine + ' '

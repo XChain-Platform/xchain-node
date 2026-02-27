@@ -21,7 +21,7 @@ function createDirectories() {
     if (!fs.existsSync(containersFilesDir))  fs.mkdirSync(containersFilesDir)
 }
 
-async function preCheck() {
+async function preCheck(checkVersions = false) {
     try {
         console.log("Checking if Docker is installed")
         await checkDockerInstalledAndReachable()
@@ -33,8 +33,10 @@ async function preCheck() {
     createDirectories()
     console.log("Checking/Creating database")
     await db.createDatabase()
-    console.log("Getting all remote project versions")
-    await checkAllRemoteVersions()
+    if (checkVersions) {
+        console.log("Getting all remote project versions")
+        await checkAllRemoteVersions()
+    }
     console.log("Getting modules status")
     await getStatus(null, null, false)
 

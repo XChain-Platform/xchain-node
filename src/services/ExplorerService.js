@@ -19,6 +19,7 @@ async function updateExplorer() {
     const explorerStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
 
     if (explorerStatus === undefined) return true
+    if (explorerStatus["status"]["State"]["Status"] === "exited") return true
 
     const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
     const explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
@@ -28,7 +29,6 @@ async function updateExplorer() {
             for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
                 try {
                     await addContainerToNetwork(explorerContainerId, getDockerNetwork(nextCoin, nextNetwork))
-                    await statusChanged()
                 } catch {
                     console.log("There was an error trying to connect the xchain-explorer to the " + nextCoin + "/" + nextNetwork + " network")
                 }
