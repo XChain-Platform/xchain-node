@@ -169,7 +169,6 @@ async function updateHub() {
             for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
                 try {
                     await addContainerToNetwork(hubContainerId, getDockerNetwork(nextCoin, nextNetwork))
-                    await statusChanged()
                 } catch {
                     console.log("There was an error trying to connect the xchain-hub to the " + nextCoin + "/" + nextNetwork + " network")
                 }
@@ -199,9 +198,16 @@ async function installHubModule() {
                 console.log("The hub module container status is 'exited'. Restarting it...")
                 const { restartContainer } = require('./DockerService')
                 const restarted = await restartContainer(hubStatus["container_id"])
-                await statusChanged()
                 if (restarted !== true) {
                     throw false
+                }
+                console.log("Waiting for the xchain-hub to respond")
+                let restartTries = 10
+                while (restartTries > 0) {
+                    const ping = await hubConnector.ping()
+                    if (ping) break
+                    restartTries--
+                    await sleep(2000)
                 }
             }
             return true
@@ -223,6 +229,7 @@ async function installHubModule() {
             return true
         }
         tries--
+        await sleep(2000)
     }
 
     throw "Couldn't install hub module"

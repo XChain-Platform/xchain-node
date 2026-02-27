@@ -26,9 +26,10 @@ const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 async function parseCommand() {
     const program = new Command()
 
-    program.hook('preAction', async () => {
+    const commandsNeedingVersions = ['install', 'update', 'reinstall']
+    program.hook('preAction', async (thisCommand, actionCommand) => {
         console.log("Checking xchain-node structure")
-        await preCheck()
+        await preCheck(commandsNeedingVersions.includes(actionCommand.name()))
     })
 
     program

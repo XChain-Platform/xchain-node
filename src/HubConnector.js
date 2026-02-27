@@ -36,7 +36,7 @@ class HubConnector {
         // Make the request to the node
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: 5000 })
         } catch (err) {
             return false
         }
@@ -59,7 +59,7 @@ class HubConnector {
         let response = null
         try {
             // Make the request to the node
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: 10000 })
         } catch (err) {
             //console.log(err)
             //console.log("There was an error trying to update the config in the hub")
