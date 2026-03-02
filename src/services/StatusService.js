@@ -131,10 +131,21 @@ async function getStatus(coin, network, printStatus = false) {
                                 nextCoinNetworkModules[nextModule]["container_version"] = containerVersion
                             } catch { /* not available yet */ }
 
-                            const versionString = " {remote:" + remoteVersion + ", local:" + localVersion + ", container:" + containerVersion + "}"
                             const state = containerStatus["State"]["Status"]
                             const color = state === "Exited" ? "\x1b[31m" : "\x1b[32m"
-                            appendLastPrintedStatus(" " + color + nextModule + " (" + state + ")\x1b[37m " + versionString + "\n")
+
+                            const rawPorts = containerStatus["NetworkSettings"]["Ports"] || {}
+                            const portParts = []
+                            for (const [containerPort, bindings] of Object.entries(rawPorts)) {
+                                if (bindings && bindings.length > 0) {
+                                    for (const binding of bindings) {
+                                        portParts.push(binding.HostIp + ":" + binding.HostPort + "->" + containerPort)
+                                    }
+                                }
+                            }
+                            const portsString = portParts.length > 0 ? portParts.join(", ") : "-"
+
+                            appendLastPrintedStatus(" " + color + nextModule + " (" + state + ")\x1b[37m " + portsString + "\n")
 
                         } catch {
                             toRemove.push(nextModule)
