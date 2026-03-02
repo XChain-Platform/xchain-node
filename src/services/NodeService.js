@@ -94,6 +94,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
             const dockerCommand = 'docker run -d '
                 + '-v ' + dataDir + "/" + NODE_MODULE_NAME + "/" + coin + "/" + network + ":/root/." + coin + " "
                 + '--hostname ' + NODE_MODULE_NAME + ' '
+                + '--ulimit nofile=2048:2048 '
                 + '--network ' + getDockerNetwork(coin, network) + ' '
                 + (defaultExposedPort && defaultNodePort ? '-p ' + defaultExposedPort + ':' + defaultNodePort + ' ' : "")
                 + ' -e CRYPTO_NODE_VERSION=' + bitcoinVer + ' '
