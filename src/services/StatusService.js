@@ -74,6 +74,8 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
     const installedModules = getInstalledModules()
     const remoteModuleVersions = getRemoteModuleVersions()
 
+    const rows = []
+
     if (Object.keys(installedModules).length > 0) {
         for (const nextCoin in installedModules) {
             if (checkVersions && !(NODE_MODULE_NAME + SEP + nextCoin in remoteModuleVersions)) {
@@ -86,7 +88,6 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                 const nextCoinNetworkModules = installedModules[nextCoin][nextCoinNetwork]
                 const moduleKeys = Object.keys(nextCoinNetworkModules)
 
-                let titlePrinted = false
                 if (moduleKeys.length > 0) {
                     const toRemove = []
 
@@ -95,11 +96,6 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                         try {
                             const containerStatus = await getStatusFromContainer(containerId)
                             nextCoinNetworkModules[nextModule]["status"] = containerStatus
-
-                            if (!titlePrinted) {
-                                appendLastPrintedStatus("\x1b[37m[" + (nextCoin + " - " + nextCoinNetwork).toUpperCase() + "]\x1b[37m\n")
-                                titlePrinted = true
-                            }
 
                             let remoteVersion = "-"
                             try {
@@ -131,11 +127,10 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 nextCoinNetworkModules[nextModule]["container_version"] = containerVersion
                             } catch { /* not available yet */ }
 
-                            const state = containerStatus["State"]["Status"]
-                            const color = state === "Exited" ? "\x1b[31m" : "\x1b[32m"
-
-                            const rawPorts = containerStatus["NetworkSettings"]["Ports"] || {}
-                            const portParts = []
+                            const state       = containerStatus["State"]["Status"]
+                            const name        = nextModule
+                            const rawPorts    = containerStatus["NetworkSettings"]["Ports"] || {}
+                            const portParts   = []
                             for (const [containerPort, bindings] of Object.entries(rawPorts)) {
                                 if (bindings && bindings.length > 0) {
                                     for (const binding of bindings) {
@@ -143,9 +138,13 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                     }
                                 }
                             }
-                            const portsString = portParts.length > 0 ? portParts.join(", ") : "-"
-
-                            appendLastPrintedStatus(" " + color + nextModule + " (" + state + ")\x1b[37m " + portsString + "\n")
+                            rows.push({
+                                name,
+                                coin:    nextCoin    || "-",
+                                network: nextCoinNetwork || "-",
+                                state,
+                                ports: portParts.length > 0 ? portParts.join(", ") : "-"
+                            })
 
                         } catch {
                             toRemove.push(nextModule)
@@ -174,10 +173,28 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                 delete installedModules[nextCoin]
             }
         }
-
-        appendLastPrintedStatus("\n")
-        if (printStatus) console.log(getLastPrintedStatus())
     }
+
+    const COL_COIN    = Math.max("COIN".length,    ...rows.map(r => r.coin.length))    + 2
+    const COL_NETWORK = Math.max("NETWORK".length, ...rows.map(r => r.network.length)) + 2
+    const COL_NAME    = Math.max("SERVICE".length, ...rows.map(r => r.name.length))    + 2
+    const COL_STATUS  = Math.max("STATUS".length,  ...rows.map(r => r.state.length))   + 2
+    let output = "\x1b[1m"
+        + "COIN".padEnd(COL_COIN)
+        + "NETWORK".padEnd(COL_NETWORK)
+        + "SERVICE".padEnd(COL_NAME)
+        + "STATUS".padEnd(COL_STATUS)
+        + "PORTS\x1b[0m\n"
+    for (const row of rows) {
+        const color = row.state === "running" ? "\x1b[32m" : "\x1b[31m"
+        output += row.coin.padEnd(COL_COIN)
+            + row.network.padEnd(COL_NETWORK)
+            + row.name.padEnd(COL_NAME)
+            + color + row.state.padEnd(COL_STATUS) + "\x1b[0m"
+            + row.ports + "\n"
+    }
+    setLastPrintedStatus(output)
+    if (printStatus) console.log(getLastPrintedStatus())
 
     setLastStatus(installedModules)
     setStatusUpdated(true)
