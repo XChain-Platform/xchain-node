@@ -45,8 +45,8 @@ async function getInstalledCoinsAndNetworks() {
     return result
 }
 
-async function loadInstalledModules(coin, network) {
-    await checkRemoteNodeVersion(coin, network)
+async function loadInstalledModules(coin, network, checkVersions = false) {
+    if (checkVersions) await checkRemoteNodeVersion(coin, network)
     const modules = await db.getAllModuleContainers(coin, network)
 
     for (const nextModule of modules) {
@@ -61,7 +61,7 @@ async function loadInstalledModules(coin, network) {
     }
 }
 
-async function getStatus(coin, network, printStatus = false) {
+async function getStatus(coin, network, printStatus = false, checkVersions = false) {
     if (isStatusUpdated()) {
         if (printStatus) console.log(getLastPrintedStatus())
         return getLastStatus()
@@ -69,14 +69,14 @@ async function getStatus(coin, network, printStatus = false) {
 
     setLastPrintedStatus("")
     resetInstalledModules()
-    await loadInstalledModules(coin, network)
+    await loadInstalledModules(coin, network, checkVersions)
 
     const installedModules = getInstalledModules()
     const remoteModuleVersions = getRemoteModuleVersions()
 
     if (Object.keys(installedModules).length > 0) {
         for (const nextCoin in installedModules) {
-            if (!(NODE_MODULE_NAME + SEP + nextCoin in remoteModuleVersions)) {
+            if (checkVersions && !(NODE_MODULE_NAME + SEP + nextCoin in remoteModuleVersions)) {
                 await checkRemoteNodeVersion(nextCoin)
             }
 

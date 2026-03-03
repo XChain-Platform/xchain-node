@@ -38,7 +38,7 @@ async function preCheck(checkVersions = false) {
         await checkAllRemoteVersions()
     }
     console.log("Getting modules status")
-    await getStatus(null, null, false)
+    await getStatus(null, null, false, checkVersions)
 
     try {
         await createDockerNetwork(getDockerNetwork("", ""))
