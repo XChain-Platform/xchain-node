@@ -6,6 +6,7 @@
 const { Command }  = require('commander')
 const { version }  = require('../package.json')
 const { preCheck } = require('./precheck')
+const { setVerbose } = require('./state')
 const { filterCommandParameters } = require('./services/ConfigService')
 const {
     installModules,
@@ -28,13 +29,15 @@ async function parseCommand() {
 
     const commandsNeedingVersions = ['install', 'update', 'reinstall']
     program.hook('preAction', async (thisCommand, actionCommand) => {
-        console.log("Checking xchain-node structure")
+        setVerbose(thisCommand.opts().verbose ?? false)
+        if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
         await preCheck(commandsNeedingVersions.includes(actionCommand.name()))
     })
 
     program
         .name('xchain-node')
-        .version(version, '-v, --version', 'Shows xchain-node version')
+        .version(version, '-V, --version', 'Shows xchain-node version')
+        .option('-v, --verbose', 'Print precheck progress messages')
         .option('-i, --interactive', 'Interactive mode')
         .option('--no-bootstrap', 'Do not download bootstrap files (full parse)')
         .option('--no-explorer', 'Do not install xchain-explorer')

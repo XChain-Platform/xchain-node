@@ -6,7 +6,7 @@
 const fs = require('fs')
 
 const { dataDir, moduleDir, tmpDir, containersFilesDir } = require('./config/constants')
-const { db }                           = require('./state')
+const { db, isVerbose }                = require('./state')
 const { checkDockerInstalledAndReachable, createDockerNetwork } = require('./services/DockerService')
 const { getDockerNetwork } = require('./services/ConfigService')
 const { checkAllRemoteVersions }       = require('./services/VersionService')
@@ -23,21 +23,21 @@ function createDirectories() {
 
 async function preCheck(checkVersions = false) {
     try {
-        console.log("Checking if Docker is installed")
+        if (isVerbose()) console.log("Checking if Docker is installed")
         await checkDockerInstalledAndReachable()
     } catch {
         throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
     }
 
-    console.log("Checking/Creating directories")
+    if (isVerbose()) console.log("Checking/Creating directories")
     createDirectories()
-    console.log("Checking/Creating database")
+    if (isVerbose()) console.log("Checking/Creating database")
     await db.createDatabase()
     if (checkVersions) {
-        console.log("Getting all remote project versions")
+        if (isVerbose()) console.log("Getting all remote project versions")
         await checkAllRemoteVersions()
     }
-    console.log("Getting modules status")
+    if (isVerbose()) console.log("Getting modules status")
     await getStatus(null, null, false, checkVersions)
 
     try {
@@ -47,7 +47,7 @@ async function preCheck(checkVersions = false) {
     }
 
     try {
-        console.log("Checking/Installing hub module")
+        if (isVerbose()) console.log("Checking/Installing hub module")
         await installHubModule()
     } catch {
         throw new Error("There was an error trying to install the hub module")

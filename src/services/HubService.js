@@ -7,7 +7,7 @@ const {
     HUB_MODULE_NAME, DB_MODULE_NAME, NODE_MODULE_NAME, EXPLORER_MODULE_NAME,
     XChainService, SEP
 } = require('../config/constants')
-const { db, getLastStatus, isStatusUpdated }   = require('../state')
+const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
 const { sleep }                                = require('../utils/helpers')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = require('./ConfigService')
 const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./StatusService')
@@ -182,7 +182,7 @@ async function updateHub() {
 
 async function installHubModule() {
     const defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
-    console.log("Checking if xchain-hub module is running")
+    if (isVerbose()) console.log("Checking if xchain-hub module is running")
     const hubConnector = new HubConnector(defaultConfig["HUB_HOST"], defaultConfig["HUB_PORT"])
 
     const pingHub = await hubConnector.ping()

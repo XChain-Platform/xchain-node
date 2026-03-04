@@ -17,6 +17,7 @@ let remoteModuleVersions = {}
 let statusUpdated     = false
 let lastStatus        = null
 let lastPrintedStatus = ""
+let verbose           = false
 
 function getDbRootPassword()       { return dbRootPassword }
 function setDbRootPassword(val)    { dbRootPassword = val }
@@ -38,6 +39,9 @@ function getLastPrintedStatus()    { return lastPrintedStatus }
 function setLastPrintedStatus(val) { lastPrintedStatus = val }
 function appendLastPrintedStatus(val) { lastPrintedStatus += val }
 
+function isVerbose()               { return verbose }
+function setVerbose(val)           { verbose = val }
+
 module.exports = {
     db,
     gitHubDownloader,
@@ -54,5 +58,7 @@ module.exports = {
     setLastStatus,
     getLastPrintedStatus,
     setLastPrintedStatus,
-    appendLastPrintedStatus
+    appendLastPrintedStatus,
+    isVerbose,
+    setVerbose
 }
