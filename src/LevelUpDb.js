@@ -32,10 +32,6 @@ class LevelUpStore {
         this.path = path
     }
   
-    async sleep(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-    }
-  
     async createDatabase() {
         try {
             this.db = levelup(leveldown(this.path+"/"+this.dbName)) 

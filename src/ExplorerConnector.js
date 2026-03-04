@@ -26,10 +26,6 @@ class ExplorerConnector {
         this.port = port
     }
 
-    async sleep(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
     async ping(){
         const data = {
             jsonrpc: '2.0',
