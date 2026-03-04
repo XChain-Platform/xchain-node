@@ -121,6 +121,7 @@ async function getDefaultConfig(module, coin, network) {
             "DECODER_API_PORT":  3002,
             "DECODER_PORT":      3002,
             "DECODER_BOOTSTRAP_VOLUME": dataDir + "/" + coin + "/" + network + "/" + module + "/bootstrap/",
+            "INDEXER_BOOTSTRAP_VOLUME": dataDir + "/" + coin + "/" + network + "/" + module + "/bootstrap/",
             "ENCODER_URL":       getDockerContainerImageName(XChainService.XCHAIN_ENCODER, coin, network),
             "ENCODER_API_PORT":  3003,
             "ENCODER_PORT":      3003,
