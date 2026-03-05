@@ -346,9 +346,7 @@ async function mainMenu() {
 
     const answer = await prompt.run().catch(() => null)
 
-    if (answer == null) {
-        return { menuFunction: mainMenu, parameters: [] }
-    } else if (answer === "Exit") {
+    if (answer == null || answer === "Exit") {
         console.log("Bye!")
         return { menuFunction: exit, parameters: [] }
     } else if (answer === "Scan already installed modules") {
