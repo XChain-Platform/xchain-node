@@ -90,7 +90,7 @@ async function restoreBootstrapInterface(coin, network, module) {
         choices: moduleChoices
     })
 
-    const answer = await modulesSelect.run()
+    const answer = await modulesSelect.run().catch(() => "Return")
     if (answer === "Return") {
         return true
     } else {
@@ -170,9 +170,7 @@ async function modulesSelectionInterface(coin, network) {
         choices: moduleChoices
     })
 
-    const moduleAnswer = await modulesSelect.run().catch(error => {
-        console.log("An error has occurred in Enquirer:", error)
-    })
+    const moduleAnswer = await modulesSelect.run().catch(() => "Return")
 
     if (moduleAnswer === "Return") {
         return { menuFunction: mainMenu, parameters: [] }
@@ -269,10 +267,10 @@ async function modulesSelectionInterface(coin, network) {
                 choices: moduleActions
             })
 
-            const actionAnswer = await actionSelect.run().catch(error => {
-                console.log("An error has occurred in Enquirer:", error)
-            })
-            if (actionAnswer === "Uninstall") {
+            const actionAnswer = await actionSelect.run().catch(() => "Return")
+            if (actionAnswer === "Return") {
+                // ESC or Return: go back to module list
+            } else if (actionAnswer === "Uninstall") {
                 try {
                     await uninstallModules({ [coin]: { [network]: [selectedValue] } })
                 } catch (err) {
@@ -310,9 +308,7 @@ async function modulesSelectionInterface(coin, network) {
                 choices: moduleActions
             })
 
-            const actionAnswer = await actionSelect.run().catch(error => {
-                console.log("An error has occurred in Enquirer:", error)
-            })
+            const actionAnswer = await actionSelect.run().catch(() => "Return")
             if (actionAnswer === "Install" || actionAnswer === "Install from local") {
                 try {
                     await installModules({ [coin]: { [network]: [selectedValue] } })
@@ -348,11 +344,11 @@ async function mainMenu() {
         ])
     })
 
-    const answer = await prompt.run().catch(error => {
-        console.log("An error has occurred in Enquirer:", error)
-    })
+    const answer = await prompt.run().catch(() => null)
 
-    if (answer === "Exit") {
+    if (answer == null) {
+        return { menuFunction: mainMenu, parameters: [] }
+    } else if (answer === "Exit") {
         console.log("Bye!")
         return { menuFunction: exit, parameters: [] }
     } else if (answer === "Scan already installed modules") {
@@ -364,7 +360,8 @@ async function mainMenu() {
         }
         return { menuFunction: mainMenu, parameters: [] }
     } else {
-        const networkAnswer = await networkPrompt.run()
+        const networkAnswer = await networkPrompt.run().catch(() => null)
+        if (networkAnswer == null) return { menuFunction: mainMenu, parameters: [] }
         return { menuFunction: modulesSelectionInterface, parameters: [answer, networkAnswer] }
     }
 }
