@@ -43,7 +43,6 @@ async function parseCommand() {
         .option('--no-explorer', 'Do not install xchain-explorer')
         .action(async (options) => {
             if (options.interactive) {
-                await preCheck()
                 return startInterface()
             }
             program.help()
