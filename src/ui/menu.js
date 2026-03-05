@@ -10,9 +10,9 @@ const {
     NODE_MODULE_NAME, DB_MODULE_NAME, XChainService, Coin, Network, SEP
 } = require('../config/constants')
 const { db, getRemoteModuleVersions }   = require('../state')
-const { killContainer, removeContainer } = require('../services/DockerService')
 const { getStatus, statusChanged }       = require('../services/StatusService')
-const { installModule, uninstallModule } = require('../services/ModuleService')
+const { cloneGit, installModule } = require('../services/ModuleService')
+const { installModules, uninstallModules, updateModules, restartModules } = require('../operations/moduleOperations')
 const { installNode }                    = require('../services/NodeService')
 const { makeBootstrap, restoreBootstrap, getBootstrapFilesList } = require('../services/BootstrapService')
 const {
@@ -161,17 +161,13 @@ async function modulesSelectionInterface(coin, network) {
     if (moduleAnswer === "Return") {
         return { menuFunction: mainMenu, parameters: [] }
     } else if (moduleAnswer === "Uninstall all the modules") {
-        for (const key in actionModules) {
-            const mod = actionModules[key]
-            if ((mod["value"] !== DB_MODULE_NAME || onlyOneModuleUsingDatabase) && mod["status"] !== "missing") {
-                try {
-                    if (mod["status"] !== "exited") await killContainer(mod["container_id"])
-                    await removeContainer(mod["container_id"])
-                    await statusChanged()
-                } catch {
-                    console.log("There was a problem trying to kill a container")
-                }
-            }
+        const modulesToUninstall = Object.values(actionModules)
+            .filter(mod => mod["status"] !== "missing" && mod["value"] !== DB_MODULE_NAME)
+            .map(mod => mod["value"])
+        try {
+            await uninstallModules({ [coin]: { [network]: modulesToUninstall } })
+        } catch (err) {
+            console.log(err)
         }
         return { menuFunction: modulesSelectionInterface, parameters: [coin, network] }
     } else if (moduleAnswer === "Install the node") {
@@ -260,20 +256,15 @@ async function modulesSelectionInterface(coin, network) {
             const actionAnswer = await actionSelect.run().catch(error => {
                 console.log("An error has occurred in Enquirer:", error)
             })
-            const { cloneGit } = require('../services/ModuleService')
             if (actionAnswer === "Uninstall") {
                 try {
-                    if (selectedStatus !== "exited") await killContainer(selected["container_id"])
-                    await removeContainer(selected["container_id"])
-                    await statusChanged()
+                    await uninstallModules({ [coin]: { [network]: [selectedValue] } })
                 } catch (err) {
                     console.log(err)
                 }
             } else if (actionAnswer === "Restart") {
                 try {
-                    const { restartContainer } = require('../services/DockerService')
-                    await restartContainer(selected["container_id"])
-                    await statusChanged()
+                    await restartModules({ [coin]: { [network]: [selectedValue] } })
                 } catch (err) {
                     console.log(err)
                 }
@@ -286,8 +277,7 @@ async function modulesSelectionInterface(coin, network) {
             } else if (actionAnswer === "Restore Bootstrap") {
                 await restoreBootstrapInterface(coin, network, selectedValue)
             } else if (actionAnswer === "Reinstall from remote") {
-                await cloneGit(selectedValue, true)
-                await installModule(selectedValue, coin, network, false, selected["container_id"])
+                await updateModules({ [coin]: { [network]: [selectedValue] } })
             }
         } else {
             const moduleActions = []
@@ -307,15 +297,9 @@ async function modulesSelectionInterface(coin, network) {
             const actionAnswer = await actionSelect.run().catch(error => {
                 console.log("An error has occurred in Enquirer:", error)
             })
-            if (actionAnswer === "Install") {
+            if (actionAnswer === "Install" || actionAnswer === "Install from local") {
                 try {
-                    await installModule(selectedValue, coin, network, true)
-                } catch (err) {
-                    console.log(err)
-                }
-            } else if (actionAnswer === "Install from local") {
-                try {
-                    await installModule(selectedValue, coin, network, false)
+                    await installModules({ [coin]: { [network]: [selectedValue] } })
                 } catch (err) {
                     console.log(err)
                 }
