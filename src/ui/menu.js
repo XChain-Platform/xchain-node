@@ -358,6 +358,7 @@ async function mainMenu() {
     } else if (answer === "Scan already installed modules") {
         try {
             await scanModules()
+            await statusChanged()
         } catch (err) {
             console.log(err)
         }
