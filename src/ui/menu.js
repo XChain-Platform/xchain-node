@@ -12,7 +12,6 @@ const {
 const { db, getRemoteModuleVersions }   = require('../state')
 const { killContainer, removeContainer } = require('../services/DockerService')
 const { getStatus, statusChanged }       = require('../services/StatusService')
-const { buildDatabaseModule, setDatabaseParameters } = require('../services/DatabaseService')
 const { installModule, uninstallModule } = require('../services/ModuleService')
 const { installNode }                    = require('../services/NodeService')
 const { makeBootstrap, restoreBootstrap, getBootstrapFilesList } = require('../services/BootstrapService')
@@ -344,7 +343,6 @@ async function mainMenu() {
         name: 'action',
         message: 'Select a coin and a network to check the status and install/uninstall modules',
         choices: Object.values(Coin).concat([
-            { name: 'Install/Configure database', value: 'configure_database' },
             { name: 'Scan already installed modules', value: 'scan_modules' },
             { name: 'Exit', value: 'exit' }
         ])
@@ -357,15 +355,6 @@ async function mainMenu() {
     if (answer === "Exit") {
         console.log("Bye!")
         return { menuFunction: exit, parameters: [] }
-    } else if (answer === "Install/Configure database") {
-        try {
-            await buildDatabaseModule("", "")
-            await setDatabaseParameters()
-        } catch (err) {
-            console.log("WARNING! The database parameters couldn't be set")
-            console.log(err)
-        }
-        return { menuFunction: mainMenu, parameters: [] }
     } else if (answer === "Scan already installed modules") {
         try {
             await scanModules()
