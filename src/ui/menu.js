@@ -7,7 +7,8 @@ const { Select } = require('enquirer')
 const semver    = require('semver')
 
 const {
-    NODE_MODULE_NAME, DB_MODULE_NAME, XChainService, Coin, Network, SEP
+    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
+    XChainService, Coin, Network, SEP
 } = require('../config/constants')
 const { db, getRemoteModuleVersions }   = require('../state')
 const { getStatus, statusChanged }       = require('../services/StatusService')
@@ -37,6 +38,18 @@ async function scanModules() {
                 if (!imageName.startsWith(NODE_PREFIX + SEP)) continue
 
                 const rest  = imageName.substr(NODE_PREFIX.length + SEP.length)
+
+                // Special modules: database, hub, explorer (no coin/network in image name)
+                const specialModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME]
+                if (specialModules.includes(rest)) {
+                    const moduleDb = await db.getModuleContainer(rest, "", "")
+                    if (moduleDb == null) {
+                        await db.insertModuleContainer(rest, "", "", nextContainer.ID)
+                        console.log("Added " + rest + " (" + nextContainer.ID + ")")
+                    }
+                    continue
+                }
+
                 const parts = rest.split(SEP)
                 if (parts.length < 3) continue
 
