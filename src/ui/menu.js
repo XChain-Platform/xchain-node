@@ -21,40 +21,43 @@ const {
 } = require('../services/VersionService')
 
 async function scanModules() {
+    const { NODE_PREFIX } = require('../config/constants')
+    const { stringToXChainService } = require('../utils/helpers')
+    const validCoins    = Object.values(Coin)
+    const validNetworks = Object.values(Network)
+
     return new Promise((resolve) => {
         exec('docker ps -a --no-trunc --format json', async (error, stdout) => {
-            const { NODE_PREFIX, SEP } = require('../config/constants')
             const containers = stdout.trim()
                 .split('\n').filter(line => line.trim().length > 0)
                 .map(line => JSON.parse(line))
 
             for (const nextContainer of containers) {
-                let imageName = nextContainer.Image
-                if (!imageName.startsWith(NODE_PREFIX)) continue
+                const imageName = nextContainer.Image
+                if (!imageName.startsWith(NODE_PREFIX + SEP)) continue
 
-                imageName = imageName.substr(NODE_PREFIX.length + 1)
-                const parts = imageName.split(SEP)
+                const rest  = imageName.substr(NODE_PREFIX.length + SEP.length)
+                const parts = rest.split(SEP)
+                if (parts.length < 3) continue
 
-                if (parts.length === 3) {
-                    const coin = Coin[parts[0]]
-                    const network = Coin[parts[1]]
-                    const { stringToXChainService } = require('../utils/helpers')
+                const coinStr    = parts[0]
+                const networkStr = parts[1]
+                const moduleStr  = parts.slice(2).join(SEP)
 
-                    if (coin != null && network != null) {
-                        let module = stringToXChainService(parts[2])
-                        if (module != null) {
-                            module = XChainService[module]
-                        } else if (parts[2] === NODE_MODULE_NAME) {
-                            module = NODE_MODULE_NAME
-                        }
+                if (!validCoins.includes(coinStr) || !validNetworks.includes(networkStr)) continue
 
-                        if (module != null) {
-                            const moduleDb = await db.getModuleContainer(module, coin, network)
-                            if (moduleDb == null) {
-                                await db.insertModuleContainer(module, coin, network, nextContainer.ID)
-                                console.log("Added " + coin + "-" + network + SEP + module + " (" + nextContainer.ID + ")")
-                            }
-                        }
+                let module = stringToXChainService(moduleStr)
+                if (module != null) {
+                    module = XChainService[module]
+                } else if (moduleStr === NODE_MODULE_NAME) {
+                    module = NODE_MODULE_NAME
+                }
+
+                if (module != null) {
+                    const moduleDb = await db.getModuleContainer(module, coinStr, networkStr)
+                    if (moduleDb == null) {
+                        await db.insertModuleContainer(module, coinStr, networkStr, nextContainer.ID)
+                        console.log("Added " + coinStr + SEP + networkStr + SEP + module + " (" + nextContainer.ID + ")")
                     }
                 }
             }
