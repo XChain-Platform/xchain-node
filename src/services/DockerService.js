@@ -352,6 +352,33 @@ async function killContainer(containerId) {
     })
 }
 
+async function waitContainer(containerId) {
+    return new Promise((resolve, reject) => {
+        exec('docker wait ' + containerId, (error, stdout) => {
+            if (error) {
+                reject(error)
+            } else {
+                resolve(parseInt(stdout.trim()))
+            }
+        })
+    })
+}
+
+async function saveContainerLogs(containerId, filePath) {
+    return new Promise((resolve, reject) => {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true })
+        const output = fs.createWriteStream(filePath)
+        const child = spawn('docker', ['logs', containerId])
+        child.stdout.pipe(output)
+        child.stderr.pipe(output)
+        child.on('close', () => {
+            output.end()
+            resolve(true)
+        })
+        child.on('error', reject)
+    })
+}
+
 module.exports = {
     checkDockerInstalledAndReachable,
     getStatusFromContainer,
@@ -370,5 +397,7 @@ module.exports = {
     execContainer,
     shellContainer,
     logContainer,
-    startDockerMonitor
+    startDockerMonitor,
+    waitContainer,
+    saveContainerLogs
 }

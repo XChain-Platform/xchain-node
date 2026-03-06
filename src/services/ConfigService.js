@@ -204,7 +204,7 @@ function filterCommandParameters(branch, modules, coins, networks) {
     }
 
     if (modules === "all") {
-        modules = Object.values(XChainService)
+        modules = Object.values(XChainService).filter(m => m !== XChainService.XCHAIN_E2E_TEST)
         modules.push(NODE_MODULE_NAME)
         addExplorer = true
     } else if (modules === "explorer") {
