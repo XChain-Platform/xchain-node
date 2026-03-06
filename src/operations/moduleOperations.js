@@ -3,10 +3,11 @@
  * Bulk operations over lists of modules (install, start, stop, etc.)
  ********************************************************************/
 
-const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME } = require('../config/constants')
+const path = require('path')
+const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, XChainService, dataDir } = require('../config/constants')
 const { db }                 = require('../state')
 const { getDockerContainerImageName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
-const { createDockerNetwork, killContainer, removeContainer, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor } = require('../services/DockerService')
+const { createDockerNetwork, killContainer, removeContainer, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
 const { buildDatabaseModule } = require('../services/DatabaseService')
 const { cloneGit, installModule, uninstallModule } = require('../services/ModuleService')
 const { statusChanged } = require('../services/StatusService')
@@ -195,6 +196,22 @@ async function shellModule(servicesList) {
     return true
 }
 
+async function runE2ETest(coin, network) {
+    const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true)
+
+    console.log("Running e2e tests, please wait...")
+    const exitCode = await waitContainer(containerId)
+
+    const now = new Date()
+    const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const logFile = path.join(dataDir, 'e2e-logs', `${coin}-${network}-${timestamp}.log`)
+
+    await saveContainerLogs(containerId, logFile)
+    await removeContainer(containerId)
+
+    return { logFile, exitCode }
+}
+
 module.exports = {
     installModules,
     updateModules,
@@ -205,5 +222,6 @@ module.exports = {
     stopModules,
     startModules,
     execModules,
-    shellModule
+    shellModule,
+    runE2ETest
 }

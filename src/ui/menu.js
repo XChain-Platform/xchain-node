@@ -13,7 +13,7 @@ const {
 const { db, getRemoteModuleVersions }   = require('../state')
 const { getStatus, statusChanged }       = require('../services/StatusService')
 const { cloneGit, installModule } = require('../services/ModuleService')
-const { installModules, uninstallModules, updateModules, restartModules, logModules } = require('../operations/moduleOperations')
+const { installModules, uninstallModules, updateModules, restartModules, logModules, runE2ETest } = require('../operations/moduleOperations')
 const { installNode }                    = require('../services/NodeService')
 const { makeBootstrap, restoreBootstrap, getBootstrapFilesList } = require('../services/BootstrapService')
 const {
@@ -194,8 +194,9 @@ async function modulesSelectionInterface(coin, network) {
         return { menuFunction: modulesSelectionInterface, parameters: [coin, network] }
     } else if (moduleAnswer === "Perform an E2E test") {
         try {
-            const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true)
-            console.log("The e2e test was performed in container " + containerId)
+            const { logFile, exitCode } = await runE2ETest(coin, network)
+            console.log("E2E tests finished with exit code " + exitCode)
+            console.log("Logs saved to: " + logFile)
         } catch (err) {
             console.log(err)
         }
