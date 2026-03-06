@@ -13,7 +13,7 @@ const {
 const { db, getRemoteModuleVersions }   = require('../state')
 const { getStatus, statusChanged }       = require('../services/StatusService')
 const { cloneGit, installModule } = require('../services/ModuleService')
-const { installModules, uninstallModules, updateModules, restartModules } = require('../operations/moduleOperations')
+const { installModules, uninstallModules, updateModules, restartModules, logModules } = require('../operations/moduleOperations')
 const { installNode }                    = require('../services/NodeService')
 const { makeBootstrap, restoreBootstrap, getBootstrapFilesList } = require('../services/BootstrapService')
 const {
@@ -227,7 +227,7 @@ async function modulesSelectionInterface(coin, network) {
                     : await getContainerModuleVersion(selectedValue, coin, network, selected["container_id"])
             } catch { /* not available */ }
 
-            const moduleActions = []
+            const moduleActions = [{ name: "Tail logs", value: "tail" }]
 
             if (selectedStatus === "exited") moduleActions.push({ name: "Restart", value: "restart" })
 
@@ -292,6 +292,8 @@ async function modulesSelectionInterface(coin, network) {
                 await restoreBootstrapInterface(coin, network, selectedValue)
             } else if (actionAnswer === "Reinstall from remote") {
                 await updateModules({ [coin]: { [network]: [selectedValue] } })
+            } else if (actionAnswer === "Tail logs") {
+                await logModules({ [coin]: { [network]: [selectedValue] } })
             }
         } else {
             const moduleActions = []

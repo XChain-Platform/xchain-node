@@ -237,8 +237,33 @@ async function logContainer(containerId, follow = true) {
         if (follow) {
             parameters.splice(1, 0, '--tail', '10', '--follow')
         }
-        spawnSync('docker', parameters, { stdio: 'inherit' })
-        resolve(true)
+
+        const child = spawn('docker', parameters, { stdio: ['pipe', 'inherit', 'inherit'] })
+
+        const killChild = () => child.kill('SIGTERM')
+
+        const onKeypress = (key) => {
+            if (key === '\u001b' || key === '\u0003') killChild()
+        }
+
+        process.once('SIGINT', killChild)
+
+        if (follow && process.stdin.isTTY) {
+            process.stdin.setRawMode(true)
+            process.stdin.resume()
+            process.stdin.setEncoding('utf8')
+            process.stdin.on('data', onKeypress)
+        }
+
+        child.on('close', () => {
+            process.removeListener('SIGINT', killChild)
+            if (follow && process.stdin.isTTY) {
+                process.stdin.removeListener('data', onKeypress)
+                process.stdin.setRawMode(false)
+                process.stdin.pause()
+            }
+            resolve(true)
+        })
     })
 }
 
