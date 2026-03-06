@@ -67,9 +67,10 @@ async function parseCommand() {
         .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .action(async (service, chain, network) => {
+        .option('--include-shared', 'Also uninstall shared services (database, xchain-hub, xchain-explorer)')
+        .action(async (service, chain, network, options) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await uninstallModules(serviceList)
+            await uninstallModules(serviceList, options.includeShared)
             return process.exit(0)
         })
 

@@ -252,7 +252,8 @@ async function modulesSelectionInterface(coin, network) {
                 moduleActions.push({ name: "Update locale version", value: "update locale version" })
             }
 
-            if (selectedValue !== DB_MODULE_NAME) {
+            const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME]
+            if (!sharedModules.includes(selectedValue)) {
                 moduleActions.push({ name: "Uninstall", value: "uninstall" })
                 if (selectedValue === XChainService.XCHAIN_UTXO_TRACKER) {
                     moduleActions.push({ name: "Make Bootstrap", value: "make_bootstrap" })

@@ -3,7 +3,7 @@
  * Bulk operations over lists of modules (install, start, stop, etc.)
  ********************************************************************/
 
-const { NODE_MODULE_NAME }   = require('../config/constants')
+const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME } = require('../config/constants')
 const { db }                 = require('../state')
 const { getDockerContainerImageName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor } = require('../services/DockerService')
@@ -43,10 +43,12 @@ async function updateModules(servicesList) {
     return true
 }
 
-async function uninstallModules(servicesList) {
+async function uninstallModules(servicesList, includeShared = false) {
+    const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME]
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                if (!includeShared && sharedModules.includes(nextModule)) continue
                 try {
                     await uninstallModule(nextCoin, nextNetwork, nextModule)
                 } catch (err) {
