@@ -18,7 +18,8 @@ const {
     stopModules,
     startModules,
     execModules,
-    shellModule
+    shellModule,
+    runE2ETest
 } = require('./operations/moduleOperations')
 const { getStatus }            = require('./services/StatusService')
 const { makeBootstrap }        = require('./services/BootstrapService')
@@ -204,6 +205,17 @@ async function parseCommand() {
             }
             const serviceList = filterCommandParameters(null, service, chain, network)
             await shellModule(serviceList)
+            return process.exit(0)
+        })
+
+    program
+        .command('e2etest')
+        .description('Run E2E tests on a regtest network')
+        .argument('<chain>', '(bitcoin, litecoin, dogecoin)')
+        .action(async (chain) => {
+            const { logFile, exitCode } = await runE2ETest(chain, 'regtest')
+            console.log("E2E tests finished with exit code " + exitCode)
+            console.log("Logs saved to: " + logFile)
             return process.exit(0)
         })
 
