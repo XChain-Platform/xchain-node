@@ -58,7 +58,7 @@ async function parseCommand() {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (branch, service, chain, network) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await installModules(serviceList)
+            await installModules(serviceList, branch)
             return process.exit(0)
         })
 
