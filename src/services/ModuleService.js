@@ -66,6 +66,14 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
     })
 }
 
+async function getModuleBranch(module) {
+    const { promisify } = require('util')
+    const execAsync = promisify(exec)
+    const dir = getModuleDir(module)
+    const { stdout } = await execAsync(`git -C "${dir}" rev-parse --abbrev-ref HEAD`)
+    return stdout.trim()
+}
+
 async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false) {
     if (!checkIfModuleExists(module)) {
         throw "module not found"
@@ -253,6 +261,12 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
             try {
                 if (remoteUpdate || localModuleVersion == null) {
                     await cloneGit(module, true, false, branch)
+                } else if (branch && moduleDirExists(module)) {
+                    const currentBranch = await getModuleBranch(module)
+                    if (currentBranch !== branch) {
+                        console.log(`Module '${module}' is on branch '${currentBranch}', switching to '${branch}'...`)
+                        await cloneGit(module, true, false, branch)
+                    }
                 }
                 const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
