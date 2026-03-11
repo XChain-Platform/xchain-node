@@ -31,7 +31,7 @@ async function installModules(servicesList, branch = null) {
     return true
 }
 
-async function updateModules(servicesList) {
+async function updateModules(servicesList, branch = null) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
@@ -39,7 +39,7 @@ async function updateModules(servicesList) {
                 if (nextModule === NODE_MODULE_NAME) {
                     await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId)
                 } else {
-                    await cloneGit(nextModule, true, false)
+                    await cloneGit(nextModule, true, false, branch)
                     await installModule(nextModule, nextCoin, nextNetwork, false, moduleContainerId)
                 }
             }

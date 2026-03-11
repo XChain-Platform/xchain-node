@@ -82,9 +82,10 @@ async function parseCommand() {
         .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .action(async (service, chain, network) => {
+        .argument('[branch]',  '(master, develop, or any branch name)')
+        .action(async (service, chain, network, branch) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await updateModules(serviceList)
+            await updateModules(serviceList, branch)
             return process.exit(0)
         })
 
