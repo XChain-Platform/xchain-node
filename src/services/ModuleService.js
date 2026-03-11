@@ -45,9 +45,20 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
         const destination = useTmp ? getModuleTmpDir(module) : getModuleDir(module)
         const branchFlag = branch ? `-b ${branch} ` : ''
 
-        exec(`git clone ${branchFlag}${gitUrl} ${destination}`, (error) => {
+        exec(`git clone ${branchFlag}${gitUrl} ${destination}`, (error, stdout, stderr) => {
             if (error) {
-                reject("Error cloning project: " + error.message)
+                if (branch && stderr && stderr.toLowerCase().includes('not found')) {
+                    console.warn(`WARNING: Branch '${branch}' not found for module '${module}'. Falling back to default branch (master).`)
+                    exec(`git clone ${gitUrl} ${destination}`, (fallbackError) => {
+                        if (fallbackError) {
+                            reject("Error cloning project: " + fallbackError.message)
+                        } else {
+                            resolve(true)
+                        }
+                    })
+                } else {
+                    reject("Error cloning project: " + error.message)
+                }
             } else {
                 resolve(true)
             }
