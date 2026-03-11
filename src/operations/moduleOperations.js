@@ -236,8 +236,7 @@ async function resetModules(coin, network) {
     const nodeDataPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
     if (fs.existsSync(nodeDataPath)) {
         console.log(`Clearing node data at ${nodeDataPath}...`)
-        fs.rmSync(nodeDataPath, { recursive: true, force: true })
-        fs.mkdirSync(nodeDataPath, { recursive: true })
+        await execAsync(`docker run --rm -v "${nodeDataPath}:/data" alpine sh -c "find /data -mindepth 1 -delete"`)
     }
 
     const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
