@@ -194,14 +194,12 @@ async function setDatabaseParameters() {
     return true
 }
 
-async function resetDatabases(coin, network) {
+async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]) {
     const mariadbRootPassword = await askMariadbRootPassword(coin, network)
     const mariadbContainerId  = await db.getModuleContainer(DB_MODULE_NAME, "", "")
 
-    const decoderDbName = getModuleDatabaseName(XChainService.XCHAIN_DECODER, coin, network)
-    const indexerDbName = getModuleDatabaseName(XChainService.XCHAIN_INDEXER, coin, network)
-
-    for (const dbName of [decoderDbName, indexerDbName]) {
+    for (const module of modules) {
+        const dbName = getModuleDatabaseName(module, coin, network)
         await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
             `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`
         )

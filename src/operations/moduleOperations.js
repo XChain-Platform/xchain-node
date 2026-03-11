@@ -216,39 +216,54 @@ async function runE2ETest(coin, network) {
     return { logFile, exitCode }
 }
 
-async function resetModules(coin, network) {
-    const modulesToReset = [
-        NODE_MODULE_NAME,
-        XChainService.XCHAIN_UTXO_TRACKER,
-        XChainService.XCHAIN_DECODER,
-        XChainService.XCHAIN_INDEXER,
-        XChainService.XCHAIN_REGTEST_MINER,
-    ]
+async function resetModules(service, coin, network) {
+    const resetAll         = service === 'all'
+    const resetNode        = resetAll || service === NODE_MODULE_NAME
+    const resetUtxoTracker = resetAll || service === XChainService.XCHAIN_UTXO_TRACKER
+    const resetDecoder     = resetAll || service === XChainService.XCHAIN_DECODER
+    const resetIndexer     = resetAll || service === XChainService.XCHAIN_INDEXER
+
+    const modulesToStop = []
+    if (resetNode)        modulesToStop.push(NODE_MODULE_NAME)
+    if (resetUtxoTracker) modulesToStop.push(XChainService.XCHAIN_UTXO_TRACKER)
+    if (resetDecoder)     modulesToStop.push(XChainService.XCHAIN_DECODER)
+    if (resetIndexer)     modulesToStop.push(XChainService.XCHAIN_INDEXER)
+    if (resetAll)         modulesToStop.push(XChainService.XCHAIN_REGTEST_MINER)
 
     console.log(`Stopping ${coin} ${network} services...`)
-    for (const module of modulesToReset) {
+    for (const module of modulesToStop) {
         try {
             const containerId = await db.getModuleContainer(module, coin, network)
             await stopContainer(containerId)
         } catch { /* not installed, skip */ }
     }
 
-    const nodeDataPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
-    if (fs.existsSync(nodeDataPath)) {
-        console.log(`Clearing node data at ${nodeDataPath}...`)
-        await execAsync(`docker run --rm -v "${nodeDataPath}:/data" alpine sh -c "find /data -mindepth 1 -delete"`)
+    if (resetNode) {
+        const nodeDataPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
+        if (fs.existsSync(nodeDataPath)) {
+            console.log(`Clearing node data at ${nodeDataPath}...`)
+            await execAsync(`docker run --rm -v "${nodeDataPath}:/data" alpine sh -c "find /data -mindepth 1 -delete"`)
+        }
     }
 
-    const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
-    try {
-        console.log(`Clearing Docker volume ${volumeName}...`)
-        await execAsync(`docker run --rm -v ${volumeName}:/data alpine sh -c "find /data -mindepth 1 -delete"`)
-    } catch { /* volume may not exist, skip */ }
+    if (resetUtxoTracker) {
+        const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
+        try {
+            console.log(`Clearing Docker volume ${volumeName}...`)
+            await execAsync(`docker run --rm -v ${volumeName}:/data alpine sh -c "find /data -mindepth 1 -delete"`)
+        } catch { /* volume may not exist, skip */ }
+    }
 
-    await resetDatabases(coin, network)
+    const dbModulesToReset = [
+        ...(resetDecoder ? [XChainService.XCHAIN_DECODER] : []),
+        ...(resetIndexer ? [XChainService.XCHAIN_INDEXER] : []),
+    ]
+    if (dbModulesToReset.length > 0) {
+        await resetDatabases(coin, network, dbModulesToReset)
+    }
 
     console.log(`Restarting ${coin} ${network} services...`)
-    for (const module of modulesToReset) {
+    for (const module of modulesToStop) {
         try {
             const containerId = await db.getModuleContainer(module, coin, network)
             await startContainer(containerId)
