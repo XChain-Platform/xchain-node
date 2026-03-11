@@ -14,7 +14,7 @@ const {
 } = require('../config/constants')
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
 const { sleep }                   = require('../utils/helpers')
-const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = require('./ConfigService')
+const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName } = require('./ConfigService')
 const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork } = require('./DockerService')
 const { statusChanged }           = require('./StatusService')
 
@@ -194,6 +194,21 @@ async function setDatabaseParameters() {
     return true
 }
 
+async function resetDatabases(coin, network) {
+    const mariadbRootPassword = await askMariadbRootPassword(coin, network)
+    const mariadbContainerId  = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+
+    const decoderDbName = getModuleDatabaseName(XChainService.XCHAIN_DECODER, coin, network)
+    const indexerDbName = getModuleDatabaseName(XChainService.XCHAIN_INDEXER, coin, network)
+
+    for (const dbName of [decoderDbName, indexerDbName]) {
+        await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+            `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`
+        )
+        console.log(`Database ${dbName} reset!`)
+    }
+}
+
 async function buildDatabaseModule(coin, network) {
     const existingId = await checkIfDatabaseModuleExists(coin, network)
 
@@ -244,5 +259,6 @@ module.exports = {
     executeDockerMariaDbCommand,
     addUserPasswordToDatabase,
     setDatabaseParameters,
-    buildDatabaseModule
+    buildDatabaseModule,
+    resetDatabases
 }

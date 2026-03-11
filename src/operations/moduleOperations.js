@@ -3,12 +3,16 @@
  * Bulk operations over lists of modules (install, start, stop, etc.)
  ********************************************************************/
 
-const path = require('path')
-const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, XChainService, dataDir } = require('../config/constants')
+const path      = require('path')
+const fs        = require('fs')
+const { exec }  = require('child_process')
+const { promisify } = require('util')
+const execAsync = promisify(exec)
+const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, XChainService, SEP, dataDir } = require('../config/constants')
 const { db }                 = require('../state')
 const { getDockerContainerImageName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
-const { buildDatabaseModule } = require('../services/DatabaseService')
+const { buildDatabaseModule, resetDatabases } = require('../services/DatabaseService')
 const { cloneGit, installModule, uninstallModule } = require('../services/ModuleService')
 const { statusChanged } = require('../services/StatusService')
 
@@ -212,6 +216,50 @@ async function runE2ETest(coin, network) {
     return { logFile, exitCode }
 }
 
+async function resetModules(coin, network) {
+    const modulesToReset = [
+        NODE_MODULE_NAME,
+        XChainService.XCHAIN_UTXO_TRACKER,
+        XChainService.XCHAIN_DECODER,
+        XChainService.XCHAIN_INDEXER,
+        XChainService.XCHAIN_REGTEST_MINER,
+    ]
+
+    console.log(`Stopping ${coin} ${network} services...`)
+    for (const module of modulesToReset) {
+        try {
+            const containerId = await db.getModuleContainer(module, coin, network)
+            await stopContainer(containerId)
+        } catch { /* not installed, skip */ }
+    }
+
+    const nodeDataPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
+    if (fs.existsSync(nodeDataPath)) {
+        console.log(`Clearing node data at ${nodeDataPath}...`)
+        fs.rmSync(nodeDataPath, { recursive: true, force: true })
+        fs.mkdirSync(nodeDataPath, { recursive: true })
+    }
+
+    const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
+    try {
+        console.log(`Removing Docker volume ${volumeName}...`)
+        await execAsync(`docker volume rm ${volumeName}`)
+    } catch { /* volume may not exist, skip */ }
+
+    await resetDatabases(coin, network)
+
+    console.log(`Restarting ${coin} ${network} services...`)
+    for (const module of modulesToReset) {
+        try {
+            const containerId = await db.getModuleContainer(module, coin, network)
+            await startContainer(containerId)
+        } catch { /* not installed, skip */ }
+    }
+
+    await statusChanged()
+    return true
+}
+
 module.exports = {
     installModules,
     updateModules,
@@ -223,5 +271,6 @@ module.exports = {
     startModules,
     execModules,
     shellModule,
-    runE2ETest
+    runE2ETest,
+    resetModules
 }

@@ -19,7 +19,8 @@ const {
     startModules,
     execModules,
     shellModule,
-    runE2ETest
+    runE2ETest,
+    resetModules
 } = require('./operations/moduleOperations')
 const { getStatus }            = require('./services/StatusService')
 const { makeBootstrap }        = require('./services/BootstrapService')
@@ -216,6 +217,16 @@ async function parseCommand() {
             const { logFile, exitCode } = await runE2ETest(chain, 'regtest')
             console.log("E2E tests finished with exit code " + exitCode)
             console.log("Logs saved to: " + logFile)
+            return process.exit(0)
+        })
+
+    program
+        .command('reset')
+        .description('Reset all data for a coin/network (node, utxo-tracker, decoder, indexer)')
+        .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
+        .argument('<network>', '(mainnet, testnet, regtest)')
+        .action(async (chain, network) => {
+            await resetModules(chain, network)
             return process.exit(0)
         })
 
