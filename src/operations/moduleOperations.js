@@ -12,7 +12,7 @@ const { buildDatabaseModule } = require('../services/DatabaseService')
 const { cloneGit, installModule, uninstallModule } = require('../services/ModuleService')
 const { statusChanged } = require('../services/StatusService')
 
-async function installModules(servicesList) {
+async function installModules(servicesList, branch = null) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             if (nextCoin && nextNetwork) {
@@ -20,7 +20,7 @@ async function installModules(servicesList) {
                 await buildDatabaseModule(nextCoin, nextNetwork)
             }
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                await installModule(nextModule, nextCoin, nextNetwork)
+                await installModule(nextModule, nextCoin, nextNetwork, false, null, false, branch)
             }
         }
     }

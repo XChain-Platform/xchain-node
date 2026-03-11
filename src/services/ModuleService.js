@@ -20,7 +20,7 @@ const { statusChanged, getStatus } = require('./StatusService')
 const { killContainer, removeContainer } = require('./DockerService')
 const { setDatabaseParameters }  = require('./DatabaseService')
 
-async function cloneGit(module, rewrite = false, useTmp = false) {
+async function cloneGit(module, rewrite = false, useTmp = false, branch = null) {
     return new Promise((resolve, reject) => {
         if (useTmp) {
             removeModuleTmpDir(module)
@@ -43,8 +43,9 @@ async function cloneGit(module, rewrite = false, useTmp = false) {
 
         const gitUrl = modulesUrls[module]
         const destination = useTmp ? getModuleTmpDir(module) : getModuleDir(module)
+        const branchFlag = branch ? `-b ${branch} ` : ''
 
-        exec(`git clone ${gitUrl} ${destination}`, (error) => {
+        exec(`git clone ${branchFlag}${gitUrl} ${destination}`, (error) => {
             if (error) {
                 reject("Error cloning project: " + error.message)
             } else {
@@ -172,7 +173,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     })
 }
 
-async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false) {
+async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null) {
     if (coin === "") coin = null
     if (network === "") network = null
 
@@ -240,7 +241,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
 
             try {
                 if (remoteUpdate || localModuleVersion == null) {
-                    await cloneGit(module, true)
+                    await cloneGit(module, true, false, branch)
                 }
                 const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
