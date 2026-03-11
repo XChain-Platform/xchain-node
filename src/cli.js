@@ -223,11 +223,12 @@ async function parseCommand() {
 
     program
         .command('reset')
-        .description('Reset all data for a coin/network (node, utxo-tracker, decoder, indexer)')
+        .description('Reset data for a specific service or all services of a coin/network')
+        .argument('<service>', '(node, xchain-utxo-tracker, xchain-decoder, xchain-indexer, all)')
         .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet, testnet, regtest)')
-        .action(async (chain, network) => {
-            await resetModules(chain, network)
+        .action(async (service, chain, network) => {
+            await resetModules(service, chain, network)
             return process.exit(0)
         })
 
