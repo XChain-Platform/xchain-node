@@ -241,8 +241,8 @@ async function resetModules(coin, network) {
 
     const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
     try {
-        console.log(`Removing Docker volume ${volumeName}...`)
-        await execAsync(`docker volume rm ${volumeName}`)
+        console.log(`Clearing Docker volume ${volumeName}...`)
+        await execAsync(`docker run --rm -v ${volumeName}:/data alpine sh -c "find /data -mindepth 1 -delete"`)
     } catch { /* volume may not exist, skip */ }
 
     await resetDatabases(coin, network)
