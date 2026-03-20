@@ -237,6 +237,38 @@ function filterCommandParameters(branch, modules, coins, networks) {
     return servicesList
 }
 
+// --- Argument resolution (order-independent) ---
+
+function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = {}) {
+    let service = 'all', chain = 'all', network = 'all', branch = null
+
+    const knownServices = [
+        ...Object.values(XChainService),
+        NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME,
+        EXPLORER_MODULE_NAME, 'explorer'
+    ]
+    const knownChains   = Object.values(Coin)
+    const knownNetworks = Object.values(Network)
+
+    for (const arg of args) {
+        if (!arg || arg === 'all') continue
+
+        if (knownChains.includes(arg)) {
+            chain = arg
+        } else if (knownNetworks.includes(arg)) {
+            network = arg
+        } else if (knownServices.includes(arg)) {
+            service = arg
+        } else if (expectBranch && !branch) {
+            branch = arg
+        }
+    }
+
+    if (expectBranch && !branch) branch = defaultBranch
+
+    return { service, chain, network, branch }
+}
+
 module.exports = {
     getModuleDir,
     getModuleTmpDir,
@@ -252,5 +284,6 @@ module.exports = {
     getDockerNetwork,
     getModuleDatabaseName,
     getDefaultConfig,
-    filterCommandParameters
+    filterCommandParameters,
+    resolveArgs
 }

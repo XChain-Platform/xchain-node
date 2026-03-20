@@ -7,7 +7,7 @@ const { Command }  = require('commander')
 const { version }  = require('../package.json')
 const { preCheck } = require('./precheck')
 const { setVerbose } = require('./state')
-const { filterCommandParameters } = require('./services/ConfigService')
+const { filterCommandParameters, resolveArgs } = require('./services/ConfigService')
 const {
     installModules,
     updateModules,
@@ -58,8 +58,9 @@ async function parseCommand() {
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (branch, service, chain, network) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
-            await installModules(serviceList, branch)
+            const resolved = resolveArgs([branch, service, chain, network], { expectBranch: true })
+            const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
+            await installModules(serviceList, resolved.branch)
             return process.exit(0)
         })
 
@@ -84,8 +85,9 @@ async function parseCommand() {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .argument('[branch]',  '(master, develop, or any branch name)')
         .action(async (service, chain, network, branch) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
-            await updateModules(serviceList, branch)
+            const resolved = resolveArgs([service, chain, network, branch], { expectBranch: true })
+            const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
+            await updateModules(serviceList, resolved.branch)
             return process.exit(0)
         })
 
