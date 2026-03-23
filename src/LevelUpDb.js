@@ -22,23 +22,73 @@
 // Load required libraries
 var levelup = require('levelup')
 var leveldown = require('leveldown')
+var fs = require('fs')
+var path = require('path')
 
 const PREFIX_MODULE_CONTAINER = "MC"
 
 class LevelUpStore {
-    constructor(dbName, path = "") {
+    constructor(dbName, dbPath = "") {
         this.dbName = dbName
         this.db = null
-        this.path = path
+        this.dbPath = dbPath
     }
-  
+
+    getFullPath() {
+        return this.dbPath + "/" + this.dbName
+    }
+
+    _openDb() {
+        return new Promise((resolve, reject) => {
+            const db = levelup(leveldown(this.getFullPath()), (err) => {
+                if (err) return reject(err)
+                resolve(db)
+            })
+        })
+    }
+
     async createDatabase() {
         try {
-            this.db = levelup(leveldown(this.path+"/"+this.dbName)) 
-
+            this.db = await this._openDb()
             return this.db
-        } catch (err){
-            throw new Error("Couldn't open/create levelup database")
+        } catch (err) {
+            if (err.message && err.message.includes('IO error') && err.message.includes('lock')) {
+                return this._handleLockedDatabase()
+            }
+            throw new Error("Couldn't open/create levelup database: " + err.message)
+        }
+    }
+
+    async _handleLockedDatabase() {
+        const lockFile = path.join(this.getFullPath(), 'LOCK')
+        console.log("\n⚠  The database appears to be locked.")
+        console.log("   This usually happens when xchain-node didn't close properly.")
+        console.log("   Lock file: " + lockFile + "\n")
+
+        const { Confirm } = require('enquirer')
+        const prompt = new Confirm({
+            name: 'unlock',
+            message: 'Do you want to remove the lock and continue?'
+        })
+
+        const answer = await prompt.run().catch(() => false)
+
+        if (!answer) {
+            throw new Error("Database is locked. Please close any other xchain-node instance or remove the lock file manually.")
+        }
+
+        try {
+            fs.unlinkSync(lockFile)
+        } catch (unlinkErr) {
+            throw new Error("Couldn't remove the lock file: " + unlinkErr.message)
+        }
+
+        try {
+            console.log("   Lock removed. Reopening database...\n")
+            this.db = await this._openDb()
+            return this.db
+        } catch (reopenErr) {
+            throw new Error("Couldn't open database after removing lock: " + reopenErr.message)
         }
     }
 
