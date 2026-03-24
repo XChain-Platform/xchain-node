@@ -17,6 +17,7 @@ const {
 const { getStatusFromContainer }         = require('./DockerService')
 const { checkRemoteNodeVersion }         = require('./VersionService')
 const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./VersionService')
+const { getModuleBranch } = require('./ModuleService')
 
 async function statusChanged() {
     setStatusUpdated(false)
@@ -127,6 +128,11 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 nextCoinNetworkModules[nextModule]["container_version"] = containerVersion
                             } catch { /* not available yet */ }
 
+                            let branch = "-"
+                            if (nextModule !== NODE_MODULE_NAME) {
+                                try { branch = await getModuleBranch(nextModule) } catch { /* not available */ }
+                            }
+
                             const state       = containerStatus["State"]["Status"]
                             const name        = nextModule
                             const rawPorts    = containerStatus["NetworkSettings"]["Ports"] || {}
@@ -142,6 +148,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 name,
                                 coin:    nextCoin    || "-",
                                 network: nextCoinNetwork || "-",
+                                branch,
                                 state,
                                 ports: portParts.length > 0 ? portParts.join(", ") : "-"
                             })
@@ -175,14 +182,17 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
         }
     }
 
+    const showBranch = rows.some(r => r.branch !== 'master' && r.branch !== '-')
     const COL_COIN    = Math.max("COIN".length,    ...rows.map(r => r.coin.length))    + 2
     const COL_NETWORK = Math.max("NETWORK".length, ...rows.map(r => r.network.length)) + 2
     const COL_NAME    = Math.max("SERVICE".length, ...rows.map(r => r.name.length))    + 2
+    const COL_BRANCH  = showBranch ? Math.max("BRANCH".length, ...rows.map(r => r.branch.length)) + 2 : 0
     const COL_STATUS  = Math.max("STATUS".length,  ...rows.map(r => r.state.length))   + 2
     let output = "\x1b[1m"
         + "COIN".padEnd(COL_COIN)
         + "NETWORK".padEnd(COL_NETWORK)
         + "SERVICE".padEnd(COL_NAME)
+        + (showBranch ? "BRANCH".padEnd(COL_BRANCH) : "")
         + "STATUS".padEnd(COL_STATUS)
         + "PORTS\x1b[0m\n"
     for (const row of rows) {
@@ -190,6 +200,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
         output += row.coin.padEnd(COL_COIN)
             + row.network.padEnd(COL_NETWORK)
             + row.name.padEnd(COL_NAME)
+            + (showBranch ? row.branch.padEnd(COL_BRANCH) : "")
             + color + row.state.padEnd(COL_STATUS) + "\x1b[0m"
             + row.ports + "\n"
     }
