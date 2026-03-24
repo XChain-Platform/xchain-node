@@ -36,6 +36,7 @@ async function updateModules(servicesList, branch = null) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!moduleContainerId) continue
                 if (nextModule === NODE_MODULE_NAME) {
                     await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId)
                 } else {
@@ -54,6 +55,8 @@ async function uninstallModules(servicesList, includeShared = false) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
                 if (!includeShared && sharedModules.includes(nextModule)) continue
+                const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!moduleContainerId) continue
                 try {
                     await uninstallModule(nextCoin, nextNetwork, nextModule)
                 } catch (err) {
@@ -70,15 +73,12 @@ async function logModules(servicesList, follow = true) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                try {
-                    const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                    moduleContainerIds.push({
-                        name: getDockerContainerImageName(nextModule, nextCoin, nextNetwork),
-                        id: containerId
-                    })
-                } catch (err) {
-                    console.log(err)
-                }
+                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!containerId) continue
+                moduleContainerIds.push({
+                    name: getDockerContainerImageName(nextModule, nextCoin, nextNetwork),
+                    id: containerId
+                })
             }
         }
     }
@@ -101,15 +101,12 @@ async function monitorModules(servicesList, follow = true) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                try {
-                    const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                    moduleContainerIds.push({
-                        name: getDockerContainerImageName(nextModule, nextCoin, nextNetwork),
-                        id: containerId
-                    })
-                } catch (err) {
-                    console.log(err)
-                }
+                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!containerId) continue
+                moduleContainerIds.push({
+                    name: getDockerContainerImageName(nextModule, nextCoin, nextNetwork),
+                    id: containerId
+                })
             }
         }
     }
@@ -121,8 +118,9 @@ async function restartModules(servicesList) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!containerId) continue
                 try {
-                    const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                     await restartContainer(containerId)
                     await statusChanged()
                 } catch (err) {
@@ -138,8 +136,9 @@ async function stopModules(servicesList) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!containerId) continue
                 try {
-                    const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                     await stopContainer(containerId)
                 } catch (err) {
                     console.log(err)
@@ -154,8 +153,9 @@ async function startModules(servicesList) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!containerId) continue
                 try {
-                    const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                     await startContainer(containerId)
                 } catch (err) {
                     console.log(err)
@@ -170,8 +170,9 @@ async function execModules(servicesList, command) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!containerId) continue
                 try {
-                    const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                     const execStdOut = await execContainer(containerId, command)
                     console.log(execStdOut)
                 } catch (err) {
@@ -187,8 +188,9 @@ async function shellModule(servicesList) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                if (!containerId) continue
                 try {
-                    const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                     await shellContainer(containerId)
                     return true
                 } catch (err) {
