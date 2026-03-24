@@ -316,6 +316,7 @@ async function uninstallModule(coin, network, module) {
 
 module.exports = {
     cloneGit,
+    getModuleBranch,
     buildAndUp,
     installModule,
     uninstallModule

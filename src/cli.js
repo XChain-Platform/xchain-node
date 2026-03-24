@@ -85,7 +85,7 @@ async function parseCommand() {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .argument('[branch]',  '(master, develop, or any branch name)')
         .action(async (service, chain, network, branch) => {
-            const resolved = resolveArgs([service, chain, network, branch], { expectBranch: true })
+            const resolved = resolveArgs([service, chain, network, branch], { expectBranch: true, defaultBranch: null })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
             await updateModules(serviceList, resolved.branch)
             return process.exit(0)
