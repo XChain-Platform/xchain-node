@@ -17,7 +17,6 @@ const {
 const { getStatusFromContainer }         = require('./DockerService')
 const { checkRemoteNodeVersion }         = require('./VersionService')
 const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./VersionService')
-const { getModuleBranch } = require('./ModuleService')
 
 async function statusChanged() {
     setStatusUpdated(false)
@@ -130,6 +129,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
 
                             let branch = "-"
                             if (nextModule !== NODE_MODULE_NAME) {
+                                const { getModuleBranch } = require('./ModuleService')
                                 try { branch = await getModuleBranch(nextModule) } catch { /* not available */ }
                             }
 
