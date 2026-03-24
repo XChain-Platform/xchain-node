@@ -13,7 +13,7 @@ const { db }                 = require('../state')
 const { getDockerContainerImageName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases } = require('../services/DatabaseService')
-const { cloneGit, installModule, uninstallModule } = require('../services/ModuleService')
+const { cloneGit, getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { statusChanged } = require('../services/StatusService')
 
 async function installModules(servicesList, branch = null) {
@@ -40,7 +40,11 @@ async function updateModules(servicesList, branch = null) {
                 if (nextModule === NODE_MODULE_NAME) {
                     await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId)
                 } else {
-                    await cloneGit(nextModule, true, false, branch)
+                    let moduleBranch = branch
+                    if (!moduleBranch) {
+                        try { moduleBranch = await getModuleBranch(nextModule) } catch { /* use default */ }
+                    }
+                    await cloneGit(nextModule, true, false, moduleBranch)
                     await installModule(nextModule, nextCoin, nextNetwork, false, moduleContainerId)
                 }
             }
