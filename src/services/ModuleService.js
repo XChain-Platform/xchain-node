@@ -74,7 +74,7 @@ async function getModuleBranch(module) {
     return stdout.trim()
 }
 
-async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false) {
+async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmd = null) {
     if (!checkIfModuleExists(module)) {
         throw "module not found"
     }
@@ -160,6 +160,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                     + environmentVariablesLine + ' '
                     + portLine + ' '
                     + '-t ' + containerPrefix
+                    + (dockerCmd ? ' ' + dockerCmd : '')
 
                 console.log("Creating container of module " + module + (coin && network ? " in " + coin + " " + network : ""))
                 exec(dockerCommand, { cwd: dir }, async (error2, stdout) => {
@@ -192,7 +193,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     })
 }
 
-async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null) {
+async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null, dockerCmd = null) {
     if (coin === "") coin = null
     if (network === "") network = null
 
@@ -268,7 +269,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                         await cloneGit(module, true, false, branch)
                     }
                 }
-                const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution)
+                const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmd)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
                     await setDatabaseParameters()
                 }

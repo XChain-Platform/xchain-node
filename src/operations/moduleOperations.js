@@ -206,8 +206,11 @@ async function shellModule(servicesList) {
     return true
 }
 
-async function runE2ETest(coin, network) {
-    const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true)
+async function runE2ETest(coin, network, testName = null) {
+    const dockerCmd = testName
+        ? `npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js "test/actions/${testName}.test.js"`
+        : null
+    const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true, null, dockerCmd)
 
     console.log("Running e2e tests, please wait...")
     const exitCode = await waitContainer(containerId)

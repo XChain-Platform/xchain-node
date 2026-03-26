@@ -216,8 +216,9 @@ async function parseCommand() {
         .command('e2etest')
         .description('Run E2E tests on a regtest network')
         .argument('<chain>', '(bitcoin, litecoin, dogecoin)')
-        .action(async (chain) => {
-            const { logFile, exitCode } = await runE2ETest(chain, 'regtest')
+        .argument('[testName]', 'optional test file name (e.g. "order", "issue") — runs only that suite')
+        .action(async (chain, testName) => {
+            const { logFile, exitCode } = await runE2ETest(chain, 'regtest', testName)
             console.log("E2E tests finished with exit code " + exitCode)
             console.log("Logs saved to: " + logFile)
             return process.exit(0)
