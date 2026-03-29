@@ -217,8 +217,9 @@ async function parseCommand() {
         .description('Run E2E tests on a regtest network')
         .argument('<chain>', '(bitcoin, litecoin, dogecoin)')
         .argument('[testName]', 'optional test file name (e.g. "order", "issue") — runs only that suite')
-        .action(async (chain, testName) => {
-            const { logFile, exitCode } = await runE2ETest(chain, 'regtest', testName)
+        .option('--grep <pattern>', 'only run tests matching this pattern (passed to mocha --grep)')
+        .action(async (chain, testName, options) => {
+            const { logFile, exitCode } = await runE2ETest(chain, 'regtest', testName, options.grep)
             console.log("E2E tests finished with exit code " + exitCode)
             console.log("Logs saved to: " + logFile)
             return process.exit(0)
