@@ -7,7 +7,7 @@ const { exec }  = require('child_process')
 const fs        = require('fs')
 
 const {
-    NODE_MODULE_NAME, DB_MODULE_NAME, EXPLORER_MODULE_NAME,
+    NODE_MODULE_NAME, DB_MODULE_NAME, EXPLORER_MODULE_NAME, INDEXER_SYNC_MODULE_NAME,
     XChainService, SEP, modulesUrls
 } = require('../config/constants')
 const { db }                = require('../state')
@@ -122,6 +122,13 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         network = ""
                         portLine = "-p " + environmentVariables["EXPLORER_PORT_HTTP"] + ":" + environmentVariables["EXPLORER_API_PORT_HTTP"]
                             + " -p " + environmentVariables["EXPLORER_PORT_HTTPS"] + ":" + environmentVariables["EXPLORER_API_PORT_HTTPS"]
+                        break
+                    case INDEXER_SYNC_MODULE_NAME:
+                        coin = ""
+                        network = ""
+                        if ("SYNC_PORT" in environmentVariables && "SYNC_API_PORT" in environmentVariables) {
+                            portLine = "-p " + environmentVariables["SYNC_PORT"] + ":" + environmentVariables["SYNC_API_PORT"]
+                        }
                         break
                 }
 
