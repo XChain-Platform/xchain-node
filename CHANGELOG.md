@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-04-05
+
+### Added
+- Smoke test suite with 159 tests across 10 scenarios verifying CLI operational readiness
+- Smoke tests for module import chain (all 21 source files resolve without errors)
+- Smoke tests for Commander CLI registration (all 17 commands with correct argument counts)
+- Smoke tests for global options registration (verbose, interactive, no-bootstrap, no-explorer, version)
+- Smoke tests for constants and enum integrity (XChainService, Coin, Network, paths, git URLs, project folders)
+- Smoke tests for config template file integrity (all 9 coin/network files: format, required keys, no duplicates)
+- Smoke tests for config composition (getDefaultConfig for coin-specific, regtest, and shared-service configs)
+- Smoke tests for Docker command construction (all 15 exported operation functions exist)
+- Smoke tests for parameter expansion (wildcard expansion, regtest filtering, explorer as shared service)
+- Smoke tests for state module initialization (singleton exports, initial values, getter/setter pairs)
+- Smoke tests for crypto node Dockerfile existence (bitcoin, litecoin, dogecoin)
+- `test:smoke` npm script; smoke tests run first in `test:all` pipeline
+
 ## [0.0.4] - 2026-04-05
 
 ### Added
