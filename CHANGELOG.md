@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-04-06
+
+### Added
+- Regression test suite (`test/regression/`) with 60 tests across 3 priority tiers (P0/P1/P2) covering argument parsing, configuration generation, Docker command construction, security boundaries, service lifecycle, state integrity, E2E workflows, config parsing boundaries, and utility functions
+- `test:regression` npm script for full regression suite execution
+- `test:regression:p0` npm script for critical-path P0 tests only (28 tests, <1s)
+- `test:regression:p0p1` npm script for P0+P1 high-priority tests (52 tests, <2s)
+- Regression tests included in `test:all` pipeline
+
 ## [0.0.13] - 2026-04-06
 
 ### Added

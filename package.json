@@ -1,6 +1,6 @@
 {
   "name": "xchain-node",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "description": "xchain-node allows users to install, configure and run XChain platform nodes.",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
@@ -28,7 +28,10 @@
     "test:e2e": "mocha 'test/e2e/**/*.test.js' --timeout 30000 --exit --recursive",
     "test:fuzz": "mocha 'test/fuzz/**/*.fuzz.test.js' --timeout 10000 --recursive",
     "test:chaos": "mocha 'test/chaos/**/*.chaos.test.js' --timeout 15000 --recursive",
-    "test:all": "mocha 'test/smoke/**/*.test.js' 'test/unit/**/*.test.js' 'test/integration/**/*.test.js' 'test/e2e/**/*.test.js' 'test/fuzz/**/*.fuzz.test.js' 'test/chaos/**/*.chaos.test.js' --timeout 30000 --recursive",
+    "test:regression": "mocha 'test/regression/**/*.test.js' --timeout 10000 --recursive",
+    "test:regression:p0": "mocha 'test/regression/**/*.test.js' --grep '\\[regression:p0\\]' --timeout 10000 --recursive",
+    "test:regression:p0p1": "mocha 'test/regression/**/*.test.js' --grep '\\[regression:p[01]\\]' --timeout 10000 --recursive",
+    "test:all": "mocha 'test/smoke/**/*.test.js' 'test/unit/**/*.test.js' 'test/integration/**/*.test.js' 'test/e2e/**/*.test.js' 'test/fuzz/**/*.fuzz.test.js' 'test/chaos/**/*.chaos.test.js' 'test/regression/**/*.test.js' --timeout 30000 --recursive",
     "test:mutation": "npx stryker run",
     "test:mutation:config": "npx stryker run stryker.config.pilot.json",
     "benchmark": "node test/benchmarks/harness.js",
