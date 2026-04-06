@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-04-06
+
+### Added
+- Performance benchmark harness (`test/benchmarks/`) with 6 scenarios measuring CLI throughput
+- `config-generation` benchmark: `getDefaultConfig()` throughput for all 9 coin-network combos plus shared module path
+- `filter-params` benchmark: `filterCommandParameters()` expansion for all/single/explorer/node cases
+- `leveldb-operations` benchmark: LevelDB put/get/del single-key latency and scan at 10/50/100/500 entries via memdown
+- `config-parsing-scale` benchmark: config file parsing scaling from 10 to 500 lines with scaling factor calculation
+- `resolve-args` benchmark: `resolveArgs()` throughput for standard/reversed/branch/empty/all argument patterns
+- `naming-helpers` benchmark: Docker image naming, network naming, database naming, and port validation throughput
+- `MetricsCollector` class with high-resolution timing, percentile calculations, memory snapshots, and event loop monitoring
+- Baseline comparison support (`--compare`, `--save-baseline`) for regression detection
+- `benchmark` and `benchmark:quick` npm scripts
+
 ## [0.0.9] - 2026-04-05
 
 ### Security
