@@ -326,26 +326,34 @@ describe('DockerService', function () {
     })
 
     describe('logContainer()', function () {
-        it('calls spawnSync with --tail and --follow for follow=true', async function () {
+        it('calls spawn with --tail and --follow for follow=true', async function () {
             const stubs = makeStubs()
-            stubs.spawnSync.returns({ status: 0 })
-            const ds = loadDockerService(stubs)
-            await ds.logContainer('abc123', true)
-            const [cmd, args] = stubs.spawnSync.firstCall.args
+            const EventEmitter = require('events')
+            const child = new EventEmitter()
+            child.kill = sinon.stub()
+            stubs.spawn.returns(child)
+            const promise = loadDockerService(stubs).logContainer('abc123', true)
+            const [cmd, args] = stubs.spawn.firstCall.args
             expect(cmd).to.equal('docker')
             expect(args).to.include('--tail')
             expect(args).to.include('10')
             expect(args).to.include('--follow')
             expect(args).to.include('abc123')
+            child.emit('close')
+            await promise
         })
 
-        it('calls spawnSync without --follow for follow=false', async function () {
+        it('calls spawn without --follow for follow=false', async function () {
             const stubs = makeStubs()
-            stubs.spawnSync.returns({ status: 0 })
-            const ds = loadDockerService(stubs)
-            await ds.logContainer('abc123', false)
-            const [cmd, args] = stubs.spawnSync.firstCall.args
+            const EventEmitter = require('events')
+            const child = new EventEmitter()
+            child.kill = sinon.stub()
+            stubs.spawn.returns(child)
+            const promise = loadDockerService(stubs).logContainer('abc123', false)
+            const [cmd, args] = stubs.spawn.firstCall.args
             expect(args).to.not.include('--follow')
+            child.emit('close')
+            await promise
         })
     })
 

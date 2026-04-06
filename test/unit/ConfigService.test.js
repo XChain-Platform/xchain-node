@@ -467,11 +467,11 @@ describe('ConfigService', function () {
             expect(modules).to.not.include('xchain-e2e-test')
         })
 
-        it('includes regtest-only modules for regtest network', function () {
+        it('includes regtest-miner for regtest but excludes e2e-test from all', function () {
             const result = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             const modules = result['bitcoin']['regtest']
             expect(modules).to.include('xchain-regtest-miner')
-            expect(modules).to.include('xchain-e2e-test')
+            expect(modules).to.not.include('xchain-e2e-test')
         })
 
         it('adds explorer to servicesList[""][""] when modules is "all"', function () {
