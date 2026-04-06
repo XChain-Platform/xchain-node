@@ -1,6 +1,6 @@
 {
   "name": "xchain-node",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "xchain-node allows users to install, configure and run XChain platform nodes.",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
@@ -26,7 +26,8 @@
     "test:integration": "mocha 'test/integration/**/*.test.js' --timeout 30000 --recursive",
     "test:smoke": "mocha 'test/smoke/**/*.test.js' --timeout 5000 --exit --recursive",
     "test:e2e": "mocha 'test/e2e/**/*.test.js' --timeout 30000 --exit --recursive",
-    "test:all": "mocha 'test/smoke/**/*.test.js' 'test/unit/**/*.test.js' 'test/integration/**/*.test.js' 'test/e2e/**/*.test.js' --timeout 30000 --recursive"
+    "test:fuzz": "mocha 'test/fuzz/**/*.fuzz.test.js' --timeout 10000 --recursive",
+    "test:all": "mocha 'test/smoke/**/*.test.js' 'test/unit/**/*.test.js' 'test/integration/**/*.test.js' 'test/e2e/**/*.test.js' 'test/fuzz/**/*.fuzz.test.js' --timeout 30000 --recursive"
   },
   "devDependencies": {
     "chai": "^4.5.0",

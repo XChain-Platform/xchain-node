@@ -96,6 +96,19 @@ function getModuleDatabaseName(module, coin, network) {
         + moduleName.charAt(0).toUpperCase() + moduleName.slice(1)
 }
 
+// --- Validation helpers ---
+
+function validatePort(value) {
+    if (typeof value === 'number') {
+        return Number.isInteger(value) && value >= 1 && value <= 65535
+    }
+    if (typeof value === 'string' && /^\d+$/.test(value)) {
+        const port = parseInt(value, 10)
+        return port >= 1 && port <= 65535
+    }
+    return false
+}
+
 // --- Default config ---
 
 async function getDefaultConfig(module, coin, network) {
@@ -298,6 +311,7 @@ module.exports = {
     getDockerContainerImageName,
     getDockerNetwork,
     getModuleDatabaseName,
+    validatePort,
     getDefaultConfig,
     filterCommandParameters,
     resolveArgs

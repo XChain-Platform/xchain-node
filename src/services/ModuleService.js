@@ -14,7 +14,7 @@ const { db }                = require('../state')
 const {
     getModuleDir, getModuleTmpDir, moduleDirExists, checkIfModuleExists,
     removeModuleDir, removeModuleTmpDir, createModuleTmpDir,
-    getDockerContainerImageName, getDockerNetwork, getDefaultConfig
+    getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
 const { killContainer, removeContainer } = require('./DockerService')
@@ -94,6 +94,8 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 .replace(/"/g, '\\"')
                 .replace(/\$/g, '\\$')
                 .replace(/`/g, '\\`')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r')
             environmentVariablesLine += ' -e "' + key + '=' + safeVal + '"'
         }
 
@@ -162,6 +164,22 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         break
                 }
 
+                // Validate all port values in the portLine
+                if (portLine) {
+                    const portSegments = portLine.split(/\s*-p\s+/).filter(Boolean)
+                    for (const segment of portSegments) {
+                        const pair = segment.trim()
+                        const colonIdx = pair.indexOf(':')
+                        if (colonIdx === -1) continue
+                        const hostPort = pair.substring(0, colonIdx)
+                        const containerPort = pair.substring(colonIdx + 1)
+                        if (!validatePort(hostPort) || !validatePort(containerPort)) {
+                            reject("Invalid port value in configuration: " + pair)
+                            return
+                        }
+                    }
+                }
+
                 if (overwriteContainerId) {
                     try {
                         await killContainer(overwriteContainerId)
@@ -187,7 +205,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                     }
                     try {
                         const containerId = stdout.trim()
-                        if (containerId.length === 64) {
+                        if (/^[a-f0-9]{64}$/.test(containerId)) {
                             if (!onlyExecution) {
                                 if (await db.insertModuleContainer(module, coin, network, containerId)) {
                                     await statusChanged()
@@ -198,6 +216,8 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                             } else {
                                 resolve(containerId)
                             }
+                        } else {
+                            reject("Invalid container ID returned by Docker: " + containerId)
                         }
                     } catch (err) {
                         reject(err)

@@ -48,6 +48,7 @@ function loadModuleService(stubs) {
             return 'xchain-node-' + coin + '-' + net + '-' + mod
         },
         getDockerNetwork: (coin, net) => 'xchain-node' + (coin ? '-' + coin : '') + (net ? '-' + net : ''),
+        validatePort: (v) => { if (typeof v === 'number') return Number.isInteger(v) && v >= 1 && v <= 65535; if (typeof v === 'string' && /^\d+$/.test(v)) { const p = parseInt(v, 10); return p >= 1 && p <= 65535 } return false },
         getDefaultConfig: sinon.stub().resolves({
             'NETWORK': 'bitcoin-mainnet',
             'NODE_URL': 'node',

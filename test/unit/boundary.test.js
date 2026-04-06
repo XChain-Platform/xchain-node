@@ -64,6 +64,7 @@ function loadModuleService(stubs, configOverrides) {
         createModuleTmpDir: sinon.stub(),
         getDockerContainerImageName: (m, c, n) => `xchain-node-${c}-${n}-${m}`,
         getDockerNetwork: (c, n) => `xchain-node-${c}-${n}`,
+        validatePort: (v) => { if (typeof v === 'number') return Number.isInteger(v) && v >= 1 && v <= 65535; if (typeof v === 'string' && /^\d+$/.test(v)) { const p = parseInt(v, 10); return p >= 1 && p <= 65535 } return false },
         getDefaultConfig: sinon.stub().resolves({
             'NETWORK': 'bitcoin-mainnet',
             'DECODER_PORT': 3002,
