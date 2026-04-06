@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Regression tests included in `test:all` pipeline
 
 ### Changed
-- `README.md` — rewrote from minimal stub to full repo README matching platform conventions: badges, features, documentation links, quick start, scripts table, test suite breakdown (1,148 tests), copyright footer
+- `README.md` — rewrote from minimal stub to full repo README matching platform conventions: badges, features, documentation links (4 docs: README, Architecture, Configuration, Operations), quick start, scripts table, detailed test suite breakdown with per-file descriptions (1,148 tests), copyright footer
 
 ## [0.0.13] - 2026-04-06
 

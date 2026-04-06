@@ -35,7 +35,10 @@ Full xchain-node documentation is available in the [xchain-documentation](https:
 
 | Document | Description |
 |---|---|
-| [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/README.md) | Overview, commands, configuration, architecture, naming conventions, source files, dependencies |
+| [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/README.md) | Overview, features, installation, quick start, scripts, dependencies |
+| [Architecture](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/ARCHITECTURE.md) | Data pipeline position, internal components, source files, runtime directory structure |
+| [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md) | Config file system, generated environment variables, naming conventions, internal constants |
+| [Operations](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/OPERATIONS.md) | CLI commands reference, global options, parameters, troubleshooting |
 
 ## Quick Start
 
@@ -87,15 +90,19 @@ xchain_node start all bitcoin regtest
 
 | Type | Tests | Description |
 |---|---|---|
-| Unit | 373 | ConfigService, DockerService, ModuleService, LevelUpDb, DatabaseService, VersionService, ExplorerConnector, GitHubDownloader, HubConnector, state, helpers, moduleOperations, security, boundary |
-| Integration | 103 | Config pipeline, Docker commands, module lifecycle (LevelDB state), status queries, hub/explorer config, database setup, network management, multi-module orchestration |
-| Smoke | 159 | Module imports, CLI registration, global options, constants/enums, config templates, config composition, Docker exports, parameter expansion, state init, Dockerfiles |
-| E2E | 57 | Install lifecycle, multi-coin, config overrides, precheck, update flow, reset, error handling, exec/logs |
-| Fuzz | 256 | Port validation, resolveArgs, config parsing, command construction, env escaping, branch validation, filter params, container ID |
-| Chaos | 140 | Download resilience, LevelDB resilience, config resilience, Docker resilience, git clone resilience, process resilience, network resilience |
+| Unit — Core | 143 | `ConfigService.test.js`, `DockerService.test.js`, `LevelUpDb.test.js`, `state.test.js`, `helpers.test.js` — path helpers, naming, config generation, Docker commands, LevelDB CRUD, state singletons, utility functions |
+| Unit — Services | 72 | `ModuleService.test.js`, `DatabaseService.test.js`, `VersionService.test.js`, `ExplorerConnector.test.js`, `GitHubDownloader.test.js`, `HubConnector.test.js` — clone, build, install/uninstall, DB setup, version checks, RPC clients |
+| Unit — Operations | 38 | `moduleOperations.test.js` — install/update/uninstall/start/stop/restart/exec/shell/log/monitor bulk operations |
+| Unit — Security | 60 | `security.test.js` — shell injection prevention (execFile), container ID validation, NODE_PREFIX validation, branch name validation, path traversal, database command safety, source code scanning |
+| Unit — Boundary | 60 | `boundary.test.js` — config file parsing edge cases (values with `=`, base64, empty, blank lines), resolveArgs boundaries, filterCommandParameters, LevelDB key format |
+| Integration | 103 | 8 files — config pipeline, Docker commands, module lifecycle (LevelDB), status queries, hub/explorer config, database setup, network management, multi-module orchestration |
+| Smoke | 159 | 10 scenarios — module imports, CLI registration, global options, constants/enums, config templates, config composition, Docker exports, parameter expansion, state init, Dockerfiles |
+| E2E | 57 | 8 scenarios — install lifecycle, multi-coin, config overrides, precheck, update flow, reset, error handling, exec/logs |
+| Fuzz | 256 | 8 harnesses — port validation, resolveArgs, config parsing, command construction, env escaping, branch validation, filter params, container ID |
+| Chaos | 140 | 7 files — download resilience, LevelDB resilience, config resilience, Docker resilience, git clone resilience, process resilience, network resilience |
 | Regression | 60 | Three-tier suite: P0 critical (28), P1 high (24), P2 standard (8) — argument parsing, config generation, Docker commands, security, lifecycle, state, E2E workflows |
-| Performance | 6 | Config generation, filter params, LevelDB operations, config parsing scale, resolveArgs, naming helpers |
-| Mutation | 2 | Full service and ConfigService-only pilot via Stryker Mutator |
+| Performance | 6 scenarios | Config generation, filter params, LevelDB operations, config parsing scale, resolveArgs, naming helpers |
+| Mutation | 2 configs | Full service and ConfigService-only pilot via Stryker Mutator |
 | **Total** | **1,148** | |
 
 ---
