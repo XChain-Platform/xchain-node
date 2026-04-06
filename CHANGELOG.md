@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-04-06
+
+### Added
+- Mutation testing infrastructure using StrykerJS (`@stryker-mutator/core`, `@stryker-mutator/mocha-runner`)
+- Full mutation config (`stryker.config.json`) targeting 8 core source files against unit + integration tests
+- Pilot mutation config (`stryker.config.pilot.json`) scoped to ConfigService for Phase 1 rollout
+- `test:mutation` npm script for full mutation testing run
+- `test:mutation:config` npm script for ConfigService-only pilot run
+
 ## [0.0.12] - 2026-04-06
 
 ### Fixed

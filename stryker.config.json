@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.json",
+  "mutate": [
+    "src/cli.js",
+    "src/config/constants.js",
+    "src/services/ConfigService.js",
+    "src/services/ModuleService.js",
+    "src/services/DockerService.js",
+    "src/services/DatabaseService.js",
+    "src/services/BootstrapService.js",
+    "src/services/StatusService.js"
+  ],
+  "testRunner": "mocha",
+  "mochaOptions": {
+    "spec": [
+      "test/unit/**/*.test.js",
+      "test/integration/**/*.test.js"
+    ],
+    "no-config": true,
+    "no-opts": true
+  },
+  "reporters": [
+    "html",
+    "json",
+    "clear-text",
+    "progress"
+  ],
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "jsonReporter": {
+    "fileName": "reports/mutation/report.json"
+  },
+  "thresholds": {
+    "high": 90,
+    "low": 70,
+    "break": 60
+  },
+  "concurrency": 4,
+  "tempDirName": ".stryker-tmp",
+  "mutator": {
+    "excludedMutations": [
+      "StringLiteral"
+    ]
+  }
+}
