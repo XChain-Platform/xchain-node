@@ -11,6 +11,7 @@ const NODE_MODULE_NAME       = "node"
 const DB_MODULE_NAME         = "database"
 const HUB_MODULE_NAME        = "xchain-hub"
 const EXPLORER_MODULE_NAME   = "xchain-explorer"
+const INDEXER_SYNC_MODULE_NAME = "xchain-indexer-sync"
 const NODE_VERSION_FILE_NAME = "__VERSION__.txt"
 const SEP                    = "-"
 const DB_SEP                 = "_"
@@ -58,7 +59,8 @@ const projectFolders = {
     "xchain-indexer":       "XChainIndexer",
     "xchain-hub":           "XChainHub",
     "xchain-explorer":      "XChainExplorer",
-    "xchain-e2e-test":      "XChainE2ETest"
+    "xchain-e2e-test":      "XChainE2ETest",
+    "xchain-indexer-sync":  "XChainIndexerSync"
 }
 
 // --- Module Git URLs ---
@@ -70,7 +72,8 @@ const modulesUrls = {
     "xchain-regtest-miner": "git@github.com:XChain-platform/xchain-regtest-miner.git",
     "xchain-hub":           "git@github.com:XChain-platform/xchain-hub.git",
     "xchain-explorer":      "git@github.com:XChain-platform/xchain-explorer.git",
-    "xchain-e2e-test":      "git@github.com:XChain-platform/xchain-e2e-test.git"
+    "xchain-e2e-test":      "git@github.com:XChain-platform/xchain-e2e-test.git",
+    "xchain-indexer-sync":  "git@github.com:XChain-platform/xchain-indexer-sync.git"
 }
 
 // --- Directory paths ---
@@ -89,6 +92,7 @@ module.exports = {
     DB_MODULE_NAME,
     HUB_MODULE_NAME,
     EXPLORER_MODULE_NAME,
+    INDEXER_SYNC_MODULE_NAME,
     NODE_VERSION_FILE_NAME,
     SEP,
     DB_SEP,
