@@ -1,0 +1,350 @@
+'use strict'
+
+const fs         = require('fs')
+const path       = require('path')
+const sinon      = require('sinon')
+const proxyquire = require('proxyquire').noCallThru()
+
+const TestEnv        = require('../../integration/helpers/test-env')
+const CommandCapture = require('../../integration/helpers/command-capture')
+const HttpCapture    = require('../../integration/helpers/http-capture')
+
+const ROOT = path.join(__dirname, '..', '..', '..')
+
+/**
+ * E2EEnv — wires all xchain-node services together with stubbed
+ * child_process / axios / blessed, but real config generation,
+ * real LevelDB state (in-memory), and real service-list expansion.
+ *
+ * Usage:
+ *   const env = new E2EEnv()
+ *   await env.setup()
+ *   env.setupDefaultRoutes()
+ *   const cli = env.createCLI()
+ *   await cli.moduleOps.installModules(serviceList, 'master')
+ *   // ... assertions ...
+ *   await env.teardown()
+ */
+class E2EEnv extends TestEnv {
+    constructor() {
+        super()
+        this.capture = null
+        this.http = null
+        this._containerCounter = 0
+    }
+
+    async setup() {
+        await super.setup()
+        this.capture = new CommandCapture()
+        this.http = new HttpCapture()
+        return this
+    }
+
+    /**
+     * Generate a unique fake 64-char container ID for each docker run call.
+     */
+    nextContainerId() {
+        this._containerCounter++
+        const hex = this._containerCounter.toString(16).padStart(4, '0')
+        return ('c' + hex).repeat(16).substring(0, 64)
+    }
+
+    /**
+     * Set up default CommandCapture routes for all Docker commands.
+     * Each `docker run` returns a unique container ID.
+     * Each `docker kill/rm/stop/start/restart` echoes back the container ID.
+     */
+    setupDefaultRoutes() {
+        const self = this
+
+        // docker build always succeeds
+        this.capture.when(/docker build/).returns({ stdout: '' })
+
+        // docker run returns a unique container ID each time
+        this.capture.when(/docker run/).respondsWith(() => {
+            return { stdout: self.nextContainerId() + '\n' }
+        })
+
+        // docker kill/rm/stop/start/restart echo back the container ID
+        const extractId = (cmd) => {
+            const parts = cmd.trim().split(/\s+/)
+            return { stdout: parts[parts.length - 1] }
+        }
+        this.capture.when(/docker kill/).respondsWith(extractId)
+        this.capture.when(/docker rm/).respondsWith(extractId)
+        this.capture.when(/docker stop/).respondsWith(extractId)
+        this.capture.when(/docker start/).respondsWith(extractId)
+        this.capture.when(/docker restart/).respondsWith(extractId)
+
+        // docker network inspect — return success with gateway info.
+        // createDockerNetwork checks if network exists first, and if inspect succeeds
+        // it skips creation (which is fine for tests — network "already exists").
+        // addUserPasswordToDatabase also needs getDockerNetworkInspect to return gateway info.
+        this.capture.when(/docker network inspect/).returns({
+            stdout: JSON.stringify([{
+                Name: 'xchain-node',
+                IPAM: { Config: [{ Gateway: '172.18.0.1' }] }
+            }])
+        })
+
+        // docker network create succeeds (called when inspect fails, but with our
+        // setup inspect always succeeds so createDockerNetwork skips creation)
+        this.capture.when(/docker network create/).returns({ stdout: '' })
+
+        // docker inspect (container) returns running status
+        this.capture.when(/docker inspect(?! .*network)/).respondsWith(() => {
+            return {
+                stdout: JSON.stringify([{
+                    State: { Status: 'running' },
+                    NetworkSettings: {
+                        Ports: {},
+                        Networks: {
+                            'xchain-node': { Gateway: '172.18.0.1' }
+                        }
+                    }
+                }])
+            }
+        })
+
+        // docker --version
+        this.capture.when(/docker --version/).returns({
+            stdout: 'Docker version 24.0.0, build abc123'
+        })
+
+        // docker ps
+        this.capture.when(/docker ps/).returns({ stdout: '' })
+
+        // docker pull / docker tag (for MariaDB)
+        this.capture.when(/docker pull/).returns({ stdout: '' })
+        this.capture.when(/docker tag/).returns({ stdout: '' })
+
+        // docker exec (for MariaDB commands) — return success
+        this.capture.when(/docker exec/).returns({ stdout: '0' })
+
+        // docker logs
+        this.capture.when(/docker logs/).returns({ stdout: 'log output' })
+
+        // docker wait
+        this.capture.when(/docker wait/).returns({ stdout: '0' })
+
+        // git clone succeeds
+        this.capture.when(/git clone/).returns({ stdout: '' })
+
+        // git rev-parse (branch check)
+        this.capture.when(/git.*rev-parse/).returns({ stdout: 'master\n' })
+
+        // HTTP: hub ping succeeds
+        this.http.when(/127\.0\.0\.1/).returns({
+            data: { result: true }
+        })
+    }
+
+    /**
+     * Write a config file and create fake module directories for a full stack.
+     */
+    setupFullStack(coin, network) {
+        this.writeConfigFile(`${coin}-${network}`, '')
+        this.createFakeModule('xchain-encoder')
+        this.createFakeModule('xchain-decoder')
+        this.createFakeModule('xchain-utxo-tracker')
+        this.createFakeModule('xchain-indexer')
+        this.createFakeModule('xchain-regtest-miner')
+        this.createFakeModule('xchain-hub')
+        this.createFakeModule('xchain-explorer')
+        this.createFakeModule('xchain-e2e-test')
+        this.createFakeModule('xchain-indexer-sync')
+    }
+
+    /**
+     * Create a fully-wired CLI with all services connected through stubs.
+     * Returns { moduleOps, ModuleService, DockerService, ConfigService, DatabaseService, StatusService }
+     */
+    createCLI() {
+        const self = this
+        const capture = this.capture
+        const http = this.http
+
+        // Patched constants
+        const patchedConstants = Object.assign({}, require(path.join(ROOT, 'src/config/constants')), {
+            configDir: this.configDir,
+            moduleDir: this.moduleDir,
+            dataDir: this.dataDir,
+            tmpDir: path.join(this.tmpDir, 'tmp'),
+            containersFilesDir: path.join(this.tmpDir, 'tmp', 'containers_files')
+        })
+
+        // ConfigService with patched paths.
+        // Override removeModuleDir/removeModuleTmpDir to be no-ops so that after
+        // cloneGit "re-clones" (which uses our exec stub), the fake module dirs
+        // remain intact for buildAndUp's checkIfModuleExists check.
+        const RealConfigService = proxyquire(path.join(ROOT, 'src/services/ConfigService'), {
+            '../config/constants': patchedConstants
+        })
+        const ConfigService = Object.assign({}, RealConfigService, {
+            removeModuleDir: () => {},
+            removeModuleTmpDir: () => {}
+        })
+
+        const execStub = capture.createExecStub()
+        const execAsyncStub = capture.createExecAsyncStub()
+        const spawnStub = capture.createSpawnStub()
+        const spawnSyncStub = capture.createSpawnSyncStub()
+
+        // Custom spawn that auto-closes for docker logs (prevents hangs)
+        const autoCloseSpawnStub = function (command, args, options) {
+            const child = spawnStub(command, args, options)
+            // Auto-emit 'close' on next tick so logContainer/spawn-based tests don't hang
+            process.nextTick(() => child.emit('close', 0))
+            return child
+        }
+
+        // DockerService
+        const DockerService = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
+            'child_process': {
+                exec: execStub,
+                spawn: autoCloseSpawnStub,
+                spawnSync: spawnSyncStub
+            },
+            'util': { promisify: () => execAsyncStub },
+            '../config/constants': patchedConstants,
+            'blessed': {
+                screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),
+                text: () => {},
+                log: () => ({ log: () => {} })
+            }
+        })
+
+        // StatusService — uses real logic but with stubbed Docker.
+        // Override statusChanged to avoid lazy require of real HubService/ExplorerService
+        const { setStatusUpdated } = require(path.join(ROOT, 'src/state'))
+        const RealStatusService = proxyquire(path.join(ROOT, 'src/services/StatusService'), {
+            '../config/constants': patchedConstants,
+            './DockerService': DockerService,
+            './VersionService': {
+                checkRemoteNodeVersion: async () => true,
+                getLocalNodeVersion: async () => '0.0.1',
+                getContainerNodeVersion: async () => '0.0.1',
+                getLocalModuleVersion: async () => '0.0.1',
+                getContainerModuleVersion: async () => '0.0.1'
+            },
+            './ModuleService': {
+                getModuleBranch: async () => 'master'
+            }
+        })
+        const StatusService = Object.assign({}, RealStatusService, {
+            statusChanged: async () => { setStatusUpdated(false) }
+        })
+
+        // HubConnector stub
+        function StubHubConnector() {
+            this.ping = async () => true
+            this.updateConfig = async () => true
+        }
+
+        // ExplorerConnector stub
+        function StubExplorerConnector() {
+            this.ping = async () => true
+            this.updateConfig = async () => true
+        }
+
+        // HubService
+        const HubService = proxyquire(path.join(ROOT, 'src/services/HubService'), {
+            '../config/constants': patchedConstants,
+            './ConfigService': ConfigService,
+            './StatusService': StatusService,
+            './DockerService': DockerService,
+            './ModuleService': {
+                cloneGit: async () => true,
+                buildAndUp: async () => TestEnv.fakeContainerId('hub')
+            },
+            '../HubConnector.js': StubHubConnector,
+            '../ExplorerConnector.js': StubExplorerConnector
+        })
+
+        // ExplorerService
+        const ExplorerService = proxyquire(path.join(ROOT, 'src/services/ExplorerService'), {
+            '../config/constants': patchedConstants,
+            './ConfigService': ConfigService,
+            './StatusService': StatusService,
+            './DockerService': DockerService,
+            './ModuleService': {
+                cloneGit: async () => true,
+                buildAndUp: async () => TestEnv.fakeContainerId('exp')
+            },
+            '../HubConnector.js': StubHubConnector,
+            '../ExplorerConnector.js': StubExplorerConnector
+        })
+
+        // DatabaseService
+        const DatabaseService = proxyquire(path.join(ROOT, 'src/services/DatabaseService'), {
+            'child_process': { exec: execStub },
+            'util': { promisify: () => execAsyncStub },
+            '../config/constants': patchedConstants,
+            './ConfigService': ConfigService,
+            './DockerService': DockerService,
+            './StatusService': StatusService,
+            'enquirer': {
+                Password: function () {
+                    this.run = async () => 'testrootpw'
+                }
+            }
+        })
+
+        // VersionService
+        const VersionService = {
+            checkAllRemoteVersions: async () => true,
+            checkRemoteNodeVersion: async () => true,
+            getLocalNodeVersion: async () => '0.0.1',
+            getContainerNodeVersion: async () => '0.0.1',
+            getLocalModuleVersion: async () => '0.0.1',
+            getContainerModuleVersion: async () => '0.0.1'
+        }
+
+        // ModuleService — must also stub 'util' because getModuleBranch does
+        // promisify(exec) inline, and our exec stub lacks the custom promisify symbol
+        const ModuleService = proxyquire(path.join(ROOT, 'src/services/ModuleService'), {
+            'child_process': { exec: execStub },
+            'util': { promisify: () => execAsyncStub },
+            '../config/constants': patchedConstants,
+            './ConfigService': ConfigService,
+            './DockerService': DockerService,
+            './StatusService': StatusService,
+            './DatabaseService': DatabaseService,
+            './VersionService': VersionService,
+            './NodeService': {
+                buildCryptoNode: async () => true,
+                getCryptoNode: async () => true
+            },
+            './ExplorerService': {
+                installExplorerModule: async () => true
+            }
+        })
+
+        // moduleOperations — the main entry point
+        // Must also stub 'util' because resetModules uses promisify(exec) at top level
+        const moduleOps = proxyquire(path.join(ROOT, 'src/operations/moduleOperations'), {
+            'child_process': { exec: execStub },
+            'util': { promisify: () => execAsyncStub },
+            'fs': Object.assign({}, require('fs'), { existsSync: () => false }),
+            '../config/constants': patchedConstants,
+            '../services/ConfigService': ConfigService,
+            '../services/DockerService': DockerService,
+            '../services/DatabaseService': DatabaseService,
+            '../services/ModuleService': ModuleService,
+            '../services/StatusService': StatusService
+        })
+
+        return {
+            moduleOps,
+            ModuleService,
+            DockerService,
+            ConfigService,
+            DatabaseService,
+            StatusService,
+            HubService,
+            ExplorerService
+        }
+    }
+}
+
+module.exports = E2EEnv

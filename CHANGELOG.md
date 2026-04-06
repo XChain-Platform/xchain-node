@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-04-05
+
+### Added
+- End-to-end test suite with 57 tests across 8 scenario files validating complete CLI workflows
+- E2E test helper (`e2e-env.js`) extending TestEnv to wire all services together with stubbed Docker/Git/HTTP but real config generation, LevelDB state, and service-list expansion
+- E2E tests for full install lifecycle: install all, stop, start, uninstall, selective install (6 tests)
+- E2E tests for multi-coin installation: per-coin Docker networks, shared service deduplication, per-coin uninstall (6 tests)
+- E2E tests for configuration overrides: default env vars, config file overrides, regtest-specific values, DB naming conventions (13 tests)
+- E2E tests for PreCheck pipeline: Docker verification, directory creation, hub auto-install, Docker-unreachable error (6 tests)
+- E2E tests for update flow: kill old container, build new image, LevelDB updated, branch support (4 tests)
+- E2E tests for reset command: stop/clear/restart lifecycle, database DROP/CREATE, multi-module reset (4 tests)
+- E2E tests for error handling: Docker unreachable, docker run failure, missing module, git clone failure, empty LevelDB (6 tests)
+- E2E tests for exec/logs/restart commands using container IDs from LevelDB (5 tests)
+- `test:e2e` npm script; E2E tests included in `test:all` pipeline
+
 ## [0.0.5] - 2026-04-05
 
 ### Added
