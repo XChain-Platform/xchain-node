@@ -58,14 +58,16 @@ describe('Integration: Docker Command Construction', function () {
             '../config/constants': patchedConstants
         })
 
-        const execStub = capture.createExecStub()
+        const execFileStub = capture.createExecFileStub()
+        const execFileAsyncStub = capture.createExecFileAsyncStub()
 
         const PatchedDockerService = proxyquire('../../src/services/DockerService', {
             'child_process': {
-                exec: execStub,
+                execFile: execFileStub,
                 spawn: capture.createSpawnStub(),
                 spawnSync: capture.createSpawnSyncStub()
             },
+            'util': { promisify: () => execFileAsyncStub },
             'blessed': {
                 screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),
                 text: () => {},
@@ -75,9 +77,9 @@ describe('Integration: Docker Command Construction', function () {
 
         const ModuleService = proxyquire('../../src/services/ModuleService', {
             'child_process': {
-                exec: execStub,
-                spawn: capture.createSpawnStub()
+                execFile: execFileStub
             },
+            'util': { promisify: () => execFileAsyncStub },
             '../config/constants': patchedConstants,
             './ConfigService': PatchedConfigService,
             './DockerService': PatchedDockerService,
@@ -125,10 +127,10 @@ describe('Integration: Docker Command Construction', function () {
             expect(runCmd).to.include('-p 3003:3003')
 
             // Environment variables
-            expect(runCmd).to.include('"NETWORK=mainnet"')
-            expect(runCmd).to.include('"NODE_PORT=8332"')
-            expect(runCmd).to.include('"ENCODER_API_PORT=3003"')
-            expect(runCmd).to.include('"NODE_URL=node"')
+            expect(runCmd).to.include('NETWORK=mainnet')
+            expect(runCmd).to.include('NODE_PORT=8332')
+            expect(runCmd).to.include('ENCODER_API_PORT=3003')
+            expect(runCmd).to.include('NODE_URL=node')
         })
 
         it('uses testnet port when network is testnet', async function () {
@@ -139,8 +141,8 @@ describe('Integration: Docker Command Construction', function () {
             await ModuleService.buildAndUp('xchain-encoder', 'bitcoin', 'testnet', null, true)
 
             const runCmd = capture.findCommands(/docker run/)[0].command
-            expect(runCmd).to.include('"NODE_PORT=18332"')
-            expect(runCmd).to.include('"NETWORK=testnet"')
+            expect(runCmd).to.include('NODE_PORT=18332')
+            expect(runCmd).to.include('NETWORK=testnet')
         })
 
         it('propagates config file overrides into Docker env vars', async function () {
@@ -151,7 +153,7 @@ describe('Integration: Docker Command Construction', function () {
             await ModuleService.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, true)
 
             const runCmd = capture.findCommands(/docker run/)[0].command
-            expect(runCmd).to.include('"ENCODER_API_PORT=4003"')
+            expect(runCmd).to.include('ENCODER_API_PORT=4003')
             expect(runCmd).to.include('-p 4003:4003')
         })
     })
@@ -171,10 +173,10 @@ describe('Integration: Docker Command Construction', function () {
 
             const runCmd = capture.findCommands(/docker run/)[0].command
 
-            expect(runCmd).to.include('"DECODER_DB_NAME=XChain_BTC_Mainnet_Decoder"')
-            expect(runCmd).to.include('"DECODER_DB_HOST=mariadb"')
-            expect(runCmd).to.include('"DECODER_DB_USER=xchain_decoder_bitcoin_mainnet"')
-            expect(runCmd).to.include('"DECODER_DB_PASS=xchain-password"')
+            expect(runCmd).to.include('DECODER_DB_NAME=XChain_BTC_Mainnet_Decoder')
+            expect(runCmd).to.include('DECODER_DB_HOST=mariadb')
+            expect(runCmd).to.include('DECODER_DB_USER=xchain_decoder_bitcoin_mainnet')
+            expect(runCmd).to.include('DECODER_DB_PASS=xchain-password')
             expect(runCmd).to.include('-p 3002:3002')
 
             // Bootstrap volume mount
@@ -190,8 +192,8 @@ describe('Integration: Docker Command Construction', function () {
             await ModuleService.buildAndUp('xchain-decoder', 'dogecoin', 'testnet', null, true)
 
             const runCmd = capture.findCommands(/docker run/)[0].command
-            expect(runCmd).to.include('"DECODER_DB_NAME=XChain_DOGE_Testnet_Decoder"')
-            expect(runCmd).to.include('"DECODER_DB_USER=xchain_decoder_dogecoin_testnet"')
+            expect(runCmd).to.include('DECODER_DB_NAME=XChain_DOGE_Testnet_Decoder')
+            expect(runCmd).to.include('DECODER_DB_USER=xchain_decoder_dogecoin_testnet')
             expect(runCmd).to.include('--network xchain-node-dogecoin-testnet')
         })
     })
@@ -243,11 +245,11 @@ describe('Integration: Docker Command Construction', function () {
 
             const runCmd = capture.findCommands(/docker run/)[0].command
 
-            expect(runCmd).to.include('"INDEXER_DB_NAME=XChain_BTC_Mainnet_Indexer"')
-            expect(runCmd).to.include('"INDEXER_DB_USER=xchain_indexer_bitcoin_mainnet"')
-            expect(runCmd).to.include('"INDEXER_DB_HOST=mariadb"')
-            expect(runCmd).to.include('"INDEXER_COIN=BTC"')
-            expect(runCmd).to.include('"INDEXER_NETWORK=mainnet"')
+            expect(runCmd).to.include('INDEXER_DB_NAME=XChain_BTC_Mainnet_Indexer')
+            expect(runCmd).to.include('INDEXER_DB_USER=xchain_indexer_bitcoin_mainnet')
+            expect(runCmd).to.include('INDEXER_DB_HOST=mariadb')
+            expect(runCmd).to.include('INDEXER_COIN=BTC')
+            expect(runCmd).to.include('INDEXER_NETWORK=mainnet')
             expect(runCmd).to.include('-p 3004:3004')
         })
     })
@@ -267,8 +269,8 @@ describe('Integration: Docker Command Construction', function () {
 
             const runCmd = capture.findCommands(/docker run/)[0].command
 
-            expect(runCmd).to.include('"NODE_PORT=18444"')
-            expect(runCmd).to.include('"NETWORK=regtest"')
+            expect(runCmd).to.include('NODE_PORT=18444')
+            expect(runCmd).to.include('NETWORK=regtest')
             expect(runCmd).to.include('-p 3005:3005')
             expect(runCmd).to.include('--network xchain-node-bitcoin-regtest')
         })
@@ -383,11 +385,11 @@ describe('Integration: Docker Command Construction', function () {
 
                     expect(runCmd).to.include(`--hostname xchain-node-${coin}-${network}-xchain-encoder`)
                     expect(runCmd).to.include(`--network xchain-node-${coin}-${network}`)
-                    expect(runCmd).to.include(`"NETWORK=${network}"`)
-                    expect(runCmd).to.include(`"INDEXER_COIN=${CoinTickerSymbol[coin]}"`)
+                    expect(runCmd).to.include(`NETWORK=${network}`)
+                    expect(runCmd).to.include(`INDEXER_COIN=${CoinTickerSymbol[coin]}`)
 
                     if (network === 'regtest') {
-                        expect(runCmd).to.include('"REGTEST_MINER_API_PORT=3005"')
+                        expect(runCmd).to.include('REGTEST_MINER_API_PORT=3005')
                     }
                 })
             }

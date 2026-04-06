@@ -8,10 +8,10 @@ const fs              = require('fs')
 const path            = require('path')
 const crypto          = require('crypto')
 const zlib            = require('zlib')
-const { spawn }       = require('child_process')
+const { execFile, spawn } = require('child_process')
 const { promisify }   = require('util')
 const { PassThrough } = require('stream')
-const execAsync       = promisify(require('child_process').exec)
+const execFileAsync   = promisify(execFile)
 
 const { XChainService, DB_MODULE_NAME, SEP, tmpDir } = require('../config/constants')
 const { db }                                          = require('../state')
@@ -87,7 +87,8 @@ async function ensureDirWritable(dirPath) {
     // Use a throwaway Alpine container to create/chmod it.
     const parent  = path.dirname(normalized)
     const dirName = path.basename(normalized)
-    await execAsync(`docker run --rm -v "${parent}:/parent" alpine sh -c "mkdir -p /parent/${dirName} && chmod 777 /parent/${dirName}"`)
+    await execFileAsync('docker', ['run', '--rm', '-v', `${parent}:/parent`, 'alpine', 'mkdir', '-p', `/parent/${dirName}`])
+    await execFileAsync('docker', ['run', '--rm', '-v', `${parent}:/parent`, 'alpine', 'chmod', '755', `/parent/${dirName}`])
 }
 
 // ─── Public: getBootstrapFilesList ───────────────────────────────
@@ -151,8 +152,8 @@ async function makeBootstrapUtxoTracker(coin, network) {
     // Step 1: Estimate volume size
     let totalBytes = 0
     try {
-        const { stdout } = await execAsync(
-            `docker run --rm -v "${volumeName}:/data" alpine sh -c "du -sb /data"`
+        const { stdout } = await execFileAsync(
+            'docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'du', '-sb', '/data']
         )
         totalBytes = parseInt(stdout.trim().split(/\s+/)[0], 10) || 0
     } catch {
@@ -203,7 +204,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
 
         // Step 5: Create outer wrapper archive
         console.log(`Wrapping into ${archiveName}...`)
-        await execAsync(`tar czf "${finalOutput}" -C "${workDir}" data.tar.gz data.sha256`)
+        await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, 'data.tar.gz', 'data.sha256'])
 
         // Cleanup work dir
         fs.rmSync(workDir, { recursive: true })
@@ -242,8 +243,8 @@ async function makeBootstrapMariaDb(coin, network, module) {
     let totalBytes = 0
     try {
         const sizeQuery = `SELECT SUM(DATA_LENGTH + INDEX_LENGTH) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}'`
-        const { stdout } = await execAsync(
-            `docker exec ${dbContainerId} mariadb -u root -p${rootPassword} -BN -e "${sizeQuery}" information_schema`
+        const { stdout } = await execFileAsync(
+            'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-BN', '-e', sizeQuery, 'information_schema']
         )
         totalBytes = parseInt(stdout.trim(), 10) || 0
     } catch {
@@ -286,7 +287,7 @@ async function makeBootstrapMariaDb(coin, network, module) {
 
     // Step 5: Create outer wrapper archive
     console.log(`Wrapping into ${archiveName}...`)
-    await execAsync(`tar czf "${finalOutput}" -C "${workDir}" dump.sql.gz dump.sha256`)
+    await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, 'dump.sql.gz', 'dump.sha256'])
 
     // Cleanup work dir
     fs.rmSync(workDir, { recursive: true })
@@ -322,7 +323,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
     ensureDir(workDir)
     console.log('Extracting outer archive...')
-    await execAsync(`tar xzf "${archivePath}" -C "${workDir}"`)
+    await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
 
     const innerArchive = path.join(workDir, 'data.tar.gz')
     const checksumFile = path.join(workDir, 'data.sha256')
@@ -352,7 +353,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     try {
         // Step 4: Clear volume
         console.log('Clearing LevelDB volume...')
-        await execAsync(`docker run --rm -v "${volumeName}:/data" alpine sh -c "find /data -mindepth 1 -delete"`)
+        await execFileAsync('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
 
         // Step 5: Restore data.tar.gz into volume with progress
         const stats      = await fs.promises.stat(innerArchive)
@@ -408,7 +409,7 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
     ensureDir(workDir)
     console.log('Extracting outer archive...')
-    await execAsync(`tar xzf "${archivePath}" -C "${workDir}"`)
+    await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
 
     const innerArchive = path.join(workDir, 'dump.sql.gz')
     const checksumFile = path.join(workDir, 'dump.sha256')
@@ -436,8 +437,8 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
 
     // Step 4: Drop and recreate database
     console.log(`Recreating database ${dbName}...`)
-    await execAsync(
-        `docker exec ${dbContainerId} mariadb -u root -p${rootPassword} -e "DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}"`
+    await execFileAsync(
+        'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-e', `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`]
     )
 
     // Step 5: Pipe decompressed SQL into mariadb with progress

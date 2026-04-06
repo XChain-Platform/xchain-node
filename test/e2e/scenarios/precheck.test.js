@@ -33,7 +33,7 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
      * Create a preCheck function wired with our stubs.
      */
     function makePreCheck(capture, overrides = {}) {
-        const execStub = capture.createExecStub()
+        const execFileStub = capture.createExecFileStub()
 
         const patchedConstants = Object.assign({}, require(path.join(ROOT, 'src/config/constants')), {
             configDir: env.configDir,
@@ -45,11 +45,11 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
 
         const DockerService = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
             'child_process': {
-                exec: execStub,
+                execFile: execFileStub,
                 spawn: capture.createSpawnStub(),
                 spawnSync: capture.createSpawnSyncStub()
             },
-            'util': { promisify: () => capture.createExecAsyncStub() },
+            'util': { promisify: () => capture.createExecFileAsyncStub() },
             '../config/constants': patchedConstants,
             'blessed': {
                 screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),

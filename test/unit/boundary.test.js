@@ -34,7 +34,7 @@ function makeConfigService(fsStub) {
 
 function makeModuleServiceStubs() {
     return {
-        exec: sinon.stub(),
+        execFile: sinon.stub(),
         fs: {
             existsSync: sinon.stub().returns(true),
             rmSync: sinon.stub(),
@@ -73,7 +73,7 @@ function loadModuleService(stubs, configOverrides) {
     }, configOverrides || {})
 
     return proxyquire('../../src/services/ModuleService', {
-        'child_process': { exec: stubs.exec },
+        'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs,
         '../state': {
             db: stubs.db,
@@ -416,9 +416,9 @@ describe('Boundary Tests', function () {
     // 4. Docker env var escaping (Fix 3)
     // ===================================================================
 
-    describe('ModuleService — Docker env var escaping', function () {
+    describe('ModuleService — Docker env var passing (execFile)', function () {
 
-        it('escapes double quotes in environment variable values', async function () {
+        it('passes double quotes in environment variable values unescaped', async function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs, {
                 getDefaultConfig: sinon.stub().resolves({
@@ -426,12 +426,14 @@ describe('Boundary Tests', function () {
                 })
             })
 
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null, '')
-                } else if (cmd.includes('docker run')) {
-                    expect(cmd).to.include('TEST_VAR=hello\\"world')
+                } else if (args[0] === 'run') {
+                    expect(args).to.include('TEST_VAR=hello"world')
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
@@ -439,7 +441,7 @@ describe('Boundary Tests', function () {
             await ms.buildAndUp('xchain-decoder', 'bitcoin', 'mainnet')
         })
 
-        it('escapes dollar signs in environment variable values', async function () {
+        it('passes dollar signs in environment variable values unescaped', async function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs, {
                 getDefaultConfig: sinon.stub().resolves({
@@ -447,12 +449,14 @@ describe('Boundary Tests', function () {
                 })
             })
 
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null, '')
-                } else if (cmd.includes('docker run')) {
-                    expect(cmd).to.include('PRICE=costs_\\$100')
+                } else if (args[0] === 'run') {
+                    expect(args).to.include('PRICE=costs_$100')
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
@@ -460,7 +464,7 @@ describe('Boundary Tests', function () {
             await ms.buildAndUp('xchain-decoder', 'bitcoin', 'mainnet')
         })
 
-        it('escapes backticks in environment variable values', async function () {
+        it('passes backticks in environment variable values unescaped', async function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs, {
                 getDefaultConfig: sinon.stub().resolves({
@@ -468,12 +472,14 @@ describe('Boundary Tests', function () {
                 })
             })
 
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null, '')
-                } else if (cmd.includes('docker run')) {
-                    expect(cmd).to.include('CMD=run \\`whoami\\`')
+                } else if (args[0] === 'run') {
+                    expect(args).to.include('CMD=run `whoami`')
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
@@ -481,7 +487,7 @@ describe('Boundary Tests', function () {
             await ms.buildAndUp('xchain-decoder', 'bitcoin', 'mainnet')
         })
 
-        it('escapes backslashes in environment variable values', async function () {
+        it('passes backslashes in environment variable values unescaped', async function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs, {
                 getDefaultConfig: sinon.stub().resolves({
@@ -489,12 +495,14 @@ describe('Boundary Tests', function () {
                 })
             })
 
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null, '')
-                } else if (cmd.includes('docker run')) {
-                    expect(cmd).to.include('PATH_VAR=C:\\\\Users\\\\test')
+                } else if (args[0] === 'run') {
+                    expect(args).to.include('PATH_VAR=C:\\Users\\test')
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
@@ -510,12 +518,14 @@ describe('Boundary Tests', function () {
                 })
             })
 
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null, '')
-                } else if (cmd.includes('docker run')) {
-                    expect(cmd).to.include('PORT=3002')
+                } else if (args[0] === 'run') {
+                    expect(args).to.include('PORT=3002')
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
@@ -531,12 +541,14 @@ describe('Boundary Tests', function () {
                 })
             })
 
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null, '')
-                } else if (cmd.includes('docker run')) {
-                    expect(cmd).to.include('EXPLORER_API_USER=false')
+                } else if (args[0] === 'run') {
+                    expect(args).to.include('EXPLORER_API_USER=false')
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
@@ -555,8 +567,10 @@ describe('Boundary Tests', function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs)
 
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('-b master')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(args).to.include('-b')
+                expect(args).to.include('master')
                 cb(null, '', '')
             })
 
@@ -567,8 +581,10 @@ describe('Boundary Tests', function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs)
 
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('-b feature/my-branch')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(args).to.include('-b')
+                expect(args).to.include('feature/my-branch')
                 cb(null, '', '')
             })
 
@@ -579,8 +595,10 @@ describe('Boundary Tests', function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs)
 
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('-b v1.0.0')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(args).to.include('-b')
+                expect(args).to.include('v1.0.0')
                 cb(null, '', '')
             })
 
@@ -591,8 +609,10 @@ describe('Boundary Tests', function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs)
 
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('-b release_2.0')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(args).to.include('-b')
+                expect(args).to.include('release_2.0')
                 cb(null, '', '')
             })
 
@@ -663,8 +683,9 @@ describe('Boundary Tests', function () {
             const stubs = makeModuleServiceStubs()
             const ms = loadModuleService(stubs)
 
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.not.include('-b')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(args).to.not.include('-b')
                 cb(null, '', '')
             })
 
@@ -688,12 +709,10 @@ describe('Boundary Tests', function () {
     // 6. Grep/testName escaping (Fix 5)
     // ===================================================================
 
-    describe('moduleOperations — grep/testName escaping', function () {
+    describe('moduleOperations — grep/testName handling', function () {
 
         function loadModuleOperations(stubs) {
             return proxyquire('../../src/operations/moduleOperations', {
-                'child_process': { exec: stubs.exec },
-                'util': { promisify: (fn) => fn },
                 '../config/constants': require('../../src/config/constants'),
                 '../state': {
                     db: stubs.db
@@ -733,16 +752,15 @@ describe('Boundary Tests', function () {
             })
         }
 
-        it('escapes double quotes in grep pattern', async function () {
-            let capturedDockerCmd = null
+        it('passes grep pattern as separate array element', async function () {
+            let capturedDockerCmdArgs = null
             const stubs = {
-                exec: sinon.stub(),
                 db: { getModuleContainer: sinon.stub().resolves('abc123') },
                 waitContainer: sinon.stub().resolves(0),
                 saveContainerLogs: sinon.stub().resolves(true),
                 removeContainer: sinon.stub().resolves(true),
-                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmd) => {
-                    capturedDockerCmd = dockerCmd
+                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmdArgs) => {
+                    capturedDockerCmdArgs = dockerCmdArgs
                     return Promise.resolve('a'.repeat(64))
                 })
             }
@@ -750,19 +768,19 @@ describe('Boundary Tests', function () {
             const ops = loadModuleOperations(stubs)
             await ops.runE2ETest('bitcoin', 'regtest', 'order', 'test "injection"')
 
-            expect(capturedDockerCmd).to.include('--grep "test \\"injection\\""')
+            expect(capturedDockerCmdArgs).to.include('--grep')
+            expect(capturedDockerCmdArgs).to.include('test "injection"')
         })
 
-        it('escapes backslashes in grep pattern', async function () {
-            let capturedDockerCmd = null
+        it('passes backslashes in grep pattern unescaped', async function () {
+            let capturedDockerCmdArgs = null
             const stubs = {
-                exec: sinon.stub(),
                 db: { getModuleContainer: sinon.stub().resolves('abc123') },
                 waitContainer: sinon.stub().resolves(0),
                 saveContainerLogs: sinon.stub().resolves(true),
                 removeContainer: sinon.stub().resolves(true),
-                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmd) => {
-                    capturedDockerCmd = dockerCmd
+                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmdArgs) => {
+                    capturedDockerCmdArgs = dockerCmdArgs
                     return Promise.resolve('a'.repeat(64))
                 })
             }
@@ -770,19 +788,19 @@ describe('Boundary Tests', function () {
             const ops = loadModuleOperations(stubs)
             await ops.runE2ETest('bitcoin', 'regtest', 'order', 'path\\test')
 
-            expect(capturedDockerCmd).to.include('--grep "path\\\\test"')
+            expect(capturedDockerCmdArgs).to.include('--grep')
+            expect(capturedDockerCmdArgs).to.include('path\\test')
         })
 
-        it('escapes double quotes in testName', async function () {
-            let capturedDockerCmd = null
+        it('includes testName in file path array element', async function () {
+            let capturedDockerCmdArgs = null
             const stubs = {
-                exec: sinon.stub(),
                 db: { getModuleContainer: sinon.stub().resolves('abc123') },
                 waitContainer: sinon.stub().resolves(0),
                 saveContainerLogs: sinon.stub().resolves(true),
                 removeContainer: sinon.stub().resolves(true),
-                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmd) => {
-                    capturedDockerCmd = dockerCmd
+                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmdArgs) => {
+                    capturedDockerCmdArgs = dockerCmdArgs
                     return Promise.resolve('a'.repeat(64))
                 })
             }
@@ -790,19 +808,18 @@ describe('Boundary Tests', function () {
             const ops = loadModuleOperations(stubs)
             await ops.runE2ETest('bitcoin', 'regtest', 'test"name', null)
 
-            expect(capturedDockerCmd).to.include('test/actions/test\\"name.test.js')
+            expect(capturedDockerCmdArgs.some(a => a.includes('test"name.test.js'))).to.be.true
         })
 
         it('handles null grep and null testName', async function () {
-            let capturedDockerCmd = null
+            let capturedDockerCmdArgs = null
             const stubs = {
-                exec: sinon.stub(),
                 db: { getModuleContainer: sinon.stub().resolves('abc123') },
                 waitContainer: sinon.stub().resolves(0),
                 saveContainerLogs: sinon.stub().resolves(true),
                 removeContainer: sinon.stub().resolves(true),
-                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmd) => {
-                    capturedDockerCmd = dockerCmd
+                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmdArgs) => {
+                    capturedDockerCmdArgs = dockerCmdArgs
                     return Promise.resolve('a'.repeat(64))
                 })
             }
@@ -810,19 +827,18 @@ describe('Boundary Tests', function () {
             const ops = loadModuleOperations(stubs)
             await ops.runE2ETest('bitcoin', 'regtest', null, null)
 
-            expect(capturedDockerCmd).to.be.null
+            expect(capturedDockerCmdArgs).to.be.null
         })
 
         it('does not add --grep when testName is null even if grep is set', async function () {
-            let capturedDockerCmd = null
+            let capturedDockerCmdArgs = null
             const stubs = {
-                exec: sinon.stub(),
                 db: { getModuleContainer: sinon.stub().resolves('abc123') },
                 waitContainer: sinon.stub().resolves(0),
                 saveContainerLogs: sinon.stub().resolves(true),
                 removeContainer: sinon.stub().resolves(true),
-                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmd) => {
-                    capturedDockerCmd = dockerCmd
+                installModule: sinon.stub().callsFake((mod, coin, net, remoteUpdate, overwrite, onlyExec, branch, dockerCmdArgs) => {
+                    capturedDockerCmdArgs = dockerCmdArgs
                     return Promise.resolve('a'.repeat(64))
                 })
             }
@@ -830,8 +846,8 @@ describe('Boundary Tests', function () {
             const ops = loadModuleOperations(stubs)
             await ops.runE2ETest('bitcoin', 'regtest', null, 'some pattern')
 
-            // dockerCmd is null when testName is null, so grep is not appended
-            expect(capturedDockerCmd).to.be.null
+            // dockerCmdArgs is null when testName is null, so grep is not appended
+            expect(capturedDockerCmdArgs).to.be.null
         })
     })
 

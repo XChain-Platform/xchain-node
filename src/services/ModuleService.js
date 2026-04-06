@@ -3,7 +3,9 @@
  * Clone, build, install and uninstall XChain modules
  ********************************************************************/
 
-const { exec }  = require('child_process')
+const { execFile } = require('child_process')
+const { promisify } = require('util')
+const execFileAsync = promisify(execFile)
 const fs        = require('fs')
 
 const {
@@ -48,13 +50,15 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
 
         const gitUrl = modulesUrls[module]
         const destination = useTmp ? getModuleTmpDir(module) : getModuleDir(module)
-        const branchFlag = branch ? `-b ${branch} ` : ''
+        const cloneArgs = ['clone']
+        if (branch) cloneArgs.push('-b', branch)
+        cloneArgs.push(gitUrl, destination)
 
-        exec(`git clone ${branchFlag}${gitUrl} ${destination}`, (error, stdout, stderr) => {
+        execFile('git', cloneArgs, (error, stdout, stderr) => {
             if (error) {
                 if (branch && stderr && stderr.toLowerCase().includes('not found')) {
                     console.warn(`WARNING: Branch '${branch}' not found for module '${module}'. Falling back to default branch (master).`)
-                    exec(`git clone ${gitUrl} ${destination}`, (fallbackError) => {
+                    execFile('git', ['clone', gitUrl, destination], (fallbackError) => {
                         if (fallbackError) {
                             reject("Error cloning project: " + fallbackError.message)
                         } else {
@@ -72,14 +76,12 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
 }
 
 async function getModuleBranch(module) {
-    const { promisify } = require('util')
-    const execAsync = promisify(exec)
     const dir = getModuleDir(module)
-    const { stdout } = await execAsync(`git -C "${dir}" rev-parse --abbrev-ref HEAD`)
+    const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])
     return stdout.trim()
 }
 
-async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmd = null) {
+async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null) {
     if (!checkIfModuleExists(module)) {
         throw "module not found"
     }
@@ -87,95 +89,94 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     const environmentVariables = await getDefaultConfig(module, coin, network)
 
     return new Promise((resolve, reject) => {
-        let environmentVariablesLine = ""
+        // With execFile, env vars are passed as individual array elements — no shell escaping needed
+        const envArgs = []
         for (const key in environmentVariables) {
-            const safeVal = String(environmentVariables[key])
-                .replace(/\\/g, '\\\\')
-                .replace(/"/g, '\\"')
-                .replace(/\$/g, '\\$')
-                .replace(/`/g, '\\`')
-                .replace(/\n/g, '\\n')
-                .replace(/\r/g, '\\r')
-            environmentVariablesLine += ' -e "' + key + '=' + safeVal + '"'
+            envArgs.push('-e', `${key}=${String(environmentVariables[key])}`)
         }
 
         const dir = getModuleDir(module)
         const containerPrefix = getDockerContainerImageName(module, coin, network)
 
         console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
-        exec('docker build . -t ' + containerPrefix, { cwd: dir }, async (error) => {
+        execFile('docker', ['build', '.', '-t', containerPrefix], { cwd: dir }, async (error) => {
             if (error) {
                 console.error("Error creating Docker image: " + error.message)
                 return
             }
 
             try {
-                let portLine = ""
-                let volumeLine = ""
-                let ulimitLine = ""
+                const portArgs = []
+                const volumeArgs = []
+                const ulimitArgs = []
 
                 switch (module) {
                     case XChainService.XCHAIN_DECODER:
                         if ("DECODER_PORT" in environmentVariables && "DECODER_API_PORT" in environmentVariables) {
-                            portLine = "-p " + environmentVariables["DECODER_PORT"] + ":" + environmentVariables["DECODER_API_PORT"]
+                            portArgs.push('-p', `${environmentVariables["DECODER_PORT"]}:${environmentVariables["DECODER_API_PORT"]}`)
                         }
-                        volumeLine = "-v " + environmentVariables["DECODER_BOOTSTRAP_VOLUME"] + ":/bootstrap/xchain-decoder "
+                        volumeArgs.push('-v', `${environmentVariables["DECODER_BOOTSTRAP_VOLUME"]}:/bootstrap/xchain-decoder`)
                         break
                     case XChainService.XCHAIN_ENCODER:
                         if ("ENCODER_PORT" in environmentVariables && "ENCODER_API_PORT" in environmentVariables) {
-                            portLine = "-p " + environmentVariables["ENCODER_PORT"] + ":" + environmentVariables["ENCODER_API_PORT"]
+                            portArgs.push('-p', `${environmentVariables["ENCODER_PORT"]}:${environmentVariables["ENCODER_API_PORT"]}`)
                         }
                         break
                     case XChainService.XCHAIN_UTXO_TRACKER:
                         if ("UTXO_TRACKER_PORT" in environmentVariables && "UTXO_TRACKER_API_PORT" in environmentVariables) {
-                            portLine = "-p " + environmentVariables["UTXO_TRACKER_PORT"] + ":" + environmentVariables["UTXO_TRACKER_API_PORT"]
+                            portArgs.push('-p', `${environmentVariables["UTXO_TRACKER_PORT"]}:${environmentVariables["UTXO_TRACKER_API_PORT"]}`)
                         }
-                        volumeLine = "-v " + module + SEP + coin + "-" + network + "-data:/data/xchain-utxo-tracker "
-                            + "-v " + environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"] + ":/bootstrap/xchain-utxo-tracker "
-                        ulimitLine = "--ulimit nofile=2048:2048 "
+                        volumeArgs.push(
+                            '-v', `${module}${SEP}${coin}-${network}-data:/data/xchain-utxo-tracker`,
+                            '-v', `${environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"]}:/bootstrap/xchain-utxo-tracker`
+                        )
+                        ulimitArgs.push('--ulimit', 'nofile=2048:2048')
                         break
                     case XChainService.XCHAIN_INDEXER:
                         if ("INDEXER_PORT" in environmentVariables && "INDEXER_API_PORT" in environmentVariables) {
-                            portLine = "-p " + environmentVariables["INDEXER_PORT"] + ":" + environmentVariables["INDEXER_API_PORT"]
+                            portArgs.push('-p', `${environmentVariables["INDEXER_PORT"]}:${environmentVariables["INDEXER_API_PORT"]}`)
                         }
                         break
                     case XChainService.XCHAIN_REGTEST_MINER:
                         if ("REGTEST_MINER_PORT" in environmentVariables) {
-                            portLine = "-p " + environmentVariables["REGTEST_MINER_PORT"] + ":" + environmentVariables["REGTEST_MINER_API_PORT"]
+                            portArgs.push('-p', `${environmentVariables["REGTEST_MINER_PORT"]}:${environmentVariables["REGTEST_MINER_API_PORT"]}`)
                         }
                         break
                     case 'xchain-hub':
                         coin = ""
                         network = ""
-                        portLine = "-p " + environmentVariables["HUB_PORT"] + ":" + environmentVariables["HUB_PORT"]
+                        portArgs.push('-p', `${environmentVariables["HUB_PORT"]}:${environmentVariables["HUB_PORT"]}`)
                         break
                     case EXPLORER_MODULE_NAME:
                         coin = ""
                         network = ""
-                        portLine = "-p " + environmentVariables["EXPLORER_PORT_HTTP"] + ":" + environmentVariables["EXPLORER_API_PORT_HTTP"]
-                            + " -p " + environmentVariables["EXPLORER_PORT_HTTPS"] + ":" + environmentVariables["EXPLORER_API_PORT_HTTPS"]
+                        portArgs.push(
+                            '-p', `${environmentVariables["EXPLORER_PORT_HTTP"]}:${environmentVariables["EXPLORER_API_PORT_HTTP"]}`,
+                            '-p', `${environmentVariables["EXPLORER_PORT_HTTPS"]}:${environmentVariables["EXPLORER_API_PORT_HTTPS"]}`
+                        )
                         break
                     case INDEXER_SYNC_MODULE_NAME:
                         coin = ""
                         network = ""
                         if ("SYNC_PORT" in environmentVariables && "SYNC_API_PORT" in environmentVariables) {
-                            portLine = "-p " + environmentVariables["SYNC_PORT"] + ":" + environmentVariables["SYNC_API_PORT"]
+                            portArgs.push('-p', `${environmentVariables["SYNC_PORT"]}:${environmentVariables["SYNC_API_PORT"]}`)
                         }
                         break
                 }
 
-                // Validate all port values in the portLine
-                if (portLine) {
-                    const portSegments = portLine.split(/\s*-p\s+/).filter(Boolean)
-                    for (const segment of portSegments) {
-                        const pair = segment.trim()
-                        const colonIdx = pair.indexOf(':')
-                        if (colonIdx === -1) continue
-                        const hostPort = pair.substring(0, colonIdx)
-                        const containerPort = pair.substring(colonIdx + 1)
-                        if (!validatePort(hostPort) || !validatePort(containerPort)) {
-                            reject("Invalid port value in configuration: " + pair)
-                            return
+                // Validate all port values
+                if (portArgs.length > 0) {
+                    for (let i = 0; i < portArgs.length; i++) {
+                        if (portArgs[i] === '-p') {
+                            const pair = portArgs[i + 1]
+                            const colonIdx = pair.indexOf(':')
+                            if (colonIdx === -1) continue
+                            const hostPort = pair.substring(0, colonIdx)
+                            const containerPort = pair.substring(colonIdx + 1)
+                            if (!validatePort(hostPort) || !validatePort(containerPort)) {
+                                reject("Invalid port value in configuration: " + pair)
+                                return
+                            }
                         }
                     }
                 }
@@ -187,18 +188,19 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                     await removeContainer(overwriteContainerId)
                 }
 
-                const dockerCommand = 'docker run '
-                    + '-d --hostname ' + containerPrefix + ' '
-                    + volumeLine
-                    + ulimitLine
-                    + '--network ' + getDockerNetwork(coin, network) + ' '
-                    + environmentVariablesLine + ' '
-                    + portLine + ' '
-                    + '-t ' + containerPrefix
-                    + (dockerCmd ? ' ' + dockerCmd : '')
+                const runArgs = [
+                    'run', '-d', '--hostname', containerPrefix,
+                    ...volumeArgs,
+                    ...ulimitArgs,
+                    '--network', getDockerNetwork(coin, network),
+                    ...envArgs,
+                    ...portArgs,
+                    '-t', containerPrefix,
+                    ...(dockerCmdArgs ?? [])
+                ]
 
                 console.log("Creating container of module " + module + (coin && network ? " in " + coin + " " + network : ""))
-                exec(dockerCommand, { cwd: dir }, async (error2, stdout) => {
+                execFile('docker', runArgs, { cwd: dir }, async (error2, stdout) => {
                     if (error2) {
                         reject("Error creating the container: " + error2.message)
                         return
@@ -230,7 +232,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     })
 }
 
-async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null, dockerCmd = null) {
+async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null, dockerCmdArgs = null) {
     if (coin === "") coin = null
     if (network === "") network = null
 
@@ -306,7 +308,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                         await cloneGit(module, true, false, branch)
                     }
                 }
-                const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmd)
+                const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
                     await setDatabaseParameters()
                 }

@@ -27,10 +27,11 @@ describe('Integration: Docker Network Management', function () {
     function makeDockerService() {
         return proxyquire('../../src/services/DockerService', {
             'child_process': {
-                exec: capture.createExecStub(),
+                execFile: capture.createExecFileStub(),
                 spawn: capture.createSpawnStub(),
                 spawnSync: capture.createSpawnSyncStub()
             },
+            'util': { promisify: () => capture.createExecFileAsyncStub() },
             'blessed': {
                 screen: () => ({
                     key: () => {},
@@ -206,7 +207,7 @@ describe('Integration: Docker Network Management', function () {
             capture.when(/docker exec/).returns({ stdout: 'command output' })
 
             const DockerService = makeDockerService()
-            const result = await DockerService.execContainer(containerId, 'ls -la')
+            const result = await DockerService.execContainer(containerId, ['ls', '-la'])
 
             expect(result).to.equal('command output')
             const cmds = capture.assertCalled(/docker exec/)

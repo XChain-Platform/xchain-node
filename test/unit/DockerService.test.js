@@ -10,7 +10,7 @@ const proxyquire = require('proxyquire').noCallThru()
 
 function makeStubs() {
     return {
-        exec: sinon.stub(),
+        execFile: sinon.stub(),
         spawn: sinon.stub(),
         spawnSync: sinon.stub()
     }
@@ -19,7 +19,7 @@ function makeStubs() {
 function loadDockerService(stubs, fsStub) {
     return proxyquire('../../src/services/DockerService', {
         'child_process': {
-            exec: stubs.exec,
+            execFile: stubs.execFile,
             spawn: stubs.spawn,
             spawnSync: stubs.spawnSync
         },
@@ -50,10 +50,11 @@ describe('DockerService', function () {
 
         it('resolves true when docker --version and docker ps succeed', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                if (cmd === 'docker --version') {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === '--version') {
                     cb(null, 'Docker version 24.0.0, build abc1234')
-                } else if (cmd === 'docker ps -a') {
+                } else if (args[0] === 'ps') {
                     cb(null, '')
                 }
             })
@@ -64,7 +65,8 @@ describe('DockerService', function () {
 
         it('rejects when docker --version fails', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 cb(new Error('not found'))
             })
             const ds = loadDockerService(stubs)
@@ -78,8 +80,9 @@ describe('DockerService', function () {
 
         it('rejects when docker --version returns unexpected format', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                if (cmd === 'docker --version') {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === '--version') {
                     cb(null, 'unexpected output')
                 }
             })
@@ -95,7 +98,8 @@ describe('DockerService', function () {
         it('rejects when docker ps fails (user not in docker group)', async function () {
             const stubs = makeStubs()
             let callCount = 0
-            stubs.exec.callsFake((cmd, cb) => {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 callCount++
                 if (callCount === 1) {
                     cb(null, 'Docker version 24.0.0, build abc1234')
@@ -120,8 +124,10 @@ describe('DockerService', function () {
     describe('startContainer()', function () {
         it('runs docker start <containerId>', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker start abc123')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['start', 'abc123'])
                 cb(null, 'abc123\n')
             })
             const ds = loadDockerService(stubs)
@@ -131,7 +137,10 @@ describe('DockerService', function () {
 
         it('rejects when stdout does not match container ID', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => cb(null, 'unexpected'))
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(null, 'unexpected')
+            })
             const ds = loadDockerService(stubs)
             try {
                 await ds.startContainer('abc123')
@@ -143,7 +152,10 @@ describe('DockerService', function () {
 
         it('rejects on exec error', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => cb(new Error('not found')))
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(new Error('not found'))
+            })
             const ds = loadDockerService(stubs)
             try {
                 await ds.startContainer('abc123')
@@ -157,8 +169,10 @@ describe('DockerService', function () {
     describe('stopContainer()', function () {
         it('runs docker stop <containerId>', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker stop abc123')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['stop', 'abc123'])
                 cb(null, 'abc123\n')
             })
             const ds = loadDockerService(stubs)
@@ -168,7 +182,10 @@ describe('DockerService', function () {
 
         it('rejects when stdout does not match', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => cb(null, 'wrong'))
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(null, 'wrong')
+            })
             const ds = loadDockerService(stubs)
             try {
                 await ds.stopContainer('abc123')
@@ -182,8 +199,10 @@ describe('DockerService', function () {
     describe('restartContainer()', function () {
         it('runs docker restart <containerId>', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker restart abc123')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['restart', 'abc123'])
                 cb(null, 'abc123\n')
             })
             const ds = loadDockerService(stubs)
@@ -195,8 +214,10 @@ describe('DockerService', function () {
     describe('killContainer()', function () {
         it('runs docker kill <containerId>', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker kill abc123')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['kill', 'abc123'])
                 cb(null, 'abc123\n')
             })
             const ds = loadDockerService(stubs)
@@ -208,8 +229,10 @@ describe('DockerService', function () {
     describe('removeContainer()', function () {
         it('runs docker rm <containerId>', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker rm abc123')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['rm', 'abc123'])
                 cb(null, 'abc123\n')
             })
             const ds = loadDockerService(stubs)
@@ -226,8 +249,10 @@ describe('DockerService', function () {
         it('runs docker inspect and returns parsed JSON', async function () {
             const stubs = makeStubs()
             const inspectData = [{ State: { Status: 'running' }, NetworkSettings: {} }]
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker inspect abc123')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['inspect', 'abc123'])
                 cb(null, JSON.stringify(inspectData))
             })
             const ds = loadDockerService(stubs)
@@ -237,7 +262,10 @@ describe('DockerService', function () {
 
         it('rejects on exec error', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => cb(new Error('not found')))
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(new Error('not found'))
+            })
             const ds = loadDockerService(stubs)
             try {
                 await ds.getStatusFromContainer('bad-id')
@@ -256,13 +284,16 @@ describe('DockerService', function () {
         it('creates network when inspect fails (network does not exist)', async function () {
             const stubs = makeStubs()
             let callNum = 0
-            stubs.exec.callsFake((cmd, cb) => {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 callNum++
                 if (callNum === 1) {
-                    expect(cmd).to.equal('docker network inspect mynet')
+                    expect(cmd).to.equal('docker')
+                    expect(args).to.deep.equal(['network', 'inspect', 'mynet'])
                     cb(new Error('not found'))
                 } else {
-                    expect(cmd).to.equal('docker network create mynet')
+                    expect(cmd).to.equal('docker')
+                    expect(args).to.deep.equal(['network', 'create', 'mynet'])
                     cb(null)
                 }
             })
@@ -273,7 +304,10 @@ describe('DockerService', function () {
 
         it('resolves true when network already exists', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => cb(null, '[]'))
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(null, '[]')
+            })
             const ds = loadDockerService(stubs)
             const result = await ds.createDockerNetwork('mynet')
             expect(result).to.be.true
@@ -284,8 +318,10 @@ describe('DockerService', function () {
         it('runs docker network inspect and parses JSON', async function () {
             const stubs = makeStubs()
             const data = [{ Name: 'mynet', IPAM: {} }]
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker network inspect mynet')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['network', 'inspect', 'mynet'])
                 cb(null, JSON.stringify(data))
             })
             const ds = loadDockerService(stubs)
@@ -299,14 +335,16 @@ describe('DockerService', function () {
     // -------------------------------------------------------------------
 
     describe('execContainer()', function () {
-        it('runs docker exec -i <containerId> <command>', async function () {
+        it('runs docker exec -i <containerId> <commandArgs>', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker exec -i abc123 ls -la')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['exec', '-i', 'abc123', 'ls', '-la'])
                 cb(null, 'file1\nfile2\n')
             })
             const ds = loadDockerService(stubs)
-            const result = await ds.execContainer('abc123', 'ls -la')
+            const result = await ds.execContainer('abc123', ['ls', '-la'])
             expect(result).to.equal('file1\nfile2')
         })
     })
@@ -364,8 +402,11 @@ describe('DockerService', function () {
     describe('getDockerContainerFileData()', function () {
         it('runs docker cp and reads the copied file', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('docker cp abc123:/app/data.json')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args[0]).to.equal('cp')
+                expect(args[1]).to.include('abc123:/app/data.json')
                 cb(null)
             })
             const fsStub = {
@@ -380,8 +421,10 @@ describe('DockerService', function () {
     describe('getDockerContainerFileCat()', function () {
         it('runs docker exec cat <path>', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.equal('docker exec -i abc123 cat /app/config.json')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['exec', '-i', 'abc123', 'cat', '/app/config.json'])
                 cb(null, '{"config":true}')
             })
             const ds = loadDockerService(stubs)

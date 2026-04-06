@@ -185,8 +185,8 @@ class E2EEnv extends TestEnv {
             removeModuleTmpDir: () => {}
         })
 
-        const execStub = capture.createExecStub()
-        const execAsyncStub = capture.createExecAsyncStub()
+        const execFileStub = capture.createExecFileStub()
+        const execFileAsyncStub = capture.createExecFileAsyncStub()
         const spawnStub = capture.createSpawnStub()
         const spawnSyncStub = capture.createSpawnSyncStub()
 
@@ -201,11 +201,11 @@ class E2EEnv extends TestEnv {
         // DockerService
         const DockerService = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
             'child_process': {
-                exec: execStub,
+                execFile: execFileStub,
                 spawn: autoCloseSpawnStub,
                 spawnSync: spawnSyncStub
             },
-            'util': { promisify: () => execAsyncStub },
+            'util': { promisify: () => execFileAsyncStub },
             '../config/constants': patchedConstants,
             'blessed': {
                 screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),
@@ -277,8 +277,8 @@ class E2EEnv extends TestEnv {
 
         // DatabaseService
         const DatabaseService = proxyquire(path.join(ROOT, 'src/services/DatabaseService'), {
-            'child_process': { exec: execStub },
-            'util': { promisify: () => execAsyncStub },
+            'child_process': { execFile: execFileStub },
+            'util': { promisify: () => execFileAsyncStub },
             '../config/constants': patchedConstants,
             './ConfigService': ConfigService,
             './DockerService': DockerService,
@@ -301,10 +301,10 @@ class E2EEnv extends TestEnv {
         }
 
         // ModuleService — must also stub 'util' because getModuleBranch does
-        // promisify(exec) inline, and our exec stub lacks the custom promisify symbol
+        // promisify(execFile) inline, and our execFile stub lacks the custom promisify symbol
         const ModuleService = proxyquire(path.join(ROOT, 'src/services/ModuleService'), {
-            'child_process': { exec: execStub },
-            'util': { promisify: () => execAsyncStub },
+            'child_process': { execFile: execFileStub },
+            'util': { promisify: () => execFileAsyncStub },
             '../config/constants': patchedConstants,
             './ConfigService': ConfigService,
             './DockerService': DockerService,
@@ -321,10 +321,10 @@ class E2EEnv extends TestEnv {
         })
 
         // moduleOperations — the main entry point
-        // Must also stub 'util' because resetModules uses promisify(exec) at top level
+        // Must also stub 'util' because resetModules uses promisify(execFile) at top level
         const moduleOps = proxyquire(path.join(ROOT, 'src/operations/moduleOperations'), {
-            'child_process': { exec: execStub },
-            'util': { promisify: () => execAsyncStub },
+            'child_process': { execFile: execFileStub },
+            'util': { promisify: () => execFileAsyncStub },
             'fs': Object.assign({}, require('fs'), { existsSync: () => false }),
             '../config/constants': patchedConstants,
             '../services/ConfigService': ConfigService,

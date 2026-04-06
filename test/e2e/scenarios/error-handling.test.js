@@ -52,11 +52,11 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
 
             const DockerService = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
                 'child_process': {
-                    exec: capture.createExecStub(),
+                    execFile: capture.createExecFileStub(),
                     spawn: capture.createSpawnStub(),
                     spawnSync: capture.createSpawnSyncStub()
                 },
-                'util': { promisify: () => capture.createExecAsyncStub() },
+                'util': { promisify: () => capture.createExecFileAsyncStub() },
                 '../config/constants': patchedConstants,
                 'blessed': {
                     screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),

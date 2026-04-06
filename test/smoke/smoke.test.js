@@ -49,7 +49,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
     it('requires DockerService without throwing', function () {
         const mod = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
             'child_process': {
-                exec: sinon.stub(),
+                execFile: sinon.stub(),
                 spawn: sinon.stub(),
                 spawnSync: sinon.stub()
             },
@@ -610,7 +610,7 @@ describe('S-SMOKE-007 – Docker Command Construction', function () {
 
     const DockerService = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
         'child_process': {
-            exec: sinon.stub(),
+            execFile: sinon.stub(),
             spawn: sinon.stub(),
             spawnSync: sinon.stub()
         },

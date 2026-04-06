@@ -260,7 +260,7 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.execModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'ls -la')
-            expect(stubs.execContainer.calledWith('container-id-123', 'ls -la')).to.be.true
+            expect(stubs.execContainer.calledWith('container-id-123', ['ls', '-la'])).to.be.true
         })
     })
 

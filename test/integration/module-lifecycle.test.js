@@ -330,7 +330,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
 
             expect(execCalls).to.have.length(1)
             expect(execCalls[0].id).to.equal(containerId)
-            expect(execCalls[0].cmd).to.equal('ls -la')
+            expect(execCalls[0].cmd).to.deep.equal(['ls', '-la'])
         })
     })
 })

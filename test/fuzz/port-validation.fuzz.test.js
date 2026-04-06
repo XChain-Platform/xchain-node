@@ -79,7 +79,7 @@ describe('Fuzz: Port Validation in buildAndUp()', function () {
 
     function loadModuleService(envVars) {
         const stubs = {
-            exec: sinon.stub(),
+            execFile: sinon.stub(),
             fs: {
                 existsSync: sinon.stub().returns(true),
                 rmSync: sinon.stub(),
@@ -93,17 +93,18 @@ describe('Fuzz: Port Validation in buildAndUp()', function () {
             }
         }
 
-        stubs.exec.callsFake((cmd, opts, cb) => {
+        stubs.execFile.callsFake((cmd, args, opts, cb) => {
             if (typeof opts === 'function') { cb = opts; opts = {} }
-            if (cmd.includes('docker build')) {
+            if (args && args.includes('build')) {
                 cb(null)
-            } else if (cmd.includes('docker run')) {
+            } else if (args && args.includes('run')) {
                 cb(null, 'a'.repeat(64) + '\n')
             }
         })
 
         const ms = proxyquire('../../src/services/ModuleService', {
-            'child_process': { exec: stubs.exec },
+            'child_process': { execFile: stubs.execFile },
+            'util': { promisify: () => async (cmd, args) => ({ stdout: '', stderr: '' }) },
             'fs': stubs.fs,
             '../state': {
                 db: stubs.db,

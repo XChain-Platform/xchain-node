@@ -5,7 +5,11 @@
 const path = require('path')
 
 // --- String constants ---
-const NODE_PREFIX            = (process.env.NODE_PREFIX) ? process.env.NODE_PREFIX : "xchain-node"
+const rawPrefix              = process.env.NODE_PREFIX || "xchain-node"
+if (!/^[a-z0-9][a-z0-9._-]*$/.test(rawPrefix)) {
+    throw new Error(`Invalid NODE_PREFIX: "${rawPrefix}" — must be lowercase alphanumeric with hyphens, dots, or underscores`)
+}
+const NODE_PREFIX            = rawPrefix
 const DB_NAME                = (process.env.DB_NAME == null) ? "xchain_node" : process.env.DB_NAME
 const NODE_MODULE_NAME       = "node"
 const DB_MODULE_NAME         = "database"

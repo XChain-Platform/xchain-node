@@ -40,15 +40,15 @@ function loadDownloader(opts = {}) {
         })
     }
     const axiosStub = opts.axios || makeAxiosStub()
-    const execSyncStub = opts.execSync || sinon.stub()
+    const spawnSyncStub = opts.spawnSync || sinon.stub().returns({ status: 0 })
 
     const GitHubDownloader = proxyquire('../../src/GitHubDownloader', {
         'fs': fsStub,
         'axios': axiosStub,
-        'child_process': { execSync: execSyncStub }
+        'child_process': { spawnSync: spawnSyncStub }
     })
 
-    return { GitHubDownloader, fsStub, axiosStub, execSyncStub }
+    return { GitHubDownloader, fsStub, axiosStub, spawnSyncStub }
 }
 
 describe('GitHubDownloader', function () {

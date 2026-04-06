@@ -2,7 +2,7 @@
  * XChain Node - Interactive UI / Menu
  ********************************************************************/
 
-const { exec }  = require('child_process')
+const { execFile } = require('child_process')
 const { Select } = require('enquirer')
 const semver    = require('semver')
 
@@ -28,7 +28,7 @@ async function scanModules() {
     const validNetworks = Object.values(Network)
 
     return new Promise((resolve) => {
-        exec('docker ps -a --no-trunc --format json', async (error, stdout) => {
+        execFile('docker', ['ps', '-a', '--no-trunc', '--format', 'json'], async (error, stdout) => {
             const containers = stdout.trim()
                 .split('\n').filter(line => line.trim().length > 0)
                 .map(line => JSON.parse(line))

@@ -12,7 +12,8 @@ const { XChainService } = require('../../src/config/constants')
 
 function loadModuleService(stubs) {
     return proxyquire('../../src/services/ModuleService', {
-        'child_process': { exec: stubs.exec },
+        'child_process': { execFile: stubs.execFile },
+        'util': { promisify: () => async (cmd, args) => ({ stdout: '', stderr: '' }) },
         'fs': stubs.fs,
         '../state': {
             db: stubs.db,
@@ -45,7 +46,7 @@ function loadModuleService(stubs) {
 
 function makeStubs(envVars) {
     return {
-        exec: sinon.stub(),
+        execFile: sinon.stub(),
         fs: {
             existsSync: sinon.stub().returns(true),
             rmSync: sinon.stub(),
@@ -62,132 +63,127 @@ function makeStubs(envVars) {
 }
 
 /**
- * Captures the `docker run` command string that buildAndUp constructs.
- * The exec stub handles both `docker build` and `docker run` calls.
+ * Captures the args array from the `docker run` execFile call.
+ * Returns a getter for the full reconstructed command string and the raw args.
  */
-function captureDockerRunCmd(stubs) {
+function captureDockerRunArgs(stubs) {
+    let runArgs = null
     let runCmd = null
-    stubs.exec.callsFake((cmd, opts, cb) => {
+    stubs.execFile.callsFake((cmd, args, opts, cb) => {
         if (typeof opts === 'function') { cb = opts; opts = {} }
-        if (cmd.includes('docker build')) {
+        if (args && args.includes('build')) {
             cb(null)
-        } else if (cmd.includes('docker run')) {
-            runCmd = cmd
+        } else if (args && args.includes('run')) {
+            runArgs = args
+            runCmd = cmd + ' ' + (args || []).join(' ')
             cb(null, 'a'.repeat(64) + '\n')
         }
     })
-    return () => runCmd
+    return { getCmd: () => runCmd, getArgs: () => runArgs }
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Fuzz: Environment Variable Escaping', function () {
+describe('Fuzz: Environment Variable Handling with execFile', function () {
 
-    // Each entry: [description, malicious value, assertion about the docker run command]
-    const shellMetacharInputs = [
-        ['double quote',           'val"injection',      (cmd) => expect(cmd).to.not.match(/[^\\]"injection/)],
-        ['backslash',              'val\\injection',     (cmd) => expect(cmd).to.include('val\\\\injection')],
-        ['dollar sign',            'val$injection',      (cmd) => expect(cmd).to.include('val\\$injection')],
-        ['backtick',               'val`id`',            (cmd) => expect(cmd).to.include('val\\`id\\`')],
-        ['dollar paren',           'val$(whoami)',        (cmd) => expect(cmd).to.include('val\\$(whoami)')],
-        ['semicolon',              'val;rm -rf /',       (cmd) => expect(cmd).to.include('val;rm -rf /')], // safe inside double quotes
-        ['pipe',                   'val|cat /etc/passwd',(cmd) => expect(cmd).to.include('val|cat /etc/passwd')], // safe inside double quotes
-        ['ampersand',              'val&&echo pwned',    (cmd) => expect(cmd).to.include('val&&echo pwned')], // safe inside double quotes
+    // With execFile, env vars are passed as raw array elements — no shell escaping is needed.
+    // Each env var is passed as two separate args: '-e', 'KEY=value'
+    // The values are NOT shell-quoted or escaped.
+
+    // --- Values with shell metacharacters pass through raw ---
+
+    const rawPassthroughInputs = [
+        ['double quote',           'val"injection'],
+        ['backslash',              'val\\injection'],
+        ['dollar sign',            'val$injection'],
+        ['backtick',               'val`id`'],
+        ['dollar paren',           'val$(whoami)'],
+        ['semicolon',              'val;rm -rf /'],
+        ['pipe',                   'val|cat /etc/passwd'],
+        ['ampersand',              'val&&echo pwned'],
     ]
 
-    for (const [desc, maliciousValue, assertion] of shellMetacharInputs) {
-        it(`escapes ${desc} in env var value`, async function () {
-            const stubs = makeStubs({ 'TEST_KEY': maliciousValue, 'ENCODER_PORT': 3003, 'ENCODER_API_PORT': 3003 })
-            const getCmd = captureDockerRunCmd(stubs)
+    for (const [desc, rawValue] of rawPassthroughInputs) {
+        it(`passes ${desc} as raw value in args array (no escaping needed)`, async function () {
+            const stubs = makeStubs({ 'TEST_KEY': rawValue, 'ENCODER_PORT': 3003, 'ENCODER_API_PORT': 3003 })
+            const { getArgs } = captureDockerRunArgs(stubs)
             const ms = loadModuleService(stubs)
             await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-            const cmd = getCmd()
-            expect(cmd).to.exist
-            assertion(cmd)
+            const args = getArgs()
+            expect(args).to.exist
+
+            // Find the -e flag followed by the TEST_KEY=<value> arg
+            const eIndex = args.indexOf('-e')
+            let found = false
+            for (let i = 0; i < args.length; i++) {
+                if (args[i] === '-e' && args[i + 1] && args[i + 1].startsWith('TEST_KEY=')) {
+                    const val = args[i + 1].substring('TEST_KEY='.length)
+                    expect(val).to.equal(String(rawValue))
+                    found = true
+                    break
+                }
+            }
+            expect(found, 'TEST_KEY env var found in args').to.be.true
         })
     }
 
-    // --- Newline / carriage return injection (the bug we fixed) ---
+    // --- Newline / carriage return values are passed as raw strings ---
+    // With execFile there is no shell to interpret them, so they are safe
 
-    it('escapes newline characters to prevent Docker flag injection', async function () {
+    it('newline characters are passed raw (safe with execFile)', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'safe_value\n-v /:/host:ro',
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        // The newline must NOT appear literally — it should be escaped
-        expect(cmd).to.not.include('\n')
-        // The escaped form should be present
-        expect(cmd).to.include('safe_value\\n-v /:/host:ro')
+        const args = getArgs()
+        expect(args).to.exist
+
+        // The newline is safe with execFile — no flag injection possible
+        // Verify the value is in the args array as a single element
+        const envArg = args.find(a => a.startsWith('EVIL_KEY='))
+        expect(envArg).to.exist
+        expect(envArg).to.equal('EVIL_KEY=safe_value\n-v /:/host:ro')
     })
 
-    it('escapes carriage return characters', async function () {
+    it('carriage return characters are passed raw (safe with execFile)', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'safe_value\r-v /:/host:ro',
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        expect(cmd).to.not.include('\r')
-        expect(cmd).to.include('safe_value\\r-v /:/host:ro')
+        const args = getArgs()
+        expect(args).to.exist
+
+        const envArg = args.find(a => a.startsWith('EVIL_KEY='))
+        expect(envArg).to.exist
+        expect(envArg).to.equal('EVIL_KEY=safe_value\r-v /:/host:ro')
     })
 
-    it('escapes combined \\r\\n injection', async function () {
+    it('combined \\r\\n passed raw (safe with execFile)', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'value\r\n--privileged',
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        expect(cmd).to.not.include('\r')
-        expect(cmd).to.not.include('\n')
-    })
+        const args = getArgs()
+        expect(args).to.exist
 
-    // --- Escape chain / double-encoding attacks ---
-
-    it('handles double-backslash before dollar sign', async function () {
-        const stubs = makeStubs({
-            'TEST': '\\\\$(id)',
-            'ENCODER_PORT': 3003,
-            'ENCODER_API_PORT': 3003
-        })
-        const getCmd = captureDockerRunCmd(stubs)
-        const ms = loadModuleService(stubs)
-        await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        // Original \\ should become \\\\\\\\ (each \ doubled), $ should be escaped
-        expect(cmd).to.include('\\$')
-    })
-
-    it('handles backslash-backtick combination', async function () {
-        const stubs = makeStubs({
-            'TEST': '\\`whoami\\`',
-            'ENCODER_PORT': 3003,
-            'ENCODER_API_PORT': 3003
-        })
-        const getCmd = captureDockerRunCmd(stubs)
-        const ms = loadModuleService(stubs)
-        await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        // All backticks should be escaped
-        expect(cmd).to.not.match(/[^\\]`/)
+        const envArg = args.find(a => a.startsWith('EVIL_KEY='))
+        expect(envArg).to.exist
+        // The value is a single array element — no command injection possible
+        expect(envArg).to.equal('EVIL_KEY=value\r\n--privileged')
     })
 
     // --- Null byte and binary data ---
@@ -198,12 +194,11 @@ describe('Fuzz: Environment Variable Escaping', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        // Should not crash; command should exist
-        expect(cmd).to.exist
+        const args = getArgs()
+        expect(args).to.exist
     })
 
     // --- Extreme lengths ---
@@ -214,12 +209,15 @@ describe('Fuzz: Environment Variable Escaping', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        expect(cmd).to.include('A'.repeat(1000)) // spot check
+        const args = getArgs()
+        expect(args).to.exist
+
+        const envArg = args.find(a => a.startsWith('TEST='))
+        expect(envArg).to.exist
+        expect(envArg).to.include('A'.repeat(1000))
     })
 
     it('handles empty string env var value', async function () {
@@ -228,12 +226,14 @@ describe('Fuzz: Environment Variable Escaping', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        expect(cmd).to.include('-e "TEST="')
+        const args = getArgs()
+        expect(args).to.exist
+
+        const envArg = args.find(a => a === 'TEST=')
+        expect(envArg).to.exist
     })
 
     // --- Type coercion ---
@@ -244,12 +244,14 @@ describe('Fuzz: Environment Variable Escaping', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        expect(cmd).to.include('-e "PORT=8332"')
+        const args = getArgs()
+        expect(args).to.exist
+
+        const envArg = args.find(a => a === 'PORT=8332')
+        expect(envArg).to.exist
     })
 
     it('handles boolean env var value', async function () {
@@ -258,12 +260,14 @@ describe('Fuzz: Environment Variable Escaping', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        expect(cmd).to.include('-e "FLAG=false"')
+        const args = getArgs()
+        expect(args).to.exist
+
+        const envArg = args.find(a => a === 'FLAG=false')
+        expect(envArg).to.exist
     })
 
     it('handles null env var value via String() coercion', async function () {
@@ -272,12 +276,14 @@ describe('Fuzz: Environment Variable Escaping', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        expect(cmd).to.include('-e "NULLVAL=null"')
+        const args = getArgs()
+        expect(args).to.exist
+
+        const envArg = args.find(a => a === 'NULLVAL=null')
+        expect(envArg).to.exist
     })
 
     it('handles undefined env var value via String() coercion', async function () {
@@ -286,12 +292,14 @@ describe('Fuzz: Environment Variable Escaping', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        expect(cmd).to.include('-e "UNDEF=undefined"')
+        const args = getArgs()
+        expect(args).to.exist
+
+        const envArg = args.find(a => a === 'UNDEF=undefined')
+        expect(envArg).to.exist
     })
 
     // --- Unicode / special encoding ---
@@ -302,32 +310,31 @@ describe('Fuzz: Environment Variable Escaping', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
+        const args = getArgs()
+        expect(args).to.exist
     })
 
     // --- Comprehensive: all dangerous chars in one value ---
 
-    it('escapes a value containing all dangerous shell characters at once', async function () {
+    it('passes all dangerous shell characters raw in a single value (safe with execFile)', async function () {
         const combined = 'a"b\\c$d`e\nf\rg'
         const stubs = makeStubs({
             'COMBINED': combined,
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        const { getArgs } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        expect(cmd).to.exist
-        // No raw newlines or carriage returns
-        expect(cmd).to.not.include('\n')
-        expect(cmd).to.not.include('\r')
-        // Dollar and backtick escaped
-        expect(cmd).to.include('\\$')
-        expect(cmd).to.include('\\`')
+        const args = getArgs()
+        expect(args).to.exist
+
+        // With execFile, the value is a single array element — no shell interpretation
+        const envArg = args.find(a => a.startsWith('COMBINED='))
+        expect(envArg).to.exist
+        expect(envArg).to.equal('COMBINED=' + combined)
     })
 })
