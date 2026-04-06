@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `test:regression:p0p1` npm script for P0+P1 high-priority tests (52 tests, <2s)
 - Regression tests included in `test:all` pipeline
 
+### Changed
+- `README.md` — rewrote from minimal stub to full repo README matching platform conventions: badges, features, documentation links, quick start, scripts table, test suite breakdown (1,148 tests), copyright footer
+
 ## [0.0.13] - 2026-04-06
 
 ### Added
