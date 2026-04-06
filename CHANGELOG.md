@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.12] - 2026-04-06
+
+### Fixed
+- `buildAndUp()` docker build failure now properly rejects the promise instead of hanging forever — previously called `console.error()` + `return` instead of `reject()`, causing callers to never receive the error (found by chaos engineering tests)
+
+### Changed
+- Chaos test `FINDING` tests converted to standard rejection assertions now that the bug is fixed
+
+## [0.0.11] - 2026-04-06
+
+### Added
+- Chaos engineering test suite (`test/chaos/`) with 7 test files covering fault injection and resilience validation
+- `config-resilience` chaos tests: missing/unreadable config files, malformed content, path traversal, argument parsing injection, port validation edge cases (22 tests)
+- `docker-resilience` chaos tests: daemon unavailable (ENOENT, daemon down, permission denied), build/run failures (port conflict, OOM, invalid container ID), network creation failure, invalid inspect JSON, container operations on non-existent containers, file write failures, invalid port config (22 tests)
+- `leveldb-resilience` chaos tests: lock contention (non-interactive, lock removal failure), empty/null container IDs, closed database operations, rapid insert/remove cycles, concurrent reads/writes, key collision boundaries, filtered queries at scale (18 tests)
+- `git-clone-resilience` chaos tests: network failure, timeout, invalid branch fallback to master, fallback failure, branch validation injection, module directory conflicts, unknown module URLs, useTmp mode (14 tests)
+- `download-resilience` chaos tests: GitHub API unreachable (ECONNREFUSED, DNS failure, timeout), rate limiting (403/429/500), SHA-256 hash mismatch with expected/actual output, no compatible version, release tag not found, hashes file corruption (invalid JSON, bad format), archive extraction failure (17 tests)
+- `network-resilience` chaos tests: Hub/Explorer connector failures (ECONNREFUSED, timeout, empty response, null data, DNS failure), updateConfig error paths, malformed JSON-RPC responses (16 tests)
+- `process-resilience` chaos tests: async error propagation through build/run/statusChanged chains, killContainer/removeContainer rejection handling, empty container ID propagation, multi-step operation error chains, uninstall resilience, precheck failure cascade (Docker unavailable, network creation, hub install) (16 tests)
+- `test:chaos` npm script; chaos tests included in `test:all` pipeline
+
 ## [0.0.10] - 2026-04-06
 
 ### Added
