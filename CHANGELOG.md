@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-04-05
+
+### Fixed
+- Environment variable escaping now neutralizes newline (`\n`) and carriage return (`\r`) characters that could inject additional Docker flags via `-e` values
+- Container ID validation now requires 64-character lowercase hex (`/^[a-f0-9]{64}$/`) instead of only checking string length; rejects with a clear error on invalid IDs
+
+### Added
+- `validatePort()` helper in ConfigService — strict validation accepting only integer numbers or digit-only strings in range 1-65535; rejects hex, scientific notation, floats, booleans
+- Port validation in `buildAndUp()` that rejects invalid port values before they reach Docker command construction
+- Fuzz test suite (`test/fuzz/`) with 258 tests across 6 files covering env var escaping, branch name validation, resolveArgs robustness, config file parsing, container ID validation, port validation, command construction safety, and filterCommandParameters edge cases
+- `test:fuzz` npm script; fuzz tests included in `test:all` pipeline
+
 ## [0.0.7] - 2026-04-05
 
 ### Fixed
