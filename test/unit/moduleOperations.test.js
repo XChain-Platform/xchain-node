@@ -211,12 +211,13 @@ describe('moduleOperations', function () {
             expect(stubs.startContainer.calledWith('container-id-123')).to.be.true
         })
 
-        it('continues on error', async function () {
+        it('skips module when container ID is not found', async function () {
             const stubs = makeStubs()
-            stubs.db.getModuleContainer.rejects(new Error('not found'))
+            stubs.db.getModuleContainer.resolves(null)
             const ops = loadOperations(stubs)
             const result = await ops.startModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
             expect(result).to.be.true
+            expect(stubs.startContainer.called).to.be.false
         })
     })
 

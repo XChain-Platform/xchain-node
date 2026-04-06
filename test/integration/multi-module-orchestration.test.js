@@ -252,6 +252,11 @@ describe('Integration: Multi-Module Orchestration', function () {
     describe('uninstallModules orchestration', function () {
 
         it('calls uninstallModule for each service in the list', async function () {
+            // Modules must exist in LevelDB for uninstall to proceed
+            await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('1'))
+            await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('2'))
+            await env.insertModule('xchain-indexer', 'dogecoin', 'testnet', TestEnv.fakeContainerId('3'))
+
             const uninstalled = []
 
             const moduleOps = proxyquire('../../src/operations/moduleOperations', {
@@ -294,6 +299,11 @@ describe('Integration: Multi-Module Orchestration', function () {
         })
 
         it('continues uninstalling remaining modules when one fails', async function () {
+            // Modules must exist in LevelDB for uninstall to proceed
+            await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('1'))
+            await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('2'))
+            await env.insertModule('xchain-indexer', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('3'))
+
             const uninstalled = []
             let failCount = 0
 
@@ -399,7 +409,7 @@ describe('Integration: Multi-Module Orchestration', function () {
             expect(installed).to.not.include('xchain-e2e-test')
         })
 
-        it('"all bitcoin regtest" includes regtest-only modules', async function () {
+        it('"all bitcoin regtest" includes regtest-miner but not e2e-test', async function () {
             const { filterCommandParameters } = require('../../src/services/ConfigService')
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
 
@@ -433,7 +443,7 @@ describe('Integration: Multi-Module Orchestration', function () {
             await moduleOps.installModules(serviceList)
 
             expect(installed).to.include('xchain-regtest-miner')
-            expect(installed).to.include('xchain-e2e-test')
+            expect(installed).to.not.include('xchain-e2e-test')
         })
     })
 })

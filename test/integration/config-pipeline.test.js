@@ -110,14 +110,13 @@ describe('Integration: Config Pipeline', function () {
                     expect(modules).to.include('xchain-indexer')
                     expect(modules).to.include('node')
 
-                    // Regtest-only filtering
+                    // Regtest-only filtering (e2e-test excluded from "all" expansion)
                     if (network === 'regtest') {
                         expect(modules).to.include('xchain-regtest-miner')
-                        expect(modules).to.include('xchain-e2e-test')
                     } else {
                         expect(modules).to.not.include('xchain-regtest-miner')
-                        expect(modules).to.not.include('xchain-e2e-test')
                     }
+                    expect(modules).to.not.include('xchain-e2e-test')
                 }
             }
 
@@ -133,11 +132,11 @@ describe('Integration: Config Pipeline', function () {
             expect(modules).to.not.include('xchain-e2e-test')
         })
 
-        it('"all" on regtest includes regtest modules', function () {
+        it('"all" on regtest includes regtest-miner but not e2e-test', function () {
             const serviceList = ConfigService.filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             const modules = serviceList['bitcoin']['regtest']
             expect(modules).to.include('xchain-regtest-miner')
-            expect(modules).to.include('xchain-e2e-test')
+            expect(modules).to.not.include('xchain-e2e-test')
         })
     })
 
