@@ -41,6 +41,11 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
             return
         }
 
+        if (branch && !/^[a-zA-Z0-9._\-\/]+$/.test(branch)) {
+            reject("Invalid branch name: " + branch + " — branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes")
+            return
+        }
+
         const gitUrl = modulesUrls[module]
         const destination = useTmp ? getModuleTmpDir(module) : getModuleDir(module)
         const branchFlag = branch ? `-b ${branch} ` : ''
@@ -84,7 +89,12 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     return new Promise((resolve, reject) => {
         let environmentVariablesLine = ""
         for (const key in environmentVariables) {
-            environmentVariablesLine += ' -e "' + key + '=' + environmentVariables[key] + '"'
+            const safeVal = String(environmentVariables[key])
+                .replace(/\\/g, '\\\\')
+                .replace(/"/g, '\\"')
+                .replace(/\$/g, '\\$')
+                .replace(/`/g, '\\`')
+            environmentVariablesLine += ' -e "' + key + '=' + safeVal + '"'
         }
 
         const dir = getModuleDir(module)

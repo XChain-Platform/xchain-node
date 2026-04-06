@@ -206,11 +206,15 @@ async function shellModule(servicesList) {
     return true
 }
 
+function escapeShellDoubleQuotes(str) {
+    return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 async function runE2ETest(coin, network, testName = null, grep = null) {
     let dockerCmd = testName
-        ? `npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js "test/actions/${testName}.test.js"`
+        ? `npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js "test/actions/${escapeShellDoubleQuotes(testName)}.test.js"`
         : null
-    if (grep && dockerCmd) dockerCmd += ` --grep "${grep}"`
+    if (grep && dockerCmd) dockerCmd += ` --grep "${escapeShellDoubleQuotes(grep)}"`
     const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true, null, dockerCmd)
 
     console.log("Running e2e tests, please wait...")

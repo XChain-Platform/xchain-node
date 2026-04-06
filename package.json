@@ -1,6 +1,6 @@
 {
   "name": "xchain-node",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "xchain-node allows users to install, configure and run XChain platform nodes.",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
