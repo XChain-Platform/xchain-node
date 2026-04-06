@@ -101,7 +101,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
         execFile('docker', ['build', '.', '-t', containerPrefix], { cwd: dir }, async (error) => {
             if (error) {
-                console.error("Error creating Docker image: " + error.message)
+                reject("Error creating Docker image: " + error.message)
                 return
             }
 
