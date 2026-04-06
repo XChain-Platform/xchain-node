@@ -170,13 +170,23 @@ async function getDefaultConfig(module, coin, network) {
     // Read the config file for this coin/network pair
     const defaultConfig = {}
     if (coin && network && coin !== "" && network !== "") {
-        const configFileStream = fs.createReadStream(configDir + "/" + coin + "-" + network)
+        const configFilePath = configDir + "/" + coin + "-" + network
+        if (!fs.existsSync(configFilePath)) {
+            console.warn("Warning: config file not found: " + configFilePath + " — using defaults")
+            for (const key in defaultValues) {
+                if (!(key in defaultConfig)) {
+                    defaultConfig[key] = defaultValues[key]
+                }
+            }
+            return defaultConfig
+        }
+        const configFileStream = fs.createReadStream(configFilePath)
         const rl = readline.createInterface({ input: configFileStream, crlfDelay: Infinity })
 
         for await (const line of rl) {
-            const parts = line.split("=")
-            if (parts.length === 2) {
-                defaultConfig[parts[0]] = parts[1]
+            const eqIndex = line.indexOf("=")
+            if (eqIndex > 0) {
+                defaultConfig[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
             }
         }
     }

@@ -65,6 +65,10 @@ class LevelUpStore {
         console.log("   This usually happens when xchain-node didn't close properly.")
         console.log("   Lock file: " + lockFile + "\n")
 
+        if (!process.stdin.isTTY) {
+            throw new Error("Database is locked and running in non-interactive mode. Remove the lock file manually: " + lockFile)
+        }
+
         const { Confirm } = require('enquirer')
         const prompt = new Confirm({
             name: 'unlock',

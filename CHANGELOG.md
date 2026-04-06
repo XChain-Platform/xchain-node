@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-04-05
+
+### Fixed
+- Config file parser now preserves values containing `=` (e.g., base64 tokens, passwords with `=`)
+- Config file reader no longer crashes when a coin/network config file is missing; falls back to defaults with a warning
+- Docker environment variable values containing `"`, `$`, backticks, or `\` are now escaped before shell interpolation
+- Branch names with shell metacharacters (`;`, `$()`, backticks, spaces, pipes) are rejected with a clear error
+- E2E test `--grep` patterns and test names with `"` or `\` are now escaped to prevent shell injection
+- LevelDB lock prompt no longer hangs in non-interactive (non-TTY) environments; throws immediately with instructions
+
+### Added
+- Boundary test suite (`test/unit/boundary.test.js`) with 60 tests covering config parsing edge cases, argument resolution boundaries, Docker env var escaping, branch name validation, grep/testName escaping, LevelDB non-TTY handling, and key format integrity
+
 ## [0.0.6] - 2026-04-05
 
 ### Added
