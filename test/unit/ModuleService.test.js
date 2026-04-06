@@ -12,7 +12,7 @@ const { modulesUrls, XChainService } = require('../../src/config/constants')
 
 function makeStubs() {
     return {
-        exec: sinon.stub(),
+        execFile: sinon.stub(),
         fs: {
             existsSync: sinon.stub().returns(true),
             rmSync: sinon.stub(),
@@ -76,7 +76,7 @@ function loadModuleService(stubs) {
     }
 
     return proxyquire('../../src/services/ModuleService', {
-        'child_process': { exec: stubs.exec },
+        'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs,
         '../state': {
             db: stubs.db,
@@ -109,10 +109,12 @@ describe('ModuleService', function () {
 
         it('clones to module directory with correct git URL', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('git clone')
-                expect(cmd).to.include(modulesUrls['xchain-encoder'])
-                expect(cmd).to.include('/modules/xchain-encoder')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('git')
+                expect(args).to.include('clone')
+                expect(args).to.include(modulesUrls['xchain-encoder'])
+                expect(args).to.include('/modules/xchain-encoder')
                 cb(null)
             })
             const ms = loadModuleService(stubs)
@@ -132,21 +134,21 @@ describe('ModuleService', function () {
 
         it('removes existing directory when rewrite=true', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => cb(null))
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(null)
+            })
             const ms = loadModuleService(stubs)
             // moduleDirExists returns false by default, so rewrite path won't trigger rmSync
             // but the function should still succeed
             await ms.cloneGit('xchain-encoder', true)
-            expect(stubs.exec.calledOnce).to.be.true
+            expect(stubs.execFile.calledOnce).to.be.true
         })
 
         it('rejects when directory exists and rewrite=false', async function () {
             const stubs = makeStubs()
-            const ms = loadModuleService(stubs)
-            // Override moduleDirExists to return true via proxyquire (already set to false)
-            // We need to re-load with moduleDirExists returning true
             const ms2 = proxyquire('../../src/services/ModuleService', {
-                'child_process': { exec: stubs.exec },
+                'child_process': { execFile: stubs.execFile },
                 'fs': stubs.fs,
                 '../state': { db: stubs.db, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
                 './ConfigService': {
@@ -175,8 +177,9 @@ describe('ModuleService', function () {
 
         it('uses tmp directory when useTmp=true', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('/tmp/xchain-encoder')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(args).to.include('/tmp/xchain-encoder')
                 cb(null)
             })
             const ms = loadModuleService(stubs)
@@ -185,7 +188,8 @@ describe('ModuleService', function () {
 
         it('rejects on git clone error', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 cb(new Error('git clone failed'))
             })
             const ms = loadModuleService(stubs)
@@ -207,7 +211,7 @@ describe('ModuleService', function () {
         it('throws when module does not exist', async function () {
             const stubs = makeStubs()
             const ms = proxyquire('../../src/services/ModuleService', {
-                'child_process': { exec: stubs.exec },
+                'child_process': { execFile: stubs.execFile },
                 'fs': stubs.fs,
                 '../state': { db: stubs.db, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
                 './ConfigService': {
@@ -236,136 +240,157 @@ describe('ModuleService', function () {
 
         it('runs docker build with correct image name and cwd', async function () {
             const stubs = makeStubs()
-            let buildCmd = null
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
-                    buildCmd = cmd
+            let buildArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
+                    buildArgs = args
                     cb(null)
-                } else if (cmd.includes('docker run')) {
-                    // Return a 64-char container ID
+                } else if (args[0] === 'run') {
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(buildCmd).to.include('docker build . -t xchain-node-bitcoin-mainnet-xchain-encoder')
+            expect(buildArgs).to.include('-t')
+            expect(buildArgs).to.include('xchain-node-bitcoin-mainnet-xchain-encoder')
         })
 
         it('constructs docker run command with environment variables', async function () {
             const stubs = makeStubs()
-            let runCmd = null
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null)
-                } else if (cmd.includes('docker run')) {
-                    runCmd = cmd
+                } else if (args[0] === 'run') {
+                    runArgs = args
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(runCmd).to.include('-e "NETWORK=bitcoin-mainnet"')
-            expect(runCmd).to.include('-e "NODE_PORT=8332"')
+            expect(runArgs).to.include('-e')
+            expect(runArgs).to.include('NETWORK=bitcoin-mainnet')
+            expect(runArgs).to.include('NODE_PORT=8332')
         })
 
         it('includes port mapping for encoder', async function () {
             const stubs = makeStubs()
-            let runCmd = null
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null)
-                } else if (cmd.includes('docker run')) {
-                    runCmd = cmd
+                } else if (args[0] === 'run') {
+                    runArgs = args
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-            expect(runCmd).to.include('-p 3003:3003')
+            expect(runArgs).to.include('-p')
+            expect(runArgs).to.include('3003:3003')
         })
 
         it('includes volume mount for decoder', async function () {
             const stubs = makeStubs()
-            let runCmd = null
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null)
-                } else if (cmd.includes('docker run')) {
-                    runCmd = cmd
+                } else if (args[0] === 'run') {
+                    runArgs = args
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp(XChainService.XCHAIN_DECODER, 'bitcoin', 'mainnet')
-            expect(runCmd).to.include('-v /data/bitcoin/mainnet/xchain-decoder/bootstrap/:/bootstrap/xchain-decoder')
+            expect(runArgs).to.include('-v')
+            expect(runArgs.some(a => a.includes('/bootstrap/xchain-decoder'))).to.be.true
         })
 
         it('includes ulimit for utxo-tracker', async function () {
             const stubs = makeStubs()
-            let runCmd = null
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null)
-                } else if (cmd.includes('docker run')) {
-                    runCmd = cmd
+                } else if (args[0] === 'run') {
+                    runArgs = args
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
-            expect(runCmd).to.include('--ulimit nofile=2048:2048')
+            expect(runArgs).to.include('--ulimit')
+            expect(runArgs).to.include('nofile=2048:2048')
         })
 
         it('includes --network flag in docker run', async function () {
             const stubs = makeStubs()
-            let runCmd = null
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null)
-                } else if (cmd.includes('docker run')) {
-                    runCmd = cmd
+                } else if (args[0] === 'run') {
+                    runArgs = args
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(runCmd).to.include('--network xchain-node-bitcoin-mainnet')
+            expect(runArgs).to.include('--network')
+            expect(runArgs).to.include('xchain-node-bitcoin-mainnet')
         })
 
         it('stores container ID in LevelDB on success', async function () {
             const stubs = makeStubs()
             const containerId = 'b'.repeat(64)
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null)
-                } else if (cmd.includes('docker run')) {
+                } else if (args[0] === 'run') {
                     cb(null, containerId + '\n')
                 }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
             expect(stubs.db.insertModuleContainer.calledOnce).to.be.true
-            const args = stubs.db.insertModuleContainer.firstCall.args
-            expect(args[0]).to.equal('xchain-encoder')
-            expect(args[1]).to.equal('bitcoin')
-            expect(args[2]).to.equal('mainnet')
-            expect(args[3]).to.equal(containerId)
+            const dbArgs = stubs.db.insertModuleContainer.firstCall.args
+            expect(dbArgs[0]).to.equal('xchain-encoder')
+            expect(dbArgs[1]).to.equal('bitcoin')
+            expect(dbArgs[2]).to.equal('mainnet')
+            expect(dbArgs[3]).to.equal(containerId)
         })
 
         it('calls statusChanged after storing container ID', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null)
-                } else if (cmd.includes('docker run')) {
+                } else if (args[0] === 'run') {
                     cb(null, 'c'.repeat(64) + '\n')
                 }
             })
@@ -376,11 +401,13 @@ describe('ModuleService', function () {
 
         it('kills and removes old container when overwriteContainerId is provided', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, opts, cb) => {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (cmd.includes('docker build')) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') {
                     cb(null)
-                } else if (cmd.includes('docker run')) {
+                } else if (args[0] === 'run') {
                     cb(null, 'd'.repeat(64) + '\n')
                 }
             })

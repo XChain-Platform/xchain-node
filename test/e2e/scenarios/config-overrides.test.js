@@ -37,9 +37,9 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-encoder')).command
-            expect(runCmd).to.include('"NODE_PORT=18444"')
-            expect(runCmd).to.include('"ENCODER_API_PORT=3003"')
-            expect(runCmd).to.include('"NETWORK=regtest"')
+            expect(runCmd).to.include('NODE_PORT=18444')
+            expect(runCmd).to.include('ENCODER_API_PORT=3003')
+            expect(runCmd).to.include('NETWORK=regtest')
         })
 
         it('encoder on mainnet gets NODE_PORT=8332', async function () {
@@ -51,8 +51,8 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-encoder')).command
-            expect(runCmd).to.include('"NODE_PORT=8332"')
-            expect(runCmd).to.include('"NETWORK=mainnet"')
+            expect(runCmd).to.include('NODE_PORT=8332')
+            expect(runCmd).to.include('NETWORK=mainnet')
         })
 
         it('encoder on testnet gets NODE_PORT=18332', async function () {
@@ -64,7 +64,7 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-encoder')).command
-            expect(runCmd).to.include('"NODE_PORT=18332"')
+            expect(runCmd).to.include('NODE_PORT=18332')
         })
     })
 
@@ -83,7 +83,7 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-encoder')).command
-            expect(runCmd).to.include('"ENCODER_API_PORT=4003"')
+            expect(runCmd).to.include('ENCODER_API_PORT=4003')
             expect(runCmd).to.include('-p 4003:4003')
         })
 
@@ -96,7 +96,7 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-decoder')).command
-            expect(runCmd).to.include('"DECODER_API_PORT=4002"')
+            expect(runCmd).to.include('DECODER_API_PORT=4002')
             expect(runCmd).to.include('-p 4002:4002')
         })
 
@@ -109,8 +109,8 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-encoder')).command
-            expect(runCmd).to.include('"NODE_USER=customuser"')
-            expect(runCmd).to.include('"NODE_PASSWORD=custompass"')
+            expect(runCmd).to.include('NODE_USER=customuser')
+            expect(runCmd).to.include('NODE_PASSWORD=custompass')
         })
 
         it('unspecified values fall back to defaults', async function () {
@@ -123,9 +123,9 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-encoder')).command
             // NODE_USER overridden
-            expect(runCmd).to.include('"NODE_USER=customuser"')
+            expect(runCmd).to.include('NODE_USER=customuser')
             // NODE_PASSWORD uses default
-            expect(runCmd).to.include('"NODE_PASSWORD=rpc"')
+            expect(runCmd).to.include('NODE_PASSWORD=rpc')
         })
     })
 
@@ -175,7 +175,7 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-decoder')).command
-            expect(runCmd).to.include('"DECODER_DB_NAME=XChain_BTC_Mainnet_Decoder"')
+            expect(runCmd).to.include('DECODER_DB_NAME=XChain_BTC_Mainnet_Decoder')
         })
 
         it('indexer dogecoin/testnet → XChain_DOGE_Testnet_Indexer', async function () {
@@ -187,7 +187,7 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-indexer')).command
-            expect(runCmd).to.include('"INDEXER_DB_NAME=XChain_DOGE_Testnet_Indexer"')
+            expect(runCmd).to.include('INDEXER_DB_NAME=XChain_DOGE_Testnet_Indexer')
         })
 
         it('decoder litecoin/regtest → XChain_LTC_Regtest_Decoder', async function () {
@@ -199,7 +199,7 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-decoder')).command
-            expect(runCmd).to.include('"DECODER_DB_NAME=XChain_LTC_Regtest_Decoder"')
+            expect(runCmd).to.include('DECODER_DB_NAME=XChain_LTC_Regtest_Decoder')
         })
 
         it('DB user follows xchain_<module>_<coin>_<network> pattern', async function () {
@@ -211,7 +211,7 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-decoder')).command
-            expect(runCmd).to.include('"DECODER_DB_USER=xchain_decoder_bitcoin_mainnet"')
+            expect(runCmd).to.include('DECODER_DB_USER=xchain_decoder_bitcoin_mainnet')
         })
     })
 })

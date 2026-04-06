@@ -12,7 +12,8 @@ const { modulesUrls } = require('../../src/config/constants')
 
 function loadModuleService(stubs) {
     return proxyquire('../../src/services/ModuleService', {
-        'child_process': { exec: stubs.exec },
+        'child_process': { execFile: stubs.execFile },
+        'util': { promisify: () => async (cmd, args) => ({ stdout: '', stderr: '' }) },
         'fs': stubs.fs,
         '../state': {
             db: stubs.db,
@@ -40,7 +41,7 @@ function loadModuleService(stubs) {
 
 function makeStubs() {
     return {
-        exec: sinon.stub(),
+        execFile: sinon.stub(),
         fs: {
             existsSync: sinon.stub().returns(true),
             rmSync: sinon.stub(),
@@ -81,8 +82,9 @@ describe('Fuzz: Branch Name Validation', function () {
         it(`accepts valid branch name: "${branch}"`, async function () {
             const stubs = makeStubs()
             let clonedCmd = null
-            stubs.exec.callsFake((cmd, cb) => {
-                clonedCmd = cmd
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                if (typeof args === 'function') { cb = args; args = [] }
+                clonedCmd = cmd + ' ' + (args || []).join(' ')
                 cb(null)
             })
             const ms = loadModuleService(stubs)
@@ -139,7 +141,10 @@ describe('Fuzz: Branch Name Validation', function () {
     for (const branch of invalidBranches) {
         it(`rejects invalid branch name: ${JSON.stringify(branch)}`, async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => cb(null))
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                if (typeof args === 'function') { cb = args; args = [] }
+                cb(null)
+            })
             const ms = loadModuleService(stubs)
             try {
                 await ms.cloneGit('xchain-encoder', false, false, branch)
@@ -164,13 +169,15 @@ describe('Fuzz: Branch Name Validation', function () {
         const branch = '--upload-pack'
         const stubs = makeStubs()
         let clonedCmd = null
-        stubs.exec.callsFake((cmd, cb) => {
-            clonedCmd = cmd
+        stubs.execFile.callsFake((cmd, args, cb) => {
+            if (typeof args === 'function') { cb = args; args = [] }
+            clonedCmd = cmd + ' ' + (args || []).join(' ')
             cb(null)
         })
         const ms = loadModuleService(stubs)
         // The regex DOES allow this (all chars are in [a-zA-Z0-9._\-\/])
-        // But git clone -b --upload-pack treats it as a branch name argument to -b, not a separate flag
+        // But with execFile, args are passed as array elements, not a shell string.
+        // git clone -b --upload-pack treats it as a branch name argument to -b, not a separate flag
         // This is safe because -b consumes the next argument
         await ms.cloneGit('xchain-encoder', false, false, branch)
         expect(clonedCmd).to.include('-b --upload-pack')
@@ -185,8 +192,9 @@ describe('Fuzz: Branch Name Validation', function () {
     it('treats empty string branch same as null (no -b flag)', async function () {
         const stubs = makeStubs()
         let clonedCmd = null
-        stubs.exec.callsFake((cmd, cb) => {
-            clonedCmd = cmd
+        stubs.execFile.callsFake((cmd, args, cb) => {
+            if (typeof args === 'function') { cb = args; args = [] }
+            clonedCmd = cmd + ' ' + (args || []).join(' ')
             cb(null)
         })
         const ms = loadModuleService(stubs)
@@ -197,8 +205,9 @@ describe('Fuzz: Branch Name Validation', function () {
     it('does not include -b flag when branch is null', async function () {
         const stubs = makeStubs()
         let clonedCmd = null
-        stubs.exec.callsFake((cmd, cb) => {
-            clonedCmd = cmd
+        stubs.execFile.callsFake((cmd, args, cb) => {
+            if (typeof args === 'function') { cb = args; args = [] }
+            clonedCmd = cmd + ' ' + (args || []).join(' ')
             cb(null)
         })
         const ms = loadModuleService(stubs)
@@ -211,7 +220,10 @@ describe('Fuzz: Branch Name Validation', function () {
     it('accepts a very long but valid branch name', async function () {
         const longBranch = 'a'.repeat(500)
         const stubs = makeStubs()
-        stubs.exec.callsFake((cmd, cb) => cb(null))
+        stubs.execFile.callsFake((cmd, args, cb) => {
+            if (typeof args === 'function') { cb = args; args = [] }
+            cb(null)
+        })
         const ms = loadModuleService(stubs)
         await ms.cloneGit('xchain-encoder', false, false, longBranch)
     })
@@ -220,7 +232,10 @@ describe('Fuzz: Branch Name Validation', function () {
 
     it('accepts branch with slashes: feature/sub/deep', async function () {
         const stubs = makeStubs()
-        stubs.exec.callsFake((cmd, cb) => cb(null))
+        stubs.execFile.callsFake((cmd, args, cb) => {
+            if (typeof args === 'function') { cb = args; args = [] }
+            cb(null)
+        })
         const ms = loadModuleService(stubs)
         await ms.cloneGit('xchain-encoder', false, false, 'feature/sub/deep')
     })

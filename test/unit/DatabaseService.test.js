@@ -10,8 +10,8 @@ const proxyquire = require('proxyquire').noCallThru()
 
 function makeStubs() {
     return {
-        exec: sinon.stub(),
-        execAsync: sinon.stub(),
+        execFile: sinon.stub(),
+        execFileAsync: sinon.stub(),
         db: {
             getModuleContainer: sinon.stub().resolves('db-container-id'),
             insertModuleContainer: sinon.stub().resolves(true)
@@ -29,8 +29,8 @@ function makeStubs() {
 
 function loadDatabaseService(stubs) {
     return proxyquire('../../src/services/DatabaseService', {
-        'child_process': { exec: stubs.exec },
-        'util': { promisify: () => stubs.execAsync },
+        'child_process': { execFile: stubs.execFile },
+        'util': { promisify: () => stubs.execFileAsync },
         'mariadb': {},
         'enquirer': { Password: class { run() { return Promise.resolve('rootpass') } } },
         '../state': {
@@ -102,8 +102,18 @@ describe('DatabaseService', function () {
 
         it('constructs correct docker exec command', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('docker exec -i db-container mariadb -u root -prootpass -e "SELECT 1"')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.include('exec')
+                expect(args).to.include('-i')
+                expect(args).to.include('db-container')
+                expect(args).to.include('mariadb')
+                expect(args).to.include('-u')
+                expect(args).to.include('root')
+                expect(args).to.include('-prootpass')
+                expect(args).to.include('-e')
+                expect(args).to.include('SELECT 1')
                 cb(null, '1\n')
             })
             const ds = loadDatabaseService(stubs)
@@ -113,8 +123,10 @@ describe('DatabaseService', function () {
 
         it('appends commandOptions when provided', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => {
-                expect(cmd).to.include('-B -N')
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(args).to.include('-B')
+                expect(args).to.include('-N')
                 cb(null, '0\n')
             })
             const ds = loadDatabaseService(stubs)
@@ -123,7 +135,10 @@ describe('DatabaseService', function () {
 
         it('rejects on exec error', async function () {
             const stubs = makeStubs()
-            stubs.exec.callsFake((cmd, cb) => cb(new Error('db error')))
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(new Error('db error'))
+            })
             const ds = loadDatabaseService(stubs)
             try {
                 await ds.executeDockerMariaDbCommand('db-container', 'rootpass', 'SELECT 1')
@@ -153,11 +168,11 @@ describe('DatabaseService', function () {
             // First call for checkIfDatabaseModuleExists, second for operations
             stubs.db.getModuleContainer.onFirstCall().rejects(new Error('not found'))
             stubs.db.getModuleContainer.onSecondCall().resolves(null)
-            stubs.execAsync.resolves({ stdout: 'a'.repeat(64) + '\n' })
+            stubs.execFileAsync.resolves({ stdout: 'a'.repeat(64) + '\n' })
             const ds = loadDatabaseService(stubs)
             const result = await ds.buildDatabaseModule('bitcoin', 'mainnet')
-            // Should call execAsync for docker pull, tag, and run
-            expect(stubs.execAsync.called).to.be.true
+            // Should call execFileAsync for docker pull, tag, and run
+            expect(stubs.execFileAsync.called).to.be.true
         })
     })
 
@@ -169,7 +184,7 @@ describe('DatabaseService', function () {
 
         it('returns true when database responds', async function () {
             const stubs = makeStubs()
-            stubs.execAsync.resolves({ stdout: 'OK' })
+            stubs.execFileAsync.resolves({ stdout: 'OK' })
             const ds = loadDatabaseService(stubs)
             const result = await ds.checkIfDatabaseIsReady('root', 'rootpass')
             expect(result).to.be.true
@@ -177,7 +192,7 @@ describe('DatabaseService', function () {
 
         it('retries up to 10 times then returns false', async function () {
             const stubs = makeStubs()
-            stubs.execAsync.rejects(new Error('connection refused'))
+            stubs.execFileAsync.rejects(new Error('connection refused'))
             const ds = loadDatabaseService(stubs)
             const result = await ds.checkIfDatabaseIsReady('root', 'badpass')
             expect(result).to.be.false

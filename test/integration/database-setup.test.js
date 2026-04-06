@@ -59,16 +59,15 @@ describe('Integration: Database Service Chain', function () {
             }])
         })
 
-        const execStub = capture.createExecStub()
-        const execAsyncStub = capture.createExecAsyncStub()
+        const execFileStub = capture.createExecFileStub()
+        const execFileAsyncStub = capture.createExecFileAsyncStub()
 
         const DatabaseService = proxyquire('../../src/services/DatabaseService', {
             'child_process': {
-                exec: execStub,
-                spawn: capture.createSpawnStub()
+                execFile: execFileStub
             },
             'util': {
-                promisify: () => execAsyncStub
+                promisify: () => execFileAsyncStub
             },
             'enquirer': {
                 Password: class { async run() { return 'testrootpw' } }
@@ -147,8 +146,8 @@ describe('Integration: Database Service Chain', function () {
 
             const networkConnections = []
             const DatabaseService = proxyquire('../../src/services/DatabaseService', {
-                'child_process': { exec: capture.createExecStub(), spawn: capture.createSpawnStub() },
-                'util': { promisify: () => capture.createExecAsyncStub() },
+                'child_process': { execFile: capture.createExecFileStub() },
+                'util': { promisify: () => capture.createExecFileAsyncStub() },
                 'enquirer': { Password: class { async run() { return 'testrootpw' } } },
                 './StatusService': {
                     statusChanged: async () => true,
@@ -235,8 +234,8 @@ describe('Integration: Database Service Chain', function () {
 
             // Override network inspect to return different gateway
             const DatabaseService = proxyquire('../../src/services/DatabaseService', {
-                'child_process': { exec: capture.createExecStub(), spawn: capture.createSpawnStub() },
-                'util': { promisify: () => capture.createExecAsyncStub() },
+                'child_process': { execFile: capture.createExecFileStub() },
+                'util': { promisify: () => capture.createExecFileAsyncStub() },
                 'enquirer': { Password: class { async run() { return 'testrootpw' } } },
                 './StatusService': {
                     statusChanged: async () => true,
@@ -318,15 +317,15 @@ describe('Integration: Database Service Chain', function () {
             await env.insertModule(DB_MODULE_NAME, '', '', dbContainerId)
 
             let callCount = 0
-            const execAsyncStub = async (command) => {
+            const execFileAsyncStub = async (command, args) => {
                 callCount++
                 if (callCount < 3) throw new Error('Connection refused')
                 return { stdout: '1', stderr: '' }
             }
 
             const DatabaseService = proxyquire('../../src/services/DatabaseService', {
-                'child_process': { exec: capture.createExecStub(), spawn: capture.createSpawnStub() },
-                'util': { promisify: () => execAsyncStub },
+                'child_process': { execFile: capture.createExecFileStub() },
+                'util': { promisify: () => execFileAsyncStub },
                 'enquirer': { Password: class { async run() { return 'testrootpw' } } },
                 './StatusService': {
                     statusChanged: async () => true,

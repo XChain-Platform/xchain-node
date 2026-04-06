@@ -2,10 +2,8 @@
  * XChain Node - Utility helpers
  ********************************************************************/
 
-const { exec }    = require('child_process')
-const { promisify } = require('util')
-const execAsync   = promisify(exec)
-const path        = require('path')
+const { execFile } = require('child_process')
+const path         = require('path')
 const { Coin, Network, XChainService } = require('../config/constants')
 
 function sleep(ms) {
@@ -44,7 +42,7 @@ function stringToNetwork(networkString) {
 
 async function decompressTarGz(file) {
     return new Promise((resolve, reject) => {
-        exec('tar -xvzf ' + file, { cwd: path.dirname(file) }, (error) => {
+        execFile('tar', ['-xvzf', file], { cwd: path.dirname(file) }, (error) => {
             if (error) {
                 reject(`Error decompressing a file: ${error.message}`)
             } else {

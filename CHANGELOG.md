@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-04-05
+
+### Security
+- Replace all `child_process.exec()` calls with `execFile()`/`spawn()` using array arguments across 11 source files (~44 call sites), eliminating shell command injection as a vulnerability class
+- Fix `stringToDockerContainerFile()` broken template literal bug — now uses `spawn()` with `tee` for safe stdin piping
+- Passwords in database commands are now passed as single array elements to `execFile()`, preventing shell metacharacter interpretation and process listing exposure
+- SQL strings passed as single `-e` argument to `execFile()`, preventing shell breakout from SQL content
+- Validate `NODE_PREFIX` environment variable against `/^[a-z0-9][a-z0-9._-]*$/` to prevent shell injection via Docker naming
+- Add path traversal prevention in `ConfigService.getDefaultConfig()` with `path.resolve()` boundary check
+- Move branch name validation into `resolveArgs()` for fail-fast rejection at CLI entry point
+- Standardize container ID validation to `/^[a-f0-9]{64}$/` regex in `NodeService.js` and `DatabaseService.js`
+- Change bootstrap directory permissions from `chmod 777` to `chmod 755`
+- Remove shell escaping in `buildAndUp()` env var handling (unnecessary with `execFile()`)
+- Remove `escapeShellDoubleQuotes()` in `runE2ETest()` — replaced with array-based command construction
+- `execContainer()` now accepts `string[]` command args instead of a single shell string
+- `buildAndUp()` `dockerCmd` parameter changed from `string|null` to `string[]|null`
+- `GitHubDownloader` uses `spawnSync()` + `fs.unlinkSync()` instead of `execSync()` with shell `&&` chaining
+
+### Added
+- Security test suite (`test/unit/security.test.js`) with 27 tests covering shell injection prevention, container ID validation, NODE_PREFIX validation, branch name validation, path traversal prevention, database command safety, and source code scanning for remaining `exec()` calls
+
+### Changed
+- `CommandCapture` test helper gains `createExecFileStub()` and `createExecFileAsyncStub()` methods for the new `execFile` pattern
+- All existing tests (unit, integration, fuzz, e2e, smoke) updated to stub `execFile` instead of `exec`, with array-based assertions
+
 ## [0.0.8] - 2026-04-05
 
 ### Fixed

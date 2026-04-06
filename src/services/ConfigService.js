@@ -183,7 +183,10 @@ async function getDefaultConfig(module, coin, network) {
     // Read the config file for this coin/network pair
     const defaultConfig = {}
     if (coin && network && coin !== "" && network !== "") {
-        const configFilePath = configDir + "/" + coin + "-" + network
+        const configFilePath = path.resolve(configDir, `${coin}-${network}`)
+        if (!configFilePath.startsWith(path.resolve(configDir) + path.sep) && configFilePath !== path.resolve(configDir)) {
+            throw new Error('Config path traversal detected')
+        }
         if (!fs.existsSync(configFilePath)) {
             console.warn("Warning: config file not found: " + configFilePath + " — using defaults")
             for (const key in defaultValues) {
@@ -293,6 +296,10 @@ function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = 
     }
 
     if (expectBranch && !branch) branch = defaultBranch
+
+    if (branch && !/^[a-zA-Z0-9._\-\/]+$/.test(branch)) {
+        throw new Error("Invalid branch name: " + branch + " — branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes")
+    }
 
     return { service, chain, network, branch }
 }

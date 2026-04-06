@@ -3,7 +3,7 @@
  * Download, build and install cryptocurrency nodes
  ********************************************************************/
 
-const { exec }  = require('child_process')
+const { execFile } = require('child_process')
 const { https } = require('follow-redirects')
 const fs        = require('fs')
 const semver    = require('semver')
@@ -12,7 +12,6 @@ const {
     NODE_MODULE_NAME, NODE_VERSION_FILE_NAME, SEP,
     Coin, Network, XChainService
 } = require('../config/constants')
-const { nodeVersion: nodeVersionStr } = process.versions
 const nodeVersion = process.versions.node
 
 const { gitHubDownloader, db, getRemoteModuleVersions } = require('../state')
@@ -84,31 +83,34 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
 
     return new Promise((resolve, reject) => {
         console.log("Building image of " + coin + " " + network + " node")
-        exec('docker build . --build-arg CONF_FILE=' + coin + "-" + network + '.conf -t ' + containerPrefix, { cwd: nodeDir }, (error) => {
+        execFile('docker', ['build', '.', '--build-arg', 'CONF_FILE=' + coin + '-' + network + '.conf', '-t', containerPrefix], { cwd: nodeDir }, (error) => {
             if (error) {
                 console.error("Error creating Docker image: " + error.message)
                 return
             }
 
             const { dataDir } = require('../config/constants')
-            const dockerCommand = 'docker run -d '
-                + '-v ' + dataDir + "/" + NODE_MODULE_NAME + "/" + coin + "/" + network + ":/root/." + coin + " "
-                + '--hostname ' + NODE_MODULE_NAME + ' '
-                + '--ulimit nofile=2048:2048 '
-                + '--network ' + getDockerNetwork(coin, network) + ' '
-                + (defaultExposedPort && defaultNodePort ? '-p ' + defaultExposedPort + ':' + defaultNodePort + ' ' : "")
-                + ' -e CRYPTO_NODE_VERSION=' + bitcoinVer + ' '
-                + '-t ' + containerPrefix
+            const runArgs = [
+                'run', '-d',
+                '-v', `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`,
+                '--hostname', NODE_MODULE_NAME,
+                '--ulimit', 'nofile=2048:2048',
+                '--network', getDockerNetwork(coin, network)
+            ]
+            if (defaultExposedPort && defaultNodePort) {
+                runArgs.push('-p', `${defaultExposedPort}:${defaultNodePort}`)
+            }
+            runArgs.push('-e', `CRYPTO_NODE_VERSION=${bitcoinVer}`, '-t', containerPrefix)
 
             console.log("Creating container of " + coin + " " + network + " node")
-            exec(dockerCommand, { cwd: nodeDir }, async (error2, stdout) => {
+            execFile('docker', runArgs, { cwd: nodeDir }, async (error2, stdout) => {
                 if (error2) {
                     reject("Error creating the container: " + error2.message)
                     return
                 }
                 try {
                     const containerId = stdout.trim()
-                    if (containerId.length === 64) {
+                    if (/^[a-f0-9]{64}$/.test(containerId)) {
                         if (await db.insertModuleContainer(NODE_MODULE_NAME, coin, network, containerId)) {
                             await statusChanged()
                             resolve(containerId)

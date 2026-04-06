@@ -24,7 +24,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const util = require('util');
 const stream = require('stream');
 const pipeline = util.promisify(stream.pipeline);
@@ -201,15 +201,15 @@ class GitHubDownloader {
 
       // Extracts files by extension
       if (fileExtension === 'gz' || fileExtension === 'tgz') {
-        execSync(`tar -xzf ${downloadPath} -C ${outputPath} && rm ${downloadPath}`, {
-          stdio: 'inherit'
-        });
+        const result = spawnSync('tar', ['-xzf', downloadPath, '-C', outputPath], { stdio: 'inherit' });
+        if (result.status !== 0) throw new Error(`tar exited with code ${result.status}`);
+        fs.unlinkSync(downloadPath);
       } else if (fileExtension === 'zip') {
-        execSync(`unzip ${downloadPath} -d ${outputPath} && rm ${downloadPath}`, {
-          stdio: 'inherit'
-        });
+        const result = spawnSync('unzip', [downloadPath, '-d', outputPath], { stdio: 'inherit' });
+        if (result.status !== 0) throw new Error(`unzip exited with code ${result.status}`);
+        fs.unlinkSync(downloadPath);
       } else {
-        console.warn(`Extensión de archivo no reconocida: ${fileExtension}. No se extraerá.`);
+        console.warn(`Unrecognized file extension: ${fileExtension}. Will not extract.`);
       }
 
       // Handles directories structure after extracting the files

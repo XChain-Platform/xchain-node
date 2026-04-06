@@ -3,9 +3,9 @@
  * MariaDB management: build, configure users, check readiness
  ********************************************************************/
 
-const { exec }    = require('child_process')
+const { execFile } = require('child_process')
 const { promisify } = require('util')
-const execAsync   = promisify(exec)
+const execFileAsync = promisify(execFile)
 const mariadb     = require('mariadb')
 const { Password } = require('enquirer')
 
@@ -34,12 +34,11 @@ async function checkIfDatabaseModuleExists(coin, network) {
 
 async function checkIfDatabaseIsReady(user, userPassword) {
     const mariadbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
-    const dockerCommand = 'docker exec -i ' + mariadbContainerId + ' mariadb -u ' + user + ' -p' + userPassword + ' -e "SELECT 1"'
 
     let tries = 10
     while (tries > 0) {
         try {
-            await execAsync(dockerCommand)
+            await execFileAsync('docker', ['exec', '-i', mariadbContainerId, 'mariadb', '-u', user, `-p${userPassword}`, '-e', 'SELECT 1'])
             return true
         } catch {
             tries--
@@ -54,7 +53,6 @@ async function askMariadbRootPassword(coin, network) {
     if (cached) return cached
 
     const dbContainerId = await checkIfDatabaseModuleExists(coin, network)
-    const commandLine = "docker exec " + dbContainerId + " mariadb-admin -u root -p"
 
     while (!getDbRootPassword()) {
         const messageLine = dbContainerId
@@ -67,12 +65,12 @@ async function askMariadbRootPassword(coin, network) {
             const answer = await prompt.run()
 
             if (dbContainerId) {
-                const { stdout } = await execAsync(commandLine + answer + " ping")
+                const { stdout } = await execFileAsync('docker', ['exec', dbContainerId, 'mariadb-admin', '-u', 'root', `-p${answer}`, 'ping'])
                 if (stdout.includes('mysqld is alive')) {
                     setDbRootPassword(answer)
                     return answer
                 } else {
-                    console.log("❌ Wrong password, please try again")
+                    console.log("Wrong password, please try again")
                 }
             } else {
                 setDbRootPassword(answer)
@@ -87,10 +85,12 @@ async function askMariadbRootPassword(coin, network) {
 
 async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, command, commandOptions = "") {
     return new Promise((resolve, reject) => {
-        let dockerCommand = 'docker exec -i ' + mariadbContainerId + ' mariadb -u root -p' + mariadbRootPassword + ' -e "' + command + '"'
-        if (commandOptions !== "") dockerCommand += " " + commandOptions
+        const args = ['exec', '-i', mariadbContainerId, 'mariadb', '-u', 'root', `-p${mariadbRootPassword}`, '-e', command]
+        if (commandOptions) {
+            args.push(...commandOptions.trim().split(/\s+/))
+        }
 
-        exec(dockerCommand, (error, stdout) => {
+        execFile('docker', args, (error, stdout) => {
             if (error) {
                 reject(error)
             } else {
@@ -217,17 +217,22 @@ async function buildDatabaseModule(coin, network) {
         const containerPrefix = getDockerContainerImageName(DB_MODULE_NAME, coin, network)
 
         console.log("Building image of database")
-        const portLine = ("DB_PORT" in environmentVariables) ? "-p " + environmentVariables["DB_PORT"] + ":3306" : ""
-        const networkLine = (coin !== "" && network !== "") ? '--network ' + getDockerNetwork(coin, network) : ""
+        await execFileAsync('docker', ['pull', 'mariadb:latest'])
+        await execFileAsync('docker', ['tag', 'mariadb:latest', containerPrefix])
 
-        await execAsync('docker pull mariadb:latest')
-        await execAsync('docker tag mariadb:latest ' + containerPrefix)
+        const runArgs = ['run', '-d', '--hostname', 'mariadb']
+        if (coin !== "" && network !== "") {
+            runArgs.push('--network', getDockerNetwork(coin, network))
+        }
+        if ("DB_PORT" in environmentVariables) {
+            runArgs.push('-p', `${environmentVariables["DB_PORT"]}:3306`)
+        }
+        runArgs.push('--env', `MYSQL_ROOT_PASSWORD=${mariadbRootPassword}`, containerPrefix)
 
-        const dockerCommand = 'docker run -d --hostname mariadb ' + networkLine + ' ' + portLine + ' --env MYSQL_ROOT_PASSWORD=' + mariadbRootPassword + ' ' + containerPrefix
         console.log("Creating container of module " + DB_MODULE_NAME)
-        const { stdout } = await execAsync(dockerCommand)
+        const { stdout } = await execFileAsync('docker', runArgs)
         const containerId = stdout.trim()
-        if (containerId.length === 64) {
+        if (/^[a-f0-9]{64}$/.test(containerId)) {
             if (await db.insertModuleContainer(DB_MODULE_NAME, "", "", containerId)) {
                 await statusChanged()
                 return containerId

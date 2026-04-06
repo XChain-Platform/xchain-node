@@ -5,9 +5,9 @@
 
 const path      = require('path')
 const fs        = require('fs')
-const { exec }  = require('child_process')
+const { execFile } = require('child_process')
 const { promisify } = require('util')
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, XChainService, SEP, dataDir } = require('../config/constants')
 const { db }                 = require('../state')
 const { getDockerContainerImageName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
@@ -171,13 +171,14 @@ async function startModules(servicesList) {
 }
 
 async function execModules(servicesList, command) {
+    const commandArgs = command.split(/\s+/)
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
                 const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 if (!containerId) continue
                 try {
-                    const execStdOut = await execContainer(containerId, command)
+                    const execStdOut = await execContainer(containerId, commandArgs)
                     console.log(execStdOut)
                 } catch (err) {
                     console.log(err)
@@ -206,16 +207,15 @@ async function shellModule(servicesList) {
     return true
 }
 
-function escapeShellDoubleQuotes(str) {
-    return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-}
-
 async function runE2ETest(coin, network, testName = null, grep = null) {
-    let dockerCmd = testName
-        ? `npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js "test/actions/${escapeShellDoubleQuotes(testName)}.test.js"`
-        : null
-    if (grep && dockerCmd) dockerCmd += ` --grep "${escapeShellDoubleQuotes(grep)}"`
-    const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true, null, dockerCmd)
+    let dockerCmdArgs = null
+    if (testName) {
+        dockerCmdArgs = ['npx', 'mocha', '--timeout', '0', '--exit',
+            '--require', './test/initialCheck.test.js',
+            `test/actions/${testName}.test.js`]
+        if (grep) dockerCmdArgs.push('--grep', grep)
+    }
+    const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true, null, dockerCmdArgs)
 
     console.log("Running e2e tests, please wait...")
     const exitCode = await waitContainer(containerId)
@@ -256,7 +256,7 @@ async function resetModules(service, coin, network) {
         const nodeDataPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
         if (fs.existsSync(nodeDataPath)) {
             console.log(`Clearing node data at ${nodeDataPath}...`)
-            await execAsync(`docker run --rm -v "${nodeDataPath}:/data" alpine sh -c "find /data -mindepth 1 -delete"`)
+            await execFileAsync('docker', ['run', '--rm', '-v', `${nodeDataPath}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
         }
     }
 
@@ -264,7 +264,7 @@ async function resetModules(service, coin, network) {
         const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
         try {
             console.log(`Clearing Docker volume ${volumeName}...`)
-            await execAsync(`docker run --rm -v ${volumeName}:/data alpine sh -c "find /data -mindepth 1 -delete"`)
+            await execFileAsync('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
         } catch { /* volume may not exist, skip */ }
     }
 

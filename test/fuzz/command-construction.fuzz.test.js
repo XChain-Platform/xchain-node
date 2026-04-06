@@ -12,7 +12,7 @@ const { XChainService, modulesUrls } = require('../../src/config/constants')
 
 function makeStubs(envVars) {
     return {
-        exec: sinon.stub(),
+        execFile: sinon.stub(),
         fs: {
             existsSync: sinon.stub().returns(true),
             rmSync: sinon.stub(),
@@ -34,7 +34,8 @@ function makeStubs(envVars) {
 
 function loadModuleService(stubs) {
     return proxyquire('../../src/services/ModuleService', {
-        'child_process': { exec: stubs.exec },
+        'child_process': { execFile: stubs.execFile },
+        'util': { promisify: () => async (cmd, args) => ({ stdout: '', stderr: '' }) },
         'fs': stubs.fs,
         '../state': {
             db: stubs.db,
@@ -67,12 +68,15 @@ function loadModuleService(stubs) {
 
 function captureDockerRunCmd(stubs) {
     let runCmd = null
-    stubs.exec.callsFake((cmd, opts, cb) => {
+    let runArgs = null
+    stubs.execFile.callsFake((cmd, args, opts, cb) => {
         if (typeof opts === 'function') { cb = opts; opts = {} }
-        if (cmd.includes('docker build')) {
+        const fullCmd = cmd + ' ' + (args || []).join(' ')
+        if (args && args.includes('build')) {
             cb(null)
-        } else if (cmd.includes('docker run')) {
-            runCmd = cmd
+        } else if (args && args.includes('run')) {
+            runCmd = fullCmd
+            runArgs = args
             cb(null, 'a'.repeat(64) + '\n')
         }
     })
@@ -92,7 +96,7 @@ describe('Fuzz: Docker Command Construction', function () {
         const getCmd = captureDockerRunCmd(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        expect(getCmd()).to.match(/^docker run -d/)
+        expect(getCmd()).to.include('docker run -d')
     })
 
     it('docker run includes --hostname flag', async function () {
@@ -119,9 +123,9 @@ describe('Fuzz: Docker Command Construction', function () {
         expect(getCmd()).to.include('-t xchain-node-bitcoin-mainnet-xchain-encoder')
     })
 
-    // --- env vars are always double-quoted ---
+    // --- env vars are passed as raw array elements (no shell quoting with execFile) ---
 
-    it('every -e flag value is wrapped in double quotes', async function () {
+    it('every -e flag is followed by a raw KEY=value pair', async function () {
         const stubs = makeStubs({
             'KEY1': 'val1',
             'KEY2': 'val2',
@@ -133,12 +137,10 @@ describe('Fuzz: Docker Command Construction', function () {
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const cmd = getCmd()
-        // Extract all -e "..." segments
-        const eFlags = cmd.match(/-e "[^"]*"/g) || []
-        expect(eFlags.length).to.be.greaterThan(0)
-        for (const flag of eFlags) {
-            expect(flag).to.match(/^-e "[^"]*"$/)
-        }
+        // With execFile, env vars appear as "-e KEY1=val1" (no quotes around KEY=value)
+        expect(cmd).to.include('-e KEY1=val1')
+        expect(cmd).to.include('-e KEY2=val2')
+        expect(cmd).to.include('-e KEY3=val3')
     })
 
     // --- Malicious env var keys ---
@@ -163,10 +165,9 @@ describe('Fuzz: Docker Command Construction', function () {
         it('includes correct git URL from modulesUrls', async function () {
             const stubs = makeStubs()
             let cloneCmd = null
-            stubs.exec.callsFake((cmd, cb) => {
-                if (cmd.includes('git clone')) {
-                    cloneCmd = cmd
-                }
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                if (typeof args === 'function') { cb = args; args = [] }
+                cloneCmd = cmd + ' ' + (args || []).join(' ')
                 cb(null)
             })
             const ms = loadModuleService(stubs)
@@ -174,31 +175,33 @@ describe('Fuzz: Docker Command Construction', function () {
             expect(cloneCmd).to.include(modulesUrls['xchain-encoder'])
         })
 
-        it('branch flag is placed immediately after "git clone"', async function () {
+        it('branch flag is placed immediately after "clone"', async function () {
             const stubs = makeStubs()
             let cloneCmd = null
-            stubs.exec.callsFake((cmd, cb) => {
-                cloneCmd = cmd
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                if (typeof args === 'function') { cb = args; args = [] }
+                cloneCmd = cmd + ' ' + (args || []).join(' ')
                 cb(null)
             })
             const ms = loadModuleService(stubs)
             await ms.cloneGit('xchain-encoder', false, false, 'develop')
             // Format: git clone -b <branch> <url> <dest>
-            expect(cloneCmd).to.match(/^git clone -b develop /)
+            expect(cloneCmd).to.include('git clone -b develop ')
         })
 
         it('no -b flag when branch is null', async function () {
             const stubs = makeStubs()
             let cloneCmd = null
-            stubs.exec.callsFake((cmd, cb) => {
-                cloneCmd = cmd
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                if (typeof args === 'function') { cb = args; args = [] }
+                cloneCmd = cmd + ' ' + (args || []).join(' ')
                 cb(null)
             })
             const ms = loadModuleService(stubs)
             await ms.cloneGit('xchain-encoder', false, false, null)
             expect(cloneCmd).to.not.include('-b')
             // Should be: git clone <url> <dest>
-            expect(cloneCmd).to.match(/^git clone git@/)
+            expect(cloneCmd).to.include('git clone git@')
         })
     })
 
@@ -246,11 +249,11 @@ describe('Fuzz: Docker Command Construction', function () {
 
     // --- dockerCmd passthrough ---
 
-    it('appends dockerCmd to docker run when provided', async function () {
+    it('appends dockerCmd args to docker run when provided', async function () {
         const stubs = makeStubs()
         const getCmd = captureDockerRunCmd(stubs)
         const ms = loadModuleService(stubs)
-        await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet', null, false, 'npm start')
+        await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet', null, false, ['npm', 'start'])
         const cmd = getCmd()
         expect(cmd).to.match(/npm start$/)
     })

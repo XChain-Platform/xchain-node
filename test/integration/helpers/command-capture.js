@@ -3,13 +3,13 @@
 const sinon = require('sinon')
 
 /**
- * CommandCapture - records child_process.exec/spawn calls and returns configurable responses.
+ * CommandCapture - records child_process.execFile/spawn calls and returns configurable responses.
  *
  * Usage:
  *   const capture = new CommandCapture()
  *   capture.when(/docker run/).returns({ stdout: 'abc123...' })
  *   capture.when(/docker build/).returns({ stdout: '' })
- *   const execStub = capture.createExecStub()
+ *   const execFileStub = capture.createExecFileStub()
  *
  * Then assert:
  *   capture.history()          // all recorded calls
@@ -73,12 +73,14 @@ class CommandCapture {
     }
 
     /**
-     * Create a stub for child_process.exec (callback style).
-     * Compatible with: exec(command, [options], callback)
+     * Create a stub for child_process.execFile (callback style).
+     * Compatible with: execFile(command, args, [options], callback)
+     * Records the full command string (command + args.join(' ')) for backward
+     * compatibility with findCommands() and assertCalled().
      */
-    createExecStub() {
+    createExecFileStub() {
         const self = this
-        return function execStub(command, ...rest) {
+        return function execFileStub(command, args, ...rest) {
             let options = {}
             let callback = null
 
@@ -89,8 +91,9 @@ class CommandCapture {
                 callback = rest[1]
             }
 
-            self._history.push({ command, options, type: 'exec', timestamp: Date.now() })
-            const response = self._matchRoute(command)
+            const fullCommand = command + ' ' + (args || []).join(' ')
+            self._history.push({ command: fullCommand, args, options, type: 'execFile', timestamp: Date.now() })
+            const response = self._matchRoute(fullCommand)
 
             if (callback) {
                 process.nextTick(() => {
@@ -108,19 +111,34 @@ class CommandCapture {
     }
 
     /**
-     * Create a stub for promisified exec (util.promisify(exec)).
+     * Create a stub for promisified execFile (util.promisify(execFile)).
      */
-    createExecAsyncStub() {
+    createExecFileAsyncStub() {
         const self = this
-        return async function execAsyncStub(command, options) {
-            self._history.push({ command, options: options || {}, type: 'execAsync', timestamp: Date.now() })
-            const response = self._matchRoute(command)
+        return async function execFileAsyncStub(command, args, options) {
+            const fullCommand = command + ' ' + (args || []).join(' ')
+            self._history.push({ command: fullCommand, args, options: options || {}, type: 'execFileAsync', timestamp: Date.now() })
+            const response = self._matchRoute(fullCommand)
 
             if (response.error) {
                 throw response.error
             }
             return { stdout: response.stdout || '', stderr: response.stderr || '' }
         }
+    }
+
+    /**
+     * @deprecated Use createExecFileStub() instead.
+     */
+    createExecStub() {
+        return this.createExecFileStub()
+    }
+
+    /**
+     * @deprecated Use createExecFileAsyncStub() instead.
+     */
+    createExecAsyncStub() {
+        return this.createExecFileAsyncStub()
     }
 
     /**

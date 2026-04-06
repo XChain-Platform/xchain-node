@@ -143,25 +143,28 @@ describe('utils/helpers', function () {
     // -------------------------------------------------------------------
 
     describe('decompressTarGz()', function () {
-        let execStub
+        let execFileStub
 
-        function loadHelpers(execImpl) {
-            execStub = execImpl || sinon.stub()
+        function loadHelpers(execFileImpl) {
+            execFileStub = execFileImpl || sinon.stub()
             return proxyquire('../../src/utils/helpers', {
-                'child_process': { exec: execStub }
+                'child_process': { execFile: execFileStub }
             })
         }
 
         it('runs tar -xvzf with the file path', function (done) {
-            const helpers = loadHelpers(function (cmd, opts, cb) {
-                expect(cmd).to.equal('tar -xvzf /tmp/archive.tar.gz')
+            const helpers = loadHelpers(function (cmd, args, opts, cb) {
+                if (typeof opts === 'function') { cb = opts; opts = {} }
+                expect(cmd).to.equal('tar')
+                expect(args).to.deep.equal(['-xvzf', '/tmp/archive.tar.gz'])
                 cb(null)
             })
             helpers.decompressTarGz('/tmp/archive.tar.gz').then(() => done()).catch(done)
         })
 
         it('sets cwd to the parent directory of the file', function (done) {
-            const helpers = loadHelpers(function (cmd, opts, cb) {
+            const helpers = loadHelpers(function (cmd, args, opts, cb) {
+                if (typeof opts === 'function') { cb = opts; opts = {} }
                 expect(opts.cwd).to.equal('/tmp')
                 cb(null)
             })
@@ -169,13 +172,17 @@ describe('utils/helpers', function () {
         })
 
         it('resolves true on success', async function () {
-            const helpers = loadHelpers(function (cmd, opts, cb) { cb(null) })
+            const helpers = loadHelpers(function (cmd, args, opts, cb) {
+                if (typeof opts === 'function') { cb = opts; opts = {} }
+                cb(null)
+            })
             const result = await helpers.decompressTarGz('/tmp/archive.tar.gz')
             expect(result).to.be.true
         })
 
         it('rejects with descriptive message on error', async function () {
-            const helpers = loadHelpers(function (cmd, opts, cb) {
+            const helpers = loadHelpers(function (cmd, args, opts, cb) {
+                if (typeof opts === 'function') { cb = opts; opts = {} }
                 cb(new Error('tar failed'))
             })
             try {
