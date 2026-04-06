@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-04-05
+
+### Added
+- Integration test suite with 103 tests across 7 test files validating cross-module interactions
+- Integration test helpers: CommandCapture (child_process stub), HttpCapture (axios stub), TestEnv (isolated environment with memdown LevelDB, temp dirs, state reset)
+- Integration tests for config pipeline (filterCommandParameters -> getDefaultConfig across all coin/network combos)
+- Integration tests for Docker command construction (verifies all flags, env vars, ports, volumes per module type)
+- Integration tests for module lifecycle (LevelDB state for start/stop/restart/exec via moduleOperations)
+- Integration tests for status query chain (getStatus with running/stopped/missing containers, caching)
+- Integration tests for hub/explorer config update (payload construction, retry logic, network connectivity)
+- Integration tests for database service chain (container creation, user/grant SQL, readiness polling)
+- Integration tests for Docker network management (create/skip, container attachment, lifecycle commands)
+- Integration tests for multi-module orchestration (install ordering, update flow, uninstall resilience)
+- `test:integration` and `test:all` npm scripts
+
 ## [0.0.3] - 2026-04-05
 
 ### Added
