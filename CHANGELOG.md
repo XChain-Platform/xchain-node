@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-04-05
+
+### Added
+- Unit test suite with 261 tests across 12 test files covering all core modules
+- Test infrastructure: mocha, chai, sinon, proxyquire, memdown as devDependencies
+- Test coverage for ConfigService (path helpers, naming, getDefaultConfig, filterCommandParameters)
+- Test coverage for LevelUpDb (CRUD operations, key format, filtered queries via memdown)
+- Test coverage for DockerService (all Docker command string construction)
+- Test coverage for ModuleService (cloneGit, buildAndUp, uninstallModule)
+- Test coverage for moduleOperations (install/update/uninstall/start/stop/restart/exec/shell/log/monitor)
+- Test coverage for DatabaseService, VersionService, HubConnector, ExplorerConnector, GitHubDownloader
+- Test coverage for utility helpers (stringToCoin, stringToNetwork, decompressTarGz) and shared state
+
 ## [0.0.2] - 2026-04-03
 
 ### Added
