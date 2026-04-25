@@ -185,7 +185,9 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                     try {
                         await killContainer(overwriteContainerId)
                     } catch { /* container may not be running */ }
-                    await removeContainer(overwriteContainerId)
+                    try {
+                        await removeContainer(overwriteContainerId)
+                    } catch { /* container may have been removed manually */ }
                 }
 
                 const runArgs = [
