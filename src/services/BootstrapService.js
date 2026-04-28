@@ -28,7 +28,7 @@ function startProgress(message, totalBytes) {
     const interval = setInterval(() => {
         const mb  = (written / 1024 / 1024).toFixed(1)
         const pct = totalBytes > 0
-            ? Math.min(99, Math.floor(written / totalBytes * 100))
+            ? Math.floor(written / totalBytes * 100)
             : '?'
         process.stdout.write(`\r${frames[frameIndex++ % 10]} ${message} ${mb} MB (${pct}%)`)
     }, 100)
