@@ -13,6 +13,8 @@ const { checkAllRemoteVersions }       = require('./services/VersionService')
 const { getStatus }                    = require('./services/StatusService')
 const { installHubModule, updateHub }  = require('./services/HubService')
 const { updateExplorer }               = require('./services/ExplorerService')
+const { buildDatabaseModule, ensureXchainNodeAccess, getDatabaseHostPort } = require('./services/DatabaseService')
+const { scanAndRegisterModules }       = require('./services/DiscoveryService')
 
 function createDirectories() {
     if (!fs.existsSync(dataDir))             fs.mkdirSync(dataDir)
@@ -31,8 +33,49 @@ async function preCheck(checkVersions = false) {
 
     if (isVerbose()) console.log("Checking/Creating directories")
     createDirectories()
-    if (isVerbose()) console.log("Checking/Creating database")
-    await db.createDatabase()
+
+    if (isVerbose()) console.log("Checking/Installing mariadb container")
+    try {
+        await buildDatabaseModule("", "")
+    } catch (err) {
+        console.log(err)
+        throw new Error("There was an error installing the mariadb container")
+    }
+
+    if (isVerbose()) console.log("Checking/Creating xchain_node access for current user")
+    let dbCreds
+    try {
+        dbCreds = await ensureXchainNodeAccess()
+    } catch (err) {
+        console.log(err)
+        throw new Error("There was an error creating xchain_node access")
+    }
+
+    if (isVerbose()) console.log("Opening MariaDB connection")
+    try {
+        const port = await getDatabaseHostPort()
+        await db.createDatabase({
+            host:     "127.0.0.1",
+            port,
+            user:     dbCreds.user,
+            password: dbCreds.password,
+            database: dbCreds.database
+        })
+    } catch (err) {
+        console.log(err)
+        throw new Error("Couldn't open the xchain_node MariaDB database")
+    }
+
+    try {
+        const moduleCount = await db.countModules()
+        if (moduleCount === 0) {
+            if (isVerbose()) console.log("Modules table empty, scanning Docker for existing containers")
+            await scanAndRegisterModules({ silent: !isVerbose() })
+        }
+    } catch (err) {
+        console.log(err)
+        throw new Error("There was an error during module auto-discovery")
+    }
     if (checkVersions) {
         if (isVerbose()) console.log("Getting all remote project versions")
         await checkAllRemoteVersions()

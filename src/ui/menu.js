@@ -2,7 +2,6 @@
  * XChain Node - Interactive UI / Menu
  ********************************************************************/
 
-const { execFile } = require('child_process')
 const { Select } = require('enquirer')
 const semver    = require('semver')
 
@@ -20,64 +19,7 @@ const {
     getLocalNodeVersion, getLocalModuleVersion,
     getContainerNodeVersion, getContainerModuleVersion
 } = require('../services/VersionService')
-
-async function scanModules() {
-    const { NODE_PREFIX } = require('../config/constants')
-    const { stringToXChainService } = require('../utils/helpers')
-    const validCoins    = Object.values(Coin)
-    const validNetworks = Object.values(Network)
-
-    return new Promise((resolve) => {
-        execFile('docker', ['ps', '-a', '--no-trunc', '--format', 'json'], async (error, stdout) => {
-            const containers = stdout.trim()
-                .split('\n').filter(line => line.trim().length > 0)
-                .map(line => JSON.parse(line))
-
-            for (const nextContainer of containers) {
-                const imageName = nextContainer.Image
-                if (!imageName.startsWith(NODE_PREFIX + SEP)) continue
-
-                const rest  = imageName.substr(NODE_PREFIX.length + SEP.length)
-
-                // Special modules: database, hub, explorer (no coin/network in image name)
-                const specialModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME]
-                if (specialModules.includes(rest)) {
-                    const moduleDb = await db.getModuleContainer(rest, "", "")
-                    if (moduleDb == null) {
-                        await db.insertModuleContainer(rest, "", "", nextContainer.ID)
-                        console.log("Added " + rest + " (" + nextContainer.ID + ")")
-                    }
-                    continue
-                }
-
-                const parts = rest.split(SEP)
-                if (parts.length < 3) continue
-
-                const coinStr    = parts[0]
-                const networkStr = parts[1]
-                const moduleStr  = parts.slice(2).join(SEP)
-
-                if (!validCoins.includes(coinStr) || !validNetworks.includes(networkStr)) continue
-
-                let module = stringToXChainService(moduleStr)
-                if (module != null) {
-                    module = XChainService[module]
-                } else if (moduleStr === NODE_MODULE_NAME) {
-                    module = NODE_MODULE_NAME
-                }
-
-                if (module != null) {
-                    const moduleDb = await db.getModuleContainer(module, coinStr, networkStr)
-                    if (moduleDb == null) {
-                        await db.insertModuleContainer(module, coinStr, networkStr, nextContainer.ID)
-                        console.log("Added " + coinStr + SEP + networkStr + SEP + module + " (" + nextContainer.ID + ")")
-                    }
-                }
-            }
-            resolve(true)
-        })
-    })
-}
+const { scanAndRegisterModules } = require('../services/DiscoveryService')
 
 async function restoreBootstrapInterface(coin, network, module) {
     const bootstrapFiles = await getBootstrapFilesList(coin, network, module)
@@ -355,7 +297,7 @@ async function mainMenu() {
         return { menuFunction: exit, parameters: [] }
     } else if (answer === "Scan already installed modules") {
         try {
-            await scanModules()
+            await scanAndRegisterModules()
             await statusChanged()
         } catch (err) {
             console.log(err)

@@ -23,6 +23,7 @@ const {
     resetModules
 } = require('./operations/moduleOperations')
 const { getStatus }            = require('./services/StatusService')
+const { scanAndRegisterModules } = require('./services/DiscoveryService')
 const { makeBootstrap }        = require('./services/BootstrapService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 
@@ -96,6 +97,15 @@ async function parseCommand() {
         .description('List installed XChain services and status')
         .action(async () => {
             await getStatus(null, null, true)
+            return process.exit(0)
+        })
+
+    program
+        .command('sync')
+        .description('Scan Docker for xchain-node containers and register any missing in the database')
+        .action(async () => {
+            const added = await scanAndRegisterModules()
+            console.log(added === 0 ? "Nothing to add — already in sync" : `Registered ${added} module(s)`)
             return process.exit(0)
         })
 
