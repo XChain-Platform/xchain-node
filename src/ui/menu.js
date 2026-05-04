@@ -328,6 +328,5 @@ module.exports = {
     mainMenu,
     modulesSelectionInterface,
     restoreBootstrapInterface,
-    startInterface,
-    scanModules
+    startInterface
 }
