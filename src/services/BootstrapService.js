@@ -17,6 +17,7 @@ const { XChainService, DB_MODULE_NAME, SEP, tmpDir } = require('../config/consta
 const { db }                                          = require('../state')
 const { getDefaultConfig, getModuleDatabaseName }    = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
+const { getDatabaseContainerId }                      = require('./DatabaseService')
 
 // ─── Private helpers ─────────────────────────────────────────────
 
@@ -234,7 +235,7 @@ async function makeBootstrapMariaDb(coin, network, module) {
     const finalOutput   = path.join(outputDir, archiveName)
 
     // Step 1: Get DB container ID and credentials
-    const dbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+    const dbContainerId = await getDatabaseContainerId()
     if (!dbContainerId) throw new Error('MariaDB container not found')
 
     const rootPassword = await askMariadbRootPassword(coin, network)
@@ -430,7 +431,7 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     console.log('OK')
 
     // Step 3: Get DB container ID and credentials
-    const dbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+    const dbContainerId = await getDatabaseContainerId()
     if (!dbContainerId) throw new Error('MariaDB container not found')
 
     const rootPassword = await askMariadbRootPassword(coin, network)

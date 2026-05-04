@@ -2,12 +2,14 @@
  * XChain Node - Shared state & singleton instances
  ********************************************************************/
 
-const { DB_NAME, dataDir, srcDir } = require('./config/constants')
-const LevelUpStore      = require('./LevelUpDb.js')
+const { srcDir } = require('./config/constants')
+const MariaDbStore      = require('./MariaDbStore.js')
 const GitHubDownloader  = require('./GitHubDownloader.js')
 
 // --- Singleton service instances ---
-const db              = new LevelUpStore(DB_NAME, dataDir)
+// db starts unconfigured; precheck.js calls db.createDatabase(config) once
+// the mariadb container is up and per-OS-user credentials are loaded
+const db              = new MariaDbStore()
 const gitHubDownloader = new GitHubDownloader(srcDir + "/github_hashes.json")
 
 // --- Mutable shared state ---

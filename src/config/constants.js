@@ -10,7 +10,6 @@ if (!/^[a-z0-9][a-z0-9._-]*$/.test(rawPrefix)) {
     throw new Error(`Invalid NODE_PREFIX: "${rawPrefix}" — must be lowercase alphanumeric with hyphens, dots, or underscores`)
 }
 const NODE_PREFIX            = rawPrefix
-const DB_NAME                = (process.env.DB_NAME == null) ? "xchain_node" : process.env.DB_NAME
 const NODE_MODULE_NAME       = "node"
 const DB_MODULE_NAME         = "database"
 const HUB_MODULE_NAME        = "xchain-hub"
@@ -91,7 +90,6 @@ const containersFilesDir = path.join(tmpDir, "containers_files")
 
 module.exports = {
     NODE_PREFIX,
-    DB_NAME,
     NODE_MODULE_NAME,
     DB_MODULE_NAME,
     HUB_MODULE_NAME,

@@ -17,10 +17,45 @@ const { sleep }                   = require('../utils/helpers')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName } = require('./ConfigService')
 const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork } = require('./DockerService')
 const { statusChanged }           = require('./StatusService')
+const {
+    XCHAIN_NODE_DB, getOsUserDbName, generatePassword,
+    hasCredentials, loadCredentials, saveCredentials
+} = require('./CredentialsService')
+
+const XCHAIN_NODE_DB_HOST = "127.0.0.1"
+const XCHAIN_NODE_DB_DEFAULT_PORT = 3306
+
+async function getDatabaseContainerId() {
+    try {
+        const containerName = getDockerContainerImageName(DB_MODULE_NAME, "", "")
+        const { stdout } = await execFileAsync('docker', ['inspect', '--format', '{{.Id}}', containerName])
+        const id = stdout.trim()
+        if (/^[a-f0-9]{64}$/.test(id)) return id
+        return null
+    } catch {
+        return null
+    }
+}
+
+async function getDatabaseHostPort() {
+    try {
+        const containerName = getDockerContainerImageName(DB_MODULE_NAME, "", "")
+        const { stdout } = await execFileAsync('docker', ['port', containerName, '3306/tcp'])
+        const lines = stdout.trim().split('\n').filter(Boolean)
+        for (const line of lines) {
+            const match = line.match(/:(\d+)$/)
+            if (match) return parseInt(match[1], 10)
+        }
+        return XCHAIN_NODE_DB_DEFAULT_PORT
+    } catch {
+        return XCHAIN_NODE_DB_DEFAULT_PORT
+    }
+}
 
 async function checkIfDatabaseModuleExists(coin, network) {
     try {
-        const dbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+        const dbContainerId = await getDatabaseContainerId()
+        if (!dbContainerId) return null
         const containerStatus = await getStatusFromContainer(dbContainerId)
         if (("State" in containerStatus) && ("Status" in containerStatus["State"])) {
             return dbContainerId
@@ -33,7 +68,7 @@ async function checkIfDatabaseModuleExists(coin, network) {
 }
 
 async function checkIfDatabaseIsReady(user, userPassword) {
-    const mariadbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+    const mariadbContainerId = await getDatabaseContainerId()
 
     let tries = 10
     while (tries > 0) {
@@ -116,7 +151,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
     if (inDocker) {
         try {
             await checkIfDatabaseIsReady("root", mariadbRootPassword)
-            const mariadbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+            const mariadbContainerId = await getDatabaseContainerId()
 
             const dbCount = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                 "SELECT COUNT(SCHEMA_NAME) FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '" + databaseName + "'", "-B -N"
@@ -163,7 +198,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
 async function setDatabaseParameters() {
     const { getInstalledCoinsAndNetworks } = require('./StatusService')
     const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
-    const dbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+    const dbContainerId = await getDatabaseContainerId()
 
     for (const nextCoin in installedCoinsAndNetworks) {
         for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
@@ -196,7 +231,7 @@ async function setDatabaseParameters() {
 
 async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]) {
     const mariadbRootPassword = await askMariadbRootPassword(coin, network)
-    const mariadbContainerId  = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+    const mariadbContainerId  = await getDatabaseContainerId()
 
     for (const module of modules) {
         const dbName = getModuleDatabaseName(module, coin, network)
@@ -224,26 +259,21 @@ async function buildDatabaseModule(coin, network) {
         if (coin !== "" && network !== "") {
             runArgs.push('--network', getDockerNetwork(coin, network))
         }
-        if ("DB_PORT" in environmentVariables) {
-            runArgs.push('-p', `${environmentVariables["DB_PORT"]}:3306`)
-        }
+        const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
+        runArgs.push('-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`)
         runArgs.push('--env', `MYSQL_ROOT_PASSWORD=${mariadbRootPassword}`, containerPrefix)
 
         console.log("Creating container of module " + DB_MODULE_NAME)
         const { stdout } = await execFileAsync('docker', runArgs)
         const containerId = stdout.trim()
         if (/^[a-f0-9]{64}$/.test(containerId)) {
-            if (await db.insertModuleContainer(DB_MODULE_NAME, "", "", containerId)) {
-                await statusChanged()
-                return containerId
-            } else {
-                throw "There was a problem trying to store the container's id"
-            }
+            await statusChanged()
+            return containerId
         }
     } else {
         try {
             if (coin && network) {
-                const dbContainerId = await db.getModuleContainer(DB_MODULE_NAME, "", "")
+                const dbContainerId = await getDatabaseContainerId()
                 await addContainerToNetwork(dbContainerId, getDockerNetwork(coin, network))
                 await statusChanged()
             }
@@ -255,6 +285,43 @@ async function buildDatabaseModule(coin, network) {
     }
 }
 
+async function ensureXchainNodeAccess() {
+    if (hasCredentials()) {
+        return loadCredentials()
+    }
+
+    const containerId = await getDatabaseContainerId()
+    if (!containerId) {
+        throw new Error("MariaDB container not found — install it before requesting access")
+    }
+
+    const rootPassword = await askMariadbRootPassword("", "")
+    const ready = await checkIfDatabaseIsReady("root", rootPassword)
+    if (!ready) {
+        throw new Error("MariaDB is not responding")
+    }
+
+    const dbUser     = getOsUserDbName()
+    const dbPassword = generatePassword()
+
+    console.log("Creating xchain-node database and user " + dbUser)
+    await executeDockerMariaDbCommand(containerId, rootPassword,
+        "CREATE DATABASE IF NOT EXISTS " + XCHAIN_NODE_DB
+    )
+    await executeDockerMariaDbCommand(containerId, rootPassword,
+        "CREATE USER IF NOT EXISTS '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'"
+    )
+    await executeDockerMariaDbCommand(containerId, rootPassword,
+        "GRANT ALL PRIVILEGES ON " + XCHAIN_NODE_DB + ".* TO '" + dbUser + "'@'%'"
+    )
+    await executeDockerMariaDbCommand(containerId, rootPassword, "FLUSH PRIVILEGES")
+
+    const creds = { user: dbUser, password: dbPassword, database: XCHAIN_NODE_DB }
+    saveCredentials(creds)
+    console.log("Credentials saved to user home directory")
+    return creds
+}
+
 module.exports = {
     checkIfDatabaseModuleExists,
     checkIfDatabaseIsReady,
@@ -263,5 +330,8 @@ module.exports = {
     addUserPasswordToDatabase,
     setDatabaseParameters,
     buildDatabaseModule,
-    resetDatabases
+    resetDatabases,
+    getDatabaseContainerId,
+    getDatabaseHostPort,
+    ensureXchainNodeAccess
 }
