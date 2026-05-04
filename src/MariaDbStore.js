@@ -84,6 +84,8 @@ class MariaDbStore {
     }
 
     async getAllModuleContainers(coin, network) {
+        if (!this.pool) return []
+
         let rows
         if (coin == null && network == null) {
             rows = await this.pool.query(
@@ -106,6 +108,7 @@ class MariaDbStore {
     }
 
     async insertModuleContainer(module, coin, network, containerId) {
+        if (!this.pool) return false
         try {
             await this.pool.query(
                 `INSERT INTO modules (module, coin, network, container_id)
@@ -120,6 +123,7 @@ class MariaDbStore {
     }
 
     async getModuleContainer(module, coin, network) {
+        if (!this.pool) return null
         try {
             const rows = await this.pool.query(
                 `SELECT container_id FROM modules
@@ -134,6 +138,7 @@ class MariaDbStore {
     }
 
     async removeModuleContainer(module, coin, network) {
+        if (!this.pool) return false
         try {
             const rows = await this.pool.query(
                 `SELECT container_id FROM modules
@@ -156,6 +161,7 @@ class MariaDbStore {
     }
 
     async countModules() {
+        if (!this.pool) return 0
         const rows = await this.pool.query('SELECT COUNT(*) AS cnt FROM modules')
         return Number(rows[0].cnt)
     }
