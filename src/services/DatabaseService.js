@@ -28,7 +28,7 @@ const XCHAIN_NODE_DB_DEFAULT_PORT = 3306
 async function getDatabaseContainerId() {
     try {
         const containerName = getDockerContainerImageName(DB_MODULE_NAME, "", "")
-        const { stdout } = await execFileAsync('docker', ['inspect', '--format', '{{.Id}}', containerName])
+        const { stdout } = await execFileAsync('docker', ['inspect', '--type', 'container', '--format', '{{.Id}}', containerName])
         const id = stdout.trim()
         if (/^[a-f0-9]{64}$/.test(id)) return id
         return null
@@ -255,7 +255,7 @@ async function buildDatabaseModule(coin, network) {
         await execFileAsync('docker', ['pull', 'mariadb:latest'])
         await execFileAsync('docker', ['tag', 'mariadb:latest', containerPrefix])
 
-        const runArgs = ['run', '-d', '--hostname', 'mariadb']
+        const runArgs = ['run', '-d', '--name', containerPrefix, '--hostname', 'mariadb']
         if (coin !== "" && network !== "") {
             runArgs.push('--network', getDockerNetwork(coin, network))
         }
