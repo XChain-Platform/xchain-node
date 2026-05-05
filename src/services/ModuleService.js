@@ -191,7 +191,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 }
 
                 const runArgs = [
-                    'run', '-d', '--hostname', containerPrefix,
+                    'run', '-d', '--name', containerPrefix, '--hostname', containerPrefix,
                     ...volumeArgs,
                     ...ulimitArgs,
                     '--network', getDockerNetwork(coin, network),
