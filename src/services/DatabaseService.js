@@ -67,13 +67,16 @@ async function checkIfDatabaseModuleExists(coin, network) {
     }
 }
 
-async function checkIfDatabaseIsReady(user, userPassword) {
+async function checkIfDatabaseIsReady(user, userPassword, database = null) {
     const mariadbContainerId = await getDatabaseContainerId()
 
     let tries = 10
     while (tries > 0) {
         try {
-            await execFileAsync('docker', ['exec', '-i', mariadbContainerId, 'mariadb', '-u', user, `-p${userPassword}`, '-e', 'SELECT 1'])
+            const args = ['exec', '-i', mariadbContainerId, 'mariadb', '-u', user, `-p${userPassword}`]
+            if (database) args.push('-D', database)
+            args.push('-e', 'SELECT 1')
+            await execFileAsync('docker', args)
             return true
         } catch {
             tries--
@@ -294,9 +297,9 @@ async function ensureXchainNodeAccess() {
     const existing = hasCredentials() ? loadCredentials() : null
 
     if (existing) {
-        const works = await checkIfDatabaseIsReady(existing.user, existing.password)
+        const works = await checkIfDatabaseIsReady(existing.user, existing.password, XCHAIN_NODE_DB)
         if (works) return existing
-        console.log("Stored xchain-node credentials no longer authenticate against this MariaDB — reprovisioning")
+        console.log("Stored xchain-node credentials no longer work against this MariaDB (auth or xchain_node DB missing) — reprovisioning")
     }
 
     const rootPassword = await askMariadbRootPassword("", "")
