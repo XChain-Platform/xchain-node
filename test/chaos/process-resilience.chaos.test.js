@@ -3,8 +3,6 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
-const levelup    = require('levelup')
-const memdown    = require('memdown')
 
 // ---------------------------------------------------------------------------
 // Helpers
