@@ -16,8 +16,6 @@
 const fs = require('fs')
 const path = require('path')
 const { Readable } = require('stream')
-const levelup = require('levelup')
-const memdown = require('memdown')
 const proxyquire = require('proxyquire').noCallThru()
 const MetricsCollector = require('./MetricsCollector')
 
@@ -26,7 +24,6 @@ const BASELINE_PATH = path.join(__dirname, 'baseline.json')
 const SCENARIO_FILES = [
     'config-generation',
     'filter-params',
-    'leveldb-operations',
     'config-parsing-scale',
     'resolve-args',
     'naming-helpers'
@@ -132,20 +129,17 @@ function createMockedConfigService() {
 }
 
 /**
- * Create the benchmark context: in-memory LevelDB + mocked ConfigService.
+ * Create the benchmark context: mocked ConfigService + constants.
  */
 async function createContext() {
-    const db = levelup(memdown())
     const ConfigService = createMockedConfigService()
     const constants = require('../../src/config/constants')
 
-    return { db, ConfigService, constants, CONFIG_FILES }
+    return { ConfigService, constants, CONFIG_FILES }
 }
 
-async function destroyContext(context) {
-    if (context.db && context.db.isOpen()) {
-        await context.db.close()
-    }
+async function destroyContext(_context) {
+    // No persistent resources to release in the current scenarios
 }
 
 function formatNumber(n) {
