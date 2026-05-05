@@ -286,13 +286,17 @@ async function buildDatabaseModule(coin, network) {
 }
 
 async function ensureXchainNodeAccess() {
-    if (hasCredentials()) {
-        return loadCredentials()
-    }
-
     const containerId = await getDatabaseContainerId()
     if (!containerId) {
         throw new Error("MariaDB container not found — install it before requesting access")
+    }
+
+    const existing = hasCredentials() ? loadCredentials() : null
+
+    if (existing) {
+        const works = await checkIfDatabaseIsReady(existing.user, existing.password)
+        if (works) return existing
+        console.log("Stored xchain-node credentials no longer authenticate against this MariaDB — reprovisioning")
     }
 
     const rootPassword = await askMariadbRootPassword("", "")
@@ -301,8 +305,8 @@ async function ensureXchainNodeAccess() {
         throw new Error("MariaDB is not responding")
     }
 
-    const dbUser     = getOsUserDbName()
-    const dbPassword = generatePassword()
+    const dbUser     = existing?.user     || getOsUserDbName()
+    const dbPassword = existing?.password || generatePassword()
 
     console.log("Creating xchain-node database and user " + dbUser)
     await executeDockerMariaDbCommand(containerId, rootPassword,
@@ -310,6 +314,10 @@ async function ensureXchainNodeAccess() {
     )
     await executeDockerMariaDbCommand(containerId, rootPassword,
         "CREATE USER IF NOT EXISTS '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'"
+    )
+    // Force the password in case the user existed with a different one (stale state)
+    await executeDockerMariaDbCommand(containerId, rootPassword,
+        "ALTER USER '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'"
     )
     await executeDockerMariaDbCommand(containerId, rootPassword,
         "GRANT ALL PRIVILEGES ON " + XCHAIN_NODE_DB + ".* TO '" + dbUser + "'@'%'"
