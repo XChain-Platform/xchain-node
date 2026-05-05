@@ -1,20 +1,75 @@
 'use strict'
 
-const fs      = require('fs')
-const path    = require('path')
-const os      = require('os')
-const sinon   = require('sinon')
-const levelup = require('levelup')
-const memdown = require('memdown')
+const fs    = require('fs')
+const path  = require('path')
+const os    = require('os')
+const sinon = require('sinon')
 
 const CommandCapture = require('./command-capture')
 const HttpCapture    = require('./http-capture')
 
 /**
+ * In-memory replacement for MariaDbStore. Implements the same public API
+ * (createDatabase / get/insert/remove ModuleContainer / countModules /
+ * isReady / close / getAllModuleContainers) backed by a Map. Lets
+ * integration tests run without a live MariaDB.
+ */
+class InMemoryStore {
+    constructor() {
+        this.modules = new Map()
+        this._ready = true
+    }
+
+    _key(module, coin, network) {
+        return `${module}|${coin || ''}|${network || ''}`
+    }
+
+    async createDatabase() { return this }
+    async close()          { this._ready = false }
+    isReady()              { return this._ready }
+
+    async countModules() {
+        return this.modules.size
+    }
+
+    async getAllModuleContainers(coin, network) {
+        const out = []
+        for (const [key, container_id] of this.modules.entries()) {
+            const [module, c, n] = key.split('|')
+            const matchesAll      = coin == null && network == null
+            const matchesCoinNet  = coin === c && network === n
+            const matchesShared   = c === '' && n === ''
+            if (matchesAll || matchesCoinNet || matchesShared) {
+                out.push({ module, coin: c, network: n, container_id })
+            }
+        }
+        return out
+    }
+
+    async insertModuleContainer(module, coin, network, containerId) {
+        this.modules.set(this._key(module, coin, network), containerId)
+        return true
+    }
+
+    async getModuleContainer(module, coin, network) {
+        const v = this.modules.get(this._key(module, coin, network))
+        return v === undefined ? null : v
+    }
+
+    async removeModuleContainer(module, coin, network) {
+        const key = this._key(module, coin, network)
+        const value = this.modules.get(key)
+        if (value === undefined) return false
+        this.modules.delete(key)
+        return value
+    }
+}
+
+/**
  * TestEnv - sets up an isolated integration test environment.
  *
  * Provides:
- *   - In-memory LevelDB (via memdown) that replaces the global state db
+ *   - In-memory store that replaces the global state.db (MariaDbStore mock)
  *   - Temp directory for config file fixtures
  *   - CommandCapture for child_process stubs
  *   - HttpCapture for axios stubs
@@ -31,11 +86,12 @@ class TestEnv {
         this.configDir = null
         this.dataDir = null
         this.moduleDir = null
-        this.db = null
+        this._store = null
         this.cmdCapture = new CommandCapture()
         this.httpCapture = new HttpCapture()
         this._stubs = []
         this._origConstants = {}
+        this._origDbMethods = null
     }
 
     async setup() {
@@ -49,40 +105,33 @@ class TestEnv {
         fs.mkdirSync(this.dataDir)
         fs.mkdirSync(this.moduleDir)
 
-        // Create in-memory LevelDB
-        this.db = levelup(memdown())
-
-        // Patch the state module's db singleton to use our in-memory db
+        this._store = new InMemoryStore()
         this._patchStateDb()
-
-        // Reset mutable state
         this._resetState()
 
         return this
     }
 
     /**
-     * Patch the state module so the global `db` singleton uses our memdown-backed LevelDB.
-     * This replaces the db property methods so all services use our test db.
+     * Replace the global state.db method bag with the in-memory store's bound
+     * methods so production code transparently uses the mock.
      */
     _patchStateDb() {
         const state = require('../../../src/state')
         const realDb = state.db
+        const store = this._store
 
-        // Store original methods so we can restore
-        this._origDb = {
-            createDatabase: realDb.createDatabase.bind(realDb),
-            insertModuleContainer: realDb.insertModuleContainer.bind(realDb),
-            getModuleContainer: realDb.getModuleContainer.bind(realDb),
-            removeModuleContainer: realDb.removeModuleContainer.bind(realDb),
-            getAllModuleContainers: realDb.getAllModuleContainers.bind(realDb),
-            db: realDb.db
+        const methodNames = [
+            'createDatabase', 'close', 'isReady', 'countModules',
+            'getAllModuleContainers', 'insertModuleContainer',
+            'getModuleContainer', 'removeModuleContainer'
+        ]
+
+        this._origDbMethods = {}
+        for (const name of methodNames) {
+            this._origDbMethods[name] = realDb[name]
+            realDb[name] = store[name].bind(store)
         }
-
-        // Replace with our in-memory db
-        const testDb = this.db
-        realDb.db = testDb
-        realDb.createDatabase = async () => testDb
     }
 
     _resetState() {
@@ -117,53 +166,24 @@ class TestEnv {
     }
 
     /**
-     * Insert a module container ID directly into the test LevelDB.
+     * Insert a module container ID directly into the test store.
      */
     async insertModule(module, coin, network, containerId) {
-        const key = 'MC' + module + ';' + coin + ';' + network
-        await this.db.put(key, containerId)
+        return this._store.insertModuleContainer(module, coin, network, containerId)
     }
 
     /**
-     * Get a module container ID from the test LevelDB.
+     * Get a module container ID from the test store.
      */
     async getModule(module, coin, network) {
-        const key = 'MC' + module + ';' + coin + ';' + network
-        try {
-            const value = await this.db.get(key)
-            return value.toString('utf-8')
-        } catch {
-            return null
-        }
+        return this._store.getModuleContainer(module, coin, network)
     }
 
     /**
-     * Get all module containers from the test LevelDB.
+     * Get all module containers from the test store.
      */
     async getAllModules() {
-        return new Promise((resolve, reject) => {
-            const modules = []
-            const stream = this.db.createReadStream({
-                gte: 'MC',
-                lte: 'MC\xFF',
-                keys: true,
-                values: true
-            })
-            stream.on('data', (data) => {
-                const keyStr = data.key.toString('utf-8').substring(2)
-                const parts = keyStr.split(';')
-                if (parts.length === 3) {
-                    modules.push({
-                        module: parts[0],
-                        coin: parts[1],
-                        network: parts[2],
-                        container_id: data.value.toString('utf-8')
-                    })
-                }
-            })
-            stream.on('error', reject)
-            stream.on('end', () => resolve(modules))
-        })
+        return this._store.getAllModuleContainers(null, null)
     }
 
     /**
@@ -194,7 +214,6 @@ class TestEnv {
         // Bust the require cache for modules that destructure constants at load time.
         // This forces them to re-require constants with patched values.
         this._cachedModules = []
-        const constantsPath = require.resolve('../../../src/config/constants')
         for (const key of Object.keys(require.cache)) {
             if (key.includes('ConfigService') || key.includes('ModuleService')) {
                 this._cachedModules.push({ key, module: require.cache[key] })
@@ -219,23 +238,21 @@ class TestEnv {
     }
 
     async teardown() {
-        // Restore the original db methods
-        if (this._origDb) {
+        // Restore the original db methods on the singleton
+        if (this._origDbMethods) {
             const state = require('../../../src/state')
-            state.db.db = this._origDb.db
-            state.db.createDatabase = this._origDb.createDatabase
-            state.db.insertModuleContainer = this._origDb.insertModuleContainer
-            state.db.getModuleContainer = this._origDb.getModuleContainer
-            state.db.removeModuleContainer = this._origDb.removeModuleContainer
-            state.db.getAllModuleContainers = this._origDb.getAllModuleContainers
+            for (const [name, fn] of Object.entries(this._origDbMethods)) {
+                state.db[name] = fn
+            }
+            this._origDbMethods = null
         }
 
         this.restoreConstants()
         this._resetState()
 
-        // Close the in-memory db
-        if (this.db && this.db.isOpen()) {
-            await this.db.close()
+        if (this._store) {
+            await this._store.close()
+            this._store = null
         }
 
         // Remove temp directory
