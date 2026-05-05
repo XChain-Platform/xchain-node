@@ -53,9 +53,25 @@ class MariaDbStore {
             throw new Error("Couldn't create MariaDB pool: " + err.message)
         }
 
+        // Right after a fresh container start, mariadbd may already answer
+        // through the unix socket (so docker exec checks pass) while the TCP
+        // listener / docker port mapping aren't quite ready. Retry briefly.
         let conn
+        let lastErr
+        for (let attempt = 0; attempt < 6; attempt++) {
+            try {
+                conn = await this.pool.getConnection()
+                break
+            } catch (err) {
+                lastErr = err
+                await new Promise(r => setTimeout(r, 2000))
+            }
+        }
+        if (!conn) {
+            throw new Error("Couldn't open/create MariaDB database: " + lastErr.message)
+        }
+
         try {
-            conn = await this.pool.getConnection()
             await conn.query(
                 `CREATE TABLE IF NOT EXISTS modules (
                     module       VARCHAR(64)  NOT NULL,
@@ -70,7 +86,7 @@ class MariaDbStore {
         } catch (err) {
             throw new Error("Couldn't open/create MariaDB database: " + err.message)
         } finally {
-            if (conn) conn.release()
+            conn.release()
         }
 
         return this.pool
