@@ -83,6 +83,10 @@ class MariaDbStore {
         }
     }
 
+    isReady() {
+        return this.pool !== null
+    }
+
     async getAllModuleContainers(coin, network) {
         if (!this.pool) return []
 
