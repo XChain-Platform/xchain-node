@@ -67,6 +67,12 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
         return getLastStatus()
     }
 
+    if (!db.isReady()) {
+        // DB pool not opened yet (e.g. statusChanged() fired during early precheck)
+        // Return empty without caching, so a later call re-reads the modules table
+        return {}
+    }
+
     setLastPrintedStatus("")
     resetInstalledModules()
     await loadInstalledModules(coin, network, checkVersions)
