@@ -5,8 +5,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const { Readable } = require('stream')
-const levelup    = require('levelup')
-const memdown    = require('memdown')
 
 const {
     NODE_PREFIX, SEP, DB_SEP,
@@ -852,134 +850,7 @@ describe('Boundary Tests', function () {
     })
 
     // ===================================================================
-    // 7. LevelDB boundaries
-    // ===================================================================
-
-    describe('LevelUpDb — boundary conditions', function () {
-
-        describe('non-TTY lock handling (Fix 6)', function () {
-
-            it('throws immediately in non-TTY when database is locked', async function () {
-                const LevelUpStore = proxyquire('../../src/LevelUpDb', {
-                    'levelup': sinon.stub().callsFake((backend, cb) => {
-                        const err = new Error('IO error: lock file')
-                        err.message = 'IO error: could not lock file'
-                        cb(err)
-                    }),
-                    'leveldown': sinon.stub(),
-                    'fs': {
-                        existsSync: sinon.stub().returns(true),
-                        unlinkSync: sinon.stub()
-                    }
-                })
-
-                const origTTY = process.stdin.isTTY
-                try {
-                    process.stdin.isTTY = false
-                    const store = new LevelUpStore('test', '/tmp')
-                    await store.createDatabase()
-                    expect.fail('should have thrown')
-                } catch (err) {
-                    expect(err.message).to.include('non-interactive')
-                    expect(err.message).to.include('lock')
-                } finally {
-                    process.stdin.isTTY = origTTY
-                }
-            })
-        })
-
-        describe('key format and data integrity', function () {
-            let testDb
-
-            beforeEach(async function () {
-                testDb = levelup(memdown())
-            })
-
-            afterEach(async function () {
-                if (testDb && testDb.isOpen()) await testDb.close()
-            })
-
-            it('stores and retrieves module container with empty coin/network (shared services)', async function () {
-                const LevelUpStore = require('../../src/LevelUpDb')
-                const store = new LevelUpStore('test', '/tmp')
-                store.db = testDb
-
-                await store.insertModuleContainer('xchain-hub', '', '', 'a'.repeat(64))
-                const result = await store.getModuleContainer('xchain-hub', '', '')
-                expect(result).to.equal('a'.repeat(64))
-            })
-
-            it('returns null for non-existent key', async function () {
-                const LevelUpStore = require('../../src/LevelUpDb')
-                const store = new LevelUpStore('test', '/tmp')
-                store.db = testDb
-
-                const result = await store.getModuleContainer('nonexistent', 'bitcoin', 'mainnet')
-                expect(result).to.be.null
-            })
-
-            it('overwrites existing container ID on re-insert', async function () {
-                const LevelUpStore = require('../../src/LevelUpDb')
-                const store = new LevelUpStore('test', '/tmp')
-                store.db = testDb
-
-                await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'a'.repeat(64))
-                await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'b'.repeat(64))
-                const result = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
-                expect(result).to.equal('b'.repeat(64))
-            })
-
-            it('removes module container and returns old ID', async function () {
-                const LevelUpStore = require('../../src/LevelUpDb')
-                const store = new LevelUpStore('test', '/tmp')
-                store.db = testDb
-
-                const id = 'c'.repeat(64)
-                await store.insertModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', id)
-                const removed = await store.removeModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
-                expect(removed).to.equal(id)
-
-                const after = await store.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
-                expect(after).to.be.null
-            })
-
-            it('getAllModuleContainers returns only entries with 3-part keys', async function () {
-                const LevelUpStore = require('../../src/LevelUpDb')
-                const store = new LevelUpStore('test', '/tmp')
-                store.db = testDb
-
-                // Valid 3-part key
-                await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'a'.repeat(64))
-
-                // Manually insert a malformed key with 4 parts (simulates ; in module name)
-                await testDb.put('MCbad;key;extra;part', 'x'.repeat(64))
-
-                const modules = await store.getAllModuleContainers(null, null)
-                expect(modules).to.have.lengthOf(1)
-                expect(modules[0].module).to.equal('xchain-encoder')
-            })
-
-            it('getAllModuleContainers filters by coin/network', async function () {
-                const LevelUpStore = require('../../src/LevelUpDb')
-                const store = new LevelUpStore('test', '/tmp')
-                store.db = testDb
-
-                await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'a'.repeat(64))
-                await store.insertModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'b'.repeat(64))
-                await store.insertModuleContainer('xchain-hub', '', '', 'c'.repeat(64))
-
-                const btcModules = await store.getAllModuleContainers('bitcoin', 'mainnet')
-                // Should include bitcoin-mainnet entry AND shared entries (empty coin/network)
-                expect(btcModules).to.have.lengthOf(2)
-                const moduleNames = btcModules.map(m => m.module)
-                expect(moduleNames).to.include('xchain-encoder')
-                expect(moduleNames).to.include('xchain-hub')
-            })
-        })
-    })
-
-    // ===================================================================
-    // 8. Docker naming boundaries
+    // 7. Docker naming boundaries
     // ===================================================================
 
     describe('ConfigService — naming helper boundaries', function () {

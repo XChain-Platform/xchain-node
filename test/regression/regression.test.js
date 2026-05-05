@@ -5,8 +5,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const { Readable } = require('stream')
-const levelup    = require('levelup')
-const memdown    = require('memdown')
 
 const {
     NODE_PREFIX, SEP, DB_SEP,
@@ -15,7 +13,6 @@ const {
     moduleDir, tmpDir, configDir
 } = require('../../src/config/constants')
 
-const LevelUpStore = require('../../src/LevelUpDb')
 const TestEnv      = require('../integration/helpers/test-env')
 const E2EEnv       = require('../e2e/helpers/e2e-env')
 
@@ -692,57 +689,8 @@ describe('Regression Suite', function () {
 
     describe('[regression:p1] State & Data Integrity', function () {
 
-        let store
-
-        beforeEach(async function () {
-            store = new LevelUpStore('test', '')
-            store.db = levelup(memdown())
-        })
-
-        afterEach(async function () {
-            if (store.db && store.db.isOpen()) {
-                await store.db.close()
-            }
-        })
-
-        it('R-STA-001: LevelDB insert/get round-trip returns exact container ID', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'abc123def456')
-            const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(id).to.equal('abc123def456')
-        })
-
-        it('R-STA-002: LevelDB remove deletes entry; subsequent get returns null', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'container-abc')
-            const removed = await store.removeModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(removed).to.equal('container-abc')
-
-            const retrieved = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(retrieved).to.be.null
-        })
-
-        it('R-STA-003: getAllModuleContainers returns filtered results plus shared services', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'enc-btc')
-            await store.insertModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', 'dec-btc')
-            await store.insertModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'enc-doge')
-            await store.insertModuleContainer('xchain-hub', '', '', 'hub-id')
-
-            // Filter by bitcoin/mainnet — should also include shared modules
-            const modules = await store.getAllModuleContainers('bitcoin', 'mainnet')
-            const names = modules.map(m => m.module)
-            expect(names).to.include('xchain-encoder')
-            expect(names).to.include('xchain-decoder')
-            expect(names).to.include('xchain-hub')
-            // Dogecoin encoder excluded
-            const dogeMods = modules.filter(m => m.coin === 'dogecoin')
-            expect(dogeMods).to.have.length(0)
-        })
-
-        it('R-STA-003b: getAllModuleContainers returns all entries with null filters', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'enc-btc')
-            await store.insertModuleContainer('xchain-hub', '', '', 'hub-id')
-            const all = await store.getAllModuleContainers(null, null)
-            expect(all).to.have.length(2)
-        })
+        // Store-level regressions (R-STA-001..003b) live in test/unit/MariaDbStore.test.js
+        // since the persistence layer moved from LevelDB to MariaDB.
 
         it('R-STA-004: state singleton getters/setters round-trip correctly', function () {
             const {
@@ -782,22 +730,8 @@ describe('Regression Suite', function () {
             setVerbose(false)
         })
 
-        it('R-STA-005: LevelDB overwrites existing entry on re-insert', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'old-id')
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'new-id')
-            const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(id).to.equal('new-id')
-        })
-
-        it('R-STA-006: same module on different coin/networks have independent entries', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'btc-main')
-            await store.insertModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'doge-test')
-            await store.insertModuleContainer('xchain-encoder', 'litecoin', 'regtest', 'ltc-reg')
-
-            expect(await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal('btc-main')
-            expect(await store.getModuleContainer('xchain-encoder', 'dogecoin', 'testnet')).to.equal('doge-test')
-            expect(await store.getModuleContainer('xchain-encoder', 'litecoin', 'regtest')).to.equal('ltc-reg')
-        })
+        // R-STA-005 (re-insert overwrite) and R-STA-006 (independence across
+        // coin/network combos) are now covered in test/unit/MariaDbStore.test.js.
     })
 
     // --------------------------------------------------------------------
@@ -1026,16 +960,8 @@ describe('Regression Suite', function () {
             }
         })
 
-        it('R-PRE-003: LevelDB removeModuleContainer returns false for non-existent key', async function () {
-            const store = new LevelUpStore('test', '')
-            store.db = levelup(memdown())
-            try {
-                const result = await store.removeModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
-                expect(result).to.equal(false)
-            } finally {
-                if (store.db.isOpen()) await store.db.close()
-            }
-        })
+        // R-PRE-003 (LevelDB remove returns false for missing key) lives in
+        // test/unit/MariaDbStore.test.js after the migration to MariaDB.
 
         it('R-PRE-004: path traversal in config coin parameter is caught', async function () {
             const ConfigService = require('../../src/services/ConfigService')

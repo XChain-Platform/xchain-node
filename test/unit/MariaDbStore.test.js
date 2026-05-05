@@ -5,8 +5,7 @@ const proxyquire = require('proxyquire').noCallThru()
 
 /**
  * Minimal in-memory SQL fake covering the queries MariaDbStore issues.
- * Lets us exercise the real MariaDbStore logic without a live MariaDB,
- * mirroring the leveldown/memdown approach used for LevelUpDb tests.
+ * Lets us exercise the real MariaDbStore logic without a live MariaDB.
  */
 function buildFakeMariadbModule() {
     const rows = new Map()  // key: `${module}|${coin}|${network}` → { module, coin, network, container_id }

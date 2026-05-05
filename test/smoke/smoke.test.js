@@ -18,7 +18,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
     const safeDirect = {
         'config/constants':   'src/config/constants.js',
         'utils/helpers':      'src/utils/helpers.js',
-        'LevelUpDb':          'src/LevelUpDb.js',
+        'MariaDbStore':       'src/MariaDbStore.js',
         'HubConnector':       'src/HubConnector.js',
         'ExplorerConnector':  'src/ExplorerConnector.js'
     }
@@ -80,8 +80,9 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
 
     it('requires state module without throwing', function () {
         const mod = proxyquire(path.join(ROOT, 'src/state'), {
-            './LevelUpDb.js': function StubLevelUpStore() {
+            './MariaDbStore.js': function StubMariaDbStore() {
                 this.createDatabase = sinon.stub().resolves()
+                this.isReady = sinon.stub().returns(false)
             },
             './GitHubDownloader.js': function StubGitHubDownloader() {
                 this.loadHashesFile = sinon.stub().returns({})
@@ -724,8 +725,9 @@ describe('S-SMOKE-008 – Parameter Expansion', function () {
 describe('S-SMOKE-009 – State Module Initialization', function () {
 
     const state = proxyquire(path.join(ROOT, 'src/state'), {
-        './LevelUpDb.js': function StubLevelUpStore() {
+        './MariaDbStore.js': function StubMariaDbStore() {
             this.createDatabase = sinon.stub().resolves()
+            this.isReady = sinon.stub().returns(false)
         },
         './GitHubDownloader.js': function StubGitHubDownloader() {
             this.loadHashesFile = sinon.stub().returns({})
