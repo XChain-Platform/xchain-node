@@ -10,7 +10,7 @@ const { db, getLastStatus, isStatusUpdated } = require('../state')
 const { sleep }                              = require('../utils/helpers')
 const { getDefaultConfig, getDockerNetwork } = require('./ConfigService')
 const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./StatusService')
-const { addContainerToNetwork }              = require('./DockerService')
+const { addContainerToNetwork, killContainer, removeContainer } = require('./DockerService')
 const { cloneGit, buildAndUp }               = require('./ModuleService')
 const ExplorerConnector                      = require('../ExplorerConnector.js')
 
@@ -39,19 +39,31 @@ async function updateExplorer() {
     return true
 }
 
-async function installExplorerModule() {
+async function installExplorerModule(force = false) {
     const defaultConfig = await getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
     console.log("Checking if xchain-explorer module is running")
     const explorerConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
 
-    const pingExplorer = await explorerConnector.ping()
-    if (pingExplorer) return true
+    if (!force) {
+        const pingExplorer = await explorerConnector.ping()
+        if (pingExplorer) return true
 
-    console.log("Checking if xchain-explorer module is installed")
-    if (isStatusUpdated()) {
-        const lastStatus = getLastStatus()
-        const explorerStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
-        if (explorerStatus !== undefined) return true
+        console.log("Checking if xchain-explorer module is installed")
+        if (isStatusUpdated()) {
+            const lastStatus = getLastStatus()
+            const explorerStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
+            if (explorerStatus !== undefined) return true
+        }
+    } else {
+        // Force-rebuild: tear down any existing explorer container + DB row so
+        // the fresh clone + buildAndUp below doesn't collide with stale state.
+        const existingContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
+        if (existingContainerId) {
+            console.log("Force rebuild: removing existing xchain-explorer container")
+            try { await killContainer(existingContainerId) }   catch { /* may already be exited */ }
+            try { await removeContainer(existingContainerId) } catch { /* may already be gone */ }
+            try { await db.removeModuleContainer(EXPLORER_MODULE_NAME, "", "") } catch { /* row may already be gone */ }
+        }
     }
 
     console.log("Downloading xchain-explorer...")

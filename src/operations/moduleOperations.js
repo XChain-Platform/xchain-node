@@ -45,7 +45,11 @@ async function updateModules(servicesList, branch = null) {
                         try { moduleBranch = await getModuleBranch(nextModule) } catch { /* use default */ }
                     }
                     await cloneGit(nextModule, true, false, moduleBranch)
-                    await installModule(nextModule, nextCoin, nextNetwork, false, moduleContainerId)
+                    // remoteUpdate=true so installModule actually rebuilds the
+                    // container — without it, the `if (!containerNodeVersion ||
+                    // remoteUpdate)` guard short-circuits for any already-installed
+                    // service and `update` becomes a silent no-op.
+                    await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId)
                 }
             }
         }
