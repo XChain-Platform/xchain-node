@@ -3,9 +3,15 @@
     "v28.1": "07f77afd326639145b9ba9562912b2ad2ccec47b8a305bd075b4f4cb127b7ed7"
   },
   "dogecoin/dogecoin": {
-    "v1.14.9": "4f227117b411a7c98622c970986e27bcfc3f547a72bef65e7d9e82989175d4f8"
+    "v1.14.9": {
+      "x86_64": "4f227117b411a7c98622c970986e27bcfc3f547a72bef65e7d9e82989175d4f8",
+      "aarch64": "6928c895a20d0bcb6d5c7dcec753d35c884a471aaf8ad4242a89a96acb4f2985"
+    }
   },
   "litecoin-project/litecoin": {
-    "v0.21.4": "857fc41091f2bae65c3bf0fd4d388fca915fc93a03f16dd2578ac3cc92898390"
+    "v0.21.4": {
+      "x86_64": "857fc41091f2bae65c3bf0fd4d388fca915fc93a03f16dd2578ac3cc92898390",
+      "aarch64": "517e3a9069e658eb92de98c934c61836589ee2410d99464a768a5698985926c9"
+    }
   }
 }
