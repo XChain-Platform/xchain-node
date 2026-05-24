@@ -148,7 +148,7 @@ async function getDefaultConfig(module, coin, network) {
             "INDEXER_DB_NAME":   getModuleDatabaseName(XChainService.XCHAIN_INDEXER, coin, network),
             "INDEXER_DB_USER":   "xchain" + DB_SEP + "indexer" + DB_SEP + coin + DB_SEP + network,
             "INDEXER_DB_PASS":   "xchain" + SEP + "password",
-            "HUB_HOST":          "127.0.0.1",
+            "HUB_HOST":          "0.0.0.0",
             "HUB_API_HOST":      getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
             "HUB_PORT":          10000
         }
@@ -160,9 +160,14 @@ async function getDefaultConfig(module, coin, network) {
         }
     } else {
         defaultValues = {
-            "HUB_HOST":              "127.0.0.1",
+            "HUB_HOST":              "0.0.0.0",
             "HUB_API_HOST":          getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
             "HUB_PORT":              10000,
+            "HUB_DB_HOST":           "mariadb",
+            "HUB_DB_PORT":           3306,
+            "HUB_DB_NAME":           "XChain" + DB_SEP + "Hub",
+            "HUB_DB_USER":           "xchain" + DB_SEP + "hub",
+            "HUB_DB_PASS":           "xchain" + SEP + "password",
             "EXPLORER_HOST":         "127.0.0.1",
             "EXPLORER_PORT":         18080,
             "EXPLORER_API_HOST":     getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""),

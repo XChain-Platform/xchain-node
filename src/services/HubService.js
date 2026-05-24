@@ -13,6 +13,7 @@ const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = requ
 const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./StatusService')
 const { addContainerToNetwork }                = require('./DockerService')
 const { cloneGit, buildAndUp }                 = require('./ModuleService')
+const { addUserPasswordToDatabase }            = require('./DatabaseService')
 const HubConnector                             = require('../HubConnector.js')
 
 async function updateHubOrExplorer(module) {
@@ -197,7 +198,7 @@ async function updateHub() {
 async function installHubModule() {
     const defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
     if (isVerbose()) console.log("Checking if xchain-hub module is running")
-    const hubConnector = new HubConnector(defaultConfig["HUB_HOST"], defaultConfig["HUB_PORT"])
+    const hubConnector = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
 
     const pingHub = await hubConnector.ping()
     if (pingHub) return true
@@ -230,6 +231,12 @@ async function installHubModule() {
 
     console.log("Downloading xchain-hub...")
     await cloneGit(HUB_MODULE_NAME, true)
+
+    await addUserPasswordToDatabase(
+        HUB_MODULE_NAME, "", "",
+        defaultConfig["HUB_DB_NAME"], defaultConfig["HUB_DB_USER"], defaultConfig["HUB_DB_PASS"]
+    )
+
     console.log("Installing xchain-hub module...")
     await buildAndUp(HUB_MODULE_NAME, null, null)
     await getStatus(null, null, false)

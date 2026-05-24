@@ -23,7 +23,7 @@ const {
 } = require('./CredentialsService')
 
 const XCHAIN_NODE_DB_HOST = "127.0.0.1"
-const XCHAIN_NODE_DB_DEFAULT_PORT = 3306
+const XCHAIN_NODE_DB_DEFAULT_PORT = 13306
 
 async function getDatabaseContainerId() {
     try {
@@ -89,6 +89,11 @@ async function checkIfDatabaseIsReady(user, userPassword, database = null) {
 async function askMariadbRootPassword(coin, network) {
     const cached = getDbRootPassword()
     if (cached) return cached
+
+    if (process.env.XCHAIN_NODE_DB_ROOT_PASSWORD) {
+        setDbRootPassword(process.env.XCHAIN_NODE_DB_ROOT_PASSWORD)
+        return process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+    }
 
     const dbContainerId = await checkIfDatabaseModuleExists(coin, network)
 
@@ -255,13 +260,11 @@ async function buildDatabaseModule(coin, network) {
         const containerPrefix = getDockerContainerImageName(DB_MODULE_NAME, coin, network)
 
         console.log("Building image of database")
-        await execFileAsync('docker', ['pull', 'mariadb:latest'])
-        await execFileAsync('docker', ['tag', 'mariadb:latest', containerPrefix])
+        await execFileAsync('docker', ['pull', 'mariadb:10.11'])
+        await execFileAsync('docker', ['tag', 'mariadb:10.11', containerPrefix])
 
         const runArgs = ['run', '-d', '--name', containerPrefix, '--hostname', 'mariadb']
-        if (coin !== "" && network !== "") {
-            runArgs.push('--network', getDockerNetwork(coin, network))
-        }
+        runArgs.push('--network', getDockerNetwork(coin, network))
         const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
         runArgs.push('-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`)
         runArgs.push('--env', `MYSQL_ROOT_PASSWORD=${mariadbRootPassword}`, containerPrefix)
