@@ -309,7 +309,10 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
         }
     } else if (module === EXPLORER_MODULE_NAME) {
         try {
-            await installExplorerModule()
+            // remoteUpdate=true means the user explicitly ran `update explorer`
+            // (or a force-reinstall) — bypass the ping/status-row early returns
+            // in installExplorerModule and tear down the existing container.
+            await installExplorerModule(remoteUpdate)
             await statusChanged()
             return true
         } catch (err) {
