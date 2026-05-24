@@ -247,7 +247,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
 
     if (module === NODE_MODULE_NAME) {
         const lastStatus = getLastStatus()
-        const containerNodeVersion = lastStatus?.coin?.network?.module?.["container_version"] ?? null
+        const containerNodeVersion = lastStatus?.[coin ?? ""]?.[network ?? ""]?.[module]?.["container_version"] ?? null
 
         if (!containerNodeVersion || remoteUpdate) {
             let localNodeVersion = null
@@ -292,7 +292,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
         }
     } else {
         const lastStatus = getLastStatus()
-        const containerNodeVersion = lastStatus?.coin?.network?.module?.["container_version"] ?? null
+        const containerNodeVersion = lastStatus?.[coin ?? ""]?.[network ?? ""]?.[module]?.["container_version"] ?? null
 
         if (!containerNodeVersion || remoteUpdate) {
             let localModuleVersion = null
