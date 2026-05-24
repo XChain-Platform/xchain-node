@@ -29,6 +29,18 @@ const util = require('util');
 const stream = require('stream');
 const pipeline = util.promisify(stream.pipeline);
 
+// Map Node's process.arch to the substring used in GitHub release asset names
+// for crypto-node tarballs (bitcoin-core / litecoin / dogecoin). Mirrors
+// NodeService.js's archMap for bitcoincore.org downloads.
+const ARCH_MAP = { x64: 'x86_64', arm64: 'aarch64' };
+const SHA256_RE = /^[a-f0-9]{64}$/i;
+
+function getHostArch() {
+    const arch = ARCH_MAP[process.arch];
+    if (!arch) throw new Error(`Unsupported host architecture for GitHub asset download: ${process.arch}`);
+    return arch;
+}
+
 class GitHubDownloader {
   constructor(hashesFilePath = './github_hashes.json') {
     this.hashesFilePath = path.resolve(hashesFilePath);
@@ -43,14 +55,26 @@ class GitHubDownloader {
       }
       const data = JSON.parse(fs.readFileSync(this.hashesFilePath, 'utf8'));
       
-      // Validates structure
+      // Validates structure. A version entry is either:
+      //   - a string  (legacy single-arch hash; treated as x86_64), or
+      //   - an object { x86_64: sha, aarch64: sha, ... } for per-arch hashes.
       for (const [repo, versions] of Object.entries(data)) {
         if (typeof versions !== 'object') {
           throw new Error(`Invalid hash format for ${repo}`);
         }
         for (const [version, hash] of Object.entries(versions)) {
-          if (typeof hash !== 'string' || !/^[a-f0-9]{64}$/i.test(hash)) {
-            throw new Error(`Invalid SHA-256 hash for ${repo}@${version}`);
+          if (typeof hash === 'string') {
+            if (!SHA256_RE.test(hash)) {
+              throw new Error(`Invalid SHA-256 hash for ${repo}@${version}`);
+            }
+          } else if (hash && typeof hash === 'object') {
+            for (const [arch, archHash] of Object.entries(hash)) {
+              if (typeof archHash !== 'string' || !SHA256_RE.test(archHash)) {
+                throw new Error(`Invalid SHA-256 hash for ${repo}@${version}#${arch}`);
+              }
+            }
+          } else {
+            throw new Error(`Invalid hash entry for ${repo}@${version}`);
           }
         }
       }
@@ -158,18 +182,19 @@ class GitHubDownloader {
   }
 
   /**
-   * Downloads the asset for a linux server
+   * Downloads the asset for a linux server matching the host architecture.
+   * Picks the release asset whose name contains the host arch ("x86_64" /
+   * "aarch64") and "linux" — i.e. one of the prebuilt linux-gnu tarballs.
    */
   async downloadReleaseAsset(release, outputPath, repoKey, version, verifyHash) {
-    // Finds the asset that has (linux, x86, 64)
-    const asset = release.assets.find(asset => 
-      asset.name.toLowerCase().includes('x86') &&
-      asset.name.toLowerCase().includes('64') &&
-      asset.name.toLowerCase().includes('linux')
-    );
+    const arch = getHostArch();
+    const asset = release.assets.find(a => {
+      const name = a.name.toLowerCase();
+      return name.includes(arch) && name.includes('linux');
+    });
 
     if (!asset) {
-      throw new Error(`Couldn't find an asset compatible with (linux, x86, 64) in the release ${release.tag_name}`);
+      throw new Error(`Couldn't find an asset compatible with (linux, ${arch}) in the release ${release.tag_name}`);
     }
 
     try {
@@ -233,24 +258,45 @@ class GitHubDownloader {
   }
 
   /**
-   * Checks if hash exists for a version
+   * Checks if hash exists for a version. If arch is given, requires a
+   * matching arch-specific hash; otherwise any hash entry counts.
    */
-  hasHash(repoKey, version) {
-    return !!this.hashesData[repoKey]?.[version];
+  hasHash(repoKey, version, arch = null) {
+    const entry = this.hashesData[repoKey]?.[version];
+    if (!entry) return false;
+    if (typeof entry === 'string') return true;
+    if (arch === null) return Object.keys(entry).length > 0;
+    return !!entry[arch];
   }
 
   /**
-   * Verifies repository hash against stored value
+   * Resolve the hash for a (repo, version, arch) tuple. Legacy string-valued
+   * entries return their string regardless of arch.
    */
-  async verifyRepositoryHash(repoKey, version, repoPath) {
-    const expectedHash = this.hashesData[repoKey][version];
-    const actualHash = await this.calculateDirectoryHash(repoPath);
-    
-    if (actualHash !== expectedHash) {
-      throw new Error(`Hash verification failed for ${repoKey}@${version}\nExpected: ${expectedHash}\nActual: ${actualHash}`);
+  _getHashForArch(repoKey, version, arch) {
+    const entry = this.hashesData[repoKey]?.[version];
+    if (!entry) return null;
+    if (typeof entry === 'string') return entry;
+    return entry[arch] ?? null;
+  }
+
+  /**
+   * Verifies repository hash against stored value. `arch` defaults to the
+   * host arch; passing it explicitly is useful for cross-arch tooling.
+   */
+  async verifyRepositoryHash(repoKey, version, repoPath, arch = null) {
+    const resolvedArch = arch ?? getHostArch();
+    const expectedHash = this._getHashForArch(repoKey, version, resolvedArch);
+    if (!expectedHash) {
+      throw new Error(`No SHA-256 hash registered for ${repoKey}@${version} on ${resolvedArch}`);
     }
-    
-    console.log(`✅ Hash verified for ${repoKey}@${version}`);
+    const actualHash = await this.calculateDirectoryHash(repoPath);
+
+    if (actualHash !== expectedHash) {
+      throw new Error(`Hash verification failed for ${repoKey}@${version} (${resolvedArch})\nExpected: ${expectedHash}\nActual: ${actualHash}`);
+    }
+
+    console.log(`✅ Hash verified for ${repoKey}@${version} (${resolvedArch})`);
   }
 
   /**
