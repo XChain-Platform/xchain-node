@@ -30,7 +30,12 @@ async function getCryptoNode(coin, network, version) {
         const filePath = destination + "/bitcoin" + version + ".tar.gz"
 
         const bitcoinNodeFile = fs.createWriteStream(filePath)
-        const downloadUrl = "https://bitcoincore.org/bin/bitcoin-core-" + version + "/bitcoin-" + version + "-x86_64-linux-gnu.tar.gz"
+        // Pick the right prebuilt tarball for the host architecture.
+        // bitcoincore.org publishes x86_64-linux-gnu and aarch64-linux-gnu builds.
+        const archMap = { x64: 'x86_64', arm64: 'aarch64' }
+        const arch = archMap[process.arch]
+        if (!arch) throw new Error("Unsupported architecture for Bitcoin Core download: " + process.arch)
+        const downloadUrl = "https://bitcoincore.org/bin/bitcoin-core-" + version + "/bitcoin-" + version + "-" + arch + "-linux-gnu.tar.gz"
 
         await new Promise((resolve, reject) => {
             https.get(downloadUrl, (response) => {
