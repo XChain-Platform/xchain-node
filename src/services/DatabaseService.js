@@ -146,14 +146,14 @@ async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPasswo
 async function addUserPasswordToDatabase(module, coin, network, databaseName, user, userPassword, inDocker = true) {
     const mariadbRootPassword = await askMariadbRootPassword(coin, network)
     const moduleContainerId = await db.getModuleContainer(module, coin, network)
-    const dockerNetwork = getDockerNetwork(coin, network)
-    const dockerNetworkInspect = await getDockerNetworkInspect(dockerNetwork)
 
-    let gatewayIp = dockerNetworkInspect["IPAM"]["Config"][0]["Gateway"]
-    const parts = gatewayIp.split(".")
-    gatewayIp = parts[0] + "." + parts[1] + ".0.0"
-
-    const host = gatewayIp + "/255.255.0.0"
+    // Host is '%' so cross-network shared services (xchain-explorer, xchain-hub)
+    // can authenticate against per-coin indexer/decoder DBs. Earlier code derived
+    // a per-coin subnet from the docker network gateway, which blocked the
+    // explorer (172.18.x) from reaching e.g. xchain_indexer_litecoin_regtest
+    // (granted only from 172.20.0.0/16). MariaDB is on private docker networks
+    // and never bound to the host, so '%' here doesn't broaden external exposure.
+    const host = "%"
     const mariadbUser = "'" + user + "'@'" + host + "'"
 
     if (inDocker) {
