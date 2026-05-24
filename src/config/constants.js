@@ -63,7 +63,8 @@ const projectFolders = {
     "xchain-hub":           "XChainHub",
     "xchain-explorer":      "XChainExplorer",
     "xchain-e2e-test":      "XChainE2ETest",
-    "xchain-indexer-sync":  "XChainIndexerSync"
+    "xchain-indexer-sync":  "XChainIndexerSync",
+    "xchain-vm":            "XChainVM"
 }
 
 // --- Module Git URLs ---
@@ -76,7 +77,17 @@ const modulesUrls = {
     "xchain-hub":           "git@github.com:XChain-platform/xchain-hub.git",
     "xchain-explorer":      "git@github.com:XChain-platform/xchain-explorer.git",
     "xchain-e2e-test":      "git@github.com:XChain-platform/xchain-e2e-test.git",
-    "xchain-indexer-sync":  "git@github.com:XChain-platform/xchain-indexer-sync.git"
+    "xchain-indexer-sync":  "git@github.com:XChain-platform/xchain-indexer-sync.git",
+    "xchain-vm":            "git@github.com:XChain-platform/xchain-vm.git"
+}
+
+// --- Library bundles ---
+// Maps a service to the library modules that must be staged into its build
+// context before docker build. Used by ModuleService.buildAndUp to clone +
+// copy each library into the service's modules/ subdir; the service's
+// Dockerfile then COPYs them in and npm resolves the file: link.
+const LIBRARY_BUNDLES = {
+    "xchain-indexer": ["xchain-vm"]
 }
 
 // --- Directory paths ---
@@ -101,6 +112,7 @@ module.exports = {
     HUB_PORT,
     XChainService,
     REGTEST_MODULES,
+    LIBRARY_BUNDLES,
     Coin,
     Network,
     CoinTickerSymbol,
