@@ -8,9 +8,10 @@ const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 const fs        = require('fs')
 
+const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, EXPLORER_MODULE_NAME, INDEXER_SYNC_MODULE_NAME,
-    XChainService, SEP, modulesUrls
+    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES
 } = require('../config/constants')
 const { db }                = require('../state')
 const {
@@ -87,6 +88,31 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     }
 
     const environmentVariables = await getDefaultConfig(module, coin, network)
+    const dir = getModuleDir(module)
+
+    // Stage any bundled library modules into this service's build context.
+    // The service's Dockerfile COPYs them in and npm resolves the
+    // "file:./<lib>" deps recursively at install.
+    const bundledLibs = LIBRARY_BUNDLES[module] || []
+    for (const lib of bundledLibs) {
+        if (!moduleDirExists(lib)) {
+            console.log("Cloning bundled library " + lib + " for " + module)
+            await cloneGit(lib, true, false, null)
+        }
+        const libSrc  = getModuleDir(lib)
+        const libDest = path.join(dir, lib)
+        console.log("Staging " + lib + " into " + module + " build context")
+        fs.rmSync(libDest, { recursive: true, force: true })
+        fs.cpSync(libSrc, libDest, {
+            recursive: true,
+            force: true,
+            filter: (src) => {
+                const base = path.basename(src)
+                return base !== "node_modules" && base !== ".git" &&
+                       base !== "test" && base !== "bench" && base !== "reports"
+            }
+        })
+    }
 
     return new Promise((resolve, reject) => {
         // With execFile, env vars are passed as individual array elements — no shell escaping needed
@@ -95,7 +121,6 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             envArgs.push('-e', `${key}=${String(environmentVariables[key])}`)
         }
 
-        const dir = getModuleDir(module)
         const containerPrefix = getDockerContainerImageName(module, coin, network)
 
         console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
