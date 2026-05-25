@@ -53,6 +53,10 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
         const destination = useTmp ? getModuleTmpDir(module) : getModuleDir(module)
         const cloneArgs = ['clone']
         if (branch) cloneArgs.push('-b', branch)
+        // Local-path sources (no ':' i.e. not a URL/SCP-style remote) on the
+        // Parallels share can't hardlink between the two trees, so force
+        // a copy instead of git's default object-linking.
+        if (gitUrl && gitUrl.startsWith('/')) cloneArgs.push('--no-hardlinks')
         cloneArgs.push(gitUrl, destination)
 
         execFile('git', cloneArgs, (error, stdout, stderr) => {
