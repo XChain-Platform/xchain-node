@@ -171,8 +171,17 @@ async function restartContainer(containerId) {
 
 async function removeContainer(containerId) {
     return new Promise((resolve, reject) => {
-        execFile('docker', ['rm', containerId], (error, stdout) => {
+        execFile('docker', ['rm', containerId], (error, stdout, stderr) => {
             if (error) {
+                // Treat "No such container" as success — the desired state
+                // (container is gone) is already met. Without this, callers
+                // like runE2ETest crash if the container was already cleaned
+                // up by something else (e.g. another invocation, manual rm,
+                // or an auto-remove edge case).
+                if (stderr && /no such container/i.test(stderr)) {
+                    resolve(true)
+                    return
+                }
                 reject(error)
                 return
             }
