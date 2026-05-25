@@ -65,7 +65,7 @@ function loadModuleService(stubs, opts = {}) {
             removeModuleTmpDir: sinon.stub(),
             createModuleTmpDir: sinon.stub(),
             getDockerContainerImageName: (mod, coin, net) => {
-                if (['database', 'xchain-hub', 'xchain-explorer', 'xchain-indexer-sync'].includes(mod)) {
+                if (['database', 'xchain-hub', 'xchain-explorer', 'xchain-sync'].includes(mod)) {
                     return 'xchain-node-' + mod
                 }
                 return 'xchain-node-' + coin + '-' + net + '-' + mod

@@ -152,7 +152,7 @@ class E2EEnv extends TestEnv {
         this.createFakeModule('xchain-hub')
         this.createFakeModule('xchain-explorer')
         this.createFakeModule('xchain-e2e-test')
-        this.createFakeModule('xchain-indexer-sync')
+        this.createFakeModule('xchain-sync')
     }
 
     /**

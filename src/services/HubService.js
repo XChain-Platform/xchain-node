@@ -4,7 +4,7 @@
  ********************************************************************/
 
 const {
-    HUB_MODULE_NAME, DB_MODULE_NAME, NODE_MODULE_NAME, EXPLORER_MODULE_NAME, INDEXER_SYNC_MODULE_NAME,
+    HUB_MODULE_NAME, DB_MODULE_NAME, NODE_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     XChainService, SEP
 } = require('../config/constants')
 const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
@@ -178,15 +178,15 @@ async function updateHub() {
         await updateHubOrExplorer("xchain-hub")
     }
 
-    // Connect indexer-sync container to all chain/network Docker networks (same pattern as hub)
-    const syncContainerId = await db.getModuleContainer(INDEXER_SYNC_MODULE_NAME, "", "")
+    // Connect xchain-sync container to all chain/network Docker networks (same pattern as hub)
+    const syncContainerId = await db.getModuleContainer(SYNC_MODULE_NAME, "", "")
     if (syncContainerId) {
         for (const nextCoin in installedCoinsAndNetworks) {
             for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
                 try {
                     await addContainerToNetwork(syncContainerId, getDockerNetwork(nextCoin, nextNetwork))
                 } catch {
-                    console.log("There was an error trying to connect xchain-indexer-sync to the " + nextCoin + "/" + nextNetwork + " network")
+                    console.log("There was an error trying to connect xchain-sync to the " + nextCoin + "/" + nextNetwork + " network")
                 }
             }
         }
