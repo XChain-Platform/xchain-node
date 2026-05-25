@@ -41,7 +41,23 @@ async function scanAndRegisterModules({ silent = false } = {}) {
         })
     })
 
-    let added = 0
+    let added       = 0
+    let reconciled  = 0
+    let removed     = 0
+    // Track which (module, coin, network) keys we saw a live container for, so
+    // we can purge orphan rows whose registered container_id no longer maps to
+    // any docker container at all.
+    const seen = new Set()
+    const keyOf = (module, coin, network) => module + '|' + coin + '|' + network
+
+    // Sort containers so RUNNING ones come first — when multiple containers
+    // share the same expected key (e.g. an old exited container and a fresh
+    // running one), the running ID wins on the upsert.
+    containers.sort((a, b) => {
+        const ar = (a.State || '').toLowerCase() === 'running' ? 0 : 1
+        const br = (b.State || '').toLowerCase() === 'running' ? 0 : 1
+        return ar - br
+    })
 
     for (const nextContainer of containers) {
         const imageName = nextContainer.Image
@@ -50,11 +66,19 @@ async function scanAndRegisterModules({ silent = false } = {}) {
         const rest = imageName.substr(NODE_PREFIX.length + SEP.length)
 
         if (SHARED_MODULES.includes(rest)) {
+            seen.add(keyOf(rest, "", ""))
             const existing = await db.getModuleContainer(rest, "", "")
             if (existing == null) {
                 await db.insertModuleContainer(rest, "", "", nextContainer.ID)
-                logIfNotSilent(silent, "Added " + rest + " (" + nextContainer.ID + ")")
+                logIfNotSilent(silent, "Added " + rest + " (" + nextContainer.ID.slice(0,12) + ")")
                 added++
+            } else if (existing !== nextContainer.ID) {
+                // Stale registry — running container has a different ID than recorded
+                // (typically a rebuild that bypassed the CLI). insertModuleContainer
+                // is an UPSERT, so this fixes the row in-place.
+                await db.insertModuleContainer(rest, "", "", nextContainer.ID)
+                logIfNotSilent(silent, "Reconciled " + rest + " (was " + existing.slice(0,12) + ", now " + nextContainer.ID.slice(0,12) + ")")
+                reconciled++
             }
             continue
         }
@@ -76,16 +100,37 @@ async function scanAndRegisterModules({ silent = false } = {}) {
         }
 
         if (module != null) {
+            seen.add(keyOf(module, coinStr, networkStr))
             const existing = await db.getModuleContainer(module, coinStr, networkStr)
             if (existing == null) {
                 await db.insertModuleContainer(module, coinStr, networkStr, nextContainer.ID)
-                logIfNotSilent(silent, "Added " + coinStr + SEP + networkStr + SEP + module + " (" + nextContainer.ID + ")")
+                logIfNotSilent(silent, "Added " + coinStr + SEP + networkStr + SEP + module + " (" + nextContainer.ID.slice(0,12) + ")")
                 added++
+            } else if (existing !== nextContainer.ID) {
+                await db.insertModuleContainer(module, coinStr, networkStr, nextContainer.ID)
+                logIfNotSilent(silent, "Reconciled " + coinStr + SEP + networkStr + SEP + module + " (was " + existing.slice(0,12) + ", now " + nextContainer.ID.slice(0,12) + ")")
+                reconciled++
             }
         }
     }
 
-    return added
+    // Purge orphan registry rows — modules table entries whose key we never
+    // saw in `docker ps -a`, meaning the container was deleted externally
+    // (or the row is otherwise unreferenced). Leaving these around makes
+    // downstream operations log spurious "couldn't connect to network" /
+    // "container not found" warnings against a phantom container.
+    const allRows = await db.getAllModuleContainers(null, null)
+    for (const row of allRows) {
+        const k = keyOf(row.module, row.coin || '', row.network || '')
+        if (seen.has(k)) continue
+        await db.removeModuleContainer(row.module, row.coin || '', row.network || '')
+        logIfNotSilent(silent, "Removed orphan registry row " +
+            (row.coin || row.network ? (row.coin + SEP + row.network + SEP) : '') +
+            row.module + " (was " + String(row.container_id || '').slice(0,12) + ")")
+        removed++
+    }
+
+    return added + reconciled + removed
 }
 
 module.exports = {
