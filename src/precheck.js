@@ -67,11 +67,13 @@ async function preCheck(checkVersions = false) {
     }
 
     try {
-        const moduleCount = await db.countModules()
-        if (moduleCount === 0) {
-            if (isVerbose()) console.log("Modules table empty, scanning Docker for existing containers")
-            await scanAndRegisterModules({ silent: !isVerbose() })
-        }
+        // Always reconcile against `docker ps -a`: adds missing rows
+        // (the original empty-table case), updates stale container_ids
+        // when containers were recreated outside the CLI, and purges
+        // orphan rows whose containers were deleted externally. Without
+        // this, downstream operations log "container not found" /
+        // "couldn't connect to network" warnings against phantom IDs.
+        await scanAndRegisterModules({ silent: !isVerbose() })
     } catch (err) {
         console.log(err)
         throw new Error("There was an error during module auto-discovery")
