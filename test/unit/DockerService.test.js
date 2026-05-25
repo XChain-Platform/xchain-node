@@ -239,6 +239,33 @@ describe('DockerService', function () {
             const result = await ds.removeContainer('abc123')
             expect(result).to.be.true
         })
+
+        it('treats "No such container" as success (idempotent)', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                const err = new Error('Command failed')
+                err.code = 1
+                cb(err, '', 'Error response from daemon: No such container: abc123\n')
+            })
+            const ds = loadDockerService(stubs)
+            const result = await ds.removeContainer('abc123')
+            expect(result).to.be.true
+        })
+
+        it('rejects on other errors', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                const err = new Error('Cannot connect to the Docker daemon')
+                err.code = 1
+                cb(err, '', 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock')
+            })
+            const ds = loadDockerService(stubs)
+            let rejected = false
+            try { await ds.removeContainer('abc123') } catch { rejected = true }
+            expect(rejected).to.be.true
+        })
     })
 
     // -------------------------------------------------------------------
