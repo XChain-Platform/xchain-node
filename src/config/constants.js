@@ -81,6 +81,32 @@ const modulesUrls = {
     "xchain-vm":            "git@github.com:XChain-platform/xchain-vm.git"
 }
 
+// Optional env-var override for local-source workflows. Lets you point any
+// module at a local path (or a fork URL) without editing this file each
+// iteration. Combined with ModuleService's --no-hardlinks-for-local-paths
+// makes "iterate against unpushed commits" friction-free.
+//
+// Format: JSON object mapping module name → source URL (or local path).
+//   export XCHAIN_NODE_MODULES_URLS_OVERRIDE='{"xchain-indexer":"/path/to/local"}'
+//
+// Unrecognized module names are ignored with a warning so a typo doesn't
+// silently misroute clone targets.
+if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
+    try {
+        const overrides = JSON.parse(process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE)
+        for (const [mod, url] of Object.entries(overrides)) {
+            if (!(mod in modulesUrls)) {
+                console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: unknown module '" + mod + "' — ignored")
+                continue
+            }
+            modulesUrls[mod] = url
+            console.log("modulesUrls['" + mod + "'] overridden via env → " + url)
+        }
+    } catch (err) {
+        console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: parse failed (" + err.message + ") — using defaults")
+    }
+}
+
 // --- Library bundles ---
 // Maps a service to the library modules that must be staged into its build
 // context before docker build. Used by ModuleService.buildAndUp to clone +
