@@ -14,7 +14,7 @@ const NODE_MODULE_NAME       = "node"
 const DB_MODULE_NAME         = "database"
 const HUB_MODULE_NAME        = "xchain-hub"
 const EXPLORER_MODULE_NAME   = "xchain-explorer"
-const INDEXER_SYNC_MODULE_NAME = "xchain-indexer-sync"
+const SYNC_MODULE_NAME       = "xchain-sync"
 const NODE_VERSION_FILE_NAME = "__VERSION__.txt"
 const SEP                    = "-"
 const DB_SEP                 = "_"
@@ -63,22 +63,22 @@ const projectFolders = {
     "xchain-hub":           "XChainHub",
     "xchain-explorer":      "XChainExplorer",
     "xchain-e2e-test":      "XChainE2ETest",
-    "xchain-indexer-sync":  "XChainIndexerSync",
+    "xchain-sync":          "XChainSync",
     "xchain-vm":            "XChainVM"
 }
 
 // --- Module Git URLs ---
 const modulesUrls = {
-    "xchain-encoder":       "git@github.com:XChain-platform/xchain-encoder.git",
-    "xchain-decoder":       "git@github.com:XChain-platform/xchain-decoder.git",
-    "xchain-utxo-tracker":  "git@github.com:XChain-platform/xchain-utxo-tracker.git",
-    "xchain-indexer":       "git@github.com:XChain-platform/xchain-indexer.git",
-    "xchain-regtest-miner": "git@github.com:XChain-platform/xchain-regtest-miner.git",
-    "xchain-hub":           "git@github.com:XChain-platform/xchain-hub.git",
-    "xchain-explorer":      "git@github.com:XChain-platform/xchain-explorer.git",
-    "xchain-e2e-test":      "git@github.com:XChain-platform/xchain-e2e-test.git",
-    "xchain-indexer-sync":  "git@github.com:XChain-platform/xchain-indexer-sync.git",
-    "xchain-vm":            "git@github.com:XChain-platform/xchain-vm.git"
+    "xchain-encoder":       "git@github.com:XChain-Platform/xchain-encoder.git",
+    "xchain-decoder":       "git@github.com:XChain-Platform/xchain-decoder.git",
+    "xchain-utxo-tracker":  "git@github.com:XChain-Platform/xchain-utxo-tracker.git",
+    "xchain-indexer":       "git@github.com:XChain-Platform/xchain-indexer.git",
+    "xchain-regtest-miner": "git@github.com:XChain-Platform/xchain-regtest-miner.git",
+    "xchain-hub":           "git@github.com:XChain-Platform/xchain-hub.git",
+    "xchain-explorer":      "git@github.com:XChain-Platform/xchain-explorer.git",
+    "xchain-e2e-test":      "git@github.com:XChain-Platform/xchain-e2e-test.git",
+    "xchain-sync":          "git@github.com:XChain-Platform/xchain-sync.git",
+    "xchain-vm":            "git@github.com:XChain-Platform/xchain-vm.git"
 }
 
 // Optional env-var override for local-source workflows. Lets you point any
@@ -131,7 +131,7 @@ module.exports = {
     DB_MODULE_NAME,
     HUB_MODULE_NAME,
     EXPLORER_MODULE_NAME,
-    INDEXER_SYNC_MODULE_NAME,
+    SYNC_MODULE_NAME,
     NODE_VERSION_FILE_NAME,
     SEP,
     DB_SEP,

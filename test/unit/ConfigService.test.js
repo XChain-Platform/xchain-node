@@ -8,7 +8,7 @@ const { Readable } = require('stream')
 
 const {
     NODE_PREFIX, SEP, DB_SEP,
-    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, INDEXER_SYNC_MODULE_NAME,
+    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     Coin, Network, XChainService, CoinTickerSymbol, REGTEST_MODULES,
     moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir
 } = require('../../src/config/constants')
@@ -163,9 +163,9 @@ describe('ConfigService', function () {
             expect(name).to.equal('xchain-node-xchain-explorer')
         })
 
-        it('builds indexer-sync name: xchain-node-xchain-indexer-sync', function () {
-            const name = getDockerContainerImageName(INDEXER_SYNC_MODULE_NAME, '', '')
-            expect(name).to.equal('xchain-node-xchain-indexer-sync')
+        it('builds sync name: xchain-node-xchain-sync', function () {
+            const name = getDockerContainerImageName(SYNC_MODULE_NAME, '', '')
+            expect(name).to.equal('xchain-node-xchain-sync')
         })
 
         it('builds correct names for all coin/network combos', function () {
@@ -398,13 +398,13 @@ describe('ConfigService', function () {
 
             it('returns SYNC_MODE as server', async function () {
                 const cs = makeServiceWithConfig('')
-                const config = await cs.getDefaultConfig(INDEXER_SYNC_MODULE_NAME, null, null)
+                const config = await cs.getDefaultConfig(SYNC_MODULE_NAME, null, null)
                 expect(config['SYNC_MODE']).to.equal('server')
             })
 
             it('returns SYNC_API_PORT as 3006', async function () {
                 const cs = makeServiceWithConfig('')
-                const config = await cs.getDefaultConfig(INDEXER_SYNC_MODULE_NAME, null, null)
+                const config = await cs.getDefaultConfig(SYNC_MODULE_NAME, null, null)
                 expect(config['SYNC_API_PORT']).to.equal(3006)
             })
 

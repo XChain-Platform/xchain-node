@@ -9,7 +9,7 @@ const readline = require('readline')
 
 const {
     NODE_PREFIX, SEP, DB_SEP,
-    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, INDEXER_SYNC_MODULE_NAME,
+    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     Coin, Network, XChainService, CoinTickerSymbol, REGTEST_MODULES,
     moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir
 } = require('../config/constants')
@@ -72,7 +72,7 @@ function checkIfCryptoNodeSourceExists(coin) {
 // --- Naming helpers ---
 
 function getDockerContainerImageNamePrefix(module, coin, network) {
-    if (module === DB_MODULE_NAME || module === HUB_MODULE_NAME || module === EXPLORER_MODULE_NAME || module === INDEXER_SYNC_MODULE_NAME) {
+    if (module === DB_MODULE_NAME || module === HUB_MODULE_NAME || module === EXPLORER_MODULE_NAME || module === SYNC_MODULE_NAME) {
         return NODE_PREFIX
     }
     return NODE_PREFIX + SEP + coin + SEP + network
@@ -180,7 +180,7 @@ async function getDefaultConfig(module, coin, network) {
             "SYNC_MODE":               "server",
             "SYNC_API_PORT":           3006,
             "SYNC_PORT":               3006,
-            "SYNC_API_HOST":           getDockerContainerImageName(INDEXER_SYNC_MODULE_NAME, "", ""),
+            "SYNC_API_HOST":           getDockerContainerImageName(SYNC_MODULE_NAME, "", ""),
             "HUB_API_HOST_SYNC":       getDockerContainerImageName(HUB_MODULE_NAME, "", "")
         }
     }
