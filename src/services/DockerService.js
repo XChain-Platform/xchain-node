@@ -379,13 +379,18 @@ async function saveContainerLogs(containerId, filePath) {
         fs.mkdirSync(path.dirname(filePath), { recursive: true })
         const output = fs.createWriteStream(filePath)
         const child = spawn('docker', ['logs', containerId])
-        child.stdout.pipe(output)
-        child.stderr.pipe(output)
-        child.on('close', () => {
-            output.end()
-            resolve(true)
-        })
+        // { end: false } on both pipes: the default end:true makes whichever
+        // stream closes first call output.end(), which silently drops any
+        // remaining writes from the other stream. End the output manually
+        // only after the child process exits (both streams closed).
+        child.stdout.pipe(output, { end: false })
+        child.stderr.pipe(output, { end: false })
+        child.on('close', () => output.end())
         child.on('error', reject)
+        // Resolve only after the output is fully flushed to disk — otherwise
+        // the caller can read a truncated file.
+        output.on('finish', () => resolve(true))
+        output.on('error', reject)
     })
 }
 
