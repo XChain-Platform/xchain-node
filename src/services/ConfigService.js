@@ -157,6 +157,12 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues["REGTEST_MINER_URL"]      = getDockerContainerImageName(XChainService.XCHAIN_REGTEST_MINER, coin, network)
             defaultValues["REGTEST_MINER_API_PORT"] = 3005
             defaultValues["REGTEST_MINER_PORT"]     = 3005
+            // Encoder's express-rate-limit defaults to 60 RPM, which the e2e
+            // suite blows past whenever the stale-UTXO retry shim fires (up
+            // to 15 retries per failing tx — easily 100+ RPM during the
+            // order/swap blocks). Production-safe defaults stay at 60; we
+            // raise it for regtest where load is by-design bursty.
+            defaultValues["RATE_LIMIT_RPM"]         = 99999
         }
     } else {
         defaultValues = {
