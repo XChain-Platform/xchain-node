@@ -288,6 +288,27 @@ async function resetModules(service, coin, network) {
         } catch { /* not installed, skip */ }
     }
 
+    // Workaround for a known race: the decoder + indexer's initial pool
+    // connections sometimes lose the connection mid-startup right after a
+    // DROP DATABASE / CREATE DATABASE cycle (their inner retry-on-connect
+    // helps but doesn't fully cover the case where Node throws before the
+    // retry loop is reached). A simple "settle then bounce" of decoder +
+    // indexer after the first start pass is empirically deterministic and
+    // costs ~5s on the happy path.
+    const bounceCandidates = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]
+        .filter((m) => modulesToStop.includes(m))
+    if (bounceCandidates.length > 0) {
+        await new Promise((r) => setTimeout(r, 5000))
+        for (const module of bounceCandidates) {
+            try {
+                const containerId = await db.getModuleContainer(module, coin, network)
+                // restartContainer = docker stop + docker start; sufficient to
+                // re-enter Node's bootstrap with the freshly-created DB ready.
+                await restartContainer(containerId)
+            } catch { /* not installed, skip */ }
+        }
+    }
+
     await statusChanged()
     return true
 }
