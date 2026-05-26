@@ -113,7 +113,12 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
 // copy each library into the service's modules/ subdir; the service's
 // Dockerfile then COPYs them in and npm resolves the file: link.
 const LIBRARY_BUNDLES = {
-    "xchain-indexer": ["xchain-vm"]
+    "xchain-indexer":  ["xchain-vm"],
+    // xchain-e2e-test's multiValidatorHubHelper boots in-process XChainHub
+    // instances against the regtest stack (multiHubAttestation,
+    // llmAttestation). xchain-hub needs to ride into the build context so
+    // those tests can `require` its source from inside the dockerized image.
+    "xchain-e2e-test": ["xchain-hub"]
 }
 
 // --- Directory paths ---
