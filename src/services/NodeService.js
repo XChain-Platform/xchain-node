@@ -95,6 +95,17 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
             }
 
             const { dataDir } = require('../config/constants')
+            // Optional split-storage: when XCHAIN_NODE_BLOCKS_DIR is set,
+            // mount the daemon's blocks/ directory from a separate host path
+            // (typically SATA bulk storage) while chainstate/ stays on the
+            // primary datadir (typically NVMe). Lets a single chassis with
+            // 2×NVMe + 2×SATA host a full bitcoind without blocks/ eating
+            // the NVMe pair.
+            const blocksDir = process.env.XCHAIN_NODE_BLOCKS_DIR
+            if (blocksDir) {
+                const blocksHostPath = `${blocksDir}/${coin}/${network}`
+                fs.mkdirSync(blocksHostPath, { recursive: true })
+            }
             const runArgs = [
                 'run', '-d',
                 '--name', containerPrefix,
@@ -103,10 +114,25 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 '--ulimit', 'nofile=2048:2048',
                 '--network', getDockerNetwork(coin, network)
             ]
+            if (blocksDir) {
+                runArgs.push('-v', `${blocksDir}/${coin}/${network}:/blocks`)
+            }
             if (defaultExposedPort && defaultNodePort) {
                 runArgs.push('-p', `${defaultExposedPort}:${defaultNodePort}`)
             }
             runArgs.push('-e', `CRYPTO_NODE_VERSION=${bitcoinVer}`, '-t', containerPrefix)
+            // Override the image CMD only when split-storage is requested.
+            // Otherwise the Dockerfile's CMD (which doesn't know about /blocks)
+            // is used unchanged — backwards compatible.
+            if (blocksDir) {
+                const daemonName = `${coin}d`
+                const confPath = `/etc/${coin}/${coin}.conf`
+                if (coin === 'bitcoin') {
+                    runArgs.push(daemonName, `-conf=${confPath}`, `-datadir=/root/.${coin}/`, '-blocksdir=/blocks')
+                } else {
+                    runArgs.push(daemonName, `-conf=${confPath}`, '-blocksdir=/blocks')
+                }
+            }
 
             console.log("Creating container of " + coin + " " + network + " node")
             execFile('docker', runArgs, { cwd: nodeDir }, async (error2, stdout) => {
