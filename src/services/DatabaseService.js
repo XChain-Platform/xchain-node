@@ -97,6 +97,24 @@ async function askMariadbRootPassword(coin, network) {
 
     const dbContainerId = await checkIfDatabaseModuleExists(coin, network)
 
+    // If the mariadb container is already up, its MYSQL_ROOT_PASSWORD env is
+    // the source of truth — read it directly so non-interactive runs (CI, the
+    // review system's release-check producer, scripted resets) don't hang on
+    // a stdin prompt. Falls through to the prompt if the env isn't readable.
+    if (dbContainerId) {
+        try {
+            const { stdout } = await execFileAsync('docker', ['exec', dbContainerId, 'printenv', 'MYSQL_ROOT_PASSWORD'])
+            const fromEnv = stdout.replace(/\r?\n$/, '')
+            if (fromEnv) {
+                const ping = await execFileAsync('docker', ['exec', dbContainerId, 'mariadb-admin', '-u', 'root', `-p${fromEnv}`, 'ping'])
+                if (ping.stdout.includes('mysqld is alive')) {
+                    setDbRootPassword(fromEnv)
+                    return fromEnv
+                }
+            }
+        } catch { /* fall through to interactive prompt */ }
+    }
+
     while (!getDbRootPassword()) {
         const messageLine = dbContainerId
             ? 'Please, type the password for the root user of mariadb to add new users'
