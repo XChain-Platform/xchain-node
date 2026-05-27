@@ -100,6 +100,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 '--name', containerPrefix,
                 '-v', `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`,
                 '--hostname', NODE_MODULE_NAME,
+                '--network-alias', NODE_MODULE_NAME,
                 '--ulimit', 'nofile=2048:2048',
                 '--network', getDockerNetwork(coin, network)
             ]
