@@ -11,7 +11,8 @@ const {
     NODE_PREFIX, SEP, DB_SEP,
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     Coin, Network, XChainService, CoinTickerSymbol, REGTEST_MODULES,
-    moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir
+    moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir,
+    EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT
 } = require('../config/constants')
 const { stringToCoin } = require('../utils/helpers')
 
@@ -221,6 +222,22 @@ async function getDefaultConfig(module, coin, network) {
     for (const key in defaultValues) {
         if (!(key in defaultConfig)) {
             defaultConfig[key] = defaultValues[key]
+        }
+    }
+
+    // EXTERNAL_DB: rewrite the DB host/port keys so containerized services
+    // reach the host-native MariaDB via the bridge gateway instead of the
+    // docker DNS name "mariadb" (which no longer resolves once the bundled
+    // container is decommissioned). The DB name/user/pass keys stay as-is —
+    // those are about the credentials, not the network location.
+    if (EXTERNAL_DB) {
+        const dbHostKeys = ['HUB_DB_HOST', 'DECODER_DB_HOST', 'INDEXER_DB_HOST']
+        const dbPortKeys = ['HUB_DB_PORT', 'DECODER_DB_PORT', 'INDEXER_DB_PORT']
+        for (const k of dbHostKeys) {
+            if (k in defaultConfig) defaultConfig[k] = EXTERNAL_DB_HOST
+        }
+        for (const k of dbPortKeys) {
+            if (k in defaultConfig) defaultConfig[k] = EXTERNAL_DB_PORT
         }
     }
 

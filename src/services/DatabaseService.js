@@ -7,10 +7,11 @@ const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 const mariadb     = require('mariadb')
-const { Password } = require('enquirer')
+const { Password, Input, NumberPrompt } = require('enquirer')
 
 const {
-    DB_MODULE_NAME, XChainService, SEP
+    DB_MODULE_NAME, XChainService, SEP,
+    EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER
 } = require('../config/constants')
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
 const { sleep }                   = require('../utils/helpers')
@@ -19,7 +20,8 @@ const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork }
 const { statusChanged }           = require('./StatusService')
 const {
     XCHAIN_NODE_DB, getOsUserDbName, generatePassword,
-    hasCredentials, loadCredentials, saveCredentials
+    hasCredentials, loadCredentials, saveCredentials,
+    hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig
 } = require('./CredentialsService')
 
 const XCHAIN_NODE_DB_HOST = "127.0.0.1"
@@ -86,9 +88,127 @@ async function checkIfDatabaseIsReady(user, userPassword, database = null) {
     return false
 }
 
+// Returns full external-DB config { host, port, root_user, root_password }.
+// Precedence: env vars (all four) → credentials.json `externalDb` block →
+// interactive prompt → verify → persist. Cached in state.dbRootPassword for
+// the rest of the process so we don't re-prompt within a single CLI run.
+async function getExternalDbConfig() {
+    // Fast path: env vars supply everything for headless flows
+    if (process.env.XCHAIN_NODE_EXTERNAL_DB_HOST
+        && process.env.XCHAIN_NODE_EXTERNAL_DB_PORT
+        && process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER
+        && process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD) {
+        return {
+            host:          process.env.XCHAIN_NODE_EXTERNAL_DB_HOST,
+            port:          parseInt(process.env.XCHAIN_NODE_EXTERNAL_DB_PORT, 10),
+            root_user:     process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER,
+            root_password: process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD
+        }
+    }
+
+    // Saved config wins next
+    if (hasExternalDbConfig()) {
+        const saved = loadExternalDbConfig()
+        if (saved) {
+            // Verify still works — bad creds in storage mean we should re-prompt
+            try {
+                await _pingMariaDb(saved)
+                return saved
+            } catch {
+                console.log("Saved external-DB credentials no longer work — let's re-enter them.")
+            }
+        }
+    }
+
+    // Interactive prompt
+    console.log("\nExternal MariaDB configuration (XCHAIN_NODE_EXTERNAL_DB=1)")
+    console.log("Provide the connection details for the host-native MariaDB this node should use.\n")
+
+    let cfg = null
+    while (!cfg) {
+        const hostPrompt = new Input({ name: 'host', message: 'Host', initial: EXTERNAL_DB_HOST })
+        const host = await hostPrompt.run()
+        const portPrompt = new NumberPrompt({ name: 'port', message: 'Port', initial: EXTERNAL_DB_PORT })
+        const port = await portPrompt.run()
+        const userPrompt = new Input({ name: 'root_user', message: 'Root user', initial: EXTERNAL_DB_ROOT_USER })
+        const root_user = await userPrompt.run()
+        const passPrompt = new Password({ name: 'root_password', message: 'Root password' })
+        const root_password = await passPrompt.run()
+
+        const candidate = { host: String(host).trim(), port: Number(port), root_user: String(root_user).trim(), root_password }
+        try {
+            await _pingMariaDb(candidate)
+            saveExternalDbConfig(candidate)
+            console.log("External MariaDB connection verified — saved to ~/.xchain-node/credentials.json")
+            cfg = candidate
+        } catch (err) {
+            console.log("Could not connect: " + (err.message || err) + " — try again.")
+        }
+    }
+    return cfg
+}
+
+// Lightweight ping: open a one-shot connection, SELECT 1, close.
+async function _pingMariaDb({ host, port, root_user, root_password }) {
+    const conn = await mariadb.createConnection({
+        host, port: Number(port), user: root_user, password: root_password,
+        connectTimeout: 5_000
+    })
+    try {
+        await conn.query("SELECT 1")
+    } finally {
+        try { await conn.end() } catch {}
+    }
+}
+
+// Execute a single SQL statement against the external (host-native) MariaDB
+// as the root user. Mirrors the interface of executeDockerMariaDbCommand
+// so callers can switch on EXTERNAL_DB without changing their structure.
+// commandOptions is honored for "-B -N" (batch, no-headers) which existing
+// callers use to parse single-value queries.
+async function executeNativeMariaDbCommand(externalCfg, command, commandOptions = "") {
+    const batchMode = /(^|\s)-B(\s|$)/.test(commandOptions) || /(^|\s)--batch(\s|$)/.test(commandOptions)
+    const noHeaders = /(^|\s)-N(\s|$)/.test(commandOptions) || /(^|\s)--skip-column-names(\s|$)/.test(commandOptions)
+
+    const conn = await mariadb.createConnection({
+        host:          externalCfg.host,
+        port:          Number(externalCfg.port),
+        user:          externalCfg.root_user,
+        password:      externalCfg.root_password,
+        connectTimeout: 10_000,
+        // Match the docker-exec contract: return rows as arrays of strings
+        // when batch-mode parsing is needed, otherwise plain objects.
+        rowsAsArray:   batchMode
+    })
+    try {
+        const result = await conn.query(command)
+        // For DDL/DML, result has no .length property typically — return ''.
+        // For SELECTs, format to match docker-exec stdout shape.
+        if (!Array.isArray(result)) return ''
+        if (batchMode) {
+            // Each row is an array; join columns by tab, rows by newline.
+            // When -N also set, no header row is emitted (rowsAsArray already
+            // omits a header from result).
+            const lines = result.map(row => row.join('\t'))
+            return lines.join('\n')
+        }
+        return ''
+    } finally {
+        try { await conn.end() } catch {}
+    }
+}
+
 async function askMariadbRootPassword(coin, network) {
     const cached = getDbRootPassword()
     if (cached) return cached
+
+    // External-DB mode: defer to the full external config helper. Cache the
+    // password so subsequent calls in the same process are free.
+    if (EXTERNAL_DB) {
+        const cfg = await getExternalDbConfig()
+        setDbRootPassword(cfg.root_password)
+        return cfg.root_password
+    }
 
     if (process.env.XCHAIN_NODE_DB_ROOT_PASSWORD) {
         setDbRootPassword(process.env.XCHAIN_NODE_DB_ROOT_PASSWORD)
@@ -174,7 +294,12 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
     const host = "%"
     const mariadbUser = "'" + user + "'@'" + host + "'"
 
-    if (inDocker) {
+    // EXTERNAL_DB short-circuits the inDocker branch: even if a caller passed
+    // inDocker=true (today's default for backward compat), we route through
+    // the native MariaDB path. Single switch, no caller changes required.
+    const useDocker = inDocker && !EXTERNAL_DB
+
+    if (useDocker) {
         try {
             await checkIfDatabaseIsReady("root", mariadbRootPassword)
             const mariadbContainerId = await getDatabaseContainerId()
@@ -217,19 +342,68 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             throw err
         }
     } else {
-        // TODO: add user to a remote mariadb
+        // External (host-native) MariaDB path. Same DDL as the docker branch
+        // above, just sent over the network to the configured host instead
+        // of via `docker exec`. EXTERNAL_DB config is loaded fresh here so
+        // callers don't have to thread it through the parameter list.
+        const externalCfg = await getExternalDbConfig()
+        try {
+            const dbCount = await executeNativeMariaDbCommand(externalCfg,
+                "SELECT COUNT(SCHEMA_NAME) FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '" + databaseName + "'", "-B -N"
+            )
+            if (dbCount == 0) {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "CREATE DATABASE IF NOT EXISTS " + databaseName
+                )
+                console.log("Database " + databaseName + " created!")
+            }
+
+            const userCount = await executeNativeMariaDbCommand(externalCfg,
+                "SELECT COUNT(*) FROM mysql.user WHERE user = '" + user + "' AND host = '" + host + "' AND password = PASSWORD('" + userPassword + "')", "-B -N"
+            )
+            if (userCount == 0) {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+                )
+                // Force password in case the user already existed with a different one
+                await executeNativeMariaDbCommand(externalCfg,
+                    "ALTER USER " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+                )
+                console.log("User " + mariadbUser + " created!")
+            }
+
+            let userGrants = await executeNativeMariaDbCommand(externalCfg,
+                "SHOW GRANTS FOR " + mariadbUser, "-B -N"
+            )
+            userGrants = userGrants.replaceAll("`", "'").split("\n")
+            if (!userGrants.includes("GRANT ALL PRIVILEGES ON '" + databaseName + "'.* TO " + mariadbUser)) {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "GRANT ALL PRIVILEGES ON " + databaseName + ".* TO " + mariadbUser
+                )
+                await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
+                console.log("Permissions granted to " + mariadbUser + "!")
+            }
+            return true
+        } catch (err) {
+            console.log(err)
+            throw err
+        }
     }
 }
 
 async function setDatabaseParameters() {
     const { getInstalledCoinsAndNetworks } = require('./StatusService')
     const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
-    const dbContainerId = await getDatabaseContainerId()
+    const dbContainerId = EXTERNAL_DB ? null : await getDatabaseContainerId()
 
     for (const nextCoin in installedCoinsAndNetworks) {
         for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
             try {
-                await addContainerToNetwork(dbContainerId, getDockerNetwork(nextCoin, nextNetwork))
+                // External DB has no container to attach to per-coin networks —
+                // it's reachable via the bridge gateway from inside containers.
+                if (!EXTERNAL_DB) {
+                    await addContainerToNetwork(dbContainerId, getDockerNetwork(nextCoin, nextNetwork))
+                }
                 await statusChanged()
 
                 let containerId = await db.getModuleContainer(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork)
@@ -269,6 +443,21 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
 }
 
 async function buildDatabaseModule(coin, network) {
+    // External (host-native) MariaDB mode: xchain-node doesn't own the DB
+    // engine — operator runs MariaDB themselves. We just need to confirm the
+    // configured external host is reachable and credentials work, then skip
+    // everything else. All downstream callers (precheck, ModuleService,
+    // moduleOperations, NodeService) are happy with this no-op return.
+    if (EXTERNAL_DB) {
+        const cfg = await getExternalDbConfig()
+        try {
+            await _pingMariaDb(cfg)
+        } catch (err) {
+            throw new Error("Cannot reach external MariaDB at " + cfg.host + ":" + cfg.port + ": " + (err.message || err))
+        }
+        return true
+    }
+
     const existingId = await checkIfDatabaseModuleExists(coin, network)
 
     if (!existingId) {
@@ -310,12 +499,48 @@ async function buildDatabaseModule(coin, network) {
 }
 
 async function ensureXchainNodeAccess() {
+    const existing = hasCredentials() ? loadCredentials() : null
+
+    if (EXTERNAL_DB) {
+        const externalCfg = await getExternalDbConfig()
+
+        // If existing creds work against the external DB, reuse them.
+        if (existing) {
+            try {
+                const conn = await mariadb.createConnection({
+                    host: externalCfg.host, port: Number(externalCfg.port),
+                    user: existing.user, password: existing.password, database: XCHAIN_NODE_DB,
+                    connectTimeout: 5_000
+                })
+                await conn.query("SELECT 1")
+                await conn.end()
+                return existing
+            } catch {
+                console.log("Stored xchain-node credentials no longer work against the external MariaDB — reprovisioning")
+            }
+        }
+
+        const dbUser     = existing?.user     || getOsUserDbName()
+        const dbPassword = existing?.password || generatePassword()
+
+        console.log("Creating xchain-node database and user " + dbUser + " on external MariaDB")
+        await executeNativeMariaDbCommand(externalCfg, "CREATE DATABASE IF NOT EXISTS " + XCHAIN_NODE_DB)
+        await executeNativeMariaDbCommand(externalCfg, "CREATE USER IF NOT EXISTS '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'")
+        // Force password in case user exists from earlier with a different one
+        await executeNativeMariaDbCommand(externalCfg, "ALTER USER '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'")
+        await executeNativeMariaDbCommand(externalCfg, "GRANT ALL PRIVILEGES ON " + XCHAIN_NODE_DB + ".* TO '" + dbUser + "'@'%'")
+        await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
+
+        const creds = { user: dbUser, password: dbPassword, database: XCHAIN_NODE_DB }
+        saveCredentials(creds)
+        console.log("Credentials saved to user home directory")
+        return creds
+    }
+
     const containerId = await getDatabaseContainerId()
     if (!containerId) {
         throw new Error("MariaDB container not found — install it before requesting access")
     }
-
-    const existing = hasCredentials() ? loadCredentials() : null
 
     if (existing) {
         const works = await checkIfDatabaseIsReady(existing.user, existing.password, XCHAIN_NODE_DB)
@@ -359,6 +584,8 @@ module.exports = {
     checkIfDatabaseIsReady,
     askMariadbRootPassword,
     executeDockerMariaDbCommand,
+    executeNativeMariaDbCommand,
+    getExternalDbConfig,
     addUserPasswordToDatabase,
     setDatabaseParameters,
     buildDatabaseModule,

@@ -5,7 +5,8 @@
 
 const fs = require('fs')
 
-const { dataDir, moduleDir, tmpDir, containersFilesDir } = require('./config/constants')
+const { dataDir, moduleDir, tmpDir, containersFilesDir,
+        EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT } = require('./config/constants')
 const { db, isVerbose }                = require('./state')
 const { checkDockerInstalledAndReachable, createDockerNetwork } = require('./services/DockerService')
 const { getDockerNetwork } = require('./services/ConfigService')
@@ -53,10 +54,14 @@ async function preCheck(checkVersions = false) {
 
     if (isVerbose()) console.log("Opening MariaDB connection")
     try {
-        const port = await getDatabaseHostPort()
+        // External-DB mode connects to the configured host:port directly.
+        // Default (docker) mode reads the live port-forward from the running
+        // container (port can drift if operator overrode DB_PORT).
+        const dbHost = EXTERNAL_DB ? EXTERNAL_DB_HOST : "127.0.0.1"
+        const dbPort = EXTERNAL_DB ? EXTERNAL_DB_PORT : await getDatabaseHostPort()
         await db.createDatabase({
-            host:     "127.0.0.1",
-            port,
+            host:     dbHost,
+            port:     dbPort,
             user:     dbCreds.user,
             password: dbCreds.password,
             database: dbCreds.database

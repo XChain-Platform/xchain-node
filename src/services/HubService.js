@@ -5,7 +5,8 @@
 
 const {
     HUB_MODULE_NAME, DB_MODULE_NAME, NODE_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    XChainService, SEP
+    XChainService, SEP,
+    EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT
 } = require('../config/constants')
 const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
 const { sleep }                                = require('../utils/helpers')
@@ -60,7 +61,12 @@ async function updateHubOrExplorer(module) {
 
                 switch (nextModule) {
                     case DB_MODULE_NAME:
-                        config = { "host": "mariadb", "port": 3306 }
+                        // External DB has no container; point the hub at the
+                        // configured external host so its module-config view
+                        // reflects reality.
+                        config = EXTERNAL_DB
+                            ? { "host": EXTERNAL_DB_HOST, "port": EXTERNAL_DB_PORT }
+                            : { "host": "mariadb", "port": 3306 }
                         break
                     case NODE_MODULE_NAME:
                         config = {

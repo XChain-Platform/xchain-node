@@ -20,6 +20,22 @@ const SEP                    = "-"
 const DB_SEP                 = "_"
 const HUB_PORT               = 10000
 
+// External (host-native) MariaDB mode. When XCHAIN_NODE_EXTERNAL_DB=1, the
+// CLI skips provisioning its own dockerized MariaDB and instead expects a
+// reachable MariaDB at the configured host/port. All managed services
+// (hub, decoder, indexer) get pointed at that host via env-var injection
+// in ConfigService. Connection details come from credentials.json
+// (interactive prompt on first run) with env-var overrides for headless
+// flows. The bridge gateway IP (e.g. 172.18.0.1) is the typical value when
+// MariaDB runs on the docker host and services connect from container land.
+const EXTERNAL_DB                   = process.env.XCHAIN_NODE_EXTERNAL_DB === '1'
+const EXTERNAL_DB_DEFAULT_HOST      = "127.0.0.1"
+const EXTERNAL_DB_DEFAULT_PORT      = 3306
+const EXTERNAL_DB_DEFAULT_ROOT_USER = "root"
+const EXTERNAL_DB_HOST              = process.env.XCHAIN_NODE_EXTERNAL_DB_HOST || EXTERNAL_DB_DEFAULT_HOST
+const EXTERNAL_DB_PORT              = parseInt(process.env.XCHAIN_NODE_EXTERNAL_DB_PORT || EXTERNAL_DB_DEFAULT_PORT, 10)
+const EXTERNAL_DB_ROOT_USER         = process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER || EXTERNAL_DB_DEFAULT_ROOT_USER
+
 // --- Enums ---
 const XChainService = {
     XCHAIN_ENCODER:       "xchain-encoder",
@@ -141,6 +157,10 @@ module.exports = {
     SEP,
     DB_SEP,
     HUB_PORT,
+    EXTERNAL_DB,
+    EXTERNAL_DB_HOST,
+    EXTERNAL_DB_PORT,
+    EXTERNAL_DB_ROOT_USER,
     XChainService,
     REGTEST_MODULES,
     LIBRARY_BUNDLES,
