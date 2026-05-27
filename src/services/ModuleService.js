@@ -99,10 +99,13 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     // "file:./<lib>" deps recursively at install.
     const bundledLibs = LIBRARY_BUNDLES[module] || []
     for (const lib of bundledLibs) {
-        if (!moduleDirExists(lib)) {
-            console.log("Cloning bundled library " + lib + " for " + module)
-            await cloneGit(lib, true, false, null)
-        }
+        // Always re-clone so bundled-library commits land on every `update`.
+        // The previous "clone only if missing" check meant xchain-vm changes
+        // got silently ignored on `update xchain-indexer` because the cached
+        // modules/xchain-vm dir from a prior run was reused verbatim.
+        // cloneGit(rewrite=true) removes any existing dir before cloning.
+        console.log("Cloning bundled library " + lib + " for " + module)
+        await cloneGit(lib, true, false, null)
         const libSrc  = getModuleDir(lib)
         const libDest = path.join(dir, lib)
         console.log("Staging " + lib + " into " + module + " build context")
