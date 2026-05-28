@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-05-28
+
+### Fixed
+- Bootstrap restore now opens the MariaDB connection pool itself before looking up a module's container, so it works regardless of how it is invoked. Previously, when restore was driven outside the interactive CLI entry path the pool was never opened, `getModuleContainer()` silently returned null, and the restore failed with a misleading `utxo-tracker container not found` error even though the container was healthy and the `modules` row was correct.
+- The container-lookup failure in utxo-tracker restore now distinguishes "DB pool not initialized" from "no matching row in the modules table" so the actual cause is clear.
+
+### Added
+- Bootstrap restore is now resumable. A late-stage failure no longer discards the (up to ~30 min each) outer-extract and SHA-256 verify work: an already-extracted `data.tar.gz`/`dump.sql.gz` + checksum pair in the work dir is reused instead of re-extracted, and a `verify.ok` sentinel lets a re-run skip re-verification and proceed straight to the restore steps. The work dir is still cleaned up after a successful restore.
+
 ## [0.0.15] - 2026-04-06
 
 ### Changed

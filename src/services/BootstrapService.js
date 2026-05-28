@@ -17,7 +17,7 @@ const { XChainService, DB_MODULE_NAME, SEP, tmpDir } = require('../config/consta
 const { db }                                          = require('../state')
 const { getDefaultConfig, getModuleDatabaseName }    = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
-const { getDatabaseContainerId }                      = require('./DatabaseService')
+const { getDatabaseContainerId, ensureDatabasePool }  = require('./DatabaseService')
 
 // ─── Private helpers ─────────────────────────────────────────────
 
@@ -320,33 +320,56 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
 
     if (!fs.existsSync(archivePath)) throw new Error(`Bootstrap file not found: ${archivePath}`)
 
-    // Step 1: Extract outer archive
-    if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
-    ensureDir(workDir)
-    console.log('Extracting outer archive...')
-    await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
+    const innerArchive   = path.join(workDir, 'data.tar.gz')
+    const checksumFile    = path.join(workDir, 'data.sha256')
+    const verifySentinel = path.join(workDir, 'verify.ok')
 
-    const innerArchive = path.join(workDir, 'data.tar.gz')
-    const checksumFile = path.join(workDir, 'data.sha256')
+    // Step 1: Extract outer archive (resumable — if a prior run already
+    // extracted a valid inner archive + checksum into the work dir, keep them.
+    // Extracting + SHA-256 verifying a mainnet archive can take ~30 min each,
+    // so a late-stage failure must not force redoing that work.)
+    if (fs.existsSync(innerArchive) && fs.existsSync(checksumFile)) {
+        console.log('Found previously extracted archive in work dir — skipping outer extract')
+    } else {
+        if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
+        ensureDir(workDir)
+        console.log('Extracting outer archive...')
+        await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
 
-    if (!fs.existsSync(innerArchive) || !fs.existsSync(checksumFile)) {
-        fs.rmSync(workDir, { recursive: true })
-        throw new Error('Archive is malformed: missing data.tar.gz or data.sha256')
+        if (!fs.existsSync(innerArchive) || !fs.existsSync(checksumFile)) {
+            fs.rmSync(workDir, { recursive: true })
+            throw new Error('Archive is malformed: missing data.tar.gz or data.sha256')
+        }
     }
 
-    // Step 2: Verify checksum
-    process.stdout.write('Verifying checksum... ')
-    const stored   = (await fs.promises.readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0]
-    const computed = await computeSha256(innerArchive)
-    if (stored !== computed) {
-        fs.rmSync(workDir, { recursive: true })
-        throw new Error(`Checksum mismatch!\n  Expected: ${stored}\n  Got:      ${computed}`)
+    // Step 2: Verify checksum (resumable — skip if a prior run already verified
+    // this inner archive and dropped the sentinel)
+    if (fs.existsSync(verifySentinel)) {
+        console.log('Checksum already verified in a prior run — skipping verification')
+    } else {
+        process.stdout.write('Verifying checksum... ')
+        const stored   = (await fs.promises.readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0]
+        const computed = await computeSha256(innerArchive)
+        if (stored !== computed) {
+            fs.rmSync(workDir, { recursive: true })
+            throw new Error(`Checksum mismatch!\n  Expected: ${stored}\n  Got:      ${computed}`)
+        }
+        await fs.promises.writeFile(verifySentinel, `${computed}  data.tar.gz\n`)
+        console.log('OK')
     }
-    console.log('OK')
 
     // Step 3: Get container ID and stop service
+    // Make sure the DB pool is open first — when this routine is invoked outside
+    // the CLI precheck the pool is null, and getModuleContainer would silently
+    // return null, masquerading as a missing container.
+    await ensureDatabasePool()
     const containerId = await db.getModuleContainer(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
-    if (!containerId) throw new Error(`utxo-tracker container not found for ${coin}/${network}`)
+    if (!containerId) {
+        if (!db.isReady()) {
+            throw new Error(`utxo-tracker container lookup failed: MariaDB connection pool is not initialized for ${coin}/${network}`)
+        }
+        throw new Error(`utxo-tracker container not found for ${coin}/${network} (DB pool is ready but no matching row in the modules table)`)
+    }
 
     console.log(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
     await stopContainer(containerId)
@@ -406,29 +429,42 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
 
     if (!fs.existsSync(archivePath)) throw new Error(`Bootstrap file not found: ${archivePath}`)
 
-    // Step 1: Extract outer archive
-    if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
-    ensureDir(workDir)
-    console.log('Extracting outer archive...')
-    await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
+    const innerArchive   = path.join(workDir, 'dump.sql.gz')
+    const checksumFile    = path.join(workDir, 'dump.sha256')
+    const verifySentinel = path.join(workDir, 'verify.ok')
 
-    const innerArchive = path.join(workDir, 'dump.sql.gz')
-    const checksumFile = path.join(workDir, 'dump.sha256')
+    // Step 1: Extract outer archive (resumable — keep a prior run's extracted
+    // inner archive + checksum so a late-stage failure doesn't force redoing
+    // the extract + SHA-256 verify work)
+    if (fs.existsSync(innerArchive) && fs.existsSync(checksumFile)) {
+        console.log('Found previously extracted archive in work dir — skipping outer extract')
+    } else {
+        if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
+        ensureDir(workDir)
+        console.log('Extracting outer archive...')
+        await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
 
-    if (!fs.existsSync(innerArchive) || !fs.existsSync(checksumFile)) {
-        fs.rmSync(workDir, { recursive: true })
-        throw new Error('Archive is malformed: missing dump.sql.gz or dump.sha256')
+        if (!fs.existsSync(innerArchive) || !fs.existsSync(checksumFile)) {
+            fs.rmSync(workDir, { recursive: true })
+            throw new Error('Archive is malformed: missing dump.sql.gz or dump.sha256')
+        }
     }
 
-    // Step 2: Verify checksum
-    process.stdout.write('Verifying checksum... ')
-    const stored   = (await fs.promises.readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0]
-    const computed = await computeSha256(innerArchive)
-    if (stored !== computed) {
-        fs.rmSync(workDir, { recursive: true })
-        throw new Error(`Checksum mismatch!\n  Expected: ${stored}\n  Got:      ${computed}`)
+    // Step 2: Verify checksum (resumable — skip if a prior run already verified
+    // this inner archive and dropped the sentinel)
+    if (fs.existsSync(verifySentinel)) {
+        console.log('Checksum already verified in a prior run — skipping verification')
+    } else {
+        process.stdout.write('Verifying checksum... ')
+        const stored   = (await fs.promises.readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0]
+        const computed = await computeSha256(innerArchive)
+        if (stored !== computed) {
+            fs.rmSync(workDir, { recursive: true })
+            throw new Error(`Checksum mismatch!\n  Expected: ${stored}\n  Got:      ${computed}`)
+        }
+        await fs.promises.writeFile(verifySentinel, `${computed}  dump.sql.gz\n`)
+        console.log('OK')
     }
-    console.log('OK')
 
     // Step 3: Get DB container ID and credentials
     const dbContainerId = await getDatabaseContainerId()

@@ -54,6 +54,28 @@ async function getDatabaseHostPort() {
     }
 }
 
+// Open the shared MariaDB connection pool if it isn't already open.
+// The CLI precheck normally does this, but restore/maintenance routines can
+// be invoked outside that path (e.g. driven directly rather than through the
+// interactive menu), in which case `db.pool` would be null and every
+// `db.getModuleContainer(...)` call would silently return null. Calling this
+// first makes those routines safe regardless of how they were invoked. It is
+// idempotent: a no-op once the pool is open.
+async function ensureDatabasePool() {
+    if (db.isReady()) return
+
+    const dbCreds = await ensureXchainNodeAccess()
+    const dbHost  = EXTERNAL_DB ? EXTERNAL_DB_HOST : XCHAIN_NODE_DB_HOST
+    const dbPort  = EXTERNAL_DB ? EXTERNAL_DB_PORT : await getDatabaseHostPort()
+    await db.createDatabase({
+        host:     dbHost,
+        port:     dbPort,
+        user:     dbCreds.user,
+        password: dbCreds.password,
+        database: dbCreds.database
+    })
+}
+
 async function checkIfDatabaseModuleExists(coin, network) {
     try {
         const dbContainerId = await getDatabaseContainerId()
@@ -592,5 +614,6 @@ module.exports = {
     resetDatabases,
     getDatabaseContainerId,
     getDatabaseHostPort,
+    ensureDatabasePool,
     ensureXchainNodeAccess
 }
