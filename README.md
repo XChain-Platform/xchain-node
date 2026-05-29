@@ -71,6 +71,20 @@ xchain_node stop all bitcoin regtest
 xchain_node start all bitcoin regtest
 ```
 
+## Host environment variables
+
+Five env vars override where xchain-node stores its filesystem state. Set them in the shell or systemd unit before running `xchain-node install`. Each falls back to a path inside this repo if unset, so existing installs are unaffected.
+
+| Variable | What goes here |
+|---|---|
+| `XCHAIN_NODE_DATA_DIR` | Per-coin state + bootstrap output archives (tens to hundreds of GB) |
+| `XCHAIN_NODE_TMP_DIR` | Bootstrap inner work archives (tens of GB during bootstrap ops) |
+| `XCHAIN_NODE_MODULES_DIR` | Git clones of sibling xchain-* repos |
+| `XCHAIN_NODE_CRYPTO_NODES_DIR` | Downloaded coin-node binaries |
+| `XCHAIN_NODE_CONFIG_DIR` | Generated per-service `.env` files |
+
+On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md).
+
 ## Scripts
 
 | Command | Description |

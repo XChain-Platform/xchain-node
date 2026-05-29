@@ -138,12 +138,17 @@ const LIBRARY_BUNDLES = {
 }
 
 // --- Directory paths ---
-const moduleDir          = path.join(__dirname, "..", "..", "modules")
-const tmpDir             = path.join(__dirname, "..", "..", "tmp")
+// These five operator-relevant roots are env-var-overridable so that hosts
+// with a small / partition and a large data volume (e.g., OVH RISE-3 with
+// /misc on a SATA mirror) can land bootstrap work + outputs on the big disk
+// without symlink surgery. Falling back to the in-repo default preserves
+// behavior for installs that don't set the env vars.
+const moduleDir          = process.env.XCHAIN_NODE_MODULES_DIR      || path.join(__dirname, "..", "..", "modules")
+const tmpDir             = process.env.XCHAIN_NODE_TMP_DIR          || path.join(__dirname, "..", "..", "tmp")
 const srcDir             = path.join(__dirname, "..")
-const cryptoNodesDir     = path.join(__dirname, "..", "..", "crypto_nodes")
-const dataDir            = path.join(__dirname, "..", "..", "data")
-const configDir          = path.join(__dirname, "..", "..", "config")
+const cryptoNodesDir     = process.env.XCHAIN_NODE_CRYPTO_NODES_DIR || path.join(__dirname, "..", "..", "crypto_nodes")
+const dataDir            = process.env.XCHAIN_NODE_DATA_DIR         || path.join(__dirname, "..", "..", "data")
+const configDir          = process.env.XCHAIN_NODE_CONFIG_DIR       || path.join(__dirname, "..", "..", "config")
 const containersFilesDir = path.join(tmpDir, "containers_files")
 
 module.exports = {
