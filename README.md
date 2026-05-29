@@ -85,6 +85,12 @@ Five env vars override where xchain-node stores its filesystem state. Set them i
 
 On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md).
 
+## Telemetry
+
+`xchain-node` sends an anonymous usage ping (xchain-node + service versions, which services are running, basic OS/Docker info). Your **IP address is never sent or stored** — the receiver derives only a coarse country/region and an anonymous one-way network hash from the connection, then discards the IP. It contains **no** secrets, wallet data, addresses, or config. It is **on by default**, sent only on install/update and at most once per day otherwise, and never blocks a command.
+
+Turn it off with any of: `--no-telemetry` on any command (sticks for future runs), `XCHAIN_NODE_NO_TELEMETRY=1`, or `"optOut": true` in `~/.xchain-node/telemetry.json`. Point at a different collector with `XCHAIN_NODE_TELEMETRY_URL`. Full details: [Privacy & Telemetry](https://github.com/XChain-platform/xchain-documentation/blob/master/operations/TELEMETRY.md).
+
 ## Scripts
 
 | Command | Description |

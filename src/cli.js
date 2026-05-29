@@ -24,6 +24,7 @@ const {
 } = require('./operations/moduleOperations')
 const { getStatus }            = require('./services/StatusService')
 const { scanAndRegisterModules } = require('./services/DiscoveryService')
+const { maybeReportTelemetry } = require('./services/TelemetryService')
 const { makeBootstrap }        = require('./services/BootstrapService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 
@@ -35,6 +36,12 @@ async function parseCommand() {
         setVerbose(thisCommand.opts().verbose ?? false)
         if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
         await preCheck(commandsNeedingVersions.includes(actionCommand.name()))
+        // Anonymous usage telemetry (default-on, opt-out). Fire-and-forget:
+        // a failure here must never block or break the command being run.
+        try {
+            const optOut = thisCommand.opts().telemetry === false
+            await maybeReportTelemetry(actionCommand.name(), optOut)
+        } catch { /* telemetry is best-effort */ }
     })
 
     program
@@ -44,6 +51,7 @@ async function parseCommand() {
         .option('-i, --interactive', 'Interactive mode')
         .option('--no-bootstrap', 'Do not download bootstrap files (full parse)')
         .option('--no-explorer', 'Do not install xchain-explorer')
+        .option('--no-telemetry', 'Disable anonymous usage telemetry (see Privacy & Telemetry docs)')
         .action(async (options) => {
             if (options.interactive) {
                 return startInterface()
