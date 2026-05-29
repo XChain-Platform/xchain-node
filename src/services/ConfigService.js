@@ -192,6 +192,17 @@ async function getDefaultConfig(module, coin, network) {
         }
     }
 
+    // Usage-telemetry env is only meaningful to the hub (the telemetry collector).
+    // TELEMETRY_IP_SALT is read from the host environment (e.g. xchain-node's .env) so
+    // the IP-hash salt stays out of source and config files; without it the hub records
+    // country/region but leaves ip_hash null. The hub is a shared service (no per
+    // coin/network config file), so the host env is the injection point.
+    if (module === HUB_MODULE_NAME) {
+        defaultValues["TELEMETRY_ENABLED"]        = process.env.TELEMETRY_ENABLED || "true"
+        defaultValues["TELEMETRY_RETENTION_DAYS"] = process.env.TELEMETRY_RETENTION_DAYS || 90
+        defaultValues["TELEMETRY_IP_SALT"]        = process.env.TELEMETRY_IP_SALT || ""
+    }
+
     // Read the config file for this coin/network pair
     const defaultConfig = {}
     if (coin && network && coin !== "" && network !== "") {
