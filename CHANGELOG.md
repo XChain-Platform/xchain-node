@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.19] - 2026-05-29
+
+### Changed
+- `preCheck` no longer pushes local config to the hub/explorer for read-only commands (`ps`, `tail`, `logs`, `monitor`, `tailmonitor`). The `updateconfig` round-trip can take tens of seconds on multi-coin nodes and adds nothing when local service state hasn't changed, so display-only commands now return promptly. State-changing commands (`install`, `update`, `start`, `stop`, `restart`, `uninstall`, `reset`, `sync`, …) still push as before — the sync is the default, so any unlisted/new command keeps pushing.
+
 ## [0.0.18] - 2026-05-28
 
 ### Security

@@ -32,10 +32,21 @@ async function parseCommand() {
     const program = new Command()
 
     const commandsNeedingVersions = ['install', 'update', 'reinstall']
+    // Read-only commands only display state and never change which services
+    // are installed/running, so they don't need to push local config to the
+    // hub/explorer. Skipping the push keeps them fast and avoids the lengthy
+    // updateconfig round-trip on multi-coin nodes. Any command NOT listed here
+    // (install, update, start, stop, restart, uninstall, reset, sync, …) still
+    // pushes — the default is to sync, so a new/unknown command stays safe.
+    const readOnlyCommands = ['ps', 'tail', 'logs', 'monitor', 'tailmonitor']
     program.hook('preAction', async (thisCommand, actionCommand) => {
         setVerbose(thisCommand.opts().verbose ?? false)
         if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
-        await preCheck(commandsNeedingVersions.includes(actionCommand.name()))
+        const commandName = actionCommand.name()
+        await preCheck(
+            commandsNeedingVersions.includes(commandName),
+            !readOnlyCommands.includes(commandName)
+        )
         // Anonymous usage telemetry (default-on, opt-out). Fire-and-forget:
         // a failure here must never block or break the command being run.
         try {

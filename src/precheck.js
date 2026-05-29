@@ -24,7 +24,7 @@ function createDirectories() {
     if (!fs.existsSync(containersFilesDir))  fs.mkdirSync(containersFilesDir)
 }
 
-async function preCheck(checkVersions = false) {
+async function preCheck(checkVersions = false, syncHubConfig = true) {
     try {
         if (isVerbose()) console.log("Checking if Docker is installed")
         await checkDockerInstalledAndReachable()
@@ -103,12 +103,18 @@ async function preCheck(checkVersions = false) {
         throw new Error("There was an error trying to install the hub module")
     }
 
-    try {
-        await updateHub()
-        await updateExplorer()
-    } catch (err) {
-        console.log(err)
-        throw new Error("There was an error trying to update the hub module")
+    // Only push local config to the hub/explorer for state-changing commands.
+    // Read-only commands (ps, tail, logs, …) pass syncHubConfig=false to skip
+    // this — the updateconfig round-trip can be slow on multi-coin nodes and
+    // pushing it adds nothing when local service state hasn't changed.
+    if (syncHubConfig) {
+        try {
+            await updateHub()
+            await updateExplorer()
+        } catch (err) {
+            console.log(err)
+            throw new Error("There was an error trying to update the hub module")
+        }
     }
 
     return true
