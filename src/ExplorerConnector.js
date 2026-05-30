@@ -38,6 +38,7 @@ class ExplorerConnector {
         try {
             response = await axios.post(this.url, data)
         } catch (err) {
+            console.error('ExplorerConnector: failed to check explorer connectivity:', err.message);
             return false
         }
 

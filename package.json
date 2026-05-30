@@ -16,7 +16,7 @@
     "dotenv": "^16.4.5",
     "enquirer": "^2.4.1",
     "follow-redirects": "^1.15.9",
-    "mariadb": "3.1.1",
+    "mariadb": "^3.2.3",
     "semver": "^7.6.3"
   },
   "scripts": {
