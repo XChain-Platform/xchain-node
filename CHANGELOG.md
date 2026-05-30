@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.21] - 2026-05-29
+
+### Security
+- Pin `tmp` to `>=0.2.3` via an `overrides` entry. The vulnerable `tmp@0.0.33` was pulled in transitively through the `@stryker-mutator/core` dev toolchain (`@inquirer/editor` → `external-editor` → `tmp`) and was flagged by GHSA-ph9p-34f9-6g65 (path traversal via unsanitized `prefix`/`postfix`) and GHSA-52f5-9888-hmc6 (symlink `dir` write). `tmp` is not used on any runtime code path — it only reaches the mutation-testing tooling — but the override upgrades it to a patched line (`0.2.7`) and clears the audit warning. No functional change; Stryker and the test suite resolve and run unchanged.
+
 ## [0.0.20] - 2026-05-29
 
 ### Changed

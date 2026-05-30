@@ -1,6 +1,6 @@
 {
   "name": "xchain-node",
-  "version": "0.0.20",
+  "version": "0.0.21",
   "description": "xchain-node allows users to install, configure and run XChain platform nodes.",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
@@ -45,7 +45,8 @@
   },
   "overrides": {
     "qs": "^6.15.2",
-    "serialize-javascript": ">=6.0.4"
+    "serialize-javascript": ">=6.0.4",
+    "tmp": ">=0.2.3"
   },
   "bin": {
     "xchain_node": "./src/index.js"
