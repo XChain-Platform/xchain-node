@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.20] - 2026-05-29
+
+### Changed
+- Dependency installs are now reproducible: `package-lock.json` is committed to the repo (previously git-ignored). With the lockfile tracked, a fresh `npm install` resolves the exact dependency tree that was tested rather than whatever latest compatible minor/patch versions happen to be published at install time.
+
 ## [0.0.19] - 2026-05-29
 
 ### Changed
