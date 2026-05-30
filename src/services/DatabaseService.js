@@ -492,7 +492,7 @@ async function buildDatabaseModule(coin, network) {
         await execFileAsync('docker', ['pull', 'mariadb:10.11'])
         await execFileAsync('docker', ['tag', 'mariadb:10.11', containerPrefix])
 
-        const runArgs = ['run', '-d', '--name', containerPrefix, '--hostname', 'mariadb']
+        const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb']
         runArgs.push('--network', getDockerNetwork(coin, network))
         const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
         runArgs.push('-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`)

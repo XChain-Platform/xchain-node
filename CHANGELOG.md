@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.22] - 2026-05-30
+
+### Fixed
+- Managed containers are now created with `--restart unless-stopped`. Previously every container started by `xchain-node` (service modules, coin node daemons, and the MariaDB container) used Docker's default restart policy of `no`, so after a host reboot or Docker daemon restart none of them came back automatically — the platform stayed dark until an operator manually restarted each container in order. The flag was added to the `docker run` argument list at all three container-creation sites (`ModuleService`, `NodeService`, `DatabaseService`); containers now restart automatically after a crash or daemon restart and stay down only when the operator intentionally stops them. The policy is applied at creation time, so already-running containers must be migrated once with `docker update --restart unless-stopped <id>` (or recreated via `stop` + `start`) to pick it up.
+
 ## [0.0.21] - 2026-05-29
 
 ### Security

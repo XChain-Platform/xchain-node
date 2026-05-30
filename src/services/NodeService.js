@@ -118,6 +118,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
             }
             const runArgs = [
                 'run', '-d',
+                '--restart', 'unless-stopped',
                 '--name', containerPrefix,
                 '-v', `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`,
                 '--hostname', NODE_MODULE_NAME,
