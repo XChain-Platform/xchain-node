@@ -10,7 +10,7 @@ const mariadb     = require('mariadb')
 const { Password, Input, NumberPrompt } = require('enquirer')
 
 const {
-    DB_MODULE_NAME, XChainService, SEP,
+    DB_MODULE_NAME, HUB_MODULE_NAME, XChainService, SEP,
     EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER
 } = require('../config/constants')
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
@@ -358,6 +358,21 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 console.log("Permissions granted to " + mariadbUser + "!")
             }
 
+            // The e2e federation suites (xchain-e2e-test test:federation /
+            // test:attestation:llm) spin up throwaway in-process validator hubs
+            // via MultiValidatorHub, each creating + dropping its own DB named
+            // XChain_<coin>_<network>_MVH_<pid>_<n>. Grant the hub user CREATE/DROP
+            // on ONLY that test-only name pattern (escaped underscores → matches
+            // nothing but MVH databases) so those suites run without a privileged
+            // root account. Idempotent; harmless on networks that never run them.
+            if (module === HUB_MODULE_NAME) {
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                    "GRANT ALL PRIVILEGES ON `XChain\\_%\\_MVH\\_%`.* TO " + mariadbUser
+                )
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
+                console.log("MVH test-database permissions granted to " + mariadbUser + "!")
+            }
+
             return true
         } catch (err) {
             console.log(err)
@@ -404,6 +419,17 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
                 console.log("Permissions granted to " + mariadbUser + "!")
+            }
+
+            // See the docker branch above: grant the hub user CREATE/DROP on the
+            // MVH test-database name pattern so the e2e federation suites run
+            // without root. Test-only pattern; idempotent.
+            if (module === HUB_MODULE_NAME) {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "GRANT ALL PRIVILEGES ON `XChain\\_%\\_MVH\\_%`.* TO " + mariadbUser
+                )
+                await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
+                console.log("MVH test-database permissions granted to " + mariadbUser + "!")
             }
             return true
         } catch (err) {
