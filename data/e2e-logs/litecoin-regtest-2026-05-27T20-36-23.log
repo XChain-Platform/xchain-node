@@ -1,0 +1,30 @@
+
+[0m[0m
+Checking if GAS token (XCHAIN) exists...
+GAS token not found, creating it...
+Sending funds (1) to mmZrNbA43ViS3JXthm1FuvJHVefuYmUMMZ
+Waiting for the utxos for mmZrNbA43ViS3JXthm1FuvJHVefuYmUMMZ
+Creating and sending ISSUE V0 tx...
+Creating the transaction...
+Creating the second transaction (the encode type P2SH was chosen)...
+Sending the transaction... (hex length: 448)
+Sending the second transaction... (hex length: 570)
+Waiting for the transaction (24986aed616fed1ca03022fe3ccdb1771bac4a45d1d7acd13d679f0746fbc8a7) to be confirmed...
+Waiting for the second transaction (97724b65ff55f6b679f400cbbdf5942fb2ba0303f09f96404c33e7cff122334e) to be confirmed...
+Waiting for the utxo-tracker to index confirmed UTXOs from tx 24986aed616fed1ca03022fe3ccdb1771bac4a45d1d7acd13d679f0746fbc8a7...
+Waiting for ISSUE in the database...
+GAS token (XCHAIN) created successfully
+[0m  Attestation framework — round-trip request → response → callback[0m
+Attestation framework requires BTC chain — skipping on LTC
+  [36m  - emits ATTEST v0 (request) on EXECUTE and stores it pending[0m
+  [36m  - accepts a signed ATTEST v1 (response), fulfills the request, and fires the callback[0m
+  [36m  - auto-expires a request whose DEADLINE_BLOCK passes without a response, firing the callback with status=expired[0m
+  [36m  - rejects a signature from an unstaked pubkey[0m
+  [36m  - accepts a redundancy=3 response with 3 valid signatures (PBFT quorum)[0m
+  [36m  - rejects a redundancy=3 response with only 2 valid signatures[0m
+
+
+[92m [0m[32m 0 passing[0m[90m (5s)[0m
+[36m [0m[36m 6 pending[0m
+
+\[1G[0K

@@ -42,6 +42,7 @@ describe('Chaos: Config Resilience', function () {
             const fsStub = {
                 existsSync: sinon.stub().returns(false),
                 createReadStream: sinon.stub(),
+                writeFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -61,6 +62,7 @@ describe('Chaos: Config Resilience', function () {
             const fsStub = {
                 existsSync: sinon.stub().returns(false),
                 createReadStream: sinon.stub(),
+                writeFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -118,6 +120,7 @@ describe('Chaos: Config Resilience', function () {
             const fsStub = {
                 existsSync: sinon.stub().returns(true),
                 createReadStream: sinon.stub().callsFake(() => Readable.from(configContent.split('\n').map(l => l + '\n'))),
+                appendFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -133,6 +136,7 @@ describe('Chaos: Config Resilience', function () {
             const fsStub = {
                 existsSync: sinon.stub().returns(true),
                 createReadStream: sinon.stub().callsFake(() => Readable.from('')),
+                appendFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -149,6 +153,7 @@ describe('Chaos: Config Resilience', function () {
             const fsStub = {
                 existsSync: sinon.stub().returns(true),
                 createReadStream: sinon.stub().callsFake(() => Readable.from(configContent.split('\n').map(l => l + '\n'))),
+                appendFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -191,6 +196,7 @@ describe('Chaos: Config Resilience', function () {
             const fsStub = {
                 existsSync: sinon.stub().returns(true),
                 createReadStream: sinon.stub().callsFake(() => Readable.from(configContent)),
+                appendFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -246,6 +252,7 @@ describe('Chaos: Config Resilience', function () {
             const fsStub = {
                 existsSync: sinon.stub().returns(false),
                 createReadStream: sinon.stub(),
+                writeFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }

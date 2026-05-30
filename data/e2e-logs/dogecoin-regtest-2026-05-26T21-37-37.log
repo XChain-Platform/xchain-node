@@ -1,0 +1,22 @@
+
+> xchain-e2e-test@0.3.3 test
+> mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'
+
+
+[0m[0m
+[31m  1) "before all" hook: beforeAll in "{root}"[0m
+There was a problem setting the default mining time values for the regtest miner
+
+[92m [0m[32m 0 passing[0m[90m (216ms)[0m
+[31m  1 failing[0m
+
+[0m  1) "before all" hook: beforeAll in "{root}":
+[0m[31m     Error: Can't connect to the XChain Regtest Miner module[0m[90m
+      at /XChainE2ETest/test/initialCheck.test.js:216:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Object.phase (test/perf/perfCollector.js:41:20)
+      at async Context.beforeAll (test/initialCheck.test.js:183:9)
+[0m
+
+
+\[1G[0K

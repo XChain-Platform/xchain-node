@@ -1,0 +1,28 @@
+
+> xchain-e2e-test@0.3.8 test
+> mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'
+
+
+[0m[0m
+Error: Error in network request: request to http://node:18444/ failed, reason: getaddrinfo ENOTFOUND node
+    at BlockchainConnector.getNetworkInfo [90m(/XChainE2ETest/[39msrc/BlockchainConnector.js:71:19[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:185:32
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:183:9[90m)[39m
+[31m  1) "before all" hook: beforeAll in "{root}"[0m
+There was a problem setting the default mining time values for the regtest miner
+
+[92m [0m[32m 0 passing[0m[90m (15ms)[0m
+[31m  1 failing[0m
+
+[0m  1) "before all" hook: beforeAll in "{root}":
+[0m[31m     Error: There was an error trying to connect to the node[0m[90m
+      at /XChainE2ETest/test/initialCheck.test.js:191:23
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Object.phase (test/perf/perfCollector.js:41:20)
+      at async Context.beforeAll (test/initialCheck.test.js:183:9)
+[0m
+
+
+\[1G[0K

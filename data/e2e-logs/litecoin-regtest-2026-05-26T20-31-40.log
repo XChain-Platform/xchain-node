@@ -1,0 +1,25 @@
+
+> xchain-e2e-test@0.3.3 test
+> mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'
+
+
+[0m[0m
+[31m  1) "before all" hook: beforeAll in "{root}"[0m
+
+[92m [0m[32m 0 passing[0m[90m (25ms)[0m
+[31m  1 failing[0m
+
+[0m  1) "before all" hook: beforeAll in "{root}":
+[0m[31m     FetchError: request to http://xchain-node-litecoin-regtest-xchain-utxo-tracker:3001/ failed, reason: connect ECONNREFUSED 172.20.0.6:3001[0m[90m
+      at ClientRequest.<anonymous> (node_modules/node-fetch/lib/index.js:1501:11)
+      at ClientRequest.emit (node:events:509:20)
+      at emitErrorEvent (node:_http_client:109:11)
+      at Socket.socketErrorListener (node:_http_client:593:5)
+      at Socket.emit (node:events:509:20)
+      at emitErrorNT (node:internal/streams/destroy:170:8)
+      at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+      at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[0m
+
+
+\[1G[0K

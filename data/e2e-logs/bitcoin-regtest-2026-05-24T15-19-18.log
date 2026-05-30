@@ -1,0 +1,35 @@
+
+> xchain-e2e-test@0.3.3 test
+> mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'
+
+
+ Exception during run: Error: Cannot find module '../helpers/cryptoHelper'
+Require stack:
+- /XChainE2ETest/test/actions/staking.test.js
+[90m    at Module._resolveFilename (node:internal/modules/cjs/loader:1519:15)[39m
+[90m    at wrapResolveFilename (node:internal/modules/cjs/loader:1073:27)[39m
+[90m    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1097:10)[39m
+[90m    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1124:12)[39m
+[90m    at Module._load (node:internal/modules/cjs/loader:1296:5)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)[39m
+[90m    at Module.require (node:internal/modules/cjs/loader:1619:12)[39m
+[90m    at require (node:internal/modules/helpers:191:16)[39m
+    at Object.<anonymous> [90m(/XChainE2ETest/[39mtest/actions/staking.test.js:3:22[90m)[39m
+[90m    at Module._compile (node:internal/modules/cjs/loader:1873:14)[39m
+[90m    at Object..js (node:internal/modules/cjs/loader:2013:10)[39m
+[90m    at Module.load (node:internal/modules/cjs/loader:1596:32)[39m
+[90m    at Module._load (node:internal/modules/cjs/loader:1398:12)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)[39m
+[90m    at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:373:15)[39m
+[90m    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:245:9)[39m
+[90m    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)[39m
+    at async node:internal/modules/esm/loader:666:26
+    at async formattedImport [90m(/XChainE2ETest/[39mnode_modules/[4mmocha[24m/lib/nodejs/esm-utils.js:10:14[90m)[39m
+    at async Object.requireModule [as requireOrImport] [90m(/XChainE2ETest/[39mnode_modules/[4mmocha[24m/lib/nodejs/esm-utils.js:102:30[90m)[39m
+    at async exports.loadFilesAsync [90m(/XChainE2ETest/[39mnode_modules/[4mmocha[24m/lib/nodejs/esm-utils.js:155:20[90m)[39m
+    at async singleRun [90m(/XChainE2ETest/[39mnode_modules/[4mmocha[24m/lib/cli/run-helpers.js:174:3[90m)[39m
+    at async exports.handler [90m(/XChainE2ETest/[39mnode_modules/[4mmocha[24m/lib/cli/run.js:384:5[90m)[39m {
+  code: [32m'MODULE_NOT_FOUND'[39m,
+  requireStack: [ [32m'/XChainE2ETest/test/actions/staking.test.js'[39m ]
+}
+\[1G[0K

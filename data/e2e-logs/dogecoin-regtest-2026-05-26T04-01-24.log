@@ -1,0 +1,23 @@
+
+> xchain-e2e-test@0.3.3 test
+> mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'
+
+
+[0m[0m
+Checking if GAS token (XCHAIN) exists...
+GAS token (XCHAIN) already exists
+[0m  ADDRESS[0m
+[0m    v0[0m
+Sending funds (1) to mrfmhB8YDdZqBXN6B65Pm5JjNdMQNwkwNG
+Waiting for the utxos for mrfmhB8YDdZqBXN6B65Pm5JjNdMQNwkwNG
+UTXOs still not visible (tracker=4864 node=4810 lag=-54) — nudging miner to mine a block (attempt 1/6)
+UTXOs still not visible (tracker=4864 node=4811 lag=-53) — nudging miner to mine a block (attempt 2/6)
+UTXOs still not visible (tracker=4864 node=4812 lag=-52) — nudging miner to mine a block (attempt 3/6)
+UTXOs still not visible (tracker=4864 node=4813 lag=-51) — nudging miner to mine a block (attempt 4/6)
+UTXOs still not visible (tracker=4864 node=4814 lag=-50) — nudging miner to mine a block (attempt 5/6)
+\[1G[0K[1mnpm[22m [31merror[39m [94mpath[39m /XChainE2ETest
+\[1G[0K[1mnpm[22m [31merror[39m command failed
+\[1G[0K[1mnpm[22m [31merror[39m [94msignal[39m SIGTERM
+\[1G[0K[1mnpm[22m [31merror[39m [94mcommand[39m sh -c mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'
+\[1G[0K[1mnpm[22m [31merror[39m A complete log of this run can be found in: /root/.npm/_logs/2026-05-26T03_58_30_205Z-debug-0.log
+\[1G[0K

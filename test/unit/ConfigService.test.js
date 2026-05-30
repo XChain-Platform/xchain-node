@@ -235,6 +235,8 @@ describe('ConfigService', function () {
             const fsStub = {
                 createReadStream: sinon.stub().returns(streamFromString(configContent)),
                 existsSync: sinon.stub().returns(true),
+                appendFileSync: sinon.stub(),
+                writeFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -267,11 +269,13 @@ describe('ConfigService', function () {
                 expect(config['NODE_PORT']).to.equal(18444)
             })
 
-            it('returns NODE_USER and NODE_PASSWORD as rpc', async function () {
+            it('generates random NODE_USER and NODE_PASSWORD when absent from config file', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
-                expect(config['NODE_USER']).to.equal('rpc')
-                expect(config['NODE_PASSWORD']).to.equal('rpc')
+                expect(config['NODE_USER']).to.be.a('string').with.length.greaterThan(0)
+                expect(config['NODE_USER']).to.not.equal('rpc')
+                expect(config['NODE_PASSWORD']).to.be.a('string').with.length.greaterThan(0)
+                expect(config['NODE_PASSWORD']).to.not.equal('rpc')
             })
 
             it('returns correct UTXO_TRACKER_URL as Docker image name', async function () {

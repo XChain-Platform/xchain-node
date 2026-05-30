@@ -1,0 +1,1423 @@
+
+
+
+
+
+2026-05-27T23:49:04Z Ignoring unknown configuration value regtest.rpctimeout
+2026-05-27T23:49:04Z Setting version bits activation parameters for mweb to start=0, timeout=0, start_height=212667024507776, timeout_height=212667024507776
+2026-05-27T23:49:04Z Litecoin Core version v0.21.4 (release build)
+2026-05-27T23:49:04Z Validating signatures for all blocks.
+2026-05-27T23:49:04Z Setting nMinimumChainWork=0000000000000000000000000000000000000000000000000000000000000000
+2026-05-27T23:49:04Z Using the 'standard' SHA256 implementation
+2026-05-27T23:49:04Z Default data directory /root/.litecoin
+2026-05-27T23:49:04Z Using data directory /root/.litecoin/regtest
+2026-05-27T23:49:04Z Config file: /etc/litecoin/litecoin.conf
+2026-05-27T23:49:04Z Config file arg: fallbackfee="0.00001"
+2026-05-27T23:49:04Z Config file arg: listen="1"
+2026-05-27T23:49:04Z Config file arg: printtoconsole="1"
+2026-05-27T23:49:04Z Config file arg: regtest="1"
+2026-05-27T23:49:04Z Config file arg: rpcpassword=****
+2026-05-27T23:49:04Z Config file arg: rpcthreads="16"
+2026-05-27T23:49:04Z Config file arg: rpcuser=****
+2026-05-27T23:49:04Z Config file arg: rpcworkqueue="128"
+2026-05-27T23:49:04Z Config file arg: server="1"
+2026-05-27T23:49:04Z Config file arg: txindex="1"
+2026-05-27T23:49:04Z Config file arg: [regtest] limitdescendantcount="2500"
+2026-05-27T23:49:04Z Config file arg: [regtest] limitdescendantsize="3000"
+2026-05-27T23:49:04Z Config file arg: [regtest] rpcallowip="0.0.0.0/0"
+2026-05-27T23:49:04Z Config file arg: [regtest] rpcbind=****
+2026-05-27T23:49:04Z Config file arg: [regtest] rpcport="18444"
+2026-05-27T23:49:04Z Config file arg: [regtest] vbparams="mweb:0:0"
+2026-05-27T23:49:04Z Command-line arg: conf="/etc/litecoin/litecoin.conf"
+2026-05-27T23:49:04Z Using at most 125 automatic connections (2048 file descriptors available)
+2026-05-27T23:49:04Z Using 16 MiB out of 32/2 requested for signature cache, able to store 524288 elements
+2026-05-27T23:49:04Z Using 16 MiB out of 32/2 requested for script execution cache, able to store 524288 elements
+2026-05-27T23:49:04Z Script verification uses 5 additional threads
+2026-05-27T23:49:04Z scheduler thread start
+2026-05-27T23:49:04Z WARNING: the RPC server is not safe to expose to untrusted networks such as the public internet
+2026-05-27T23:49:04Z HTTP: creating work queue of depth 128
+2026-05-27T23:49:04Z Config options rpcuser and rpcpassword will soon be deprecated. Locally-run instances may remove rpcuser to use cookie-based auth, or may be replaced with rpcauth. Please see share/rpcauth for rpcauth auth generation.
+2026-05-27T23:49:04Z HTTP: starting 16 worker threads
+2026-05-27T23:49:04Z Using wallet directory /root/.litecoin/regtest/wallets
+2026-05-27T23:49:04Z init message: Verifying wallet(s)...
+2026-05-27T23:49:04Z init message: Loading banlist...
+2026-05-27T23:49:04Z ERROR: DeserializeFileDB: Failed to open file /root/.litecoin/regtest/banlist.dat
+2026-05-27T23:49:04Z Invalid or missing banlist.dat; recreating
+2026-05-27T23:49:04Z SetNetworkActive: true
+2026-05-27T23:49:04Z Using /16 prefix for IP bucketing
+2026-05-27T23:49:04Z Cache configuration:
+2026-05-27T23:49:04Z * Using 2.0 MiB for block index database
+2026-05-27T23:49:04Z * Using 56.0 MiB for transaction index database
+2026-05-27T23:49:04Z * Using 49.0 MiB for basic block filter index database
+2026-05-27T23:49:04Z * Using 8.0 MiB for chain state database
+2026-05-27T23:49:04Z * Using 335.0 MiB for in-memory UTXO set (plus up to 286.1 MiB of unused mempool space)
+2026-05-27T23:49:04Z init message: Loading block index...
+2026-05-27T23:49:04Z Switching active chainstate to Chainstate [ibd] @ height -1 (null)
+2026-05-27T23:49:04Z Opening LevelDB in /root/.litecoin/regtest/blocks/index
+2026-05-27T23:49:04Z Opened LevelDB successfully
+2026-05-27T23:49:04Z Using obfuscation key for /root/.litecoin/regtest/blocks/index: 0000000000000000
+2026-05-27T23:49:04Z LoadBlockIndexDB: last block file = 0
+2026-05-27T23:49:04Z LoadBlockIndexDB: last block file info: CBlockFileInfo(blocks=0, size=0, heights=0...0, time=1970-01-01...1970-01-01)
+2026-05-27T23:49:04Z Checking all blk files are present...
+2026-05-27T23:49:04Z Initializing databases...
+2026-05-27T23:49:04Z Pre-allocating up to position 0x1000000 in blk00000.dat
+2026-05-27T23:49:05Z Opening LevelDB in /root/.litecoin/regtest/chainstate
+2026-05-27T23:49:05Z Opened LevelDB successfully
+2026-05-27T23:49:05Z Wrote new obfuscate key for /root/.litecoin/regtest/chainstate: 2643bf06f579c518
+2026-05-27T23:49:05Z Using obfuscation key for /root/.litecoin/regtest/chainstate: 2643bf06f579c518
+2026-05-27T23:49:05Z Create(18) - File /root/.litecoin/regtest/leaf000000.dat does not exist. Creating it now.
+2026-05-27T23:49:05Z Create(18) - File /root/.litecoin/regtest/O000000.dat does not exist. Creating it now.
+2026-05-27T23:49:05Z init message: Rewinding blocks...
+2026-05-27T23:49:05Z  block index             568ms
+2026-05-27T23:49:05Z Opening LevelDB in /root/.litecoin/regtest/indexes/txindex
+2026-05-27T23:49:05Z Opened LevelDB successfully
+2026-05-27T23:49:05Z Using obfuscation key for /root/.litecoin/regtest/indexes/txindex: 0000000000000000
+2026-05-27T23:49:05Z txindex thread start
+2026-05-27T23:49:05Z txindex is enabled
+2026-05-27T23:49:05Z txindex thread exit
+2026-05-27T23:49:05Z Opening LevelDB in /root/.litecoin/regtest/indexes/blockfilter/basic/db
+2026-05-27T23:49:05Z Opened LevelDB successfully
+2026-05-27T23:49:05Z Using obfuscation key for /root/.litecoin/regtest/indexes/blockfilter/basic/db: 0000000000000000
+2026-05-27T23:49:05Z basic block filter index thread start
+2026-05-27T23:49:05Z basic block filter index is enabled
+2026-05-27T23:49:05Z basic block filter index thread exit
+2026-05-27T23:49:05Z loadblk thread start
+2026-05-27T23:49:05Z UpdateTip: new best=530827f38f93b43ed12af0b3ad25a288dc02ed74d6d7857862df51fc56c416f9 height=0 version=0x00000001 log2_work=1.000000 tx=1 date='2011-02-02T23:16:42Z' progress=1.000000 cache=0.0MiB(0txo)
+2026-05-27T23:49:05Z Failed to open mempool file from disk. Continuing anyway.
+2026-05-27T23:49:05Z loadblk thread exit
+2026-05-27T23:49:05Z block tree size = 1
+2026-05-27T23:49:05Z nBestHeight = 0
+2026-05-27T23:49:05Z torcontrol thread start
+2026-05-27T23:49:05Z Bound to [::]:19444
+2026-05-27T23:49:05Z Pre-allocating up to position 0x100000 in fltr00000.dat
+2026-05-27T23:49:05Z Bound to 0.0.0.0:19444
+2026-05-27T23:49:05Z Unable to bind to 127.0.0.1:19444 on this computer. Litecoin Core is probably already running.
+2026-05-27T23:49:05Z init message: Loading P2P addresses...
+2026-05-27T23:49:05Z ERROR: DeserializeFileDB: Failed to open file /root/.litecoin/regtest/peers.dat
+2026-05-27T23:49:05Z Invalid or missing peers.dat; recreating
+2026-05-27T23:49:05Z ERROR: DeserializeFileDB: Failed to open file /root/.litecoin/regtest/anchors.dat
+2026-05-27T23:49:05Z 0 block-relay-only anchors will be tried for connections.
+2026-05-27T23:49:05Z init message: Starting network threads...
+2026-05-27T23:49:05Z net thread start
+2026-05-27T23:49:05Z init message: Done loading
+2026-05-27T23:49:05Z opencon thread start
+2026-05-27T23:49:05Z dnsseed thread start
+2026-05-27T23:49:05Z 0 addresses found from DNS seeds
+2026-05-27T23:49:05Z dnsseed thread exit
+2026-05-27T23:49:05Z msghand thread start
+2026-05-27T23:49:05Z addcon thread start
+2026-05-27T23:49:06Z Using BerkeleyDB version Berkeley DB 4.8.30: (April  9, 2010)
+2026-05-27T23:49:06Z Using wallet /root/.litecoin/regtest/wallets/xchain_regtest_wallet/wallet.dat
+2026-05-27T23:49:06Z BerkeleyEnvironment::Open: LogDir=/root/.litecoin/regtest/wallets/xchain_regtest_wallet/database ErrorFile=/root/.litecoin/regtest/wallets/xchain_regtest_wallet/db.log
+2026-05-27T23:49:06Z init message: Loading wallet...
+2026-05-27T23:49:06Z [xchain_regtest_wallet] Wallet File Version = 10500
+2026-05-27T23:49:06Z [xchain_regtest_wallet] Keys: 0 plaintext, 0 encrypted, 0 w/ metadata, 0 total. Unknown wallet records: 0
+2026-05-27T23:49:06Z [xchain_regtest_wallet] External scriptPubKey Manager for output type 3 does not exist
+2026-05-27T23:49:09Z [xchain_regtest_wallet] keypool added 3000 keys (1000 internal, 1000 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:49:09Z [xchain_regtest_wallet] LegacyScriptPubKeyMan::NewKeyPool rewrote keypool
+2026-05-27T23:49:09Z [xchain_regtest_wallet] Wallet completed loading in            2894ms
+2026-05-27T23:49:09Z [xchain_regtest_wallet] setKeyPool.size() = 2000
+2026-05-27T23:49:09Z [xchain_regtest_wallet] mapWallet.size() = 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] m_address_book.size() = 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] keypool reserve 1
+2026-05-27T23:49:09Z [xchain_regtest_wallet] keypool keep 1
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z Pre-allocating up to position 0x100000 in rev00000.dat
+2026-05-27T23:49:09Z Leaving InitialBlockDownload (latching to false)
+2026-05-27T23:49:09Z UpdateTip: new best=07f62c3c92c1b980f19395e29629b1e713765455091b260043ee58f7eeb56d7c height=1 version=0x20000000 log2_work=2.000000 tx=2 date='2026-05-27T23:49:09Z' progress=1.000000 cache=0.0MiB(1txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=c0f52cd4409381b18f02d4e236be77ed21da1e5fb1dba3d86e89f1a88f0192d5 height=2 version=0x20000000 log2_work=2.584963 tx=3 date='2026-05-27T23:49:10Z' progress=1.000000 cache=0.0MiB(2txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=7fa667ba339d80e698966d922bbd0346eafe6e422133987f081b552b0a5005a8 height=3 version=0x20000000 log2_work=3.000000 tx=4 date='2026-05-27T23:49:10Z' progress=1.000000 cache=0.0MiB(3txo)
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 8c16b703703d23bdfeefb3ab68a8342fd8baef6c6220155ab0f4f854668bdfcd  new
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=3156331ebc07a09bdf614b63726de0405e66dd2489abbaa05d633f3639eca160 height=4 version=0x20000000 log2_work=3.321928 tx=5 date='2026-05-27T23:49:11Z' progress=1.000000 cache=0.0MiB(4txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 940a2b37aff67880dc406f514456899c8896e7b0e13c4dc03d85527b8fcf8099  new
+2026-05-27T23:49:09Z UpdateTip: new best=240878bdccb2ff906a09bc5479ad96a5f2717973d0f67fb5ec6952bd74d18157 height=5 version=0x20000000 log2_work=3.584963 tx=6 date='2026-05-27T23:49:11Z' progress=1.000000 cache=0.0MiB(5txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=43decf44deba26160e9010aa29713d4a68a93a58f1c5c10e4393ace6cfdcfe56 height=6 version=0x20000000 log2_work=3.807355 tx=7 date='2026-05-27T23:49:11Z' progress=1.000000 cache=0.0MiB(6txo)
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet c2ed9b1f2524244c0a1554b74825e7b23c0eba84c7790eafeae421128a02888a  new
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=72068d24aa4ad8d18fd967b7ade45b63faa90c96cd6c98dcb794cccd5516c9eb height=7 version=0x20000000 log2_work=4.000000 tx=8 date='2026-05-27T23:49:11Z' progress=1.000000 cache=0.0MiB(7txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 25767627b3fd907bb4cc32d838e8c86b45ffef3d12df53d5fd4aa59813757525  new
+2026-05-27T23:49:09Z UpdateTip: new best=0ba21fafc19879bb310f4d1cdbf2bfa9ad38dafe5fb720a11b3f2a3dedc0f857 height=8 version=0x20000000 log2_work=4.169925 tx=9 date='2026-05-27T23:49:12Z' progress=1.000000 cache=0.0MiB(8txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=001b66862853367ea0b01bec867635ac72c85dc2544f303ceecd9153fa5a299a height=9 version=0x20000000 log2_work=4.321928 tx=10 date='2026-05-27T23:49:12Z' progress=1.000000 cache=0.0MiB(9txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet b6b52d8b4ae05be8282a309ec9d3fb36f264fc3d3811ef1ba84542f91af7bda5  new
+2026-05-27T23:49:09Z UpdateTip: new best=cdd2e6588d98e2284f7d26afb778e5671675fb2e456e0f307fa57e52681bcb18 height=10 version=0x20000000 log2_work=4.459432 tx=11 date='2026-05-27T23:49:12Z' progress=1.000000 cache=0.0MiB(10txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=d711d9d0be37207dad05692471b34483852998bb2e141000353f6acb06abaab7 height=11 version=0x20000000 log2_work=4.584963 tx=12 date='2026-05-27T23:49:12Z' progress=1.000000 cache=0.0MiB(11txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 15385b8f87c0ffdec231068e7b55543d1694867a7fa71787cc07cd17402f7070  new
+2026-05-27T23:49:09Z UpdateTip: new best=fc9fa0a03ff315fb2fec65054da43ce208c706b782ae3deb5edfc4452670f37d height=12 version=0x20000000 log2_work=4.700440 tx=13 date='2026-05-27T23:49:12Z' progress=1.000000 cache=0.0MiB(12txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 5d7a882ea21f9f8f07fddd868b944baf84194a8b37196a5cb9a2cd64a89fa1fd  new
+2026-05-27T23:49:09Z UpdateTip: new best=c99beb94c2492d79fc475ee4f5a227c13b23a7ab1787c761e29ebd039663b9f1 height=13 version=0x20000000 log2_work=4.807355 tx=14 date='2026-05-27T23:49:12Z' progress=1.000000 cache=0.0MiB(13txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 3c5ea05ab2c78dcdf86c671ddc67285453b4789b72a2007af673a3119d99f55e  new
+2026-05-27T23:49:09Z UpdateTip: new best=1a70d8fbb52277adb87401c5392378a6273ff68793a075a7630b41526a8fc64b height=14 version=0x20000000 log2_work=4.906891 tx=15 date='2026-05-27T23:49:13Z' progress=1.000000 cache=0.0MiB(14txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet c2b82b09d4946cc26837b28f295027f059715d8c8e776a62660ec76f159b7b94  new
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 75dec87e30666c4e9a468ff75c08f2ddae845f7032fc50560bfc7a73d1e3adde  new
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 8cfdc291d0b2f9aa635df5a2065e1995a74cc4fcc6fe0dd3a8ced1b3e94bac04  new
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 87624580cdc066011c7cb0e47c9cdc212c7e8bcfabdbd21eae031ffa2e03df59  new
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 09bcb4dcf757913155823ef1ff31ada2565a65f80394a29ff9d7f537092847db  new
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet a059335418782603e2ea0ba945c7b160a0481682c5958185a5a54226a9cba484  new
+2026-05-27T23:49:09Z UpdateTip: new best=2c684c5d648add11eae4ce8db6ab0f78bffed2b1ee580f473f758edcf924efed height=15 version=0x20000000 log2_work=5.000000 tx=16 date='2026-05-27T23:49:13Z' progress=1.000000 cache=0.0MiB(15txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 884 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=e82744ba86e40e2b9b2298182d7d410190ffa5adf0459d890b7f1e131735aa3c height=16 version=0x20000000 log2_work=5.087463 tx=17 date='2026-05-27T23:49:13Z' progress=1.000000 cache=0.0MiB(16txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 0028972dad886466736fe106b63dae3b7dcf7833b91835d5956862fe65be657f  new
+2026-05-27T23:49:09Z UpdateTip: new best=47b504353e74c10fd1cf6c1cb6d2bd8416f1440ec8d7acc28b749966017167c0 height=17 version=0x20000000 log2_work=5.169925 tx=18 date='2026-05-27T23:49:13Z' progress=1.000000 cache=0.0MiB(17txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=71be6ae577d94e15e648b4bf0b57f0a2f5d5ec6bf7c4b35dbc23ac8b99fc8684 height=18 version=0x20000000 log2_work=5.247928 tx=19 date='2026-05-27T23:49:13Z' progress=1.000000 cache=0.0MiB(18txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet f4705eb23d68571682cd667adc8564c558cbd1c77c38346fb61434c6d4c4a928  new
+2026-05-27T23:49:09Z UpdateTip: new best=f3f5ff4f7bcba839e0af68d9e940c991eed09b895df7fb3ea2444b4d304046b3 height=19 version=0x20000000 log2_work=5.321928 tx=20 date='2026-05-27T23:49:13Z' progress=1.000000 cache=0.0MiB(19txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=e218782b621ab90acceaecf7e5030f24f3df161c52b5c49c911b004fc33d28a8 height=20 version=0x20000000 log2_work=5.392317 tx=21 date='2026-05-27T23:49:14Z' progress=1.000000 cache=0.0MiB(20txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 4f5dc53b6874e03931c80dc44e8b091189c24a8bac864ae75c81bbd024a6d7a4  new
+2026-05-27T23:49:09Z UpdateTip: new best=376f2585c262035deb8a42cbf524886ee4c8baa865c3040f899f479d3a0fe183 height=21 version=0x20000000 log2_work=5.459432 tx=22 date='2026-05-27T23:49:14Z' progress=1.000000 cache=0.0MiB(21txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet da11f4928807eb0e8f01253f503f91b50bc840e65e8de7a65821705e4b9b1066  new
+2026-05-27T23:49:09Z UpdateTip: new best=fc3de522e887e82b6566915b787c075c4c31a30a1e9b905ba08a35225b06c2ca height=22 version=0x20000000 log2_work=5.523562 tx=23 date='2026-05-27T23:49:14Z' progress=1.000000 cache=0.0MiB(22txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=0c9329ef2d1c014c7c706bc75515a01172f6a0e9fcf315a5e673919f2c198253 height=23 version=0x20000000 log2_work=5.584963 tx=24 date='2026-05-27T23:49:14Z' progress=1.000000 cache=0.0MiB(23txo)
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 9932cd84ddf5bb6de4d6b54a6e6353f31885e11819bb8565c1803b3e0156244d  new
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=d7cb76071af065b1ab0827c12b9faa0f5a5a3b63e1e11d987d224953af2b95eb height=24 version=0x20000000 log2_work=5.643856 tx=25 date='2026-05-27T23:49:14Z' progress=1.000000 cache=0.0MiB(24txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet e0ad4166a8370df1087119627cf018a1f9dc281845d461d79d8456de6b91a4cd  new
+2026-05-27T23:49:09Z UpdateTip: new best=13eee11116c775e77b54a18aca9cce96fb0483f2ae54153e4fe1f7b3ef659aec height=25 version=0x20000000 log2_work=5.700440 tx=26 date='2026-05-27T23:49:14Z' progress=1.000000 cache=0.0MiB(25txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z UpdateTip: new best=e12f98184e22194fe4dbcd53abb0ea0046da671fb1b623bd4a242bf1cd9d8c40 height=26 version=0x20000000 log2_work=5.754888 tx=27 date='2026-05-27T23:49:15Z' progress=1.000000 cache=0.0MiB(26txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 2bd7e649a342f3de1525d1e3c6fe9ed12222f0238e6f07c7b2d5b876248d209c  new
+2026-05-27T23:49:09Z UpdateTip: new best=1e74bdacea7f6b2960195665860429248071b5ad1abc88d83a1fca6c3e3a8ed4 height=27 version=0x20000000 log2_work=5.807355 tx=28 date='2026-05-27T23:49:15Z' progress=1.000000 cache=0.0MiB(27txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet 57503be99b6eae1c5685b558d14ab4e567ce0e206458a9b0127cd089474a05e1  new
+2026-05-27T23:49:09Z UpdateTip: new best=bd891dfb872d62cff519b9e353675c7aa17f88fbac4b3f1501875ab69152135b height=28 version=0x20000000 log2_work=5.857981 tx=29 date='2026-05-27T23:49:15Z' progress=1.000000 cache=0.0MiB(28txo)
+2026-05-27T23:49:09Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:09Z [xchain_regtest_wallet] AddToWallet d2a54a1bf65d67065d1537886aa35caed3dadd599cac2459620d951da1a5c7f2  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet ceb913ef2ec59de12bdc7b8c2524419b32e941ccca507084632aaaa815a0c6de  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet be50b9f0eadd225af9d802fee4158a4fb9398ccad8d3df1125c62a1c44d8c3b2  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 3d004f9275a0be5786042583087a5b2ad65542e1b87eda9ceb058d64b6e842dc  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 52dfe956bbbfcde53263e6ff4d9d9d9851e7347453515f78bd6255eca0267ef3  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet b880c80dbfaa1177491a1aa779fdd205a8ffdd789ce45b5f3fa1dce32e46efe5  new
+2026-05-27T23:49:10Z UpdateTip: new best=c4b9b34fe074dc9dd6248f6eda678a08b2e02e5ee2d6a3457d24bd5ce5674996 height=29 version=0x20000000 log2_work=5.906891 tx=30 date='2026-05-27T23:49:15Z' progress=1.000000 cache=0.0MiB(29txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=b3bdd9fd2ed8e6e7a1c29a63c6f74cd93b12830f524fef2c081bd3e13a05bbcf height=30 version=0x20000000 log2_work=5.954196 tx=31 date='2026-05-27T23:49:15Z' progress=1.000000 cache=0.0MiB(30txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 22ea118388465a14829cdce933c2db46caff371912de19f5ff477a625383af27  new
+2026-05-27T23:49:10Z UpdateTip: new best=42d4be24116e005f7f5c83b5e6754b1434e2c595a3d3ed96073d380b0cd29b3c height=31 version=0x20000000 log2_work=6.000000 tx=32 date='2026-05-27T23:49:15Z' progress=1.000000 cache=0.0MiB(31txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=c58ae38c46d2943a3312dd58917ca04b29377a6c95ad3a19eef2054d80c8b85c height=32 version=0x20000000 log2_work=6.044394 tx=33 date='2026-05-27T23:49:16Z' progress=1.000000 cache=0.0MiB(32txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet d3b44db10e48a1b442eb4146c25ac16c07c423bfbc79562d06ef14f8a3ed1040  new
+2026-05-27T23:49:10Z UpdateTip: new best=7a90efcb9e21eb550e04944338967e6e21fff7484e6732c2be1de5b1fe630f16 height=33 version=0x20000000 log2_work=6.087463 tx=34 date='2026-05-27T23:49:16Z' progress=1.000000 cache=0.0MiB(33txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=ec405e8c3f893df5693611566c36afd31d7c6dca0be4c0c60d289981c97500e1 height=34 version=0x20000000 log2_work=6.129283 tx=35 date='2026-05-27T23:49:16Z' progress=1.000000 cache=0.0MiB(34txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 68d785174bbe2085a4b4110e970ec5dc1f551f37870f970481251012410a9c21  new
+2026-05-27T23:49:10Z UpdateTip: new best=9ab95ff9263a0a4c0cc1fee96840bb97869de9bc0d019f04c275ae4b170f3fc6 height=35 version=0x20000000 log2_work=6.169925 tx=36 date='2026-05-27T23:49:16Z' progress=1.000000 cache=0.0MiB(35txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=5c368dc110c27f6501555cef17962993bcf3ca5d238ea66e06b5737a9ffe86e8 height=36 version=0x20000000 log2_work=6.209453 tx=37 date='2026-05-27T23:49:16Z' progress=1.000000 cache=0.0MiB(36txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=e21891d685be61722efa3be6cc36582305618054be8b6697915e33836d72a3a9 height=37 version=0x20000000 log2_work=6.247928 tx=38 date='2026-05-27T23:49:16Z' progress=1.000000 cache=0.0MiB(37txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 0d28466388718f977dcad4777a62a8873ce2783de42e9d9172b0be0384b74502  new
+2026-05-27T23:49:10Z UpdateTip: new best=004e71ad80cd9870fea4327b89fb44557ae12b26fb68cbf653115b4047295535 height=38 version=0x20000000 log2_work=6.285402 tx=39 date='2026-05-27T23:49:17Z' progress=1.000000 cache=0.0MiB(38txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet ccdad32ee326607eb6ab25567ce490f723de0cb8f1df634e2524425326daa5f3  new
+2026-05-27T23:49:10Z UpdateTip: new best=1f2a660dae7a86e04e54fe656b5a4fd0febde45c5262076a89af7748152420b6 height=39 version=0x20000000 log2_work=6.321928 tx=40 date='2026-05-27T23:49:17Z' progress=1.000000 cache=0.0MiB(39txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 10f2364ca47abefdf28f7af56437836e5b32974c68a0de3e8e2cd69117cd373c  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 1b5b6e8f7052545a3e24afa953a3efd043fb333aae7988b5df7255497e89b83e  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 8bc54e62c3e5bfb684453370f37b9f196c6588c6428a03d08a1e2ce2b1efc8e7  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet ab6ec0d1bba5f3a3d61d1df5a6cca799067fde913b22f249764e984a6f06af53  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 409661f7e5ff81a8b64899b21a58883b1bc30adc7401606917736767bb85e188  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet dfd95e6fafcfa60722690ece23b480bf82da86f465dd7af31384aa636d2a1242  new
+2026-05-27T23:49:10Z UpdateTip: new best=f8bff3883c83b86fa87fc012a9a89b255064c249315ae988826b4d3dc090cf57 height=40 version=0x20000000 log2_work=6.357552 tx=41 date='2026-05-27T23:49:17Z' progress=1.000000 cache=0.0MiB(40txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=8fd85d2b05944c58b5c6ccbb7b5f1f582c4497418309ed22533d997607b28095 height=41 version=0x20000000 log2_work=6.392317 tx=42 date='2026-05-27T23:49:17Z' progress=1.000000 cache=0.0MiB(41txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet ab54855016732955d0b74804b3c863979730aca4742910b8cc99d266d25ff860  new
+2026-05-27T23:49:10Z UpdateTip: new best=414e311e566e11934239ed782fe6d6d304c0e7b38b96801529cf847c75c1a190 height=42 version=0x20000000 log2_work=6.426265 tx=43 date='2026-05-27T23:49:17Z' progress=1.000000 cache=0.0MiB(42txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=f6031ef83518233094d95380d65b9647a75d467258fff5b91355cd1b0184aa4a height=43 version=0x20000000 log2_work=6.459432 tx=44 date='2026-05-27T23:49:17Z' progress=1.000000 cache=0.0MiB(43txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 1cd45b8bd24aa79bd138f1de4a7a89470c93abe7902a771e031fc07c56a5a358  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=9f8321c05ddc7fab4e86208986c5dfdb4153ed72fa187d1548c607e878e025d7 height=44 version=0x20000000 log2_work=6.491853 tx=45 date='2026-05-27T23:49:18Z' progress=1.000000 cache=0.0MiB(44txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet a11d4850115a65accdb21f2cdaee282770440c50906c5ca162ae78477c2df271  new
+2026-05-27T23:49:10Z UpdateTip: new best=3fd405fa6e1d7ef9c42e7be7a4ff88ebe0f26fb9d3a91418e331e72608808931 height=45 version=0x20000000 log2_work=6.523562 tx=46 date='2026-05-27T23:49:18Z' progress=1.000000 cache=0.0MiB(45txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=330e7a43384eae976ef3caec2f60c8358fe6a0ff4c71d7cc0e975190d250d0a8 height=46 version=0x20000000 log2_work=6.554589 tx=47 date='2026-05-27T23:49:18Z' progress=1.000000 cache=0.0MiB(46txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 95568e780961f43d83faba6ffcbe6002b93e22604c9ae56a000a60c84e7c0fce  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=61e49289a4fde0cc873d5308ae3985ec215a9849b0c9311e257f40b9807873f1 height=47 version=0x20000000 log2_work=6.584963 tx=48 date='2026-05-27T23:49:18Z' progress=1.000000 cache=0.0MiB(47txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 7ef75bdd01ff5c836eede7913c1415a54d349f74d09f46ee0c0644d5a2abf3f0  new
+2026-05-27T23:49:10Z UpdateTip: new best=4cefe07109796cb8dd8ac5219b40f0b833d7e5668a5a602c0a428e42ee64b165 height=48 version=0x20000000 log2_work=6.614710 tx=49 date='2026-05-27T23:49:18Z' progress=1.000000 cache=0.0MiB(48txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=243d165cd8046f0ee035a810a8980a64ba000dee58c845f427bd59305dffa4b2 height=49 version=0x20000000 log2_work=6.643856 tx=50 date='2026-05-27T23:49:18Z' progress=1.000000 cache=0.0MiB(49txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 98d9d657fbf5b2fa10484fefaa5a4a94841b4ad122cdee835167001a704a03cd  new
+2026-05-27T23:49:10Z UpdateTip: new best=6e8811d96c86862716cc2050cb298246b26392794b3e74c15b3fed0b7dafda2b height=50 version=0x20000000 log2_work=6.672425 tx=51 date='2026-05-27T23:49:19Z' progress=1.000000 cache=0.0MiB(50txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=53a4dadfc087e6f75a53f92710652589f1bc8ed13290660278adc401310d163c height=51 version=0x20000000 log2_work=6.700440 tx=52 date='2026-05-27T23:49:19Z' progress=1.000000 cache=0.0MiB(51txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 1a59d0fcbbc2cc3d5cc06917f95db1886f64f182bd607757e7f6c2302f5f06a6  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=b58b81d8098c160a665c88791522b0473df00b608ae02b3eb8da403b755f07e2 height=52 version=0x20000000 log2_work=6.727920 tx=53 date='2026-05-27T23:49:19Z' progress=1.000000 cache=0.0MiB(52txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 475425cec87255430112bf68fd9fb364f9ab697225c79085ec7e782421c8fda8  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=8aaf74ed096c8476e07e04c642b029d882a9f780b8e22cb48d68f6c5c5b454a6 height=53 version=0x20000000 log2_work=6.754888 tx=54 date='2026-05-27T23:49:19Z' progress=1.000000 cache=0.0MiB(53txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 85485beb0f18aa0206a3efa55d4be17b75fa455ba3aebdc0f6edc83c2ae8fd0a  new
+2026-05-27T23:49:10Z UpdateTip: new best=aca3759fb3c87f9f2c0c2aa14eccdeda972c2ea955638e6eb6cce11b2d42e2a3 height=54 version=0x20000000 log2_work=6.781360 tx=55 date='2026-05-27T23:49:19Z' progress=1.000000 cache=0.0MiB(54txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet cddb3ab9a911c71eb80fdeb93e48e5333e580a0bd07a2f1ad5a150e37854badc  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 30dcfb19dc08e780545cbec85026edd1c704c3daf81704d5245e1ae136c8423a  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet f12d336b43ad13961dc89ec1206aaeba28000df7f56fd855ea995290395c8a0a  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet c7ad509711c83c13f022090e77dcac51897dd7820849255ca8115573f2c1b461  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 52bf9f5ab8b43eebac751515f9f9bf6e73d8d69c5d447a7fd8a5aee38ab58037  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet aee96d0b9ee090cff5479e28509fd53900c1ad241bc7ad1543f945bd92b5ce6e  new
+2026-05-27T23:49:10Z UpdateTip: new best=ed7aa2414d35280287b1005d6584f5761b24205419338887ef40c82e910ae153 height=55 version=0x20000000 log2_work=6.807355 tx=56 date='2026-05-27T23:49:19Z' progress=1.000000 cache=0.0MiB(55txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=7a39b0260f0dc45a5eee73ef1fc01ec9d3455e21e58f0a7f3cdd1933adc78d46 height=56 version=0x20000000 log2_work=6.832890 tx=57 date='2026-05-27T23:49:20Z' progress=1.000000 cache=0.0MiB(56txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 50c334f814fc74419ebc81738da2086903353bba17948d362004f85b5beaf488  new
+2026-05-27T23:49:10Z UpdateTip: new best=5841b19c69149b187082ab9da9b64304135103b8e7c08aef6825011b174871cc height=57 version=0x20000000 log2_work=6.857981 tx=58 date='2026-05-27T23:49:20Z' progress=1.000000 cache=0.0MiB(57txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet f7c4ce35072d0b76484aae44a62b00a5efb14459875982d5b3c50480bdf1b6da  new
+2026-05-27T23:49:10Z UpdateTip: new best=78bd2ef5fba805d098c705e1416accaf8a0c679dfc56d289ca6e98f6a74a63fb height=58 version=0x20000000 log2_work=6.882643 tx=59 date='2026-05-27T23:49:20Z' progress=1.000000 cache=0.0MiB(58txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=4eb971f55ab25a6740f77278b9bd9ea0740fa711c9cb8ddf59b0d494e4edef53 height=59 version=0x20000000 log2_work=6.906891 tx=60 date='2026-05-27T23:49:20Z' progress=1.000000 cache=0.0MiB(59txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet d8af5b20052ee540f1096d3c4e7bdf6dcfae82de08e5d9294e65ceee9b9cf19d  new
+2026-05-27T23:49:10Z UpdateTip: new best=ea47752795b0bdd0facfb7c7c8198c4e3b06a27862800bfd85c6a9bb11276bb8 height=60 version=0x20000000 log2_work=6.930737 tx=61 date='2026-05-27T23:49:20Z' progress=1.000000 cache=0.0MiB(60txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet c92ede5d9707a5024376b7e2f1ce9b909044bebe54ba7c7b61329737bd8193b7  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=c469bead6941542f8ca839acdc9b04c834c3f4e3efb7105096cc3287e21f6e3d height=61 version=0x20000000 log2_work=6.954196 tx=62 date='2026-05-27T23:49:20Z' progress=1.000000 cache=0.0MiB(61txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 26369e76a593a087e6ab23d1766938ae99b6698ef5d57dc1983a72f756ec9201  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=8d05c8ebd8ef8bd4894fe2b0fcc870be8e3e85c1b3f388459b6e32e5f2d07d63 height=62 version=0x20000000 log2_work=6.977280 tx=63 date='2026-05-27T23:49:21Z' progress=1.000000 cache=0.0MiB(62txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=33516879da1a2f7bf4d68bcef4e52f2169ebf29eb2de2f8c324ca0b3879329b6 height=63 version=0x20000000 log2_work=7.000000 tx=64 date='2026-05-27T23:49:21Z' progress=1.000000 cache=0.0MiB(63txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 8749cee32498d2786d590a85d0958ce42fdf9a6f5282982cfa3a7976707e9d62  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=87470d95f7705e4651963a73fc9d8bc0cc735ecb1140ff979a063e2aed1db00a height=64 version=0x20000000 log2_work=7.022368 tx=65 date='2026-05-27T23:49:21Z' progress=1.000000 cache=0.0MiB(64txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 28dcb2fe86bb1151aabe87b0d2e2ea405094c1c6f716d0d5658451180706c34f  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=64918aa98d2a65a61e3525e14b32fafc366da6d4b32cb13bbd68a417f93ef80c height=65 version=0x20000000 log2_work=7.044394 tx=66 date='2026-05-27T23:49:21Z' progress=1.000000 cache=0.0MiB(65txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 0ff7d61d451a5b5a03bb2f5f301817349fda79288f690398efff4e8e2d24926c  new
+2026-05-27T23:49:10Z UpdateTip: new best=22d560976fd1bea41dec4fe9558590e0c95c0489dacd8825b009c1aa6438d6f8 height=66 version=0x20000000 log2_work=7.066089 tx=67 date='2026-05-27T23:49:21Z' progress=1.000000 cache=0.0MiB(66txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=8cba345bd36f919e4e7803393ec67546d2099603a6a10bdf91fd73b4663a5afb height=67 version=0x20000000 log2_work=7.087463 tx=68 date='2026-05-27T23:49:21Z' progress=1.000000 cache=0.0MiB(67txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 7cc9dbda1db581cb9b761e15e35cd65b467a0fc764c70e0621fb2baf8ce62ab2  new
+2026-05-27T23:49:10Z UpdateTip: new best=875411b5104932fb38488c2e2fc7b99eaa96833223ee28fa401669a8cef19112 height=68 version=0x20000000 log2_work=7.108524 tx=69 date='2026-05-27T23:49:22Z' progress=1.000000 cache=0.0MiB(68txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=198abcba3227cc1ffcd3d3cb6fbc948113150ad243d90e8cdc7b78bcd8e01f7e height=69 version=0x20000000 log2_work=7.129283 tx=70 date='2026-05-27T23:49:22Z' progress=1.000000 cache=0.0MiB(69txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet e388da92fdd0a2dde62922b70849dfa71878bd661dc6df2ed49ab2d15c061c22  new
+2026-05-27T23:49:10Z UpdateTip: new best=f105c83abba507db6cf5c9e63593c8948dc723bdbc9154be9357667132aade6c height=70 version=0x20000000 log2_work=7.149747 tx=71 date='2026-05-27T23:49:22Z' progress=1.000000 cache=0.0MiB(70txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 4de20cede7a56df253f0d6f7a239d15ce78dddaef2059a87d03073f4fe843662  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet b91d7f1a1cb7339f9ee6bc7c8176ffe5ecafb51f24192da50be8105a80a4588f  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 9f637b96f875cf72fc985c72f29eb8a64d121f837862461d290674b9ec3fa707  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 325735bf01f28d8c2c6bf133a5733a00aaf8553e956849bca40cf8741d7bea16  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet b3b62c376a0de42bed34329c8aad0453abca356d972d32e6a4b5b3e7e54de321  new
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 61380fd52cd72e1a021db2093a434799891f7ec451bffe118758fe8ce24b5310  new
+2026-05-27T23:49:10Z UpdateTip: new best=a98a00390eb66f8dca5a02b9e12888abb285ba78aa77247246c0af760d97adc5 height=71 version=0x20000000 log2_work=7.169925 tx=72 date='2026-05-27T23:49:22Z' progress=1.000000 cache=0.0MiB(71txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=9bfd405f278654bf85ced1c015f5ef8285d4a373f603b231c72ce10570a76fe9 height=72 version=0x20000000 log2_work=7.189825 tx=73 date='2026-05-27T23:49:22Z' progress=1.000000 cache=0.0MiB(72txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet a1b934472418b4b30d1af79bbda5c64d475c5e87de91c7af18d3f27c324e36db  new
+2026-05-27T23:49:10Z UpdateTip: new best=0b29d5fca4a6155cc426ab82f3e299de77bafea3ffb83649d2a8fe97afac6378 height=73 version=0x20000000 log2_work=7.209453 tx=74 date='2026-05-27T23:49:22Z' progress=1.000000 cache=0.0MiB(73txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 7484542fde3b86a7bc66f853ab50722aec46f3e9d331c23169f7941203bfa525  new
+2026-05-27T23:49:10Z UpdateTip: new best=f87039cf1c26a2dcb7d3c7845817763b4a108823475e2138c40356191fb894d2 height=74 version=0x20000000 log2_work=7.228819 tx=75 date='2026-05-27T23:49:23Z' progress=1.000000 cache=0.0MiB(74txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 29e1be1d08ad98a50364b4f979c0a82b973cf231458d5106c54bd13715ce09c8  new
+2026-05-27T23:49:10Z UpdateTip: new best=41a4e248d072b13c09d4f34c2124041b8c03ed873b68cd14ae5b9f37e252a233 height=75 version=0x20000000 log2_work=7.247928 tx=76 date='2026-05-27T23:49:23Z' progress=1.000000 cache=0.0MiB(75txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=0742032e399db6ed696669d2f21a37916a9f61cc6f665c6f42fee14bd8291f88 height=76 version=0x20000000 log2_work=7.266787 tx=77 date='2026-05-27T23:49:23Z' progress=1.000000 cache=0.0MiB(76txo)
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 38ad899f75b7ce4178d462801be1998c2edba793de252ac4e4658b1ef322472d  new
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=d486e74b34aec2c7ba7a3f7afb57feed1a2661f5880a76c7e23421e07a31b9e6 height=77 version=0x20000000 log2_work=7.285402 tx=78 date='2026-05-27T23:49:23Z' progress=1.000000 cache=0.0MiB(77txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 6a937181d7c1added75a594c6ac237ae5df0b79931dbc25216a4e65d1610d9e2  new
+2026-05-27T23:49:10Z UpdateTip: new best=936baa147fb7cd8937b3ddfd32343a9dd2373ff9e3899ed7d8ef2298fa4faa67 height=78 version=0x20000000 log2_work=7.303781 tx=79 date='2026-05-27T23:49:23Z' progress=1.000000 cache=0.0MiB(78txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=e07d43716e2d06e7bf622c5e186bdcdb868a61b2d662292a537f830dd0b2914e height=79 version=0x20000000 log2_work=7.321928 tx=80 date='2026-05-27T23:49:23Z' progress=1.000000 cache=0.0MiB(79txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet 18eefe3234b4e65995c9e136a441d50fd98a64ce26fb1a6afc82236d7534e54e  new
+2026-05-27T23:49:10Z UpdateTip: new best=763f2ad1f6dd43cba3500272c13f32753310935bf628e80374fa56c2f6a47e81 height=80 version=0x20000000 log2_work=7.339850 tx=81 date='2026-05-27T23:49:24Z' progress=1.000000 cache=0.0MiB(80txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z UpdateTip: new best=4efe8745213a696f0c8f67c70a306b9249ac867d77d4095a8783c752c9e50519 height=81 version=0x20000000 log2_work=7.357552 tx=82 date='2026-05-27T23:49:24Z' progress=1.000000 cache=0.0MiB(81txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:10Z [xchain_regtest_wallet] AddToWallet f86822f04c1fb5733d59f2ee0964dfcf850ac5c926187f8aecc4de992a1268a1  new
+2026-05-27T23:49:10Z UpdateTip: new best=518dc05f72bfd3f240d602dd0c2906f4d51af9cdc47c55195a1281ae8fe3b4d5 height=82 version=0x20000000 log2_work=7.375039 tx=83 date='2026-05-27T23:49:24Z' progress=1.000000 cache=0.0MiB(82txo)
+2026-05-27T23:49:10Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 9fae0f49824ed9b5c8b0eb9a31516c7e1e28645b58ad1248f6098e8bd7dbc9e6  new
+2026-05-27T23:49:11Z UpdateTip: new best=777721b1616f9e11ea6842ff2da3b0c323c9d1a3777ee3418a76e76cf84b3071 height=83 version=0x20000000 log2_work=7.392317 tx=84 date='2026-05-27T23:49:24Z' progress=1.000000 cache=0.0MiB(83txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=80057280bad681953c67a254e8eb33457d14a46b3258902197bacaa97c82e6aa height=84 version=0x20000000 log2_work=7.409391 tx=85 date='2026-05-27T23:49:24Z' progress=1.000000 cache=0.0MiB(84txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet f828cb0a6bc14861496ff8bee684f9c399a8306e760ec289090d695ed9e2644a  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet a57909d4aede1178ab525f20a2fedcb27da0826b741af7010d4bd89739dbd5dd  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 4f036f2a54c023b98193bf1c1a51fbe3d0fd48083e2030cf5e14a8909443b3d8  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 931cbc8fe70d1c7d95fb24ebe2f1a53be809b5e17db86ce088da48faa71bae59  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet de004448b8b33fddfad016a4c4aeef4a11d5c948424fa4434afa9e4ecfb4b9da  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet a15243a096c0eeec99c392ddcdf13cf5aade92361b71c3a8ffea0025e9ba784f  new
+2026-05-27T23:49:11Z UpdateTip: new best=bb272475db56bb4e8f61185fa45da28c77b268255dd91d770d0b258350701019 height=85 version=0x20000000 log2_work=7.426265 tx=86 date='2026-05-27T23:49:24Z' progress=1.000000 cache=0.0MiB(85txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=881c128ff0142da08b58e284940f44c058df5485380b1d771eb5ac20f27d7fe2 height=86 version=0x20000000 log2_work=7.442943 tx=87 date='2026-05-27T23:49:25Z' progress=1.000000 cache=0.0MiB(86txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 4f1c317875753dc725ad16915bde45c6809799fd5b7e3d27893d189cbd921464  new
+2026-05-27T23:49:11Z UpdateTip: new best=321f0397474062b4dee1bdf17d3c0829438330d24a074a456674f044f0cd9f55 height=87 version=0x20000000 log2_work=7.459432 tx=88 date='2026-05-27T23:49:25Z' progress=1.000000 cache=0.0MiB(87txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=2c1428cd9afeec2e239d27e31e438845909c1a19eb3186ab473abd763e967e19 height=88 version=0x20000000 log2_work=7.475733 tx=89 date='2026-05-27T23:49:25Z' progress=1.000000 cache=0.0MiB(88txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet afd2e0057944cba9d087acfcddf5f9c4989111c0924ec519ba8901398799882d  new
+2026-05-27T23:49:11Z UpdateTip: new best=121f47f0aae4de0f620d5f0895cb29eb52bd25dee8ad8ad8553fbcb8afd559a1 height=89 version=0x20000000 log2_work=7.491853 tx=90 date='2026-05-27T23:49:25Z' progress=1.000000 cache=0.0MiB(89txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=d588ddf3ba80fc96b38ca7f98527d91850f2e0978e5058359f1201f62403082a height=90 version=0x20000000 log2_work=7.507795 tx=91 date='2026-05-27T23:49:25Z' progress=1.000000 cache=0.0MiB(90txo)
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 7b9e7e70b7f6a8b994e60c8e25efe11b91ea0e65ecb5e867fa659b07bc5482d4  new
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=a0bb75b0a06388fe24431fb8771615efede93cf545652c747ad4fc172d59cd68 height=91 version=0x20000000 log2_work=7.523562 tx=92 date='2026-05-27T23:49:25Z' progress=1.000000 cache=0.0MiB(91txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet d2a306d3dd037190aa61840c7ac2db7e10daecaf440431d9d473739406daada5  new
+2026-05-27T23:49:11Z UpdateTip: new best=36d064d4c2a73597eb5686e3ab5b0ca3cc8a8081d45f93098f337b4671dabbb3 height=92 version=0x20000000 log2_work=7.539159 tx=93 date='2026-05-27T23:49:26Z' progress=1.000000 cache=0.0MiB(92txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=e4e766eeb76addfa4303cdfb0510f331732db3c7769bdb9302a624e37075ff13 height=93 version=0x20000000 log2_work=7.554589 tx=94 date='2026-05-27T23:49:26Z' progress=1.000000 cache=0.0MiB(93txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 672d8b31392271225ace563694835bc4f88deb0340333084658a27225b2de00c  new
+2026-05-27T23:49:11Z UpdateTip: new best=ce975e86afdd1a60cd0a677bcff45927288873894cc7ef0a00f11dde6607fc22 height=94 version=0x20000000 log2_work=7.569856 tx=95 date='2026-05-27T23:49:26Z' progress=1.000000 cache=0.0MiB(94txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=bc8f80f951c8632433c205e5873fe224f1a835fd293511216cd63ed78cf8796d height=95 version=0x20000000 log2_work=7.584963 tx=96 date='2026-05-27T23:49:26Z' progress=1.000000 cache=0.0MiB(95txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 8df68684200fd527525862beca4e30da82b60d122d6705ef19d78aed363e48f1  new
+2026-05-27T23:49:11Z UpdateTip: new best=ddc7d6de1456ceed1ecc3b98dfa8c2e9c05427678021a810795a4d4cdff471e1 height=96 version=0x20000000 log2_work=7.599913 tx=97 date='2026-05-27T23:49:26Z' progress=1.000000 cache=0.0MiB(96txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 7a7cfedccdae323625f73ff4be7882d7640a82b2c0e00529909f6e77319be5cc  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 9cb1a8d9353c8a0b7e51068eed50dbc0f4d83703fdc2a775d8a5f281ba9c7770  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 4ce7980f8b76597582ad251a73e4600fda0b71236c251370d22a5d8436cf6098  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet fcc53a50cfadfd536f7edeb288de3e779a09828f145e0be97aa883bba78797c9  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet bd825e4f0460d142053b3f6c31b50b26d1690c3473c5cac2582ec73a1dcc5913  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet ba1b0926f3518470526e6ab050e10b9abf74e80ea475501696de20ff2f9d8214  new
+2026-05-27T23:49:11Z UpdateTip: new best=b255846062e4d98d421042da3ec23a25a45764fd0bcc687181fab9330a9739b7 height=97 version=0x20000000 log2_work=7.614710 tx=98 date='2026-05-27T23:49:26Z' progress=1.000000 cache=0.0MiB(97txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=3ac1e24e0a02b38385b04d5760da6bfdab8a480f20af384a4fcd2f9ee4db8a74 height=98 version=0x20000000 log2_work=7.629357 tx=99 date='2026-05-27T23:49:27Z' progress=1.000000 cache=0.0MiB(98txo)
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 05c2095a1de2db4e330179caa2343e6185e4ba117df7539e0f6fedca23b5a8cb  new
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=3d12e109169b22c17badf254e6924aaee18655a33554c91efff4771620c24a45 height=99 version=0x20000000 log2_work=7.643856 tx=100 date='2026-05-27T23:49:27Z' progress=1.000000 cache=0.0MiB(99txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 27907e508e5ee03e0cbc7a097b236f8295cc62cff9e035a9caee80570125425f  new
+2026-05-27T23:49:11Z UpdateTip: new best=1c83db7ad625c4ab46301849279fc769728d35b0a3c7b4ef5bffc6e787483b4f height=100 version=0x20000000 log2_work=7.658211 tx=101 date='2026-05-27T23:49:27Z' progress=1.000000 cache=0.0MiB(100txo)
+2026-05-27T23:49:11Z CreateNewBlock(): block weight: 888 txs: 0 fees: 0 sigops: 400 MWEB weight: 0
+2026-05-27T23:49:11Z UpdateTip: new best=f5c855991ce86be7c1ed8fb7895cc21bf1d9a0f33e0553a39b70984ed97b3ec7 height=101 version=0x20000000 log2_work=7.672425 tx=102 date='2026-05-27T23:49:27Z' progress=1.000000 cache=0.0MiB(101txo)
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet 07b7605ab71795df9ad97dc0b83e2eabd1675474554247daadb843ec10751e96  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet a723740f714fd72bbf7e626853fc790ca1ad552662823d278eba2feefa90032b  new
+2026-05-27T23:49:11Z [xchain_regtest_wallet] AddToWallet b81fc4ead2cd7be8d6e3b359ed97cb0603312b234ab389103e0faa1724ef3f85  new
+2026-05-27T23:49:42Z [xchain_regtest_wallet] keypool added 1 keys (0 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:49:42Z [xchain_regtest_wallet] keypool reserve 2001
+2026-05-27T23:49:42Z [xchain_regtest_wallet] keypool keep 2001
+2026-05-27T23:49:42Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:0 (requested 6) Reason:"Minimum Required Fee" Decay 0.00000: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out)
+2026-05-27T23:49:42Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:49:42Z [xchain_regtest_wallet] keypool reserve 2002
+2026-05-27T23:49:42Z [xchain_regtest_wallet] keypool keep 2002
+2026-05-27T23:49:42Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:0 (requested 6) Reason:"Minimum Required Fee" Decay 0.00000: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out)
+2026-05-27T23:49:42Z [xchain_regtest_wallet] Fee non-grouped = 1440, grouped = 1440, using grouped
+2026-05-27T23:49:42Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=4541b2b87c, ver=2, vin.size=1, vout.size=2, nLockTime=101)
+    CTxIn(COutPoint(8c16b70370, 0), scriptSig=, nSequence=4294967294)
+    CScriptWitness(304402202bc775e6efb17568ce626e3634e101695c61fcbb69b01ff0084332ee67d19be0022035f9d0c34c7d74b97756a69c3acb58f81bbc8abc51fe9f316e44c40e6364091201, 03e392a23581aff1749a9aba28dea043df775fbded70f84d7aa6bf89bad26d8fb0)
+    CTxOut(nValue=48.99998560, scriptPubKey=001421894d891571d70af34024a93f)
+    CTxOut(nValue=1.00000000, scriptPubKey=76a914aa4b2fd63daa0c502dae4780)
+2026-05-27T23:49:42Z [xchain_regtest_wallet] AddToWallet 4541b2b87c923b9ea91b6c67589885c1c7c6569efb2d50d9cd7af9a1fef6487b  newupdate
+2026-05-27T23:49:42Z [xchain_regtest_wallet] Submitting wtx 4541b2b87c923b9ea91b6c67589885c1c7c6569efb2d50d9cd7af9a1fef6487b to mempool for relay
+2026-05-27T23:49:42Z [xchain_regtest_wallet] AddToWallet 4541b2b87c923b9ea91b6c67589885c1c7c6569efb2d50d9cd7af9a1fef6487b  
+2026-05-27T23:49:43Z CreateNewBlock(): block weight: 1461 txs: 1 fees: 1440 sigops: 405 MWEB weight: 0
+2026-05-27T23:49:43Z UpdateTip: new best=489e274322eb3ce8d271bed3463e7e2a0c3bfd8aaea372a9df0f876319b00978 height=102 version=0x20000000 log2_work=7.686501 tx=104 date='2026-05-27T23:49:43Z' progress=1.000000 cache=0.0MiB(104txo)
+2026-05-27T23:49:43Z [xchain_regtest_wallet] AddToWallet 745ed5fb20f6cfa3626268f5249545097bac7544d7d39567893ba824e9764c13  new
+2026-05-27T23:49:43Z [xchain_regtest_wallet] AddToWallet 4541b2b87c923b9ea91b6c67589885c1c7c6569efb2d50d9cd7af9a1fef6487b  update
+2026-05-27T23:49:46Z CreateNewBlock(): block weight: 2924 txs: 2 fees: 10920 sigops: 408 MWEB weight: 0
+2026-05-27T23:49:46Z UpdateTip: new best=236aca68a809b53739b8f9932fe233d388aba73a000c074eeb5aa8f46ca0f816 height=103 version=0x20000000 log2_work=7.700440 tx=107 date='2026-05-27T23:49:46Z' progress=1.000000 cache=0.0MiB(105txo)
+2026-05-27T23:49:46Z [xchain_regtest_wallet] AddToWallet 0fdae808b129f1e9673124a08e9b2c3c603c0fe4ea45576c184eb5b3027f5ae0  new
+2026-05-27T23:49:48Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:49:48Z [xchain_regtest_wallet] keypool reserve 2003
+2026-05-27T23:49:48Z [xchain_regtest_wallet] keypool keep 2003
+2026-05-27T23:49:48Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:0 (requested 6) Reason:"Minimum Required Fee" Decay 0.00000: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out)
+2026-05-27T23:49:48Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:49:48Z [xchain_regtest_wallet] keypool reserve 2004
+2026-05-27T23:49:48Z [xchain_regtest_wallet] keypool keep 2004
+2026-05-27T23:49:48Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:0 (requested 6) Reason:"Minimum Required Fee" Decay 0.00000: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out)
+2026-05-27T23:49:48Z [xchain_regtest_wallet] Fee non-grouped = 1440, grouped = 1440, using grouped
+2026-05-27T23:49:48Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=aa1ac00c6a, ver=2, vin.size=1, vout.size=2, nLockTime=49)
+    CTxIn(COutPoint(4541b2b87c, 0), scriptSig=, nSequence=4294967294)
+    CScriptWitness(304402207f6a88c75e9a10b44274fc99c1646b1e926bbb9bc301638937a886410bb8265f0220599218ce65d4ff6e491b97d4f832f3be0669b3d5b4947a311379d47558cde53b01, 036712b875b4473e1f344198c8ae2285024e23ac43afe2e879d985373d20cfbc0b)
+    CTxOut(nValue=47.99997120, scriptPubKey=0014578169688e2b560f03a80189fb)
+    CTxOut(nValue=1.00000000, scriptPubKey=76a9147dd4a0618b46496f794a9508)
+2026-05-27T23:49:48Z [xchain_regtest_wallet] AddToWallet aa1ac00c6ac6a5e784793a596b8a2e0a5bcbb08bda41e9fec772273cee085a79  newupdate
+2026-05-27T23:49:48Z [xchain_regtest_wallet] Submitting wtx aa1ac00c6ac6a5e784793a596b8a2e0a5bcbb08bda41e9fec772273cee085a79 to mempool for relay
+2026-05-27T23:49:48Z [xchain_regtest_wallet] AddToWallet aa1ac00c6ac6a5e784793a596b8a2e0a5bcbb08bda41e9fec772273cee085a79  
+2026-05-27T23:49:49Z CreateNewBlock(): block weight: 1461 txs: 1 fees: 1440 sigops: 405 MWEB weight: 0
+2026-05-27T23:49:49Z UpdateTip: new best=53fd0ec5738921e6d3d4f8cc6c08be054e84978912002f2b1402e6248ccf1609 height=104 version=0x20000000 log2_work=7.714246 tx=109 date='2026-05-27T23:49:49Z' progress=1.000000 cache=0.0MiB(107txo)
+2026-05-27T23:49:49Z [xchain_regtest_wallet] AddToWallet a3a46b154e944d5b80eff3d28cb10572a14fc853e929055da6c94575d57396ce  new
+2026-05-27T23:49:49Z [xchain_regtest_wallet] AddToWallet aa1ac00c6ac6a5e784793a596b8a2e0a5bcbb08bda41e9fec772273cee085a79  update
+2026-05-27T23:49:51Z CreateNewBlock(): block weight: 1928 txs: 1 fees: 5460 sigops: 404 MWEB weight: 0
+2026-05-27T23:49:51Z UpdateTip: new best=c347f9aff60262d05332299ad444d072425f429059a9a9e0b5b7f81beeb45d3e height=105 version=0x20000000 log2_work=7.727920 tx=111 date='2026-05-27T23:49:51Z' progress=1.000000 cache=0.0MiB(108txo)
+2026-05-27T23:49:51Z [xchain_regtest_wallet] AddToWallet aba766145d4a7927700481fc97292d455addcea5255ff9e6e9f8dc35e688ff6e  new
+2026-05-27T23:49:54Z CreateNewBlock(): block weight: 9676 txs: 2 fees: 21840 sigops: 416 MWEB weight: 0
+2026-05-27T23:49:54Z UpdateTip: new best=ceb4229c68904fd46461e597887c4193957cce722ff6628e50a66b6b54bb4322 height=106 version=0x20000000 log2_work=7.741467 tx=114 date='2026-05-27T23:49:54Z' progress=1.000000 cache=0.0MiB(109txo)
+2026-05-27T23:49:54Z [xchain_regtest_wallet] AddToWallet ed13a62566c2454058a6878507dcc9e1795b3de9f5a696b51165d408a41aab25  new
+2026-05-27T23:49:58Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:49:58Z [xchain_regtest_wallet] keypool reserve 2005
+2026-05-27T23:49:58Z [xchain_regtest_wallet] keypool keep 2005
+2026-05-27T23:49:58Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:2 (requested 6) Reason:"Minimum Required Fee" Decay 0.96200: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (0 - 1e+99) 100.00% 4.6/(4.6 0 mem 0.0 out)
+2026-05-27T23:49:58Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:49:58Z [xchain_regtest_wallet] keypool reserve 2006
+2026-05-27T23:49:58Z [xchain_regtest_wallet] keypool keep 2006
+2026-05-27T23:49:58Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:2 (requested 6) Reason:"Minimum Required Fee" Decay 0.96200: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (0 - 1e+99) 100.00% 4.6/(4.6 0 mem 0.0 out)
+2026-05-27T23:49:58Z [xchain_regtest_wallet] Fee non-grouped = 1440, grouped = 1440, using grouped
+2026-05-27T23:49:58Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=79b9862bcf, ver=2, vin.size=1, vout.size=2, nLockTime=106)
+    CTxIn(COutPoint(aa1ac00c6a, 0), scriptSig=, nSequence=4294967294)
+    CScriptWitness(304402203f51e1e3b1864f2e8ff3a9caa6ce86b9952ab8eaada4426a7ddd5083da913a9e02207bb8856efd8105dc9412a35de4d9dbc58db1541da4ca8b543b2723a29b08eb8a01, 03e473f3e451b971f4e8373d20940802f2816f141f6fb2f78ee46490ca51db6ec9)
+    CTxOut(nValue=1.00000000, scriptPubKey=76a914582dcdd0555e6bbc5262735c)
+    CTxOut(nValue=46.99995680, scriptPubKey=0014e4bfc5d870e178f29312a7e837)
+2026-05-27T23:49:58Z [xchain_regtest_wallet] AddToWallet 79b9862bcf850f74f40880d2dace47818ac4288db7ba263e1ebd477f236ba7df  newupdate
+2026-05-27T23:49:58Z [xchain_regtest_wallet] Submitting wtx 79b9862bcf850f74f40880d2dace47818ac4288db7ba263e1ebd477f236ba7df to mempool for relay
+2026-05-27T23:49:58Z [xchain_regtest_wallet] AddToWallet 79b9862bcf850f74f40880d2dace47818ac4288db7ba263e1ebd477f236ba7df  
+2026-05-27T23:49:59Z CreateNewBlock(): block weight: 1461 txs: 1 fees: 1440 sigops: 405 MWEB weight: 0
+2026-05-27T23:49:59Z UpdateTip: new best=2a5ace17c02761e6ce5e28dfbd7adff6c76c90f1c85211e20a5705ee793d28fd height=107 version=0x20000000 log2_work=7.754888 tx=116 date='2026-05-27T23:49:59Z' progress=1.000000 cache=0.0MiB(111txo)
+2026-05-27T23:49:59Z [xchain_regtest_wallet] AddToWallet 14c94b08864167e2e0c59d75c691e302c2fe3a11b4e0f9433f9e5fa14272124f  new
+2026-05-27T23:49:59Z [xchain_regtest_wallet] AddToWallet 79b9862bcf850f74f40880d2dace47818ac4288db7ba263e1ebd477f236ba7df  update
+2026-05-27T23:50:01Z CreateNewBlock(): block weight: 1928 txs: 1 fees: 5460 sigops: 404 MWEB weight: 0
+2026-05-27T23:50:01Z UpdateTip: new best=20d46264aca37c535d30e5a7ead7c64ac7f0d01d8ffc68b41e9dc3b75cfe115a height=108 version=0x20000000 log2_work=7.768184 tx=118 date='2026-05-27T23:50:01Z' progress=1.000000 cache=0.0MiB(112txo)
+2026-05-27T23:50:01Z [xchain_regtest_wallet] AddToWallet 9d8dbb0ef560c06c5858724cccb5d9611cf8ba9ae810de87f1b4ca789586db07  new
+2026-05-27T23:50:04Z CreateNewBlock(): block weight: 9684 txs: 2 fees: 21840 sigops: 416 MWEB weight: 0
+2026-05-27T23:50:04Z UpdateTip: new best=c635f24949ca11658f174bc43368d48e202741686c5db830bcadeb1f7bf447e1 height=109 version=0x20000000 log2_work=7.781360 tx=121 date='2026-05-27T23:50:04Z' progress=1.000000 cache=0.0MiB(113txo)
+2026-05-27T23:50:04Z [xchain_regtest_wallet] AddToWallet 2d11c840c8dbf6a2e9879b165ca42a5825abbde73fcf14791432d5bc03fca13e  new
+2026-05-27T23:50:06Z Adding fixed seed nodes as DNS doesn't seem to be available.
+2026-05-27T23:51:05Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:51:05Z [xchain_regtest_wallet] keypool reserve 2007
+2026-05-27T23:51:05Z [xchain_regtest_wallet] keypool keep 2007
+2026-05-27T23:51:05Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:3 (requested 6) Reason:"Minimum Required Fee" Decay 0.96200: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (0 - 1e+99) 100.00% 7.0/(7.0 0 mem 0.0 out)
+2026-05-27T23:51:05Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:51:05Z [xchain_regtest_wallet] keypool reserve 2008
+2026-05-27T23:51:05Z [xchain_regtest_wallet] keypool keep 2008
+2026-05-27T23:51:05Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:3 (requested 6) Reason:"Minimum Required Fee" Decay 0.96200: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (0 - 1e+99) 100.00% 7.0/(7.0 0 mem 0.0 out)
+2026-05-27T23:51:05Z [xchain_regtest_wallet] Fee non-grouped = 1440, grouped = 1440, using grouped
+2026-05-27T23:51:05Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=3083c9c375, ver=2, vin.size=1, vout.size=2, nLockTime=109)
+    CTxIn(COutPoint(79b9862bcf, 1), scriptSig=, nSequence=4294967294)
+    CScriptWitness(3044022046cb1e08dc5020ccdea53d3c42302369be4a4f51b967d8375061568b77b01ca602205ff1be0d19af2aacb4f1ca3fc20b37f84194c3f343897140b6111b416ef46a8201, 0343d54dd1acf04172af66bafeadcfaa30ec0444f3dc881dd310378e4c673d8df4)
+    CTxOut(nValue=1.00000000, scriptPubKey=76a9148cba9df94a89482e8e1939ac)
+    CTxOut(nValue=45.99994240, scriptPubKey=00142c3554a2f4abebc0aab41af2f3)
+2026-05-27T23:51:05Z [xchain_regtest_wallet] AddToWallet 3083c9c375d6c63a1e36c9804e3fd71a6f3615cd074d3a0472a77ec1678fad89  newupdate
+2026-05-27T23:51:05Z [xchain_regtest_wallet] Submitting wtx 3083c9c375d6c63a1e36c9804e3fd71a6f3615cd074d3a0472a77ec1678fad89 to mempool for relay
+2026-05-27T23:51:05Z [xchain_regtest_wallet] AddToWallet 3083c9c375d6c63a1e36c9804e3fd71a6f3615cd074d3a0472a77ec1678fad89  
+2026-05-27T23:51:07Z CreateNewBlock(): block weight: 1461 txs: 1 fees: 1440 sigops: 405 MWEB weight: 0
+2026-05-27T23:51:07Z UpdateTip: new best=e3ac356fba6e831f09cfcfd91a05ea3aa5928adabdec8ec3833490f30fbfa355 height=110 version=0x20000000 log2_work=7.794416 tx=123 date='2026-05-27T23:51:07Z' progress=1.000000 cache=0.0MiB(115txo)
+2026-05-27T23:51:07Z [xchain_regtest_wallet] AddToWallet 0b295fb4b6ee00a7ef95be1da6491ce3a6016c82bc7589b9e3d1044bb5b81a3e  new
+2026-05-27T23:51:07Z [xchain_regtest_wallet] AddToWallet 3083c9c375d6c63a1e36c9804e3fd71a6f3615cd074d3a0472a77ec1678fad89  update
+2026-05-27T23:51:09Z CreateNewBlock(): block weight: 1932 txs: 1 fees: 5460 sigops: 404 MWEB weight: 0
+2026-05-27T23:51:09Z UpdateTip: new best=cb83d8e9d3c26cbd8bfe52295569de875389f08833a7f1dc552400c0c971103a height=111 version=0x20000000 log2_work=7.807355 tx=125 date='2026-05-27T23:51:09Z' progress=1.000000 cache=0.0MiB(116txo)
+2026-05-27T23:51:09Z [xchain_regtest_wallet] AddToWallet ba7195687ca22db0642b536a958d635dd907ea7fb8dc54cb3326465832175a10  new
+2026-05-27T23:51:16Z CreateNewBlock(): block weight: 9660 txs: 2 fees: 21840 sigops: 416 MWEB weight: 0
+2026-05-27T23:51:16Z UpdateTip: new best=b29f584f114a95cc4aa9879794cf542dc6977b864d01f8b649662d178733b127 height=112 version=0x20000000 log2_work=7.820179 tx=128 date='2026-05-27T23:51:16Z' progress=1.000000 cache=0.0MiB(117txo)
+2026-05-27T23:51:16Z [xchain_regtest_wallet] AddToWallet 774158289dbe93192809f45f43a26ecf4e79875b0403b648a50bb13395bae1e3  new
+2026-05-27T23:51:18Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:51:18Z [xchain_regtest_wallet] keypool reserve 2009
+2026-05-27T23:51:18Z [xchain_regtest_wallet] keypool keep 2009
+2026-05-27T23:51:18Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:5 (requested 6) Reason:"Minimum Required Fee" Decay 0.96200: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (0 - 1e+99) 100.00% 9.1/(9.1 0 mem 0.0 out)
+2026-05-27T23:51:18Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:51:18Z [xchain_regtest_wallet] keypool reserve 2010
+2026-05-27T23:51:18Z [xchain_regtest_wallet] keypool keep 2010
+2026-05-27T23:51:18Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:5 (requested 6) Reason:"Minimum Required Fee" Decay 0.96200: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (0 - 1e+99) 100.00% 9.1/(9.1 0 mem 0.0 out)
+2026-05-27T23:51:18Z [xchain_regtest_wallet] Fee non-grouped = 1440, grouped = 1440, using grouped
+2026-05-27T23:51:18Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=e7546221fc, ver=2, vin.size=1, vout.size=2, nLockTime=112)
+    CTxIn(COutPoint(3083c9c375, 1), scriptSig=, nSequence=4294967294)
+    CScriptWitness(304402203fcab6efa1c68aa84dd84848b250598d78aa7249d6a4e63a1d133e869b6c25ce022064765c54ebbc83e05d16a1336717e7e333c6254f6195941f43ffc7452708656e01, 02e03692271d22a73d69eb1375c241a660f29f94bc43b7ce0b004889e9123d11b1)
+    CTxOut(nValue=44.99992800, scriptPubKey=0014752f25b4b1d04c1d0b6b9876fa)
+    CTxOut(nValue=1.00000000, scriptPubKey=76a914b95f645c99b64072cca3a36a)
+2026-05-27T23:51:18Z [xchain_regtest_wallet] AddToWallet e7546221fcdebe73bd76abc03601fb2a6a45b287cc2bce67b36ec3f2c674a432  newupdate
+2026-05-27T23:51:18Z [xchain_regtest_wallet] Submitting wtx e7546221fcdebe73bd76abc03601fb2a6a45b287cc2bce67b36ec3f2c674a432 to mempool for relay
+2026-05-27T23:51:18Z [xchain_regtest_wallet] AddToWallet e7546221fcdebe73bd76abc03601fb2a6a45b287cc2bce67b36ec3f2c674a432  
+2026-05-27T23:51:20Z CreateNewBlock(): block weight: 1461 txs: 1 fees: 1440 sigops: 405 MWEB weight: 0
+2026-05-27T23:51:20Z UpdateTip: new best=4935940b785859b250e402f331099793ffe4dc35e27e51e1f3dd4c26fa290a1d height=113 version=0x20000000 log2_work=7.832890 tx=130 date='2026-05-27T23:51:20Z' progress=1.000000 cache=0.0MiB(119txo)
+2026-05-27T23:51:20Z [xchain_regtest_wallet] AddToWallet cc0d5bc78d64086071427d1218a76b93fbf7114f4b2222abaa72438fa4d6b8ed  new
+2026-05-27T23:51:20Z [xchain_regtest_wallet] AddToWallet e7546221fcdebe73bd76abc03601fb2a6a45b287cc2bce67b36ec3f2c674a432  update
+2026-05-27T23:51:22Z CreateNewBlock(): block weight: 1928 txs: 1 fees: 5460 sigops: 404 MWEB weight: 0
+2026-05-27T23:51:22Z UpdateTip: new best=4cdd2e8ee17b0911809af8627862079892865ee35c53cee743dc84c0cacc1e72 height=114 version=0x20000000 log2_work=7.845490 tx=132 date='2026-05-27T23:51:22Z' progress=1.000000 cache=0.0MiB(120txo)
+2026-05-27T23:51:22Z [xchain_regtest_wallet] AddToWallet ab9bdba66a107b198c9aeb1b3be8a7e0f9582347cde93fbee566f5628f7aa513  new
+2026-05-27T23:51:24Z CreateNewBlock(): block weight: 2992 txs: 2 fees: 10920 sigops: 408 MWEB weight: 0
+2026-05-27T23:51:24Z UpdateTip: new best=c3650401e7d3fead2bcca04fe136b4b6c78e8067e436963e5871c9c7c062bd1a height=115 version=0x20000000 log2_work=7.857981 tx=135 date='2026-05-27T23:51:24Z' progress=1.000000 cache=0.0MiB(121txo)
+2026-05-27T23:51:24Z [xchain_regtest_wallet] AddToWallet d8d8588a4a57a3812eab5d5b0d223a0e7eb20c5a86628b633dd3fe1b82412fcc  new
+2026-05-27T23:51:29Z CreateNewBlock(): block weight: 2952 txs: 2 fees: 10920 sigops: 408 MWEB weight: 0
+2026-05-27T23:51:29Z UpdateTip: new best=802b1006f52c4dddd667bb99900c7152e5d38be9d97965ed92c62bf5cead9e99 height=116 version=0x20000000 log2_work=7.870365 tx=138 date='2026-05-27T23:51:29Z' progress=1.000000 cache=0.0MiB(122txo)
+2026-05-27T23:51:29Z [xchain_regtest_wallet] AddToWallet df564ace2b1f7707dd6015fde084ece4d0b4010fb2476c567fa552139fc4d225  new
+2026-05-27T23:51:33Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:51:33Z [xchain_regtest_wallet] keypool reserve 2011
+2026-05-27T23:51:33Z [xchain_regtest_wallet] keypool keep 2011
+2026-05-27T23:51:33Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:6 (requested 6) Reason:"Minimum Required Fee" Decay 0.96200: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (0 - 1e+99) 100.00% 11.6/(11.6 0 mem 0.0 out)
+2026-05-27T23:51:33Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:51:33Z [xchain_regtest_wallet] keypool reserve 2012
+2026-05-27T23:51:33Z [xchain_regtest_wallet] keypool keep 2012
+2026-05-27T23:51:33Z [xchain_regtest_wallet] Fee Calculation: Fee:1440 Bytes:144 Needed:1440 Tgt:6 (requested 6) Reason:"Minimum Required Fee" Decay 0.96200: Estimation: (-1 - -1) 0.00% 0.0/(0.0 0 mem 0.0 out) Fail: (0 - 1e+99) 100.00% 11.6/(11.6 0 mem 0.0 out)
+2026-05-27T23:51:33Z [xchain_regtest_wallet] Fee non-grouped = 1440, grouped = 1440, using grouped
+2026-05-27T23:51:33Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=c6b00db4bc, ver=2, vin.size=1, vout.size=2, nLockTime=116)
+    CTxIn(COutPoint(e7546221fc, 0), scriptSig=, nSequence=4294967294)
+    CScriptWitness(30440220773a9116031e83c39d206dd4a7e3e1379fe5d8542390a5c00fe75201649c89000220453524a878800102baeb2201f88d845bf5c5348e285afb18cf9f8994f0a7919f01, 03b15a08b4da9e04f06843e0797fc5d42acfbff454410d6dbfb4907ca446b4ae87)
+    CTxOut(nValue=1.00000000, scriptPubKey=76a91412803411bca31907344006e5)
+    CTxOut(nValue=43.99991360, scriptPubKey=00147cb6e41baba4b478337b68a507)
+2026-05-27T23:51:33Z [xchain_regtest_wallet] AddToWallet c6b00db4bc59c1f7fd4339400cd79cb1bb13b1d5b40b8de888072c783209fd6d  newupdate
+2026-05-27T23:51:33Z [xchain_regtest_wallet] Submitting wtx c6b00db4bc59c1f7fd4339400cd79cb1bb13b1d5b40b8de888072c783209fd6d to mempool for relay
+2026-05-27T23:51:33Z [xchain_regtest_wallet] AddToWallet c6b00db4bc59c1f7fd4339400cd79cb1bb13b1d5b40b8de888072c783209fd6d  
+2026-05-27T23:51:35Z CreateNewBlock(): block weight: 1461 txs: 1 fees: 1440 sigops: 405 MWEB weight: 0
+2026-05-27T23:51:35Z UpdateTip: new best=b35818efc60e4b4ee86f3f84b1bc2071599d0c8f6f4cc81aebc66c696e1c843b height=117 version=0x20000000 log2_work=7.882643 tx=140 date='2026-05-27T23:51:35Z' progress=1.000000 cache=0.0MiB(124txo)
+2026-05-27T23:51:35Z [xchain_regtest_wallet] AddToWallet 0f98e53a1818b334ca70dc7b36a1cff54344944461a930603e152f56c464a1c2  new
+2026-05-27T23:51:35Z [xchain_regtest_wallet] AddToWallet c6b00db4bc59c1f7fd4339400cd79cb1bb13b1d5b40b8de888072c783209fd6d  update
+2026-05-27T23:51:38Z CreateNewBlock(): block weight: 1928 txs: 1 fees: 5460 sigops: 404 MWEB weight: 0
+2026-05-27T23:51:38Z UpdateTip: new best=3b04c1e371e45743e0e005300af1fa9b91868229f7b9e72963e44936a8b117c9 height=118 version=0x20000000 log2_work=7.894818 tx=142 date='2026-05-27T23:51:38Z' progress=1.000000 cache=0.0MiB(125txo)
+2026-05-27T23:51:38Z [xchain_regtest_wallet] AddToWallet 3442da111acfb983354791f57721c6a7c4854e145c763b374cd1b2e18c9aa966  new
+2026-05-27T23:51:45Z CreateNewBlock(): block weight: 9632 txs: 2 fees: 21840 sigops: 416 MWEB weight: 0
+2026-05-27T23:51:45Z UpdateTip: new best=234d884f33efc4efb0a4e1dd7457f80d28f78a120de59b3f57a4e173843101a0 height=119 version=0x20000000 log2_work=7.906891 tx=145 date='2026-05-27T23:51:45Z' progress=1.000000 cache=0.0MiB(126txo)
+2026-05-27T23:51:45Z [xchain_regtest_wallet] AddToWallet 5a79fcbcbf47e5e7dc8f5483500eba69685e75decfa0a7e320d0dd6c8647c168  new
+2026-05-27T23:51:48Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:51:48Z [xchain_regtest_wallet] keypool reserve 2013
+2026-05-27T23:51:48Z [xchain_regtest_wallet] keypool keep 2013
+2026-05-27T23:51:48Z [xchain_regtest_wallet] Fee Calculation: Fee:2737 Bytes:144 Needed:2737 Tgt:6 (requested 6) Reason:"Half Target 60% Threshold" Decay 0.96200: Estimation: (9905.97 - 1e+99) 100.00% 13.2/(13.2 0 mem 0.0 out) Fail: (0 - 9905.97) 0.00% 0.0/(0.0 0 mem 0.0 out)
+2026-05-27T23:51:48Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:51:48Z [xchain_regtest_wallet] keypool reserve 2014
+2026-05-27T23:51:48Z [xchain_regtest_wallet] keypool keep 2014
+2026-05-27T23:51:48Z [xchain_regtest_wallet] Fee Calculation: Fee:2737 Bytes:144 Needed:2737 Tgt:6 (requested 6) Reason:"Half Target 60% Threshold" Decay 0.96200: Estimation: (9905.97 - 1e+99) 100.00% 13.2/(13.2 0 mem 0.0 out) Fail: (0 - 9905.97) 0.00% 0.0/(0.0 0 mem 0.0 out)
+2026-05-27T23:51:48Z [xchain_regtest_wallet] Fee non-grouped = 2737, grouped = 2737, using grouped
+2026-05-27T23:51:48Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=b8ecae1958, ver=2, vin.size=1, vout.size=2, nLockTime=119)
+    CTxIn(COutPoint(c6b00db4bc, 1), scriptSig=, nSequence=4294967294)
+    CScriptWitness(3044022031f0ecd8ec9b1f3fdb8f47e8475cbeab7b79508424466b8b2b31ea9f30dc84be022005d2a54bef47cc426a1dcb4f02a63a36ebb459d33b3bf17d6eea7d7018ada5c301, 023b1d3492355802f5ded01248aaa868541d872a57dd953f08e36ebdaf02fe0368)
+    CTxOut(nValue=1.00000000, scriptPubKey=76a9146a6ba3a2e983290acfbccb61)
+    CTxOut(nValue=42.99988623, scriptPubKey=0014a55d4676394108bc99ec3a4c42)
+2026-05-27T23:51:48Z [xchain_regtest_wallet] AddToWallet b8ecae195837d73de77bfd1188720cd537edb74fa959b2c1629f284398f18e34  newupdate
+2026-05-27T23:51:48Z [xchain_regtest_wallet] Submitting wtx b8ecae195837d73de77bfd1188720cd537edb74fa959b2c1629f284398f18e34 to mempool for relay
+2026-05-27T23:51:48Z [xchain_regtest_wallet] AddToWallet b8ecae195837d73de77bfd1188720cd537edb74fa959b2c1629f284398f18e34  
+2026-05-27T23:51:50Z CreateNewBlock(): block weight: 1461 txs: 1 fees: 2737 sigops: 405 MWEB weight: 0
+2026-05-27T23:51:50Z UpdateTip: new best=1916c81485d379462b1e0c7a34fcdb01afc3e23dad5b8d2973290717bcc23304 height=120 version=0x20000000 log2_work=7.918863 tx=147 date='2026-05-27T23:51:50Z' progress=1.000000 cache=0.0MiB(128txo)
+2026-05-27T23:51:50Z [xchain_regtest_wallet] AddToWallet ad5aeed23ee56581e62e190c2e9fcc04ec2dfe7a7f07ba71b90ad47112f28a2b  new
+2026-05-27T23:51:50Z [xchain_regtest_wallet] AddToWallet b8ecae195837d73de77bfd1188720cd537edb74fa959b2c1629f284398f18e34  update
+2026-05-27T23:51:53Z CreateNewBlock(): block weight: 1928 txs: 1 fees: 5550 sigops: 404 MWEB weight: 0
+2026-05-27T23:51:53Z UpdateTip: new best=4b8752d64595dcbfbba626c3e7e7322503ad9aa3793f08e8794fe4862fae7099 height=121 version=0x20000000 log2_work=7.930737 tx=149 date='2026-05-27T23:51:53Z' progress=1.000000 cache=0.0MiB(129txo)
+2026-05-27T23:51:53Z [xchain_regtest_wallet] AddToWallet ad2adf870afb807bd116320a7c6851bd9719401dfb326b47d3e699a6fd4da04c  new
+2026-05-27T23:52:01Z CreateNewBlock(): block weight: 2992 txs: 2 fees: 10920 sigops: 408 MWEB weight: 0
+2026-05-27T23:52:01Z UpdateTip: new best=1ba86dbcae0f5a7e12b9cdaaa4673eb1dae2c0f8c104b7a30bddd6fd1d58c03c height=122 version=0x20000000 log2_work=7.942515 tx=152 date='2026-05-27T23:52:01Z' progress=1.000000 cache=0.0MiB(130txo)
+2026-05-27T23:52:01Z [xchain_regtest_wallet] AddToWallet f7265b0489977441526cb431890c7ed1948654aa392959bff55cf54ded8e1d64  new
+2026-05-27T23:53:02Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:53:02Z [xchain_regtest_wallet] keypool reserve 2015
+2026-05-27T23:53:02Z [xchain_regtest_wallet] keypool keep 2015
+2026-05-27T23:53:02Z [xchain_regtest_wallet] Fee Calculation: Fee:3033 Bytes:144 Needed:3033 Tgt:6 (requested 6) Reason:"Half Target 60% Threshold" Decay 0.96200: Estimation: (9905.97 - 1e+99) 100.00% 14.7/(14.7 0 mem 0.0 out) Fail: (0 - 9905.97) 0.00% 0.0/(0.0 0 mem 0.0 out)
+2026-05-27T23:53:02Z [xchain_regtest_wallet] keypool added 1 keys (1 internal, 0 MWEB), size=3000 (1000 internal, 1000 MWEB)
+2026-05-27T23:53:02Z [xchain_regtest_wallet] keypool reserve 2016
+2026-05-27T23:53:02Z [xchain_regtest_wallet] keypool keep 2016
+2026-05-27T23:53:02Z [xchain_regtest_wallet] Fee Calculation: Fee:3033 Bytes:144 Needed:3033 Tgt:6 (requested 6) Reason:"Half Target 60% Threshold" Decay 0.96200: Estimation: (9905.97 - 1e+99) 100.00% 14.7/(14.7 0 mem 0.0 out) Fail: (0 - 9905.97) 0.00% 0.0/(0.0 0 mem 0.0 out)
+2026-05-27T23:53:02Z [xchain_regtest_wallet] Fee non-grouped = 3033, grouped = 3033, using grouped
+2026-05-27T23:53:02Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=cf7599e5a4, ver=2, vin.size=1, vout.size=2, nLockTime=122)
+    CTxIn(COutPoint(b8ecae1958, 1), scriptSig=, nSequence=4294967294)
+    CScriptWitness(304402204515bf6eaf84f362e30eb28940506695f45f879aeca5812cac5c930fdccaabc5022070b6ac52efd3293bf92f69e506a423f5f8e4f35f8b3a456bb68fc4c7ede9239201, 03941a0e0f697100cfad0572a811c49a53aa80f386214885d914e5222b9123b87d)
+    CTxOut(nValue=1.00000000, scriptPubKey=76a914752e434d3802b82eb5d1eb58)
+    CTxOut(nValue=41.99985590, scriptPubKey=00144cf7620cf5c60d1b6ce479aea9)
+2026-05-27T23:53:02Z [xchain_regtest_wallet] AddToWallet cf7599e5a4b7f979f918bc284e9a3c4e9e3e59794ad6e43721b8f3936ab43131  newupdate
+2026-05-27T23:53:02Z [xchain_regtest_wallet] Submitting wtx cf7599e5a4b7f979f918bc284e9a3c4e9e3e59794ad6e43721b8f3936ab43131 to mempool for relay
+2026-05-27T23:53:02Z [xchain_regtest_wallet] AddToWallet cf7599e5a4b7f979f918bc284e9a3c4e9e3e59794ad6e43721b8f3936ab43131  
+2026-05-27T23:53:04Z CreateNewBlock(): block weight: 1461 txs: 1 fees: 3033 sigops: 405 MWEB weight: 0
+2026-05-27T23:53:04Z UpdateTip: new best=53a257316480cdf63f0161ce09050c5b20b9126d55004e58ae5c3a40776e5a09 height=123 version=0x20000000 log2_work=7.954196 tx=154 date='2026-05-27T23:53:04Z' progress=1.000000 cache=0.0MiB(132txo)
+2026-05-27T23:53:04Z [xchain_regtest_wallet] AddToWallet 7b6e91b2f7856e5bc9f307bfd92588dcfbf3af3115347c8b2c2fadb55528ddf0  new
+2026-05-27T23:53:04Z [xchain_regtest_wallet] AddToWallet cf7599e5a4b7f979f918bc284e9a3c4e9e3e59794ad6e43721b8f3936ab43131  update
+2026-05-27T23:53:07Z CreateNewBlock(): block weight: 1928 txs: 1 fees: 6150 sigops: 404 MWEB weight: 0
+2026-05-27T23:53:07Z UpdateTip: new best=4ec286c762131a6eb1bfef1f3f9c25721f6f878a6536ed3c3f0533c60f84faf7 height=124 version=0x20000000 log2_work=7.965784 tx=156 date='2026-05-27T23:53:07Z' progress=1.000000 cache=0.0MiB(133txo)
+2026-05-27T23:53:07Z [xchain_regtest_wallet] AddToWallet d78e3513db98882462d20f87f70ce9d283e1060bfc8ccbc16c48ade15a75f0d5  new
+2026-05-27T23:53:15Z CreateNewBlock(): block weight: 3024 txs: 2 fees: 11273 sigops: 408 MWEB weight: 0
+2026-05-27T23:53:15Z UpdateTip: new best=19b0ed8759326f61d5270ec375e7750c1925aa3775c20c69ea17b270950f1189 height=125 version=0x20000000 log2_work=7.977280 tx=159 date='2026-05-27T23:53:15Z' progress=1.000000 cache=0.0MiB(134txo)
+2026-05-27T23:53:15Z [xchain_regtest_wallet] AddToWallet 4f1d82e1a7a27802e143bc00f75852b7f66220098b4c4b410e79a236f4cd091e  new
+2026-05-28T00:01:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 514 seconds ago)
+2026-05-28T00:04:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 694 seconds ago)
+2026-05-28T00:07:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 874 seconds ago)
+2026-05-28T00:10:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 1054 seconds ago)
+2026-05-28T00:13:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 1234 seconds ago)
+2026-05-28T00:16:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 1414 seconds ago)
+2026-05-28T00:19:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 1594 seconds ago)
+2026-05-28T00:22:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 1774 seconds ago)
+2026-05-28T00:25:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 1954 seconds ago)
+2026-05-28T00:28:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 2134 seconds ago)
+2026-05-28T00:31:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 2314 seconds ago)
+2026-05-28T00:34:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 2494 seconds ago)
+2026-05-28T00:37:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 2674 seconds ago)
+2026-05-28T00:40:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 2854 seconds ago)
+2026-05-28T00:43:49Z Potential stale tip detected, will try using extra outbound peer (last tip update: 3034 seconds ago)
+2026-05-28T00:46:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 3215 seconds ago)
+2026-05-28T00:49:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 3395 seconds ago)
+2026-05-28T00:52:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 3575 seconds ago)
+2026-05-28T00:55:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 3755 seconds ago)
+2026-05-28T00:58:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 3935 seconds ago)
+2026-05-28T01:01:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 4115 seconds ago)
+2026-05-28T01:04:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 4295 seconds ago)
+2026-05-28T01:07:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 4475 seconds ago)
+2026-05-28T01:10:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 4655 seconds ago)
+2026-05-28T01:13:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 4835 seconds ago)
+2026-05-28T01:16:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 5015 seconds ago)
+2026-05-28T01:19:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 5195 seconds ago)
+2026-05-28T01:22:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 5375 seconds ago)
+2026-05-28T01:25:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 5555 seconds ago)
+2026-05-28T01:28:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 5735 seconds ago)
+2026-05-28T01:31:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 5915 seconds ago)
+2026-05-28T01:34:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 6095 seconds ago)
+2026-05-28T01:37:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 6275 seconds ago)
+2026-05-28T01:40:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 6455 seconds ago)
+2026-05-28T01:43:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 6635 seconds ago)
+2026-05-28T01:46:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 6815 seconds ago)
+2026-05-28T01:49:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 6995 seconds ago)
+2026-05-28T01:52:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 7175 seconds ago)
+2026-05-28T01:55:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 7355 seconds ago)
+2026-05-28T01:58:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 7535 seconds ago)
+2026-05-28T02:01:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 7715 seconds ago)
+2026-05-28T02:04:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 7895 seconds ago)
+2026-05-28T02:07:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 8075 seconds ago)
+2026-05-28T02:10:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 8255 seconds ago)
+2026-05-28T02:13:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 8435 seconds ago)
+2026-05-28T02:16:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 8615 seconds ago)
+2026-05-28T02:19:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 8795 seconds ago)
+2026-05-28T02:22:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 8975 seconds ago)
+2026-05-28T02:25:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 9155 seconds ago)
+2026-05-28T02:28:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 9335 seconds ago)
+2026-05-28T02:31:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 9515 seconds ago)
+2026-05-28T02:34:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 9695 seconds ago)
+2026-05-28T02:37:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 9875 seconds ago)
+2026-05-28T02:40:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 10055 seconds ago)
+2026-05-28T02:43:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 10235 seconds ago)
+2026-05-28T02:46:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 10415 seconds ago)
+2026-05-28T02:49:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 10595 seconds ago)
+2026-05-28T02:52:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 10775 seconds ago)
+2026-05-28T02:55:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 10955 seconds ago)
+2026-05-28T02:58:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 11135 seconds ago)
+2026-05-28T03:01:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 11315 seconds ago)
+2026-05-28T03:04:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 11495 seconds ago)
+2026-05-28T03:07:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 11675 seconds ago)
+2026-05-28T03:10:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 11855 seconds ago)
+2026-05-28T03:13:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 12035 seconds ago)
+2026-05-28T03:16:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 12215 seconds ago)
+2026-05-28T03:19:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 12395 seconds ago)
+2026-05-28T03:22:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 12575 seconds ago)
+2026-05-28T03:25:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 12755 seconds ago)
+2026-05-28T03:28:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 12935 seconds ago)
+2026-05-28T03:31:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 13115 seconds ago)
+2026-05-28T03:34:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 13295 seconds ago)
+2026-05-28T03:37:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 13475 seconds ago)
+2026-05-28T03:40:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 13655 seconds ago)
+2026-05-28T03:43:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 13835 seconds ago)
+2026-05-28T03:46:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 14015 seconds ago)
+2026-05-28T03:49:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 14195 seconds ago)
+2026-05-28T03:52:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 14375 seconds ago)
+2026-05-28T03:55:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 14555 seconds ago)
+2026-05-28T03:58:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 14735 seconds ago)
+2026-05-28T04:01:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 14915 seconds ago)
+2026-05-28T04:04:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 15095 seconds ago)
+2026-05-28T04:07:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 15275 seconds ago)
+2026-05-28T04:10:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 15455 seconds ago)
+2026-05-28T04:13:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 15635 seconds ago)
+2026-05-28T04:16:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 15815 seconds ago)
+2026-05-28T04:19:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 15995 seconds ago)
+2026-05-28T04:22:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 16175 seconds ago)
+2026-05-28T04:25:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 16355 seconds ago)
+2026-05-28T04:28:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 16535 seconds ago)
+2026-05-28T04:31:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 16715 seconds ago)
+2026-05-28T04:34:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 16895 seconds ago)
+2026-05-28T04:37:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 17075 seconds ago)
+2026-05-28T04:40:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 17255 seconds ago)
+2026-05-28T04:43:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 17435 seconds ago)
+2026-05-28T04:46:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 17615 seconds ago)
+2026-05-28T04:49:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 17795 seconds ago)
+2026-05-28T04:52:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 17975 seconds ago)
+2026-05-28T04:55:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 18155 seconds ago)
+2026-05-28T04:58:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 18335 seconds ago)
+2026-05-28T05:01:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 18515 seconds ago)
+2026-05-28T05:04:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 18695 seconds ago)
+2026-05-28T05:07:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 18875 seconds ago)
+2026-05-28T05:10:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 19055 seconds ago)
+2026-05-28T05:13:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 19235 seconds ago)
+2026-05-28T05:16:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 19415 seconds ago)
+2026-05-28T05:19:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 19595 seconds ago)
+2026-05-28T05:22:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 19775 seconds ago)
+2026-05-28T05:25:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 19955 seconds ago)
+2026-05-28T05:28:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 20135 seconds ago)
+2026-05-28T05:31:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 20315 seconds ago)
+2026-05-28T05:34:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 20495 seconds ago)
+2026-05-28T05:37:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 20675 seconds ago)
+2026-05-28T05:40:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 20855 seconds ago)
+2026-05-28T05:43:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 21035 seconds ago)
+2026-05-28T05:46:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 21215 seconds ago)
+2026-05-28T05:49:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 21395 seconds ago)
+2026-05-28T05:52:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 21575 seconds ago)
+2026-05-28T05:55:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 21755 seconds ago)
+2026-05-28T05:58:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 21935 seconds ago)
+2026-05-28T06:01:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 22115 seconds ago)
+2026-05-28T06:04:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 22295 seconds ago)
+2026-05-28T06:07:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 22475 seconds ago)
+2026-05-28T06:10:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 22655 seconds ago)
+2026-05-28T06:13:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 22835 seconds ago)
+2026-05-28T06:16:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 23015 seconds ago)
+2026-05-28T06:19:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 23195 seconds ago)
+2026-05-28T06:22:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 23375 seconds ago)
+2026-05-28T06:25:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 23555 seconds ago)
+2026-05-28T06:28:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 23735 seconds ago)
+2026-05-28T06:55:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 25355 seconds ago)
+2026-05-28T06:58:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 25535 seconds ago)
+2026-05-28T07:01:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 25715 seconds ago)
+2026-05-28T07:04:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 25895 seconds ago)
+2026-05-28T07:07:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 26075 seconds ago)
+2026-05-28T07:10:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 26255 seconds ago)
+2026-05-28T07:13:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 26435 seconds ago)
+2026-05-28T07:16:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 26615 seconds ago)
+2026-05-28T07:19:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 26795 seconds ago)
+2026-05-28T07:22:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 26975 seconds ago)
+2026-05-28T07:25:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 27155 seconds ago)
+2026-05-28T07:28:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 27335 seconds ago)
+2026-05-28T07:31:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 27515 seconds ago)
+2026-05-28T07:34:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 27695 seconds ago)
+2026-05-28T07:37:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 27875 seconds ago)
+2026-05-28T07:40:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 28055 seconds ago)
+2026-05-28T07:43:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 28235 seconds ago)
+2026-05-28T07:46:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 28415 seconds ago)
+2026-05-28T07:49:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 28595 seconds ago)
+2026-05-28T07:52:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 28775 seconds ago)
+2026-05-28T07:55:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 28955 seconds ago)
+2026-05-28T07:58:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 29135 seconds ago)
+2026-05-28T08:07:32Z Potential stale tip detected, will try using extra outbound peer (last tip update: 29657 seconds ago)
+2026-05-28T08:10:32Z Potential stale tip detected, will try using extra outbound peer (last tip update: 29837 seconds ago)
+2026-05-28T08:29:22Z Potential stale tip detected, will try using extra outbound peer (last tip update: 30967 seconds ago)
+2026-05-28T08:46:42Z Potential stale tip detected, will try using extra outbound peer (last tip update: 32007 seconds ago)
+2026-05-28T08:49:42Z Potential stale tip detected, will try using extra outbound peer (last tip update: 32187 seconds ago)
+2026-05-28T09:07:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 33237 seconds ago)
+2026-05-28T09:23:53Z Potential stale tip detected, will try using extra outbound peer (last tip update: 34238 seconds ago)
+2026-05-28T09:26:53Z Potential stale tip detected, will try using extra outbound peer (last tip update: 34418 seconds ago)
+2026-05-28T09:44:04Z Potential stale tip detected, will try using extra outbound peer (last tip update: 35449 seconds ago)
+2026-05-28T10:02:38Z Potential stale tip detected, will try using extra outbound peer (last tip update: 36563 seconds ago)
+2026-05-28T10:05:38Z Potential stale tip detected, will try using extra outbound peer (last tip update: 36743 seconds ago)
+2026-05-28T10:12:46Z Potential stale tip detected, will try using extra outbound peer (last tip update: 37171 seconds ago)
+2026-05-28T10:31:50Z Potential stale tip detected, will try using extra outbound peer (last tip update: 38315 seconds ago)
+2026-05-28T10:48:37Z Potential stale tip detected, will try using extra outbound peer (last tip update: 39322 seconds ago)
+2026-05-28T10:51:37Z Potential stale tip detected, will try using extra outbound peer (last tip update: 39502 seconds ago)
+2026-05-28T11:07:55Z Potential stale tip detected, will try using extra outbound peer (last tip update: 40480 seconds ago)
+2026-05-28T11:24:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 41470 seconds ago)
+2026-05-28T11:27:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 41650 seconds ago)
+2026-05-28T11:30:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 41830 seconds ago)
+2026-05-28T11:33:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 42010 seconds ago)
+2026-05-28T11:36:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 42190 seconds ago)
+2026-05-28T11:39:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 42370 seconds ago)
+2026-05-28T11:42:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 42550 seconds ago)
+2026-05-28T11:45:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 42730 seconds ago)
+2026-05-28T11:48:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 42910 seconds ago)
+2026-05-28T11:51:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 43090 seconds ago)
+2026-05-28T11:54:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 43270 seconds ago)
+2026-05-28T11:57:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 43450 seconds ago)
+2026-05-28T12:00:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 43630 seconds ago)
+2026-05-28T12:03:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 43810 seconds ago)
+2026-05-28T12:06:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 43990 seconds ago)
+2026-05-28T12:09:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 44170 seconds ago)
+2026-05-28T12:12:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 44350 seconds ago)
+2026-05-28T12:15:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 44530 seconds ago)
+2026-05-28T12:18:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 44710 seconds ago)
+2026-05-28T12:21:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 44890 seconds ago)
+2026-05-28T12:24:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 45070 seconds ago)
+2026-05-28T12:27:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 45250 seconds ago)
+2026-05-28T12:30:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 45430 seconds ago)
+2026-05-28T12:33:25Z Potential stale tip detected, will try using extra outbound peer (last tip update: 45610 seconds ago)
+2026-05-28T12:49:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 46572 seconds ago)
+2026-05-28T12:52:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 46752 seconds ago)
+2026-05-28T12:55:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 46932 seconds ago)
+2026-05-28T13:09:29Z Potential stale tip detected, will try using extra outbound peer (last tip update: 47774 seconds ago)
+2026-05-28T13:25:58Z Potential stale tip detected, will try using extra outbound peer (last tip update: 48763 seconds ago)
+2026-05-28T13:28:58Z Potential stale tip detected, will try using extra outbound peer (last tip update: 48943 seconds ago)
+2026-05-28T13:47:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 50052 seconds ago)
+2026-05-28T13:50:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 50232 seconds ago)
+2026-05-28T13:53:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 50412 seconds ago)
+2026-05-28T14:10:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 51432 seconds ago)
+2026-05-28T14:13:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 51612 seconds ago)
+2026-05-28T14:16:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 51792 seconds ago)
+2026-05-28T14:19:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 51972 seconds ago)
+2026-05-28T14:22:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 52152 seconds ago)
+2026-05-28T14:25:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 52332 seconds ago)
+2026-05-28T14:28:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 52512 seconds ago)
+2026-05-28T14:31:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 52692 seconds ago)
+2026-05-28T14:34:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 52872 seconds ago)
+2026-05-28T14:37:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 53052 seconds ago)
+2026-05-28T14:40:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 53232 seconds ago)
+2026-05-28T14:43:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 53412 seconds ago)
+2026-05-28T14:46:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 53592 seconds ago)
+2026-05-28T14:49:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 53772 seconds ago)
+2026-05-28T14:52:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 53952 seconds ago)
+2026-05-28T14:55:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 54132 seconds ago)
+2026-05-28T14:58:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 54312 seconds ago)
+2026-05-28T15:01:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 54492 seconds ago)
+2026-05-28T15:04:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 54672 seconds ago)
+2026-05-28T15:07:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 54852 seconds ago)
+2026-05-28T15:10:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 55032 seconds ago)
+2026-05-28T15:13:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 55212 seconds ago)
+2026-05-28T15:16:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 55392 seconds ago)
+2026-05-28T15:19:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 55572 seconds ago)
+2026-05-28T15:22:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 55752 seconds ago)
+2026-05-28T15:25:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 55932 seconds ago)
+2026-05-28T15:28:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 56112 seconds ago)
+2026-05-28T15:31:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 56292 seconds ago)
+2026-05-28T15:34:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 56472 seconds ago)
+2026-05-28T15:37:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 56652 seconds ago)
+2026-05-28T15:40:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 56832 seconds ago)
+2026-05-28T15:43:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 57012 seconds ago)
+2026-05-28T15:46:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 57192 seconds ago)
+2026-05-28T15:49:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 57372 seconds ago)
+2026-05-28T15:52:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 57552 seconds ago)
+2026-05-28T15:55:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 57732 seconds ago)
+2026-05-28T15:58:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 57912 seconds ago)
+2026-05-28T16:01:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 58092 seconds ago)
+2026-05-28T16:04:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 58272 seconds ago)
+2026-05-28T16:07:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 58452 seconds ago)
+2026-05-28T16:10:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 58632 seconds ago)
+2026-05-28T16:13:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 58812 seconds ago)
+2026-05-28T16:16:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 58992 seconds ago)
+2026-05-28T16:19:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 59172 seconds ago)
+2026-05-28T16:22:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 59352 seconds ago)
+2026-05-28T16:25:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 59532 seconds ago)
+2026-05-28T16:28:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 59712 seconds ago)
+2026-05-28T16:31:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 59892 seconds ago)
+2026-05-28T16:34:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 60072 seconds ago)
+2026-05-28T16:37:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 60252 seconds ago)
+2026-05-28T16:40:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 60432 seconds ago)
+2026-05-28T16:43:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 60612 seconds ago)
+2026-05-28T16:46:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 60792 seconds ago)
+2026-05-28T16:49:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 60972 seconds ago)
+2026-05-28T16:52:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 61152 seconds ago)
+2026-05-28T16:55:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 61332 seconds ago)
+2026-05-28T16:58:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 61512 seconds ago)
+2026-05-28T17:01:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 61692 seconds ago)
+2026-05-28T17:04:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 61872 seconds ago)
+2026-05-28T17:07:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 62052 seconds ago)
+2026-05-28T17:10:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 62232 seconds ago)
+2026-05-28T17:13:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 62412 seconds ago)
+2026-05-28T17:16:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 62592 seconds ago)
+2026-05-28T17:19:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 62772 seconds ago)
+2026-05-28T17:22:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 62952 seconds ago)
+2026-05-28T17:25:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 63132 seconds ago)
+2026-05-28T17:28:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 63312 seconds ago)
+2026-05-28T17:31:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 63492 seconds ago)
+2026-05-28T17:34:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 63672 seconds ago)
+2026-05-28T17:37:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 63852 seconds ago)
+2026-05-28T17:40:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 64032 seconds ago)
+2026-05-28T17:43:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 64212 seconds ago)
+2026-05-28T17:46:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 64392 seconds ago)
+2026-05-28T17:49:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 64572 seconds ago)
+2026-05-28T17:52:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 64752 seconds ago)
+2026-05-28T17:55:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 64932 seconds ago)
+2026-05-28T17:58:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 65112 seconds ago)
+2026-05-28T18:01:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 65292 seconds ago)
+2026-05-28T18:04:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 65472 seconds ago)
+2026-05-28T18:07:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 65652 seconds ago)
+2026-05-28T18:10:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 65832 seconds ago)
+2026-05-28T18:13:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 66012 seconds ago)
+2026-05-28T18:16:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 66192 seconds ago)
+2026-05-28T18:19:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 66372 seconds ago)
+2026-05-28T18:22:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 66552 seconds ago)
+2026-05-28T18:25:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 66732 seconds ago)
+2026-05-28T18:28:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 66912 seconds ago)
+2026-05-28T18:31:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 67092 seconds ago)
+2026-05-28T18:34:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 67272 seconds ago)
+2026-05-28T18:37:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 67452 seconds ago)
+2026-05-28T18:40:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 67632 seconds ago)
+2026-05-28T18:43:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 67812 seconds ago)
+2026-05-28T18:46:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 67992 seconds ago)
+2026-05-28T18:49:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 68172 seconds ago)
+2026-05-28T18:52:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 68352 seconds ago)
+2026-05-28T18:55:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 68532 seconds ago)
+2026-05-28T18:58:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 68712 seconds ago)
+2026-05-28T19:01:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 68892 seconds ago)
+2026-05-28T19:04:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 69072 seconds ago)
+2026-05-28T19:07:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 69252 seconds ago)
+2026-05-28T19:10:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 69432 seconds ago)
+2026-05-28T19:13:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 69612 seconds ago)
+2026-05-28T19:16:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 69792 seconds ago)
+2026-05-28T19:19:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 69972 seconds ago)
+2026-05-28T19:22:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 70152 seconds ago)
+2026-05-28T19:25:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 70332 seconds ago)
+2026-05-28T19:28:27Z Potential stale tip detected, will try using extra outbound peer (last tip update: 70512 seconds ago)
+2026-05-28T19:31:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 70693 seconds ago)
+2026-05-28T19:34:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 70873 seconds ago)
+2026-05-28T19:37:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 71053 seconds ago)
+2026-05-28T19:40:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 71233 seconds ago)
+2026-05-28T19:43:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 71413 seconds ago)
+2026-05-28T19:46:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 71593 seconds ago)
+2026-05-28T19:49:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 71773 seconds ago)
+2026-05-28T19:52:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 71953 seconds ago)
+2026-05-28T19:55:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 72133 seconds ago)
+2026-05-28T19:58:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 72313 seconds ago)
+2026-05-28T20:01:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 72493 seconds ago)
+2026-05-28T20:04:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 72673 seconds ago)
+2026-05-28T20:07:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 72853 seconds ago)
+2026-05-28T20:10:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 73033 seconds ago)
+2026-05-28T20:13:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 73213 seconds ago)
+2026-05-28T20:16:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 73393 seconds ago)
+2026-05-28T20:19:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 73573 seconds ago)
+2026-05-28T20:22:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 73753 seconds ago)
+2026-05-28T20:25:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 73933 seconds ago)
+2026-05-28T20:28:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 74113 seconds ago)
+2026-05-28T20:31:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 74293 seconds ago)
+2026-05-28T20:34:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 74473 seconds ago)
+2026-05-28T20:37:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 74653 seconds ago)
+2026-05-28T20:42:04Z Potential stale tip detected, will try using extra outbound peer (last tip update: 74929 seconds ago)
+2026-05-28T20:58:38Z Potential stale tip detected, will try using extra outbound peer (last tip update: 75923 seconds ago)
+2026-05-28T21:15:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 76916 seconds ago)
+2026-05-28T21:18:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 77096 seconds ago)
+2026-05-28T21:21:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 77276 seconds ago)
+2026-05-28T21:24:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 77456 seconds ago)
+2026-05-28T21:27:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 77636 seconds ago)
+2026-05-28T21:30:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 77816 seconds ago)
+2026-05-28T21:33:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 77996 seconds ago)
+2026-05-28T21:36:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 78176 seconds ago)
+2026-05-28T21:39:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 78356 seconds ago)
+2026-05-28T21:42:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 78536 seconds ago)
+2026-05-28T21:45:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 78716 seconds ago)
+2026-05-28T21:48:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 78896 seconds ago)
+2026-05-28T21:51:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 79076 seconds ago)
+2026-05-28T21:54:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 79256 seconds ago)
+2026-05-28T21:57:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 79436 seconds ago)
+2026-05-28T22:00:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 79616 seconds ago)
+2026-05-28T22:03:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 79796 seconds ago)
+2026-05-28T22:06:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 79976 seconds ago)
+2026-05-28T22:09:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 80156 seconds ago)
+2026-05-28T22:12:11Z Potential stale tip detected, will try using extra outbound peer (last tip update: 80336 seconds ago)
+2026-05-28T22:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 80517 seconds ago)
+2026-05-28T22:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 80697 seconds ago)
+2026-05-28T22:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 80877 seconds ago)
+2026-05-28T22:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 81057 seconds ago)
+2026-05-28T22:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 81237 seconds ago)
+2026-05-28T22:30:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 81417 seconds ago)
+2026-05-28T22:33:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 81597 seconds ago)
+2026-05-28T22:36:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 81777 seconds ago)
+2026-05-28T22:39:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 81957 seconds ago)
+2026-05-28T22:42:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 82137 seconds ago)
+2026-05-28T22:45:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 82317 seconds ago)
+2026-05-28T22:48:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 82497 seconds ago)
+2026-05-28T22:51:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 82677 seconds ago)
+2026-05-28T22:54:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 82857 seconds ago)
+2026-05-28T22:57:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 83037 seconds ago)
+2026-05-28T23:00:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 83217 seconds ago)
+2026-05-28T23:03:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 83397 seconds ago)
+2026-05-28T23:06:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 83577 seconds ago)
+2026-05-28T23:09:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 83757 seconds ago)
+2026-05-28T23:12:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 83937 seconds ago)
+2026-05-28T23:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 84117 seconds ago)
+2026-05-28T23:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 84297 seconds ago)
+2026-05-28T23:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 84477 seconds ago)
+2026-05-28T23:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 84657 seconds ago)
+2026-05-28T23:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 84837 seconds ago)
+2026-05-28T23:30:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 85017 seconds ago)
+2026-05-28T23:33:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 85197 seconds ago)
+2026-05-28T23:36:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 85377 seconds ago)
+2026-05-28T23:39:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 85557 seconds ago)
+2026-05-28T23:42:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 85737 seconds ago)
+2026-05-28T23:45:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 85917 seconds ago)
+2026-05-28T23:48:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 86097 seconds ago)
+2026-05-28T23:51:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 86277 seconds ago)
+2026-05-28T23:54:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 86457 seconds ago)
+2026-05-28T23:57:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 86637 seconds ago)
+2026-05-29T00:00:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 86817 seconds ago)
+2026-05-29T00:03:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 86997 seconds ago)
+2026-05-29T00:06:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 87177 seconds ago)
+2026-05-29T00:09:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 87357 seconds ago)
+2026-05-29T00:12:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 87537 seconds ago)
+2026-05-29T00:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 87717 seconds ago)
+2026-05-29T00:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 87897 seconds ago)
+2026-05-29T00:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 88077 seconds ago)
+2026-05-29T00:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 88257 seconds ago)
+2026-05-29T00:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 88437 seconds ago)
+2026-05-29T00:30:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 88617 seconds ago)
+2026-05-29T00:33:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 88797 seconds ago)
+2026-05-29T00:36:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 88977 seconds ago)
+2026-05-29T00:39:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 89157 seconds ago)
+2026-05-29T00:42:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 89337 seconds ago)
+2026-05-29T00:45:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 89517 seconds ago)
+2026-05-29T00:48:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 89697 seconds ago)
+2026-05-29T00:51:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 89877 seconds ago)
+2026-05-29T00:54:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 90057 seconds ago)
+2026-05-29T00:57:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 90237 seconds ago)
+2026-05-29T01:00:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 90417 seconds ago)
+2026-05-29T01:03:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 90597 seconds ago)
+2026-05-29T01:06:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 90777 seconds ago)
+2026-05-29T01:09:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 90957 seconds ago)
+2026-05-29T01:12:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 91137 seconds ago)
+2026-05-29T01:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 91317 seconds ago)
+2026-05-29T01:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 91497 seconds ago)
+2026-05-29T01:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 91677 seconds ago)
+2026-05-29T01:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 91857 seconds ago)
+2026-05-29T01:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 92037 seconds ago)
+2026-05-29T01:30:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 92217 seconds ago)
+2026-05-29T01:33:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 92397 seconds ago)
+2026-05-29T01:36:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 92577 seconds ago)
+2026-05-29T01:39:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 92757 seconds ago)
+2026-05-29T01:42:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 92937 seconds ago)
+2026-05-29T01:45:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 93117 seconds ago)
+2026-05-29T01:48:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 93297 seconds ago)
+2026-05-29T01:51:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 93477 seconds ago)
+2026-05-29T01:54:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 93657 seconds ago)
+2026-05-29T01:57:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 93837 seconds ago)
+2026-05-29T02:00:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 94017 seconds ago)
+2026-05-29T02:03:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 94197 seconds ago)
+2026-05-29T02:06:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 94377 seconds ago)
+2026-05-29T02:09:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 94557 seconds ago)
+2026-05-29T02:12:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 94737 seconds ago)
+2026-05-29T02:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 94917 seconds ago)
+2026-05-29T02:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 95097 seconds ago)
+2026-05-29T02:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 95277 seconds ago)
+2026-05-29T02:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 95457 seconds ago)
+2026-05-29T02:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 95637 seconds ago)
+2026-05-29T02:30:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 95817 seconds ago)
+2026-05-29T02:33:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 95997 seconds ago)
+2026-05-29T02:36:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 96177 seconds ago)
+2026-05-29T02:39:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 96357 seconds ago)
+2026-05-29T02:42:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 96537 seconds ago)
+2026-05-29T02:45:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 96717 seconds ago)
+2026-05-29T02:48:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 96897 seconds ago)
+2026-05-29T02:51:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 97077 seconds ago)
+2026-05-29T02:54:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 97257 seconds ago)
+2026-05-29T02:57:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 97437 seconds ago)
+2026-05-29T03:00:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 97617 seconds ago)
+2026-05-29T03:03:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 97797 seconds ago)
+2026-05-29T03:06:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 97977 seconds ago)
+2026-05-29T03:09:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 98157 seconds ago)
+2026-05-29T03:12:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 98337 seconds ago)
+2026-05-29T03:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 98517 seconds ago)
+2026-05-29T03:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 98697 seconds ago)
+2026-05-29T03:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 98877 seconds ago)
+2026-05-29T03:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 99057 seconds ago)
+2026-05-29T03:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 99237 seconds ago)
+2026-05-29T03:30:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 99417 seconds ago)
+2026-05-29T03:33:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 99597 seconds ago)
+2026-05-29T03:36:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 99777 seconds ago)
+2026-05-29T03:39:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 99957 seconds ago)
+2026-05-29T03:42:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 100137 seconds ago)
+2026-05-29T03:45:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 100317 seconds ago)
+2026-05-29T03:48:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 100497 seconds ago)
+2026-05-29T03:51:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 100677 seconds ago)
+2026-05-29T03:54:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 100857 seconds ago)
+2026-05-29T03:57:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 101037 seconds ago)
+2026-05-29T04:00:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 101217 seconds ago)
+2026-05-29T04:03:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 101397 seconds ago)
+2026-05-29T04:06:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 101577 seconds ago)
+2026-05-29T04:09:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 101757 seconds ago)
+2026-05-29T04:12:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 101937 seconds ago)
+2026-05-29T04:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 102117 seconds ago)
+2026-05-29T04:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 102297 seconds ago)
+2026-05-29T04:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 102477 seconds ago)
+2026-05-29T04:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 102657 seconds ago)
+2026-05-29T04:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 102837 seconds ago)
+2026-05-29T04:30:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 103017 seconds ago)
+2026-05-29T04:33:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 103197 seconds ago)
+2026-05-29T04:36:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 103377 seconds ago)
+2026-05-29T04:39:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 103557 seconds ago)
+2026-05-29T04:42:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 103737 seconds ago)
+2026-05-29T04:45:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 103917 seconds ago)
+2026-05-29T04:48:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 104097 seconds ago)
+2026-05-29T04:51:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 104277 seconds ago)
+2026-05-29T04:54:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 104457 seconds ago)
+2026-05-29T04:57:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 104637 seconds ago)
+2026-05-29T05:00:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 104817 seconds ago)
+2026-05-29T05:03:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 104997 seconds ago)
+2026-05-29T05:06:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 105177 seconds ago)
+2026-05-29T05:09:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 105357 seconds ago)
+2026-05-29T05:12:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 105537 seconds ago)
+2026-05-29T05:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 105717 seconds ago)
+2026-05-29T05:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 105897 seconds ago)
+2026-05-29T05:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 106077 seconds ago)
+2026-05-29T05:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 106257 seconds ago)
+2026-05-29T05:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 106437 seconds ago)
+2026-05-29T05:30:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 106617 seconds ago)
+2026-05-29T05:33:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 106797 seconds ago)
+2026-05-29T05:36:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 106977 seconds ago)
+2026-05-29T05:39:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 107157 seconds ago)
+2026-05-29T05:42:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 107337 seconds ago)
+2026-05-29T05:45:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 107517 seconds ago)
+2026-05-29T05:48:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 107697 seconds ago)
+2026-05-29T05:51:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 107877 seconds ago)
+2026-05-29T05:54:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 108057 seconds ago)
+2026-05-29T05:57:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 108237 seconds ago)
+2026-05-29T06:00:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 108417 seconds ago)
+2026-05-29T06:03:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 108597 seconds ago)
+2026-05-29T06:06:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 108777 seconds ago)
+2026-05-29T06:09:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 108957 seconds ago)
+2026-05-29T06:12:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 109137 seconds ago)
+2026-05-29T06:15:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 109317 seconds ago)
+2026-05-29T06:18:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 109497 seconds ago)
+2026-05-29T06:21:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 109677 seconds ago)
+2026-05-29T06:24:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 109857 seconds ago)
+2026-05-29T06:27:12Z Potential stale tip detected, will try using extra outbound peer (last tip update: 110037 seconds ago)
+2026-05-29T06:30:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 110218 seconds ago)
+2026-05-29T06:33:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 110398 seconds ago)
+2026-05-29T06:36:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 110578 seconds ago)
+2026-05-29T06:39:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 110758 seconds ago)
+2026-05-29T06:42:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 110938 seconds ago)
+2026-05-29T06:45:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 111118 seconds ago)
+2026-05-29T06:48:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 111298 seconds ago)
+2026-05-29T06:51:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 111478 seconds ago)
+2026-05-29T06:54:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 111658 seconds ago)
+2026-05-29T06:57:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 111838 seconds ago)
+2026-05-29T07:00:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 112018 seconds ago)
+2026-05-29T07:03:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 112198 seconds ago)
+2026-05-29T07:21:09Z Potential stale tip detected, will try using extra outbound peer (last tip update: 113274 seconds ago)
+2026-05-29T07:35:44Z Potential stale tip detected, will try using extra outbound peer (last tip update: 114149 seconds ago)
+2026-05-29T07:38:44Z Potential stale tip detected, will try using extra outbound peer (last tip update: 114329 seconds ago)
+2026-05-29T08:12:46Z Potential stale tip detected, will try using extra outbound peer (last tip update: 116371 seconds ago)
+2026-05-29T08:15:46Z Potential stale tip detected, will try using extra outbound peer (last tip update: 116551 seconds ago)
+2026-05-29T08:18:46Z Potential stale tip detected, will try using extra outbound peer (last tip update: 116731 seconds ago)
+2026-05-29T08:34:20Z Potential stale tip detected, will try using extra outbound peer (last tip update: 117665 seconds ago)
+2026-05-29T08:44:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 118273 seconds ago)
+2026-05-29T08:47:28Z Potential stale tip detected, will try using extra outbound peer (last tip update: 118453 seconds ago)
+2026-05-29T09:21:00Z Potential stale tip detected, will try using extra outbound peer (last tip update: 120465 seconds ago)
+2026-05-29T09:24:00Z Potential stale tip detected, will try using extra outbound peer (last tip update: 120645 seconds ago)
+2026-05-29T09:27:00Z Potential stale tip detected, will try using extra outbound peer (last tip update: 120825 seconds ago)
+2026-05-29T09:42:56Z Potential stale tip detected, will try using extra outbound peer (last tip update: 121781 seconds ago)
+2026-05-29T10:01:39Z Potential stale tip detected, will try using extra outbound peer (last tip update: 122904 seconds ago)
+2026-05-29T10:04:39Z Potential stale tip detected, will try using extra outbound peer (last tip update: 123084 seconds ago)
+2026-05-29T10:21:51Z Potential stale tip detected, will try using extra outbound peer (last tip update: 124116 seconds ago)
+2026-05-29T10:38:08Z Potential stale tip detected, will try using extra outbound peer (last tip update: 125093 seconds ago)
+2026-05-29T10:41:08Z Potential stale tip detected, will try using extra outbound peer (last tip update: 125273 seconds ago)
+2026-05-29T10:44:31Z Potential stale tip detected, will try using extra outbound peer (last tip update: 125476 seconds ago)
+2026-05-29T11:01:54Z Potential stale tip detected, will try using extra outbound peer (last tip update: 126519 seconds ago)
+2026-05-29T11:04:54Z Potential stale tip detected, will try using extra outbound peer (last tip update: 126699 seconds ago)
+2026-05-29T11:21:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 127666 seconds ago)
+2026-05-29T11:24:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 127846 seconds ago)
+2026-05-29T11:27:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 128026 seconds ago)
+2026-05-29T11:30:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 128206 seconds ago)
+2026-05-29T11:33:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 128386 seconds ago)
+2026-05-29T11:36:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 128566 seconds ago)
+2026-05-29T11:39:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 128746 seconds ago)
+2026-05-29T11:42:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 128926 seconds ago)
+2026-05-29T11:45:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 129106 seconds ago)
+2026-05-29T11:48:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 129286 seconds ago)
+2026-05-29T11:51:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 129466 seconds ago)
+2026-05-29T11:54:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 129646 seconds ago)
+2026-05-29T11:57:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 129826 seconds ago)
+2026-05-29T12:00:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 130006 seconds ago)
+2026-05-29T12:03:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 130186 seconds ago)
+2026-05-29T12:06:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 130366 seconds ago)
+2026-05-29T12:09:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 130546 seconds ago)
+2026-05-29T12:12:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 130726 seconds ago)
+2026-05-29T12:15:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 130906 seconds ago)
+2026-05-29T12:18:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 131086 seconds ago)
+2026-05-29T12:21:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 131266 seconds ago)
+2026-05-29T12:24:01Z Potential stale tip detected, will try using extra outbound peer (last tip update: 131446 seconds ago)
+2026-05-29T12:41:18Z Potential stale tip detected, will try using extra outbound peer (last tip update: 132483 seconds ago)
+2026-05-29T12:44:18Z Potential stale tip detected, will try using extra outbound peer (last tip update: 132663 seconds ago)
+2026-05-29T13:04:02Z Potential stale tip detected, will try using extra outbound peer (last tip update: 133847 seconds ago)
+2026-05-29T13:08:04Z Potential stale tip detected, will try using extra outbound peer (last tip update: 134089 seconds ago)
+2026-05-29T13:25:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 135118 seconds ago)
+2026-05-29T13:28:13Z Potential stale tip detected, will try using extra outbound peer (last tip update: 135298 seconds ago)
+2026-05-29T13:45:23Z Potential stale tip detected, will try using extra outbound peer (last tip update: 136328 seconds ago)
+2026-05-29T13:48:23Z Potential stale tip detected, will try using extra outbound peer (last tip update: 136508 seconds ago)
+2026-05-29T13:51:23Z Potential stale tip detected, will try using extra outbound peer (last tip update: 136688 seconds ago)
+2026-05-29T14:07:43Z Potential stale tip detected, will try using extra outbound peer (last tip update: 137668 seconds ago)
+2026-05-29T14:10:43Z Potential stale tip detected, will try using extra outbound peer (last tip update: 137848 seconds ago)
+2026-05-29T14:13:43Z Potential stale tip detected, will try using extra outbound peer (last tip update: 138028 seconds ago)
+2026-05-29T14:30:02Z Potential stale tip detected, will try using extra outbound peer (last tip update: 139007 seconds ago)
+2026-05-29T14:33:02Z Potential stale tip detected, will try using extra outbound peer (last tip update: 139187 seconds ago)
+2026-05-29T14:39:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 139550 seconds ago)
+2026-05-29T14:42:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 139730 seconds ago)
+2026-05-29T14:45:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 139910 seconds ago)
+2026-05-29T14:48:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 140090 seconds ago)
+2026-05-29T14:51:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 140270 seconds ago)
+2026-05-29T14:54:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 140450 seconds ago)
+2026-05-29T14:57:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 140630 seconds ago)
+2026-05-29T15:00:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 140810 seconds ago)
+2026-05-29T15:03:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 140990 seconds ago)
+2026-05-29T15:06:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 141170 seconds ago)
+2026-05-29T15:09:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 141350 seconds ago)
+2026-05-29T15:12:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 141530 seconds ago)
+2026-05-29T15:15:05Z Potential stale tip detected, will try using extra outbound peer (last tip update: 141710 seconds ago)
+2026-05-29T15:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 141891 seconds ago)
+2026-05-29T15:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 142071 seconds ago)
+2026-05-29T15:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 142251 seconds ago)
+2026-05-29T15:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 142431 seconds ago)
+2026-05-29T15:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 142611 seconds ago)
+2026-05-29T15:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 142791 seconds ago)
+2026-05-29T15:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 142971 seconds ago)
+2026-05-29T15:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 143151 seconds ago)
+2026-05-29T15:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 143331 seconds ago)
+2026-05-29T15:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 143511 seconds ago)
+2026-05-29T15:48:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 143691 seconds ago)
+2026-05-29T15:51:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 143871 seconds ago)
+2026-05-29T15:54:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 144051 seconds ago)
+2026-05-29T15:57:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 144231 seconds ago)
+2026-05-29T16:00:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 144411 seconds ago)
+2026-05-29T16:03:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 144591 seconds ago)
+2026-05-29T16:06:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 144771 seconds ago)
+2026-05-29T16:09:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 144951 seconds ago)
+2026-05-29T16:12:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 145131 seconds ago)
+2026-05-29T16:15:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 145311 seconds ago)
+2026-05-29T16:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 145491 seconds ago)
+2026-05-29T16:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 145671 seconds ago)
+2026-05-29T16:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 145851 seconds ago)
+2026-05-29T16:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 146031 seconds ago)
+2026-05-29T16:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 146211 seconds ago)
+2026-05-29T16:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 146391 seconds ago)
+2026-05-29T16:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 146571 seconds ago)
+2026-05-29T16:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 146751 seconds ago)
+2026-05-29T16:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 146931 seconds ago)
+2026-05-29T16:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 147111 seconds ago)
+2026-05-29T16:48:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 147291 seconds ago)
+2026-05-29T16:51:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 147471 seconds ago)
+2026-05-29T16:54:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 147651 seconds ago)
+2026-05-29T16:57:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 147831 seconds ago)
+2026-05-29T17:00:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 148011 seconds ago)
+2026-05-29T17:03:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 148191 seconds ago)
+2026-05-29T17:06:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 148371 seconds ago)
+2026-05-29T17:09:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 148551 seconds ago)
+2026-05-29T17:12:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 148731 seconds ago)
+2026-05-29T17:15:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 148911 seconds ago)
+2026-05-29T17:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 149091 seconds ago)
+2026-05-29T17:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 149271 seconds ago)
+2026-05-29T17:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 149451 seconds ago)
+2026-05-29T17:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 149631 seconds ago)
+2026-05-29T17:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 149811 seconds ago)
+2026-05-29T17:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 149991 seconds ago)
+2026-05-29T17:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 150171 seconds ago)
+2026-05-29T17:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 150351 seconds ago)
+2026-05-29T17:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 150531 seconds ago)
+2026-05-29T17:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 150711 seconds ago)
+2026-05-29T17:48:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 150891 seconds ago)
+2026-05-29T17:51:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 151071 seconds ago)
+2026-05-29T17:54:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 151251 seconds ago)
+2026-05-29T17:57:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 151431 seconds ago)
+2026-05-29T18:00:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 151611 seconds ago)
+2026-05-29T18:03:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 151791 seconds ago)
+2026-05-29T18:06:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 151971 seconds ago)
+2026-05-29T18:09:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 152151 seconds ago)
+2026-05-29T18:12:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 152331 seconds ago)
+2026-05-29T18:15:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 152511 seconds ago)
+2026-05-29T18:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 152691 seconds ago)
+2026-05-29T18:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 152871 seconds ago)
+2026-05-29T18:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 153051 seconds ago)
+2026-05-29T18:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 153231 seconds ago)
+2026-05-29T18:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 153411 seconds ago)
+2026-05-29T18:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 153591 seconds ago)
+2026-05-29T18:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 153771 seconds ago)
+2026-05-29T18:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 153951 seconds ago)
+2026-05-29T18:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 154131 seconds ago)
+2026-05-29T18:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 154311 seconds ago)
+2026-05-29T18:48:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 154491 seconds ago)
+2026-05-29T18:51:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 154671 seconds ago)
+2026-05-29T18:54:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 154851 seconds ago)
+2026-05-29T18:57:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 155031 seconds ago)
+2026-05-29T19:00:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 155211 seconds ago)
+2026-05-29T19:03:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 155391 seconds ago)
+2026-05-29T19:06:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 155571 seconds ago)
+2026-05-29T19:09:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 155751 seconds ago)
+2026-05-29T19:12:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 155931 seconds ago)
+2026-05-29T19:15:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 156111 seconds ago)
+2026-05-29T19:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 156291 seconds ago)
+2026-05-29T19:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 156471 seconds ago)
+2026-05-29T19:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 156651 seconds ago)
+2026-05-29T19:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 156831 seconds ago)
+2026-05-29T19:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 157011 seconds ago)
+2026-05-29T19:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 157191 seconds ago)
+2026-05-29T19:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 157371 seconds ago)
+2026-05-29T19:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 157551 seconds ago)
+2026-05-29T19:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 157731 seconds ago)
+2026-05-29T19:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 157911 seconds ago)
+2026-05-29T19:48:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 158091 seconds ago)
+2026-05-29T19:51:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 158271 seconds ago)
+2026-05-29T19:54:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 158451 seconds ago)
+2026-05-29T19:57:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 158631 seconds ago)
+2026-05-29T20:00:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 158811 seconds ago)
+2026-05-29T20:03:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 158991 seconds ago)
+2026-05-29T20:06:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 159171 seconds ago)
+2026-05-29T20:09:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 159351 seconds ago)
+2026-05-29T20:12:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 159531 seconds ago)
+2026-05-29T20:15:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 159711 seconds ago)
+2026-05-29T20:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 159891 seconds ago)
+2026-05-29T20:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 160071 seconds ago)
+2026-05-29T20:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 160251 seconds ago)
+2026-05-29T20:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 160431 seconds ago)
+2026-05-29T20:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 160611 seconds ago)
+2026-05-29T20:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 160791 seconds ago)
+2026-05-29T20:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 160971 seconds ago)
+2026-05-29T20:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 161151 seconds ago)
+2026-05-29T20:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 161331 seconds ago)
+2026-05-29T20:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 161511 seconds ago)
+2026-05-29T20:48:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 161691 seconds ago)
+2026-05-29T20:51:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 161871 seconds ago)
+2026-05-29T20:54:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 162051 seconds ago)
+2026-05-29T20:57:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 162231 seconds ago)
+2026-05-29T21:00:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 162411 seconds ago)
+2026-05-29T21:03:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 162591 seconds ago)
+2026-05-29T21:06:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 162771 seconds ago)
+2026-05-29T21:09:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 162951 seconds ago)
+2026-05-29T21:12:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 163131 seconds ago)
+2026-05-29T21:15:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 163311 seconds ago)
+2026-05-29T21:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 163491 seconds ago)
+2026-05-29T21:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 163671 seconds ago)
+2026-05-29T21:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 163851 seconds ago)
+2026-05-29T21:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 164031 seconds ago)
+2026-05-29T21:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 164211 seconds ago)
+2026-05-29T21:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 164391 seconds ago)
+2026-05-29T21:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 164571 seconds ago)
+2026-05-29T21:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 164751 seconds ago)
+2026-05-29T21:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 164931 seconds ago)
+2026-05-29T21:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 165111 seconds ago)
+2026-05-29T21:48:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 165291 seconds ago)
+2026-05-29T21:51:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 165471 seconds ago)
+2026-05-29T21:54:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 165651 seconds ago)
+2026-05-29T21:57:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 165831 seconds ago)
+2026-05-29T22:00:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 166011 seconds ago)
+2026-05-29T22:03:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 166191 seconds ago)
+2026-05-29T22:06:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 166371 seconds ago)
+2026-05-29T22:09:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 166551 seconds ago)
+2026-05-29T22:12:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 166731 seconds ago)
+2026-05-29T22:15:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 166911 seconds ago)
+2026-05-29T22:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 167091 seconds ago)
+2026-05-29T22:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 167271 seconds ago)
+2026-05-29T22:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 167451 seconds ago)
+2026-05-29T22:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 167631 seconds ago)
+2026-05-29T22:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 167811 seconds ago)
+2026-05-29T22:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 167991 seconds ago)
+2026-05-29T22:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 168171 seconds ago)
+2026-05-29T22:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 168351 seconds ago)
+2026-05-29T22:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 168531 seconds ago)
+2026-05-29T22:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 168711 seconds ago)
+2026-05-29T22:48:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 168891 seconds ago)
+2026-05-29T22:51:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 169071 seconds ago)
+2026-05-29T22:54:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 169251 seconds ago)
+2026-05-29T22:57:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 169431 seconds ago)
+2026-05-29T23:00:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 169611 seconds ago)
+2026-05-29T23:03:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 169791 seconds ago)
+2026-05-29T23:06:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 169971 seconds ago)
+2026-05-29T23:09:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 170151 seconds ago)
+2026-05-29T23:12:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 170331 seconds ago)
+2026-05-29T23:15:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 170511 seconds ago)
+2026-05-29T23:18:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 170691 seconds ago)
+2026-05-29T23:21:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 170871 seconds ago)
+2026-05-29T23:24:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 171051 seconds ago)
+2026-05-29T23:27:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 171231 seconds ago)
+2026-05-29T23:30:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 171411 seconds ago)
+2026-05-29T23:33:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 171591 seconds ago)
+2026-05-29T23:36:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 171771 seconds ago)
+2026-05-29T23:39:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 171951 seconds ago)
+2026-05-29T23:42:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 172131 seconds ago)
+2026-05-29T23:45:06Z Potential stale tip detected, will try using extra outbound peer (last tip update: 172311 seconds ago)

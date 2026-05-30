@@ -1,0 +1,32 @@
+
+[0m[0m
+Checking if GAS token (XCHAIN) exists...
+GAS token not found, creating it...
+Sending funds (1) to n3Q55dNtNATFVMCuTGG8Mrtbfhg1WifQAx
+Waiting for the utxos for n3Q55dNtNATFVMCuTGG8Mrtbfhg1WifQAx
+Creating and sending ISSUE V0 tx...
+Creating the transaction...
+Creating the second transaction (the encode type P2SH was chosen)...
+Sending the transaction... (hex length: 448)
+Error: Error trying to send a transaction to the node — HTTP 500 Internal Server Error: {"result":null,"error":{"code":-26,"message":"66: insufficient priority"},"id":1}
+
+[31m  1) "before all" hook: beforeAll in "{root}"[0m
+
+[92m [0m[32m 0 passing[0m[90m (3s)[0m
+[31m  1 failing[0m
+
+[0m  1) "before all" hook: beforeAll in "{root}":
+[0m[31m     Error: Error trying to send a transaction to the node — HTTP 500 Internal Server Error: {"result":null,"error":{"code":-26,"message":"66: insufficient priority"},"id":1}
+[0m[90m
+      at BlockchainConnector.broadcastTx (src/BlockchainConnector.js:160:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Object._doCreateAndSendTransaction (test/transactionHelper.js:175:18)
+      at async Object.createAndSendTransaction (test/transactionHelper.js:85:24)
+      at async Object.sendIssueV0 (test/helpers/issueHelper.js:21:22)
+      at async /XChainE2ETest/test/initialCheck.test.js:229:17
+      at async Object.phase (test/perf/perfCollector.js:41:20)
+      at async Context.beforeAll (test/initialCheck.test.js:222:9)
+[0m
+
+
+\[1G[0K

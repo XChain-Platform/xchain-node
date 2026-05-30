@@ -1,0 +1,565 @@
+
+> xchain-e2e-test@0.3.3 test
+> mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'
+
+
+[0m[0m
+Checking if GAS token (XCHAIN) exists...
+GAS token not found, creating it...
+Sending funds (1) to mnwuygo8gxiaobSaUYMGfHdUoE1MNKQTUy
+Waiting for the utxos for mnwuygo8gxiaobSaUYMGfHdUoE1MNKQTUy
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+Error fetching UTXOs: Error getting utxos
+Error: Error getting utxos
+    at UtxoTracker.getUtxosFromAddress [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:119:23[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at async UtxoTracker.waitForUtxos [90m(/XChainE2ETest/[39msrc/XChainUtxoTrackerConnector.js:73:36[90m)[39m
+    at async Object.getNewFundedAddress [90m(/XChainE2ETest/[39mtest/cryptoHelper.js:77:35[90m)[39m
+    at async [90m/XChainE2ETest/[39mtest/initialCheck.test.js:228:38
+    at async Object.phase [90m(/XChainE2ETest/[39mtest/perf/perfCollector.js:41:20[90m)[39m
+    at async Context.beforeAll [90m(/XChainE2ETest/[39mtest/initialCheck.test.js:222:9[90m)[39m
+[31m  1) "before all" hook: beforeAll in "{root}"[0m
+
+[92m [0m[32m 0 passing[0m[90m (1m)[0m
+[31m  1 failing[0m
+
+[0m  1) "before all" hook: beforeAll in "{root}":
+[0m[31m     Error: The utxo tracker couldn't parse the utxo[0m[90m
+      at Object.getNewFundedAddress (test/cryptoHelper.js:83:19)
+      at async /XChainE2ETest/test/initialCheck.test.js:228:38
+      at async Object.phase (test/perf/perfCollector.js:41:20)
+      at async Context.beforeAll (test/initialCheck.test.js:222:9)
+[0m
+
+
+\[1G[0K

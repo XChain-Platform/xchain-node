@@ -44,7 +44,8 @@
     "sinon": "^21.0.3"
   },
   "overrides": {
-    "qs": "^6.15.2"
+    "qs": "^6.15.2",
+    "serialize-javascript": ">=6.0.4"
   },
   "bin": {
     "xchain_node": "./src/index.js"

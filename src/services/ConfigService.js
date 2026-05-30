@@ -3,6 +3,7 @@
  * Path helpers, naming helpers, and getDefaultConfig
  ********************************************************************/
 
+const crypto   = require('crypto')
 const fs       = require('fs')
 const path     = require('path')
 const readline = require('readline')
@@ -212,6 +213,13 @@ async function getDefaultConfig(module, coin, network) {
         }
         if (!fs.existsSync(configFilePath)) {
             console.warn("Warning: config file not found: " + configFilePath + " — using defaults")
+            const nodeUser     = crypto.randomBytes(12).toString('hex')
+            const nodePassword = crypto.randomBytes(24).toString('hex')
+            defaultValues['NODE_USER']     = nodeUser
+            defaultValues['NODE_PASSWORD'] = nodePassword
+            const credDir = path.dirname(configFilePath)
+            if (!fs.existsSync(credDir)) fs.mkdirSync(credDir, { recursive: true })
+            fs.writeFileSync(configFilePath, `NODE_USER=${nodeUser}\nNODE_PASSWORD=${nodePassword}\n`)
             for (const key in defaultValues) {
                 if (!(key in defaultConfig)) {
                     defaultConfig[key] = defaultValues[key]
@@ -227,6 +235,15 @@ async function getDefaultConfig(module, coin, network) {
             if (eqIndex > 0) {
                 defaultConfig[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
             }
+        }
+
+        // Generate and persist RPC credentials on first provision if absent from the config file
+        if (!('NODE_USER' in defaultConfig) && !('NODE_PASSWORD' in defaultConfig)) {
+            const nodeUser     = crypto.randomBytes(12).toString('hex')
+            const nodePassword = crypto.randomBytes(24).toString('hex')
+            defaultValues['NODE_USER']     = nodeUser
+            defaultValues['NODE_PASSWORD'] = nodePassword
+            fs.appendFileSync(configFilePath, `NODE_USER=${nodeUser}\nNODE_PASSWORD=${nodePassword}\n`)
         }
     }
 

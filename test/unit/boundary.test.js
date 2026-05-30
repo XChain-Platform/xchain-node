@@ -123,6 +123,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
                     createReadStream: sinon.stub().returns(streamFromString('AUTH_TOKEN=dGVzdA==\n')),
+                    appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -135,6 +136,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
                     createReadStream: sinon.stub().returns(streamFromString('SEPARATOR==\n')),
+                    appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -150,6 +152,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
                     createReadStream: sinon.stub().returns(streamFromString('EMPTY_VAR=\n')),
+                    appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -162,6 +165,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
                     createReadStream: sinon.stub().returns(streamFromString('\n\nKEY=value\n\n')),
+                    appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -174,6 +178,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
                     createReadStream: sinon.stub().returns(streamFromString('no-equals-here\nKEY=value\n')),
+                    appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -187,6 +192,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
                     createReadStream: sinon.stub().returns(streamFromString('=nokey\nKEY=value\n')),
+                    appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -203,6 +209,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(false),
                     createReadStream: sinon.stub(),
+                    writeFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -211,7 +218,9 @@ describe('Boundary Tests', function () {
 
                 // Should have defaults, not crash
                 expect(config['NODE_PORT']).to.equal(8332)
-                expect(config['NODE_USER']).to.equal('rpc')
+                // NODE_USER is randomly generated when absent — must be a non-empty, non-default string
+                expect(config['NODE_USER']).to.be.a('string').with.length.greaterThan(0)
+                expect(config['NODE_USER']).to.not.equal('rpc')
                 expect(config['HUB_PORT']).to.equal(10000)
 
                 // createReadStream should NOT have been called
@@ -238,6 +247,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
                     createReadStream: sinon.stub().returns(streamFromString('NODE_PORT=9999\n')),
+                    appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -250,6 +260,7 @@ describe('Boundary Tests', function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
                     createReadStream: sinon.stub().returns(streamFromString('CUSTOM_KEY=custom\n')),
+                    appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }

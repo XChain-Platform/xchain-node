@@ -6,6 +6,7 @@
 const { execFile } = require('child_process')
 const { https } = require('follow-redirects')
 const fs        = require('fs')
+const path      = require('path')
 const semver    = require('semver')
 
 const {
@@ -85,6 +86,17 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
     const defaultNodePort = defaultConfig["NODE_PORT"]
     const containerPrefix = getDockerContainerImageName(NODE_MODULE_NAME, coin, network)
     const nodeDir = cryptoNodesDir + "/" + coin
+
+    // Inject the provisioned RPC credentials into the coin-node conf file
+    // so the daemon and the xchain services share the same credentials.
+    const confFileName = `${coin}-${network}.conf`
+    const confFilePath = path.join(nodeDir, confFileName)
+    if (fs.existsSync(confFilePath)) {
+        let confContent = fs.readFileSync(confFilePath, 'utf8')
+        confContent = confContent.replace(/^rpcuser=.*$/m,     `rpcuser=${defaultConfig['NODE_USER']}`)
+        confContent = confContent.replace(/^rpcpassword=.*$/m, `rpcpassword=${defaultConfig['NODE_PASSWORD']}`)
+        fs.writeFileSync(confFilePath, confContent)
+    }
 
     return new Promise((resolve, reject) => {
         console.log("Building image of " + coin + " " + network + " node")
