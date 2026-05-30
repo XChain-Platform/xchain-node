@@ -178,6 +178,16 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         coin = ""
                         network = ""
                         portArgs.push('-p', `${environmentVariables["HUB_PORT"]}:${environmentVariables["HUB_PORT"]}`)
+                        // Validator mode: mount the capability config (read-only) so the
+                        // hub's HUB_CAPABILITY_CONFIG path resolves inside the container.
+                        // No-op for a standalone hub (no validator configured).
+                        if ("HUB_CAPABILITY_CONFIG" in environmentVariables) {
+                            const { getCapabilityConfigHostPath, CAPS_CONTAINER_PATH } = require('./ValidatorService')
+                            const capsHost = getCapabilityConfigHostPath()
+                            if (capsHost) {
+                                volumeArgs.push('-v', `${capsHost}:${CAPS_CONTAINER_PATH}:ro`)
+                            }
+                        }
                         break
                     case EXPLORER_MODULE_NAME:
                         coin = ""

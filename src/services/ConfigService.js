@@ -202,6 +202,13 @@ async function getDefaultConfig(module, coin, network) {
         defaultValues["TELEMETRY_ENABLED"]        = process.env.TELEMETRY_ENABLED || "true"
         defaultValues["TELEMETRY_RETENTION_DAYS"] = process.env.TELEMETRY_RETENTION_DAYS || 90
         defaultValues["TELEMETRY_IP_SALT"]        = process.env.TELEMETRY_IP_SALT || ""
+
+        // Validator mode: when `xchain-node validator init` has been run, inject the
+        // P2P / signing-key / capability-config env so the hub starts as a full
+        // validator. Returns {} (no change) for a standalone node, so the standalone
+        // install path is unaffected.
+        const { getValidatorEnv } = require('./ValidatorService')
+        Object.assign(defaultValues, getValidatorEnv())
     }
 
     // Read the config file for this coin/network pair

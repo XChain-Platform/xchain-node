@@ -71,6 +71,31 @@ xchain_node stop all bitcoin regtest
 xchain_node start all bitcoin regtest
 ```
 
+### Run a validator
+
+By default the bundled `xchain-hub` runs as a standalone config oracle. To run it
+as a full validator (P2P + PBFT + capability staking), generate a validator
+identity first — this is offline and needs no running stack:
+
+```bash
+xchain_node validator init \
+  --seed-nodes seed1.example:10001,seed2.example:10001 \
+  --p2p-addr <your-public-host>:10001 \
+  --oracle-epoch-start <shared-federation-unix-ms> \
+  --capabilities price,cross_chain,oracle_publish,attestation
+```
+
+It generates an Ed25519 signing key (saved `0600` under `config/validator/`),
+prints the **pubkey to stake XCHAIN to**, and writes a starter `capabilities.json`.
+Edit that file to set real `cross_chain` RPC endpoints and `oracle_publish` DOGE
+values, then install/start the hub — it now boots in validator mode with your key
+and capability config mounted automatically:
+
+```bash
+xchain_node install master xchain-hub
+xchain_node validator status      # show pubkey, peers, capabilities
+```
+
 ## Host environment variables
 
 Five env vars override where xchain-node stores its filesystem state. Set them in the shell or systemd unit before running `xchain-node install`. Each falls back to a path inside this repo if unset, so existing installs are unaffected.

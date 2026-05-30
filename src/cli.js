@@ -26,6 +26,7 @@ const { getStatus }            = require('./services/StatusService')
 const { scanAndRegisterModules } = require('./services/DiscoveryService')
 const { maybeReportTelemetry } = require('./services/TelemetryService')
 const { makeBootstrap }        = require('./services/BootstrapService')
+const { initValidator, getValidatorSettings, isInitialized } = require('./services/ValidatorService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 
 async function parseCommand() {
@@ -43,6 +44,11 @@ async function parseCommand() {
         setVerbose(thisCommand.opts().verbose ?? false)
         if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
         const commandName = actionCommand.name()
+        // `validator` subcommands are offline (key generation + local config
+        // file writes). They must NOT trigger the Docker/MariaDB precheck, so an
+        // operator can prepare their validator identity before any stack is up.
+        const parentName = actionCommand.parent && actionCommand.parent.name()
+        if (commandName === 'validator' || parentName === 'validator') return
         await preCheck(
             commandsNeedingVersions.includes(commandName),
             !readOnlyCommands.includes(commandName)
@@ -292,6 +298,44 @@ Notes:
                 await makeBootstrap(chain, network, service)
             } else {
                 await restoreBootstrapInterface(chain, network, service)
+            }
+            return process.exit(0)
+        })
+
+    const validator = program
+        .command('validator')
+        .description('Validator-mode setup for the xchain-hub (key generation + config)')
+
+    validator
+        .command('init')
+        .description('Generate a validator signing key + config so the hub runs in validator mode')
+        .option('--seed-nodes <list>',        'comma-separated peer addresses (host:port,host:port)')
+        .option('--p2p-addr <addr>',          'this validator\'s public address (host:port)')
+        .option('--p2p-port <port>',          'P2P listen port (default 10001)')
+        .option('--oracle-epoch-start <ms>',  'shared oracle epoch start (unix ms) — must match the federation')
+        .option('--capabilities <list>',      'enabled capabilities (default price,cross_chain,oracle_publish,attestation)')
+        .option('--force',                    'overwrite existing validator config (generates a NEW key)')
+        .action(async (opts) => {
+            await initValidator(opts)
+            return process.exit(0)
+        })
+
+    validator
+        .command('status')
+        .description('Show this node\'s validator configuration (pubkey, peers, capabilities)')
+        .action(async () => {
+            const s = getValidatorSettings()
+            if (!s) {
+                console.log(isInitialized()
+                    ? 'Validator is initialized but disabled.'
+                    : 'No validator configured. Run: xchain-node validator init')
+            } else {
+                console.log('Validator enabled.')
+                console.log('  pubkey       : ' + s.pubkey)
+                console.log('  p2p address  : ' + s.P2P_VALIDATOR_ADDR)
+                console.log('  seed nodes   : ' + ((s.SEED_NODES || []).join(', ') || '(none)'))
+                console.log('  oracle epoch : ' + (s.ORACLE_EPOCH_START || '(unset — required before oracle runs)'))
+                console.log('  capabilities : ' + ((s.capabilities || []).join(', ') || '(none)'))
             }
             return process.exit(0)
         })
