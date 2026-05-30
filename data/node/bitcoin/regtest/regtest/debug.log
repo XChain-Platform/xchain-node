@@ -1602,3 +1602,30 @@ CTransaction(hash=47801ade32, ver=2, vin.size=1, vout.size=2, nLockTime=125)
 2026-05-30T04:30:41Z Saw new header hash=321c1bb98c3a2fd2ab7fabc1493776da5153417315826d6fd874c3bd02c5115f height=127
 2026-05-30T04:30:41Z UpdateTip: new best=321c1bb98c3a2fd2ab7fabc1493776da5153417315826d6fd874c3bd02c5115f height=127 version=0x20000000 log2_work=8.000000 tx=148 date='2026-05-30T04:30:41Z' progress=1.000000 cache=0.3MiB(139txo)
 2026-05-30T04:30:41Z [xchain_regtest_wallet] AddToWallet de708fdb09d2176a6a895a05b9d17d6abc3ea89fc8cdab442a3661dd3e26edc1  new Confirmed (block=321c1bb98c3a2fd2ab7fabc1493776da5153417315826d6fd874c3bd02c5115f, height=127, index=0)
+2026-05-30T04:31:42Z [xchain_regtest_wallet] Coin Selection: Algorithm:knapsack, Waste Metric Score:-652
+2026-05-30T04:31:42Z [xchain_regtest_wallet] Fee Calculation: Fee:473 Bytes:225 Tgt:6 (requested 6) Reason:"Half Target 60% Threshold" Decay 0.96200: Estimation: (1885.65 - 1e+99) 100.00% 13.7/(13.7 0 mem 0.0 out) Fail: (0 - 1885.65) 100.00% 3.0/(3.0 0 mem 0.0 out)
+2026-05-30T04:31:42Z [xchain_regtest_wallet] Coin Selection: Algorithm:knapsack, Waste Metric Score:-13446
+2026-05-30T04:31:42Z [xchain_regtest_wallet] Fee Calculation: Fee:3868 Bytes:1840 Tgt:6 (requested 6) Reason:"Half Target 60% Threshold" Decay 0.96200: Estimation: (1885.65 - 1e+99) 100.00% 13.7/(13.7 0 mem 0.0 out) Fail: (0 - 1885.65) 100.00% 3.0/(3.0 0 mem 0.0 out)
+2026-05-30T04:31:42Z [xchain_regtest_wallet] Fee non-grouped = 473, grouped = 3868, using non-grouped
+2026-05-30T04:31:42Z [xchain_regtest_wallet] CommitTransaction:
+CTransaction(hash=2c2de0842d, ver=2, vin.size=1, vout.size=2, nLockTime=127)
+    CTxIn(COutPoint(47801ade32, 1), scriptSig=47304402204dd4a035733716, nSequence=4294967293)
+    CScriptWitness()
+    CTxOut(nValue=1.00000000, scriptPubKey=76a914e1a77118a8ee99d76fcc2dae)
+    CTxOut(nValue=37.99994488, scriptPubKey=76a914263708e57b9ae0fad75216cd)
+2026-05-30T04:31:42Z [xchain_regtest_wallet] AddToWallet 2c2de0842df3ed1ecccc2b910eadc41e1aaebde9b425313408d52d9d40750d35  newupdate Inactive (abandoned=0)
+2026-05-30T04:31:42Z [xchain_regtest_wallet] Submitting wtx 2c2de0842df3ed1ecccc2b910eadc41e1aaebde9b425313408d52d9d40750d35 to mempool for relay
+2026-05-30T04:31:42Z [xchain_regtest_wallet] AddToWallet 2c2de0842df3ed1ecccc2b910eadc41e1aaebde9b425313408d52d9d40750d35   InMempool
+2026-05-30T04:31:43Z CreateNewBlock(): block weight: 1792 txs: 1 fees: 473 sigops 408
+2026-05-30T04:31:43Z Saw new header hash=73de0c028edf996255bffc93abb4a553e359dacf221d95c340601b4ec0311273 height=128
+2026-05-30T04:31:43Z UpdateTip: new best=73de0c028edf996255bffc93abb4a553e359dacf221d95c340601b4ec0311273 height=128 version=0x20000000 log2_work=8.011227 tx=150 date='2026-05-30T04:31:43Z' progress=1.000000 cache=0.3MiB(141txo)
+2026-05-30T04:31:43Z [xchain_regtest_wallet] AddToWallet 4eceb06b86b6b1739d7825dfa49868f2e58cb77920ae85202cfe946b5d5eeff9  new Confirmed (block=73de0c028edf996255bffc93abb4a553e359dacf221d95c340601b4ec0311273, height=128, index=0)
+2026-05-30T04:31:43Z [xchain_regtest_wallet] AddToWallet 2c2de0842df3ed1ecccc2b910eadc41e1aaebde9b425313408d52d9d40750d35  update Confirmed (block=73de0c028edf996255bffc93abb4a553e359dacf221d95c340601b4ec0311273, height=128, index=1)
+2026-05-30T04:31:45Z CreateNewBlock(): block weight: 1932 txs: 1 fees: 613 sigops 404
+2026-05-30T04:31:45Z Saw new header hash=6e569f9fcdd8c7607c5cf6883d4487f937130f8e3ab4d87245b9dccf0cbecc06 height=129
+2026-05-30T04:31:45Z UpdateTip: new best=6e569f9fcdd8c7607c5cf6883d4487f937130f8e3ab4d87245b9dccf0cbecc06 height=129 version=0x20000000 log2_work=8.022368 tx=152 date='2026-05-30T04:31:45Z' progress=1.000000 cache=0.3MiB(142txo)
+2026-05-30T04:31:45Z [xchain_regtest_wallet] AddToWallet 4f5c16e1279eeb84c41aef4b14570030e1b55d7e883942d70c7c7b6ae33d3a93  new Confirmed (block=6e569f9fcdd8c7607c5cf6883d4487f937130f8e3ab4d87245b9dccf0cbecc06, height=129, index=0)
+2026-05-30T04:33:48Z CreateNewBlock(): block weight: 2956 txs: 2 fees: 1155 sigops 408
+2026-05-30T04:33:48Z Saw new header hash=31c9ac7e0f4cd48187cccb1ce7eb38418401779b1e92ed5f05266f0447c66f41 height=130
+2026-05-30T04:33:48Z UpdateTip: new best=31c9ac7e0f4cd48187cccb1ce7eb38418401779b1e92ed5f05266f0447c66f41 height=130 version=0x20000000 log2_work=8.033423 tx=155 date='2026-05-30T04:33:48Z' progress=1.000000 cache=0.3MiB(143txo)
+2026-05-30T04:33:48Z [xchain_regtest_wallet] AddToWallet d19f4afe6e4dd5905077900c3c5d686e3eb479a8c938daaa937e48322384b049  new Confirmed (block=31c9ac7e0f4cd48187cccb1ce7eb38418401779b1e92ed5f05266f0447c66f41, height=130, index=0)

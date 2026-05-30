@@ -110,7 +110,11 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
             const blocksDir = process.env.XCHAIN_NODE_BLOCKS_DIR
             if (blocksDir) {
                 const blocksHostPath = `${blocksDir}/${coin}/${network}`
-                fs.mkdirSync(blocksHostPath, { recursive: true })
+                try {
+                    fs.mkdirSync(blocksHostPath, { recursive: true })
+                } catch (err) {
+                    throw new Error(`XCHAIN_NODE_BLOCKS_DIR: failed to create ${blocksHostPath}: ${err.message}`)
+                }
             }
             const runArgs = [
                 'run', '-d',
