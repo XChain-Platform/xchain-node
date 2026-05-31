@@ -21,6 +21,7 @@
   },
   "scripts": {
     "test": "mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive",
+    "ci": "mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive --exit",
     "test:integration": "mocha 'test/integration/**/*.test.js' --timeout 30000 --recursive",
     "test:smoke": "mocha 'test/smoke/**/*.test.js' --timeout 5000 --exit --recursive",
     "test:e2e": "mocha 'test/e2e/**/*.test.js' --timeout 30000 --exit --recursive",
