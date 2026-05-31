@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `src/services/ConfigService.js` — updated the regtest encoder rate-limit default to the renamed `ENCODER_RATE_LIMIT_RPM` key (was `RATE_LIMIT_RPM`), tracking the encoder's adoption of the per-service `<SERVICE>_RATE_LIMIT_RPM` naming convention. This keeps the regtest high-throughput default (`99999`) effective; without the rename the encoder would have silently fallen back to the production default of 60 RPM and re-introduced HTTP 429 back-pressure failures in the bursty e2e suite.
 - `package.json` — aligned the `mariadb` driver to the `^3.5.2` range used across the platform. The driver was previously pinned to `~3.4.5` (a patch-only range, one minor line behind the `xchain-dashboard` host); the caret range now tracks 3.x minor releases consistently with every other service, removing the version drift and the mix of `~`/`^` range operators across the platform. No source changes.
 
 ### Fixed

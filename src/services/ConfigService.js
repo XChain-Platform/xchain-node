@@ -164,7 +164,7 @@ async function getDefaultConfig(module, coin, network) {
             // to 15 retries per failing tx — easily 100+ RPM during the
             // order/swap blocks). Production-safe defaults stay at 60; we
             // raise it for regtest where load is by-design bursty.
-            defaultValues["RATE_LIMIT_RPM"]         = 99999
+            defaultValues["ENCODER_RATE_LIMIT_RPM"] = 99999
         }
     } else {
         defaultValues = {
