@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `.env.example` — added a configuration template listing the environment variables `xchain-node` reads (directory overrides, managed and external MariaDB settings, telemetry opt-out), with safe defaults and inline comments.
+
 ## [0.0.22] - 2026-05-30
 
 ### Fixed
