@@ -8,10 +8,17 @@ const proxyquire = require('proxyquire').noCallThru()
 // Helpers
 // ---------------------------------------------------------------------------
 
+const VALID_CONTAINER_ID = 'a'.repeat(64)
+
 function makeStubs() {
+    // execFileAsync is what the source uses (via promisify(execFile)) for all
+    // docker inspect / docker port / docker pull / docker run calls.
+    // Default: return a valid 64-char hex container ID (simulates a running DB
+    // container found via `docker inspect`).
+    const execFileAsync = sinon.stub().resolves({ stdout: VALID_CONTAINER_ID + '\n' })
     return {
         execFile: sinon.stub(),
-        execFileAsync: sinon.stub(),
+        execFileAsync,
         db: {
             getModuleContainer: sinon.stub().resolves('db-container-id'),
             insertModuleContainer: sinon.stub().resolves(true)
@@ -74,7 +81,9 @@ describe('DatabaseService', function () {
             const stubs = makeStubs()
             const ds = loadDatabaseService(stubs)
             const result = await ds.checkIfDatabaseModuleExists('bitcoin', 'mainnet')
-            expect(result).to.equal('db-container-id')
+            // Source now uses getDatabaseContainerId() → docker inspect → returns
+            // the 64-char hex ID directly (not a DB-stored string).
+            expect(result).to.equal(VALID_CONTAINER_ID)
         })
 
         it('returns null when container does not have State.Status', async function () {
@@ -85,9 +94,11 @@ describe('DatabaseService', function () {
             expect(result).to.be.null
         })
 
-        it('returns null when getModuleContainer throws', async function () {
+        it('returns null when docker inspect fails', async function () {
             const stubs = makeStubs()
-            stubs.db.getModuleContainer.rejects(new Error('not found'))
+            // Source uses getDatabaseContainerId() → execFileAsync('docker inspect ...).
+            // Simulate container not found by rejecting the async exec.
+            stubs.execFileAsync.rejects(new Error('not found'))
             const ds = loadDatabaseService(stubs)
             const result = await ds.checkIfDatabaseModuleExists('bitcoin', 'mainnet')
             expect(result).to.be.null
@@ -165,10 +176,12 @@ describe('DatabaseService', function () {
 
         it('installs mariadb when no existing database found', async function () {
             const stubs = makeStubs()
-            // First call for checkIfDatabaseModuleExists, second for operations
-            stubs.db.getModuleContainer.onFirstCall().rejects(new Error('not found'))
-            stubs.db.getModuleContainer.onSecondCall().resolves(null)
-            stubs.execFileAsync.resolves({ stdout: 'a'.repeat(64) + '\n' })
+            // First execFileAsync call is `docker inspect` inside getDatabaseContainerId()
+            // (called by checkIfDatabaseModuleExists). Rejecting it makes the check
+            // return null → buildDatabaseModule enters the install branch.
+            // Subsequent calls (docker pull, tag, run) resolve with a valid container ID.
+            stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
             const ds = loadDatabaseService(stubs)
             const result = await ds.buildDatabaseModule('bitcoin', 'mainnet')
             // Should call execFileAsync for docker pull, tag, and run
