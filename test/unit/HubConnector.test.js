@@ -22,22 +22,25 @@ describe('HubConnector', function () {
 
     describe('constructor', function () {
 
-        it('builds the URL as http://<url>:<port>', function () {
+        it('builds urls array with http://<host>:<port> from host+port args', function () {
             const HubConnector = loadConnector(makeAxiosStub())
             const connector = new HubConnector('localhost', 10000)
-            expect(connector.url).to.equal('http://localhost:10000')
+            expect(connector.urls).to.be.an('array').with.lengthOf(1)
+            expect(connector.urls[0]).to.equal('http://localhost:10000')
         })
 
-        it('stores the port on the instance', function () {
+        it('stores a single-element urls array when constructed with host+port', function () {
             const HubConnector = loadConnector(makeAxiosStub())
             const connector = new HubConnector('127.0.0.1', 8765)
-            expect(connector.port).to.equal(8765)
+            expect(connector.urls).to.be.an('array').with.lengthOf(1)
+            expect(connector.urls[0]).to.equal('http://127.0.0.1:8765')
         })
 
-        it('handles IP addresses', function () {
+        it('handles IP addresses in urls array', function () {
             const HubConnector = loadConnector(makeAxiosStub())
             const connector = new HubConnector('192.168.1.100', 3000)
-            expect(connector.url).to.equal('http://192.168.1.100:3000')
+            expect(connector.urls).to.be.an('array').with.lengthOf(1)
+            expect(connector.urls[0]).to.equal('http://192.168.1.100:3000')
         })
     })
 
@@ -125,7 +128,7 @@ describe('HubConnector', function () {
             const [url, data, opts] = axiosStub.post.firstCall.args
             expect(data.method).to.equal('updateconfig')
             expect(data.params).to.deep.equal({ config: config })
-            expect(opts.timeout).to.equal(10000)
+            expect(opts.timeout).to.equal(60000)
         })
 
         it('returns false when response has no result', async function () {
