@@ -31,15 +31,24 @@ class HubConnector {
         } else {
             this.urls = ["http://" + endpoints + ":" + port];
         }
+        // Sticky-last-good endpoint: start each call at the last endpoint that
+        // answered, so a degraded first endpoint isn't retried first every call
+        // (which would cost the full timeout per call before falling back).
+        this._lastGoodIdx = 0;
     }
 
-    // Internal: call a JSON-RPC method, trying each endpoint in order
+    // Internal: call a JSON-RPC method, trying each endpoint starting from the
+    // last one that succeeded and wrapping around through the rest.
     async _call(data, timeout = 5000){
-        for(let url of this.urls){
+        for(let i = 0; i < this.urls.length; i++){
+            let idx = (this._lastGoodIdx + i) % this.urls.length;
+            let url = this.urls[idx];
             try {
                 let response = await axios.post(url, data, { timeout });
-                if(response.data && response.data.result !== undefined)
+                if(response.data && response.data.result !== undefined){
+                    this._lastGoodIdx = idx;
                     return response.data.result;
+                }
             } catch(err){
                 // Silent — try next endpoint
             }
