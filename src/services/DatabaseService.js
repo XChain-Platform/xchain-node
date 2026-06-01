@@ -522,6 +522,14 @@ async function buildDatabaseModule(coin, network) {
         runArgs.push('--network', getDockerNetwork(coin, network))
         const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
         runArgs.push('-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`)
+        // Optional: pin the MariaDB datadir to a host path (e.g. a fast NVMe
+        // mount) instead of the image's default anonymous volume, which lands
+        // under Docker's data-root (often a bulk/HDD disk). Unset = unchanged
+        // behaviour. Set XCHAIN_NODE_DB_DATA_DIR=/var/lib/mysql to keep the DB
+        // on a dedicated NVMe volume.
+        if (process.env.XCHAIN_NODE_DB_DATA_DIR) {
+            runArgs.push('-v', `${process.env.XCHAIN_NODE_DB_DATA_DIR}:/var/lib/mysql`)
+        }
         runArgs.push('--env', `MYSQL_ROOT_PASSWORD=${mariadbRootPassword}`, containerPrefix)
 
         console.log("Creating container of module " + DB_MODULE_NAME)
