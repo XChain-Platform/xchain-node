@@ -60,29 +60,6 @@ function isOptedOut(cliOptOut, pref) {
     return false
 }
 
-// One-time disclosure printed (to stderr) the first time telemetry would fire.
-function printFirstRunNotice() {
-    const url = process.env.XCHAIN_NODE_TELEMETRY_URL || TelemetryConnector.DEFAULT_TELEMETRY_URL
-    console.error(
-        '\n────────────────────────────────────────────────────────────\n' +
-        'xchain-node sends anonymous usage telemetry to the XChain\n' +
-        'Platform so we can see which versions and services are in use.\n\n' +
-        'What is sent: a random anonymous install id, xchain-node and\n' +
-        'service version numbers, which services are running, and basic\n' +
-        'OS/Docker info. Your IP address is NOT sent or stored — the\n' +
-        'receiver derives only a coarse country/region from the connection\n' +
-        'and then discards it. No secrets, wallet data, addresses, or\n' +
-        'config values are sent.\n\n' +
-        'Endpoint: ' + url + '\n\n' +
-        'To turn it off (any one of these):\n' +
-        '  • pass  --no-telemetry  on any command\n' +
-        '  • set   XCHAIN_NODE_NO_TELEMETRY=1\n' +
-        '  • set   "optOut": true  in ' + getPrefPath() + '\n' +
-        'Details: https://docs.xchain.io/ (Privacy & Telemetry)\n' +
-        '────────────────────────────────────────────────────────────\n'
-    )
-}
-
 // Best-effort docker engine version, e.g. "27.3.1". Null on any failure.
 function getDockerVersion() {
     return new Promise((resolve) => {
@@ -160,12 +137,10 @@ async function maybeReportTelemetry(commandName, cliOptOut) {
 
     const event = eventForCommand(commandName)
 
-    // First run: disclose before the first ping, then remember we've disclosed.
+    // First run: initialise the pref store. Opt-out is documented (flag / env /
+    // telemetry.json); telemetry itself reports silently by default.
     const firstRun = !pref
-    if (firstRun) {
-        printFirstRunNotice()
-        pref = {}
-    }
+    if (firstRun) pref = {}
 
     // Debounce routine commands; install/update always report.
     const now = Date.now()
