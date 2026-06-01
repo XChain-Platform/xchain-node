@@ -3,3 +3,9 @@ node_modules/
 .DS_Store
 .stryker-tmp/
 reports/mutation/
+
+# Runtime coin-node data — created when nodes run. Never a repo artifact:
+# includes wallet.dat (keys), chainstate/blocks, debug.log, peers.dat, *.pid.
+data/node/
+# E2E run logs.
+data/e2e-logs/
