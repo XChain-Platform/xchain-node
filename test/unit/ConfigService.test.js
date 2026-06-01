@@ -296,6 +296,43 @@ describe('ConfigService', function () {
                 expect(config['INDEXER_DB_NAME']).to.equal('XChain_BTC_Mainnet_Indexer')
             })
 
+            describe('native-coin fee destination injection', function () {
+                const FEE_ENV = 'XCHAIN_FEE_DESTINATION_BTC_REGTEST'
+                let savedPerCoin, savedGeneric
+                beforeEach(function () {
+                    savedPerCoin = process.env[FEE_ENV]
+                    savedGeneric = process.env.FEE_DESTINATION
+                    delete process.env[FEE_ENV]
+                    delete process.env.FEE_DESTINATION
+                })
+                afterEach(function () {
+                    if (savedPerCoin === undefined) delete process.env[FEE_ENV]; else process.env[FEE_ENV] = savedPerCoin
+                    if (savedGeneric === undefined) delete process.env.FEE_DESTINATION; else process.env.FEE_DESTINATION = savedGeneric
+                })
+
+                it('injects FEE_DESTINATION (decoder) + per-coin var (indexer) from the host env', async function () {
+                    process.env[FEE_ENV] = 'mFeeRegtestAddr111'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
+                    expect(config['FEE_DESTINATION']).to.equal('mFeeRegtestAddr111')
+                    expect(config[FEE_ENV]).to.equal('mFeeRegtestAddr111')
+                })
+
+                it('falls back to a generic FEE_DESTINATION host env var', async function () {
+                    process.env.FEE_DESTINATION = 'mGenericFeeAddr222'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config[FEE_ENV]).to.equal('mGenericFeeAddr222')
+                })
+
+                it('omits fee keys entirely when unset (feature stays disabled)', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
+                    expect(config).to.not.have.property('FEE_DESTINATION')
+                    expect(config).to.not.have.property(FEE_ENV)
+                })
+            })
+
             it('returns correct INDEXER_COIN ticker', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')

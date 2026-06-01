@@ -166,6 +166,20 @@ async function getDefaultConfig(module, coin, network) {
             // raise it for regtest where load is by-design bursty.
             defaultValues["ENCODER_RATE_LIMIT_RPM"] = 99999
         }
+
+        // Native-coin protocol fee destination (per coin/network). Read from the host env
+        // (e.g. xchain-node's .env) so the protocol fee address stays out of source — mirrors
+        // the TELEMETRY_IP_SALT injection pattern above. The decoder reads FEE_DESTINATION (to
+        // persist the fee output to transaction_outputs); the indexer reads
+        // XCHAIN_FEE_DESTINATION_<COIN>_<NETWORK> (src/configs/<COIN>.js). Injected as a default,
+        // so a value in the <coin>-<network> config file still takes precedence; when unset,
+        // native-coin fee payment stays disabled (config placeholder).
+        const feeDestEnvName = 'XCHAIN_FEE_DESTINATION_' + CoinTickerSymbol[coin] + '_' + network.toUpperCase()
+        const feeDestination = process.env[feeDestEnvName] || process.env.FEE_DESTINATION || null
+        if (feeDestination) {
+            defaultValues['FEE_DESTINATION'] = feeDestination
+            defaultValues[feeDestEnvName]    = feeDestination
+        }
     } else {
         defaultValues = {
             "HUB_HOST":              "0.0.0.0",
