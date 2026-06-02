@@ -14,6 +14,18 @@ function loadConnector(axiosStub) {
     })
 }
 
+// Axios-style error for a non-2xx response that still carries a valid JSON-RPC
+// body — e.g. the hub's HTTP 503 "degraded" health response when its DB pool is
+// down. Axios attaches the full response to the thrown error as err.response.
+function degraded503Error(body) {
+    const err = new Error('Request failed with status code 503')
+    err.response = {
+        status: 503,
+        data: { jsonrpc: '2.0', id: 1, result: body || { status: 'degraded', db: false } }
+    }
+    return err
+}
+
 describe('HubConnector', function () {
 
     // -------------------------------------------------------------------
@@ -99,6 +111,54 @@ describe('HubConnector', function () {
             const connector = new HubConnector('localhost', 10000)
             const result = await connector.ping()
             expect(result).to.be.false
+        })
+
+        it('returns true (reachable) for a 503 "degraded" hub rather than masking it as down', async function () {
+            // A live hub with a dead DB pool must NOT read the same as a crashed
+            // one, or the install/restart loop would exhaust its retries against
+            // a hub that is actually running.
+            const axiosStub = makeAxiosStub()
+            axiosStub.post.rejects(degraded503Error())
+            const HubConnector = loadConnector(axiosStub)
+            const connector = new HubConnector('localhost', 10000)
+            const result = await connector.ping()
+            expect(result).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // _call() — degraded-response handling
+    // -------------------------------------------------------------------
+
+    describe('_call()', function () {
+
+        it('surfaces the JSON-RPC body of a 503 "degraded" response instead of discarding it', async function () {
+            const axiosStub = makeAxiosStub()
+            axiosStub.post.rejects(degraded503Error())
+            const HubConnector = loadConnector(axiosStub)
+            const connector = new HubConnector('localhost', 10000)
+            const result = await connector._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            expect(result).to.deep.equal({ status: 'degraded', db: false })
+        })
+
+        it('prefers a healthy endpoint over a degraded one', async function () {
+            const axiosStub = makeAxiosStub()
+            axiosStub.post.onFirstCall().rejects(degraded503Error())
+            axiosStub.post.onSecondCall().resolves({ data: { result: 'pong' } })
+            const HubConnector = loadConnector(axiosStub)
+            const connector = new HubConnector(['http://hub1:10000', 'http://hub2:10000'])
+            const result = await connector._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            expect(result).to.equal('pong')
+            expect(axiosStub.post.callCount).to.equal(2)
+        })
+
+        it('returns null when an endpoint is truly unreachable (no err.response)', async function () {
+            const axiosStub = makeAxiosStub()
+            axiosStub.post.rejects(new Error('ECONNREFUSED'))
+            const HubConnector = loadConnector(axiosStub)
+            const connector = new HubConnector('localhost', 10000)
+            const result = await connector._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            expect(result).to.be.null
         })
     })
 

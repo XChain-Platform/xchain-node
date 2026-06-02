@@ -40,6 +40,13 @@ class HubConnector {
     // Internal: call a JSON-RPC method, trying each endpoint starting from the
     // last one that succeeded and wrapping around through the rest.
     async _call(data, timeout = 5000){
+        // A reachable-but-unhealthy hub responds with a non-2xx status (e.g. the
+        // 503 "degraded" health body returned when its DB pool is down) that
+        // still carries a valid JSON-RPC body. Axios throws on any non-2xx, so
+        // without inspecting err.response that state is indistinguishable from an
+        // unreachable endpoint. Capture such a body as a fallback but keep trying
+        // the remaining endpoints in case one is fully healthy.
+        let degraded = null;
         for(let i = 0; i < this.urls.length; i++){
             let idx = (this._lastGoodIdx + i) % this.urls.length;
             let url = this.urls[idx];
@@ -50,14 +57,27 @@ class HubConnector {
                     return response.data.result;
                 }
             } catch(err){
-                // Silent — try next endpoint
+                if(err.response && err.response.data && err.response.data.result !== undefined){
+                    degraded = err.response.data.result;
+                }
+                // else: unreachable — silently try the next endpoint
             }
         }
-        return null;
+        // No endpoint returned a healthy result. Surface a reachable-but-degraded
+        // response (if any) so callers can tell "up but DB down" from
+        // "unreachable"; otherwise null, preserving the all-endpoints-failed signal.
+        return degraded;
     }
 
     async ping(){
         let result = await this._call({ jsonrpc: '2.0', method: 'ping', id: 1 });
+        // A reachable-but-degraded hub returns a non-null {status:"degraded"}
+        // body. The hub is up, so report it as reachable rather than treating it
+        // as down (which would make the install/restart loop exhaust its retries
+        // against a live hub) — but log the degraded state so it stays visible.
+        if(result && typeof result === 'object' && result.status === 'degraded'){
+            console.warn('Hub reachable but reporting degraded state: ', result);
+        }
         return result !== null;
     }
 
