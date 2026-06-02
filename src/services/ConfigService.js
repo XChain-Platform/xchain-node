@@ -311,6 +311,12 @@ function filterCommandParameters(branch, modules, coins, networks) {
         networks = Object.values(Network)
     }
 
+    // Shared services (hub / explorer / db / sync) are registered under a single
+    // empty coin+network key, not per-coin. A bare `update xchain-hub` must resolve
+    // to that ""/"" container; otherwise it gets fanned out across real coins where
+    // it matches nothing and the command silently no-ops.
+    const SHARED_SERVICES = [HUB_MODULE_NAME, EXPLORER_MODULE_NAME, DB_MODULE_NAME, SYNC_MODULE_NAME]
+
     if (modules === "all") {
         modules = Object.values(XChainService).filter(m => m !== XChainService.XCHAIN_E2E_TEST)
         modules.push(NODE_MODULE_NAME)
@@ -318,6 +324,9 @@ function filterCommandParameters(branch, modules, coins, networks) {
     } else if (modules === "explorer") {
         addExplorer = true
         coins = []
+    } else if (SHARED_SERVICES.includes(modules)) {
+        // Explicitly-named shared service → emit under the empty ""/"" key only.
+        return { "": { "": [modules] } }
     } else if (modules === "node") {
         modules = [NODE_MODULE_NAME]
     } else if (modules) {
@@ -353,7 +362,7 @@ function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = 
     const knownServices = [
         ...Object.values(XChainService),
         NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME,
-        EXPLORER_MODULE_NAME, 'explorer'
+        EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, 'explorer'
     ]
     const knownChains   = Object.values(Coin)
     const knownNetworks = Object.values(Network)

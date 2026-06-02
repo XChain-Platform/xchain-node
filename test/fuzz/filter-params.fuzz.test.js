@@ -4,7 +4,8 @@ const { expect } = require('chai')
 
 const {
     Coin, Network, XChainService,
-    NODE_MODULE_NAME, EXPLORER_MODULE_NAME, REGTEST_MODULES
+    NODE_MODULE_NAME, EXPLORER_MODULE_NAME, REGTEST_MODULES,
+    HUB_MODULE_NAME, DB_MODULE_NAME, SYNC_MODULE_NAME
 } = require('../../src/config/constants')
 const { filterCommandParameters } = require('../../src/services/ConfigService')
 
@@ -150,6 +151,24 @@ describe('Fuzz: filterCommandParameters()', function () {
         // No coin-specific entries
         expect(result).to.not.have.property('bitcoin')
     })
+
+    // --- Shared-service routing (hub / explorer / db / sync) ---
+    // Shared services register under a single empty coin+network key. A bare
+    // `update xchain-hub` must resolve there, not fan out across real coins
+    // (where it matches no container and silently no-ops).
+
+    for (const shared of [HUB_MODULE_NAME, EXPLORER_MODULE_NAME, DB_MODULE_NAME, SYNC_MODULE_NAME]) {
+        it(`explicitly-named shared service "${shared}" routes under empty coin/network only`, function () {
+            const result = filterCommandParameters(null, shared, 'all', 'all')
+            expect(result).to.deep.equal({ '': { '': [shared] } })
+        })
+
+        it(`shared service "${shared}" ignores coin/network args (always shared key)`, function () {
+            const result = filterCommandParameters(null, shared, 'bitcoin', 'mainnet')
+            expect(result['']['']).to.deep.equal([shared])
+            expect(result).to.not.have.property('bitcoin')
+        })
+    }
 
     // --- Combinatorial explosion check ---
 
