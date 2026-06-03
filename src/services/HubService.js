@@ -98,7 +98,7 @@ async function updateHubOrExplorer(module) {
                         break
                     case XChainService.XCHAIN_INDEXER:
                         config = {
-                            "host":        defaultConfigCoinNetwork["INDEXER_HOST"],
+                            "host":        defaultConfigCoinNetwork["INDEXER_URL"],
                             "port":        defaultConfigCoinNetwork["INDEXER_API_PORT"],
                             "server_port": defaultConfigCoinNetwork["INDEXER_PORT"],
                             "db_host":     defaultConfigCoinNetwork["INDEXER_DB_HOST"],

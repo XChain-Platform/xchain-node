@@ -140,7 +140,7 @@ async function getDefaultConfig(module, coin, network) {
             "ENCODER_URL":       getDockerContainerImageName(XChainService.XCHAIN_ENCODER, coin, network),
             "ENCODER_API_PORT":  3003,
             "ENCODER_PORT":      3003,
-            "INDEXER_HOST":      getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coin, network),
+            "INDEXER_URL":       getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coin, network),
             "INDEXER_API_PORT":  3004,
             "INDEXER_PORT":      3004,
             "INDEXER_COIN":      CoinTickerSymbol[coin],

@@ -73,7 +73,7 @@ describe('Chaos: Config Resilience', function () {
 
             const requiredKeys = [
                 'NETWORK', 'NODE_URL', 'NODE_PORT', 'NODE_USER', 'NODE_PASSWORD',
-                'DECODER_DB_HOST', 'DECODER_DB_PORT', 'ENCODER_URL', 'INDEXER_HOST',
+                'DECODER_DB_HOST', 'DECODER_DB_PORT', 'ENCODER_URL', 'INDEXER_URL',
                 'HUB_HOST', 'HUB_PORT'
             ]
             for (const key of requiredKeys) {
