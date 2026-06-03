@@ -9,10 +9,15 @@ name: Nightly E2E (regtest)
 # bring-up is heavy (clones + image builds + a coin daemon).
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# STATUS: SCAFFOLD — needs a first manual `workflow_dispatch` run to validate.
-# The structure, env, and commands are correct; the parts to shake out on the
-# first run are flagged "VALIDATE:" below. Start with bitcoin; add litecoin /
-# dogecoin (run-multichain-e2e.sh covers all three) once bitcoin is green.
+# STATUS: VALIDATED THROUGH STACK CLONE-PREP (manual workflow_dispatch, bitcoin,
+# 2026-06-03). Green through: checkout, node 22, disk reclaim, headless MariaDB
+# bring-up, dep install, and the SSH→HTTPS clone rewrite. The install process
+# reaches the external DB (creates its DB on 172.17.0.1:3306) — so that env path
+# is proven. BLOCKER: the sub-repos are PRIVATE, so cloning them on a hosted
+# runner needs a SUBREPO_CLONE_TOKEN secret (see the rewrite step) OR the repos
+# to be made public. Until one of those, the boot step fails at the first clone.
+# Still to confirm once it boots: service→DB container networking, then add
+# litecoin / dogecoin (run-multichain-e2e.sh covers all three).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -83,10 +88,30 @@ jobs:
 
       # xchain-node's module URLs are SSH form (git@github.com:XChain-Platform/…).
       # The runner has no SSH deploy key, so SSH clones fail with
-      # "Permission denied (publickey)". The sub-repos are public, so rewrite to
-      # anonymous HTTPS for the duration of the job — no credentials needed.
-      - name: Clone sub-repos over HTTPS (runner has no SSH key; repos are public)
-        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+      # "Permission denied (publickey)". Rewrite them to HTTPS for the job.
+      #
+      # The sub-repos are PRIVATE today, so anonymous HTTPS clones fail with
+      # "could not read Username for 'https://github.com'". The automatic
+      # GITHUB_TOKEN is scoped to THIS repo only and cannot read the siblings,
+      # so a token with org-wide `contents: read` is required:
+      #   - Add a repo/org secret SUBREPO_CLONE_TOKEN (a fine-grained PAT or a
+      #     GitHub App installation token granting read on the XChain-Platform
+      #     sub-repos), and this step authenticates the HTTPS clones with it.
+      #   - Once the sub-repos are made public (pre-launch plan), the token
+      #     becomes unnecessary — the anonymous-HTTPS fallback below just works.
+      # If neither applies, the next step fails fast at the first private clone.
+      - name: Rewrite sub-repo clones to HTTPS (token-auth if SUBREPO_CLONE_TOKEN set)
+        env:
+          SUBREPO_CLONE_TOKEN: ${{ secrets.SUBREPO_CLONE_TOKEN }}
+        run: |
+          if [ -n "$SUBREPO_CLONE_TOKEN" ]; then
+            echo "Using SUBREPO_CLONE_TOKEN for authenticated HTTPS clones."
+            git config --global url."https://x-access-token:${SUBREPO_CLONE_TOKEN}@github.com/".insteadOf "git@github.com:"
+          else
+            echo "::warning::SUBREPO_CLONE_TOKEN not set — falling back to anonymous HTTPS."
+            echo "::warning::This only works once the XChain-Platform sub-repos are public; private repos will fail at clone."
+            git config --global url."https://github.com/".insteadOf "git@github.com:"
+          fi
 
       - name: Boot the regtest stack (clones every service at master HEAD)
         # First heavy step — repo clones + docker image builds + coin daemon.
