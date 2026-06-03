@@ -216,6 +216,10 @@ async function getDefaultConfig(module, coin, network) {
         defaultValues["TELEMETRY_ENABLED"]        = process.env.TELEMETRY_ENABLED || "true"
         defaultValues["TELEMETRY_RETENTION_DAYS"] = process.env.TELEMETRY_RETENTION_DAYS || 90
         defaultValues["TELEMETRY_IP_SALT"]        = process.env.TELEMETRY_IP_SALT || ""
+        // Gate for the per-install detail endpoint (GET /telemetry/operators). Like the
+        // salt, sourced from host env so the secret stays out of source/config files;
+        // unset leaves the endpoint fail-closed (401 for everyone).
+        defaultValues["TELEMETRY_ADMIN_KEY"]      = process.env.TELEMETRY_ADMIN_KEY || ""
 
         // Validator mode: when `xchain-node validator init` has been run, inject the
         // P2P / signing-key / capability-config env so the hub starts as a full
