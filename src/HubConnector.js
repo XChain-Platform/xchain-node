@@ -35,6 +35,10 @@ class HubConnector {
         // answered, so a degraded first endpoint isn't retried first every call
         // (which would cost the full timeout per call before falling back).
         this._lastGoodIdx = 0;
+        // Per-endpoint failure detail from the most recent _call(). Populated with
+        // "url → code|message" strings for each unreachable endpoint so callers
+        // can report exactly what was tried and why, instead of a bare null.
+        this.lastFailures = [];
     }
 
     // Internal: call a JSON-RPC method, trying each endpoint starting from the
@@ -47,6 +51,7 @@ class HubConnector {
         // unreachable endpoint. Capture such a body as a fallback but keep trying
         // the remaining endpoints in case one is fully healthy.
         let degraded = null;
+        this.lastFailures = [];
         for(let i = 0; i < this.urls.length; i++){
             let idx = (this._lastGoodIdx + i) % this.urls.length;
             let url = this.urls[idx];
@@ -59,8 +64,11 @@ class HubConnector {
             } catch(err){
                 if(err.response && err.response.data && err.response.data.result !== undefined){
                     degraded = err.response.data.result;
+                } else {
+                    // Unreachable — record why so the caller can report which
+                    // endpoints failed instead of an undiagnosable null.
+                    this.lastFailures.push(url + ' → ' + (err.code || err.message));
                 }
-                // else: unreachable — silently try the next endpoint
             }
         }
         // No endpoint returned a healthy result. Surface a reachable-but-degraded
