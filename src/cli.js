@@ -257,7 +257,9 @@ async function parseCommand() {
             const { logFile, exitCode } = await runE2ETest(chain, 'regtest', testName, options.grep)
             console.log("E2E tests finished with exit code " + exitCode)
             console.log("Logs saved to: " + logFile)
-            return process.exit(0)
+            // Propagate the suite's real exit code so CI (and run-multichain-e2e.sh)
+            // can gate on $? natively instead of scraping the line above.
+            return process.exit(exitCode)
         })
 
     program

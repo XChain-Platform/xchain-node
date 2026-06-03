@@ -1,0 +1,102 @@
+name: Nightly E2E (regtest)
+
+# Cross-component integration gate. Boots the FULL XChain stack on regtest via
+# xchain-node — which clones every service repo at its master HEAD and runs them
+# as Docker containers — then runs the live xchain-e2e-test action suite against
+# it (real transactions, real indexing, reorg convergence). This is the only gate
+# that exercises consensus / money movement end-to-end; the per-repo CI jobs are
+# single-process unit tests. Scheduled nightly (not per-push) because a full
+# bring-up is heavy (clones + image builds + a coin daemon).
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# STATUS: SCAFFOLD — needs a first manual `workflow_dispatch` run to validate.
+# The structure, env, and commands are correct; the parts to shake out on the
+# first run are flagged "VALIDATE:" below. Start with bitcoin; add litecoin /
+# dogecoin (run-multichain-e2e.sh covers all three) once bitcoin is green.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '0 7 * * *'        # 07:00 UTC nightly
+  workflow_dispatch:
+    inputs:
+      coin:
+        description: 'Coin to test'
+        type: choice
+        options: [bitcoin, litecoin, dogecoin]
+        default: bitcoin
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      COIN: ${{ github.event.inputs.coin || 'bitcoin' }}
+      # Headless DB: point xchain-node at an external MariaDB instead of its
+      # bundled DB container, so the first install does NOT stop on the
+      # interactive root-password prompt (see DatabaseService.getExternalDbConfig
+      # — these five vars are the documented headless fast-path).
+      XCHAIN_NODE_EXTERNAL_DB: '1'
+      # VALIDATE: 172.17.0.1 is the default docker-bridge gateway — reachable from
+      # xchain-node's spawned service containers to the host-published MariaDB
+      # port below. If xchain-node puts services on a custom network, this host
+      # may need to be the runner's LAN IP or the DB run on that same network.
+      XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1'
+      XCHAIN_NODE_EXTERNAL_DB_PORT: '3306'
+      XCHAIN_NODE_EXTERNAL_DB_ROOT_USER: 'root'
+      XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: 'ci_root_pw'
+      # GH runners are native ext4, so coin-node data is safe in the workspace
+      # (the native-ext4 requirement only bites on the Parallels dev VM).
+      XCHAIN_NODE_DATA_DIR: ${{ github.workspace }}/.xchain-data
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Reclaim runner disk (coin daemon + per-service images are large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android "$AGENT_TOOLSDIRECTORY" || true
+          docker system prune -af || true
+          df -h /
+
+      - name: Start headless MariaDB (host-published so spawned containers reach it)
+        run: |
+          docker run -d --name xchain-ci-db \
+            -e MARIADB_ROOT_PASSWORD="$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" \
+            -p 3306:3306 mariadb:11
+          # Wait for readiness before xchain-node tries to connect.
+          for i in $(seq 1 30); do
+            if docker exec xchain-ci-db mariadb-admin -uroot -p"$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" ping 2>/dev/null | grep -q "is alive"; then
+              echo "MariaDB ready"; break
+            fi
+            echo "waiting for MariaDB ($i)"; sleep 3
+          done
+
+      - name: Install xchain-node deps
+        run: npm ci
+
+      - name: Boot the regtest stack (clones every service at master HEAD)
+        # VALIDATE: first heavy step — repo clones + docker image builds + coin
+        # daemon. Watch disk + the external-DB connection from each service.
+        run: |
+          mkdir -p "$XCHAIN_NODE_DATA_DIR"
+          node src/index.js install master all "$COIN" regtest
+
+      - name: Run the e2e action suite
+        # Now exits non-zero on failure (cli.js e2etest propagates the suite's
+        # exit code), so this step natively gates the job.
+        run: node src/index.js e2etest "$COIN"
+
+      - name: Upload e2e logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-${{ env.COIN }}
+          path: ${{ env.XCHAIN_NODE_DATA_DIR }}/e2e-logs/
+          if-no-files-found: ignore
