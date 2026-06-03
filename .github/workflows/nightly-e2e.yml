@@ -81,9 +81,20 @@ jobs:
       - name: Install xchain-node deps
         run: npm ci
 
+      # xchain-node's module URLs are SSH form (git@github.com:XChain-Platform/…).
+      # The runner has no SSH deploy key, so SSH clones fail with
+      # "Permission denied (publickey)". The sub-repos are public, so rewrite to
+      # anonymous HTTPS for the duration of the job — no credentials needed.
+      - name: Clone sub-repos over HTTPS (runner has no SSH key; repos are public)
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
       - name: Boot the regtest stack (clones every service at master HEAD)
-        # VALIDATE: first heavy step — repo clones + docker image builds + coin
-        # daemon. Watch disk + the external-DB connection from each service.
+        # First heavy step — repo clones + docker image builds + coin daemon.
+        # Watch disk and image-build time here (the 120-min job timeout covers it).
+        # Note: the external-DB connection for the install process itself is
+        # already proven — it creates the xchain-node DB on 172.17.0.1:3306 before
+        # this step. Service→DB networking (spawned containers → host DB) is the
+        # remaining thing to confirm once the stack boots.
         run: |
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
           node src/index.js install master all "$COIN" regtest
