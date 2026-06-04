@@ -8,12 +8,13 @@ const fs              = require('fs')
 const path            = require('path')
 const crypto          = require('crypto')
 const zlib            = require('zlib')
+const axios           = require('axios')
 const { execFile, spawn } = require('child_process')
 const { promisify }   = require('util')
 const { PassThrough } = require('stream')
 const execFileAsync   = promisify(execFile)
 
-const { XChainService, DB_MODULE_NAME, SEP, tmpDir } = require('../config/constants')
+const { XChainService, DB_MODULE_NAME, SEP, tmpDir, BOOTSTRAP_BASE_URL } = require('../config/constants')
 const { db }                                          = require('../state')
 const { getDefaultConfig, getModuleDatabaseName }    = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
@@ -509,10 +510,98 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     return true
 }
 
+// ─── Public: auto-download + restore on fresh install ─────────────
+
+// Whether the utxo-tracker LevelDB volume already holds data. Used as a
+// race-free freshness gate: it must be checked BEFORE the container starts,
+// because a freshly-started tracker creates an (empty) LevelDB immediately.
+// Returns false when the volume is absent or empty (i.e. a fresh install).
+async function utxoTrackerVolumeHasData(coin, network) {
+    const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
+    try {
+        await execFileAsync('docker', ['volume', 'inspect', volumeName])
+    } catch {
+        return false // volume doesn't exist yet — fresh install
+    }
+    try {
+        const { stdout } = await execFileAsync('docker',
+            ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'ls -A /data 2>/dev/null | head -1'])
+        return stdout.trim().length > 0
+    } catch {
+        return false
+    }
+}
+
+// Stream <BOOTSTRAP_BASE_URL>/<module>/<coin>/<network>/latest.tgz into destDir
+// as latest.tgz. Returns the filename on success, null when none is published
+// (404). Follows the http→https redirect. Throws on other network errors.
+async function downloadBootstrap(coin, network, module, destDir) {
+    const url      = `${BOOTSTRAP_BASE_URL}/${module}/${coin}/${network}/latest.tgz`
+    const destPath = path.join(destDir, 'latest.tgz')
+    ensureDir(destDir)
+
+    const response = await axios({
+        method: 'get',
+        url,
+        responseType: 'stream',
+        maxRedirects: 5,
+        timeout: 60000,                 // connect/headers timeout; body has no timeout
+        validateStatus: s => s === 200 || s === 404
+    })
+    if (response.status === 404) return null
+
+    const totalBytes = parseInt(response.headers['content-length'] || '0', 10)
+    const progress   = startProgress(`Downloading bootstrap (${module} ${coin}/${network})...`, totalBytes)
+    try {
+        await new Promise((resolve, reject) => {
+            const counter     = new PassThrough()
+            const writeStream = fs.createWriteStream(destPath)
+            counter.on('data', chunk => progress.update(chunk.length))
+            response.data.pipe(counter).pipe(writeStream)
+            response.data.on('error', reject)
+            writeStream.on('error',   reject)
+            writeStream.on('finish',  resolve)
+        })
+    } finally {
+        progress.stop('Bootstrap downloaded')
+    }
+    return 'latest.tgz'
+}
+
+// On a FRESH utxo-tracker install, download the published bootstrap and restore
+// it. Best-effort: any failure (no bootstrap published, download/restore error)
+// logs a warning and returns so the install proceeds with a normal sync.
+async function ensureBootstrapUtxoTracker(coin, network) {
+    if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
+        console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP) — syncing from scratch')
+        return false
+    }
+    try {
+        const defaultConfig = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
+        const bootstrapDir  = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"]
+
+        console.log(`Checking for a published bootstrap for ${coin}/${network}...`)
+        const fileName = await downloadBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, bootstrapDir)
+        if (!fileName) {
+            console.log('No bootstrap available — the tracker will sync from scratch')
+            return false
+        }
+        await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
+        console.log('Bootstrap installed — tracker will continue from the bootstrap height')
+        return true
+    } catch (err) {
+        console.log(`WARNING: bootstrap auto-restore failed (${err.message}) — the tracker will sync from scratch`)
+        return false
+    }
+}
+
 // ─── Exports ──────────────────────────────────────────────────────
 
 module.exports = {
     getBootstrapFilesList,
     makeBootstrap,
-    restoreBootstrap
+    restoreBootstrap,
+    downloadBootstrap,
+    utxoTrackerVolumeHasData,
+    ensureBootstrapUtxoTracker
 }

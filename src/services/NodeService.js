@@ -212,7 +212,10 @@ async function installNode(coin, network) {
     console.log("Downloading xchain-utxo-tracker...")
     await cloneGit(XChainService.XCHAIN_UTXO_TRACKER, true)
     console.log("Building xchain-utxo-tracker...")
+    const { utxoTrackerVolumeHasData, ensureBootstrapUtxoTracker } = require('./BootstrapService')
+    const utxoWasFresh = !(await utxoTrackerVolumeHasData(coin, network))
     await buildAndUp(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
+    if (utxoWasFresh) await ensureBootstrapUtxoTracker(coin, network)
 
     if (network === Network.REGTEST) {
         console.log("Downloading xchain-regtest-miner...")

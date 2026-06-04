@@ -355,9 +355,20 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                         await cloneGit(module, true, false, branch)
                     }
                 }
+                // Fresh-install detection must happen BEFORE buildAndUp starts the
+                // tracker (a fresh tracker creates an empty LevelDB immediately).
+                let utxoWasFresh = false
+                if (module === XChainService.XCHAIN_UTXO_TRACKER && !onlyExecution) {
+                    const { utxoTrackerVolumeHasData } = require('./BootstrapService')
+                    utxoWasFresh = !(await utxoTrackerVolumeHasData(coin, network))
+                }
                 const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
                     await setDatabaseParameters()
+                }
+                if (utxoWasFresh) {
+                    const { ensureBootstrapUtxoTracker } = require('./BootstrapService')
+                    await ensureBootstrapUtxoTracker(coin, network)
                 }
                 if (!onlyExecution) await statusChanged()
                 return containerId

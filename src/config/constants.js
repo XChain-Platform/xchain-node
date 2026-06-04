@@ -151,6 +151,15 @@ const dataDir            = process.env.XCHAIN_NODE_DATA_DIR         || path.join
 const configDir          = process.env.XCHAIN_NODE_CONFIG_DIR       || path.join(__dirname, "..", "..", "config")
 const containersFilesDir = path.join(tmpDir, "containers_files")
 
+// --- Bootstrap auto-restore ---
+// On a fresh install, xchain-node can download a published bootstrap and restore
+// it instead of syncing from genesis. Distribution layout (per service):
+//   <base>/<module>/<coin>/<network>/latest.tgz
+// http://sync.xchain.io 301-redirects to https, so default straight to https.
+// Auto-restore is ON by default; opt out at runtime via XCHAIN_NODE_NO_BOOTSTRAP=1
+// or the install --no-bootstrap flag (both read live from the env, not at load).
+const BOOTSTRAP_BASE_URL     = process.env.XCHAIN_NODE_BOOTSTRAP_BASE_URL || "https://sync.xchain.io/bootstraps"
+
 module.exports = {
     NODE_PREFIX,
     NODE_MODULE_NAME,
@@ -180,5 +189,6 @@ module.exports = {
     cryptoNodesDir,
     dataDir,
     configDir,
-    containersFilesDir
+    containersFilesDir,
+    BOOTSTRAP_BASE_URL
 }
