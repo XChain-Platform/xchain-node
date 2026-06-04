@@ -362,6 +362,14 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                     const { utxoTrackerVolumeHasData } = require('./BootstrapService')
                     utxoWasFresh = !(await utxoTrackerVolumeHasData(coin, network))
                 }
+                // Decoder/indexer freshness must also be sampled BEFORE buildAndUp —
+                // once the service starts it fills its `blocks` table, which would
+                // make a fresh install look populated.
+                let mariaWasFresh = false
+                if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
+                    const { mariaDbModuleHasData } = require('./BootstrapService')
+                    mariaWasFresh = !(await mariaDbModuleHasData(coin, network, module))
+                }
                 const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
                     await setDatabaseParameters()
@@ -369,6 +377,10 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                 if (utxoWasFresh) {
                     const { ensureBootstrapUtxoTracker } = require('./BootstrapService')
                     await ensureBootstrapUtxoTracker(coin, network)
+                }
+                if (mariaWasFresh) {
+                    const { ensureBootstrapMariaDb } = require('./BootstrapService')
+                    await ensureBootstrapMariaDb(coin, network, module)
                 }
                 if (!onlyExecution) await statusChanged()
                 return containerId

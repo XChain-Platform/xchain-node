@@ -473,41 +473,64 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
 
     const rootPassword = await askMariadbRootPassword(coin, network)
 
-    // Step 4: Drop and recreate database
-    console.log(`Recreating database ${dbName}...`)
-    await execFileAsync(
-        'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-e', `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`]
-    )
+    // Stop the service that owns this DB so it isn't writing rows or holding
+    // connections while we DROP and reimport (mirrors the utxo-tracker path,
+    // which stops the tracker before clearing its volume). Best-effort: a
+    // manual restore run before the service is installed has no container to
+    // stop. Open the DB pool first so getModuleContainer can resolve the row.
+    await ensureDatabasePool()
+    let serviceContainerId = null
+    try {
+        serviceContainerId = await db.getModuleContainer(module, coin, network)
+    } catch { /* service not installed yet — proceed without stopping */ }
+    if (serviceContainerId) {
+        console.log(`Stopping ${module} container...`)
+        await stopContainer(serviceContainerId)
+    }
 
-    // Step 5: Pipe decompressed SQL into mariadb with progress
-    const stats      = await fs.promises.stat(innerArchive)
-    const totalBytes = stats.size
-    const progress   = startProgress(`Restoring ${dbName}...`, totalBytes)
+    try {
+        // Step 4: Drop and recreate database
+        console.log(`Recreating database ${dbName}...`)
+        await execFileAsync(
+            'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-e', `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`]
+        )
 
-    await new Promise((resolve, reject) => {
-        const readStream  = fs.createReadStream(innerArchive)
-        const counter     = new PassThrough()
-        const gunzip      = zlib.createGunzip()
-        const mysqlProc   = spawn('docker', ['exec', '-i', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, dbName], { stdio: ['pipe', 'inherit', 'pipe'] })
+        // Step 5: Pipe decompressed SQL into mariadb with progress
+        const stats      = await fs.promises.stat(innerArchive)
+        const totalBytes = stats.size
+        const progress   = startProgress(`Restoring ${dbName}...`, totalBytes)
 
-        counter.on('data', chunk => progress.update(chunk.length))
-        readStream.pipe(counter).pipe(gunzip).pipe(mysqlProc.stdin)
+        await new Promise((resolve, reject) => {
+            const readStream  = fs.createReadStream(innerArchive)
+            const counter     = new PassThrough()
+            const gunzip      = zlib.createGunzip()
+            const mysqlProc   = spawn('docker', ['exec', '-i', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, dbName], { stdio: ['pipe', 'inherit', 'pipe'] })
 
-        readStream.on('error',  err => reject(err))
-        gunzip.on('error',      err => reject(err))
-        mysqlProc.on('error',   err => reject(err))
-        mysqlProc.on('close', code => {
-            if (code === 0) resolve()
-            else reject(new Error(`mariadb restore exited with code ${code}`))
+            counter.on('data', chunk => progress.update(chunk.length))
+            readStream.pipe(counter).pipe(gunzip).pipe(mysqlProc.stdin)
+
+            readStream.on('error',  err => reject(err))
+            gunzip.on('error',      err => reject(err))
+            mysqlProc.on('error',   err => reject(err))
+            mysqlProc.on('close', code => {
+                if (code === 0) resolve()
+                else reject(new Error(`mariadb restore exited with code ${code}`))
+            })
         })
-    })
-    progress.stop(`${dbName} restored`)
+        progress.stop(`${dbName} restored`)
 
-    // Cleanup
-    fs.rmSync(workDir, { recursive: true })
-    console.log('Bootstrap restore complete')
+        // Cleanup
+        fs.rmSync(workDir, { recursive: true })
+        console.log('Bootstrap restore complete')
 
-    return true
+        return true
+    } finally {
+        // Always restart the service so a failed restore doesn't leave it down.
+        if (serviceContainerId) {
+            console.log(`Starting ${module} container...`)
+            await startContainer(serviceContainerId)
+        }
+    }
 }
 
 // ─── Public: auto-download + restore on fresh install ─────────────
@@ -595,6 +618,76 @@ async function ensureBootstrapUtxoTracker(coin, network) {
     }
 }
 
+// Whether the decoder/indexer MariaDB database already holds indexed data.
+// The MariaDB analogue of utxoTrackerVolumeHasData: a fresh install has either
+// no database yet or an empty `blocks` table (both decoder and indexer carry a
+// `blocks` table that fills as they follow the chain). Used as the freshness
+// gate before the service container starts decoding/indexing. Best-effort:
+// any lookup error is treated as "fresh" so install proceeds with a normal sync.
+async function mariaDbModuleHasData(coin, network, module) {
+    const { askMariadbRootPassword } = require('./DatabaseService')
+    const dbName = getModuleDatabaseName(module, coin, network)
+
+    let dbContainerId
+    try {
+        dbContainerId = await getDatabaseContainerId()
+    } catch { return false }
+    if (!dbContainerId) return false // no DB container yet — fresh install
+
+    let rootPassword
+    try {
+        rootPassword = await askMariadbRootPassword(coin, network)
+    } catch { return false }
+
+    try {
+        // Does the `blocks` table exist? (DB or table absent ⇒ fresh)
+        const existsQuery = `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}' AND TABLE_NAME = 'blocks'`
+        const { stdout: tblOut } = await execFileAsync(
+            'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-BN', '-e', existsQuery, 'information_schema']
+        )
+        if (parseInt(tblOut.trim(), 10) === 0) return false
+
+        // Table exists — does it hold any rows?
+        const countQuery = `SELECT COUNT(*) FROM \`${dbName}\`.blocks`
+        const { stdout: cntOut } = await execFileAsync(
+            'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-BN', '-e', countQuery]
+        )
+        return parseInt(cntOut.trim(), 10) > 0
+    } catch {
+        return false
+    }
+}
+
+// On a FRESH decoder/indexer install, download the published bootstrap and
+// restore it. Best-effort, mirroring ensureBootstrapUtxoTracker: any failure
+// (none published, download/restore error) logs a warning and returns so the
+// install proceeds with a normal sync from scratch.
+async function ensureBootstrapMariaDb(coin, network, module) {
+    if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
+        console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP) — syncing from scratch')
+        return false
+    }
+    try {
+        const defaultConfig = await getDefaultConfig(module, coin, network)
+        const bootstrapDir  = module === XChainService.XCHAIN_DECODER
+            ? defaultConfig["DECODER_BOOTSTRAP_VOLUME"]
+            : defaultConfig["INDEXER_BOOTSTRAP_VOLUME"]
+
+        console.log(`Checking for a published ${module} bootstrap for ${coin}/${network}...`)
+        const fileName = await downloadBootstrap(coin, network, module, bootstrapDir)
+        if (!fileName) {
+            console.log('No bootstrap available — the service will sync from scratch')
+            return false
+        }
+        await restoreBootstrap(coin, network, module, fileName)
+        console.log('Bootstrap installed — the service will continue from the bootstrap height')
+        return true
+    } catch (err) {
+        console.log(`WARNING: bootstrap auto-restore failed (${err.message}) — the service will sync from scratch`)
+        return false
+    }
+}
+
 // ─── Exports ──────────────────────────────────────────────────────
 
 module.exports = {
@@ -603,5 +696,7 @@ module.exports = {
     restoreBootstrap,
     downloadBootstrap,
     utxoTrackerVolumeHasData,
-    ensureBootstrapUtxoTracker
+    ensureBootstrapUtxoTracker,
+    mariaDbModuleHasData,
+    ensureBootstrapMariaDb
 }
