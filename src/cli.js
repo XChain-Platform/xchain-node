@@ -83,9 +83,12 @@ async function parseCommand() {
         .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .option('--no-bootstrap', 'do not auto-download/restore a published utxo-tracker bootstrap (sync from scratch)')
-        .action(async (branch, service, chain, network, options) => {
-            if (options && options.bootstrap === false) process.env.XCHAIN_NODE_NO_BOOTSTRAP = '1'
+        .action(async (branch, service, chain, network) => {
+            // Honor the global `--no-bootstrap` flag (defined on the root program above):
+            // commander assigns a flag matching a global option to the global, so reading
+            // the install command's own opts would always see the default. Skips the
+            // auto-download/restore and syncs from scratch.
+            if (program.opts().bootstrap === false) process.env.XCHAIN_NODE_NO_BOOTSTRAP = '1'
             const resolved = resolveArgs([branch, service, chain, network], { expectBranch: true })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
             await installModules(serviceList, resolved.branch)
