@@ -86,10 +86,16 @@ async function ensureDirWritable(dirPath) {
     }
 
     // Directory exists but isn't writable (likely created by Docker as root).
-    // Use a throwaway Alpine container to create/chmod it.
+    // Use a throwaway Alpine container to create it and hand ownership to the
+    // invoking user. chmod 755 alone is not enough: the dir stays root-owned, so
+    // a non-root prod user only gets r-x (others) and still cannot write — which
+    // broke `bootstrap create` on non-root hosts. chown to our uid/gid first.
     const parent  = path.dirname(normalized)
     const dirName = path.basename(normalized)
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 0
+    const gid = typeof process.getgid === 'function' ? process.getgid() : 0
     await execFileAsync('docker', ['run', '--rm', '-v', `${parent}:/parent`, 'alpine', 'mkdir', '-p', `/parent/${dirName}`])
+    await execFileAsync('docker', ['run', '--rm', '-v', `${parent}:/parent`, 'alpine', 'chown', `${uid}:${gid}`, `/parent/${dirName}`])
     await execFileAsync('docker', ['run', '--rm', '-v', `${parent}:/parent`, 'alpine', 'chmod', '755', `/parent/${dirName}`])
 }
 
