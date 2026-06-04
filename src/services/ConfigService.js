@@ -180,6 +180,18 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues['FEE_DESTINATION'] = feeDestination
             defaultValues[feeDestEnvName]    = feeDestination
         }
+
+        // Address-deriving modules (encoder/decoder/utxo-tracker) resolve their bitcoinjs
+        // network via CryptoNetworks, which keys on the COIN-PREFIXED name (e.g.
+        // "bitcoin-regtest"). A bare network ("regtest") matches no case → getBitcoinJsNetwork
+        // returns undefined → bitcoinjs-lib falls back to MAINNET → addresses derive with
+        // mainnet version bytes (a regtest "m..."/"n..." source comes out as "1..."), which then
+        // never matches on-chain balances (e.g. an issuance fee-check reads the wrong address and
+        // fails "insufficient funds (FEE)"). Those modules need the coin-prefixed network; the
+        // indexer/node keep the bare network (protocol-change matching / bitcoind conf).
+        if (module === XChainService.XCHAIN_ENCODER || module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_UTXO_TRACKER) {
+            defaultValues["NETWORK"] = coin + "-" + network
+        }
     } else {
         defaultValues = {
             "HUB_HOST":              "0.0.0.0",
