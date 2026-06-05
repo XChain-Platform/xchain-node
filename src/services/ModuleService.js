@@ -420,6 +420,18 @@ async function uninstallModule(coin, network, module) {
             throw "There was a problem trying to kill a container"
         }
     } else {
+        // No live container found for this module (already removed, or never
+        // built). A stale row can still linger in the `modules` tracking table
+        // — e.g. the container was `docker rm`'d out of band — which silently
+        // makes a later install/update misbehave. getStatus probes every tracked
+        // container and drops the ones that are gone, so reaching here means the
+        // container truly isn't present: clean up any orphaned row.
+        const staleId = await db.getModuleContainer(module, coin, network)
+        if (staleId) {
+            await db.removeModuleContainer(module, coin, network)
+            await statusChanged()
+            console.log("Removed stale tracking row for " + module + " (" + coin + "/" + network + ")")
+        }
         return true
     }
 }

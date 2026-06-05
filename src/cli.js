@@ -351,3 +351,14 @@ Notes:
 }
 
 module.exports = { parseCommand }
+
+// Allow running this file directly (`node src/cli.js <cmd>`) as well as via the
+// bin entrypoint `src/index.js`. When cli.js is required as a module (index.js
+// does `require('./cli')`), require.main is the entrypoint — not this file — so
+// parseCommand is NOT auto-invoked here and index.js remains the single caller.
+// Running it directly otherwise silently does nothing, because program.parse()
+// lives inside parseCommand() and would never be called.
+if (require.main === module) {
+    require('dotenv').config()
+    parseCommand()
+}
