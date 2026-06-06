@@ -9,3 +9,8 @@ reports/mutation/
 data/node/
 # E2E run logs.
 data/e2e-logs/
+
+# Per-coin/network node configs hold generated RPC creds — never track (generated at install)
+config/*-mainnet
+config/*-testnet
+config/*-regtest
