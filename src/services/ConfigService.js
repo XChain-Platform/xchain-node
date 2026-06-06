@@ -164,7 +164,14 @@ async function getDefaultConfig(module, coin, network) {
             "INDEXER_DB_PASS":   "xchain" + SEP + "password",
             "HUB_HOST":          "0.0.0.0",
             "HUB_API_HOST":      getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
-            "HUB_PORT":          10000
+            "HUB_PORT":          10000,
+            // Explorer is a SHARED service (no coin/network suffix). Like the hub
+            // above, the e2e-test container needs to reach it on the docker network;
+            // omitting it left EXPLORER_URL/EXPLORER_API_PORT unset, which failed the
+            // e2e harness's checkAllEnvironmentalVariables() → broken hub-config fallback.
+            "EXPLORER_URL":      getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""),
+            "EXPLORER_API_PORT": 8080,
+            "EXPLORER_PORT":     8080
         }
 
         if (network === "regtest") {
