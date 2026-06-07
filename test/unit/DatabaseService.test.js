@@ -197,6 +197,76 @@ describe('DatabaseService', function () {
             // Should call execFileAsync for docker pull, tag, and run
             expect(stubs.execFileAsync.called).to.be.true
         })
+
+        // Locate the `docker run -d ...` argv array among the execFileAsync calls.
+        function findDockerRunArgs(execFileAsync) {
+            const call = execFileAsync.getCalls().find(c =>
+                c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1][0] === 'run')
+            return call ? call.args[1] : null
+        }
+
+        it('appends MariaDB tuning args to docker run when env vars are set', async function () {
+            const saved = {
+                XCHAIN_NODE_DB_BUFFER_POOL_SIZE:        process.env.XCHAIN_NODE_DB_BUFFER_POOL_SIZE,
+                XCHAIN_NODE_DB_MAX_CONNECTIONS:         process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS,
+                XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT: process.env.XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT
+            }
+            process.env.XCHAIN_NODE_DB_BUFFER_POOL_SIZE        = '16G'
+            process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS         = '300'
+            process.env.XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT = '2'
+            try {
+                const stubs = makeStubs()
+                stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+                stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                const ds = loadDatabaseService(stubs)
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+
+                const runArgs = findDockerRunArgs(stubs.execFileAsync)
+                expect(runArgs, 'docker run call not found').to.not.be.null
+                // mysqld args must come AFTER the image name, else Docker reads
+                // them as `docker run` options instead of the container command.
+                const imageIdx = runArgs.indexOf('xchain-node-database')
+                const poolIdx  = runArgs.indexOf('--innodb-buffer-pool-size=16G')
+                expect(imageIdx).to.be.greaterThan(-1)
+                expect(poolIdx).to.be.greaterThan(imageIdx)
+                expect(runArgs).to.include('--max-connections=300')
+                expect(runArgs).to.include('--innodb-flush-log-at-trx-commit=2')
+            } finally {
+                for (const [k, v] of Object.entries(saved)) {
+                    if (v === undefined) delete process.env[k]
+                    else process.env[k] = v
+                }
+            }
+        })
+
+        it('omits MariaDB tuning args when env vars are unset', async function () {
+            const saved = {
+                XCHAIN_NODE_DB_BUFFER_POOL_SIZE:        process.env.XCHAIN_NODE_DB_BUFFER_POOL_SIZE,
+                XCHAIN_NODE_DB_MAX_CONNECTIONS:         process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS,
+                XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT: process.env.XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT
+            }
+            delete process.env.XCHAIN_NODE_DB_BUFFER_POOL_SIZE
+            delete process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS
+            delete process.env.XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT
+            try {
+                const stubs = makeStubs()
+                stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+                stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                const ds = loadDatabaseService(stubs)
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+
+                const runArgs = findDockerRunArgs(stubs.execFileAsync)
+                expect(runArgs, 'docker run call not found').to.not.be.null
+                expect(runArgs.some(a => a.startsWith('--innodb-buffer-pool-size'))).to.be.false
+                expect(runArgs.some(a => a.startsWith('--max-connections'))).to.be.false
+                expect(runArgs.some(a => a.startsWith('--innodb-flush-log-at-trx-commit'))).to.be.false
+            } finally {
+                for (const [k, v] of Object.entries(saved)) {
+                    if (v === undefined) delete process.env[k]
+                    else process.env[k] = v
+                }
+            }
+        })
     })
 
     // -------------------------------------------------------------------

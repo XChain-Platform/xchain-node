@@ -544,6 +544,27 @@ async function buildDatabaseModule(coin, network) {
         }
         runArgs.push('--env', `MYSQL_ROOT_PASSWORD=${mariadbRootPassword}`, containerPrefix)
 
+        // Optional MariaDB server tuning. These land as mysqld CLI args — the
+        // mariadb image forwards any leading-dash args placed after the image
+        // straight to mysqld — so they persist across a container *recreate*,
+        // unlike a conf.d file written into a running container (its /etc isn't
+        // a mounted volume, so a recreate drops it). Each is unset by default,
+        // leaving image defaults unchanged. Size them to the host: a busy
+        // multi-replica box (e.g. origin-host serving xchain-sync replicas across
+        // 18 DBs) wants a large buffer pool + a higher connection ceiling and
+        // can relax durable-log flushing; a laptop or single-chain node should
+        // leave them off. Args go after `containerPrefix` so Docker treats them
+        // as the container command, not as `docker run` options.
+        const dbTuningArgs = {
+            XCHAIN_NODE_DB_BUFFER_POOL_SIZE:        'innodb-buffer-pool-size',        // e.g. 16G
+            XCHAIN_NODE_DB_MAX_CONNECTIONS:         'max-connections',               // e.g. 300
+            XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT: 'innodb-flush-log-at-trx-commit' // e.g. 2 (faster, less durable)
+        }
+        for (const [envVar, mysqldFlag] of Object.entries(dbTuningArgs)) {
+            const value = process.env[envVar]
+            if (value) runArgs.push(`--${mysqldFlag}=${value}`)
+        }
+
         console.log("Creating container of module " + DB_MODULE_NAME)
         const { stdout } = await execFileAsync('docker', runArgs)
         const containerId = stdout.trim()

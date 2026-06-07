@@ -110,6 +110,17 @@ Five env vars override where xchain-node stores its filesystem state. Set them i
 
 On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md).
 
+### Bundled MariaDB tuning
+
+When xchain-node manages its own MariaDB container, these optional env vars override server defaults. They are applied as `mysqld` startup args at install time, so they **persist across a container recreate** (a `conf.d` file edited inside a running container does not). Each is unset by default — image defaults unchanged. Set them before `xchain-node install`.
+
+| Variable | mysqld setting | When to set |
+|---|---|---|
+| `XCHAIN_NODE_DB_DATA_DIR` | datadir bind-mount (`-v <dir>:/var/lib/mysql`) | Pin the datadir to a fast NVMe mount instead of the Docker data-root |
+| `XCHAIN_NODE_DB_BUFFER_POOL_SIZE` | `innodb-buffer-pool-size` (e.g. `16G`) | Large/multi-DB hosts — the stock 128 MB thrashes on multi-GB datasets |
+| `XCHAIN_NODE_DB_MAX_CONNECTIONS` | `max-connections` (e.g. `300`) | Many connection pools against one DB (replicas, shared services) |
+| `XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT` | `innodb-flush-log-at-trx-commit` (e.g. `2`) | Replica/cache DBs where a 1-second crash window is acceptable for speed |
+
 ## Telemetry
 
 `xchain-node` sends an anonymous usage ping (xchain-node + service versions, which services are running, basic OS/Docker info). Your **IP address is never sent or stored** — the receiver derives only a coarse country/region and an anonymous one-way network hash from the connection, then discards the IP. It contains **no** secrets, wallet data, addresses, or config. It is **on by default**, sent only on install/update and at most once per day otherwise, and never blocks a command.
