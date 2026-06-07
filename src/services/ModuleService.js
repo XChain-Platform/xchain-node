@@ -22,7 +22,7 @@ const fs        = require('fs')
 
 const path = require('path')
 const {
-    NODE_MODULE_NAME, DB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
+    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     XChainService, SEP, modulesUrls, LIBRARY_BUNDLES
 } = require('../config/constants')
 const { db }                = require('../state')
@@ -288,6 +288,25 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     })
 }
 
+// Singleton modules share one coin/network-independent container name (see
+// getDockerContainerImageNamePrefix). DB and EXPLORER have dedicated install
+// branches that are already idempotent; HUB and SYNC fall through to the
+// generic branch whose "already built?" check is keyed per coin/network — which
+// can't see the one shared container, so installing across multiple networks
+// would re-run `docker run` with a duplicate name and crash.
+const SINGLETON_MODULES = [HUB_MODULE_NAME, SYNC_MODULE_NAME]
+
+// True if a container with this exact name already exists (running or stopped).
+// Mirrors getDatabaseContainerId's inspect-by-name probe.
+async function containerExistsByName(name) {
+    try {
+        const { stdout } = await execFileAsync('docker', ['inspect', '--type', 'container', '--format', '{{.Id}}', name])
+        return /^[a-f0-9]{64}$/.test(stdout.trim())
+    } catch {
+        return false
+    }
+}
+
 async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null, dockerCmdArgs = null) {
     if (coin === "") coin = null
     if (network === "") network = null
@@ -348,6 +367,17 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
             throw err
         }
     } else {
+        // For a singleton module the container name is the same for every
+        // coin/network, so once it exists this call is a redundant pass for
+        // another network in the same install run — skip it (an explicit
+        // `update`, remoteUpdate=true, still rebuilds). Without this guard the
+        // second network's `docker run` collides on the existing name.
+        if (SINGLETON_MODULES.includes(module) && !remoteUpdate) {
+            if (await containerExistsByName(getDockerContainerImageName(module, coin, network))) {
+                return false
+            }
+        }
+
         const lastStatus = getLastStatus()
         const containerNodeVersion = lastStatus?.[coin ?? ""]?.[network ?? ""]?.[module]?.["container_version"] ?? null
 

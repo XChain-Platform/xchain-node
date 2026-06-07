@@ -105,6 +105,20 @@ function loadModuleService(stubs) {
         },
         './DatabaseService': {
             setDatabaseParameters: sinon.stub().resolves()
+        },
+        // installModule lazily requires these; stub so they load under test
+        // (the real VersionService pulls in state.js, which needs a live DB).
+        './VersionService': {
+            getLocalNodeVersion: sinon.stub().resolves(null),
+            getLocalModuleVersion: sinon.stub().resolves(null),
+            checkRemoteNodeVersion: sinon.stub().resolves()
+        },
+        './NodeService': {
+            buildCryptoNode: sinon.stub().resolves(true),
+            getCryptoNode: sinon.stub().resolves()
+        },
+        './ExplorerService': {
+            installExplorerModule: sinon.stub().resolves(true)
         }
     })
 }
@@ -425,6 +439,34 @@ describe('ModuleService', function () {
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', 'old-id-123')
             expect(stubs.killContainer.calledWith('old-id-123')).to.be.true
             expect(stubs.removeContainer.calledWith('old-id-123')).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // installModule — singleton guard
+    // -------------------------------------------------------------------
+
+    describe('installModule() singleton guard', function () {
+
+        it('skips re-creating a singleton module whose container already exists', async function () {
+            // Regression: a singleton (hub/sync) has one coin/network-independent
+            // container name, so installing it across multiple networks used to
+            // re-run `docker run` with a duplicate name and crash. The guard must
+            // detect the existing named container and return without rebuilding.
+            const stubs = makeStubs()
+            const VALID_ID = 'b'.repeat(64)
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                // `docker inspect <name>` → report the singleton already exists
+                if (cmd === 'docker' && args[0] === 'inspect') return cb(null, { stdout: VALID_ID + '\n' })
+                cb(null, { stdout: '' })
+            })
+            const ms = loadModuleService(stubs)
+            const result = await ms.installModule('xchain-hub', null, null)
+            expect(result).to.be.false
+            // Must short-circuit before the build path — no git clone attempted.
+            const clonedViaGit = stubs.execFile.getCalls().some(c => c.args[0] === 'git')
+            expect(clonedViaGit).to.be.false
         })
     })
 
