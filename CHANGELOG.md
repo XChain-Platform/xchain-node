@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `.env.example` — added a configuration template listing the environment variables `xchain-node` reads (directory overrides, managed and external MariaDB settings, telemetry opt-out), with safe defaults and inline comments.
 
+### Security
+- `src/services/ConfigService.js`, `.gitignore` — runtime RPC credentials (`NODE_USER`/`NODE_PASSWORD`, i.e. rpcuser/rpcpassword) are now stored in a separate, untracked `config/<coin>-<network>.local` sidecar instead of being written into the main `config/<coin>-<network>` file. Previously the generated credentials shared a file with non-secret operator overrides (`DUST_AMOUNT`, `NODE_EXPOSED_PORT`, etc.), so an operator who wanted to keep or share their template overrides had to first strip the credentials by hand — a recurring foot-gun that raised the chance of an accidental credential exposure over time. `getDefaultConfig()` now reads the sidecar (which takes precedence on key conflicts), and on first read of a legacy install it migrates any credentials still present in the main file into the sidecar and strips them from the main file, so existing installs keep working with no operator action. The new `config/*-*.local` glob is git-ignored alongside the existing per-network config ignores.
+
 ## [0.0.22] - 2026-05-30
 
 ### Fixed

@@ -125,6 +125,20 @@ function validatePort(value) {
 
 // --- Default config ---
 
+// Persist RPC credentials to the untracked <coin>-<network>.local sidecar. A fresh sidecar
+// is created with writeFileSync; an existing one is appended to, unless overwrite is set
+// (used by the legacy-migration path to replace it outright).
+function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
+    const body = Object.keys(creds).map(k => `${k}=${creds[k]}`).join("\n") + "\n"
+    if (overwrite || !fs.existsSync(localFilePath)) {
+        const dir = path.dirname(localFilePath)
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+        fs.writeFileSync(localFilePath, body)
+    } else {
+        fs.appendFileSync(localFilePath, body)
+    }
+}
+
 async function getDefaultConfig(module, coin, network) {
     let defaultValues = null
 
@@ -260,46 +274,71 @@ async function getDefaultConfig(module, coin, network) {
         Object.assign(defaultValues, getValidatorEnv())
     }
 
-    // Read the config file for this coin/network pair
+    // Read the config file for this coin/network pair. Non-secret operator overrides live
+    // in the main config file; runtime RPC credentials live in a separate, untracked
+    // <coin>-<network>.local sidecar so the main file can be diffed/shared without ever
+    // carrying rpcuser/rpcpassword.
     const defaultConfig = {}
     if (coin && network && coin !== "" && network !== "") {
         const configFilePath = path.resolve(configDir, `${coin}-${network}`)
         if (!configFilePath.startsWith(path.resolve(configDir) + path.sep) && configFilePath !== path.resolve(configDir)) {
             throw new Error('Config path traversal detected')
         }
+        const localFilePath = configFilePath + ".local"
+
+        // Track whether the main file still carries credentials so legacy installs can be migrated.
+        let mainFileHasCreds = false
+
         if (!fs.existsSync(configFilePath)) {
             console.warn("Warning: config file not found: " + configFilePath + " — using defaults")
-            const nodeUser     = crypto.randomBytes(12).toString('hex')
-            const nodePassword = crypto.randomBytes(24).toString('hex')
-            defaultValues['NODE_USER']     = nodeUser
-            defaultValues['NODE_PASSWORD'] = nodePassword
-            const credDir = path.dirname(configFilePath)
-            if (!fs.existsSync(credDir)) fs.mkdirSync(credDir, { recursive: true })
-            fs.writeFileSync(configFilePath, `NODE_USER=${nodeUser}\nNODE_PASSWORD=${nodePassword}\n`)
-            for (const key in defaultValues) {
-                if (!(key in defaultConfig)) {
-                    defaultConfig[key] = defaultValues[key]
+        } else {
+            const configFileStream = fs.createReadStream(configFilePath)
+            const rl = readline.createInterface({ input: configFileStream, crlfDelay: Infinity })
+            for await (const line of rl) {
+                const eqIndex = line.indexOf("=")
+                if (eqIndex > 0) {
+                    const key = line.substring(0, eqIndex)
+                    defaultConfig[key] = line.substring(eqIndex + 1)
+                    if (key === "NODE_USER" || key === "NODE_PASSWORD") mainFileHasCreds = true
                 }
             }
-            return defaultConfig
         }
-        const configFileStream = fs.createReadStream(configFilePath)
-        const rl = readline.createInterface({ input: configFileStream, crlfDelay: Infinity })
 
-        for await (const line of rl) {
-            const eqIndex = line.indexOf("=")
-            if (eqIndex > 0) {
-                defaultConfig[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
+        // Credentials from the sidecar take precedence over anything in the main file.
+        if (fs.existsSync(localFilePath)) {
+            const localStream = fs.createReadStream(localFilePath)
+            const rlLocal = readline.createInterface({ input: localStream, crlfDelay: Infinity })
+            for await (const line of rlLocal) {
+                const eqIndex = line.indexOf("=")
+                if (eqIndex > 0) {
+                    defaultConfig[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
+                }
             }
         }
 
-        // Generate and persist RPC credentials on first provision if absent from the config file
-        if (!('NODE_USER' in defaultConfig) && !('NODE_PASSWORD' in defaultConfig)) {
+        // One-time migration for legacy installs: older versions appended NODE_USER /
+        // NODE_PASSWORD into the main config file alongside non-secret settings. Move the
+        // credentials into the sidecar and strip them from the main file so the two never
+        // share a file again. Existing creds keep working — they are simply relocated.
+        if (mainFileHasCreds) {
+            const creds = {}
+            if ("NODE_USER" in defaultConfig)     creds["NODE_USER"]     = defaultConfig["NODE_USER"]
+            if ("NODE_PASSWORD" in defaultConfig) creds["NODE_PASSWORD"] = defaultConfig["NODE_PASSWORD"]
+            persistSidecarCreds(localFilePath, creds, { overwrite: true })
+            const remaining = []
+            for (const key in defaultConfig) {
+                if (key !== "NODE_USER" && key !== "NODE_PASSWORD") remaining.push(`${key}=${defaultConfig[key]}`)
+            }
+            fs.writeFileSync(configFilePath, remaining.length ? remaining.join("\n") + "\n" : "")
+        }
+
+        // Generate and persist RPC credentials to the sidecar on first provision if absent everywhere.
+        if (!("NODE_USER" in defaultConfig) && !("NODE_PASSWORD" in defaultConfig)) {
             const nodeUser     = crypto.randomBytes(12).toString('hex')
             const nodePassword = crypto.randomBytes(24).toString('hex')
-            defaultValues['NODE_USER']     = nodeUser
-            defaultValues['NODE_PASSWORD'] = nodePassword
-            fs.appendFileSync(configFilePath, `NODE_USER=${nodeUser}\nNODE_PASSWORD=${nodePassword}\n`)
+            defaultConfig["NODE_USER"]     = nodeUser
+            defaultConfig["NODE_PASSWORD"] = nodePassword
+            persistSidecarCreds(localFilePath, { NODE_USER: nodeUser, NODE_PASSWORD: nodePassword })
         }
     }
 

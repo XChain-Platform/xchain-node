@@ -120,7 +120,8 @@ describe('Boundary Tests', function () {
             it('preserves full value when it contains "="', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('NODE_PASSWORD=p@ss=word=123\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('NODE_PASSWORD=p@ss=word=123\n')),
+                    writeFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
                 }
@@ -132,7 +133,7 @@ describe('Boundary Tests', function () {
             it('handles base64-encoded values with trailing "="', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('AUTH_TOKEN=dGVzdA==\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('AUTH_TOKEN=dGVzdA==\n')),
                     appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
@@ -145,7 +146,7 @@ describe('Boundary Tests', function () {
             it('handles value that is just "="', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('SEPARATOR==\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('SEPARATOR==\n')),
                     appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
@@ -161,7 +162,7 @@ describe('Boundary Tests', function () {
             it('handles empty value after "="', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('EMPTY_VAR=\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('EMPTY_VAR=\n')),
                     appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
@@ -174,7 +175,7 @@ describe('Boundary Tests', function () {
             it('skips blank lines', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('\n\nKEY=value\n\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('\n\nKEY=value\n\n')),
                     appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
@@ -187,7 +188,7 @@ describe('Boundary Tests', function () {
             it('skips lines without "="', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('no-equals-here\nKEY=value\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('no-equals-here\nKEY=value\n')),
                     appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
@@ -201,7 +202,7 @@ describe('Boundary Tests', function () {
             it('skips lines that start with "=" (no key)', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('=nokey\nKEY=value\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('=nokey\nKEY=value\n')),
                     appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
@@ -256,7 +257,7 @@ describe('Boundary Tests', function () {
             it('config file values override hardcoded defaults', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('NODE_PORT=9999\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('NODE_PORT=9999\n')),
                     appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()
@@ -269,7 +270,7 @@ describe('Boundary Tests', function () {
             it('hardcoded defaults fill in for keys not in config file', async function () {
                 const fsStub = {
                     existsSync: sinon.stub().returns(true),
-                    createReadStream: sinon.stub().returns(streamFromString('CUSTOM_KEY=custom\n')),
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('CUSTOM_KEY=custom\n')),
                     appendFileSync: sinon.stub(),
                     rmSync: sinon.stub(),
                     mkdirSync: sinon.stub()

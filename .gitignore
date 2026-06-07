@@ -10,7 +10,11 @@ data/node/
 # E2E run logs.
 data/e2e-logs/
 
-# Per-coin/network node configs hold generated RPC creds — never track (generated at install)
+# Per-coin/network node configs — never track (generated at install). The main files hold
+# only non-secret operator overrides now, but stay ignored to protect any leftover files
+# from older installs that haven't migrated yet.
 config/*-mainnet
 config/*-testnet
 config/*-regtest
+# Runtime RPC credentials live in untracked .local sidecars (rpcuser/rpcpassword).
+config/*-*.local

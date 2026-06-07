@@ -47,7 +47,7 @@ function makeConfigService(fsStub) {
 
 function makeServiceWithConfig(configContent) {
     const fsStub = {
-        createReadStream: sinon.stub().returns(streamFromString(configContent)),
+        createReadStream: sinon.stub().callsFake(() => streamFromString(configContent)),
         existsSync: sinon.stub().returns(true),
         appendFileSync: sinon.stub(),
         writeFileSync: sinon.stub(),
