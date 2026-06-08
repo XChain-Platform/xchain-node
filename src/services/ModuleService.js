@@ -244,8 +244,13 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                     } catch { /* container may have been removed manually */ }
                 }
 
+                // One-shot execution containers (e.g. the e2e-test runner) must NOT get a
+                // restart policy: after their command exits, `unless-stopped` would restart
+                // them, re-running the suite and leaving the container "restarting" so the
+                // subsequent `docker rm` fails. Persistent service containers keep the policy.
+                const restartArgs = onlyExecution ? [] : ['--restart', 'unless-stopped']
                 const runArgs = [
-                    'run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', containerPrefix,
+                    'run', '-d', ...restartArgs, '--name', containerPrefix, '--hostname', containerPrefix,
                     ...volumeArgs,
                     ...ulimitArgs,
                     '--network', getDockerNetwork(coin, network),

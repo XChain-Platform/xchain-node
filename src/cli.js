@@ -270,8 +270,9 @@ async function parseCommand() {
         .argument('<chain>', '(bitcoin, litecoin, dogecoin)')
         .argument('[testName]', 'optional test file name (e.g. "order", "issue") — runs only that suite')
         .option('--grep <pattern>', 'only run tests matching this pattern (passed to mocha --grep)')
+        .option('--script <npmScript>', 'run a specific e2e npm script (e.g. test:security) instead of the default suite')
         .action(async (chain, testName, options) => {
-            const { logFile, exitCode } = await runE2ETest(chain, 'regtest', testName, options.grep)
+            const { logFile, exitCode } = await runE2ETest(chain, 'regtest', testName, options.grep, options.script)
             console.log("E2E tests finished with exit code " + exitCode)
             console.log("Logs saved to: " + logFile)
             // Propagate the suite's real exit code so CI (and run-multichain-e2e.sh)

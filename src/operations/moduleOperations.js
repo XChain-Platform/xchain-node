@@ -223,9 +223,14 @@ async function shellModule(servicesList) {
     return true
 }
 
-async function runE2ETest(coin, network, testName = null, grep = null) {
+async function runE2ETest(coin, network, testName = null, grep = null, script = null) {
     let dockerCmdArgs = null
-    if (testName) {
+    if (script) {
+        // Run an arbitrary e2e npm script (e.g. test:security, test:perf:budget) so CI
+        // can drive the stack-dependent suites beyond the default action suite. Takes
+        // precedence over testName; the e2e-test image carries these scripts.
+        dockerCmdArgs = ['npm', 'run', script]
+    } else if (testName) {
         dockerCmdArgs = ['npx', 'mocha', '--timeout', '0', '--exit',
             '--require', './test/initialCheck.test.js',
             `test/actions/${testName}.test.js`]

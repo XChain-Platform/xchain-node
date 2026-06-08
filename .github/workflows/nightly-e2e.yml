@@ -2,11 +2,14 @@ name: Nightly E2E (regtest)
 
 # Cross-component integration gate. Boots the FULL XChain stack on regtest via
 # xchain-node — which clones every service repo at its master HEAD and runs them
-# as Docker containers — then runs the live xchain-e2e-test action suite against
-# it (real transactions, real indexing, reorg convergence). This is the only gate
-# that exercises consensus / money movement end-to-end; the per-repo CI jobs are
-# single-process unit tests. Scheduled nightly (not per-push) because a full
-# bring-up is heavy (clones + image builds + a coin daemon).
+# as Docker containers — then runs the live xchain-e2e-test suites against it
+# (real transactions, real indexing, reorg convergence): the default ACTION suite,
+# the SECURITY suite (test/security), and the PERFORMANCE suite (test/perf), each
+# driven via `e2etest --script`. This is the only gate that exercises consensus /
+# money movement end-to-end; the per-repo CI jobs are single-process unit tests.
+# On-demand (workflow_dispatch) — a full bring-up is heavy (clones + image builds
+# + a coin daemon), so it is NOT per-push; the nightly schedule is deferred (see
+# the `on:` block) until the repos are public.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # STATUS: VALIDATED THROUGH STACK CLONE-PREP (manual workflow_dispatch, bitcoin,
@@ -15,14 +18,22 @@ name: Nightly E2E (regtest)
 # reaches the external DB (creates its DB on 172.17.0.1:3306) — so that env path
 # is proven. BLOCKER: the sub-repos are PRIVATE, so cloning them on a hosted
 # runner needs a SUBREPO_CLONE_TOKEN secret (see the rewrite step) OR the repos
-# to be made public. Until one of those, the boot step fails at the first clone.
-# Still to confirm once it boots: service→DB container networking, then add
-# litecoin / dogecoin (run-multichain-e2e.sh covers all three).
+# to be made public — until one of those, the boot step fails at the first clone,
+# so on GitHub this runs only with a token; locally (dev box with the stack up)
+# the same `e2etest --script test:security|test:perf:budget` commands work today
+# and are verified (13 + 8 passing). A dedicated self-hosted runner was considered
+# and dropped as premature — once the repos are public this hosted job runs for
+# free with no box. Still to confirm once it boots on a hosted runner: service→DB
+# container networking, then add litecoin / dogecoin (run-multichain-e2e.sh).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  schedule:
-    - cron: '0 7 * * *'        # 07:00 UTC nightly
+  # Manual / on-demand gate. The nightly schedule is intentionally DISABLED while the
+  # sub-repos are PRIVATE — a scheduled run would fail at the first private clone and
+  # spam nightly failures. Re-enable it once the repos are public per the launch plan
+  # (anonymous HTTPS clones just work then, and no SUBREPO_CLONE_TOKEN is needed):
+  #   schedule:
+  #     - cron: '0 7 * * *'    # 07:00 UTC nightly
   workflow_dispatch:
     inputs:
       coin:
@@ -128,6 +139,15 @@ jobs:
         # Now exits non-zero on failure (cli.js e2etest propagates the suite's
         # exit code), so this step natively gates the job.
         run: node src/index.js e2etest "$COIN"
+
+      - name: Run the e2e Security suite (test/security)
+        # Stack-dependent on-chain security suite (VM sandbox-escape / gas-bomb /
+        # deploy-reject). Driven via the e2etest --script option.
+        run: node src/index.js e2etest "$COIN" --script test:security
+
+      - name: Run the e2e Performance suite (test/perf)
+        # Live-stack per-service latency budgets (regression ceilings).
+        run: node src/index.js e2etest "$COIN" --script test:perf:budget
 
       - name: Upload e2e logs
         if: always()
