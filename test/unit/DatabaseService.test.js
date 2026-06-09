@@ -20,16 +20,30 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const VALID_CONTAINER_ID = 'a'.repeat(64)
 
-function makeStubs() {
+function makeStubs(overrides = {}) {
     // execFileAsync is what the source uses (via promisify(execFile)) for all
     // docker inspect / docker port / docker pull / docker run calls.
     // Default: return a valid 64-char hex container ID (simulates a running DB
     // container found via `docker inspect`).
     const execFileAsync = sinon.stub().resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+
+    // Fake mariadb connection used in executeNativeMariaDbCommand / _pingMariaDb
+    const fakeConn = {
+        query: sinon.stub().resolves([]),
+        end: sinon.stub().resolves()
+    }
+    const mariadbStub = {
+        createConnection: sinon.stub().resolves(fakeConn),
+        _fakeConn: fakeConn
+    }
+
     return {
         execFile: sinon.stub(),
         execFileAsync,
+        mariadb: mariadbStub,
         db: {
+            isReady: sinon.stub().returns(true),
+            createDatabase: sinon.stub().resolves(),
             getModuleContainer: sinon.stub().resolves('db-container-id'),
             insertModuleContainer: sinon.stub().resolves(true)
         },
@@ -40,32 +54,65 @@ function makeStubs() {
         addContainerToNetwork: sinon.stub().resolves(true),
         getDockerNetworkInspect: sinon.stub().resolves({
             IPAM: { Config: [{ Gateway: '172.18.0.1' }] }
-        })
+        }),
+        hasCredentials: sinon.stub().returns(false),
+        loadCredentials: sinon.stub().returns(null),
+        saveCredentials: sinon.stub(),
+        hasExternalDbConfig: sinon.stub().returns(false),
+        loadExternalDbConfig: sinon.stub().returns(null),
+        saveExternalDbConfig: sinon.stub(),
+        getOsUserDbName: sinon.stub().returns('xchain_node_testuser'),
+        generatePassword: sinon.stub().returns('test-generated-pass'),
+        ...overrides
     }
 }
 
-function loadDatabaseService(stubs) {
+function loadDatabaseService(stubs, constants = {}) {
+    const defaultConstants = {
+        DB_MODULE_NAME: 'database',
+        HUB_MODULE_NAME: 'xchain-hub',
+        XChainService: {
+            XCHAIN_DECODER: 'xchain-decoder',
+            XCHAIN_INDEXER: 'xchain-indexer'
+        },
+        SEP: '-',
+        EXTERNAL_DB: false,
+        EXTERNAL_DB_HOST: '127.0.0.1',
+        EXTERNAL_DB_PORT: 3306,
+        EXTERNAL_DB_ROOT_USER: 'root',
+        ...constants
+    }
+
     return proxyquire('../../src/services/DatabaseService', {
         'child_process': { execFile: stubs.execFile },
         'util': { promisify: () => stubs.execFileAsync },
-        'mariadb': {},
-        'enquirer': { Password: class { run() { return Promise.resolve('rootpass') } } },
+        'mariadb': stubs.mariadb,
+        'enquirer': {
+            Password: class { run() { return Promise.resolve('rootpass') } },
+            Input: class { run() { return Promise.resolve('127.0.0.1') } },
+            NumberPrompt: class { run() { return Promise.resolve(3306) } }
+        },
         '../state': {
             db: stubs.db,
             getDbRootPassword: stubs.getDbRootPassword,
             setDbRootPassword: stubs.setDbRootPassword
         },
         '../utils/helpers': { sleep: sinon.stub().resolves() },
+        '../config/constants': defaultConstants,
         './ConfigService': {
             getDefaultConfig: sinon.stub().resolves({
                 'DB_PORT': 3306,
                 'HUB_PORT': 10000,
                 'DECODER_DB_NAME': 'XChain_BTC_Mainnet_Decoder',
                 'DECODER_DB_USER': 'xchain_decoder_bitcoin_mainnet',
-                'DECODER_DB_PASS': 'xchain-password'
+                'DECODER_DB_PASS': 'test-pass',
+                'INDEXER_DB_NAME': 'XChain_BTC_Mainnet_Indexer',
+                'INDEXER_DB_USER': 'xchain_indexer_bitcoin_mainnet',
+                'INDEXER_DB_PASS': 'test-pass'
             }),
             getDockerContainerImageName: (mod) => 'xchain-node-' + mod,
-            getDockerNetwork: (coin, net) => 'xchain-node' + (coin ? '-' + coin : '') + (net ? '-' + net : '')
+            getDockerNetwork: (coin, net) => 'xchain-node' + (coin ? '-' + coin : '') + (net ? '-' + net : ''),
+            getModuleDatabaseName: (mod, coin, net) => 'XChain_BTC_Mainnet_Decoder'
         },
         './DockerService': {
             getStatusFromContainer: stubs.getStatusFromContainer,
@@ -75,6 +122,17 @@ function loadDatabaseService(stubs) {
         './StatusService': {
             statusChanged: stubs.statusChanged,
             getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['mainnet'] })
+        },
+        './CredentialsService': {
+            XCHAIN_NODE_DB: 'xchain_node',
+            getOsUserDbName: stubs.getOsUserDbName,
+            generatePassword: stubs.generatePassword,
+            hasCredentials: stubs.hasCredentials,
+            loadCredentials: stubs.loadCredentials,
+            saveCredentials: stubs.saveCredentials,
+            hasExternalDbConfig: stubs.hasExternalDbConfig,
+            loadExternalDbConfig: stubs.loadExternalDbConfig,
+            saveExternalDbConfig: stubs.saveExternalDbConfig
         }
     })
 }
@@ -109,6 +167,15 @@ describe('DatabaseService', function () {
             // Source uses getDatabaseContainerId() → execFileAsync('docker inspect ...).
             // Simulate container not found by rejecting the async exec.
             stubs.execFileAsync.rejects(new Error('not found'))
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.checkIfDatabaseModuleExists('bitcoin', 'mainnet')
+            expect(result).to.be.null
+        })
+
+        it('returns null when getStatusFromContainer throws', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            stubs.getStatusFromContainer.rejects(new Error('docker inspect status error'))
             const ds = loadDatabaseService(stubs)
             const result = await ds.checkIfDatabaseModuleExists('bitcoin', 'mainnet')
             expect(result).to.be.null
@@ -289,6 +356,951 @@ describe('DatabaseService', function () {
             const ds = loadDatabaseService(stubs)
             const result = await ds.checkIfDatabaseIsReady('root', 'badpass')
             expect(result).to.be.false
+        })
+
+        it('passes -D database arg when database is specified', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.resolves({ stdout: 'OK' })
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.checkIfDatabaseIsReady('root', 'rootpass', 'xchain_node')
+            expect(result).to.be.true
+            const dockerCall = stubs.execFileAsync.getCalls().find(c =>
+                c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1].includes('mariadb'))
+            expect(dockerCall.args[1]).to.include('-D')
+            expect(dockerCall.args[1]).to.include('xchain_node')
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // getDatabaseHostPort
+    // -------------------------------------------------------------------
+
+    describe('getDatabaseHostPort()', function () {
+
+        it('parses port from docker port output', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.resolves({ stdout: '0.0.0.0:13306\n' })
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getDatabaseHostPort()
+            expect(result).to.equal(13306)
+        })
+
+        it('returns default port when docker port fails', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.rejects(new Error('no such container'))
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getDatabaseHostPort()
+            expect(result).to.equal(13306) // XCHAIN_NODE_DB_DEFAULT_PORT
+        })
+
+        it('returns default port when output has no port match', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.resolves({ stdout: 'no port info\n' })
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getDatabaseHostPort()
+            expect(result).to.equal(13306)
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // getDatabaseContainerId
+    // -------------------------------------------------------------------
+
+    describe('getDatabaseContainerId()', function () {
+
+        it('returns container ID when inspect returns valid 64-char hex', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getDatabaseContainerId()
+            expect(result).to.equal(VALID_CONTAINER_ID)
+        })
+
+        it('returns null when inspect returns non-hex output', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.resolves({ stdout: 'not-a-container-id\n' })
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getDatabaseContainerId()
+            expect(result).to.be.null
+        })
+
+        it('returns null when inspect command throws', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.rejects(new Error('container not found'))
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getDatabaseContainerId()
+            expect(result).to.be.null
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // getExternalDbConfig
+    // -------------------------------------------------------------------
+
+    describe('getExternalDbConfig()', function () {
+
+        let savedEnv = {}
+        const ENV_KEYS = [
+            'XCHAIN_NODE_EXTERNAL_DB_HOST',
+            'XCHAIN_NODE_EXTERNAL_DB_PORT',
+            'XCHAIN_NODE_EXTERNAL_DB_ROOT_USER',
+            'XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD'
+        ]
+
+        beforeEach(function () {
+            for (const k of ENV_KEYS) {
+                savedEnv[k] = process.env[k]
+                delete process.env[k]
+            }
+        })
+
+        afterEach(function () {
+            for (const k of ENV_KEYS) {
+                if (savedEnv[k] === undefined) delete process.env[k]
+                else process.env[k] = savedEnv[k]
+            }
+        })
+
+        it('returns config from env vars when all four are set', async function () {
+            process.env.XCHAIN_NODE_EXTERNAL_DB_HOST          = 'db.example.com'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_PORT          = '3307'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER     = 'admin'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD = 'test-pass'
+
+            const stubs = makeStubs()
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getExternalDbConfig()
+
+            expect(result.host).to.equal('db.example.com')
+            expect(result.port).to.equal(3307)
+            expect(result.root_user).to.equal('admin')
+            expect(result.root_password).to.equal('test-pass')
+        })
+
+        it('returns saved config from credentials when ping succeeds', async function () {
+            const savedCfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' }
+            const stubs = makeStubs({
+                hasExternalDbConfig: sinon.stub().returns(true),
+                loadExternalDbConfig: sinon.stub().returns(savedCfg)
+            })
+            // mariadb ping should succeed
+            stubs.mariadb._fakeConn.query.resolves([])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getExternalDbConfig()
+            expect(result).to.deep.equal(savedCfg)
+        })
+
+        it('re-prompts interactively when saved config ping fails', async function () {
+            const savedCfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'old-pass' }
+            const stubs = makeStubs({
+                hasExternalDbConfig: sinon.stub().returns(true),
+                loadExternalDbConfig: sinon.stub().returns(savedCfg)
+            })
+            // First ping (saved config) fails; second ping (from prompt) succeeds
+            stubs.mariadb.createConnection
+                .onFirstCall().rejects(new Error('auth failed'))
+                .resolves(stubs.mariadb._fakeConn)
+
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.getExternalDbConfig()
+            // Should have called saveExternalDbConfig after successful prompt
+            expect(stubs.saveExternalDbConfig.calledOnce).to.be.true
+            expect(result).to.be.an('object')
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // executeNativeMariaDbCommand
+    // -------------------------------------------------------------------
+
+    describe('executeNativeMariaDbCommand()', function () {
+
+        const extCfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' }
+
+        it('returns empty string for DDL (non-array result)', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves({ affectedRows: 1 }) // non-array = DDL
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'CREATE DATABASE foo')
+            expect(result).to.equal('')
+        })
+
+        it('returns empty string for SELECT without batch mode', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([{ col: 'val' }])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT 1')
+            expect(result).to.equal('')
+        })
+
+        it('returns tab-delimited rows in batch mode (-B -N)', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([['3'], ['5']])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT id FROM tbl', '-B -N')
+            expect(result).to.equal('3\n5')
+        })
+
+        it('returns tab-joined columns in batch mode for multi-column rows', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([['a', 'b', 'c']])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT a,b,c FROM tbl', '-B -N')
+            expect(result).to.equal('a\tb\tc')
+        })
+
+        it('returns empty string for empty batch result', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT id FROM tbl', '-B -N')
+            expect(result).to.equal('')
+        })
+
+        it('recognizes --batch flag', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([['1']])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT 1', '--batch --skip-column-names')
+            expect(result).to.equal('1')
+        })
+
+        it('closes connection even when query throws', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.rejects(new Error('query error'))
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.executeNativeMariaDbCommand(extCfg, 'SELECT 1')
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.equal('query error')
+            }
+            expect(stubs.mariadb._fakeConn.end.calledOnce).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // askMariadbRootPassword
+    // -------------------------------------------------------------------
+
+    describe('askMariadbRootPassword()', function () {
+
+        it('returns cached password immediately', async function () {
+            const stubs = makeStubs()
+            stubs.getDbRootPassword.returns('cached-pass')
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+            expect(result).to.equal('cached-pass')
+        })
+
+        it('reads from external DB config when EXTERNAL_DB=true and not cached', async function () {
+            const stubs = makeStubs()
+            stubs.getDbRootPassword.returns(null)
+            stubs.mariadb._fakeConn.query.resolves([])
+
+            const saved = {
+                XCHAIN_NODE_EXTERNAL_DB_HOST:          process.env.XCHAIN_NODE_EXTERNAL_DB_HOST,
+                XCHAIN_NODE_EXTERNAL_DB_PORT:          process.env.XCHAIN_NODE_EXTERNAL_DB_PORT,
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_USER:     process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER,
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD
+            }
+            process.env.XCHAIN_NODE_EXTERNAL_DB_HOST          = '127.0.0.1'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_PORT          = '3306'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER     = 'root'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD = 'external-root-pass'
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('external-root-pass')
+                expect(stubs.setDbRootPassword.calledWith('external-root-pass')).to.be.true
+            } finally {
+                for (const [k, v] of Object.entries(saved)) {
+                    if (v === undefined) delete process.env[k]
+                    else process.env[k] = v
+                }
+            }
+        })
+
+        it('reads from XCHAIN_NODE_DB_ROOT_PASSWORD env var when not cached', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'env-root-pass'
+            try {
+                const stubs = makeStubs()
+                stubs.getDbRootPassword.returns(null)
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('env-root-pass')
+                expect(stubs.setDbRootPassword.calledWith('env-root-pass')).to.be.true
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('reads root password from running container printenv', async function () {
+            const stubs = makeStubs()
+            stubs.getDbRootPassword.returns(null)
+            // Flow (no env var XCHAIN_NODE_DB_ROOT_PASSWORD set):
+            //   1. checkIfDatabaseModuleExists -> getDatabaseContainerId -> execFileAsync call 0 (inspect)
+            //   2. getStatusFromContainer returns { State: { Status: 'running' } } -> dbContainerId found
+            //   3. execFileAsync call 1 (docker exec printenv) -> 'container-root-pass\n'
+            //   4. execFileAsync call 2 (docker exec mariadb-admin ping) -> 'mysqld is alive\n'
+            stubs.execFileAsync
+                .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // getDatabaseContainerId (inspect)
+                .onCall(1).resolves({ stdout: 'container-root-pass\n' })    // docker exec printenv
+                .onCall(2).resolves({ stdout: 'mysqld is alive\n' })        // docker exec mariadb-admin ping
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            try {
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('container-root-pass')
+                expect(stubs.setDbRootPassword.calledWith('container-root-pass')).to.be.true
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('falls back to password prompt when no container found', async function () {
+            // When no container exists, prompt runs and setDbRootPassword is called.
+            // The while condition checks getDbRootPassword() — after prompt, we need
+            // it to return the set value so the loop exits.
+            let dbRootPassword = null
+            const stubs = makeStubs()
+            stubs.getDbRootPassword.callsFake(() => dbRootPassword)
+            stubs.setDbRootPassword.callsFake(p => { dbRootPassword = p })
+            // getDatabaseContainerId (in checkIfDatabaseModuleExists) rejects -> null container
+            stubs.execFileAsync.rejects(new Error('no container'))
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            try {
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                // The prompt stub returns 'rootpass' and since no container exists,
+                // setDbRootPassword is called directly and 'rootpass' returned
+                expect(result).to.equal('rootpass')
+                expect(dbRootPassword).to.equal('rootpass')
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // addUserPasswordToDatabase
+    // -------------------------------------------------------------------
+
+    describe('addUserPasswordToDatabase()', function () {
+
+        it('creates database and user via docker when db does not exist', async function () {
+            const stubs = makeStubs()
+            // execFileAsync[0] = docker inspect (getDatabaseContainerId in checkIfDatabaseIsReady)
+            // execFile is used for executeDockerMariaDbCommand (callback style)
+            // dbCount = '0' → create DB + user + grant
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                // Return '0' for COUNT queries, '' for DDL
+                const eArg = args[args.length - 1]
+                if (eArg && eArg.startsWith('SELECT COUNT')) {
+                    cb(null, '0\n')
+                } else if (eArg && eArg.startsWith('SHOW GRANTS')) {
+                    cb(null, 'GRANT USAGE ON *.* TO user\n')
+                } else {
+                    cb(null, '')
+                }
+            })
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.addUserPasswordToDatabase(
+                'xchain-decoder', 'bitcoin', 'mainnet',
+                'XChain_BTC_Mainnet_Decoder', 'xchain_decoder_bitcoin_mainnet', 'test-pass'
+            )
+            expect(result).to.be.true
+        })
+
+        it('skips create when database already exists (dbCount != 0)', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                const eArg = args[args.length - 1]
+                if (eArg && eArg.startsWith('SELECT COUNT(SCHEMA_NAME)')) {
+                    cb(null, '1\n') // DB already exists
+                } else if (eArg && eArg.startsWith('SELECT COUNT(*)')) {
+                    cb(null, '1\n') // user already exists
+                } else if (eArg && eArg.startsWith('SHOW GRANTS')) {
+                    // Include the full grant so it skips GRANT command too
+                    cb(null, "GRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Decoder'.* TO 'xchain_decoder_bitcoin_mainnet'@'%'\n")
+                } else {
+                    cb(null, '')
+                }
+            })
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.addUserPasswordToDatabase(
+                'xchain-decoder', 'bitcoin', 'mainnet',
+                'XChain_BTC_Mainnet_Decoder', 'xchain_decoder_bitcoin_mainnet', 'test-pass'
+            )
+            expect(result).to.be.true
+        })
+
+        it('grants MVH test permissions when module is xchain-hub', async function () {
+            const stubs = makeStubs()
+            const executedCommands = []
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                executedCommands.push(args[args.length - 1])
+                const eArg = args[args.length - 1]
+                if (eArg && eArg.startsWith('SELECT COUNT')) {
+                    cb(null, '0\n')
+                } else if (eArg && eArg.startsWith('SHOW GRANTS')) {
+                    cb(null, 'GRANT USAGE ON *.* TO user\n')
+                } else {
+                    cb(null, '')
+                }
+            })
+            const ds = loadDatabaseService(stubs)
+            await ds.addUserPasswordToDatabase(
+                'xchain-hub', 'bitcoin', 'mainnet',
+                'xchain_node', 'xchain_node_user', 'test-pass'
+            )
+            const mvhGrant = executedCommands.find(c => c && c.includes('MVH'))
+            expect(mvhGrant).to.exist
+        })
+
+        it('throws when docker exec fails', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                cb(new Error('docker exec failed'))
+            })
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.addUserPasswordToDatabase(
+                    'xchain-decoder', 'bitcoin', 'mainnet',
+                    'XChain_BTC_Mainnet_Decoder', 'xchain_decoder_bitcoin_mainnet', 'test-pass'
+                )
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.equal('docker exec failed')
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // addUserPasswordToDatabase — EXTERNAL_DB path
+    // -------------------------------------------------------------------
+
+    describe('addUserPasswordToDatabase() — EXTERNAL_DB path', function () {
+
+        function setExtEnv() {
+            const saved = {}
+            const env = {
+                XCHAIN_NODE_EXTERNAL_DB_HOST:          '127.0.0.1',
+                XCHAIN_NODE_EXTERNAL_DB_PORT:          '3306',
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_USER:     'root',
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: 'test-pass'
+            }
+            for (const [k, v] of Object.entries(env)) {
+                saved[k] = process.env[k]
+                process.env[k] = v
+            }
+            return saved
+        }
+
+        function restoreEnv(saved) {
+            for (const [k, v] of Object.entries(saved)) {
+                if (v === undefined) delete process.env[k]
+                else process.env[k] = v
+            }
+        }
+
+        it('creates database and user via native mariadb when EXTERNAL_DB=true', async function () {
+            const stubs = makeStubs()
+            // batch mode query returns '0' (db doesn't exist, user doesn't exist)
+            stubs.mariadb._fakeConn.query.resolves([['0']])
+            const saved = setExtEnv()
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                const result = await ds.addUserPasswordToDatabase(
+                    'xchain-decoder', 'bitcoin', 'mainnet',
+                    'XChain_BTC_Mainnet_Decoder', 'xchain_decoder_bitcoin_mainnet', 'test-pass',
+                    true  // inDocker=true but EXTERNAL_DB overrides
+                )
+                expect(result).to.be.true
+                expect(stubs.mariadb.createConnection.called).to.be.true
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+
+        it('skips creates when db and user already exist (EXTERNAL_DB)', async function () {
+            const stubs = makeStubs()
+            // Return '1' for all COUNT queries (already exist) and full grant for SHOW GRANTS
+            let queryCount = 0
+            stubs.mariadb._fakeConn.query.callsFake((sql) => {
+                queryCount++
+                if (sql.includes('SELECT COUNT')) return Promise.resolve([['1']])
+                if (sql.includes('SHOW GRANTS')) {
+                    return Promise.resolve([["GRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Decoder'.* TO 'xchain_decoder_bitcoin_mainnet'@'%'"]])
+                }
+                return Promise.resolve([])
+            })
+            const saved = setExtEnv()
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                const result = await ds.addUserPasswordToDatabase(
+                    'xchain-decoder', 'bitcoin', 'mainnet',
+                    'XChain_BTC_Mainnet_Decoder', 'xchain_decoder_bitcoin_mainnet', 'test-pass',
+                    true
+                )
+                expect(result).to.be.true
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+
+        it('grants MVH permissions for hub module via native mariadb (EXTERNAL_DB)', async function () {
+            const stubs = makeStubs()
+            const queries = []
+            stubs.mariadb._fakeConn.query.callsFake((sql) => {
+                queries.push(sql)
+                if (sql.includes('SELECT COUNT')) return Promise.resolve([['0']])
+                if (sql.includes('SHOW GRANTS')) return Promise.resolve([['GRANT USAGE ON *.* TO user']])
+                return Promise.resolve([])
+            })
+            const saved = setExtEnv()
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true, HUB_MODULE_NAME: 'xchain-hub' })
+                await ds.addUserPasswordToDatabase(
+                    'xchain-hub', 'bitcoin', 'mainnet',
+                    'xchain_node', 'xchain_node_user', 'test-pass', true
+                )
+                const mvhQuery = queries.find(q => q && q.includes('MVH'))
+                expect(mvhQuery).to.exist
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+
+        it('throws when native mariadb command fails (EXTERNAL_DB)', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.rejects(new Error('native query error'))
+            const saved = setExtEnv()
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                await ds.addUserPasswordToDatabase(
+                    'xchain-decoder', 'bitcoin', 'mainnet',
+                    'XChain_BTC_Mainnet_Decoder', 'xchain_decoder_bitcoin_mainnet', 'test-pass', true
+                )
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.equal('native query error')
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // resetDatabases
+    // -------------------------------------------------------------------
+
+    describe('resetDatabases()', function () {
+
+        it('drops and recreates each database module', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                executed.push(args[args.length - 1])
+                cb(null, '')
+            })
+            const ds = loadDatabaseService(stubs)
+            await ds.resetDatabases('bitcoin', 'mainnet')
+            // Should have executed DROP + CREATE for decoder and indexer
+            const dropCmds = executed.filter(c => c && c.includes('DROP DATABASE'))
+            expect(dropCmds.length).to.be.greaterThan(0)
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // setDatabaseParameters
+    // -------------------------------------------------------------------
+
+    describe('setDatabaseParameters()', function () {
+
+        it('iterates installed coins+networks and adds DB users', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            stubs.execFile.callsFake((cmd, args, cb) => {
+                const eArg = args[args.length - 1]
+                if (eArg && eArg.startsWith('SELECT COUNT')) {
+                    cb(null, '1\n') // already exists
+                } else if (eArg && eArg.startsWith('SHOW GRANTS')) {
+                    cb(null, "GRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Decoder'.* TO 'xchain_decoder_bitcoin_mainnet'@'%'\nGRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Indexer'.* TO 'xchain_indexer_bitcoin_mainnet'@'%'\n")
+                } else {
+                    cb(null, '')
+                }
+            })
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.setDatabaseParameters()
+            expect(result).to.be.true
+            expect(stubs.addContainerToNetwork.called).to.be.true
+        })
+
+        it('throws and logs when coin network processing fails', async function () {
+            const stubs = makeStubs()
+            stubs.addContainerToNetwork.rejects(new Error('network error'))
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.setDatabaseParameters()
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.equal('network error')
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // buildDatabaseModule — EXTERNAL_DB path
+    // -------------------------------------------------------------------
+
+    describe('buildDatabaseModule() — EXTERNAL_DB path', function () {
+
+        it('pings external MariaDB and returns true when reachable', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([])
+            const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true, EXTERNAL_DB_HOST: '127.0.0.1', EXTERNAL_DB_PORT: 3306, EXTERNAL_DB_ROOT_USER: 'root' })
+
+            // getExternalDbConfig will use env vars
+            const saved = {
+                XCHAIN_NODE_EXTERNAL_DB_HOST:          process.env.XCHAIN_NODE_EXTERNAL_DB_HOST,
+                XCHAIN_NODE_EXTERNAL_DB_PORT:          process.env.XCHAIN_NODE_EXTERNAL_DB_PORT,
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_USER:     process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER,
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD
+            }
+            process.env.XCHAIN_NODE_EXTERNAL_DB_HOST          = '127.0.0.1'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_PORT          = '3306'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER     = 'root'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD = 'test-pass'
+            try {
+                const result = await ds.buildDatabaseModule('bitcoin', 'mainnet')
+                expect(result).to.be.true
+            } finally {
+                for (const [k, v] of Object.entries(saved)) {
+                    if (v === undefined) delete process.env[k]
+                    else process.env[k] = v
+                }
+            }
+        })
+
+        it('throws descriptive error when external MariaDB is unreachable', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb.createConnection.rejects(new Error('ECONNREFUSED'))
+            const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true, EXTERNAL_DB_HOST: 'bad-host', EXTERNAL_DB_PORT: 3306, EXTERNAL_DB_ROOT_USER: 'root' })
+
+            const saved = {
+                XCHAIN_NODE_EXTERNAL_DB_HOST:          process.env.XCHAIN_NODE_EXTERNAL_DB_HOST,
+                XCHAIN_NODE_EXTERNAL_DB_PORT:          process.env.XCHAIN_NODE_EXTERNAL_DB_PORT,
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_USER:     process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER,
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD
+            }
+            process.env.XCHAIN_NODE_EXTERNAL_DB_HOST          = 'bad-host'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_PORT          = '3306'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER     = 'root'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD = 'test-pass'
+            try {
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.include('Cannot reach external MariaDB')
+            } finally {
+                for (const [k, v] of Object.entries(saved)) {
+                    if (v === undefined) delete process.env[k]
+                    else process.env[k] = v
+                }
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // buildDatabaseModule — existing container + no coin/network
+    // -------------------------------------------------------------------
+
+    describe('buildDatabaseModule() — no coin/network', function () {
+
+        it('returns true without network join when coin+network are empty', async function () {
+            const stubs = makeStubs()
+            const ds = loadDatabaseService(stubs)
+            // Pass empty coin/network so the addContainerToNetwork branch is skipped
+            const result = await ds.buildDatabaseModule('', '')
+            expect(result).to.be.true
+            expect(stubs.addContainerToNetwork.called).to.be.false
+        })
+
+        it('throws string error when addContainerToNetwork fails on existing container', async function () {
+            const stubs = makeStubs()
+            stubs.addContainerToNetwork.rejects(new Error('network unavailable'))
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+                expect.fail('should have thrown')
+            } catch (err) {
+                // Source throws a plain string, not an Error object
+                expect(err).to.include('There was a problem trying to add the db container to the network')
+            }
+        })
+
+        it('appends DB data dir volume mount when XCHAIN_NODE_DB_DATA_DIR is set', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_DATA_DIR
+            process.env.XCHAIN_NODE_DB_DATA_DIR = '/mnt/nvme/mysql'
+            try {
+                const stubs = makeStubs()
+                stubs.execFileAsync
+                    .onFirstCall().rejects(new Error('No such container')) // getDatabaseContainerId
+                    .resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                const ds = loadDatabaseService(stubs)
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+
+                const runCall = stubs.execFileAsync.getCalls().find(c =>
+                    c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1][0] === 'run')
+                expect(runCall, 'docker run call not found').to.exist
+                const args = runCall.args[1]
+                const vIdx = args.indexOf('-v')
+                expect(vIdx).to.be.greaterThan(-1)
+                expect(args[vIdx + 1]).to.equal('/mnt/nvme/mysql:/var/lib/mysql')
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_DATA_DIR
+                else process.env.XCHAIN_NODE_DB_DATA_DIR = saved
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // ensureDatabasePool
+    // -------------------------------------------------------------------
+
+    describe('ensureDatabasePool()', function () {
+
+        it('is a no-op when db is already ready', async function () {
+            const stubs = makeStubs()
+            stubs.db.isReady.returns(true)
+            const ds = loadDatabaseService(stubs)
+            await ds.ensureDatabasePool()
+            expect(stubs.db.createDatabase.called).to.be.false
+        })
+
+        it('creates database pool when not ready (docker path)', async function () {
+            const stubs = makeStubs()
+            stubs.db.isReady.returns(false)
+            stubs.hasCredentials.returns(true)
+            stubs.loadCredentials.returns({ user: 'testuser', password: 'test-pass', database: 'xchain_node' })
+            // execFileAsync calls: inspect (checkIfDatabaseIsReady for existing creds),
+            // then docker port (getDatabaseHostPort)
+            stubs.execFileAsync
+                .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // inspect in getDatabaseContainerId
+                .onCall(1).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // inspect in checkIfDatabaseIsReady
+                .onCall(2).resolves({ stdout: 'OK' })                        // mariadb SELECT 1 → ready
+                .resolves({ stdout: '0.0.0.0:13306\n' })                    // docker port
+            const ds = loadDatabaseService(stubs)
+            await ds.ensureDatabasePool()
+            expect(stubs.db.createDatabase.calledOnce).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // ensureXchainNodeAccess — EXTERNAL_DB path
+    // -------------------------------------------------------------------
+
+    describe('ensureXchainNodeAccess() — EXTERNAL_DB path', function () {
+
+        function extEnv() {
+            return {
+                XCHAIN_NODE_EXTERNAL_DB_HOST:          'db.example.com',
+                XCHAIN_NODE_EXTERNAL_DB_PORT:          '3306',
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_USER:     'root',
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: 'test-pass'
+            }
+        }
+
+        function setExtEnv(env) {
+            const saved = {}
+            for (const [k, v] of Object.entries(env)) {
+                saved[k] = process.env[k]
+                process.env[k] = v
+            }
+            return saved
+        }
+
+        function restoreEnv(saved) {
+            for (const [k, v] of Object.entries(saved)) {
+                if (v === undefined) delete process.env[k]
+                else process.env[k] = v
+            }
+        }
+
+        it('returns existing creds when they work against external MariaDB', async function () {
+            const existing = { user: 'xchain_node_testuser', password: 'test-pass', database: 'xchain_node' }
+            const stubs = makeStubs({
+                hasCredentials: sinon.stub().returns(true),
+                loadCredentials: sinon.stub().returns(existing)
+            })
+            stubs.mariadb._fakeConn.query.resolves([])
+            const saved = setExtEnv(extEnv())
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                const result = await ds.ensureXchainNodeAccess()
+                expect(result).to.deep.equal(existing)
+                expect(stubs.saveCredentials.called).to.be.false
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+
+        it('reprovisions via native commands when existing creds fail on external MariaDB', async function () {
+            const existing = { user: 'xchain_node_testuser', password: 'old-pass', database: 'xchain_node' }
+            const stubs = makeStubs({
+                hasCredentials: sinon.stub().returns(true),
+                loadCredentials: sinon.stub().returns(existing)
+            })
+            // getExternalDbConfig uses env vars path (no mariadb connection opened).
+            // ensureXchainNodeAccess tries mariadb.createConnection for existing.user check -> fails.
+            // executeNativeMariaDbCommand DDL calls -> succeed.
+            let connCallCount = 0
+            stubs.mariadb.createConnection.callsFake(() => {
+                connCallCount++
+                if (connCallCount === 1) return Promise.reject(new Error('auth failed')) // existing creds check
+                return Promise.resolve(stubs.mariadb._fakeConn)                          // DDL commands
+            })
+            stubs.mariadb._fakeConn.query.resolves([])
+            const saved = setExtEnv(extEnv())
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                const result = await ds.ensureXchainNodeAccess()
+                expect(stubs.saveCredentials.called).to.be.true
+                expect(result.user).to.equal('xchain_node_testuser')
+                expect(result.database).to.equal('xchain_node')
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+
+        it('provisions fresh creds when no existing credentials stored', async function () {
+            const stubs = makeStubs({
+                hasCredentials: sinon.stub().returns(false)
+            })
+            stubs.mariadb._fakeConn.query.resolves([])
+            const saved = setExtEnv(extEnv())
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                const result = await ds.ensureXchainNodeAccess()
+                expect(result.user).to.equal('xchain_node_testuser')
+                expect(result.password).to.equal('test-generated-pass')
+                expect(stubs.saveCredentials.calledOnce).to.be.true
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // ensureXchainNodeAccess — docker path
+    // -------------------------------------------------------------------
+
+    describe('ensureXchainNodeAccess()', function () {
+
+        it('returns existing working credentials without reprovisioning', async function () {
+            const existing = { user: 'xchain_node_testuser', password: 'test-pass', database: 'xchain_node' }
+            const stubs = makeStubs({
+                hasCredentials: sinon.stub().returns(true),
+                loadCredentials: sinon.stub().returns(existing)
+            })
+            // checkIfDatabaseIsReady for existing creds returns true
+            stubs.execFileAsync
+                .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // inspect (in getDatabaseContainerId)
+                .onCall(1).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // inspect again
+                .resolves({ stdout: 'OK' })                                  // mariadb responds
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.ensureXchainNodeAccess()
+            expect(result).to.deep.equal(existing)
+            expect(stubs.saveCredentials.called).to.be.false
+        })
+
+        it('reprovisions when stored credentials no longer work', async function () {
+            const existing = { user: 'xchain_node_testuser', password: 'old-pass', database: 'xchain_node' }
+            const stubs = makeStubs({
+                hasCredentials: sinon.stub().returns(true),
+                loadCredentials: sinon.stub().returns(existing)
+            })
+            // Flow:
+            //   1. getDatabaseContainerId (call 0) -> valid container ID
+            //   2. checkIfDatabaseIsReady(existing.user, existing.password, ...) ->
+            //      getDatabaseContainerId (call 1) -> valid ID, then mariadb SELECT fails (calls 2-11)
+            //   3. askMariadbRootPassword uses env var -> no extra exec calls
+            //   4. checkIfDatabaseIsReady("root", rootPassword) ->
+            //      getDatabaseContainerId (call 12) -> valid ID, then mariadb SELECT succeeds (call 13)
+            //   5. DDL via executeDockerMariaDbCommand (execFile callback style)
+            let callCount = 0
+            stubs.execFileAsync.callsFake((cmd, args) => {
+                callCount++
+                // Inspect calls (docker inspect) → always succeed
+                if (Array.isArray(args) && args.includes('inspect')) {
+                    return Promise.resolve({ stdout: VALID_CONTAINER_ID + '\n' })
+                }
+                // After 12+ calls, let root mariadb check pass (call 13)
+                if (callCount > 12) {
+                    return Promise.resolve({ stdout: 'OK' })
+                }
+                // Existing-creds mariadb checks fail
+                return Promise.reject(new Error('auth failed'))
+            })
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'root-pass'
+            try {
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, ''))
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.ensureXchainNodeAccess()
+                expect(stubs.saveCredentials.called).to.be.true
+                expect(result.user).to.equal('xchain_node_testuser')
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('throws when container not found and no credentials', async function () {
+            const stubs = makeStubs({
+                hasCredentials: sinon.stub().returns(false)
+            })
+            stubs.execFileAsync.rejects(new Error('no container'))
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.ensureXchainNodeAccess()
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.include('MariaDB container not found')
+            }
+        })
+
+        it('throws "MariaDB is not responding" when root checkIfDatabaseIsReady returns false', async function () {
+            // Force: no existing creds, container found, but root mariadb check fails all retries
+            const stubs = makeStubs({
+                hasCredentials: sinon.stub().returns(false)
+            })
+            // getDatabaseContainerId (inspect) → valid, then all mariadb checks fail → ready=false
+            stubs.execFileAsync.callsFake((cmd, args) => {
+                if (Array.isArray(args) && args.includes('inspect')) {
+                    return Promise.resolve({ stdout: VALID_CONTAINER_ID + '\n' })
+                }
+                return Promise.reject(new Error('mariadb not responding'))
+            })
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'root-pass'
+            try {
+                const ds = loadDatabaseService(stubs)
+                await ds.ensureXchainNodeAccess()
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.include('MariaDB is not responding')
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
         })
     })
 })

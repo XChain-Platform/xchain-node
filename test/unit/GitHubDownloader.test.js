@@ -301,6 +301,683 @@ describe('GitHubDownloader', function () {
     })
 
     // -------------------------------------------------------------------
+    // _getHashForArch
+    // -------------------------------------------------------------------
+
+    describe('_getHashForArch()', function () {
+
+        it('returns string hash for legacy string entry (any arch)', function () {
+            const { GitHubDownloader } = loadDownloader()
+            const dl = new GitHubDownloader('/test/hashes.json')
+            // validHashesData has 'owner/repo': { 'v1.0.0': validHash } (string)
+            const result = dl._getHashForArch('owner/repo', 'v1.0.0', 'x86_64')
+            expect(result).to.equal(validHash)
+        })
+
+        it('returns arch-specific hash for object entry', function () {
+            const xHash = 'b'.repeat(64)
+            const armHash = 'c'.repeat(64)
+            const customData = { 'owner/repo': { 'v2.0.0': { x86_64: xHash, aarch64: armHash } } }
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(customData)
+                    return Buffer.from('data')
+                }),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false })
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            expect(dl._getHashForArch('owner/repo', 'v2.0.0', 'x86_64')).to.equal(xHash)
+            expect(dl._getHashForArch('owner/repo', 'v2.0.0', 'aarch64')).to.equal(armHash)
+        })
+
+        it('returns null for unknown arch in object entry', function () {
+            const xHash = 'b'.repeat(64)
+            const customData = { 'owner/repo': { 'v2.0.0': { x86_64: xHash } } }
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(customData)
+                    return Buffer.from('data')
+                }),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false })
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            expect(dl._getHashForArch('owner/repo', 'v2.0.0', 'unknown_arch')).to.be.null
+        })
+
+        it('returns null for missing repo/version', function () {
+            const { GitHubDownloader } = loadDownloader()
+            const dl = new GitHubDownloader('/test/hashes.json')
+            expect(dl._getHashForArch('nobody/norepo', 'v0.0.0', 'x86_64')).to.be.null
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // hasHash — arch-specific tests
+    // -------------------------------------------------------------------
+
+    describe('hasHash() — arch-specific', function () {
+
+        it('returns true for object entry with matching arch', function () {
+            const xHash = 'b'.repeat(64)
+            const customData = { 'owner/repo': { 'v2.0.0': { x86_64: xHash } } }
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(customData)
+                    return Buffer.from('data')
+                }),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false })
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            expect(dl.hasHash('owner/repo', 'v2.0.0', 'x86_64')).to.be.true
+            expect(dl.hasHash('owner/repo', 'v2.0.0', 'aarch64')).to.be.false
+        })
+
+        it('returns true for object entry with no arch requirement when keys exist', function () {
+            const xHash = 'b'.repeat(64)
+            const customData = { 'owner/repo': { 'v2.0.0': { x86_64: xHash } } }
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(customData)
+                    return Buffer.from('data')
+                }),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false })
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            expect(dl.hasHash('owner/repo', 'v2.0.0')).to.be.true // no arch → any hash counts
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // getReleases — generic API error (non-404)
+    // -------------------------------------------------------------------
+
+    describe('getReleases() — generic error', function () {
+
+        it('throws with generic error message on non-404 errors', async function () {
+            const axiosStub = makeAxiosStub()
+            const err = new Error('Network Error')
+            axiosStub.get.rejects(err)
+            const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            try {
+                await dl.getReleases('owner', 'repo')
+                expect.fail()
+            } catch (e) {
+                expect(e.message).to.include('GitHub API Error')
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // getReleaseByTag — error
+    // -------------------------------------------------------------------
+
+    describe('getReleaseByTag() — error', function () {
+
+        it('throws with descriptive message on error', async function () {
+            const axiosStub = makeAxiosStub()
+            axiosStub.get.rejects(new Error('Not Found'))
+            const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            try {
+                await dl.getReleaseByTag('owner', 'repo', 'v1.0.0')
+                expect.fail()
+            } catch (e) {
+                expect(e.message).to.include('Error getting the release')
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // downloadRepoVersion
+    // -------------------------------------------------------------------
+
+    describe('downloadRepoVersion()', function () {
+
+        it('throws when hash not found for repo/version', async function () {
+            const axiosStub = makeAxiosStub()
+            axiosStub.get.resolves({ data: { tag_name: 'v99.0.0', assets: [] } })
+            const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            try {
+                await dl.downloadRepoVersion('owner', 'repo', 'v99.0.0', { verifyHash: true })
+                expect.fail()
+            } catch (e) {
+                expect(e.message).to.include('Required SHA-256 hash not found')
+            }
+        })
+
+        it('cleans up output directory when download fails', async function () {
+            const axiosStub = makeAxiosStub()
+            // getReleaseByTag returns a release, but downloadReleaseAsset will fail (no matching asset)
+            axiosStub.get.resolves({
+                data: {
+                    tag_name: 'v1.0.0',
+                    assets: [] // no assets → downloadReleaseAsset throws
+                }
+            })
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => {
+                    // hashes file exists
+                    if (p.endsWith('hashes.json')) return true
+                    // output path exists (to trigger cleanup)
+                    return true
+                }),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('data')
+                }),
+                writeFileSync: sinon.stub(),
+                rmSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub(),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([])
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            try {
+                await dl.downloadRepoVersion('owner', 'repo', 'v1.0.0', { verifyHash: false })
+                expect.fail()
+            } catch (e) {
+                // Should have tried to clean up
+                expect(fsStub.rmSync.called).to.be.true
+            }
+        })
+
+        it('writes version file on successful download', async function () {
+            // Use a custom downloader where downloadReleaseAsset is stubbed
+            const axiosStub = makeAxiosStub()
+            const releaseData = { tag_name: 'v1.0.0', assets: [] }
+            axiosStub.get.resolves({ data: releaseData })
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return true
+                    return true // output path exists → triggers version file write
+                }),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('data')
+                }),
+                writeFileSync: sinon.stub(),
+                rmSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub(),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([])
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            // Stub downloadReleaseAsset to succeed without real download
+            dl.downloadReleaseAsset = sinon.stub().resolves()
+            const result = await dl.downloadRepoVersion('owner', 'repo', 'v1.0.0', { verifyHash: false })
+            // Should have written version file
+            expect(fsStub.writeFileSync.called).to.be.true
+            expect(result).to.include('repo')
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // downloadReleaseAsset
+    // -------------------------------------------------------------------
+
+    describe('downloadReleaseAsset()', function () {
+
+        it('throws when no matching linux asset found for host arch', async function () {
+            // Build a release with only a Windows asset so asset selection fails
+            const { Readable } = require('stream')
+            const axiosFn = sinon.stub().resolves({ data: new Readable({ read() {} }) })
+            axiosFn.get = sinon.stub()
+            const { GitHubDownloader } = loadDownloader({ axios: axiosFn })
+            const dl = new GitHubDownloader('/test/hashes.json')
+
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    // Windows-only asset — no linux match
+                    { name: `bitcoin-win64-${arch}.zip`, browser_download_url: 'http://example.com/win.zip' }
+                ]
+            }
+            try {
+                await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+                expect.fail()
+            } catch (e) {
+                // downloadReleaseAsset wraps in "Error downloading asset: <inner message>"
+                expect(e.message).to.satisfy((m) =>
+                    m.includes('linux') || m.includes('Error downloading asset')
+                )
+            }
+        })
+
+        it('downloads gz asset using axios stream + pipeline, extracts with tar', async function () {
+            // Use a proper Writable stream to satisfy pipeline's dst.end requirement
+            const { Readable, Writable } = require('stream')
+            const responseStream = new Readable({ read() {} })
+            setImmediate(() => responseStream.push(null)) // end stream async
+
+            const axiosFn = sinon.stub().resolves({ data: responseStream })
+            axiosFn.get = sinon.stub()
+
+            const spawnSyncStub = sinon.stub().returns({ status: 0 })
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+
+            // Create a proper Writable for createWriteStream
+            const ws = new Writable({ write(chunk, enc, cb) { cb() } })
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return true
+                    return false // output path doesn't exist → mkdirSync
+                }),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('binary data')
+                }),
+                writeFileSync: sinon.stub(),
+                rmSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub().returns(ws),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([]), // no extracted dirs
+                unlinkSync: sinon.stub()
+            }
+
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosFn, spawnSync: spawnSyncStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            dl.verifyRepositoryHash = sinon.stub().resolves()
+
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    { name: `bitcoin-linux-${arch}.tar.gz`, browser_download_url: 'http://example.com/bitcoin.tar.gz' }
+                ]
+            }
+
+            await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+            expect(spawnSyncStub.calledWith('tar')).to.be.true
+            expect(fsStub.unlinkSync.calledOnce).to.be.true
+        })
+
+        it('extracts zip asset and calls unzip', async function () {
+            const { Readable, Writable } = require('stream')
+            const responseStream = new Readable({ read() {} })
+            setImmediate(() => responseStream.push(null))
+
+            const axiosFn = sinon.stub().resolves({ data: responseStream })
+            axiosFn.get = sinon.stub()
+
+            const spawnSyncStub = sinon.stub().returns({ status: 0 })
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+
+            const ws = new Writable({ write(chunk, enc, cb) { cb() } })
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => p.endsWith('hashes.json')),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('zip content')
+                }),
+                writeFileSync: sinon.stub(),
+                rmSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub().returns(ws),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([]),
+                unlinkSync: sinon.stub()
+            }
+
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosFn, spawnSync: spawnSyncStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            dl.verifyRepositoryHash = sinon.stub().resolves()
+
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    { name: `bitcoin-linux-${arch}.zip`, browser_download_url: 'http://example.com/bitcoin.zip' }
+                ]
+            }
+
+            await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+            expect(spawnSyncStub.calledWith('unzip')).to.be.true
+            expect(fsStub.unlinkSync.calledOnce).to.be.true
+        })
+
+        it('handles single extracted directory by flattening contents', async function () {
+            const { Readable, Writable } = require('stream')
+            const responseStream = new Readable({ read() {} })
+            setImmediate(() => responseStream.push(null))
+
+            const axiosFn = sinon.stub().resolves({ data: responseStream })
+            axiosFn.get = sinon.stub()
+            const spawnSyncStub = sinon.stub().returns({ status: 0 })
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+
+            const ws = new Writable({ write(chunk, enc, cb) { cb() } })
+            const renameSync = sinon.stub()
+            const rmdirSync = sinon.stub()
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => p.endsWith('hashes.json')),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('data')
+                }),
+                writeFileSync: sinon.stub(),
+                rmSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub().returns(ws),
+                statSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return { isFile: () => true, isDirectory: () => false }
+                    if (p.includes('extracted-dir')) return { isFile: () => false, isDirectory: () => true }
+                    return { isFile: () => true, isDirectory: () => false }
+                }),
+                readdirSync: sinon.stub().callsFake((p) => {
+                    if (p === '/output') return ['extracted-dir'] // one extracted dir
+                    return ['file1.txt', 'bin'] // files inside the extracted dir
+                }),
+                renameSync,
+                rmdirSync,
+                unlinkSync: sinon.stub()
+            }
+
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosFn, spawnSync: spawnSyncStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            dl.verifyRepositoryHash = sinon.stub().resolves()
+
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    { name: `bitcoin-linux-${arch}.tar.gz`, browser_download_url: 'http://example.com/bitcoin.tar.gz' }
+                ]
+            }
+
+            await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+            // Single extracted dir → rename + rmdirSync
+            expect(renameSync.called).to.be.true
+            expect(rmdirSync.calledOnce).to.be.true
+        })
+
+        it('warns on unrecognized file extension (no extraction)', async function () {
+            const { Readable, Writable } = require('stream')
+            const responseStream = new Readable({ read() {} })
+            setImmediate(() => responseStream.push(null))
+
+            const axiosFn = sinon.stub().resolves({ data: responseStream })
+            axiosFn.get = sinon.stub()
+            const spawnSyncStub = sinon.stub().returns({ status: 0 })
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+
+            const ws = new Writable({ write(chunk, enc, cb) { cb() } })
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => p.endsWith('hashes.json')),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('data')
+                }),
+                writeFileSync: sinon.stub(),
+                rmSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub().returns(ws),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([]),
+                unlinkSync: sinon.stub()
+            }
+
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosFn, spawnSync: spawnSyncStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            dl.verifyRepositoryHash = sinon.stub().resolves()
+
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    // .bin extension → unrecognized → warn, no extract
+                    { name: `bitcoin-linux-${arch}.bin`, browser_download_url: 'http://example.com/bitcoin.bin' }
+                ]
+            }
+
+            await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+            // No spawnSync called (no extraction)
+            expect(spawnSyncStub.called).to.be.false
+        })
+
+        it('throws when unzip fails with non-zero exit code', async function () {
+            const { Readable, Writable } = require('stream')
+            const responseStream = new Readable({ read() {} })
+            setImmediate(() => responseStream.push(null))
+
+            const axiosFn = sinon.stub().resolves({ data: responseStream })
+            axiosFn.get = sinon.stub()
+            const spawnSyncStub = sinon.stub().returns({ status: 2 }) // unzip fails
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+
+            const ws = new Writable({ write(chunk, enc, cb) { cb() } })
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => p.endsWith('hashes.json')),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('data')
+                }),
+                writeFileSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub().returns(ws),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([]),
+                unlinkSync: sinon.stub()
+            }
+
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosFn, spawnSync: spawnSyncStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            dl.verifyRepositoryHash = sinon.stub().resolves()
+
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    { name: `bitcoin-linux-${arch}.zip`, browser_download_url: 'http://example.com/bitcoin.zip' }
+                ]
+            }
+
+            try {
+                await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+                expect.fail()
+            } catch (e) {
+                expect(e.message).to.include('Error downloading asset')
+                expect(e.message).to.include('unzip exited with code')
+            }
+        })
+
+        it('throws when tar fails with non-zero exit code', async function () {
+            const { Readable, Writable } = require('stream')
+            const responseStream = new Readable({ read() {} })
+            setImmediate(() => responseStream.push(null))
+
+            const axiosFn = sinon.stub().resolves({ data: responseStream })
+            axiosFn.get = sinon.stub()
+            const spawnSyncStub = sinon.stub().returns({ status: 1 }) // tar fails
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+
+            const ws = new Writable({ write(chunk, enc, cb) { cb() } })
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => p.endsWith('hashes.json')),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('data')
+                }),
+                writeFileSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub().returns(ws),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([]),
+                unlinkSync: sinon.stub()
+            }
+
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosFn, spawnSync: spawnSyncStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            dl.verifyRepositoryHash = sinon.stub().resolves()
+
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    { name: `bitcoin-linux-${arch}.tar.gz`, browser_download_url: 'http://example.com/bitcoin.tar.gz' }
+                ]
+            }
+
+            try {
+                await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+                expect.fail()
+            } catch (e) {
+                expect(e.message).to.include('Error downloading asset')
+                expect(e.message).to.include('tar exited with code')
+            }
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // getAllFiles — directory traversal
+    // -------------------------------------------------------------------
+
+    describe('getAllFiles() — directory traversal', function () {
+
+        it('returns all files recursively from a directory', function () {
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('content')
+                }),
+                statSync: sinon.stub().callsFake((p) => {
+                    if (p === '/test/hashes.json') return { isFile: () => true, isDirectory: () => false }
+                    if (p === '/dir' || p === '/dir/subdir') return { isFile: () => false, isDirectory: () => true }
+                    return { isFile: () => true, isDirectory: () => false }
+                }),
+                readdirSync: sinon.stub().callsFake((p, opts) => {
+                    if (p === '/dir') {
+                        return [
+                            { name: 'file.txt', isDirectory: () => false, isFile: () => true },
+                            { name: 'subdir', isDirectory: () => true, isFile: () => false }
+                        ]
+                    }
+                    if (p === '/dir/subdir') {
+                        return [
+                            { name: 'nested.txt', isDirectory: () => false, isFile: () => true }
+                        ]
+                    }
+                    return []
+                })
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            const files = dl.getAllFiles('/dir')
+            expect(files).to.include('/dir/file.txt')
+            expect(files).to.include('/dir/subdir/nested.txt')
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // loadHashesFile — invalid hash for object entry
+    // -------------------------------------------------------------------
+
+    describe('loadHashesFile() — invalid hash in object entry', function () {
+
+        it('throws when arch hash is invalid in object entry', function () {
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().returns(JSON.stringify({
+                    'owner/repo': { 'v1.0.0': { x86_64: 'short' } }
+                })),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false })
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            expect(() => new GitHubDownloader('/test/hashes.json')).to.throw('Invalid SHA-256 hash')
+        })
+
+        it('throws when version entry is neither string nor object', function () {
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().returns(JSON.stringify({
+                    'owner/repo': { 'v1.0.0': null }
+                })),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false })
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            expect(() => new GitHubDownloader('/test/hashes.json')).to.throw('Invalid hash entry')
+        })
+
+        it('throws when top-level repo entry is not an object', function () {
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().returns(JSON.stringify({
+                    'owner/repo': 'not-an-object'
+                })),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false })
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            expect(() => new GitHubDownloader('/test/hashes.json')).to.throw('Invalid hash format')
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // downloadReleaseAsset — verifyHash=true path
+    // -------------------------------------------------------------------
+
+    describe('downloadReleaseAsset() — verifyHash=true', function () {
+
+        it('calls verifyRepositoryHash when verifyHash=true', async function () {
+            const { Readable, Writable } = require('stream')
+            const responseStream = new Readable({ read() {} })
+            setImmediate(() => responseStream.push(null))
+
+            const axiosFn = sinon.stub().resolves({ data: responseStream })
+            axiosFn.get = sinon.stub()
+            const spawnSyncStub = sinon.stub().returns({ status: 0 })
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+
+            const ws = new Writable({ write(chunk, enc, cb) { cb() } })
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => p.endsWith('hashes.json')),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('data')
+                }),
+                writeFileSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub().returns(ws),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([]),
+                unlinkSync: sinon.stub()
+            }
+
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosFn, spawnSync: spawnSyncStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            const verifyStub = sinon.stub().resolves()
+            dl.verifyRepositoryHash = verifyStub
+
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    { name: `bitcoin-linux-${arch}.tar.gz`, browser_download_url: 'http://example.com/bitcoin.tar.gz' }
+                ]
+            }
+
+            await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', true) // verifyHash=true
+            expect(verifyStub.calledOnce).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
     // verifyRepositoryHash
     // -------------------------------------------------------------------
 
@@ -351,6 +1028,38 @@ describe('GitHubDownloader', function () {
             } catch (e) {
                 expect(e.message).to.include('Hash verification failed')
             }
+        })
+
+        it('throws when no hash registered for the repo/version/arch', async function () {
+            const { GitHubDownloader } = loadDownloader()
+            const dl = new GitHubDownloader('/test/hashes.json')
+            // 'unknown/repo' has no entry in validHashesData
+            try {
+                await dl.verifyRepositoryHash('unknown/repo', 'v1.0.0', '/path/to/file')
+                expect.fail()
+            } catch (e) {
+                expect(e.message).to.include('No SHA-256 hash registered')
+            }
+        })
+
+        it('passes explicit arch parameter to _getHashForArch', async function () {
+            const content = Buffer.from('test')
+            const expectedHash = crypto.createHash('sha256').update(content).digest('hex')
+
+            const customHashesData = { 'owner/repo': { 'v1.0.0': { myarch: expectedHash } } }
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(customHashesData)
+                    return content
+                }),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([])
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            // Should not throw when passing the right arch
+            await dl.verifyRepositoryHash('owner/repo', 'v1.0.0', '/path/to/file', 'myarch')
         })
     })
 })

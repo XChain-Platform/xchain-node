@@ -1,0 +1,1762 @@
+'use strict'
+
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+const sinon      = require('sinon')
+const { expect } = require('chai')
+const proxyquire = require('proxyquire').noCallThru()
+const { PassThrough, EventEmitter } = require('stream')
+
+// ---------------------------------------------------------------------------
+// Constants (real — no I/O side-effects)
+// ---------------------------------------------------------------------------
+const { XChainService, SEP, BOOTSTRAP_BASE_URL } = require('../../src/config/constants')
+
+const COIN    = 'bitcoin'
+const NETWORK = 'mainnet'
+const FAKE_CONTAINER_ID = 'a'.repeat(64)
+const FAKE_DB_CONTAINER = 'b'.repeat(64)
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Build a fake EventEmitter that looks like a child_process spawn() result */
+function makeSpawnProc() {
+    const proc    = new EventEmitter()
+    proc.stdout   = new PassThrough()
+    proc.stderr   = new PassThrough()
+    proc.stdin    = new PassThrough()
+    return proc
+}
+
+/** Drain a PassThrough immediately so it doesn't block the event loop */
+function drainPassThrough(pt) {
+    pt.resume()
+}
+
+/** Make a fake axios streaming response */
+function makeAxiosStreamResponse(statusCode = 200, contentLength = '1024') {
+    const dataStream = new PassThrough()
+    const response   = {
+        status:  statusCode,
+        headers: { 'content-length': contentLength },
+        data:    dataStream
+    }
+    return { response, dataStream }
+}
+
+// ---------------------------------------------------------------------------
+// Default stubs factory
+// ---------------------------------------------------------------------------
+
+function makeStubs(overrides = {}) {
+    const fakeWriteStream = new PassThrough()
+    drainPassThrough(fakeWriteStream)
+
+    const fakeReadStream = new PassThrough()
+    drainPassThrough(fakeReadStream)
+
+    // Default: createReadStream returns a stream that immediately ends
+    const fsStub = {
+        existsSync:         sinon.stub().returns(false),
+        mkdirSync:          sinon.stub(),
+        rmSync:             sinon.stub(),
+        accessSync:         sinon.stub(),
+        createWriteStream:  sinon.stub().returns(fakeWriteStream),
+        createReadStream:   sinon.stub().returns(fakeReadStream),
+        constants:          { W_OK: 2 },
+        promises: {
+            readdir:    sinon.stub().resolves(['file1.txt']),
+            stat:       sinon.stub().resolves({ isFile: () => true, size: 1024 * 1024 }),
+            writeFile:  sinon.stub().resolves(),
+            readFile:   sinon.stub().resolves('abc123  data.tar.gz\n'),
+        }
+    }
+
+    const dbStub = {
+        getModuleContainer:  sinon.stub().resolves(FAKE_CONTAINER_ID),
+        isReady:             sinon.stub().returns(true)
+    }
+
+    const axiosStub = sinon.stub()
+
+    const execFileStub = sinon.stub()
+
+    const zlibStub = {
+        createGzip:   sinon.stub().callsFake(() => new PassThrough()),
+        createGunzip: sinon.stub().callsFake(() => new PassThrough())
+    }
+
+    const configServiceStub = {
+        getDefaultConfig: sinon.stub().resolves({
+            UTXO_TRACKER_BOOTSTRAP_VOLUME: '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/',
+            DECODER_BOOTSTRAP_VOLUME:      '/data/bitcoin/mainnet/xchain-decoder/bootstrap/',
+            INDEXER_BOOTSTRAP_VOLUME:      '/data/bitcoin/mainnet/xchain-indexer/bootstrap/'
+        }),
+        getModuleDatabaseName: sinon.stub().returns('xchain_btc_mainnet_decoder')
+    }
+
+    const dockerServiceStub = {
+        stopContainer:  sinon.stub().resolves(),
+        startContainer: sinon.stub().resolves()
+    }
+
+    const databaseServiceStub = {
+        getDatabaseContainerId:   sinon.stub().resolves(FAKE_DB_CONTAINER),
+        ensureDatabasePool:       sinon.stub().resolves(),
+        askMariadbRootPassword:   sinon.stub().resolves('rootpass')
+    }
+
+    return {
+        fs:             fsStub,
+        db:             dbStub,
+        axios:          axiosStub,
+        execFile:       execFileStub,
+        zlib:           zlibStub,
+        configService:  configServiceStub,
+        dockerService:  dockerServiceStub,
+        databaseService: databaseServiceStub,
+        fakeWriteStream,
+        fakeReadStream,
+        ...overrides
+    }
+}
+
+// ---------------------------------------------------------------------------
+// proxyquire loader
+// ---------------------------------------------------------------------------
+
+function loadBootstrapService(stubs) {
+    // execFile promisify shim: the module does `promisify(execFile)` at load
+    // time. We intercept 'child_process' and supply our own stub for execFile.
+    // To make promisify work transparently we wrap the stub in a callback form.
+    const execFileCb = function(cmd, args, ...rest) {
+        const cb = typeof rest[rest.length - 1] === 'function' ? rest[rest.length - 1] : null
+        const promise = stubs.execFile(cmd, args)
+        if (cb) {
+            promise.then(r => cb(null, r || { stdout: '', stderr: '' })).catch(e => cb(e))
+        }
+        return promise
+    }
+    // sinon stubs are plain functions, promisify uses util.promisify which
+    // checks for [util.promisify.custom] or assumes last arg is cb.
+    // We provide the cb-style wrapper above instead.
+
+    return proxyquire('../../src/services/BootstrapService', {
+        'fs':             stubs.fs,
+        'axios':          stubs.axios,
+        'zlib':           stubs.zlib,
+        'child_process':  {
+            execFile: execFileCb,
+            spawn:    stubs.spawn || sinon.stub()
+        },
+        '../state':               { db: stubs.db },
+        '../config/constants': {
+            XChainService,
+            SEP,
+            BOOTSTRAP_BASE_URL,
+            tmpDir: '/tmp/xchain-test'
+        },
+        './ConfigService':   {
+            getDefaultConfig:         stubs.configService.getDefaultConfig,
+            getModuleDatabaseName:    stubs.configService.getModuleDatabaseName
+        },
+        './DockerService':    {
+            stopContainer:  stubs.dockerService.stopContainer,
+            startContainer: stubs.dockerService.startContainer
+        },
+        './DatabaseService': {
+            getDatabaseContainerId:  stubs.databaseService.getDatabaseContainerId,
+            ensureDatabasePool:      stubs.databaseService.ensureDatabasePool,
+            askMariadbRootPassword:  stubs.databaseService.askMariadbRootPassword
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('BootstrapService', function () {
+
+    // -----------------------------------------------------------------------
+    // getBootstrapFilesList
+    // -----------------------------------------------------------------------
+
+    describe('getBootstrapFilesList()', function () {
+
+        it('returns file list for XCHAIN_UTXO_TRACKER', async function () {
+            const stubs = makeStubs()
+            stubs.fs.promises.readdir.resolves(['boot1.tar.gz', 'boot2.tar.gz'])
+            stubs.fs.promises.stat.resolves({ isFile: () => true })
+            const bs = loadBootstrapService(stubs)
+            const list = await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+            expect(list).to.deep.equal(['boot1.tar.gz', 'boot2.tar.gz'])
+        })
+
+        it('returns file list for XCHAIN_DECODER', async function () {
+            const stubs = makeStubs()
+            stubs.fs.promises.readdir.resolves(['dump.tar.gz'])
+            stubs.fs.promises.stat.resolves({ isFile: () => true })
+            const bs = loadBootstrapService(stubs)
+            const list = await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(list).to.deep.equal(['dump.tar.gz'])
+        })
+
+        it('returns file list for XCHAIN_INDEXER', async function () {
+            const stubs = makeStubs()
+            stubs.fs.promises.readdir.resolves(['indexer.tar.gz'])
+            stubs.fs.promises.stat.resolves({ isFile: () => true })
+            const bs = loadBootstrapService(stubs)
+            const list = await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+            expect(list).to.deep.equal(['indexer.tar.gz'])
+        })
+
+        it('filters out non-file entries', async function () {
+            const stubs = makeStubs()
+            stubs.fs.promises.readdir.resolves(['file.tar.gz', 'subdir'])
+            stubs.fs.promises.stat
+                .onFirstCall().resolves({ isFile: () => true })
+                .onSecondCall().resolves({ isFile: () => false })
+            const bs = loadBootstrapService(stubs)
+            const list = await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+            expect(list).to.deep.equal(['file.tar.gz'])
+        })
+
+        it('throws for unsupported module', async function () {
+            const stubs = makeStubs()
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.getBootstrapFilesList(COIN, NETWORK, 'xchain-unknown')
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.include('Unsupported module for bootstrap')
+            }
+        })
+
+        it('propagates readdir error', async function () {
+            const stubs = makeStubs()
+            stubs.fs.promises.readdir.rejects(new Error('ENOENT: no such file'))
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.include('ENOENT')
+            }
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // makeBootstrap — dispatch
+    // -----------------------------------------------------------------------
+
+    describe('makeBootstrap() — dispatch', function () {
+
+        it('throws for unsupported module', async function () {
+            const stubs = makeStubs()
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.makeBootstrap(COIN, NETWORK, 'xchain-unknown')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('Unsupported module for bootstrap create')
+            }
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // restoreBootstrap — dispatch
+    // -----------------------------------------------------------------------
+
+    describe('restoreBootstrap() — dispatch', function () {
+
+        it('throws for unsupported module', async function () {
+            const stubs = makeStubs()
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, 'xchain-unknown', 'file.tgz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('Unsupported module for bootstrap restore')
+            }
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // utxoTrackerVolumeHasData
+    // -----------------------------------------------------------------------
+
+    describe('utxoTrackerVolumeHasData()', function () {
+
+        it('returns false when docker volume inspect fails (volume absent)', async function () {
+            const stubs = makeStubs()
+            stubs.execFile = sinon.stub().rejects(new Error('No such volume'))
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
+            expect(result).to.be.false
+        })
+
+        it('returns true when volume ls shows a non-empty entry', async function () {
+            const stubs = makeStubs()
+            let callCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                callCount++
+                if (callCount === 1) return Promise.resolve({ stdout: '' })       // inspect OK
+                return Promise.resolve({ stdout: 'LOCK\n' })                       // ls shows data
+            })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
+            expect(result).to.be.true
+        })
+
+        it('returns false when volume ls output is empty', async function () {
+            const stubs = makeStubs()
+            let callCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                callCount++
+                if (callCount === 1) return Promise.resolve({ stdout: '' })       // inspect OK
+                return Promise.resolve({ stdout: '' })                             // empty volume
+            })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
+            expect(result).to.be.false
+        })
+
+        it('returns false when ls exec fails', async function () {
+            const stubs = makeStubs()
+            let callCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                callCount++
+                if (callCount === 1) return Promise.resolve({ stdout: '' })       // inspect OK
+                return Promise.reject(new Error('exec error'))                     // ls fails
+            })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
+            expect(result).to.be.false
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // downloadBootstrap
+    // -----------------------------------------------------------------------
+
+    describe('downloadBootstrap()', function () {
+
+        it('returns null on 404', async function () {
+            const stubs = makeStubs()
+            stubs.axios.resolves({ status: 404, headers: {}, data: new PassThrough() })
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+            expect(result).to.be.null
+        })
+
+        it('returns "latest.tgz" on success and writes to destPath', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true)
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            stubs.axios.resolves({
+                status:  200,
+                headers: { 'content-length': '100' },
+                data:    dataStream
+            })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+
+            // Emit some data then end the source stream to trigger finish
+            setImmediate(() => {
+                dataStream.end()
+                // Emit finish on writeStream
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.equal('latest.tgz')
+        })
+
+        it('creates destDir when it does not exist', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            stubs.axios.resolves({
+                status:  200,
+                headers: {},
+                data:    dataStream
+            })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+
+            setImmediate(() => {
+                dataStream.end()
+                writeStream.emit('finish')
+            })
+
+            await promise
+            expect(stubs.fs.mkdirSync.calledWith('/tmp/dest', { recursive: true })).to.be.true
+        })
+
+        it('throws when axios rejects', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true)
+            stubs.axios.rejects(new Error('network error'))
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('network error')
+            }
+        })
+
+        it('throws when writeStream emits error', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true)
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            stubs.axios.resolves({
+                status:  200,
+                headers: {},
+                data:    dataStream
+            })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+
+            setImmediate(() => {
+                writeStream.emit('error', new Error('write error'))
+            })
+
+            try {
+                await promise
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('write error')
+            }
+        })
+
+        it('throws when data stream emits error', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true)
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            stubs.axios.resolves({
+                status:  200,
+                headers: {},
+                data:    dataStream
+            })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+
+            setImmediate(() => {
+                dataStream.emit('error', new Error('stream broken'))
+            })
+
+            try {
+                await promise
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('stream broken')
+            }
+        })
+
+        it('uses the BOOTSTRAP_BASE_URL to build the request URL', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true)
+            let capturedUrl = null
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            stubs.axios.callsFake(opts => {
+                capturedUrl = opts.url
+                return Promise.resolve({ status: 200, headers: {}, data: dataStream })
+            })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+
+            setImmediate(() => {
+                dataStream.end()
+                writeStream.emit('finish')
+            })
+
+            await promise
+            expect(capturedUrl).to.include(XChainService.XCHAIN_UTXO_TRACKER)
+            expect(capturedUrl).to.include(COIN)
+            expect(capturedUrl).to.include(NETWORK)
+            expect(capturedUrl).to.include('latest.tgz')
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // ensureBootstrapUtxoTracker
+    // -----------------------------------------------------------------------
+
+    describe('ensureBootstrapUtxoTracker()', function () {
+
+        afterEach(function () {
+            delete process.env.XCHAIN_NODE_NO_BOOTSTRAP
+        })
+
+        it('returns false when XCHAIN_NODE_NO_BOOTSTRAP is set', async function () {
+            process.env.XCHAIN_NODE_NO_BOOTSTRAP = '1'
+            const stubs = makeStubs()
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            expect(result).to.be.false
+        })
+
+        it('returns false when no bootstrap is available (downloadBootstrap returns null)', async function () {
+            const stubs = makeStubs()
+            stubs.axios.resolves({ status: 404, headers: {}, data: new PassThrough() })
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            expect(result).to.be.false
+        })
+
+        it('returns false (best-effort) when downloadBootstrap throws', async function () {
+            const stubs = makeStubs()
+            stubs.axios.rejects(new Error('network failure'))
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            expect(result).to.be.false
+        })
+
+        it('returns false when getDefaultConfig throws', async function () {
+            const stubs = makeStubs()
+            stubs.configService.getDefaultConfig.rejects(new Error('config error'))
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            expect(result).to.be.false
+        })
+
+        it('returns true when download succeeds and restoreBootstrap resolves (happy path via restoreBootstrap stub)', async function () {
+            // Stub the entire restoreBootstrapUtxoTracker path by making
+            // existsSync say the archive+work files exist with sentinel,
+            // so restoreBootstrap completes in the resumable-already-verified path.
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true)  // archive exists, sentinel exists
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            stubs.axios.resolves({ status: 200, headers: { 'content-length': '100' }, data: dataStream })
+
+            // For restoreBootstrap(utxo-tracker, 'latest.tgz'):
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })   // clear volume
+            stubs.fs.promises.stat.resolves({ size: 512 })
+
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().callsFake(() => {
+                // Emit close asynchronously after spawn is called, giving time for
+                // the pipe chain and event listeners to be set up.
+                setImmediate(() => {
+                    drainPassThrough(tarProc.stdin)
+                    tarProc.emit('close', 0)
+                })
+                return tarProc
+            })
+
+            const bs = loadBootstrapService(stubs)
+
+            // Download: emit finish after axios resolves
+            const promise = bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+
+            setImmediate(() => {
+                dataStream.end()
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // ensureBootstrapMariaDb
+    // -----------------------------------------------------------------------
+
+    describe('ensureBootstrapMariaDb()', function () {
+
+        afterEach(function () {
+            delete process.env.XCHAIN_NODE_NO_BOOTSTRAP
+        })
+
+        it('returns false when XCHAIN_NODE_NO_BOOTSTRAP is set', async function () {
+            process.env.XCHAIN_NODE_NO_BOOTSTRAP = '1'
+            const stubs = makeStubs()
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+
+        it('returns false when no bootstrap available for decoder', async function () {
+            const stubs = makeStubs()
+            stubs.axios.resolves({ status: 404, headers: {}, data: new PassThrough() })
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+
+        it('returns false when no bootstrap available for indexer', async function () {
+            const stubs = makeStubs()
+            stubs.axios.resolves({ status: 404, headers: {}, data: new PassThrough() })
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+            expect(result).to.be.false
+        })
+
+        it('returns false (best-effort) when download throws', async function () {
+            const stubs = makeStubs()
+            stubs.axios.rejects(new Error('timeout'))
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+
+        it('returns true when download succeeds and restoreBootstrap resolves for decoder', async function () {
+            const stubs = makeStubs()
+            // archive + work files exist with sentinel (fast-path through restore)
+            stubs.fs.existsSync.returns(true)
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            stubs.axios.resolves({ status: 200, headers: {}, data: dataStream })
+
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves('svc-cid')
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            stubs.fs.promises.stat.resolves({ size: 512 })
+
+            const mysqlProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().callsFake(() => {
+                // Emit close after spawn + listeners are established
+                setImmediate(() => {
+                    drainPassThrough(mysqlProc.stdin)
+                    mysqlProc.emit('close', 0)
+                })
+                return mysqlProc
+            })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+
+            setImmediate(() => {
+                dataStream.end()
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // mariaDbModuleHasData
+    // -----------------------------------------------------------------------
+
+    describe('mariaDbModuleHasData()', function () {
+
+        it('returns false when getDatabaseContainerId throws', async function () {
+            const stubs = makeStubs()
+            stubs.databaseService.getDatabaseContainerId.rejects(new Error('docker error'))
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+
+        it('returns false when getDatabaseContainerId returns null', async function () {
+            const stubs = makeStubs()
+            stubs.databaseService.getDatabaseContainerId.resolves(null)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+
+        it('returns false when askMariadbRootPassword throws', async function () {
+            const stubs = makeStubs()
+            stubs.databaseService.askMariadbRootPassword.rejects(new Error('password error'))
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+
+        it('returns false when blocks table does not exist (tblOut = 0)', async function () {
+            const stubs = makeStubs()
+            // First exec → table count = 0
+            stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+
+        it('returns false when blocks table exists but has 0 rows', async function () {
+            const stubs = makeStubs()
+            let callCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                callCount++
+                if (callCount === 1) return Promise.resolve({ stdout: '1\n' })  // table exists
+                return Promise.resolve({ stdout: '0\n' })                        // zero rows
+            })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+
+        it('returns true when blocks table has data', async function () {
+            const stubs = makeStubs()
+            let callCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                callCount++
+                if (callCount === 1) return Promise.resolve({ stdout: '1\n' })   // table exists
+                return Promise.resolve({ stdout: '1000\n' })                      // rows present
+            })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.true
+        })
+
+        it('returns true for XCHAIN_INDEXER module', async function () {
+            const stubs = makeStubs()
+            let callCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                callCount++
+                if (callCount === 1) return Promise.resolve({ stdout: '1\n' })
+                return Promise.resolve({ stdout: '500\n' })
+            })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+            expect(result).to.be.true
+        })
+
+        it('returns false when exec throws on table check', async function () {
+            const stubs = makeStubs()
+            stubs.execFile = sinon.stub().rejects(new Error('mariadb exec error'))
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.be.false
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // restoreBootstrapUtxoTracker — archive-not-found
+    // -----------------------------------------------------------------------
+
+    describe('restoreBootstrapUtxoTracker() — file not found', function () {
+
+        it('throws when archive file does not exist', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'missing.tar.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('Bootstrap file not found')
+            }
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // restoreBootstrapUtxoTracker — resumable extraction skip path
+    // -----------------------------------------------------------------------
+
+    describe('restoreBootstrapUtxoTracker() — resumable skip (inner archive + checksum exist)', function () {
+
+        it('skips outer extract when inner archive and checksum already present', async function () {
+            const stubs = makeStubs()
+
+            // archivePath exists, inner archive exists, checksum exists, verify sentinel exists
+            stubs.fs.existsSync.callsFake(p => {
+                // everything exists — archive, inner archive, checksum, and verify sentinel
+                return true
+            })
+
+            // checksum file: stored = computed (pass by returning same hash in both places)
+            stubs.fs.promises.readFile.resolves('deadbeef  data.tar.gz\n')
+
+            // For computeSha256: createReadStream emits data then ends
+            const hashStream = new PassThrough()
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => {
+                    s.emit('data', Buffer.from('hello'))
+                    s.emit('end')
+                })
+                return s
+            })
+
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+
+            // Step 4: clear volume
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+
+            // Step 5: restore data.tar.gz into volume — supply a spawn that closes with 0
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(tarProc)
+
+            stubs.fs.promises.stat.resolves({ size: 1024, isFile: () => true })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+
+            // Emit close=0 on the tar proc to resolve the inner Promise
+            setImmediate(() => {
+                drainPassThrough(tarProc.stdin)
+                tarProc.emit('close', 0)
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+            expect(stubs.dockerService.startContainer.called).to.be.true
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // restoreBootstrapUtxoTracker — fresh extract path (no prior run)
+    // -----------------------------------------------------------------------
+
+    describe('restoreBootstrapUtxoTracker() — fresh extract', function () {
+
+        it('extracts outer archive, verifies checksum, restores volume', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+
+            // extractDone tracks whether execFile (tar xzf) has been called
+            let extractDone = false
+
+            // Single definitive existsSync stub
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return false       // no sentinel
+                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return extractDone
+                if (p.includes('data.sha256')) return extractDone
+                return false
+            })
+
+            // tar xzf sets extractDone=true
+            stubs.execFile = sinon.stub().callsFake(() => {
+                extractDone = true
+                return Promise.resolve({ stdout: '' })
+            })
+
+            // computeSha256 needs createReadStream
+            const sourceData = Buffer.from('some archive data')
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => {
+                    s.emit('data', sourceData)
+                    s.emit('end')
+                })
+                return s
+            })
+
+            // Make readFile return a hash that matches what computeSha256 will compute
+            const crypto = require('crypto')
+            const expectedHash = crypto.createHash('sha256').update(sourceData).digest('hex')
+            stubs.fs.promises.readFile.resolves(`${expectedHash}  data.tar.gz\n`)
+            stubs.fs.promises.stat.resolves({ size: 2048, isFile: () => true })
+            stubs.fs.promises.writeFile.resolves()
+
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(tarProc)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+
+            // After sha256 is computed and container is stopped, emit close on tar proc
+            setTimeout(() => {
+                drainPassThrough(tarProc.stdin)
+                tarProc.emit('close', 0)
+            }, 100)
+
+            const result = await promise
+            expect(result).to.be.true
+            expect(stubs.dockerService.stopContainer.called).to.be.true
+            expect(stubs.dockerService.startContainer.called).to.be.true
+        })
+
+        it('throws on checksum mismatch (error before container stop, no finally restart)', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return false
+                // Simulate: inner archive and checksum ARE present (skip outer extract path)
+                // but verify sentinel is NOT (force checksum verification)
+                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('data.sha256')) return true
+                return false
+            })
+
+            // readFile returns a hash that won't match computed
+            stubs.fs.promises.readFile.resolves('wronghash  data.tar.gz\n')
+
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => {
+                    s.emit('data', Buffer.from('correct data'))
+                    s.emit('end')
+                })
+                return s
+            })
+
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+                expect.fail()
+            } catch (err) {
+                // Checksum verification throws before container stop — no finally restart expected
+                expect(err.message).to.include('Checksum mismatch')
+            }
+        })
+
+        it('throws when container ID is null (pool not ready)', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return true   // skip checksum
+                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('data.sha256')) return true
+                return false
+            })
+
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(null)
+            stubs.db.isReady.returns(false)
+
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('pool is not initialized')
+            }
+        })
+
+        it('throws when container ID is null but DB pool is ready (no matching row)', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return true
+                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('data.sha256')) return true
+                return false
+            })
+
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(null)
+            stubs.db.isReady.returns(true)
+
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('no matching row')
+            }
+        })
+
+        it('throws when tar restore proc exits non-zero', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return true
+                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('data.sha256')) return true
+                return false
+            })
+
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })   // clear volume
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.fs.promises.stat.resolves({ size: 512 })
+
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(tarProc)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+
+            setImmediate(() => {
+                drainPassThrough(tarProc.stdin)
+                tarProc.emit('close', 1)
+            })
+
+            try {
+                await promise
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('docker tar restore exited with code 1')
+            }
+            expect(stubs.dockerService.startContainer.called).to.be.true
+        })
+
+        it('throws when malformed archive (inner archive missing after extract)', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+            let execCalled = false
+
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                // Before exec: inner archive and checksum don't exist
+                // After exec: still don't exist (malformed archive)
+                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return false
+                if (p.includes('data.sha256')) return false
+                if (p.includes('verify.ok')) return false
+                return false
+            })
+
+            stubs.execFile = sinon.stub().callsFake(() => {
+                execCalled = true
+                return Promise.resolve({ stdout: '' })
+            })
+
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('malformed')
+            }
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // restoreBootstrapMariaDb — file-not-found
+    // -----------------------------------------------------------------------
+
+    describe('restoreBootstrapMariaDb() — file not found', function () {
+
+        it('throws when archive file does not exist', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'missing.tar.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('Bootstrap file not found')
+            }
+        })
+
+        it('throws when archive file does not exist for indexer', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_INDEXER, 'missing.tar.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('Bootstrap file not found')
+            }
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // restoreBootstrapMariaDb — full happy path
+    // -----------------------------------------------------------------------
+
+    describe('restoreBootstrapMariaDb() — happy path', function () {
+
+        it('drops/recreates DB, restores dump, restarts service container', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return true
+                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('dump.sha256')) return true
+                return false
+            })
+
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.askMariadbRootPassword.resolves('rootpass')
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves('svc-container-id')
+
+            stubs.fs.promises.stat.resolves({ size: 2048 })
+
+            const mysqlProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(mysqlProc)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+
+            setImmediate(() => {
+                drainPassThrough(mysqlProc.stdin)
+                mysqlProc.emit('close', 0)
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+            expect(stubs.dockerService.stopContainer.calledWith('svc-container-id')).to.be.true
+            expect(stubs.dockerService.startContainer.calledWith('svc-container-id')).to.be.true
+        })
+
+        it('works for XCHAIN_INDEXER (picks INDEXER_BOOTSTRAP_VOLUME)', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-indexer/bootstrap/dump.sql.gz'
+
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return true
+                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('dump.sha256')) return true
+                return false
+            })
+
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(null)  // service not installed yet
+
+            stubs.fs.promises.stat.resolves({ size: 1024 })
+
+            const mysqlProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(mysqlProc)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_INDEXER, 'dump.sql.gz')
+
+            setImmediate(() => {
+                drainPassThrough(mysqlProc.stdin)
+                mysqlProc.emit('close', 0)
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+            // service container was null → stopContainer should NOT be called for it
+            expect(stubs.dockerService.stopContainer.called).to.be.false
+        })
+
+        it('throws when mariadb restore proc exits non-zero', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return true
+                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('dump.sha256')) return true
+                return false
+            })
+
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves('svc-container-id')
+            stubs.fs.promises.stat.resolves({ size: 512 })
+
+            const mysqlProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(mysqlProc)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+
+            setImmediate(() => {
+                drainPassThrough(mysqlProc.stdin)
+                mysqlProc.emit('close', 2)
+            })
+
+            try {
+                await promise
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('mariadb restore exited with code 2')
+            }
+            // service container should still be restarted
+            expect(stubs.dockerService.startContainer.calledWith('svc-container-id')).to.be.true
+        })
+
+        it('throws when getDatabaseContainerId returns null', async function () {
+            const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return true
+                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('dump.sha256')) return true
+                return false
+            })
+            stubs.databaseService.getDatabaseContainerId.resolves(null)
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('MariaDB container not found')
+            }
+        })
+
+        it('throws on malformed mariadb archive (missing dump files)', async function () {
+            const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                // inner archive + checksum never appear → malformed
+                return false
+            })
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('malformed')
+            }
+        })
+
+        it('verifies checksum for mariadb dump on fresh run (verify.ok absent)', async function () {
+            const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return false  // no sentinel
+                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('dump.sha256')) return true
+                return false
+            })
+
+            // Make checksum match
+            const crypto = require('crypto')
+            const dumpData = Buffer.from('dump data')
+            const expectedHash = crypto.createHash('sha256').update(dumpData).digest('hex')
+            stubs.fs.promises.readFile.resolves(`${expectedHash}  dump.sql.gz\n`)
+
+            // createReadStream returns different streams on different calls:
+            // call 1: computeSha256 (needs data+end)
+            // call 2: restore stream piped into mysql (needs to pipe through, mysql close=0 resolves)
+            let rsCallCount = 0
+            stubs.fs.createReadStream.callsFake(() => {
+                rsCallCount++
+                const s = new PassThrough()
+                setImmediate(() => {
+                    s.emit('data', dumpData)
+                    s.emit('end')
+                })
+                return s
+            })
+            stubs.fs.promises.stat.resolves({ size: 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(null)
+
+            const mysqlProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(mysqlProc)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+
+            // Allow the sha256 computeSha256 to finish, then emit close on mysqlProc
+            // Use a slightly longer delay to let stream piping settle
+            setTimeout(() => {
+                drainPassThrough(mysqlProc.stdin)
+                mysqlProc.emit('close', 0)
+            }, 100)
+
+            const result = await promise
+            expect(result).to.be.true
+            // writeFile should have been called for the sentinel
+            expect(stubs.fs.promises.writeFile.called).to.be.true
+        })
+
+        it('throws checksum mismatch for mariadb dump', async function () {
+            const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+
+            stubs.fs.existsSync.callsFake(p => {
+                if (p === archivePath) return true
+                if (p.includes('verify.ok')) return false
+                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
+                if (p.includes('dump.sha256')) return true
+                return false
+            })
+
+            stubs.fs.promises.readFile.resolves('badhash  dump.sql.gz\n')
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => {
+                    s.emit('data', Buffer.from('actual data'))
+                    s.emit('end')
+                })
+                return s
+            })
+
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(null)
+
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('Checksum mismatch')
+            }
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // ensureDirWritable — Docker fallback path (directory exists but not writable)
+    // -----------------------------------------------------------------------
+
+    describe('ensureDirWritable() — Docker fallback (dir exists, not writable)', function () {
+
+        it('invokes docker mkdir/chown/chmod when outputDir exists but accessSync throws', async function () {
+            const stubs = makeStubs()
+
+            // existsSync: workDir=false (so ensureDir creates it); outputDir=true (exists)
+            stubs.fs.existsSync.callsFake(p => {
+                // workDir does not exist
+                if (p.includes('bootstrap-work')) return false
+                // outputDir (/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/) exists
+                return true
+            })
+
+            // accessSync throws → fall through to Docker approach
+            stubs.fs.accessSync.throws(new Error('EACCES: permission denied'))
+
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+
+            // All execFile calls succeed (du, docker mkdir, chown, chmod, tar czf)
+            stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
+
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(tarProc)
+
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => { s.emit('data', Buffer.from('x')); s.emit('end') })
+                return s
+            })
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+
+            setImmediate(() => {
+                tarProc.stdout.end()
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+
+            // Verify Docker fallback was invoked (chown + chmod calls)
+            const execCalls = stubs.execFile.getCalls().map(c => c.args)
+            const dockerCalls = execCalls.filter(([cmd, args]) => cmd === 'docker' && Array.isArray(args))
+            const chownCall = dockerCalls.find(([, args]) => args.includes('chown'))
+            const chmodCall = dockerCalls.find(([, args]) => args.includes('chmod'))
+            expect(chownCall).to.exist
+            expect(chmodCall).to.exist
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // makeBootstrap — XCHAIN_UTXO_TRACKER happy path
+    // -----------------------------------------------------------------------
+
+    describe('makeBootstrapUtxoTracker() — happy path', function () {
+
+        it('creates a bootstrap for utxo-tracker: stops container, tars, checksums, wraps, restarts', async function () {
+            const stubs = makeStubs()
+
+            stubs.fs.existsSync.returns(false)  // workDir does not exist
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+
+            // execFile: du → stdout, tar czf → ok
+            let execCallIdx = 0
+            stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                execCallIdx++
+                if (cmd === 'docker' && args.includes('du')) {
+                    return Promise.resolve({ stdout: '104857600\t/data\n' })
+                }
+                return Promise.resolve({ stdout: '' })
+            })
+
+            // spawn for docker tar cf (step 3)
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(tarProc)
+
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            // createReadStream for computeSha256
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => {
+                    s.emit('data', Buffer.from('archive content'))
+                    s.emit('end')
+                })
+                return s
+            })
+
+            // createWriteStream for gzip output
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+
+            // tar proc: pipe resolves when writeStream finishes
+            setImmediate(() => {
+                tarProc.stdout.end()
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+            expect(stubs.dockerService.stopContainer.calledWith(FAKE_CONTAINER_ID)).to.be.true
+            expect(stubs.dockerService.startContainer.calledWith(FAKE_CONTAINER_ID)).to.be.true
+        })
+
+        it('throws when container not found', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            stubs.execFile = sinon.stub().resolves({ stdout: '1024\t/data\n' })
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('utxo-tracker container not found')
+            }
+        })
+
+        it('proceeds when du estimate fails (catch branch, progress shows ?%)', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+
+            // First execFile call (docker du) throws → triggers catch at line 180
+            let execCallCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                execCallCount++
+                if (execCallCount === 1) return Promise.reject(new Error('docker du failed'))
+                return Promise.resolve({ stdout: '' })
+            })
+
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(tarProc)
+
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => { s.emit('data', Buffer.from('x')); s.emit('end') })
+                return s
+            })
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+
+            setImmediate(() => {
+                tarProc.stdout.end()
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+        })
+
+        it('restarts container even when tar spawn fails', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(tarProc)
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+
+            setImmediate(() => {
+                tarProc.emit('error', new Error('spawn error'))
+            })
+
+            try {
+                await promise
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('spawn error')
+            }
+            expect(stubs.dockerService.startContainer.called).to.be.true
+        })
+
+        it('restarts container when docker tar exits non-zero', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(tarProc)
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+
+            setImmediate(() => {
+                tarProc.emit('close', 127)
+            })
+
+            try {
+                await promise
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('docker tar exited with code 127')
+            }
+            expect(stubs.dockerService.startContainer.called).to.be.true
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // makeBootstrapMariaDb — dispatch
+    // -----------------------------------------------------------------------
+
+    describe('makeBootstrapMariaDb() — happy path', function () {
+
+        it('dumps decoder DB: stops, streams dump, checksums, wraps, returns true', async function () {
+            const stubs = makeStubs()
+
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.askMariadbRootPassword.resolves('rootpass')
+
+            // execFile: size estimate + tar czf
+            stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                return Promise.resolve({ stdout: '52428800\n' })
+            })
+
+            const dumpProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(dumpProc)
+
+            stubs.fs.promises.stat.resolves({ size: 512 * 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => {
+                    s.emit('data', Buffer.from('sql dump content'))
+                    s.emit('end')
+                })
+                return s
+            })
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+
+            setImmediate(() => {
+                dumpProc.stdout.end()
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+        })
+
+        it('throws when getDatabaseContainerId returns null', async function () {
+            const stubs = makeStubs()
+            stubs.databaseService.getDatabaseContainerId.resolves(null)
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('MariaDB container not found')
+            }
+        })
+
+        it('proceeds when mariadb size estimate fails (catch branch, progress shows ?%)', async function () {
+            const stubs = makeStubs()
+
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.askMariadbRootPassword.resolves('rootpass')
+
+            // First execFile (size estimate) fails → catch at line 271; others succeed
+            let execCallCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                execCallCount++
+                if (execCallCount === 1) return Promise.reject(new Error('size estimate failed'))
+                return Promise.resolve({ stdout: '' })
+            })
+
+            const dumpProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(dumpProc)
+
+            stubs.fs.promises.stat.resolves({ size: 512 * 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => { s.emit('data', Buffer.from('sql')); s.emit('end') })
+                return s
+            })
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+
+            setImmediate(() => {
+                dumpProc.stdout.end()
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+        })
+
+        it('works for XCHAIN_INDEXER (picks INDEXER_BOOTSTRAP_VOLUME)', async function () {
+            const stubs = makeStubs()
+
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.askMariadbRootPassword.resolves('rootpass')
+            stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
+
+            const dumpProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(dumpProc)
+
+            stubs.fs.promises.stat.resolves({ size: 256 * 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            stubs.fs.createReadStream.callsFake(() => {
+                const s = new PassThrough()
+                setImmediate(() => {
+                    s.emit('data', Buffer.from('indexer dump'))
+                    s.emit('end')
+                })
+                return s
+            })
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+
+            setImmediate(() => {
+                dumpProc.stdout.end()
+                writeStream.emit('finish')
+            })
+
+            const result = await promise
+            expect(result).to.be.true
+        })
+
+        it('throws when mariadb-dump exits non-zero', async function () {
+            const stubs = makeStubs()
+
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.askMariadbRootPassword.resolves('rootpass')
+            stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
+
+            const dumpProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(dumpProc)
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+
+            setImmediate(() => {
+                dumpProc.emit('close', 1)
+            })
+
+            try {
+                await promise
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.include('mariadb-dump exited with code 1')
+            }
+        })
+    })
+})

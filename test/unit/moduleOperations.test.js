@@ -34,11 +34,19 @@ function makeStubs() {
         shellContainer: sinon.stub().resolves(true),
         logContainer: sinon.stub().resolves(true),
         startDockerMonitor: sinon.stub().resolves(true),
+        waitContainer: sinon.stub().resolves(0),
+        saveContainerLogs: sinon.stub().resolves(true),
         buildDatabaseModule: sinon.stub().resolves(true),
+        resetDatabases: sinon.stub().resolves(true),
         cloneGit: sinon.stub().resolves(true),
+        getModuleBranch: sinon.stub().resolves('master'),
         installModule: sinon.stub().resolves('new-container-id'),
         uninstallModule: sinon.stub().resolves(true),
-        statusChanged: sinon.stub().resolves()
+        statusChanged: sinon.stub().resolves(),
+        execFile: sinon.stub(),
+        fs: {
+            existsSync: sinon.stub().returns(false)
+        }
     }
 }
 
@@ -61,18 +69,35 @@ function loadOperations(stubs) {
             execContainer: stubs.execContainer,
             shellContainer: stubs.shellContainer,
             logContainer: stubs.logContainer,
-            startDockerMonitor: stubs.startDockerMonitor
+            startDockerMonitor: stubs.startDockerMonitor,
+            waitContainer: stubs.waitContainer,
+            saveContainerLogs: stubs.saveContainerLogs
         },
         '../services/DatabaseService': {
-            buildDatabaseModule: stubs.buildDatabaseModule
+            buildDatabaseModule: stubs.buildDatabaseModule,
+            resetDatabases: stubs.resetDatabases
         },
         '../services/ModuleService': {
             cloneGit: stubs.cloneGit,
+            getModuleBranch: stubs.getModuleBranch,
             installModule: stubs.installModule,
             uninstallModule: stubs.uninstallModule
         },
         '../services/StatusService': {
             statusChanged: stubs.statusChanged
+        },
+        'child_process': { execFile: stubs.execFile },
+        'fs': stubs.fs,
+        'util': {
+            promisify: (fn) => async (...args) => {
+                // execFileAsync calls: resolve with empty stdout for docker run --rm
+                return new Promise((resolve, reject) => {
+                    fn(...args, (err, stdout, stderr) => {
+                        if (err) reject(err)
+                        else resolve(stdout || '')
+                    })
+                })
+            }
         }
     })
 }
@@ -323,6 +348,329 @@ describe('moduleOperations', function () {
             expect(stubs.startDockerMonitor.calledOnce).to.be.true
             const containerIds = stubs.startDockerMonitor.firstCall.args[0]
             expect(containerIds).to.have.length(2)
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // shellModule — error path
+    // -------------------------------------------------------------------
+
+    describe('shellModule() — error path', function () {
+
+        it('continues after shellContainer error and returns true', async function () {
+            const stubs = makeStubs()
+            stubs.shellContainer.rejects(new Error('shell failed'))
+            const ops = loadOperations(stubs)
+            const result = await ops.shellModule({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+        })
+
+        it('returns true when no container found', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            const result = await ops.shellModule({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+            expect(stubs.shellContainer.called).to.be.false
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // updateModules — branch handling
+    // -------------------------------------------------------------------
+
+    describe('updateModules() — branch handling', function () {
+
+        it('skips module when container ID is not found', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            const result = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+            expect(stubs.cloneGit.called).to.be.false
+        })
+
+        it('uses provided branch if given', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'feature/test')
+            expect(stubs.cloneGit.calledWith('xchain-encoder', true, false, 'feature/test')).to.be.true
+        })
+
+        it('falls back to getModuleBranch when no branch specified', async function () {
+            const stubs = makeStubs()
+            stubs.getModuleBranch.resolves('feature/existing')
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            // getModuleBranch was called and its result used
+            expect(stubs.getModuleBranch.calledOnce).to.be.true
+            expect(stubs.cloneGit.calledWith('xchain-encoder', true, false, 'feature/existing')).to.be.true
+        })
+
+        it('proceeds if getModuleBranch throws', async function () {
+            const stubs = makeStubs()
+            stubs.getModuleBranch.rejects(new Error('not a git repo'))
+            const ops = loadOperations(stubs)
+            const result = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+            // cloneGit called with null branch (fallback)
+            expect(stubs.cloneGit.calledWith('xchain-encoder', true, false, null)).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // uninstallModules — includeShared=true
+    // -------------------------------------------------------------------
+
+    describe('uninstallModules() — includeShared', function () {
+
+        it('skips shared modules by default', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.uninstallModules({ bitcoin: { mainnet: ['database', 'xchain-encoder'] } })
+            // database is in sharedModules → skipped
+            // xchain-encoder is uninstalled
+            expect(stubs.uninstallModule.callCount).to.equal(1)
+            expect(stubs.uninstallModule.firstCall.args[2]).to.equal('xchain-encoder')
+        })
+
+        it('includes shared modules when includeShared=true', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.uninstallModules({ bitcoin: { mainnet: ['database', 'xchain-encoder'] } }, true)
+            expect(stubs.uninstallModule.callCount).to.equal(2)
+        })
+
+        it('skips module when container ID is null', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            const result = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+            expect(stubs.uninstallModule.called).to.be.false
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // runE2ETest
+    // -------------------------------------------------------------------
+
+    describe('runE2ETest()', function () {
+
+        it('installs e2e module, waits, saves logs, removes container', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves('e2e-container-id')
+            stubs.waitContainer.resolves(0)
+            const ops = loadOperations(stubs)
+            const result = await ops.runE2ETest('bitcoin', 'mainnet')
+            expect(stubs.installModule.calledOnce).to.be.true
+            expect(stubs.waitContainer.calledWith('e2e-container-id')).to.be.true
+            expect(stubs.saveContainerLogs.calledWith('e2e-container-id')).to.be.true
+            expect(stubs.removeContainer.calledWith('e2e-container-id')).to.be.true
+            expect(result.exitCode).to.equal(0)
+            expect(result.logFile).to.be.a('string')
+        })
+
+        it('builds mocha docker args when testName is provided', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves('e2e-container-id')
+            const ops = loadOperations(stubs)
+            await ops.runE2ETest('bitcoin', 'mainnet', 'myTest', null)
+            const installArgs = stubs.installModule.firstCall.args
+            const dockerCmdArgs = installArgs[7]
+            expect(dockerCmdArgs).to.include('mocha')
+            expect(dockerCmdArgs.some(a => a.includes('myTest'))).to.be.true
+        })
+
+        it('includes --grep when grep is provided with testName', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves('e2e-container-id')
+            const ops = loadOperations(stubs)
+            await ops.runE2ETest('bitcoin', 'mainnet', 'myTest', 'my grep pattern')
+            const dockerCmdArgs = stubs.installModule.firstCall.args[7]
+            expect(dockerCmdArgs).to.include('--grep')
+            expect(dockerCmdArgs).to.include('my grep pattern')
+        })
+
+        it('uses npm run script when script is provided', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves('e2e-container-id')
+            const ops = loadOperations(stubs)
+            await ops.runE2ETest('bitcoin', 'mainnet', null, null, 'test:sdk')
+            const dockerCmdArgs = stubs.installModule.firstCall.args[7]
+            expect(dockerCmdArgs).to.deep.equal(['npm', 'run', 'test:sdk'])
+        })
+
+        it('passes null dockerCmdArgs when no testName or script', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves('e2e-container-id')
+            const ops = loadOperations(stubs)
+            await ops.runE2ETest('bitcoin', 'mainnet')
+            const dockerCmdArgs = stubs.installModule.firstCall.args[7]
+            expect(dockerCmdArgs).to.be.null
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // resetModules
+    // -------------------------------------------------------------------
+
+    describe('resetModules()', function () {
+
+        it('resets all services when service=all', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const clock = sinon.useFakeTimers()
+            const promise = ops.resetModules('all', 'bitcoin', 'mainnet')
+            await clock.tickAsync(6000) // advance past 5000ms bounce delay
+            clock.restore()
+            const result = await promise
+            expect(result).to.be.true
+            expect(stubs.stopContainer.called).to.be.true
+            expect(stubs.startContainer.called).to.be.true
+            expect(stubs.statusChanged.calledOnce).to.be.true
+        })
+
+        it('only resets node data when service=node', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const result = await ops.resetModules('node', 'bitcoin', 'mainnet')
+            expect(result).to.be.true
+            expect(stubs.stopContainer.called).to.be.true
+            // No bounce candidates for node-only reset
+        })
+
+        it('stops and resets utxo-tracker when service=xchain-utxo-tracker', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet')
+            expect(result).to.be.true
+            expect(stubs.stopContainer.called).to.be.true
+        })
+
+        it('resets decoder: stops, resets DB, and bounces', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const clock = sinon.useFakeTimers()
+            const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet')
+            await clock.tickAsync(6000)
+            clock.restore()
+            const result = await promise
+            expect(result).to.be.true
+            expect(stubs.resetDatabases.calledOnce).to.be.true
+            expect(stubs.restartContainer.called).to.be.true // bounce
+        })
+
+        it('resets node data when nodeDataPath exists', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true) // nodeDataPath exists
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const result = await ops.resetModules('node', 'bitcoin', 'mainnet')
+            expect(result).to.be.true
+            // execFile called for docker run --rm to clear data
+            expect(stubs.execFile.called).to.be.true
+            const call = stubs.execFile.firstCall
+            expect(call.args[0]).to.equal('docker')
+        })
+
+        it('continues when stopContainer throws', async function () {
+            const stubs = makeStubs()
+            stubs.stopContainer.rejects(new Error('stop failed'))
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const result = await ops.resetModules('node', 'bitcoin', 'mainnet')
+            expect(result).to.be.true // errors are caught/swallowed
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // logModules — no containers case
+    // -------------------------------------------------------------------
+
+    describe('logModules() — no containers', function () {
+
+        it('prints "No service was selected" when no containers found', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null) // no containers
+            const ops = loadOperations(stubs)
+            const result = await ops.logModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+            expect(stubs.logContainer.called).to.be.false
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // restartModules — error path
+    // -------------------------------------------------------------------
+
+    describe('restartModules() — error path', function () {
+
+        it('continues after restartContainer error', async function () {
+            const stubs = makeStubs()
+            stubs.restartContainer.rejects(new Error('restart failed'))
+            const ops = loadOperations(stubs)
+            const result = await ops.restartModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } })
+            expect(result).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // stopModules/startModules — skip when no container
+    // -------------------------------------------------------------------
+
+    describe('stopModules() — skip when no container', function () {
+
+        it('skips when container ID is not found', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            const result = await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+            expect(stubs.stopContainer.called).to.be.false
+        })
+
+        it('continues after stopContainer error', async function () {
+            const stubs = makeStubs()
+            stubs.stopContainer.rejects(new Error('stop failed'))
+            const ops = loadOperations(stubs)
+            const result = await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+        })
+    })
+
+    describe('startModules() — error path', function () {
+
+        it('continues after startContainer error', async function () {
+            const stubs = makeStubs()
+            stubs.startContainer.rejects(new Error('start failed'))
+            const ops = loadOperations(stubs)
+            const result = await ops.startModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+        })
+    })
+
+    describe('execModules() — error path', function () {
+
+        it('continues after execContainer error', async function () {
+            const stubs = makeStubs()
+            stubs.execContainer.rejects(new Error('exec failed'))
+            const ops = loadOperations(stubs)
+            const result = await ops.execModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'ls')
+            expect(result).to.be.true
+        })
+
+        it('skips when container ID is null', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            const result = await ops.execModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'ls')
+            expect(result).to.be.true
+            expect(stubs.execContainer.called).to.be.false
         })
     })
 })
