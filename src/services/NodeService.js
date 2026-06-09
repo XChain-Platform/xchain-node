@@ -115,6 +115,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
         execFile('docker', ['build', '.', '--build-arg', 'CONF_FILE=' + coin + '-' + network + '.conf', '-t', containerPrefix], { cwd: nodeDir }, (error) => {
             if (error) {
                 console.error("Error creating Docker image: " + error.message)
+                reject("Error creating Docker image: " + error.message)
                 return
             }
 
@@ -170,6 +171,11 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                         } else {
                             reject("There was a problem trying to store the container's id")
                         }
+                    } else {
+                        // docker run exited 0 but stdout was not a 64-char container id
+                        // (e.g. a warning line or unexpected output). Without this the
+                        // Promise would never settle and buildCryptoNode would hang.
+                        reject("Unexpected docker run output, no container id: " + containerId)
                     }
                 } catch (err) {
                     reject(err)

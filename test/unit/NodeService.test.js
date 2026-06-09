@@ -399,6 +399,46 @@ describe('NodeService — buildCryptoNode()', function () {
         }
     })
 
+    it('rejects (does not hang) when the docker build fails', async function () {
+        // Regression: the build-error callback previously bare-returned without
+        // rejecting, so the Promise never settled and buildCryptoNode hung forever.
+        // A hang here would now blow the mocha timeout and fail this test.
+        const stubs = makeNodeServiceStubs()
+        stubs.execFile.callsFake((cmd, args, opts, cb) => {
+            if (args[0] === 'build') return cb(new Error('build blew up'))
+            if (args[0] === 'run')   return cb(null, 'a'.repeat(64) + '\n')
+        })
+
+        const ns = loadNodeService(stubs)
+        try {
+            await ns.buildCryptoNode('bitcoin', 'mainnet')
+            expect.fail('Should have rejected')
+        } catch (err) {
+            expect(String(err)).to.include('Error creating Docker image')
+        }
+        // run must never have been attempted after a build failure
+        expect(stubs.execFile.getCalls().some(c => c.args[1][0] === 'run')).to.be.false
+    })
+
+    it('rejects (does not hang) when docker run output is not a container id', async function () {
+        // Regression: when `docker run` exited 0 but stdout was not a 64-hex id,
+        // there was no else branch — the Promise never settled and hung forever.
+        const stubs = makeNodeServiceStubs()
+        stubs.execFile.callsFake((cmd, args, opts, cb) => {
+            if (args[0] === 'build') return cb(null)
+            if (args[0] === 'run')   return cb(null, 'WARNING: something\n') // not a container id
+        })
+
+        const ns = loadNodeService(stubs)
+        try {
+            await ns.buildCryptoNode('bitcoin', 'mainnet')
+            expect.fail('Should have rejected')
+        } catch (err) {
+            expect(String(err)).to.include('no container id')
+        }
+        expect(stubs.db.insertModuleContainer.called).to.be.false
+    })
+
     it('reads and rewrites conf file when it exists', async function () {
         const stubs = makeNodeServiceStubs()
         const containerId = 'f'.repeat(64)
