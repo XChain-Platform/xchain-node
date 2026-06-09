@@ -21,6 +21,7 @@
   },
   "scripts": {
     "test": "mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive",
+    "coverage": "c8 --reporter=text --reporter=html --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive --exit",
     "ci": "mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive --exit",
     "test:integration": "mocha 'test/integration/**/*.test.js' --timeout 30000 --recursive",
     "test:smoke": "mocha 'test/smoke/**/*.test.js' --timeout 5000 --exit --recursive",
@@ -41,6 +42,7 @@
   "devDependencies": {
     "@stryker-mutator/core": "^8.7.1",
     "@stryker-mutator/mocha-runner": "^8.7.1",
+    "c8": "^11.0.0",
     "chai": "^4.5.0",
     "mocha": "^11.7.5",
     "proxyquire": "^2.1.3",
