@@ -266,6 +266,13 @@ async function getDefaultConfig(module, coin, network) {
         // unset leaves the endpoint fail-closed (401 for everyone).
         defaultValues["TELEMETRY_ADMIN_KEY"]      = process.env.TELEMETRY_ADMIN_KEY || ""
 
+        // BTC indexer JSON-RPC URL for the validator-mode price oracle's block-height
+        // anchor (hub.getlatestblock). Sourced from host env so a hub NOT co-located with
+        // a BTC indexer (e.g. the master hub box, where the BTC stack lives elsewhere) can
+        // point at a reachable indexer. Empty default ⇒ the hub falls back to its configs
+        // table, so co-located standalone/validator installs are unaffected.
+        defaultValues["BTC_INDEXER_API_URL"]      = process.env.BTC_INDEXER_API_URL || ""
+
         // Validator mode: when `xchain-node validator init` has been run, inject the
         // P2P / signing-key / capability-config env so the hub starts as a full
         // validator. Returns {} (no change) for a standalone node, so the standalone
