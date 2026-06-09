@@ -30,3 +30,7 @@ config/*-testnet
 config/*-regtest
 # Runtime RPC credentials live in untracked .local sidecars (rpcuser/rpcpassword).
 config/*-*.local
+
+# Coverage output (c8/nyc) — generated, not source
+coverage/
+.nyc_output/
