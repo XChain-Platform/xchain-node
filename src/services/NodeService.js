@@ -126,7 +126,11 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 try {
                     fs.mkdirSync(blocksHostPath, { recursive: true })
                 } catch (err) {
-                    throw new Error(`XCHAIN_NODE_BLOCKS_DIR: failed to create ${blocksHostPath}: ${err.message}`)
+                    // This runs inside the async docker-build callback; a throw here
+                    // escapes the Promise as an uncaught exception and hangs the
+                    // build. Reject + return so the Promise settles instead.
+                    reject(`XCHAIN_NODE_BLOCKS_DIR: failed to create ${blocksHostPath}: ${err.message}`)
+                    return
                 }
             }
             const runArgs = [

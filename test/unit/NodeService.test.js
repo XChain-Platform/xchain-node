@@ -439,6 +439,40 @@ describe('NodeService — buildCryptoNode()', function () {
         expect(stubs.db.insertModuleContainer.called).to.be.false
     })
 
+    it('rejects (does not hang) when the blocksDir mkdir fails', async function () {
+        this.timeout(5000)
+        // Regression: the XCHAIN_NODE_BLOCKS_DIR mkdir failure path used to `throw`
+        // inside the docker-build callback, escaping the Promise as an uncaught
+        // exception so buildCryptoNode hung forever. It must reject instead.
+        // NOTE: the build callback is invoked ASYNCHRONOUSLY here (as real execFile
+        // does) — a synchronous stub would let the throw be captured by the Promise
+        // executor and mask the bug.
+        const stubs = makeNodeServiceStubs()
+        stubs.fs.mkdirSync.throws(new Error('EACCES: permission denied'))
+        stubs.execFile.callsFake((cmd, args, opts, cb) => {
+            if (args[0] === 'build') return setImmediate(() => cb(null))
+            if (args[0] === 'run')   return setImmediate(() => cb(null, 'a'.repeat(64) + '\n'))
+        })
+
+        const oldBlocksDir = process.env.XCHAIN_NODE_BLOCKS_DIR
+        process.env.XCHAIN_NODE_BLOCKS_DIR = '/blocks'
+        try {
+            const ns = loadNodeService(stubs)
+            try {
+                await ns.buildCryptoNode('bitcoin', 'mainnet')
+                expect.fail('Should have rejected')
+            } catch (err) {
+                expect(String(err)).to.include('XCHAIN_NODE_BLOCKS_DIR')
+                expect(String(err)).to.include('failed to create')
+            }
+            // docker run must never be attempted once the blocks dir cannot be made
+            expect(stubs.execFile.getCalls().some(c => c.args[1][0] === 'run')).to.be.false
+        } finally {
+            if (oldBlocksDir === undefined) delete process.env.XCHAIN_NODE_BLOCKS_DIR
+            else process.env.XCHAIN_NODE_BLOCKS_DIR = oldBlocksDir
+        }
+    })
+
     it('reads and rewrites conf file when it exists', async function () {
         const stubs = makeNodeServiceStubs()
         const containerId = 'f'.repeat(64)
