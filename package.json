@@ -55,5 +55,8 @@
   },
   "bin": {
     "xchain-node": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }
