@@ -55,20 +55,20 @@ npm link
 Install all services for Bitcoin regtest:
 
 ```bash
-xchain_node install master all bitcoin regtest
+xchain-node install master all bitcoin regtest
 ```
 
 Check status:
 
 ```bash
-xchain_node ps
+xchain-node ps
 ```
 
 Start/stop:
 
 ```bash
-xchain_node stop all bitcoin regtest
-xchain_node start all bitcoin regtest
+xchain-node stop all bitcoin regtest
+xchain-node start all bitcoin regtest
 ```
 
 ### Run a validator
@@ -78,7 +78,7 @@ as a full validator (P2P + PBFT + capability staking), generate a validator
 identity first — this is offline and needs no running stack:
 
 ```bash
-xchain_node validator init \
+xchain-node validator init \
   --seed-nodes seed1.example:10001,seed2.example:10001 \
   --p2p-addr <your-public-host>:10001 \
   --oracle-epoch-start <shared-federation-unix-ms> \
@@ -92,8 +92,8 @@ values, then install/start the hub — it now boots in validator mode with your 
 and capability config mounted automatically:
 
 ```bash
-xchain_node install master xchain-hub
-xchain_node validator status      # show pubkey, peers, capabilities
+xchain-node install master xchain-hub
+xchain-node validator status      # show pubkey, peers, capabilities
 ```
 
 ## Host environment variables

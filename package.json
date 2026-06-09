@@ -54,6 +54,6 @@
     "tmp": ">=0.2.3"
   },
   "bin": {
-    "xchain_node": "./src/index.js"
+    "xchain-node": "./src/index.js"
   }
 }
