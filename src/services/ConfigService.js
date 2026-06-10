@@ -179,6 +179,15 @@ async function getDefaultConfig(module, coin, network) {
             "HUB_HOST":          "0.0.0.0",
             "HUB_API_HOST":      getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
             "HUB_PORT":          10000,
+            // The e2e federation suites (test:federation / test:attestation:llm) boot
+            // in-process MultiValidatorHubs that create + drop XChain_<coin>_<net>_MVH_*
+            // databases, so the container needs the hub DB credentials. DatabaseService
+            // grants this user CREATE/DROP on the XChain_%_MVH_% pattern when the hub
+            // module is installed. Omitting these made requireFederationEnv loud-fail.
+            "HUB_DB_HOST":       "mariadb",
+            "HUB_DB_PORT":       3306,
+            "HUB_DB_USER":       "xchain" + DB_SEP + "hub",
+            "HUB_DB_PASS":       "xchain" + SEP + "password",
             // Explorer is a SHARED service (no coin/network suffix). Like the hub
             // above, the e2e-test container needs to reach it on the docker network;
             // omitting it left EXPLORER_URL/EXPLORER_API_PORT unset, which failed the
