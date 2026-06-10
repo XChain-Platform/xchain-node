@@ -176,6 +176,12 @@ async function getDefaultConfig(module, coin, network) {
             "INDEXER_DB_NAME":   getModuleDatabaseName(XChainService.XCHAIN_INDEXER, coin, network),
             "INDEXER_DB_USER":   "xchain" + DB_SEP + "indexer" + DB_SEP + coin + DB_SEP + network,
             "INDEXER_DB_PASS":   "xchain" + SEP + "password",
+            // The e2e-test harness reaches the indexer DB via DATABASE_URL/DATABASE_PORT
+            // (test/initialCheck.test.js), not INDEXER_DB_HOST/PORT. Default them here so
+            // the EXTERNAL_DB rewrite below can repoint them — on a host-native-DB box the
+            // docker DNS name "mariadb" doesn't resolve and the suite fails at bootstrap.
+            "DATABASE_URL":      "mariadb",
+            "DATABASE_PORT":     3306,
             "HUB_HOST":          "0.0.0.0",
             "HUB_API_HOST":      getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
             "HUB_PORT":          10000,
@@ -370,8 +376,8 @@ async function getDefaultConfig(module, coin, network) {
     // container is decommissioned). The DB name/user/pass keys stay as-is —
     // those are about the credentials, not the network location.
     if (EXTERNAL_DB) {
-        const dbHostKeys = ['HUB_DB_HOST', 'DECODER_DB_HOST', 'INDEXER_DB_HOST']
-        const dbPortKeys = ['HUB_DB_PORT', 'DECODER_DB_PORT', 'INDEXER_DB_PORT']
+        const dbHostKeys = ['HUB_DB_HOST', 'DECODER_DB_HOST', 'INDEXER_DB_HOST', 'DATABASE_URL']
+        const dbPortKeys = ['HUB_DB_PORT', 'DECODER_DB_PORT', 'INDEXER_DB_PORT', 'DATABASE_PORT']
         for (const k of dbHostKeys) {
             if (k in defaultConfig) defaultConfig[k] = EXTERNAL_DB_HOST
         }
