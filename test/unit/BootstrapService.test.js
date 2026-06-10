@@ -562,8 +562,10 @@ describe('BootstrapService', function () {
             // Stub the entire restoreBootstrapUtxoTracker path by making
             // existsSync say the archive+work files exist with sentinel,
             // so restoreBootstrap completes in the resumable-already-verified path.
+            // Signing pubkey (.pem) / signature (.sig) read as absent — a dev
+            // checkout pins no key, so checkBootstrapSignature warns + proceeds.
             const stubs = makeStubs()
-            stubs.fs.existsSync.returns(true)  // archive exists, sentinel exists
+            stubs.fs.existsSync.callsFake(p => !/\.(pem|sig)$/.test(String(p)))
 
             const dataStream  = new PassThrough()
             const writeStream = new PassThrough()
@@ -651,8 +653,9 @@ describe('BootstrapService', function () {
 
         it('returns true when download succeeds and restoreBootstrap resolves for decoder', async function () {
             const stubs = makeStubs()
-            // archive + work files exist with sentinel (fast-path through restore)
-            stubs.fs.existsSync.returns(true)
+            // archive + work files exist with sentinel (fast-path through restore);
+            // signing pubkey/.sig absent → checkBootstrapSignature warns + proceeds
+            stubs.fs.existsSync.callsFake(p => !/\.(pem|sig)$/.test(String(p)))
 
             const dataStream  = new PassThrough()
             const writeStream = new PassThrough()
@@ -805,11 +808,10 @@ describe('BootstrapService', function () {
         it('skips outer extract when inner archive and checksum already present', async function () {
             const stubs = makeStubs()
 
-            // archivePath exists, inner archive exists, checksum exists, verify sentinel exists
-            stubs.fs.existsSync.callsFake(p => {
-                // everything exists — archive, inner archive, checksum, and verify sentinel
-                return true
-            })
+            // archivePath exists, inner archive exists, checksum exists, verify
+            // sentinel exists; signing pubkey/.sig absent so the signature
+            // policy takes its warn-and-proceed branch
+            stubs.fs.existsSync.callsFake(p => !/\.(pem|sig)$/.test(String(p)))
 
             // checksum file: stored = computed (pass by returning same hash in both places)
             stubs.fs.promises.readFile.resolves('deadbeef  data.tar.gz\n')

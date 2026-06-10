@@ -34,6 +34,105 @@ const { getDatabaseContainerId, ensureDatabasePool }  = require('./DatabaseServi
 
 // ─── Private helpers ─────────────────────────────────────────────
 
+// ─── Bootstrap signing (supply-chain integrity) ──────────────────
+//
+// The outer archive bundles data.tar.gz together with its own data.sha256,
+// so that checksum only proves the download wasn't corrupted in transit —
+// anyone who can alter the archive on (or en route from) the bootstrap
+// server can recompute it. Restores therefore also verify an Ed25519
+// signature published NEXT TO the archive (<archive>.sig) against a public
+// key pinned in this repository — the trust anchor travels with the code,
+// not with the data server.
+//
+//   Publisher (bootstrap create): set XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY to
+//   the Ed25519 private key PEM path; a .sig is written beside the archive
+//   and must be uploaded alongside it.
+//
+//   Consumers (restore / auto-bootstrap): the pinned public key is read
+//   from src/config/bootstrap_signing_pubkey.pem (override path via
+//   XCHAIN_NODE_BOOTSTRAP_PUBKEY). When the key and a .sig are present the
+//   signature MUST verify or the restore aborts. When either is missing the
+//   restore proceeds with a loud warning (bootstraps are best-effort and
+//   pre-signing archives exist) — set XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=1
+//   to fail closed instead.
+//
+//   Key generation (operator, one-time):
+//     openssl genpkey -algorithm ed25519 -out bootstrap_signing_key.pem
+//     openssl pkey -in bootstrap_signing_key.pem -pubout \
+//       -out src/config/bootstrap_signing_pubkey.pem
+//
+// Signature format (v1): "v1 ed25519 <base64>" where the signature is over
+// the raw 32-byte SHA-256 digest of the outer archive (digest-then-sign, so
+// multi-GB archives never need to be buffered).
+
+const BOOTSTRAP_SIG_SUFFIX = '.sig'
+const DEFAULT_BOOTSTRAP_PUBKEY_PATH = path.join(__dirname, '..', 'config', 'bootstrap_signing_pubkey.pem')
+
+function loadBootstrapPublicKey() {
+    const pubkeyPath = process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY || DEFAULT_BOOTSTRAP_PUBKEY_PATH
+    if (!fs.existsSync(pubkeyPath)) return null
+    return crypto.createPublicKey(fs.readFileSync(pubkeyPath, 'utf8'))
+}
+
+async function signBootstrapArchive(archivePath, privateKeyPath) {
+    const privateKey = crypto.createPrivateKey(fs.readFileSync(privateKeyPath, 'utf8'))
+    const digestHex  = await computeSha256(archivePath)
+    const signature  = crypto.sign(null, Buffer.from(digestHex, 'hex'), privateKey)
+    const sigPath    = archivePath + BOOTSTRAP_SIG_SUFFIX
+    await fs.promises.writeFile(sigPath, `v1 ed25519 ${signature.toString('base64')}\n`)
+    return sigPath
+}
+
+async function verifyBootstrapSignature(archivePath, sigPath, publicKey) {
+    const sigText = (await fs.promises.readFile(sigPath, 'utf8')).trim()
+    const parts   = sigText.split(/\s+/)
+    if (parts.length !== 3 || parts[0] !== 'v1' || parts[1] !== 'ed25519') {
+        throw new Error(`Bootstrap signature file is malformed: ${sigPath}`)
+    }
+    const digestHex = await computeSha256(archivePath)
+    const valid = crypto.verify(null, Buffer.from(digestHex, 'hex'), publicKey, Buffer.from(parts[2], 'base64'))
+    if (!valid) {
+        throw new Error(`Bootstrap signature verification FAILED for ${archivePath} — the archive does not match its published signature. Refusing to restore.`)
+    }
+}
+
+// Policy gate run before any restore. Returns silently when the archive may
+// be used; throws when it must not be.
+async function checkBootstrapSignature(archivePath) {
+    const requireSigned = !!process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP
+    const sigPath       = archivePath + BOOTSTRAP_SIG_SUFFIX
+    const publicKey     = loadBootstrapPublicKey()
+
+    if (publicKey && fs.existsSync(sigPath)) {
+        process.stdout.write('Verifying bootstrap signature... ')
+        await verifyBootstrapSignature(archivePath, sigPath, publicKey)
+        console.log('OK')
+        return
+    }
+
+    const missing = !publicKey
+        ? 'no bootstrap signing public key is pinned (src/config/bootstrap_signing_pubkey.pem)'
+        : `no signature file found (${sigPath})`
+    if (requireSigned) {
+        throw new Error(`Refusing unsigned bootstrap: ${missing} and XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP is set`)
+    }
+    console.log(`WARNING: restoring bootstrap WITHOUT signature verification — ${missing}. The embedded checksum only detects transport corruption, not tampering.`)
+}
+
+// Sign the just-created archive when a publisher signing key is configured.
+// Best-effort from the creator's perspective only in the sense that a missing
+// env var skips signing; a configured-but-broken key fails the create loudly.
+async function maybeSignBootstrap(finalOutput) {
+    const keyPath = process.env.XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY
+    if (!keyPath) {
+        console.log('NOTE: XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY not set — bootstrap is unsigned. Consumers cannot verify provenance.')
+        return null
+    }
+    const sigPath = await signBootstrapArchive(finalOutput, keyPath)
+    console.log(`Bootstrap signed: ${sigPath}`)
+    return sigPath
+}
+
 function startProgress(message, totalBytes) {
     const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
     let written    = 0
@@ -226,6 +325,9 @@ async function makeBootstrapUtxoTracker(coin, network) {
         console.log(`Wrapping into ${archiveName}...`)
         await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, 'data.tar.gz', 'data.sha256'])
 
+        // Step 5b: Sign the archive (publish the .sig next to it)
+        await maybeSignBootstrap(finalOutput)
+
         // Cleanup work dir
         fs.rmSync(workDir, { recursive: true })
         console.log(`Bootstrap created: ${finalOutput}`)
@@ -309,6 +411,9 @@ async function makeBootstrapMariaDb(coin, network, module) {
     console.log(`Wrapping into ${archiveName}...`)
     await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, 'dump.sql.gz', 'dump.sha256'])
 
+    // Step 5b: Sign the archive (publish the .sig next to it)
+    await maybeSignBootstrap(finalOutput)
+
     // Cleanup work dir
     fs.rmSync(workDir, { recursive: true })
     console.log(`Bootstrap created: ${finalOutput}`)
@@ -338,6 +443,11 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     const workDir       = getWorkDir(coin, network, `${XChainService.XCHAIN_UTXO_TRACKER}-restore`)
 
     if (!fs.existsSync(archivePath)) throw new Error(`Bootstrap file not found: ${archivePath}`)
+
+    // Supply-chain gate: the embedded data.sha256 below only detects transport
+    // corruption (it ships inside the same archive). Provenance comes from the
+    // detached signature checked here.
+    await checkBootstrapSignature(archivePath)
 
     const innerArchive   = path.join(workDir, 'data.tar.gz')
     const checksumFile    = path.join(workDir, 'data.sha256')
@@ -447,6 +557,11 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     const workDir       = getWorkDir(coin, network, `${module}-restore`)
 
     if (!fs.existsSync(archivePath)) throw new Error(`Bootstrap file not found: ${archivePath}`)
+
+    // Supply-chain gate: the embedded dump.sha256 below only detects transport
+    // corruption (it ships inside the same archive). Provenance comes from the
+    // detached signature checked here.
+    await checkBootstrapSignature(archivePath)
 
     const innerArchive   = path.join(workDir, 'dump.sql.gz')
     const checksumFile    = path.join(workDir, 'dump.sha256')
@@ -606,6 +721,26 @@ async function downloadBootstrap(coin, network, module, destDir) {
     } finally {
         progress.stop('Bootstrap downloaded')
     }
+
+    // Also fetch the detached signature published next to the archive. A 404
+    // means this bootstrap is unsigned — remove any stale local .sig so the
+    // restore's signature policy sees the true current state instead of
+    // verifying today's archive against yesterday's signature.
+    const sigPath = destPath + BOOTSTRAP_SIG_SUFFIX
+    const sigResponse = await axios({
+        method: 'get',
+        url: url + BOOTSTRAP_SIG_SUFFIX,
+        responseType: 'text',
+        maxRedirects: 5,
+        timeout: 60000,
+        validateStatus: s => s === 200 || s === 404
+    })
+    if (sigResponse.status === 200) {
+        await fs.promises.writeFile(sigPath, sigResponse.data)
+    } else if (fs.existsSync(sigPath)) {
+        fs.rmSync(sigPath, { force: true })
+    }
+
     return 'latest.tgz'
 }
 
@@ -716,5 +851,10 @@ module.exports = {
     utxoTrackerVolumeHasData,
     ensureBootstrapUtxoTracker,
     mariaDbModuleHasData,
-    ensureBootstrapMariaDb
+    ensureBootstrapMariaDb,
+    // Bootstrap signing (supply-chain integrity)
+    signBootstrapArchive,
+    verifyBootstrapSignature,
+    checkBootstrapSignature,
+    loadBootstrapPublicKey
 }
