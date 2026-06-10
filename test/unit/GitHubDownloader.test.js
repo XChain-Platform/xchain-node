@@ -670,6 +670,59 @@ describe('GitHubDownloader', function () {
             expect(fsStub.unlinkSync.calledOnce).to.be.true
         })
 
+        it('refuses to extract a gz asset with an unsafe member path', async function () {
+            const { Readable, Writable } = require('stream')
+            const responseStream = new Readable({ read() {} })
+            setImmediate(() => responseStream.push(null))
+
+            const axiosFn = sinon.stub().resolves({ data: responseStream })
+            axiosFn.get = sinon.stub()
+
+            // Member listing (tar -tzf) reports an absolute path; extraction must not run
+            const spawnSyncStub = sinon.stub().callsFake((cmd, args) => {
+                if (args[0] === '-tzf') return { status: 0, stdout: 'ok.txt\n/etc/cron.d/evil\n' }
+                return { status: 0 }
+            })
+            const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+
+            const ws = new Writable({ write(chunk, enc, cb) { cb() } })
+
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => p.endsWith('hashes.json')),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('binary data')
+                }),
+                writeFileSync: sinon.stub(),
+                rmSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub().returns(ws),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([]),
+                unlinkSync: sinon.stub()
+            }
+
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosFn, spawnSync: spawnSyncStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            dl.verifyRepositoryHash = sinon.stub().resolves()
+
+            const release = {
+                tag_name: 'v1.0.0',
+                assets: [
+                    { name: `bitcoin-linux-${arch}.tar.gz`, browser_download_url: 'http://example.com/bitcoin.tar.gz' }
+                ]
+            }
+
+            try {
+                await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+                expect.fail('should have thrown')
+            } catch (e) {
+                expect(e.message).to.include('unsafe member path')
+            }
+            expect(spawnSyncStub.calledWith('tar', sinon.match(args => args[0] === '-xzf'))).to.be.false
+            expect(fsStub.unlinkSync.called).to.be.false
+        })
+
         it('extracts zip asset and calls unzip', async function () {
             const { Readable, Writable } = require('stream')
             const responseStream = new Readable({ read() {} })

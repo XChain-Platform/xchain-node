@@ -24,6 +24,7 @@ const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const { spawnSync } = require('child_process');
+const { assertSafeArchiveMemberNames } = require('./utils/helpers');
 const util = require('util');
 const stream = require('stream');
 const pipeline = util.promisify(stream.pipeline);
@@ -225,6 +226,12 @@ class GitHubDownloader {
 
       // Extracts files by extension
       if (fileExtension === 'gz' || fileExtension === 'tgz') {
+        // Refuse archives whose member paths could escape outputPath (absolute
+        // paths or '..' segments) — checked explicitly so safety doesn't depend
+        // on the host tar implementation's defaults.
+        const listing = spawnSync('tar', ['-tzf', downloadPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+        if (listing.status !== 0) throw new Error(`tar exited with code ${listing.status}`);
+        assertSafeArchiveMemberNames(listing.stdout, downloadPath);
         const result = spawnSync('tar', ['-xzf', downloadPath, '-C', outputPath], { stdio: 'inherit' });
         if (result.status !== 0) throw new Error(`tar exited with code ${result.status}`);
         fs.unlinkSync(downloadPath);

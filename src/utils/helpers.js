@@ -52,7 +52,37 @@ function stringToNetwork(networkString) {
     return { coin: coinKey, network: networkKey }
 }
 
+// Throws if any archive member name could escape the extraction directory
+// (absolute path or a '..' segment). GNU tar ≥1.30 refuses '..' members and
+// strips a leading '/' on its own, but that protection is implementation- and
+// version-specific (bsdtar/busybox differ), so the member list is checked
+// explicitly before any extraction instead of relying on tar defaults.
+function assertSafeArchiveMemberNames(listing, archivePath) {
+    const members = String(listing || '').split('\n').filter(Boolean)
+    for (const name of members) {
+        if (name.startsWith('/') || name.split('/').includes('..')) {
+            throw new Error(`Refusing to extract ${archivePath}: unsafe member path "${name}"`)
+        }
+    }
+}
+
+// Lists a .tar.gz's member names and rejects the archive if any could write
+// outside the extraction directory.
+async function assertSafeTarGzMembers(file) {
+    const listing = await new Promise((resolve, reject) => {
+        execFile('tar', ['-tzf', file], { maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
+            if (error) {
+                reject(new Error(`Error listing archive members: ${error.message}`))
+            } else {
+                resolve(stdout)
+            }
+        })
+    })
+    assertSafeArchiveMemberNames(listing, file)
+}
+
 async function decompressTarGz(file) {
+    await assertSafeTarGzMembers(file)
     return new Promise((resolve, reject) => {
         execFile('tar', ['-xvzf', file], { cwd: path.dirname(file) }, (error) => {
             if (error) {
@@ -69,5 +99,7 @@ module.exports = {
     stringToCoin,
     stringToXChainService,
     stringToNetwork,
-    decompressTarGz
+    decompressTarGz,
+    assertSafeArchiveMemberNames,
+    assertSafeTarGzMembers
 }

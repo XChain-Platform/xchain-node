@@ -162,39 +162,44 @@ describe('utils/helpers', function () {
             })
         }
 
-        it('runs tar -xvzf with the file path', function (done) {
-            const helpers = loadHelpers(function (cmd, args, opts, cb) {
+        /** Answers the member-listing call, then delegates the extract call */
+        function listThenExtract(listing, extractImpl) {
+            return function (cmd, args, opts, cb) {
                 if (typeof opts === 'function') { cb = opts; opts = {} }
+                if (args[0] === '-tzf') return cb(null, listing)
+                extractImpl(cmd, args, opts, cb)
+            }
+        }
+
+        it('lists members first, then runs tar -xvzf with the file path', function (done) {
+            const helpers = loadHelpers(listThenExtract('a/b.txt\n', function (cmd, args, opts, cb) {
                 expect(cmd).to.equal('tar')
                 expect(args).to.deep.equal(['-xvzf', '/tmp/archive.tar.gz'])
                 cb(null)
-            })
+            }))
             helpers.decompressTarGz('/tmp/archive.tar.gz').then(() => done()).catch(done)
         })
 
-        it('sets cwd to the parent directory of the file', function (done) {
-            const helpers = loadHelpers(function (cmd, args, opts, cb) {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
+        it('sets cwd to the parent directory of the file on extraction', function (done) {
+            const helpers = loadHelpers(listThenExtract('a/b.txt\n', function (cmd, args, opts, cb) {
                 expect(opts.cwd).to.equal('/tmp')
                 cb(null)
-            })
+            }))
             helpers.decompressTarGz('/tmp/archive.tar.gz').then(() => done()).catch(done)
         })
 
         it('resolves true on success', async function () {
-            const helpers = loadHelpers(function (cmd, args, opts, cb) {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
+            const helpers = loadHelpers(listThenExtract('a/b.txt\n', function (cmd, args, opts, cb) {
                 cb(null)
-            })
+            }))
             const result = await helpers.decompressTarGz('/tmp/archive.tar.gz')
             expect(result).to.be.true
         })
 
-        it('rejects with descriptive message on error', async function () {
-            const helpers = loadHelpers(function (cmd, args, opts, cb) {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
+        it('rejects with descriptive message on extraction error', async function () {
+            const helpers = loadHelpers(listThenExtract('a/b.txt\n', function (cmd, args, opts, cb) {
                 cb(new Error('tar failed'))
-            })
+            }))
             try {
                 await helpers.decompressTarGz('/tmp/archive.tar.gz')
                 expect.fail('should have thrown')
@@ -202,6 +207,77 @@ describe('utils/helpers', function () {
                 expect(err).to.include('Error decompressing a file')
                 expect(err).to.include('tar failed')
             }
+        })
+
+        it('rejects an absolute member path without extracting', async function () {
+            let extracted = false
+            const helpers = loadHelpers(listThenExtract('/etc/cron.d/evil\n', function (cmd, args, opts, cb) {
+                extracted = true
+                cb(null)
+            }))
+            try {
+                await helpers.decompressTarGz('/tmp/archive.tar.gz')
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.include('unsafe member path')
+            }
+            expect(extracted).to.be.false
+        })
+
+        it('rejects a ".." member path without extracting', async function () {
+            let extracted = false
+            const helpers = loadHelpers(listThenExtract('a/../../escape\n', function (cmd, args, opts, cb) {
+                extracted = true
+                cb(null)
+            }))
+            try {
+                await helpers.decompressTarGz('/tmp/archive.tar.gz')
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.include('unsafe member path')
+            }
+            expect(extracted).to.be.false
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // assertSafeArchiveMemberNames
+    // -------------------------------------------------------------------
+
+    describe('assertSafeArchiveMemberNames()', function () {
+        const { assertSafeArchiveMemberNames } = require('../../src/utils/helpers')
+
+        it('accepts relative member paths', function () {
+            assertSafeArchiveMemberNames('a.txt\ndir/\ndir/b.txt\n', '/tmp/a.tgz')
+        })
+
+        it('accepts an empty listing', function () {
+            assertSafeArchiveMemberNames('', '/tmp/a.tgz')
+            assertSafeArchiveMemberNames(undefined, '/tmp/a.tgz')
+        })
+
+        it('accepts names merely containing dots ("a..b", "..hidden")', function () {
+            assertSafeArchiveMemberNames('a..b\ndir/..hidden\nv1.2..3/\n', '/tmp/a.tgz')
+        })
+
+        it('throws on an absolute member path', function () {
+            expect(() => assertSafeArchiveMemberNames('ok\n/etc/evil\n', '/tmp/a.tgz'))
+                .to.throw(/unsafe member path "\/etc\/evil"/)
+        })
+
+        it('throws on a leading ".." segment', function () {
+            expect(() => assertSafeArchiveMemberNames('../escape\n', '/tmp/a.tgz'))
+                .to.throw(/unsafe member path/)
+        })
+
+        it('throws on an interior ".." segment', function () {
+            expect(() => assertSafeArchiveMemberNames('dir/../../escape\n', '/tmp/a.tgz'))
+                .to.throw(/unsafe member path/)
+        })
+
+        it('throws on a bare ".." member', function () {
+            expect(() => assertSafeArchiveMemberNames('..\n', '/tmp/a.tgz'))
+                .to.throw(/unsafe member path/)
         })
     })
 })

@@ -31,6 +31,7 @@ const { db }                                          = require('../state')
 const { getDefaultConfig, getModuleDatabaseName }    = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
 const { getDatabaseContainerId, ensureDatabasePool }  = require('./DatabaseService')
+const { assertSafeArchiveMemberNames }                = require('../utils/helpers')
 
 // ─── Private helpers ─────────────────────────────────────────────
 
@@ -463,6 +464,11 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
         ensureDir(workDir)
         console.log('Extracting outer archive...')
+        // Refuse member paths that could escape the work dir (absolute paths
+        // or '..' segments) so a tampered bootstrap archive cannot write
+        // outside it, regardless of the host tar implementation's defaults.
+        const { stdout: memberList } = await execFileAsync('tar', ['tzf', archivePath], { maxBuffer: 64 * 1024 * 1024 })
+        assertSafeArchiveMemberNames(memberList, archivePath)
         await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
 
         if (!fs.existsSync(innerArchive) || !fs.existsSync(checksumFile)) {
@@ -576,6 +582,11 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
         if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
         ensureDir(workDir)
         console.log('Extracting outer archive...')
+        // Refuse member paths that could escape the work dir (absolute paths
+        // or '..' segments) so a tampered bootstrap archive cannot write
+        // outside it, regardless of the host tar implementation's defaults.
+        const { stdout: memberList } = await execFileAsync('tar', ['tzf', archivePath], { maxBuffer: 64 * 1024 * 1024 })
+        assertSafeArchiveMemberNames(memberList, archivePath)
         await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
 
         if (!fs.existsSync(innerArchive) || !fs.existsSync(checksumFile)) {

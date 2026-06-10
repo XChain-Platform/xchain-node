@@ -922,6 +922,31 @@ describe('BootstrapService', function () {
             expect(stubs.dockerService.startContainer.called).to.be.true
         })
 
+        it('refuses an outer archive with an unsafe member path (never extracts)', async function () {
+            const stubs = makeStubs()
+
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+            stubs.fs.existsSync.callsFake(p => p === archivePath)
+
+            let extracted = false
+            stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                if (cmd === 'tar' && args[0] === 'tzf') {
+                    return Promise.resolve({ stdout: 'data.tar.gz\n../escape\n' })
+                }
+                if (cmd === 'tar' && args[0] === 'xzf') extracted = true
+                return Promise.resolve({ stdout: '' })
+            })
+
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.include('unsafe member path')
+            }
+            expect(extracted).to.be.false
+        })
+
         it('throws on checksum mismatch (error before container stop, no finally restart)', async function () {
             const stubs = makeStubs()
 
