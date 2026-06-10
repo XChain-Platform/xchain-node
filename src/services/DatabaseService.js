@@ -27,6 +27,7 @@ const {
 } = require('../config/constants')
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
 const { sleep }                   = require('../utils/helpers')
+const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName } = require('./ConfigService')
 const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork } = require('./DockerService')
 const { statusChanged }           = require('./StatusService')
@@ -109,10 +110,10 @@ async function checkIfDatabaseIsReady(user, userPassword, database = null) {
     let tries = 10
     while (tries > 0) {
         try {
-            const args = ['exec', '-i', mariadbContainerId, 'mariadb', '-u', user, `-p${userPassword}`]
+            const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', user], { interactive: true })
             if (database) args.push('-D', database)
             args.push('-e', 'SELECT 1')
-            await execFileAsync('docker', args)
+            await execFileAsync('docker', args, { env: mariadbEnv(userPassword) })
             return true
         } catch {
             tries--
@@ -260,7 +261,7 @@ async function askMariadbRootPassword(coin, network) {
             const { stdout } = await execFileAsync('docker', ['exec', dbContainerId, 'printenv', 'MYSQL_ROOT_PASSWORD'])
             const fromEnv = stdout.replace(/\r?\n$/, '')
             if (fromEnv) {
-                const ping = await execFileAsync('docker', ['exec', dbContainerId, 'mariadb-admin', '-u', 'root', `-p${fromEnv}`, 'ping'])
+                const ping = await execFileAsync('docker', dockerMariadbArgs(dbContainerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(fromEnv) })
                 if (ping.stdout.includes('mysqld is alive')) {
                     setDbRootPassword(fromEnv)
                     return fromEnv
@@ -280,7 +281,7 @@ async function askMariadbRootPassword(coin, network) {
             const answer = await prompt.run()
 
             if (dbContainerId) {
-                const { stdout } = await execFileAsync('docker', ['exec', dbContainerId, 'mariadb-admin', '-u', 'root', `-p${answer}`, 'ping'])
+                const { stdout } = await execFileAsync('docker', dockerMariadbArgs(dbContainerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(answer) })
                 if (stdout.includes('mysqld is alive')) {
                     setDbRootPassword(answer)
                     return answer
@@ -300,12 +301,12 @@ async function askMariadbRootPassword(coin, network) {
 
 async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, command, commandOptions = "") {
     return new Promise((resolve, reject) => {
-        const args = ['exec', '-i', mariadbContainerId, 'mariadb', '-u', 'root', `-p${mariadbRootPassword}`, '-e', command]
+        const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', 'root', '-e', command], { interactive: true })
         if (commandOptions) {
             args.push(...commandOptions.trim().split(/\s+/))
         }
 
-        execFile('docker', args, (error, stdout) => {
+        execFile('docker', args, { env: mariadbEnv(mariadbRootPassword) }, (error, stdout) => {
             if (error) {
                 reject(error)
             } else {

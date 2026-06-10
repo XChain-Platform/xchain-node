@@ -188,10 +188,11 @@ describe('DatabaseService', function () {
 
     describe('executeDockerMariaDbCommand()', function () {
 
-        it('constructs correct docker exec command', async function () {
+        it('constructs correct docker exec command with the password in env, not argv', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                const opts = typeof rest[0] === 'function' ? {} : rest[0]
                 expect(cmd).to.equal('docker')
                 expect(args).to.include('exec')
                 expect(args).to.include('-i')
@@ -199,9 +200,13 @@ describe('DatabaseService', function () {
                 expect(args).to.include('mariadb')
                 expect(args).to.include('-u')
                 expect(args).to.include('root')
-                expect(args).to.include('-prootpass')
                 expect(args).to.include('-e')
                 expect(args).to.include('SELECT 1')
+                // Password must travel via MYSQL_PWD env (forwarded with a bare
+                // docker -e), never as a -p<password> argv entry
+                expect(args).to.include('MYSQL_PWD')
+                expect(args.some(a => String(a).includes('rootpass'))).to.be.false
+                expect(opts.env.MYSQL_PWD).to.equal('rootpass')
                 cb(null, '1\n')
             })
             const ds = loadDatabaseService(stubs)
@@ -368,6 +373,18 @@ describe('DatabaseService', function () {
                 c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1].includes('mariadb'))
             expect(dockerCall.args[1]).to.include('-D')
             expect(dockerCall.args[1]).to.include('xchain_node')
+        })
+
+        it('passes the password via MYSQL_PWD env, never in argv', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.resolves({ stdout: 'OK' })
+            const ds = loadDatabaseService(stubs)
+            await ds.checkIfDatabaseIsReady('root', 's3cret-pw')
+            const dockerCall = stubs.execFileAsync.getCalls().find(c =>
+                c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1].includes('mariadb'))
+            expect(dockerCall.args[1]).to.include('MYSQL_PWD')
+            expect(dockerCall.args[1].some(a => String(a).includes('s3cret-pw'))).to.be.false
+            expect(dockerCall.args[2].env.MYSQL_PWD).to.equal('s3cret-pw')
         })
     })
 
@@ -699,7 +716,7 @@ describe('DatabaseService', function () {
             // execFileAsync[0] = docker inspect (getDatabaseContainerId in checkIfDatabaseIsReady)
             // execFile is used for executeDockerMariaDbCommand (callback style)
             // dbCount = '0' → create DB + user + grant
-            stubs.execFile.callsFake((cmd, args, cb) => {
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
                 // Return '0' for COUNT queries, '' for DDL
                 const eArg = args[args.length - 1]
                 if (eArg && eArg.startsWith('SELECT COUNT')) {
@@ -720,7 +737,7 @@ describe('DatabaseService', function () {
 
         it('skips create when database already exists (dbCount != 0)', async function () {
             const stubs = makeStubs()
-            stubs.execFile.callsFake((cmd, args, cb) => {
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
                 const eArg = args[args.length - 1]
                 if (eArg && eArg.startsWith('SELECT COUNT(SCHEMA_NAME)')) {
                     cb(null, '1\n') // DB already exists
@@ -744,7 +761,7 @@ describe('DatabaseService', function () {
         it('grants MVH test permissions when module is xchain-hub', async function () {
             const stubs = makeStubs()
             const executedCommands = []
-            stubs.execFile.callsFake((cmd, args, cb) => {
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
                 executedCommands.push(args[args.length - 1])
                 const eArg = args[args.length - 1]
                 if (eArg && eArg.startsWith('SELECT COUNT')) {
@@ -766,7 +783,7 @@ describe('DatabaseService', function () {
 
         it('throws when docker exec fails', async function () {
             const stubs = makeStubs()
-            stubs.execFile.callsFake((cmd, args, cb) => {
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
                 cb(new Error('docker exec failed'))
             })
             const ds = loadDatabaseService(stubs)
@@ -906,7 +923,7 @@ describe('DatabaseService', function () {
         it('drops and recreates each database module', async function () {
             const stubs = makeStubs()
             const executed = []
-            stubs.execFile.callsFake((cmd, args, cb) => {
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
                 executed.push(args[args.length - 1])
                 cb(null, '')
             })
@@ -927,7 +944,7 @@ describe('DatabaseService', function () {
         it('iterates installed coins+networks and adds DB users', async function () {
             const stubs = makeStubs()
             stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
-            stubs.execFile.callsFake((cmd, args, cb) => {
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
                 const eArg = args[args.length - 1]
                 if (eArg && eArg.startsWith('SELECT COUNT')) {
                     cb(null, '1\n') // already exists
@@ -1252,7 +1269,7 @@ describe('DatabaseService', function () {
             const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
             process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'root-pass'
             try {
-                stubs.execFile.callsFake((cmd, args, cb) => cb(null, ''))
+                stubs.execFile.callsFake((cmd, args, opts, cb) => cb(null, ''))
                 const ds = loadDatabaseService(stubs)
                 const result = await ds.ensureXchainNodeAccess()
                 expect(stubs.saveCredentials.called).to.be.true

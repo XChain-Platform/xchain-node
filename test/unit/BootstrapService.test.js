@@ -1177,6 +1177,14 @@ describe('BootstrapService', function () {
             expect(result).to.be.true
             expect(stubs.dockerService.stopContainer.calledWith('svc-container-id')).to.be.true
             expect(stubs.dockerService.startContainer.calledWith('svc-container-id')).to.be.true
+
+            // The restore client must receive the root password via MYSQL_PWD env, never argv
+            const [spawnCmd, spawnArgs, spawnOpts] = stubs.spawn.firstCall.args
+            expect(spawnCmd).to.equal('docker')
+            expect(spawnArgs).to.include('mariadb')
+            expect(spawnArgs).to.include('MYSQL_PWD')
+            expect(spawnArgs.some(a => String(a).includes('rootpass'))).to.be.false
+            expect(spawnOpts.env.MYSQL_PWD).to.equal('rootpass')
         })
 
         it('works for XCHAIN_INDEXER (picks INDEXER_BOOTSTRAP_VOLUME)', async function () {
@@ -1663,6 +1671,14 @@ describe('BootstrapService', function () {
 
             const result = await promise
             expect(result).to.be.true
+
+            // The dump must receive the root password via MYSQL_PWD env, never argv
+            const [spawnCmd, spawnArgs, spawnOpts] = stubs.spawn.firstCall.args
+            expect(spawnCmd).to.equal('docker')
+            expect(spawnArgs).to.include('mariadb-dump')
+            expect(spawnArgs).to.include('MYSQL_PWD')
+            expect(spawnArgs.some(a => String(a).includes('rootpass'))).to.be.false
+            expect(spawnOpts.env.MYSQL_PWD).to.equal('rootpass')
         })
 
         it('throws when getDatabaseContainerId returns null', async function () {

@@ -32,6 +32,7 @@ const { getDefaultConfig, getModuleDatabaseName }    = require('./ConfigService'
 const { stopContainer, startContainer }               = require('./DockerService')
 const { getDatabaseContainerId, ensureDatabasePool }  = require('./DatabaseService')
 const { assertSafeArchiveMemberNames }                = require('../utils/helpers')
+const { dockerMariadbArgs, mariadbEnv }               = require('../utils/dockerMariadb')
 
 // ─── Private helpers ─────────────────────────────────────────────
 
@@ -367,7 +368,8 @@ async function makeBootstrapMariaDb(coin, network, module) {
     try {
         const sizeQuery = `SELECT SUM(DATA_LENGTH + INDEX_LENGTH) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}'`
         const { stdout } = await execFileAsync(
-            'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-BN', '-e', sizeQuery, 'information_schema']
+            'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', sizeQuery, 'information_schema']),
+            { env: mariadbEnv(rootPassword) }
         )
         totalBytes = parseInt(stdout.trim(), 10) || 0
     } catch {
@@ -382,7 +384,7 @@ async function makeBootstrapMariaDb(coin, network, module) {
     // Step 3: Stream mysqldump → gzip → dump.sql.gz
     const progress = startProgress(`Dumping ${dbName}...`, totalBytes)
     await new Promise((resolve, reject) => {
-        const dumpProc    = spawn('docker', ['exec', '-i', dbContainerId, 'mariadb-dump', '-u', 'root', `-p${rootPassword}`, '--single-transaction', '--routines', '--triggers', dbName])
+        const dumpProc    = spawn('docker', dockerMariadbArgs(dbContainerId, ['mariadb-dump', '-u', 'root', '--single-transaction', '--routines', '--triggers', dbName], { interactive: true }), { env: mariadbEnv(rootPassword) })
         const counter     = new PassThrough()
         const gzipStream  = zlib.createGzip()
         const writeStream = fs.createWriteStream(innerArchive)
@@ -636,7 +638,8 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
         // Step 4: Drop and recreate database
         console.log(`Recreating database ${dbName}...`)
         await execFileAsync(
-            'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-e', `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`]
+            'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-e', `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`]),
+            { env: mariadbEnv(rootPassword) }
         )
 
         // Step 5: Pipe decompressed SQL into mariadb with progress
@@ -648,7 +651,7 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
             const readStream  = fs.createReadStream(innerArchive)
             const counter     = new PassThrough()
             const gunzip      = zlib.createGunzip()
-            const mysqlProc   = spawn('docker', ['exec', '-i', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, dbName], { stdio: ['pipe', 'inherit', 'pipe'] })
+            const mysqlProc   = spawn('docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', dbName], { interactive: true }), { stdio: ['pipe', 'inherit', 'pipe'], env: mariadbEnv(rootPassword) })
 
             counter.on('data', chunk => progress.update(chunk.length))
             readStream.pipe(counter).pipe(gunzip).pipe(mysqlProc.stdin)
@@ -807,14 +810,16 @@ async function mariaDbModuleHasData(coin, network, module) {
         // Does the `blocks` table exist? (DB or table absent ⇒ fresh)
         const existsQuery = `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}' AND TABLE_NAME = 'blocks'`
         const { stdout: tblOut } = await execFileAsync(
-            'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-BN', '-e', existsQuery, 'information_schema']
+            'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', existsQuery, 'information_schema']),
+            { env: mariadbEnv(rootPassword) }
         )
         if (parseInt(tblOut.trim(), 10) === 0) return false
 
         // Table exists — does it hold any rows?
         const countQuery = `SELECT COUNT(*) FROM \`${dbName}\`.blocks`
         const { stdout: cntOut } = await execFileAsync(
-            'docker', ['exec', dbContainerId, 'mariadb', '-u', 'root', `-p${rootPassword}`, '-BN', '-e', countQuery]
+            'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', countQuery]),
+            { env: mariadbEnv(rootPassword) }
         )
         return parseInt(cntOut.trim(), 10) > 0
     } catch {
