@@ -51,16 +51,35 @@ async function getCryptoNode(coin, network, version) {
         const downloadUrl = "https://bitcoincore.org/bin/bitcoin-core-" + version + "/bitcoin-" + version + "-" + arch + "-linux-gnu.tar.gz"
 
         await new Promise((resolve, reject) => {
-            https.get(downloadUrl, (response) => {
+            const request = https.get(downloadUrl, (response) => {
+                // Fail closed on a non-success response (404 / redirect to an
+                // error page / etc.) instead of piping an HTML error body into
+                // the tarball and only discovering it later.
+                if (response.statusCode !== 200) {
+                    response.resume() // drain
+                    reject(new Error(`Bitcoin Core download failed: HTTP ${response.statusCode} from ${downloadUrl}`))
+                    return
+                }
+
                 response.pipe(bitcoinNodeFile)
 
-                bitcoinNodeFile.on("error", () => {
+                bitcoinNodeFile.on("error", (err) => {
                     console.log("An error happened while trying to download the bitcoin node")
+                    reject(err)
                 })
 
                 bitcoinNodeFile.on("finish", async () => {
                     bitcoinNodeFile.close()
                     try {
+                        // Supply-chain guard: bitcoind is a prebuilt binary fetched
+                        // straight from bitcoincore.org over the wire. Verify the
+                        // downloaded tarball against the project's published
+                        // SHA-256 (github_hashes.json, sourced from the GPG-signed
+                        // SHA256SUMS) BEFORE decompressing, so a tampered or
+                        // truncated download can never reach the build/run path.
+                        // Fails closed: unknown version/arch or any mismatch throws.
+                        await gitHubDownloader.verifyFileHash(filePath, 'bitcoin/bitcoin', 'v' + version, arch)
+
                         console.log("Decompressing bitcoin node files...")
                         await decompressTarGz(filePath)
 
@@ -75,11 +94,21 @@ async function getCryptoNode(coin, network, version) {
                         fs.renameSync(destination + "/bitcoin-" + version, destination + "/bitcoin")
                         fs.writeFileSync(destination + "/bitcoin/" + NODE_VERSION_FILE_NAME, version)
                     } catch (err) {
+                        // Remove the unverified/failed tarball so a later retry
+                        // re-downloads cleanly instead of trusting a cached bad file.
+                        try { fs.rmSync(filePath, { force: true }) } catch { /* best-effort */ }
                         reject(err)
                         return
                     }
                     resolve(true)
                 })
+            })
+
+            // Surface transport-level failures (DNS, connection reset, TLS) as a
+            // rejection instead of leaving the promise to hang forever.
+            request.on("error", (err) => {
+                console.log("An error happened while trying to download the bitcoin node")
+                reject(err)
             })
         })
     } else if (coin === Coin.DOGECOIN) {

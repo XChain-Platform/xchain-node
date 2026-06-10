@@ -1,6 +1,9 @@
 {
   "bitcoin/bitcoin": {
-    "v28.1": "07f77afd326639145b9ba9562912b2ad2ccec47b8a305bd075b4f4cb127b7ed7"
+    "v28.1": {
+      "x86_64": "07f77afd326639145b9ba9562912b2ad2ccec47b8a305bd075b4f4cb127b7ed7",
+      "aarch64": "6ddb6990690bd4c9a9f4319ed6f6e9c995c85ce5530ee9f120e80ce09e090c44"
+    }
   },
   "dogecoin/dogecoin": {
     "v1.14.9": {

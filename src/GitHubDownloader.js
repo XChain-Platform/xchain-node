@@ -299,6 +299,44 @@ class GitHubDownloader {
   }
 
   /**
+   * Verifies a downloaded FILE (e.g. a prebuilt release tarball) against the
+   * registered SHA-256, before it is decompressed or executed. This is the
+   * counterpart to verifyRepositoryHash (which hashes an extracted source
+   * directory) for binaries fetched as a single archive — notably the
+   * Bitcoin Core tarball from bitcoincore.org, whose registered hashes are
+   * the project's own published+GPG-signed SHA256SUMS values. Fails closed:
+   * throws when no hash is registered for the (repo, version, arch) tuple.
+   *
+   * @param {string} filePath  the downloaded archive on disk
+   * @param {string} repoKey   e.g. 'bitcoin/bitcoin'
+   * @param {string} version   e.g. 'v28.1'
+   * @param {string|null} arch defaults to the host arch
+   */
+  async verifyFileHash(filePath, repoKey, version, arch = null) {
+    const resolvedArch = arch ?? getHostArch();
+    const expectedHash = this._getHashForArch(repoKey, version, resolvedArch);
+    if (!expectedHash) {
+      throw new Error(`No SHA-256 hash registered for ${repoKey}@${version} on ${resolvedArch}`);
+    }
+    const actualHash = await this.calculateFileHash(filePath);
+
+    if (actualHash !== expectedHash) {
+      throw new Error(`Hash verification failed for ${repoKey}@${version} (${resolvedArch})\nExpected: ${expectedHash}\nActual: ${actualHash}`);
+    }
+
+    console.log(`✅ Tarball hash verified for ${repoKey}@${version} (${resolvedArch})`);
+  }
+
+  /**
+   * Calculates the SHA-256 hash of a single file's bytes.
+   */
+  async calculateFileHash(filePath) {
+    const hash = crypto.createHash('sha256');
+    hash.update(fs.readFileSync(filePath));
+    return hash.digest('hex');
+  }
+
+  /**
    * Calculates SHA-256 hash for directory contents
    */
   async calculateDirectoryHash(dirPath) {

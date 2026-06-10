@@ -36,7 +36,8 @@ function makeNodeServiceStubs(overrides = {}) {
         isReady:               sinon.stub().returns(true)
     }
     const gitHubDownloaderStub = {
-        downloadRepoVersion: sinon.stub().resolves(true)
+        downloadRepoVersion: sinon.stub().resolves(true),
+        verifyFileHash:      sinon.stub().resolves()
     }
     const decompressTarGzStub = sinon.stub().resolves()
     const statusChangedStub   = sinon.stub().resolves()
@@ -132,7 +133,7 @@ function loadNodeService(stubs) {
 // ---------------------------------------------------------------------------
 // Helper: build a fake https.get that succeeds with pipe-able response
 // ---------------------------------------------------------------------------
-function makeFakeHttps(stubs, { decompressErr = null } = {}) {
+function makeFakeHttps(stubs, { decompressErr = null, statusCode = 200 } = {}) {
     const writableEmitter = new EventEmitter()
     writableEmitter.close = sinon.stub()
     stubs.fs.createWriteStream.returns(writableEmitter)
@@ -141,6 +142,8 @@ function makeFakeHttps(stubs, { decompressErr = null } = {}) {
     const httpsGetStub = sinon.stub().callsFake((url, cb) => {
         const responseEmitter = new EventEmitter()
         responseEmitter.pipe = sinon.stub()
+        responseEmitter.resume = sinon.stub()
+        responseEmitter.statusCode = statusCode
         cb(responseEmitter)
         // Fire finish after the current tick so the pipe+handlers are set up
         setImmediate(() => {
@@ -228,6 +231,70 @@ describe('NodeService — getCryptoNode()', function () {
             expect.fail('Should have thrown')
         } catch (err) {
             expect(err.message).to.equal('decompress failed')
+        } finally {
+            Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
+        }
+    })
+
+    it('verifies the downloaded bitcoin tarball before decompressing', async function () {
+        const stubs = makeNodeServiceStubs()
+        stubs.https = makeFakeHttps(stubs)
+
+        const origArch = process.arch
+        Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
+
+        const ns = loadNodeService(stubs)
+        await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+        Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
+
+        // Hash verification ran for the right (repo, version, arch) BEFORE decompress.
+        expect(stubs.gitHubDownloader.verifyFileHash.calledOnce).to.be.true
+        const [, repoKey, version, arch] = stubs.gitHubDownloader.verifyFileHash.firstCall.args
+        expect(repoKey).to.equal('bitcoin/bitcoin')
+        expect(version).to.equal('v28.1')
+        expect(arch).to.equal('x86_64')
+        expect(stubs.gitHubDownloader.verifyFileHash.calledBefore(stubs.decompressTarGz)).to.be.true
+    })
+
+    it('rejects (and never decompresses) when the bitcoin tarball hash mismatches', async function () {
+        const stubs = makeNodeServiceStubs()
+        stubs.https = makeFakeHttps(stubs)
+        stubs.gitHubDownloader.verifyFileHash.rejects(new Error('Hash verification failed for bitcoin/bitcoin@v28.1'))
+
+        const origArch = process.arch
+        Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
+
+        const ns = loadNodeService(stubs)
+        try {
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+            expect.fail('Should have thrown')
+        } catch (err) {
+            expect(err.message).to.match(/Hash verification failed/)
+            // Fail closed: the tampered tarball is never extracted, and the bad
+            // file is cleaned up so a retry re-downloads.
+            expect(stubs.decompressTarGz.called).to.be.false
+            expect(stubs.fs.rmSync.called).to.be.true
+        } finally {
+            Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
+        }
+    })
+
+    it('rejects on a non-200 download response', async function () {
+        const stubs = makeNodeServiceStubs()
+        stubs.https = makeFakeHttps(stubs, { statusCode: 404 })
+
+        const origArch = process.arch
+        Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
+
+        const ns = loadNodeService(stubs)
+        try {
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+            expect.fail('Should have thrown')
+        } catch (err) {
+            expect(err.message).to.match(/HTTP 404/)
+            expect(stubs.gitHubDownloader.verifyFileHash.called).to.be.false
+            expect(stubs.decompressTarGz.called).to.be.false
         } finally {
             Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
         }
