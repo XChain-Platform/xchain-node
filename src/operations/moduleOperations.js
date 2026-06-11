@@ -298,11 +298,28 @@ async function resetModules(service, coin, network) {
     }
 
     console.log(`Restarting ${coin} ${network} services...`)
+    // Track restart failures instead of swallowing them: a silent skip here
+    // left a wiped stack DOWN (node never restarted, every dependent service
+    // crash-looped) while `reset` still reported success. "Not installed"
+    // (registry miss) stays a legitimate skip; a failed docker start gets one
+    // retry, then is reported loudly at the end.
+    const startFailures = []
     for (const module of modulesToStop) {
+        let containerId = null
         try {
-            const containerId = await db.getModuleContainer(module, coin, network)
+            containerId = await db.getModuleContainer(module, coin, network)
+        } catch { continue /* not installed, skip */ }
+        try {
             await startContainer(containerId)
-        } catch { /* not installed, skip */ }
+        } catch (firstErr) {
+            console.warn(`Failed to start ${module} (${firstErr && firstErr.message}); retrying in 3s...`)
+            await new Promise((r) => setTimeout(r, 3000))
+            try {
+                await startContainer(containerId)
+            } catch (retryErr) {
+                startFailures.push({ module, error: (retryErr && retryErr.message) || String(retryErr) })
+            }
+        }
     }
 
     // Workaround for a known race: the decoder + indexer's initial pool
@@ -327,6 +344,11 @@ async function resetModules(service, coin, network) {
     }
 
     await statusChanged()
+
+    if (startFailures.length > 0) {
+        const detail = startFailures.map((f) => `${f.module}: ${f.error}`).join('; ')
+        throw new Error(`reset completed but ${startFailures.length} service(s) failed to restart — ${detail}. Start them manually (docker start) or re-run reset.`)
+    }
     return true
 }
 

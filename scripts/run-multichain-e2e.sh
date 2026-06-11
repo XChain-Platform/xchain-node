@@ -18,13 +18,12 @@
 #   - Native ext4 data dir (set XCHAIN_NODE_DATA_DIR) — the Parallels share is not safe
 #     for bitcoind/litecoind/dogecoind data.
 #
-# NOTE on exit codes: `xchain-node e2etest` currently prints
-#   "E2E tests finished with exit code N"
-# but the CLI process itself always exits 0 (see src/cli.js e2etest action —
-# `process.exit(0)`). So this runner parses that printed line to determine pass/fail
-# rather than trusting $?. RECOMMENDATION: change that CLI line to
-# `process.exit(exitCode)` so `xchain-node e2etest` propagates failure natively; this
-# runner will then also honor $? as a fallback.
+# NOTE on exit codes: `xchain-node e2etest` propagates the suite's real exit
+# code (src/cli.js e2etest action calls `process.exit(exitCode)`), so $? is
+# authoritative. The printed "E2E tests finished with exit code N" line is
+# still parsed as a belt-and-braces fallback for an older xchain-node on PATH
+# (whose CLI always exited 0). Note $? here relies on `set -o pipefail`
+# applying inside the command substitution — the pipeline ends in `tee`.
 #
 # Usage:
 #   scripts/run-multichain-e2e.sh                 # all three coins
@@ -46,15 +45,18 @@ for coin in $COINS_LIST; do
     echo ">> Running e2e suite for: ${coin} (regtest)"
     echo "==================================================================="
 
-    # Capture combined output so we can parse the reported exit code (the CLI
-    # always exits 0 — see note above). tee keeps live output visible.
+    # Capture combined output; tee keeps live output visible. With pipefail,
+    # $? of the substitution is e2etest's exit code, not tee's.
     out="$(xchain-node e2etest "${coin}" 2>&1 | tee /dev/tty)"
     cli_status=$?
 
-    # Parse "E2E tests finished with exit code N"; fall back to the CLI's own $?.
-    reported="$(printf '%s\n' "$out" | sed -n 's/.*finished with exit code \([0-9][0-9]*\).*/\1/p' | tail -1)"
-    if [ -z "$reported" ]; then
-        reported="$cli_status"
+    # $? is authoritative (the CLI propagates the suite's exit code). The
+    # printed "finished with exit code N" line is a fallback for an older CLI
+    # on PATH that always exited 0: trust a nonzero parse over a zero status.
+    reported="$cli_status"
+    parsed="$(printf '%s\n' "$out" | sed -n 's/.*finished with exit code \([0-9][0-9]*\).*/\1/p' | tail -1)"
+    if [ "$cli_status" = "0" ] && [ -n "$parsed" ] && [ "$parsed" != "0" ]; then
+        reported="$parsed"
     fi
 
     RESULT[$coin]="$reported"
