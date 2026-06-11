@@ -491,6 +491,22 @@ async function setDatabaseParameters() {
 }
 
 async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]) {
+    // External (host-native) MariaDB: there is no database container to exec
+    // into — `docker exec ... null` failed here and aborted the reset mid-way
+    // (data wiped, DBs stale, services left stopped). Use the driver-based
+    // helper instead. DROP and CREATE go as separate statements: unlike the
+    // mariadb CLI, the driver rejects multi-statement strings.
+    if (EXTERNAL_DB) {
+        const cfg = await getExternalDbConfig()
+        for (const module of modules) {
+            const dbName = getModuleDatabaseName(module, coin, network)
+            await executeNativeMariaDbCommand(cfg, `DROP DATABASE IF EXISTS ${dbName}`)
+            await executeNativeMariaDbCommand(cfg, `CREATE DATABASE ${dbName}`)
+            console.log(`Database ${dbName} reset!`)
+        }
+        return
+    }
+
     const mariadbRootPassword = await askMariadbRootPassword(coin, network)
     const mariadbContainerId  = await getDatabaseContainerId()
 
