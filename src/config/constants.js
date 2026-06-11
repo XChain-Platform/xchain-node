@@ -106,7 +106,10 @@ const modulesUrls = {
     "xchain-explorer":      "git@github.com:XChain-Platform/xchain-explorer.git",
     "xchain-e2e-test":      "git@github.com:XChain-Platform/xchain-e2e-test.git",
     "xchain-sync":          "git@github.com:XChain-Platform/xchain-sync.git",
-    "xchain-vm":            "git@github.com:XChain-Platform/xchain-vm.git"
+    "xchain-vm":            "git@github.com:XChain-Platform/xchain-vm.git",
+    // Not an installable service — listed so LIBRARY_BUNDLES can stage it
+    // into the xchain-e2e-test build context (test:sdk suites).
+    "xchain-sdk":           "git@github.com:XChain-Platform/xchain-sdk.git"
 }
 
 // Optional env-var override for local-source workflows. Lets you point any
@@ -146,7 +149,9 @@ const LIBRARY_BUNDLES = {
     // instances against the regtest stack (multiHubAttestation,
     // llmAttestation). xchain-hub needs to ride into the build context so
     // those tests can `require` its source from inside the dockerized image.
-    "xchain-e2e-test": ["xchain-hub"]
+    // xchain-sdk rides along the same way for the test:sdk suites
+    // (test/sdk/sdkHelper.js loadSDK resolves the file: dep first).
+    "xchain-e2e-test": ["xchain-hub", "xchain-sdk"]
 }
 
 // --- Directory paths ---
