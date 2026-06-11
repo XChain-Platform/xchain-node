@@ -25,7 +25,7 @@ const { db }                 = require('../state')
 const { getDockerContainerImageName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases } = require('../services/DatabaseService')
-const { cloneGit, getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
+const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { statusChanged } = require('../services/StatusService')
 
 async function installModules(servicesList, branch = null) {
@@ -56,12 +56,18 @@ async function updateModules(servicesList, branch = null) {
                     if (!moduleBranch) {
                         try { moduleBranch = await getModuleBranch(nextModule) } catch { /* use default */ }
                     }
-                    await cloneGit(nextModule, true, false, moduleBranch)
                     // remoteUpdate=true so installModule actually rebuilds the
                     // container — without it, the `if (!containerNodeVersion ||
                     // remoteUpdate)` guard short-circuits for any already-installed
                     // service and `update` becomes a silent no-op.
-                    await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId)
+                    //
+                    // moduleBranch MUST be threaded through: installModule re-clones the
+                    // module on the remoteUpdate path (cloneGit with this `branch`), so a
+                    // null branch here re-clones the default branch and clobbers the branch
+                    // the operator asked for — the cause of `update <svc> <chain> <net>
+                    // <branch>` silently deploying master. (installModule does the clone, so
+                    // no separate cloneGit is needed here.)
+                    await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId, false, moduleBranch)
                 }
             }
         }

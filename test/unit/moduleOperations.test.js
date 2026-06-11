@@ -177,18 +177,18 @@ describe('moduleOperations', function () {
             expect(stubs.db.getModuleContainer.calledWith('xchain-encoder', 'bitcoin', 'mainnet')).to.be.true
         })
 
-        it('calls cloneGit with rewrite=true for non-node modules', async function () {
+        it('rebuilds non-node modules via installModule (which re-clones internally)', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(stubs.cloneGit.calledWith('xchain-encoder', true, false)).to.be.true
+            expect(stubs.installModule.calledWith('xchain-encoder', 'bitcoin', 'mainnet', true)).to.be.true
         })
 
-        it('does not call cloneGit for node module', async function () {
+        it('handles the node module via installModule (built from releases, not git-cloned)', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
-            expect(stubs.cloneGit.called).to.be.false
+            expect(stubs.installModule.calledWith('node', 'bitcoin', 'mainnet', true)).to.be.true
         })
 
         it('passes container ID to installModule for replacement', async function () {
@@ -387,34 +387,41 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             const result = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
             expect(result).to.be.true
-            expect(stubs.cloneGit.called).to.be.false
+            expect(stubs.installModule.called).to.be.false
         })
 
-        it('uses provided branch if given', async function () {
+        // The branch must reach installModule (7th arg) — installModule re-clones on the
+        // remoteUpdate path, so a null branch there clobbers the requested branch with the
+        // default. Regression for `update <svc> <chain> <net> <branch>` deploying master.
+        it('threads the provided branch through to installModule', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'feature/test')
-            expect(stubs.cloneGit.calledWith('xchain-encoder', true, false, 'feature/test')).to.be.true
+            expect(stubs.installModule.calledWith(
+                'xchain-encoder', 'bitcoin', 'mainnet', true, 'container-id-123', false, 'feature/test'
+            )).to.be.true
         })
 
-        it('falls back to getModuleBranch when no branch specified', async function () {
+        it('falls back to getModuleBranch (current branch) when no branch specified', async function () {
             const stubs = makeStubs()
             stubs.getModuleBranch.resolves('feature/existing')
             const ops = loadOperations(stubs)
             await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            // getModuleBranch was called and its result used
             expect(stubs.getModuleBranch.calledOnce).to.be.true
-            expect(stubs.cloneGit.calledWith('xchain-encoder', true, false, 'feature/existing')).to.be.true
+            expect(stubs.installModule.calledWith(
+                'xchain-encoder', 'bitcoin', 'mainnet', true, 'container-id-123', false, 'feature/existing'
+            )).to.be.true
         })
 
-        it('proceeds if getModuleBranch throws', async function () {
+        it('proceeds with null branch if getModuleBranch throws', async function () {
             const stubs = makeStubs()
             stubs.getModuleBranch.rejects(new Error('not a git repo'))
             const ops = loadOperations(stubs)
             const result = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
             expect(result).to.be.true
-            // cloneGit called with null branch (fallback)
-            expect(stubs.cloneGit.calledWith('xchain-encoder', true, false, null)).to.be.true
+            expect(stubs.installModule.calledWith(
+                'xchain-encoder', 'bitcoin', 'mainnet', true, 'container-id-123', false, null
+            )).to.be.true
         })
     })
 
