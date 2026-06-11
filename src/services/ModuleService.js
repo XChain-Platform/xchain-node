@@ -200,6 +200,14 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                                 volumeArgs.push('-v', `${capsHost}:${CAPS_CONTAINER_PATH}:ro`)
                             }
                         }
+                        // Operator signer for the on-chain DOGE publishers (PRICE v0 /
+                        // ANCHOR). The directory carries the operator's signer.js plus
+                        // its own node_modules and key file, so the whole directory is
+                        // mounted read-only; ConfigService sets HUB_SIGNER_MODULE to the
+                        // matching in-container path. No-op when unconfigured.
+                        if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR && fs.existsSync(process.env.XCHAIN_NODE_HUB_SIGNER_DIR)) {
+                            volumeArgs.push('-v', `${process.env.XCHAIN_NODE_HUB_SIGNER_DIR}:/XChainHub/operator-signer:ro`)
+                        }
                         break
                     case EXPLORER_MODULE_NAME:
                         coin = ""

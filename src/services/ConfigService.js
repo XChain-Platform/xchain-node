@@ -288,6 +288,40 @@ async function getDefaultConfig(module, coin, network) {
         // table, so co-located standalone/validator installs are unaffected.
         defaultValues["BTC_INDEXER_API_URL"]      = process.env.BTC_INDEXER_API_URL || ""
 
+        // State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a
+        // shared service (no per coin/network config file), so — like the telemetry
+        // salt and BTC_INDEXER_API_URL above — the host env is the injection point.
+        // Per-coin <COIN>_INDEXER_URLs feed getblockhashes (checkpoint state reads);
+        // DOGE_* configures the on-chain ANCHOR/price publisher signer pipeline;
+        // XDEX_* are the shared single-validator/regtest seams. Only set values are
+        // injected, so unset host env leaves the hub's own defaults untouched.
+        const hubPassthroughVars = [
+            "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL",
+            "BTC_INDEXER_API_KEY", "LTC_INDEXER_API_KEY", "DOGE_INDEXER_API_KEY",
+            "CHECKPOINT_ENABLED", "CHECKPOINT_INTERVAL_BLOCKS", "CHECKPOINT_CONFIRMATIONS",
+            "CHECKPOINT_POLL_MS", "CHECKPOINT_ROUND_TIMEOUT_MS", "CHECKPOINT_CHAINS",
+            "ANCHOR_ENABLED", "ANCHOR_INTERVAL_MS", "ANCHOR_MATCH_BATCH_SIZE",
+            "ANCHOR_MAX_BATCH", "ANCHOR_CHUNK_MAX_BYTES", "ANCHOR_ROUND_TIMEOUT_MS",
+            "ANCHOR_ELECTION_TOLERANCE_BLOCKS",
+            "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
+            "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
+            "XDEX_SEED_LOCAL_VALIDATOR", "XDEX_SNAPSHOT_BLOCK"
+        ]
+        for (const varName of hubPassthroughVars) {
+            if (process.env[varName] !== undefined && process.env[varName] !== "") {
+                defaultValues[varName] = process.env[varName]
+            }
+        }
+
+        // Operator signer for the on-chain DOGE publishers: when the host sets
+        // XCHAIN_NODE_HUB_SIGNER_DIR, ModuleService mounts that directory
+        // read-only at /XChainHub/operator-signer and the hub loads
+        // <dir>/signer.js via HUB_SIGNER_MODULE (see xchain-hub
+        // examples/doge-signer.example.js for the module contract).
+        if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR) {
+            defaultValues["HUB_SIGNER_MODULE"] = "/XChainHub/operator-signer/signer.js"
+        }
+
         // Validator mode: when `xchain-node validator init` has been run, inject the
         // P2P / signing-key / capability-config env so the hub starts as a full
         // validator. Returns {} (no change) for a standalone node, so the standalone
