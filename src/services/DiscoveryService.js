@@ -39,10 +39,48 @@ function logIfNotSilent(silent, message) {
     if (!silent) console.log(message)
 }
 
-async function scanAndRegisterModules({ silent = false } = {}) {
-    const validCoins    = Object.values(Coin)
-    const validNetworks = Object.values(Network)
+// Resolve a docker container to its registry identity { module, coin, network }
+// (coin/network are '' for shared modules), or null for non-xchain containers.
+//
+// Identity comes from the CONTAINER NAME — the stable key the CLI itself
+// assigns at creation (and what the file header above promises). The image
+// tag is NOT reliable: rebuilding a module's image while the old container is
+// still running steals the tag, docker then reports that container's image as
+// a bare ID, and an image-keyed scan goes blind to a live, healthy container —
+// worse, the orphan purge below then DELETES its registry row, after which
+// update/start/stop silently no-op for it (node-host-b litecoin-mainnet
+// xchain-indexer incident, 2026-06-11). The image name remains a fallback for
+// containers that were renamed externally.
+function classifyContainer(container) {
+    const name  = String((Array.isArray(container.Names) ? container.Names[0] : container.Names) || '').replace(/^\//, '')
+    const image = String(container.Image || '')
+    const identity = name.startsWith(NODE_PREFIX + SEP) ? name : image
+    if (!identity.startsWith(NODE_PREFIX + SEP)) return null
 
+    const rest = identity.substr(NODE_PREFIX.length + SEP.length)
+    if (SHARED_MODULES.includes(rest)) return { module: rest, coin: "", network: "" }
+
+    const parts = rest.split(SEP)
+    if (parts.length < 3) return null
+
+    const coinStr    = parts[0]
+    const networkStr = parts[1]
+    const moduleStr  = parts.slice(2).join(SEP)
+
+    if (!Object.values(Coin).includes(coinStr) || !Object.values(Network).includes(networkStr)) return null
+
+    let module = stringToXChainService(moduleStr)
+    if (module != null) {
+        module = XChainService[module]
+    } else if (moduleStr === NODE_MODULE_NAME) {
+        module = NODE_MODULE_NAME
+    } else {
+        return null
+    }
+    return { module, coin: coinStr, network: networkStr }
+}
+
+async function scanAndRegisterModules({ silent = false } = {}) {
     const containers = await new Promise((resolve, reject) => {
         execFile('docker', ['ps', '-a', '--no-trunc', '--format', 'json'], (error, stdout) => {
             if (error) return reject(error)
@@ -72,57 +110,24 @@ async function scanAndRegisterModules({ silent = false } = {}) {
     })
 
     for (const nextContainer of containers) {
-        const imageName = nextContainer.Image
-        if (!imageName.startsWith(NODE_PREFIX + SEP)) continue
+        const identity = classifyContainer(nextContainer)
+        if (identity == null) continue
+        const { module, coin, network } = identity
+        const label = (coin || network) ? (coin + SEP + network + SEP + module) : module
 
-        const rest = imageName.substr(NODE_PREFIX.length + SEP.length)
-
-        if (SHARED_MODULES.includes(rest)) {
-            seen.add(keyOf(rest, "", ""))
-            const existing = await db.getModuleContainer(rest, "", "")
-            if (existing == null) {
-                await db.insertModuleContainer(rest, "", "", nextContainer.ID)
-                logIfNotSilent(silent, "Added " + rest + " (" + nextContainer.ID.slice(0,12) + ")")
-                added++
-            } else if (existing !== nextContainer.ID) {
-                // Stale registry — running container has a different ID than recorded
-                // (typically a rebuild that bypassed the CLI). insertModuleContainer
-                // is an UPSERT, so this fixes the row in-place.
-                await db.insertModuleContainer(rest, "", "", nextContainer.ID)
-                logIfNotSilent(silent, "Reconciled " + rest + " (was " + existing.slice(0,12) + ", now " + nextContainer.ID.slice(0,12) + ")")
-                reconciled++
-            }
-            continue
-        }
-
-        const parts = rest.split(SEP)
-        if (parts.length < 3) continue
-
-        const coinStr    = parts[0]
-        const networkStr = parts[1]
-        const moduleStr  = parts.slice(2).join(SEP)
-
-        if (!validCoins.includes(coinStr) || !validNetworks.includes(networkStr)) continue
-
-        let module = stringToXChainService(moduleStr)
-        if (module != null) {
-            module = XChainService[module]
-        } else if (moduleStr === NODE_MODULE_NAME) {
-            module = NODE_MODULE_NAME
-        }
-
-        if (module != null) {
-            seen.add(keyOf(module, coinStr, networkStr))
-            const existing = await db.getModuleContainer(module, coinStr, networkStr)
-            if (existing == null) {
-                await db.insertModuleContainer(module, coinStr, networkStr, nextContainer.ID)
-                logIfNotSilent(silent, "Added " + coinStr + SEP + networkStr + SEP + module + " (" + nextContainer.ID.slice(0,12) + ")")
-                added++
-            } else if (existing !== nextContainer.ID) {
-                await db.insertModuleContainer(module, coinStr, networkStr, nextContainer.ID)
-                logIfNotSilent(silent, "Reconciled " + coinStr + SEP + networkStr + SEP + module + " (was " + existing.slice(0,12) + ", now " + nextContainer.ID.slice(0,12) + ")")
-                reconciled++
-            }
+        seen.add(keyOf(module, coin, network))
+        const existing = await db.getModuleContainer(module, coin, network)
+        if (existing == null) {
+            await db.insertModuleContainer(module, coin, network, nextContainer.ID)
+            logIfNotSilent(silent, "Added " + label + " (" + nextContainer.ID.slice(0,12) + ")")
+            added++
+        } else if (existing !== nextContainer.ID) {
+            // Stale registry — running container has a different ID than recorded
+            // (typically a rebuild that bypassed the CLI). insertModuleContainer
+            // is an UPSERT, so this fixes the row in-place.
+            await db.insertModuleContainer(module, coin, network, nextContainer.ID)
+            logIfNotSilent(silent, "Reconciled " + label + " (was " + existing.slice(0,12) + ", now " + nextContainer.ID.slice(0,12) + ")")
+            reconciled++
         }
     }
 
@@ -146,5 +151,6 @@ async function scanAndRegisterModules({ silent = false } = {}) {
 }
 
 module.exports = {
-    scanAndRegisterModules
+    scanAndRegisterModules,
+    classifyContainer
 }
