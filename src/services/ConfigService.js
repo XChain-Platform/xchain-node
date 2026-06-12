@@ -302,6 +302,10 @@ async function getDefaultConfig(module, coin, network) {
             "CHECKPOINT_POLL_MS", "CHECKPOINT_ROUND_TIMEOUT_MS", "CHECKPOINT_CHAINS",
             "ANCHOR_ENABLED", "ANCHOR_INTERVAL_MS", "ANCHOR_MATCH_BATCH_SIZE",
             "ANCHOR_MAX_BATCH", "ANCHOR_CHUNK_MAX_BYTES", "ANCHOR_ROUND_TIMEOUT_MS",
+            // ANCHOR_CHUNK_RETRY_MS must outlast the utxo-tracker's mempool poll
+            // (60s on mainnet) or back-to-back same-wallet anchor broadcasts
+            // exhaust their retries on a stale UTXO view (txn-mempool-conflict).
+            "ANCHOR_CHUNK_RETRY_MS",
             "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
             "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
             "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
