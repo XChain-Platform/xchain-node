@@ -38,7 +38,10 @@ function makeStubs() {
         getStatus: sinon.stub().resolves({}),
         killContainer: sinon.stub().resolves(true),
         removeContainer: sinon.stub().resolves(true),
-        getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } })
+        getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } }),
+        // No published host ports by default → buildAndUp's pre-flight conflict
+        // check is a no-op. Conflict tests override this with a populated Map.
+        getPublishedHostPorts: sinon.stub().resolves(new Map())
     }
 }
 
@@ -101,7 +104,8 @@ function loadModuleService(stubs, constantsOverride) {
         './DockerService': {
             killContainer: stubs.killContainer,
             removeContainer: stubs.removeContainer,
-            getStatusFromContainer: stubs.getStatusFromContainer
+            getStatusFromContainer: stubs.getStatusFromContainer,
+            getPublishedHostPorts: stubs.getPublishedHostPorts
         },
         './DatabaseService': {
             setDatabaseParameters: sinon.stub().resolves()
@@ -1098,7 +1102,8 @@ describe('ModuleService', function () {
                 './DockerService': {
                     killContainer: stubs.killContainer,
                     removeContainer: stubs.removeContainer,
-                    getStatusFromContainer: stubs.getStatusFromContainer
+                    getStatusFromContainer: stubs.getStatusFromContainer,
+                    getPublishedHostPorts: stubs.getPublishedHostPorts
                 },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves() },
                 './ValidatorService': {
@@ -1936,6 +1941,73 @@ describe('ModuleService', function () {
             })
             const branch = await ms2.getModuleBranch('xchain-encoder')
             expect(branch).to.equal('feature/test')
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // assertNoHostPortConflicts — multi-stack host-port collision guard
+    // -------------------------------------------------------------------
+
+    describe('assertNoHostPortConflicts()', function () {
+
+        it('resolves when no host ports are requested', async function () {
+            const ms = loadModuleService(makeStubs())
+            await ms.assertNoHostPortConflicts([], 'self')
+        })
+
+        it('resolves when requested ports are free on the host', async function () {
+            const stubs = makeStubs()
+            stubs.getPublishedHostPorts = sinon.stub().resolves(new Map([['9999', new Set(['some-other'])]]))
+            const ms = loadModuleService(stubs)
+            await ms.assertNoHostPortConflicts(['-p', '80:8080', '-p', '443:8443'], 'self')
+        })
+
+        it('throws naming the conflicting container when a host port is taken', async function () {
+            const stubs = makeStubs()
+            stubs.getPublishedHostPorts = sinon.stub().resolves(new Map([['80', new Set(['xchain-node-explorer'])]]))
+            const ms = loadModuleService(stubs)
+            let threw = null
+            try {
+                await ms.assertNoHostPortConflicts(['-p', '80:8080'], 'newprefix-explorer')
+            } catch (err) { threw = err }
+            expect(threw).to.be.an.instanceOf(Error)
+            expect(threw.message).to.include('host port 80')
+            expect(threw.message).to.include('xchain-node-explorer')
+        })
+
+        it('does NOT flag the container being re-created (selfName excluded)', async function () {
+            const stubs = makeStubs()
+            stubs.getPublishedHostPorts = sinon.stub().resolves(new Map([['80', new Set(['xchain-node-explorer'])]]))
+            const ms = loadModuleService(stubs)
+            await ms.assertNoHostPortConflicts(['-p', '80:8080'], 'xchain-node-explorer')
+        })
+
+        it('parses IP-scoped publish specs (IP:HOST:CONTAINER)', async function () {
+            const stubs = makeStubs()
+            stubs.getPublishedHostPorts = sinon.stub().resolves(new Map([['13306', new Set(['xchain-node-database'])]]))
+            const ms = loadModuleService(stubs)
+            let threw = null
+            try {
+                await ms.assertNoHostPortConflicts(['-p', '127.0.0.1:13306:3306'], 'self')
+            } catch (err) { threw = err }
+            expect(threw).to.be.an.instanceOf(Error)
+            expect(threw.message).to.include('13306')
+        })
+
+        it('reports every conflicting port, not just the first', async function () {
+            const stubs = makeStubs()
+            stubs.getPublishedHostPorts = sinon.stub().resolves(new Map([
+                ['80',  new Set(['stackA-explorer'])],
+                ['443', new Set(['stackA-explorer'])]
+            ]))
+            const ms = loadModuleService(stubs)
+            let threw = null
+            try {
+                await ms.assertNoHostPortConflicts(['-p', '80:8080', '-p', '443:8443'], 'stackB-explorer')
+            } catch (err) { threw = err }
+            expect(threw).to.be.an.instanceOf(Error)
+            expect(threw.message).to.include('host port 80')
+            expect(threw.message).to.include('host port 443')
         })
     })
 })

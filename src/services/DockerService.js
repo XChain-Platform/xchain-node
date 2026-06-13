@@ -125,6 +125,46 @@ async function getAllContainerFromModule(module, coin, network) {
     })
 }
 
+// Map every host port currently published by a RUNNING container to the
+// name(s) of the container(s) holding it. Stopped containers don't bind host
+// ports, so `docker ps` (running only) is the correct scope. Used to detect
+// host-port collisions BEFORE `docker run` on multi-stack hosts, where two
+// NODE_PREFIX stacks — or a hand-created service container — can contend for
+// the same host port and otherwise only surface a cryptic "port is already
+// allocated" after the image build. Best-effort: any docker failure yields an
+// empty map so the subsequent `docker run` still surfaces the real error.
+async function getPublishedHostPorts() {
+    return new Promise((resolve) => {
+        execFile('docker', ['ps', '--format', '{{.Names}}\t{{.Ports}}'], (error, stdout) => {
+            const portToContainers = new Map()
+            if (error || !stdout) {
+                resolve(portToContainers)
+                return
+            }
+            for (const line of stdout.split('\n')) {
+                if (!line.trim()) continue
+                const tab = line.indexOf('\t')
+                if (tab === -1) continue
+                const name  = line.substring(0, tab).trim()
+                const ports = line.substring(tab + 1)
+                // Published bindings render as "IP:HOSTPORT->CONTAINERPORT/proto"
+                // (0.0.0.0:, :::, or 127.0.0.1:). Exposed-but-unpublished ports
+                // have no "->" and are correctly skipped. Key on host port number
+                // only: a 0.0.0.0 bind conflicts with any specific-IP bind on the
+                // same port, so the conservative match avoids missing real clashes.
+                const re = /:(\d+)->/g
+                let m
+                while ((m = re.exec(ports)) !== null) {
+                    const hostPort = m[1]
+                    if (!portToContainers.has(hostPort)) portToContainers.set(hostPort, new Set())
+                    portToContainers.get(hostPort).add(name)
+                }
+            }
+            resolve(portToContainers)
+        })
+    })
+}
+
 async function getDockerContainerFileData(containerId, filePath) {
     return new Promise((resolve, reject) => {
         execFile('docker', ['cp', containerId + ':' + filePath, containersFilesDir], (error) => {
@@ -437,6 +477,7 @@ module.exports = {
     createDockerNetwork,
     addContainerToNetwork,
     getAllContainerFromModule,
+    getPublishedHostPorts,
     getDockerContainerFileData,
     getDockerContainerFileCat,
     stringToDockerContainerFile,

@@ -32,7 +32,7 @@ const {
     getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
-const { killContainer, removeContainer } = require('./DockerService')
+const { killContainer, removeContainer, getPublishedHostPorts } = require('./DockerService')
 const { setDatabaseParameters }  = require('./DatabaseService')
 
 async function cloneGit(module, rewrite = false, useTmp = false, branch = null) {
@@ -96,6 +96,51 @@ async function getModuleBranch(module) {
     const dir = getModuleDir(module)
     const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])
     return stdout.trim()
+}
+
+// Fail fast on host-port collisions before `docker run`. On a single-stack
+// host this is a no-op; on a multi-stack host (two NODE_PREFIX stacks, or a
+// service container hand-created outside xchain-node) two containers can request
+// the same host port, which `docker run` only surfaces as a cryptic "port is
+// already allocated" AFTER the image build wastes minutes. `selfName` is the
+// container we're (re)creating — excluded so re-installs/updates of the same
+// service don't flag themselves (the old container is already killed+removed
+// before this runs, but the name-exclusion is belt-and-suspenders).
+async function assertNoHostPortConflicts(portArgs, selfName) {
+    const requested = []
+    for (let i = 0; i < portArgs.length; i++) {
+        if (portArgs[i] === '-p') {
+            const pair = portArgs[i + 1]
+            if (typeof pair !== 'string') continue
+            const colonIdx = pair.lastIndexOf(':')
+            if (colonIdx === -1) continue
+            // "-p HOST:CONTAINER" or "-p IP:HOST:CONTAINER" — the host port is the
+            // field before the final colon; take the last colon-separated pair's left side.
+            const beforeContainer = pair.substring(0, colonIdx)
+            const hostPort = beforeContainer.substring(beforeContainer.lastIndexOf(':') + 1)
+            if (/^\d+$/.test(hostPort)) requested.push(hostPort)
+        }
+    }
+    if (requested.length === 0) return
+
+    const published = await getPublishedHostPorts()
+    const conflicts = []
+    for (const hostPort of requested) {
+        const holders = published.get(hostPort)
+        if (!holders) continue
+        const others = [...holders].filter(n => n !== selfName)
+        if (others.length > 0) conflicts.push({ hostPort, holders: others })
+    }
+    if (conflicts.length > 0) {
+        const lines = conflicts.map(c => `  host port ${c.hostPort} is already published by: ${c.holders.join(', ')}`)
+        throw new Error(
+            'Host port conflict — cannot publish the following port(s):\n' +
+            lines.join('\n') + '\n' +
+            'Another stack or container already binds them on this host. Override the colliding ' +
+            'port(s) in config/<coin>-<network> (e.g. EXPLORER_PORT_HTTP/HTTPS, INDEXER_PORT, HUB_PORT, ' +
+            'DECODER_PORT, ENCODER_PORT, UTXO_TRACKER_PORT, SYNC_PORT) and re-run, or stop the conflicting container first.'
+        )
+    }
 }
 
 async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null) {
@@ -257,6 +302,12 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         await removeContainer(overwriteContainerId)
                     } catch { /* container may have been removed manually */ }
                 }
+
+                // Pre-flight host-port collision check (multi-stack hosts). Runs
+                // after the overwrite removal so a re-install of THIS service never
+                // flags its own just-removed container. Throws here reject the
+                // promise via the surrounding try/catch.
+                await assertNoHostPortConflicts(portArgs, containerPrefix)
 
                 // One-shot execution containers (e.g. the e2e-test runner) must NOT get a
                 // restart policy: after their command exits, `unless-stopped` would restart
@@ -501,6 +552,7 @@ module.exports = {
     cloneGit,
     getModuleBranch,
     buildAndUp,
+    assertNoHostPortConflicts,
     installModule,
     uninstallModule
 }

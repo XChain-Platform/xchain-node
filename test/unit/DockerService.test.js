@@ -620,6 +620,82 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
+    // getPublishedHostPorts
+    // -------------------------------------------------------------------
+
+    describe('getPublishedHostPorts()', function () {
+
+        function stubPs(stubs, output) {
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args[0]).to.equal('ps')
+                expect(args).to.include('--format')
+                cb(null, output)
+            })
+        }
+
+        it('maps host ports to the containers publishing them (0.0.0.0 + :::)', async function () {
+            const stubs = makeStubs()
+            stubPs(stubs,
+                'xchain-node-explorer\t0.0.0.0:80->8080/tcp, :::80->8080/tcp, 0.0.0.0:443->8443/tcp, :::443->8443/tcp\n' +
+                'xchain-node-bitcoin-mainnet-xchain-indexer\t0.0.0.0:4010->4010/tcp\n'
+            )
+            const ds = loadDockerService(stubs)
+            const map = await ds.getPublishedHostPorts()
+            expect([...map.get('80')]).to.deep.equal(['xchain-node-explorer'])
+            expect([...map.get('443')]).to.deep.equal(['xchain-node-explorer'])
+            expect([...map.get('4010')]).to.deep.equal(['xchain-node-bitcoin-mainnet-xchain-indexer'])
+        })
+
+        it('records multiple containers contending for the same host port', async function () {
+            const stubs = makeStubs()
+            stubPs(stubs,
+                'stackA-explorer\t0.0.0.0:80->8080/tcp\n' +
+                'stackB-explorer\t0.0.0.0:80->8080/tcp\n'
+            )
+            const ds = loadDockerService(stubs)
+            const map = await ds.getPublishedHostPorts()
+            expect([...map.get('80')].sort()).to.deep.equal(['stackA-explorer', 'stackB-explorer'])
+        })
+
+        it('ignores exposed-but-unpublished ports (no "->")', async function () {
+            const stubs = makeStubs()
+            stubPs(stubs, 'some-db\t3306/tcp\n')
+            const ds = loadDockerService(stubs)
+            const map = await ds.getPublishedHostPorts()
+            expect(map.size).to.equal(0)
+        })
+
+        it('parses host-IP-scoped bindings (127.0.0.1:13306->3306)', async function () {
+            const stubs = makeStubs()
+            stubPs(stubs, 'xchain-node-database\t127.0.0.1:13306->3306/tcp\n')
+            const ds = loadDockerService(stubs)
+            const map = await ds.getPublishedHostPorts()
+            expect([...map.get('13306')]).to.deep.equal(['xchain-node-database'])
+        })
+
+        it('returns an empty map when docker ps fails (best-effort)', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(new Error('docker daemon unreachable'))
+            })
+            const ds = loadDockerService(stubs)
+            const map = await ds.getPublishedHostPorts()
+            expect(map.size).to.equal(0)
+        })
+
+        it('returns an empty map when there are no running containers', async function () {
+            const stubs = makeStubs()
+            stubPs(stubs, '')
+            const ds = loadDockerService(stubs)
+            const map = await ds.getPublishedHostPorts()
+            expect(map.size).to.equal(0)
+        })
+    })
+
+    // -------------------------------------------------------------------
     // waitContainer
     // -------------------------------------------------------------------
 
