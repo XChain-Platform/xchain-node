@@ -374,6 +374,30 @@ async function killContainer(containerId) {
     })
 }
 
+// Force-remove a container by NAME (kill + remove in one shot), tolerating
+// "no such container". Used immediately before a `docker run --name X` to make
+// (re)creation idempotent: it clears both a previous running container of that
+// name (the `update` path — the old container is never auto-removed) AND a
+// leftover `Created`-state carcass from a failed earlier create, either of
+// which would otherwise collide on the name and fail the run. Keying on the
+// name (not a registry id) is deliberate — it also catches containers the
+// module registry never recorded (e.g. a create that died before insert).
+async function forceRemoveContainerByName(name) {
+    return new Promise((resolve) => {
+        execFile('docker', ['rm', '-f', name], (error, stdout, stderr) => {
+            if (error) {
+                // "No such container" is the desired state already — succeed.
+                // Any other error (e.g. daemon unreachable) is surfaced by the
+                // subsequent `docker run` anyway, so don't reject here and risk
+                // masking the real run error or breaking the fresh-install path.
+                resolve(false)
+                return
+            }
+            resolve(true)
+        })
+    })
+}
+
 async function waitContainer(containerId) {
     return new Promise((resolve, reject) => {
         execFile('docker', ['wait', containerId], (error, stdout) => {
@@ -421,6 +445,7 @@ module.exports = {
     restartContainer,
     removeContainer,
     killContainer,
+    forceRemoveContainerByName,
     execContainer,
     shellContainer,
     logContainer,

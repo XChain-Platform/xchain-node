@@ -27,6 +27,7 @@ function makeStubs() {
         createDockerNetwork: sinon.stub().resolves(true),
         killContainer: sinon.stub().resolves(true),
         removeContainer: sinon.stub().resolves(true),
+        forceRemoveContainerByName: sinon.stub().resolves(true),
         stopContainer: sinon.stub().resolves(true),
         startContainer: sinon.stub().resolves(true),
         restartContainer: sinon.stub().resolves(true),
@@ -63,6 +64,7 @@ function loadOperations(stubs) {
             createDockerNetwork: stubs.createDockerNetwork,
             killContainer: stubs.killContainer,
             removeContainer: stubs.removeContainer,
+            forceRemoveContainerByName: stubs.forceRemoveContainerByName,
             stopContainer: stubs.stopContainer,
             startContainer: stubs.startContainer,
             restartContainer: stubs.restartContainer,
@@ -197,6 +199,31 @@ describe('moduleOperations', function () {
             await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
             const installCall = stubs.installModule.firstCall
             expect(installCall.args[4]).to.equal('container-id-123') // overwriteContainerId
+        })
+
+        it('tears down the existing node container by name before rebuilding', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
+            // getDockerContainerImageName stub renders as `${coin}-${net}-${mod}`
+            expect(stubs.forceRemoveContainerByName.calledWith('bitcoin-mainnet-node')).to.be.true
+            expect(stubs.forceRemoveContainerByName.calledBefore(stubs.installModule)).to.be.true
+        })
+
+        it('recreates the node even when its container is missing (no silent no-op)', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null) // node container crashed/removed
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
+            expect(stubs.installModule.calledWith('node', 'bitcoin', 'mainnet', true, null)).to.be.true
+        })
+
+        it('still skips a NON-node module whose container is missing', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(stubs.installModule.called).to.be.false
         })
     })
 

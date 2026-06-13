@@ -23,7 +23,7 @@ const execFileAsync = promisify(execFile)
 const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, XChainService, SEP, dataDir } = require('../config/constants')
 const { db }                 = require('../state')
 const { getDockerContainerImageName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
-const { createDockerNetwork, killContainer, removeContainer, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
+const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { statusChanged } = require('../services/StatusService')
@@ -48,10 +48,26 @@ async function updateModules(servicesList, branch = null) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                if (!moduleContainerId) continue
                 if (nextModule === NODE_MODULE_NAME) {
-                    await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId)
+                    // Tear down the existing node container before rebuilding. The node
+                    // branch of installModule calls buildCryptoNode, which `docker run
+                    // --name`s the node but never removes a prior container of that name
+                    // — on `update` that collided and crashed (unhandled rejection).
+                    // Remove by NAME so it also clears a leftover Created-state carcass
+                    // the module registry no longer tracks; a no-op on a clean or
+                    // already-missing node. (Done here rather than inside buildCryptoNode
+                    // to keep that hot path — shared with fresh `install` — untouched;
+                    // the node is briefly down during the image rebuild, which an update
+                    // implies anyway.)
+                    await forceRemoveContainerByName(getDockerContainerImageName(NODE_MODULE_NAME, nextCoin, nextNetwork))
+                    // Recreate even when the container was missing from the registry:
+                    // the old `if (!moduleContainerId) continue` made `update node` a
+                    // silent no-op (exit 0, nothing created) once the node had crashed or
+                    // been removed — only `install master node` could bring it back.
+                    // installModule's remoteUpdate path rebuilds it from local source.
+                    await installModule(nextModule, nextCoin, nextNetwork, true, null)
                 } else {
+                    if (!moduleContainerId) continue
                     let moduleBranch = branch
                     if (!moduleBranch) {
                         try { moduleBranch = await getModuleBranch(nextModule) } catch { /* use default */ }
