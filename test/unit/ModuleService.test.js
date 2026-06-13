@@ -42,7 +42,7 @@ function makeStubs() {
     }
 }
 
-function loadModuleService(stubs) {
+function loadModuleService(stubs, constantsOverride) {
     const configServiceStub = {
         getModuleDir: (mod) => '/modules/' + mod,
         getModuleTmpDir: (mod) => '/tmp/' + mod,
@@ -85,7 +85,7 @@ function loadModuleService(stubs) {
         })
     }
 
-    return proxyquire('../../src/services/ModuleService', {
+    const proxies = {
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs,
         '../state': {
@@ -120,7 +120,11 @@ function loadModuleService(stubs) {
         './ExplorerService': {
             installExplorerModule: sinon.stub().resolves(true)
         }
-    })
+    }
+    if (constantsOverride) {
+        proxies['../config/constants'] = Object.assign({}, require('../../src/config/constants'), constantsOverride)
+    }
+    return proxyquire('../../src/services/ModuleService', proxies)
 }
 
 describe('ModuleService', function () {
@@ -361,6 +365,32 @@ describe('ModuleService', function () {
             await ms.buildAndUp(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
             expect(runArgs).to.include('--ulimit')
             expect(runArgs).to.include('nofile=2048:2048')
+        })
+
+        it('keeps the legacy tracker volume name under the default NODE_PREFIX', async function () {
+            const stubs = makeStubs()
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') { cb(null) }
+                else if (args[0] === 'run') { runArgs = args; cb(null, 'a'.repeat(64) + '\n') }
+            })
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
+            expect(runArgs).to.include('xchain-utxo-tracker-bitcoin-mainnet-data:/data/xchain-utxo-tracker')
+        })
+
+        it('prefixes the tracker volume name under a non-default NODE_PREFIX (F11)', async function () {
+            const stubs = makeStubs()
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') { cb(null) }
+                else if (args[0] === 'run') { runArgs = args; cb(null, 'a'.repeat(64) + '\n') }
+            })
+            const ms = loadModuleService(stubs, { NODE_PREFIX: 'xchain-fed' })
+            await ms.buildAndUp(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'regtest')
+            expect(runArgs).to.include('xchain-fed-xchain-utxo-tracker-bitcoin-regtest-data:/data/xchain-utxo-tracker')
         })
 
         it('includes --network flag in docker run', async function () {

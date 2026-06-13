@@ -17,7 +17,8 @@
 const path = require('path')
 
 // --- String constants ---
-const rawPrefix              = process.env.NODE_PREFIX || "xchain-node"
+const DEFAULT_NODE_PREFIX    = "xchain-node"
+const rawPrefix              = process.env.NODE_PREFIX || DEFAULT_NODE_PREFIX
 if (!/^[a-z0-9][a-z0-9._-]*$/.test(rawPrefix)) {
     throw new Error(`Invalid NODE_PREFIX: "${rawPrefix}" — must be lowercase alphanumeric with hyphens, dots, or underscores`)
 }
@@ -179,6 +180,7 @@ const BOOTSTRAP_BASE_URL     = process.env.XCHAIN_NODE_BOOTSTRAP_BASE_URL || "ht
 
 module.exports = {
     NODE_PREFIX,
+    DEFAULT_NODE_PREFIX,
     NODE_MODULE_NAME,
     DB_MODULE_NAME,
     HUB_MODULE_NAME,

@@ -23,7 +23,7 @@ const fs        = require('fs')
 const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES
+    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, NODE_PREFIX, DEFAULT_NODE_PREFIX
 } = require('../config/constants')
 const { db }                = require('../state')
 const {
@@ -170,8 +170,14 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         if ("UTXO_TRACKER_PORT" in environmentVariables && "UTXO_TRACKER_API_PORT" in environmentVariables) {
                             portArgs.push('-p', `${environmentVariables["UTXO_TRACKER_PORT"]}:${environmentVariables["UTXO_TRACKER_API_PORT"]}`)
                         }
+                        // Two NODE_PREFIX stacks of the same coin+network must not share
+                        // one tracker volume, so non-default prefixes get a prefixed
+                        // volume name. The default prefix keeps the legacy unprefixed
+                        // name — renaming it would orphan every existing deployment's
+                        // tracker data (forced fleet-wide resync).
+                        const trackerVolumePrefix = NODE_PREFIX === DEFAULT_NODE_PREFIX ? '' : `${NODE_PREFIX}${SEP}`
                         volumeArgs.push(
-                            '-v', `${module}${SEP}${coin}-${network}-data:/data/xchain-utxo-tracker`,
+                            '-v', `${trackerVolumePrefix}${module}${SEP}${coin}-${network}-data:/data/xchain-utxo-tracker`,
                             '-v', `${environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"]}:/bootstrap/xchain-utxo-tracker`
                         )
                         ulimitArgs.push('--ulimit', 'nofile=2048:2048')

@@ -309,7 +309,12 @@ async function getDefaultConfig(module, coin, network) {
             "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
             "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
             "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
-            "XDEX_SEED_LOCAL_VALIDATOR", "XDEX_SNAPSHOT_BLOCK"
+            "XDEX_SEED_LOCAL_VALIDATOR", "XDEX_SNAPSHOT_BLOCK",
+            // Reverse-proxy trust for the hub's express API (rate-limiter IP
+            // keying). Default 'loopback' suits the Apache-on-same-host prod
+            // topology; containerized hubs see the docker bridge as the peer,
+            // so an operator fronting the container with a proxy sets this.
+            "HUB_TRUST_PROXY"
         ]
         for (const varName of hubPassthroughVars) {
             if (process.env[varName] !== undefined && process.env[varName] !== "") {
