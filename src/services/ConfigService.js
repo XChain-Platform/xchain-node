@@ -307,6 +307,9 @@ async function getDefaultConfig(module, coin, network) {
             // exhaust their retries on a stale UTXO view (txn-mempool-conflict).
             "ANCHOR_CHUNK_RETRY_MS",
             "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
+            // Anchor every Nth checkpoint_seq on-chain (off-multiples stay in the
+            // free off-chain mirror) — decouples DOGE spend from checkpoint cadence.
+            "ANCHOR_CHECKPOINT_EVERY_N",
             "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
             "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
             "XDEX_SEED_LOCAL_VALIDATOR", "XDEX_SNAPSHOT_BLOCK",
