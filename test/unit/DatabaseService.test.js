@@ -63,6 +63,7 @@ function makeStubs(overrides = {}) {
         saveExternalDbConfig: sinon.stub(),
         getOsUserDbName: sinon.stub().returns('xchain_node_testuser'),
         generatePassword: sinon.stub().returns('test-generated-pass'),
+        assertNoHostPortConflicts: sinon.stub().resolves(),
         ...overrides
     }
 }
@@ -118,6 +119,12 @@ function loadDatabaseService(stubs, constants = {}) {
             getStatusFromContainer: stubs.getStatusFromContainer,
             getDockerNetworkInspect: stubs.getDockerNetworkInspect,
             addContainerToNetwork: stubs.addContainerToNetwork
+        },
+        // buildDatabaseModule lazy-requires this for the multi-stack host-port
+        // pre-flight; stub it so the install branch doesn't load the real
+        // (LevelDB-backed) ModuleService. Default: no conflict (resolves).
+        './ModuleService': {
+            assertNoHostPortConflicts: stubs.assertNoHostPortConflicts
         },
         './StatusService': {
             statusChanged: stubs.statusChanged,
@@ -268,6 +275,38 @@ describe('DatabaseService', function () {
             const result = await ds.buildDatabaseModule('bitcoin', 'mainnet')
             // Should call execFileAsync for docker pull, tag, and run
             expect(stubs.execFileAsync.called).to.be.true
+        })
+
+        it('runs the multi-stack host-port pre-flight before docker run', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            const ds = loadDatabaseService(stubs)
+            await ds.buildDatabaseModule('bitcoin', 'mainnet')
+
+            expect(stubs.assertNoHostPortConflicts.calledOnce).to.be.true
+            const [portArgs, selfName] = stubs.assertNoHostPortConflicts.firstCall.args
+            // -p spec binds the DB host port to container 3306, scoped to the DB container name.
+            expect(portArgs).to.include('-p')
+            expect(portArgs.some(a => /:3306$/.test(a))).to.be.true
+            expect(selfName).to.equal('xchain-node-database')
+        })
+
+        it('aborts the install (no docker run) when a host-port conflict is detected', async function () {
+            const stubs = makeStubs({
+                assertNoHostPortConflicts: sinon.stub().rejects(new Error('Host port conflict — host port 13306 is already published by: other-stack-database'))
+            })
+            stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            const ds = loadDatabaseService(stubs)
+            let threw = null
+            try {
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+            } catch (err) { threw = err }
+            expect(threw).to.be.an.instanceOf(Error)
+            expect(threw.message).to.include('Host port conflict')
+            // The guard runs after pull/tag but before run — so `docker run` must NOT fire.
+            expect(findDockerRunArgs(stubs.execFileAsync)).to.be.null
         })
 
         // Locate the `docker run -d ...` argv array among the execFileAsync calls.

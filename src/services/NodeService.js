@@ -139,6 +139,17 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
         fs.writeFileSync(confFilePath, confContent)
     }
 
+    // Pre-flight host-port collision check (multi-stack hosts) — the same guard
+    // the service- and DB-install paths use. Two different-NODE_PREFIX stacks
+    // each running this coin/network node would both bind the node RPC host
+    // port; without this, `docker run` fails with a cryptic "port is already
+    // allocated". Runs before the build so a conflict fails fast (no wasted
+    // image build). Lazy require avoids a load-time cycle with ModuleService.
+    if (defaultExposedPort && defaultNodePort) {
+        const { assertNoHostPortConflicts } = require('./ModuleService')
+        await assertNoHostPortConflicts(['-p', `${defaultExposedPort}:${defaultNodePort}`], containerPrefix)
+    }
+
     return new Promise((resolve, reject) => {
         console.log("Building image of " + coin + " " + network + " node")
         execFile('docker', ['build', '.', '--build-arg', 'CONF_FILE=' + coin + '-' + network + '.conf', '-t', containerPrefix], { cwd: nodeDir }, (error) => {

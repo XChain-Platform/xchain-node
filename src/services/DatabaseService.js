@@ -582,6 +582,15 @@ async function buildDatabaseModule(coin, network) {
             if (value) runArgs.push(`--${mysqldFlag}=${value}`)
         }
 
+        // Pre-flight host-port collision check (multi-stack hosts) — the same
+        // guard the service-install path uses in ModuleService.buildAndUp. Two
+        // different-NODE_PREFIX stacks on one host both try to bind the DB host
+        // port; without this, `docker run` fails with a cryptic "port is already
+        // allocated". Lazy require avoids a load-time cycle (ModuleService
+        // requires this module at top).
+        const { assertNoHostPortConflicts } = require('./ModuleService')
+        await assertNoHostPortConflicts(['-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`], containerPrefix)
+
         console.log("Creating container of module " + DB_MODULE_NAME)
         const { stdout } = await execFileAsync('docker', runArgs)
         const containerId = stdout.trim()

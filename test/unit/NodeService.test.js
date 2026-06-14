@@ -121,7 +121,10 @@ function loadNodeService(stubs) {
         },
         './ModuleService': {
             cloneGit:   sinon.stub().resolves(true),
-            buildAndUp: sinon.stub().resolves('c'.repeat(64))
+            buildAndUp: sinon.stub().resolves('c'.repeat(64)),
+            // buildCryptoNode lazy-requires this for the multi-stack host-port
+            // pre-flight. Default: no conflict. A test overrides it to reject.
+            assertNoHostPortConflicts: stubs.assertNoHostPortConflicts || sinon.stub().resolves()
         },
         './BootstrapService': {
             utxoTrackerVolumeHasData:    sinon.stub().resolves(true),
@@ -407,6 +410,27 @@ describe('NodeService — buildCryptoNode()', function () {
 
         expect(runArgs).to.include('-p')
         expect(runArgs).to.include('8333:8332')
+    })
+
+    it('aborts before the docker build when a host-port conflict is detected', async function () {
+        const stubs = makeNodeServiceStubs()
+        stubs.assertNoHostPortConflicts = sinon.stub().rejects(
+            new Error('Host port conflict — host port 8333 is already published by: other-stack-bitcoin-mainnet-node'))
+        let built = false
+        stubs.execFile.callsFake((cmd, args, opts, cb) => {
+            if (args[0] === 'build') { built = true; return cb(null) }
+            if (args[0] === 'run')   return cb(null, 'e'.repeat(64) + '\n')
+        })
+
+        const ns = loadNodeService(stubs)
+        let threw = null
+        try {
+            await ns.buildCryptoNode('bitcoin', 'mainnet')
+        } catch (err) { threw = err }
+        expect(threw).to.be.an.instanceOf(Error)
+        expect(threw.message).to.include('Host port conflict')
+        // The guard runs before the build — so `docker build` must NOT fire.
+        expect(built).to.be.false
     })
 
     it('injects blocksDir volume when XCHAIN_NODE_BLOCKS_DIR is set', async function () {
@@ -727,7 +751,8 @@ describe('NodeService — installNode()', function () {
             },
             './ModuleService': {
                 cloneGit:   cloneGitStub,
-                buildAndUp: buildAndUpStub
+                buildAndUp: buildAndUpStub,
+                assertNoHostPortConflicts: sinon.stub().resolves()
             },
             './BootstrapService': {
                 utxoTrackerVolumeHasData:   sinon.stub().resolves(true),
@@ -771,7 +796,7 @@ describe('NodeService — installNode()', function () {
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
             './DockerService':   { createDockerNetwork: sinon.stub().resolves() },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
-            './ModuleService': { cloneGit: cloneGitStub, buildAndUp: buildAndUpStub },
+            './ModuleService': { cloneGit: cloneGitStub, buildAndUp: buildAndUpStub, assertNoHostPortConflicts: sinon.stub().resolves() },
             './BootstrapService': { utxoTrackerVolumeHasData: sinon.stub().resolves(true), ensureBootstrapUtxoTracker: sinon.stub().resolves() }
         })
 
@@ -808,7 +833,7 @@ describe('NodeService — installNode()', function () {
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
             './DockerService':   { createDockerNetwork: sinon.stub().resolves() },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
-            './ModuleService': { cloneGit: sinon.stub().resolves(true), buildAndUp: sinon.stub().resolves('e'.repeat(64)) },
+            './ModuleService': { cloneGit: sinon.stub().resolves(true), buildAndUp: sinon.stub().resolves('e'.repeat(64)), assertNoHostPortConflicts: sinon.stub().resolves() },
             './BootstrapService': {
                 utxoTrackerVolumeHasData:   sinon.stub().resolves(false), // fresh
                 ensureBootstrapUtxoTracker: ensureBootstrap
