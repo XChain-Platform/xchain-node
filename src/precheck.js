@@ -20,6 +20,7 @@ const fs = require('fs')
 const { dataDir, moduleDir, tmpDir, containersFilesDir,
         EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT } = require('./config/constants')
 const { db, isVerbose }                = require('./state')
+const { redactSecrets }                = require('./utils/helpers')
 const { checkDockerInstalledAndReachable, createDockerNetwork } = require('./services/DockerService')
 const { getDockerNetwork } = require('./services/ConfigService')
 const { checkAllRemoteVersions }       = require('./services/VersionService')
@@ -60,7 +61,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
     try {
         await buildDatabaseModule("", "")
     } catch (err) {
-        console.log(err)
+        console.log(redactSecrets(err))
         throw new Error("There was an error installing the mariadb container")
     }
 
@@ -69,7 +70,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
     try {
         dbCreds = await ensureXchainNodeAccess()
     } catch (err) {
-        console.log(err)
+        console.log(redactSecrets(err))
         throw new Error("There was an error creating xchain_node access")
     }
 
@@ -88,7 +89,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
             database: dbCreds.database
         })
     } catch (err) {
-        console.log(err)
+        console.log(redactSecrets(err))
         throw new Error("Couldn't open the xchain_node MariaDB database")
     }
 
@@ -101,7 +102,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
         // "couldn't connect to network" warnings against phantom IDs.
         await scanAndRegisterModules({ silent: !isVerbose() })
     } catch (err) {
-        console.log(err)
+        console.log(redactSecrets(err))
         throw new Error("There was an error during module auto-discovery")
     }
     if (checkVersions) {
@@ -127,7 +128,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
             await updateHub()
             await updateExplorer()
         } catch (err) {
-            console.log(err)
+            console.log(redactSecrets(err))
             throw new Error("There was an error trying to update the hub module")
         }
     }

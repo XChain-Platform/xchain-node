@@ -228,9 +228,31 @@ async function executeNativeMariaDbCommand(externalCfg, command, commandOptions 
             return lines.join('\n')
         }
         return ''
+    } catch (err) {
+        // The mariadb driver embeds the failing SQL in its error
+        // (`.message` / `.sql` / `.text`). A user-creation statement carries
+        // PASSWORD('<userPassword>'), so scrub the SQL out before the error
+        // propagates to callers that console.log it. (The docker path keeps
+        // the SQL out of argv entirely; this is the external-DB equivalent.)
+        throw scrubSqlFromError(err, command)
     } finally {
         try { await conn.end() } catch {}
     }
+}
+
+// Remove a SQL statement (which may embed a secret like PASSWORD('<pw>')) from
+// the common string fields of an error a caller might console.log. Mutates and
+// returns the same error; tolerant of read-only fields.
+function scrubSqlFromError(err, command) {
+    if (!err || !command) return err
+    const RED = '<redacted-sql>'
+    for (const field of ['message', 'cmd', 'sql', 'sqlMessage', 'text']) {
+        const value = err[field]
+        if (typeof value === 'string' && value.includes(command)) {
+            try { err[field] = value.split(command).join(RED) } catch { /* read-only */ }
+        }
+    }
+    return err
 }
 
 async function askMariadbRootPassword(coin, network) {

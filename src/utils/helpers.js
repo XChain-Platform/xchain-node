@@ -94,6 +94,25 @@ async function decompressTarGz(file) {
     })
 }
 
+// Mask secret-shaped substrings before an error/string is logged. Defense in
+// depth for diagnostic logs (e.g. precheck's `console.log(err)`): the actual
+// credential-leak sources are fixed at the DB-command layer, but a future code
+// path could surface a secret in a recognizable shape. Accepts a string or an
+// Error (uses its stack) and returns a redacted string.
+function redactSecrets(input) {
+    let s
+    if (input == null) s = ''
+    else if (typeof input === 'string') s = input
+    else s = String(input.stack || input.message || input)
+    return s
+        // SQL: PASSWORD('<secret>')
+        .replace(/PASSWORD\(\s*'(?:[^'\\]|\\.)*'\s*\)/gi, "PASSWORD('<redacted>')")
+        // SQL: IDENTIFIED BY '<secret>'  /  IDENTIFIED BY PASSWORD '<secret>'
+        .replace(/IDENTIFIED BY\s+(?:PASSWORD\s+)?'(?:[^'\\]|\\.)*'/gi, "IDENTIFIED BY '<redacted>'")
+        // env-forwarded creds surfaced in a docker err.cmd: MYSQL_PWD=… etc.
+        .replace(/\b(MYSQL_(?:PWD|ROOT_PASSWORD))=\S+/gi, '$1=<redacted>')
+}
+
 module.exports = {
     sleep,
     stringToCoin,
@@ -101,5 +120,6 @@ module.exports = {
     stringToNetwork,
     decompressTarGz,
     assertSafeArchiveMemberNames,
-    assertSafeTarGzMembers
+    assertSafeTarGzMembers,
+    redactSecrets
 }

@@ -304,6 +304,37 @@ describe('DatabaseService', function () {
     })
 
     // -------------------------------------------------------------------
+    // executeNativeMariaDbCommand (external-DB path)
+    // -------------------------------------------------------------------
+
+    describe('executeNativeMariaDbCommand()', function () {
+
+        // Security: the mariadb driver embeds the failing SQL in its error
+        // (.message / .sql), which a user-creation statement fills with a
+        // password. Scrub it before the error propagates to a console.log.
+        it('scrubs the SQL from a driver query error (avoids leaking an embedded password)', async function () {
+            const stubs = makeStubs()
+            const SECRET = 'us3r-pw-do-not-leak'
+            const SQL = "CREATE USER 'x'@'%' IDENTIFIED BY PASSWORD('" + SECRET + "')"
+            const driverErr = new Error('(conn=1, no: 1064, SQLState: 42000) syntax error\nsql: ' + SQL)
+            driverErr.sql = SQL
+            stubs.mariadb._fakeConn.query.rejects(driverErr)
+            const ds = loadDatabaseService(stubs)
+            const cfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'rootpass' }
+            try {
+                await ds.executeNativeMariaDbCommand(cfg, SQL)
+                expect.fail('should have rejected')
+            } catch (err) {
+                expect(err.message).to.not.include(SECRET)
+                expect(String(err.sql || '')).to.not.include(SECRET)
+                expect(err.message).to.include('<redacted-sql>')
+            }
+            // Connection is still closed via the finally block.
+            expect(stubs.mariadb._fakeConn.end.called).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
     // buildDatabaseModule
     // -------------------------------------------------------------------
 

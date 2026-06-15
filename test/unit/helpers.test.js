@@ -280,4 +280,38 @@ describe('utils/helpers', function () {
                 .to.throw(/unsafe member path/)
         })
     })
+
+    describe('redactSecrets()', function () {
+        const { redactSecrets } = require('../../src/utils/helpers')
+
+        it("masks the value inside PASSWORD('…')", function () {
+            const out = redactSecrets("CREATE USER 'x'@'%' IDENTIFIED BY PASSWORD('s3cr3t-pw')")
+            expect(out).to.not.include('s3cr3t-pw')
+            expect(out).to.include("PASSWORD('<redacted>')")
+        })
+
+        it("masks IDENTIFIED BY '…' literals", function () {
+            const out = redactSecrets("CREATE USER 'x'@'%' IDENTIFIED BY 'pla1n-pw'")
+            expect(out).to.not.include('pla1n-pw')
+            expect(out).to.include("IDENTIFIED BY '<redacted>'")
+        })
+
+        it('masks MYSQL_PWD / MYSQL_ROOT_PASSWORD env values', function () {
+            const out = redactSecrets('docker exec -e MYSQL_PWD=topsecret ... MYSQL_ROOT_PASSWORD=rootsecret')
+            expect(out).to.not.include('topsecret')
+            expect(out).to.not.include('rootsecret')
+            expect(out).to.include('MYSQL_PWD=<redacted>')
+        })
+
+        it('accepts an Error and redacts secrets from its stack', function () {
+            const out = redactSecrets(new Error("failed near PASSWORD('leak-me')"))
+            expect(out).to.not.include('leak-me')
+            expect(out).to.include("PASSWORD('<redacted>')")
+        })
+
+        it('returns clean strings unchanged and handles null', function () {
+            expect(redactSecrets('nothing secret here')).to.equal('nothing secret here')
+            expect(redactSecrets(null)).to.equal('')
+        })
+    })
 })
