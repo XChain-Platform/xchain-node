@@ -525,6 +525,13 @@ function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = 
     for (const arg of args) {
         if (!arg || arg === 'all') continue
 
+        // 'xchain-node' is the CLI itself, not an installable service. Without this
+        // guard the loop silently drops it and leaves service='all', so e.g.
+        // `install master xchain-node` would expand to EVERY service. Fail loudly.
+        if (arg === 'xchain-node') {
+            throw new Error("'xchain-node' is the CLI itself, not an installable service. Omit it to operate on all services, or name a specific one (e.g. xchain-indexer, xchain-decoder, xchain-hub).")
+        }
+
         if (knownChains.includes(arg)) {
             chain = arg
         } else if (knownNetworks.includes(arg)) {

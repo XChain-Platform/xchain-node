@@ -47,6 +47,15 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
     if (isVerbose()) console.log("Checking/Creating directories")
     createDirectories()
 
+    // The bundled MariaDB container is started with `--network <xchain net>`
+    // (DatabaseService.buildDatabaseModule), so the base network MUST exist
+    // before it — otherwise a fresh box fails with "network not found".
+    try {
+        await createDockerNetwork(getDockerNetwork("", ""))
+    } catch {
+        throw new Error("There was an error trying to create the base xchain network")
+    }
+
     if (isVerbose()) console.log("Checking/Installing mariadb container")
     try {
         await buildDatabaseModule("", "")
@@ -101,12 +110,6 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
     }
     if (isVerbose()) console.log("Getting modules status")
     await getStatus(null, null, false, checkVersions)
-
-    try {
-        await createDockerNetwork(getDockerNetwork("", ""))
-    } catch {
-        throw new Error("There was an error trying to create the base xchain network")
-    }
 
     try {
         if (isVerbose()) console.log("Checking/Installing hub module")
