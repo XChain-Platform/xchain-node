@@ -299,7 +299,10 @@ async function parseCommand() {
         .argument('<chain>',       '(bitcoin, litecoin, dogecoin)')
         .argument('<network>',     '(mainnet, testnet, regtest)')
         .action(async () => {
-            // coming soon
+            // Not yet implemented — fail loudly instead of silently doing nothing,
+            // so operators don't believe a rollback occurred.
+            console.error('`rollback` is not yet implemented. To recover a service to a known-good block, use `reset` followed by a bootstrap restore.')
+            process.exitCode = 1
         })
 
     program
