@@ -13,12 +13,46 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
+const { EventEmitter } = require('events')
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const VALID_CONTAINER_ID = 'a'.repeat(64)
+
+// Fake `spawn` for executeDockerMariaDbCommand, which now pipes SQL to the
+// mariadb client over STDIN (never argv). `respond(sql, args, opts)` decides
+// the child's output from the SQL the source writes to stdin, returning
+// `{ stdout?, stderr?, code?, error? }`. The returned child records argv
+// (`_args`), env (`_env`) and the piped SQL (`_stdin`) for assertions; grab it
+// in a test via `stubs.spawn.firstCall.returnValue`.
+function fakeSpawn(respond) {
+    return function (cmd, args, opts) {
+        const child = new EventEmitter()
+        child.stdout = new EventEmitter()
+        child.stderr = new EventEmitter()
+        child._cmd = cmd
+        child._args = args
+        child._env = opts && opts.env
+        child._stdin = ''
+        child.stdin = {
+            write(d) { if (d != null) child._stdin += d },
+            end(d) {
+                if (d != null) child._stdin += d
+                const r = (respond ? respond(child._stdin, args, opts) : null) || {}
+                setImmediate(() => {
+                    if (r.stdout) child.stdout.emit('data', Buffer.from(String(r.stdout)))
+                    if (r.stderr) child.stderr.emit('data', Buffer.from(String(r.stderr)))
+                    if (r.error) { child.emit('error', r.error); return }
+                    child.emit('close', r.code == null ? 0 : r.code)
+                })
+            },
+            on() {}
+        }
+        return child
+    }
+}
 
 function makeStubs(overrides = {}) {
     // execFileAsync is what the source uses (via promisify(execFile)) for all
@@ -39,6 +73,9 @@ function makeStubs(overrides = {}) {
 
     return {
         execFile: sinon.stub(),
+        // executeDockerMariaDbCommand now uses spawn (SQL via stdin). Default:
+        // a child that succeeds with empty output; tests override per-case.
+        spawn: sinon.stub().callsFake(fakeSpawn(() => ({ stdout: '', code: 0 }))),
         execFileAsync,
         mariadb: mariadbStub,
         db: {
@@ -85,7 +122,7 @@ function loadDatabaseService(stubs, constants = {}) {
     }
 
     return proxyquire('../../src/services/DatabaseService', {
-        'child_process': { execFile: stubs.execFile },
+        'child_process': { execFile: stubs.execFile, spawn: stubs.spawn },
         'util': { promisify: () => stubs.execFileAsync },
         'mariadb': stubs.mariadb,
         'enquirer': {
@@ -195,50 +232,44 @@ describe('DatabaseService', function () {
 
     describe('executeDockerMariaDbCommand()', function () {
 
-        it('constructs correct docker exec command with the password in env, not argv', async function () {
+        it('pipes SQL via stdin (never argv) with the password in env, not argv', async function () {
             const stubs = makeStubs()
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                const opts = typeof rest[0] === 'function' ? {} : rest[0]
-                expect(cmd).to.equal('docker')
-                expect(args).to.include('exec')
-                expect(args).to.include('-i')
-                expect(args).to.include('db-container')
-                expect(args).to.include('mariadb')
-                expect(args).to.include('-u')
-                expect(args).to.include('root')
-                expect(args).to.include('-e')
-                expect(args).to.include('SELECT 1')
-                // Password must travel via MYSQL_PWD env (forwarded with a bare
-                // docker -e), never as a -p<password> argv entry
-                expect(args).to.include('MYSQL_PWD')
-                expect(args.some(a => String(a).includes('rootpass'))).to.be.false
-                expect(opts.env.MYSQL_PWD).to.equal('rootpass')
-                cb(null, '1\n')
-            })
+            stubs.spawn.callsFake(fakeSpawn(() => ({ stdout: '1\n' })))
             const ds = loadDatabaseService(stubs)
             const result = await ds.executeDockerMariaDbCommand('db-container', 'rootpass', 'SELECT 1')
             expect(result).to.equal('1')
+
+            const child = stubs.spawn.firstCall.returnValue
+            expect(stubs.spawn.firstCall.args[0]).to.equal('docker')
+            expect(child._args).to.include('exec')
+            expect(child._args).to.include('-i')
+            expect(child._args).to.include('db-container')
+            expect(child._args).to.include('mariadb')
+            expect(child._args).to.include('-u')
+            expect(child._args).to.include('root')
+            // The SQL must NOT appear anywhere in argv — it is piped via stdin.
+            expect(child._args.some(a => String(a).includes('SELECT 1'))).to.be.false
+            expect(child._stdin).to.include('SELECT 1')
+            // Password must travel via MYSQL_PWD env (forwarded with a bare
+            // docker -e), never as a -p<password> argv entry.
+            expect(child._args).to.include('MYSQL_PWD')
+            expect(child._args.some(a => String(a).includes('rootpass'))).to.be.false
+            expect(child._env.MYSQL_PWD).to.equal('rootpass')
         })
 
         it('appends commandOptions when provided', async function () {
             const stubs = makeStubs()
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                expect(args).to.include('-B')
-                expect(args).to.include('-N')
-                cb(null, '0\n')
-            })
+            stubs.spawn.callsFake(fakeSpawn(() => ({ stdout: '0\n' })))
             const ds = loadDatabaseService(stubs)
             await ds.executeDockerMariaDbCommand('db-container', 'rootpass', 'SELECT COUNT(*)', '-B -N')
+            const child = stubs.spawn.firstCall.returnValue
+            expect(child._args).to.include('-B')
+            expect(child._args).to.include('-N')
         })
 
-        it('rejects on exec error', async function () {
+        it('rejects on non-zero exit', async function () {
             const stubs = makeStubs()
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cb(new Error('db error'))
-            })
+            stubs.spawn.callsFake(fakeSpawn(() => ({ stderr: 'db error', code: 1 })))
             const ds = loadDatabaseService(stubs)
             try {
                 await ds.executeDockerMariaDbCommand('db-container', 'rootpass', 'SELECT 1')
@@ -248,26 +279,25 @@ describe('DatabaseService', function () {
             }
         })
 
-        // Security: a failed exec must not leak the SQL (which can embed a
-        // user password) through error.message / error.cmd, since callers
-        // console.log the rejected error.
-        it('scrubs the SQL from a failed exec error (avoids leaking an embedded password)', async function () {
+        // Security: a failed command must not leak the SQL (which can embed a
+        // user password). The SQL is no longer in argv at all; this guards the
+        // remaining vector — mariadb's stderr echoing a fragment of the failing
+        // statement — which callers console.log.
+        it('scrubs the SQL from a failed command (avoids leaking an embedded password)', async function () {
             const stubs = makeStubs()
             const SECRET = 'us3r-pw-do-not-leak'
             const SQL = "CREATE USER 'x'@'%' IDENTIFIED BY PASSWORD('" + SECRET + "')"
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                const err = new Error('Command failed: docker exec -i -e MYSQL_PWD db-container mariadb -u root -e ' + SQL)
-                err.cmd = 'docker exec -i -e MYSQL_PWD db-container mariadb -u root -e ' + SQL
-                cb(err)
-            })
+            stubs.spawn.callsFake(fakeSpawn(() => ({
+                // mariadb batch-mode error echoing the offending statement
+                stderr: 'ERROR 1064 (42000) at line 1 near ' + SQL,
+                code: 1
+            })))
             const ds = loadDatabaseService(stubs)
             try {
                 await ds.executeDockerMariaDbCommand('db-container', 'rootpass', SQL)
                 expect.fail('should have rejected')
             } catch (err) {
                 expect(err.message).to.not.include(SECRET)
-                expect(String(err.cmd || '')).to.not.include(SECRET)
                 expect(err.message).to.include('<redacted-sql>')
             }
         })
@@ -808,19 +838,14 @@ describe('DatabaseService', function () {
         it('creates database and user via docker when db does not exist', async function () {
             const stubs = makeStubs()
             // execFileAsync[0] = docker inspect (getDatabaseContainerId in checkIfDatabaseIsReady)
-            // execFile is used for executeDockerMariaDbCommand (callback style)
+            // executeDockerMariaDbCommand pipes the SQL via stdin; branch on it.
             // dbCount = '0' → create DB + user + grant
-            stubs.execFile.callsFake((cmd, args, opts, cb) => {
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
                 // Return '0' for COUNT queries, '' for DDL
-                const eArg = args[args.length - 1]
-                if (eArg && eArg.startsWith('SELECT COUNT')) {
-                    cb(null, '0\n')
-                } else if (eArg && eArg.startsWith('SHOW GRANTS')) {
-                    cb(null, 'GRANT USAGE ON *.* TO user\n')
-                } else {
-                    cb(null, '')
-                }
-            })
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' }
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' }
+                return { stdout: '' }
+            }))
             const ds = loadDatabaseService(stubs)
             const result = await ds.addUserPasswordToDatabase(
                 'xchain-decoder', 'bitcoin', 'mainnet',
@@ -831,19 +856,15 @@ describe('DatabaseService', function () {
 
         it('skips create when database already exists (dbCount != 0)', async function () {
             const stubs = makeStubs()
-            stubs.execFile.callsFake((cmd, args, opts, cb) => {
-                const eArg = args[args.length - 1]
-                if (eArg && eArg.startsWith('SELECT COUNT(SCHEMA_NAME)')) {
-                    cb(null, '1\n') // DB already exists
-                } else if (eArg && eArg.startsWith('SELECT COUNT(*)')) {
-                    cb(null, '1\n') // user already exists
-                } else if (eArg && eArg.startsWith('SHOW GRANTS')) {
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                if (sql.startsWith('SELECT COUNT(SCHEMA_NAME)')) return { stdout: '1\n' } // DB already exists
+                if (sql.startsWith('SELECT COUNT(*)')) return { stdout: '1\n' } // user already exists
+                if (sql.startsWith('SHOW GRANTS')) {
                     // Include the full grant so it skips GRANT command too
-                    cb(null, "GRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Decoder'.* TO 'xchain_decoder_bitcoin_mainnet'@'%'\n")
-                } else {
-                    cb(null, '')
+                    return { stdout: "GRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Decoder'.* TO 'xchain_decoder_bitcoin_mainnet'@'%'\n" }
                 }
-            })
+                return { stdout: '' }
+            }))
             const ds = loadDatabaseService(stubs)
             const result = await ds.addUserPasswordToDatabase(
                 'xchain-decoder', 'bitcoin', 'mainnet',
@@ -855,17 +876,12 @@ describe('DatabaseService', function () {
         it('grants MVH test permissions when module is xchain-hub', async function () {
             const stubs = makeStubs()
             const executedCommands = []
-            stubs.execFile.callsFake((cmd, args, opts, cb) => {
-                executedCommands.push(args[args.length - 1])
-                const eArg = args[args.length - 1]
-                if (eArg && eArg.startsWith('SELECT COUNT')) {
-                    cb(null, '0\n')
-                } else if (eArg && eArg.startsWith('SHOW GRANTS')) {
-                    cb(null, 'GRANT USAGE ON *.* TO user\n')
-                } else {
-                    cb(null, '')
-                }
-            })
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executedCommands.push(sql)
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' }
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' }
+                return { stdout: '' }
+            }))
             const ds = loadDatabaseService(stubs)
             await ds.addUserPasswordToDatabase(
                 'xchain-hub', 'bitcoin', 'mainnet',
@@ -877,9 +893,7 @@ describe('DatabaseService', function () {
 
         it('throws when docker exec fails', async function () {
             const stubs = makeStubs()
-            stubs.execFile.callsFake((cmd, args, opts, cb) => {
-                cb(new Error('docker exec failed'))
-            })
+            stubs.spawn.callsFake(fakeSpawn(() => ({ error: new Error('docker exec failed') })))
             const ds = loadDatabaseService(stubs)
             try {
                 await ds.addUserPasswordToDatabase(
@@ -1017,10 +1031,10 @@ describe('DatabaseService', function () {
         it('drops and recreates each database module', async function () {
             const stubs = makeStubs()
             const executed = []
-            stubs.execFile.callsFake((cmd, args, opts, cb) => {
-                executed.push(args[args.length - 1])
-                cb(null, '')
-            })
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
             const ds = loadDatabaseService(stubs)
             await ds.resetDatabases('bitcoin', 'mainnet')
             // Should have executed DROP + CREATE for decoder and indexer
@@ -1038,16 +1052,13 @@ describe('DatabaseService', function () {
         it('iterates installed coins+networks and adds DB users', async function () {
             const stubs = makeStubs()
             stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
-            stubs.execFile.callsFake((cmd, args, opts, cb) => {
-                const eArg = args[args.length - 1]
-                if (eArg && eArg.startsWith('SELECT COUNT')) {
-                    cb(null, '1\n') // already exists
-                } else if (eArg && eArg.startsWith('SHOW GRANTS')) {
-                    cb(null, "GRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Decoder'.* TO 'xchain_decoder_bitcoin_mainnet'@'%'\nGRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Indexer'.* TO 'xchain_indexer_bitcoin_mainnet'@'%'\n")
-                } else {
-                    cb(null, '')
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '1\n' } // already exists
+                if (sql.startsWith('SHOW GRANTS')) {
+                    return { stdout: "GRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Decoder'.* TO 'xchain_decoder_bitcoin_mainnet'@'%'\nGRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Indexer'.* TO 'xchain_indexer_bitcoin_mainnet'@'%'\n" }
                 }
-            })
+                return { stdout: '' }
+            }))
             const ds = loadDatabaseService(stubs)
             const result = await ds.setDatabaseParameters()
             expect(result).to.be.true
@@ -1363,7 +1374,7 @@ describe('DatabaseService', function () {
             const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
             process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'root-pass'
             try {
-                stubs.execFile.callsFake((cmd, args, opts, cb) => cb(null, ''))
+                stubs.spawn.callsFake(fakeSpawn(() => ({ stdout: '' })))
                 const ds = loadDatabaseService(stubs)
                 const result = await ds.ensureXchainNodeAccess()
                 expect(stubs.saveCredentials.called).to.be.true

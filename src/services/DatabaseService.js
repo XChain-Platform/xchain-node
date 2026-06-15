@@ -15,7 +15,7 @@
  * MariaDB management: build, configure users, check readiness
  ********************************************************************/
 
-const { execFile } = require('child_process')
+const { execFile, spawn } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 const mariadb     = require('mariadb')
@@ -301,29 +301,43 @@ async function askMariadbRootPassword(coin, network) {
 
 async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, command, commandOptions = "") {
     return new Promise((resolve, reject) => {
-        const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', 'root', '-e', command], { interactive: true })
+        // The SQL is fed to the mariadb client over STDIN, never as an
+        // `-e <sql>` argv entry. User-creation statements embed a secret —
+        // PASSWORD('<userPassword>') — so keeping the SQL out of argv keeps it
+        // out of the child's /proc/<pid>/cmdline (world-readable on the host)
+        // entirely, closing the transient exposure that a `-e <sql>` argv left
+        // open during the exec. The mariadb client reads statements from stdin
+        // when no -e is given; `docker exec -i` (interactive) pipes our stdin
+        // through to it. The root password still travels via MYSQL_PWD env (see
+        // dockerMariadbArgs), never argv.
+        const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', 'root'], { interactive: true })
         if (commandOptions) {
             args.push(...commandOptions.trim().split(/\s+/))
         }
 
-        execFile('docker', args, { env: mariadbEnv(mariadbRootPassword) }, (error, stdout) => {
-            if (error) {
-                // The SQL passed via `-e` can embed a secret (user-creation
-                // queries carry PASSWORD('<userPassword>')). execFile copies the
-                // full argv into error.cmd / error.message, which callers
-                // console.log — so scrub the command text before propagating.
-                // (Deeper fix — feed SQL via stdin so it never reaches argv at
-                // all — is tracked as a follow-up; it needs live-DB validation.)
-                if (command) {
-                    const RED = '<redacted-sql>'
-                    if (typeof error.message === 'string') error.message = error.message.split(command).join(RED)
-                    if (typeof error.cmd === 'string') error.cmd = error.cmd.split(command).join(RED)
-                }
-                reject(error)
-            } else {
+        const child = spawn('docker', args, { env: mariadbEnv(mariadbRootPassword) })
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', (chunk) => { stdout += chunk })
+        child.stderr.on('data', (chunk) => { stderr += chunk })
+        child.on('error', reject)
+        child.on('close', (code) => {
+            if (code === 0) {
                 resolve(stdout.trim())
+                return
             }
+            // mariadb's batch-mode error text can echo a fragment of the failing
+            // statement (which may carry the embedded secret) — scrub the SQL
+            // before the error propagates to callers that console.log it.
+            let detail = stderr.trim()
+            if (command && detail) detail = detail.split(command).join('<redacted-sql>')
+            const error = new Error('mariadb command failed (exit ' + code + ')' + (detail ? ': ' + detail : ''))
+            error.code = code
+            reject(error)
         })
+        // Ignore EPIPE if the client exits before consuming all input.
+        child.stdin.on('error', () => {})
+        child.stdin.end(command.endsWith(';') ? command + '\n' : command + ';\n')
     })
 }
 

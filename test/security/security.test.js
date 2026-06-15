@@ -23,6 +23,31 @@ function makeExecFileStub() {
     return sinon.stub()
 }
 
+// executeDockerMariaDbCommand pipes SQL to the mariadb client over STDIN (never
+// argv). This builds a fake `spawn` child that records argv (`_args`) and the
+// piped SQL (`_stdin`) and resolves with empty output. Grab the child via
+// `stubs.spawn.firstCall.returnValue`.
+function makeDbSpawnStub() {
+    const { EventEmitter } = require('events')
+    return sinon.stub().callsFake(function (cmd, args, opts) {
+        const child = new EventEmitter()
+        child.stdout = new EventEmitter()
+        child.stderr = new EventEmitter()
+        child._args = args
+        child._env = opts && opts.env
+        child._stdin = ''
+        child.stdin = {
+            write(d) { if (d != null) child._stdin += d },
+            end(d) {
+                if (d != null) child._stdin += d
+                setImmediate(() => child.emit('close', 0))
+            },
+            on() {}
+        }
+        return child
+    })
+}
+
 function loadDockerService(stubs) {
     return proxyquire('../../src/services/DockerService', {
         'child_process': {
@@ -73,7 +98,7 @@ function loadModuleService(stubs, configOverrides) {
 
 function loadDatabaseService(stubs) {
     return proxyquire('../../src/services/DatabaseService', {
-        'child_process': { execFile: stubs.execFile },
+        'child_process': { execFile: stubs.execFile, spawn: stubs.spawn || makeDbSpawnStub() },
         'util': { promisify: () => stubs.execFileAsync || sinon.stub().resolves({ stdout: '', stderr: '' }) },
         'mariadb': {},
         'enquirer': { Password: sinon.stub() },
@@ -409,41 +434,36 @@ describe('Security', function () {
 
     describe('Database command safety', function () {
 
-        it('executeDockerMariaDbCommand passes SQL as single -e arg', async function () {
-            const stubs = { execFile: makeExecFileStub() }
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cb(null, '1\n')
-            })
+        it('executeDockerMariaDbCommand pipes SQL via stdin, never argv', async function () {
+            const stubs = { execFile: makeExecFileStub(), spawn: makeDbSpawnStub() }
             const ds = loadDatabaseService(stubs)
             const sql = "SELECT COUNT(*) FROM mysql.user WHERE user = 'test'"
             await ds.executeDockerMariaDbCommand('db-container', 'rootpass', sql, '-B -N')
 
-            const [cmd, args] = stubs.execFile.firstCall.args
-            expect(cmd).to.equal('docker')
-            // SQL should be a single array element after -e
-            const eIdx = args.indexOf('-e')
-            expect(eIdx).to.be.greaterThan(-1)
-            expect(args[eIdx + 1]).to.equal(sql)
-            // Command options should be separate elements
-            expect(args).to.include('-B')
-            expect(args).to.include('-N')
+            const child = stubs.spawn.firstCall.returnValue
+            expect(stubs.spawn.firstCall.args[0]).to.equal('docker')
+            // The SQL must NOT appear anywhere in argv — it is piped via stdin.
+            // This keeps a user-creation statement's embedded PASSWORD('...')
+            // out of the child's /proc/<pid>/cmdline.
+            expect(child._args.some(a => String(a).includes('mysql.user'))).to.be.false
+            expect(child._args).to.not.include('-e' + sql)
+            expect(child._stdin).to.include(sql)
+            // Command options stay as separate argv elements.
+            expect(child._args).to.include('-B')
+            expect(child._args).to.include('-N')
         })
 
-        it('password is a single -p arg, not split across shell tokens', async function () {
-            const stubs = { execFile: makeExecFileStub() }
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cb(null, '1\n')
-            })
+        it('password travels via MYSQL_PWD env, never a -p argv token', async function () {
+            const stubs = { execFile: makeExecFileStub(), spawn: makeDbSpawnStub() }
             const ds = loadDatabaseService(stubs)
             const password = 'pa$$w0rd`whoami`'
             await ds.executeDockerMariaDbCommand('db-container', password, 'SELECT 1')
 
-            const [, args] = stubs.execFile.firstCall.args
-            const pwArg = args.find(a => a.startsWith('-p'))
-            expect(pwArg).to.equal(`-p${password}`)
-            // The entire password including metacharacters is one array element
+            const child = stubs.spawn.firstCall.returnValue
+            // No -p<password> token anywhere; the secret is only in the env.
+            expect(child._args.some(a => String(a).startsWith('-p'))).to.be.false
+            expect(child._args.some(a => String(a).includes(password))).to.be.false
+            expect(child._env.MYSQL_PWD).to.equal(password)
         })
     })
 
