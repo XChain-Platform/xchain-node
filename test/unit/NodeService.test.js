@@ -433,26 +433,73 @@ describe('NodeService — buildCryptoNode()', function () {
         expect(built).to.be.false
     })
 
-    it('injects blocksDir volume when XCHAIN_NODE_BLOCKS_DIR is set', async function () {
-        const stubs = makeNodeServiceStubs()
-        const containerId = 'd'.repeat(64)
-        let runArgs = null
+    describe('XCHAIN_NODE_BLOCKS_DIR (blocks + txindex split)', function () {
+        // Run buildCryptoNode with the env var set and return the `docker run` argv.
+        async function runArgsFor(coin, network, blocksDir = '/bigdisk') {
+            const stubs = makeNodeServiceStubs()
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
+                if (args[0] === 'build') return cb(null)
+                if (args[0] === 'run') { runArgs = args; return cb(null, 'd'.repeat(64) + '\n') }
+            })
+            const old = process.env.XCHAIN_NODE_BLOCKS_DIR
+            if (blocksDir === null) delete process.env.XCHAIN_NODE_BLOCKS_DIR
+            else process.env.XCHAIN_NODE_BLOCKS_DIR = blocksDir
+            try {
+                const ns = loadNodeService(stubs)
+                await ns.buildCryptoNode(coin, network)
+                return runArgs
+            } finally {
+                if (old === undefined) delete process.env.XCHAIN_NODE_BLOCKS_DIR
+                else process.env.XCHAIN_NODE_BLOCKS_DIR = old
+            }
+        }
+        // Collect the VALUE of every `-v VALUE` pair in the argv.
+        function mounts(runArgs) {
+            const out = []
+            for (let i = 0; i < runArgs.length - 1; i++) if (runArgs[i] === '-v') out.push(runArgs[i + 1])
+            return out
+        }
 
-        stubs.execFile.callsFake((cmd, args, opts, cb) => {
-            if (args[0] === 'build') return cb(null)
-            if (args[0] === 'run') { runArgs = args; return cb(null, containerId + '\n') }
+        it('bitcoin: -blocksdir against /blocks + relocates txindex', async function () {
+            const args = await runArgsFor('bitcoin', 'mainnet')
+            expect(mounts(args)).to.include('/bigdisk/bitcoin/mainnet:/blocks')
+            expect(mounts(args)).to.include('/bigdisk/bitcoin/mainnet-txindex:/root/.bitcoin/indexes/txindex')
+            expect(args).to.include('-blocksdir=/blocks')
         })
 
-        const oldBlocksDir = process.env.XCHAIN_NODE_BLOCKS_DIR
-        process.env.XCHAIN_NODE_BLOCKS_DIR = '/blocks'
-        try {
-            const ns = loadNodeService(stubs)
-            await ns.buildCryptoNode('bitcoin', 'mainnet')
-            expect(runArgs.some(a => typeof a === 'string' && a.includes('/blocks'))).to.be.true
-        } finally {
-            if (oldBlocksDir === undefined) delete process.env.XCHAIN_NODE_BLOCKS_DIR
-            else process.env.XCHAIN_NODE_BLOCKS_DIR = oldBlocksDir
-        }
+        it('litecoin: honors -blocksdir (Bitcoin 0.21 base)', async function () {
+            const args = await runArgsFor('litecoin', 'mainnet')
+            expect(mounts(args)).to.include('/bigdisk/litecoin/mainnet:/blocks')
+            expect(args).to.include('-blocksdir=/blocks')
+        })
+
+        it('dogecoin mainnet: nests blocks onto the in-datadir path, never -blocksdir', async function () {
+            const args = await runArgsFor('dogecoin', 'mainnet')
+            expect(mounts(args)).to.include('/bigdisk/dogecoin/mainnet:/root/.dogecoin/blocks')
+            expect(mounts(args)).to.include('/bigdisk/dogecoin/mainnet-txindex:/root/.dogecoin/indexes/txindex')
+            expect(args.some(a => typeof a === 'string' && a.includes('-blocksdir'))).to.be.false
+        })
+
+        it('dogecoin testnet: nests under the testnet3 subdir', async function () {
+            const args = await runArgsFor('dogecoin', 'testnet')
+            expect(mounts(args)).to.include('/bigdisk/dogecoin/testnet:/root/.dogecoin/testnet3/blocks')
+        })
+
+        it('dogecoin regtest: nests under the regtest subdir', async function () {
+            const args = await runArgsFor('dogecoin', 'regtest')
+            expect(mounts(args)).to.include('/bigdisk/dogecoin/regtest:/root/.dogecoin/regtest/blocks')
+        })
+
+        it('litecoin testnet: relocates txindex under testnet4', async function () {
+            const args = await runArgsFor('litecoin', 'testnet')
+            expect(mounts(args)).to.include('/bigdisk/litecoin/testnet-txindex:/root/.litecoin/testnet4/indexes/txindex')
+        })
+
+        it('no blocks/txindex mounts when the env var is unset', async function () {
+            const args = await runArgsFor('bitcoin', 'mainnet', null)
+            expect(mounts(args).some(m => m.includes('/blocks') || m.includes('txindex'))).to.be.false
+        })
     })
 
     it('rejects when docker run fails', async function () {

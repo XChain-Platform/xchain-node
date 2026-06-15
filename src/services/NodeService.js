@@ -121,6 +121,25 @@ async function getCryptoNode(coin, network, version) {
     return true
 }
 
+// Whether the coin's pinned daemon honors `-blocksdir`. Dogecoin Core (v1.14.x)
+// is based on a pre-0.18 Bitcoin Core and silently ignores the flag (added
+// upstream in Bitcoin Core 0.18); Bitcoin (v28) and Litecoin (v0.21) both honor
+// it. For a daemon that ignores it, blocks are relocated by bind-mounting the
+// external path straight onto the in-datadir blocks directory instead.
+function daemonSupportsBlocksdir(coin) {
+    return coin !== 'dogecoin'
+}
+
+// The network-specific subdirectory a daemon writes chain data under, relative
+// to the datadir root. Mainnet writes directly under the datadir; testnet and
+// regtest use a subdir. Litecoin moved its testnet to `testnet4`; Bitcoin and
+// Dogecoin use `testnet3`.
+function nodeNetworkSubdir(coin, network) {
+    if (network === 'mainnet') return ''
+    if (network === 'regtest') return '/regtest'
+    return coin === 'litecoin' ? '/testnet4' : '/testnet3'
+}
+
 async function buildCryptoNode(coin, network, bitcoinVer = null) {
     const defaultConfig = await getDefaultConfig(NODE_MODULE_NAME, coin, network)
     const defaultExposedPort = defaultConfig["NODE_EXPOSED_PORT"]
@@ -161,10 +180,21 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
 
             const { dataDir } = require('../config/constants')
             const blocksDir = process.env.XCHAIN_NODE_BLOCKS_DIR
+            // Daemons that ignore -blocksdir (dogecoin) get their blocks
+            // relocated by nest-mounting onto the in-datadir blocks path, which
+            // is network-specific; the others use -blocksdir against /blocks.
+            const useBlocksdirFlag = daemonSupportsBlocksdir(coin)
+            const netSubdir        = nodeNetworkSubdir(coin, network)
+            const blocksHostPath   = blocksDir ? `${blocksDir}/${coin}/${network}` : null
+            // txindex is enabled in every coin conf and stays in the datadir even
+            // when blocks move (no daemon flag relocates it), so it is bind-
+            // mounted onto the big disk separately. Assumes a fresh install — an
+            // existing in-datadir txindex would be shadowed and rebuilt.
+            const txindexHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
             if (blocksDir) {
-                const blocksHostPath = `${blocksDir}/${coin}/${network}`
                 try {
                     fs.mkdirSync(blocksHostPath, { recursive: true })
+                    fs.mkdirSync(txindexHostPath, { recursive: true })
                 } catch (err) {
                     // This runs inside the async docker-build callback; a throw here
                     // escapes the Promise as an uncaught exception and hangs the
@@ -184,13 +214,24 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 '--network', getDockerNetwork(coin, network)
             ]
             if (blocksDir) {
-                runArgs.push('-v', `${blocksDir}/${coin}/${network}:/blocks`)
+                if (useBlocksdirFlag) {
+                    runArgs.push('-v', `${blocksHostPath}:/blocks`)
+                } else {
+                    // doged ignores -blocksdir: mount straight onto the blocks
+                    // dir it actually writes to, under the network subdir.
+                    runArgs.push('-v', `${blocksHostPath}:/root/.${coin}${netSubdir}/blocks`)
+                }
+                // Relocate txindex for every coin (nested under the network subdir).
+                runArgs.push('-v', `${txindexHostPath}:/root/.${coin}${netSubdir}/indexes/txindex`)
             }
             if (defaultExposedPort && defaultNodePort) {
                 runArgs.push('-p', `${defaultExposedPort}:${defaultNodePort}`)
             }
             runArgs.push('-e', `CRYPTO_NODE_VERSION=${bitcoinVer}`, '-t', containerPrefix)
-            if (blocksDir) {
+            // Only daemons that honor -blocksdir need a CMD override to pass it.
+            // doged relocates via the nested bind-mount above and keeps its
+            // default CMD (which already references its conf).
+            if (blocksDir && useBlocksdirFlag) {
                 const daemonName = `${coin}d`
                 const confPath = `/etc/${coin}/${coin}.conf`
                 if (coin === 'bitcoin') {
