@@ -465,6 +465,25 @@ describe('ConfigService', function () {
                 expect(config['NODE_PORT']).to.be.undefined
                 expect(config['DECODER_DB_NAME']).to.be.undefined
             })
+
+            describe('HUB_NETWORK passthrough', function () {
+                let saved
+                beforeEach(function () { saved = process.env.HUB_NETWORK; delete process.env.HUB_NETWORK })
+                afterEach(function () { if (saved === undefined) delete process.env.HUB_NETWORK; else process.env.HUB_NETWORK = saved })
+
+                it('injects HUB_NETWORK from host env into the hub config', async function () {
+                    process.env.HUB_NETWORK = 'mainnet'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['HUB_NETWORK']).to.equal('mainnet')
+                })
+
+                it('leaves HUB_NETWORK unset when host env is absent (standalone unchanged)', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['HUB_NETWORK']).to.be.undefined
+                })
+            })
         })
     })
 

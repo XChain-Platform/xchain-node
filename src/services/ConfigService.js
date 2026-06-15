@@ -330,7 +330,13 @@ async function getDefaultConfig(module, coin, network) {
             // keying). Default 'loopback' suits the Apache-on-same-host prod
             // topology; containerized hubs see the docker bridge as the peer,
             // so an operator fronting the container with a proxy sets this.
-            "HUB_TRUST_PROXY"
+            "HUB_TRUST_PROXY",
+            // Deployment network for the hub's consensus gates (notably
+            // STAKE_WEIGHTED_QUORUM, whose activation height is per-network).
+            // REQUIRED by the hub in validator mode (it fails loud on a
+            // blank/invalid value — no silent default here either) and must
+            // match the INDEXER_NETWORK of the chains this hub federates.
+            "HUB_NETWORK"
         ]
         for (const varName of hubPassthroughVars) {
             if (process.env[varName] !== undefined && process.env[varName] !== "") {
