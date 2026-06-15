@@ -316,6 +316,37 @@ describe('DatabaseService', function () {
             return call ? call.args[1] : null
         }
 
+        // Security regression: the MariaDB root password must reach the container
+        // via docker's OWN environment (bare `--env NAME` + execFile { env }), and
+        // must NEVER appear in the docker argv. If it did, a failed `docker run`
+        // would reject with the secret embedded in err.cmd/err.message, which
+        // upstream error logging (precheck's console.log(err)) would print.
+        it('passes MYSQL_ROOT_PASSWORD via docker env, never in the argv', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            const ds = loadDatabaseService(stubs)
+            await ds.buildDatabaseModule('bitcoin', 'mainnet')
+
+            // The enquirer Password prompt is stubbed to resolve 'rootpass'.
+            const ROOT_PW = 'rootpass'
+            const runCall = stubs.execFileAsync.getCalls().find(c =>
+                c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1][0] === 'run')
+            expect(runCall, 'docker run call not found').to.not.be.undefined
+
+            const runArgs = runCall.args[1]
+            const runOpts = runCall.args[2] || {}
+
+            // 1) The secret must not appear anywhere in the command line.
+            expect(runArgs.some(a => String(a).includes(ROOT_PW)), 'secret leaked into docker argv').to.be.false
+            expect(runArgs.some(a => /^MYSQL_ROOT_PASSWORD=/.test(String(a))), 'inline --env NAME=value leaks the secret').to.be.false
+            // 2) The bare env name is forwarded so docker reads it from its env.
+            expect(runArgs).to.include('MYSQL_ROOT_PASSWORD')
+            // 3) The value is supplied through the child process environment.
+            expect(runOpts.env, 'docker run env not set').to.be.an('object')
+            expect(runOpts.env.MYSQL_ROOT_PASSWORD).to.equal(ROOT_PW)
+        })
+
         it('appends MariaDB tuning args to docker run when env vars are set', async function () {
             const saved = {
                 XCHAIN_NODE_DB_BUFFER_POOL_SIZE:        process.env.XCHAIN_NODE_DB_BUFFER_POOL_SIZE,

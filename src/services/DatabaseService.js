@@ -559,7 +559,14 @@ async function buildDatabaseModule(coin, network) {
         if (process.env.XCHAIN_NODE_DB_DATA_DIR) {
             runArgs.push('-v', `${process.env.XCHAIN_NODE_DB_DATA_DIR}:/var/lib/mysql`)
         }
-        runArgs.push('--env', `MYSQL_ROOT_PASSWORD=${mariadbRootPassword}`, containerPrefix)
+        // Pass the root password through docker's OWN environment via a bare
+        // `--env NAME` (value supplied in the execFile env below), NOT
+        // `--env NAME=value` in argv. Otherwise the secret lands in the child
+        // process command line, and a failed `docker run` rejects with it
+        // embedded in err.cmd/err.message — which upstream error logging
+        // (e.g. precheck's console.log(err)) would print. Mirrors the
+        // mariadbEnv() MYSQL_PWD pattern used on the client path.
+        runArgs.push('--env', 'MYSQL_ROOT_PASSWORD', containerPrefix)
 
         // Optional MariaDB server tuning. These land as mysqld CLI args — the
         // mariadb image forwards any leading-dash args placed after the image
@@ -592,7 +599,9 @@ async function buildDatabaseModule(coin, network) {
         await assertNoHostPortConflicts(['-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`], containerPrefix)
 
         console.log("Creating container of module " + DB_MODULE_NAME)
-        const { stdout } = await execFileAsync('docker', runArgs)
+        const { stdout } = await execFileAsync('docker', runArgs, {
+            env: { ...process.env, MYSQL_ROOT_PASSWORD: mariadbRootPassword }
+        })
         const containerId = stdout.trim()
         if (/^[a-f0-9]{64}$/.test(containerId)) {
             await statusChanged()
