@@ -308,6 +308,17 @@ async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPasswo
 
         execFile('docker', args, { env: mariadbEnv(mariadbRootPassword) }, (error, stdout) => {
             if (error) {
+                // The SQL passed via `-e` can embed a secret (user-creation
+                // queries carry PASSWORD('<userPassword>')). execFile copies the
+                // full argv into error.cmd / error.message, which callers
+                // console.log — so scrub the command text before propagating.
+                // (Deeper fix — feed SQL via stdin so it never reaches argv at
+                // all — is tracked as a follow-up; it needs live-DB validation.)
+                if (command) {
+                    const RED = '<redacted-sql>'
+                    if (typeof error.message === 'string') error.message = error.message.split(command).join(RED)
+                    if (typeof error.cmd === 'string') error.cmd = error.cmd.split(command).join(RED)
+                }
                 reject(error)
             } else {
                 resolve(stdout.trim())

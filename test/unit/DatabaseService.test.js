@@ -247,6 +247,30 @@ describe('DatabaseService', function () {
                 expect(err).to.be.an.instanceOf(Error)
             }
         })
+
+        // Security: a failed exec must not leak the SQL (which can embed a
+        // user password) through error.message / error.cmd, since callers
+        // console.log the rejected error.
+        it('scrubs the SQL from a failed exec error (avoids leaking an embedded password)', async function () {
+            const stubs = makeStubs()
+            const SECRET = 'us3r-pw-do-not-leak'
+            const SQL = "CREATE USER 'x'@'%' IDENTIFIED BY PASSWORD('" + SECRET + "')"
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                const err = new Error('Command failed: docker exec -i -e MYSQL_PWD db-container mariadb -u root -e ' + SQL)
+                err.cmd = 'docker exec -i -e MYSQL_PWD db-container mariadb -u root -e ' + SQL
+                cb(err)
+            })
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.executeDockerMariaDbCommand('db-container', 'rootpass', SQL)
+                expect.fail('should have rejected')
+            } catch (err) {
+                expect(err.message).to.not.include(SECRET)
+                expect(String(err.cmd || '')).to.not.include(SECRET)
+                expect(err.message).to.include('<redacted-sql>')
+            }
+        })
     })
 
     // -------------------------------------------------------------------
