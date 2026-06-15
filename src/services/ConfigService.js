@@ -265,6 +265,19 @@ async function getDefaultConfig(module, coin, network) {
             "SYNC_API_HOST":           getDockerContainerImageName(SYNC_MODULE_NAME, "", ""),
             "HUB_API_HOST_SYNC":       getDockerContainerImageName(HUB_MODULE_NAME, "", "")
         }
+
+        // Allow the operator to override the explorer's published HOST ports via host
+        // env. Shared services (explorer/hub) have no per-coin config file, so host env
+        // is the injection point — same pattern as the hub passthrough vars below. The
+        // motivating case: a second co-located xchain-node install (e.g. a federation
+        // stack alongside the primary node) must publish the explorer on a non-default
+        // port to avoid colliding with the primary's 18080/18081. Container-internal
+        // ports (EXPLORER_API_PORT_HTTP/HTTPS) are unchanged.
+        for (const k of ["EXPLORER_PORT_HTTP", "EXPLORER_PORT_HTTPS", "EXPLORER_PORT"]) {
+            if (process.env[k] !== undefined && process.env[k] !== "") {
+                defaultValues[k] = process.env[k]
+            }
+        }
     }
 
     // Usage-telemetry env is only meaningful to the hub (the telemetry collector).
