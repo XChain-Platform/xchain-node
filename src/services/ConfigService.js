@@ -336,7 +336,22 @@ async function getDefaultConfig(module, coin, network) {
             // REQUIRED by the hub in validator mode (it fails loud on a
             // blank/invalid value — no silent default here either) and must
             // match the INDEXER_NETWORK of the chains this hub federates.
-            "HUB_NETWORK"
+            "HUB_NETWORK",
+            // Oracle price-round finalization threshold. Defaults to 2 in the hub
+            // (a 2-hub diversity floor so a lone external source never becomes a
+            // federation-signed price). Single-host prod / regtest deployments must
+            // set ORACLE_MIN_SUBMISSIONS=1 explicitly or NO round ever finalizes —
+            // which stalls every indexer's oracle price-sync barrier. Passed through
+            // here so the host env survives a hub container regenerate.
+            "ORACLE_MIN_SUBMISSIONS",
+            // Per-IP request/min cap on the hub's express API (default 100). Too low
+            // for legitimate multi-indexer re-bootstrap: every indexer on a box shares
+            // one source IP, so a fleet bootstrapping HubDbSync tables (oracle_prices,
+            // price_snapshots, cross_chain_calls, capability_snapshots, state_checkpoints)
+            // collectively blows 100/min and gets 429'd — the heartbeat gate then stays
+            // closed and the chain stalls. Raise for prod fleets. Passed through so the
+            // host env survives a hub container regenerate.
+            "HUB_RATE_LIMIT_RPM"
         ]
         for (const varName of hubPassthroughVars) {
             if (process.env[varName] !== undefined && process.env[varName] !== "") {
