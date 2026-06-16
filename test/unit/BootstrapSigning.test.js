@@ -148,9 +148,25 @@ describe('Bootstrap signing', function () {
             expect(threw).to.be.true
         })
 
-        it('warns but proceeds when no public key is pinned (default policy)', async function () {
-            // No XCHAIN_NODE_BOOTSTRAP_PUBKEY and the repo default path is absent
-            // in a dev checkout — fail-open with a warning for back-compat.
+        it('fails closed BY DEFAULT when no public key is pinned', async function () {
+            // Default policy is now require-signed. Point the pubkey override at a
+            // nonexistent path so loadBootstrapPublicKey() returns null (the repo
+            // now ships a real pinned key at the default path).
+            process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY = path.join(tmpDir, 'does-not-exist.pem')
+
+            let threw = false
+            try {
+                await svc.checkBootstrapSignature(archivePath)
+            } catch (err) {
+                threw = true
+                expect(err.message).to.match(/Refusing unsigned bootstrap/)
+            }
+            expect(threw).to.be.true
+        })
+
+        it('warns but proceeds when enforcement is explicitly disabled (=0)', async function () {
+            process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY = path.join(tmpDir, 'does-not-exist.pem')
+            process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP = '0'
             await svc.checkBootstrapSignature(archivePath) // must not throw
         })
 

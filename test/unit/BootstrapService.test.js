@@ -183,6 +183,20 @@ function loadBootstrapService(stubs) {
 
 describe('BootstrapService', function () {
 
+    // Signature ENFORCEMENT is fail-closed by default (see BootstrapSigning.test.js
+    // for that policy). The restore/ensure tests below exercise restore MECHANICS
+    // with no pinned key/.sig in their stubbed fs, so they opt out of enforcement —
+    // otherwise checkBootstrapSignature would (correctly) refuse and abort the restore.
+    let _savedRequireSigned
+    beforeEach(function () {
+        _savedRequireSigned = process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP
+        process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP = '0'
+    })
+    afterEach(function () {
+        if (_savedRequireSigned === undefined) delete process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP
+        else process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP = _savedRequireSigned
+    })
+
     // -----------------------------------------------------------------------
     // getBootstrapFilesList
     // -----------------------------------------------------------------------

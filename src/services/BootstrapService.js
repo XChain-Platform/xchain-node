@@ -53,10 +53,12 @@ const { dockerMariadbArgs, mariadbEnv }               = require('../utils/docker
 //   Consumers (restore / auto-bootstrap): the pinned public key is read
 //   from src/config/bootstrap_signing_pubkey.pem (override path via
 //   XCHAIN_NODE_BOOTSTRAP_PUBKEY). When the key and a .sig are present the
-//   signature MUST verify or the restore aborts. When either is missing the
-//   restore proceeds with a loud warning (bootstraps are best-effort and
-//   pre-signing archives exist) — set XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=1
-//   to fail closed instead.
+//   signature MUST verify or the restore aborts. Enforcement is ON BY DEFAULT
+//   (fail closed): if the key or .sig is missing the restore is refused. Set
+//   XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 (or false/no) to opt out — e.g. a
+//   self-hosted bootstrap source that publishes no signatures. (For the
+//   auto-bootstrap-on-install path the refusal is caught and the node simply
+//   syncs from scratch instead of restoring an unverified archive.)
 //
 //   Key generation (operator, one-time):
 //     openssl genpkey -algorithm ed25519 -out bootstrap_signing_key.pem
@@ -101,7 +103,11 @@ async function verifyBootstrapSignature(archivePath, sigPath, publicKey) {
 // Policy gate run before any restore. Returns silently when the archive may
 // be used; throws when it must not be.
 async function checkBootstrapSignature(archivePath) {
-    const requireSigned = !!process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP
+    // Fail closed by default. Opt out only with an explicit falsy value
+    // (XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0/false/no) — e.g. for a self-hosted
+    // bootstrap source that publishes no signatures.
+    const optOut        = /^(0|false|no)$/i.test(process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP || '')
+    const requireSigned = !optOut
     const sigPath       = archivePath + BOOTSTRAP_SIG_SUFFIX
     const publicKey     = loadBootstrapPublicKey()
 
@@ -116,9 +122,9 @@ async function checkBootstrapSignature(archivePath) {
         ? 'no bootstrap signing public key is pinned (src/config/bootstrap_signing_pubkey.pem)'
         : `no signature file found (${sigPath})`
     if (requireSigned) {
-        throw new Error(`Refusing unsigned bootstrap: ${missing} and XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP is set`)
+        throw new Error(`Refusing unsigned bootstrap: ${missing}. Signed bootstraps are required by default; set XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 to override.`)
     }
-    console.log(`WARNING: restoring bootstrap WITHOUT signature verification — ${missing}. The embedded checksum only detects transport corruption, not tampering.`)
+    console.log(`WARNING: restoring bootstrap WITHOUT signature verification — ${missing}. Signature enforcement disabled via XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0; the embedded checksum only detects transport corruption, not tampering.`)
 }
 
 // Sign the just-created archive when a publisher signing key is configured.
