@@ -38,9 +38,9 @@
 #
 # Cron examples (origin box crontab; redirect output to a log):
 #   # nightly, no downtime (decoder + indexer only):
-#   30 3 * * *  REDACTED-LOCAL-PATH --all >> REDACTED-LOCAL-PATH 2>&1
+#   30 3 * * *  $HOME/xchain-node/scripts/publish-bootstraps.sh --all >> $HOME/.bootstrap-publish/cron.log 2>&1
 #   # weekly maintenance window, full set incl. trackers (DOWNTIME):
-#   30 4 * * 0  REDACTED-LOCAL-PATH --all --with-trackers >> REDACTED-LOCAL-PATH 2>&1
+#   30 4 * * 0  $HOME/xchain-node/scripts/publish-bootstraps.sh --all --with-trackers >> $HOME/.bootstrap-publish/cron.log 2>&1
 #
 # PREREQUISITES:
 #   - The Ed25519 private signing key at $SIGNING_KEY (default below). Without
@@ -58,7 +58,7 @@ XCHAIN_NODE_BIN="${XCHAIN_NODE_BIN:-xchain-node}"
 SIGNING_KEY="${SIGNING_KEY:-$HOME/.bootstrap-signing/bootstrap_signing_key.pem}"
 STAGE_DIR="${STAGE_DIR:-/misc/xchain-bootstrap-out}"   # -> XCHAIN_NODE_DATA_DIR
 TMP_DIR="${TMP_DIR:-/misc/xchain-bootstrap-tmp}"        # -> XCHAIN_NODE_TMP_DIR
-SYNC_HOST="${SYNC_HOST:-jdog@origin-host.xchain.io}"
+SYNC_HOST="${SYNC_HOST:-user@your-sync-host}"
 SYNC_DIR="${SYNC_DIR:-/misc/backups/bootstraps}"
 KEEP="${KEEP:-2}"                                       # archives to retain per combo (local + remote)
 LOCK_FILE="${LOCK_FILE:-/tmp/publish-bootstraps.lock}"
