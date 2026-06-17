@@ -26,11 +26,11 @@ const { promisify }   = require('util')
 const { PassThrough } = require('stream')
 const execFileAsync   = promisify(execFile)
 
-const { XChainService, DB_MODULE_NAME, SEP, tmpDir, BOOTSTRAP_BASE_URL } = require('../config/constants')
+const { XChainService, DB_MODULE_NAME, SEP, tmpDir, BOOTSTRAP_BASE_URL, EXTERNAL_DB } = require('../config/constants')
 const { db }                                          = require('../state')
 const { getDefaultConfig, getModuleDatabaseName }    = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
-const { getDatabaseContainerId, ensureDatabasePool }  = require('./DatabaseService')
+const { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('./DatabaseService')
 const { assertSafeArchiveMemberNames }                = require('../utils/helpers')
 const { dockerMariadbArgs, mariadbEnv }               = require('../utils/dockerMariadb')
 
@@ -39,12 +39,12 @@ const { dockerMariadbArgs, mariadbEnv }               = require('../utils/docker
 // ─── Bootstrap signing (supply-chain integrity) ──────────────────
 //
 // The outer archive bundles data.tar.gz together with its own data.sha256,
-// so that checksum only proves the download wasn't corrupted in transit —
+// so that checksum only proves the download wasn't corrupted in transit;
 // anyone who can alter the archive on (or en route from) the bootstrap
 // server can recompute it. Restores therefore also verify an Ed25519
 // signature published NEXT TO the archive (<archive>.sig) against a public
-// key pinned in this repository — the trust anchor travels with the code,
-// not with the data server.
+// key pinned in this repository (the trust anchor travels with the code,
+// not with the data server).
 //
 //   Publisher (bootstrap create): set XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY to
 //   the Ed25519 private key PEM path; a .sig is written beside the archive
@@ -55,7 +55,7 @@ const { dockerMariadbArgs, mariadbEnv }               = require('../utils/docker
 //   XCHAIN_NODE_BOOTSTRAP_PUBKEY). When the key and a .sig are present the
 //   signature MUST verify or the restore aborts. Enforcement is ON BY DEFAULT
 //   (fail closed): if the key or .sig is missing the restore is refused. Set
-//   XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 (or false/no) to opt out — e.g. a
+//   XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 (or false/no) to opt out; e.g. a
 //   self-hosted bootstrap source that publishes no signatures. (For the
 //   auto-bootstrap-on-install path the refusal is caught and the node simply
 //   syncs from scratch instead of restoring an unverified archive.)
@@ -96,7 +96,7 @@ async function verifyBootstrapSignature(archivePath, sigPath, publicKey) {
     const digestHex = await computeSha256(archivePath)
     const valid = crypto.verify(null, Buffer.from(digestHex, 'hex'), publicKey, Buffer.from(parts[2], 'base64'))
     if (!valid) {
-        throw new Error(`Bootstrap signature verification FAILED for ${archivePath} — the archive does not match its published signature. Refusing to restore.`)
+        throw new Error(`Bootstrap signature verification FAILED for ${archivePath}: the archive does not match its published signature. Refusing to restore.`)
     }
 }
 
@@ -104,7 +104,7 @@ async function verifyBootstrapSignature(archivePath, sigPath, publicKey) {
 // be used; throws when it must not be.
 async function checkBootstrapSignature(archivePath) {
     // Fail closed by default. Opt out only with an explicit falsy value
-    // (XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0/false/no) — e.g. for a self-hosted
+    // (XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0/false/no); e.g. for a self-hosted
     // bootstrap source that publishes no signatures.
     const optOut        = /^(0|false|no)$/i.test(process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP || '')
     const requireSigned = !optOut
@@ -124,7 +124,7 @@ async function checkBootstrapSignature(archivePath) {
     if (requireSigned) {
         throw new Error(`Refusing unsigned bootstrap: ${missing}. Signed bootstraps are required by default; set XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 to override.`)
     }
-    console.log(`WARNING: restoring bootstrap WITHOUT signature verification — ${missing}. Signature enforcement disabled via XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0; the embedded checksum only detects transport corruption, not tampering.`)
+    console.log(`WARNING: restoring bootstrap WITHOUT signature verification (${missing}). Signature enforcement disabled via XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0; the embedded checksum only detects transport corruption, not tampering.`)
 }
 
 // Sign the just-created archive when a publisher signing key is configured.
@@ -133,7 +133,7 @@ async function checkBootstrapSignature(archivePath) {
 async function maybeSignBootstrap(finalOutput) {
     const keyPath = process.env.XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY
     if (!keyPath) {
-        console.log('NOTE: XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY not set — bootstrap is unsigned. Consumers cannot verify provenance.')
+        console.log('NOTE: XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY not set; bootstrap is unsigned. Consumers cannot verify provenance.')
         return null
     }
     const sigPath = await signBootstrapArchive(finalOutput, keyPath)
@@ -207,7 +207,7 @@ async function ensureDirWritable(dirPath) {
     // Directory exists but isn't writable (likely created by Docker as root).
     // Use a throwaway Alpine container to create it and hand ownership to the
     // invoking user. chmod 755 alone is not enough: the dir stays root-owned, so
-    // a non-root prod user only gets r-x (others) and still cannot write — which
+    // a non-root prod user only gets r-x (others) and still cannot write, which
     // broke `bootstrap create` on non-root hosts. chown to our uid/gid first.
     const parent  = path.dirname(normalized)
     const dirName = path.basename(normalized)
@@ -321,7 +321,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
             })
         })
         const innerStats = await fs.promises.stat(innerArchive)
-        progress.stop(`LevelDB compressed — ${(innerStats.size / 1024 / 1024).toFixed(1)} MB`)
+        progress.stop(`LevelDB compressed: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB`)
 
         // Step 4: Compute SHA256 and write checksum file
         process.stdout.write('Computing checksum... ')
@@ -408,7 +408,7 @@ async function makeBootstrapMariaDb(coin, network, module) {
         })
     })
     const innerStats = await fs.promises.stat(innerArchive)
-    progress.stop(`${dbName} dumped — ${(innerStats.size / 1024 / 1024).toFixed(1)} MB compressed`)
+    progress.stop(`${dbName} dumped: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB compressed`)
 
     // Step 4: Compute SHA256 and write checksum file
     process.stdout.write('Computing checksum... ')
@@ -462,12 +462,12 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     const checksumFile    = path.join(workDir, 'data.sha256')
     const verifySentinel = path.join(workDir, 'verify.ok')
 
-    // Step 1: Extract outer archive (resumable — if a prior run already
+    // Step 1: Extract outer archive (resumable: if a prior run already
     // extracted a valid inner archive + checksum into the work dir, keep them.
     // Extracting + SHA-256 verifying a mainnet archive can take ~30 min each,
     // so a late-stage failure must not force redoing that work.)
     if (fs.existsSync(innerArchive) && fs.existsSync(checksumFile)) {
-        console.log('Found previously extracted archive in work dir — skipping outer extract')
+        console.log('Found previously extracted archive in work dir, skipping outer extract')
     } else {
         if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
         ensureDir(workDir)
@@ -485,10 +485,10 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         }
     }
 
-    // Step 2: Verify checksum (resumable — skip if a prior run already verified
+    // Step 2: Verify checksum (resumable: skip if a prior run already verified
     // this inner archive and dropped the sentinel)
     if (fs.existsSync(verifySentinel)) {
-        console.log('Checksum already verified in a prior run — skipping verification')
+        console.log('Checksum already verified in a prior run, skipping verification')
     } else {
         process.stdout.write('Verifying checksum... ')
         const stored   = (await fs.promises.readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0]
@@ -502,7 +502,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     }
 
     // Step 3: Get container ID and stop service
-    // Make sure the DB pool is open first — when this routine is invoked outside
+    // Make sure the DB pool is open first; when this routine is invoked outside
     // the CLI precheck the pool is null, and getModuleContainer would silently
     // return null, masquerading as a missing container.
     await ensureDatabasePool()
@@ -581,11 +581,11 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     const checksumFile    = path.join(workDir, 'dump.sha256')
     const verifySentinel = path.join(workDir, 'verify.ok')
 
-    // Step 1: Extract outer archive (resumable — keep a prior run's extracted
+    // Step 1: Extract outer archive (resumable: keep a prior run's extracted
     // inner archive + checksum so a late-stage failure doesn't force redoing
     // the extract + SHA-256 verify work)
     if (fs.existsSync(innerArchive) && fs.existsSync(checksumFile)) {
-        console.log('Found previously extracted archive in work dir — skipping outer extract')
+        console.log('Found previously extracted archive in work dir, skipping outer extract')
     } else {
         if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
         ensureDir(workDir)
@@ -603,10 +603,10 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
         }
     }
 
-    // Step 2: Verify checksum (resumable — skip if a prior run already verified
+    // Step 2: Verify checksum (resumable: skip if a prior run already verified
     // this inner archive and dropped the sentinel)
     if (fs.existsSync(verifySentinel)) {
-        console.log('Checksum already verified in a prior run — skipping verification')
+        console.log('Checksum already verified in a prior run, skipping verification')
     } else {
         process.stdout.write('Verifying checksum... ')
         const stored   = (await fs.promises.readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0]
@@ -619,11 +619,18 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
         console.log('OK')
     }
 
-    // Step 3: Get DB container ID and credentials
-    const dbContainerId = await getDatabaseContainerId()
-    if (!dbContainerId) throw new Error('MariaDB container not found')
+    // Step 3: Get DB credentials (and container ID when not using external DB)
+    let dbContainerId = null
+    let rootPassword  = null
+    let externalCfg   = null
 
-    const rootPassword = await askMariadbRootPassword(coin, network)
+    if (EXTERNAL_DB) {
+        externalCfg = await getExternalDbConfig()
+    } else {
+        dbContainerId = await getDatabaseContainerId()
+        if (!dbContainerId) throw new Error('MariaDB container not found')
+        rootPassword = await askMariadbRootPassword(coin, network)
+    }
 
     // Stop the service that owns this DB so it isn't writing rows or holding
     // connections while we DROP and reimport (mirrors the utxo-tracker path,
@@ -634,7 +641,7 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     let serviceContainerId = null
     try {
         serviceContainerId = await db.getModuleContainer(module, coin, network)
-    } catch { /* service not installed yet — proceed without stopping */ }
+    } catch { /* service not installed yet, proceed without stopping */ }
     if (serviceContainerId) {
         console.log(`Stopping ${module} container...`)
         await stopContainer(serviceContainerId)
@@ -643,10 +650,17 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     try {
         // Step 4: Drop and recreate database
         console.log(`Recreating database ${dbName}...`)
-        await execFileAsync(
-            'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-e', `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`]),
-            { env: mariadbEnv(rootPassword) }
-        )
+        if (EXTERNAL_DB) {
+            // Driver-based path: DROP and CREATE as separate statements (the
+            // mariadb driver rejects multi-statement strings unlike the CLI).
+            await executeNativeMariaDbCommand(externalCfg, `DROP DATABASE IF EXISTS ${dbName}`)
+            await executeNativeMariaDbCommand(externalCfg, `CREATE DATABASE ${dbName}`)
+        } else {
+            await execFileAsync(
+                'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-e', `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`]),
+                { env: mariadbEnv(rootPassword) }
+            )
+        }
 
         // Step 5: Pipe decompressed SQL into mariadb with progress
         const stats      = await fs.promises.stat(innerArchive)
@@ -657,7 +671,19 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
             const readStream  = fs.createReadStream(innerArchive)
             const counter     = new PassThrough()
             const gunzip      = zlib.createGunzip()
-            const mysqlProc   = spawn('docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', dbName], { interactive: true }), { stdio: ['pipe', 'inherit', 'pipe'], env: mariadbEnv(rootPassword) })
+
+            // For external (native) MariaDB, invoke the mariadb CLI directly
+            // over TCP. The password travels via MYSQL_PWD env only, never argv.
+            let mysqlProc
+            if (EXTERNAL_DB) {
+                mysqlProc = spawn('mariadb',
+                    ['-h', externalCfg.host, '-P', String(externalCfg.port),
+                     '-u', externalCfg.root_user, dbName],
+                    { stdio: ['pipe', 'inherit', 'pipe'], env: mariadbEnv(externalCfg.root_password) })
+            } else {
+                mysqlProc = spawn('docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', dbName], { interactive: true }),
+                    { stdio: ['pipe', 'inherit', 'pipe'], env: mariadbEnv(rootPassword) })
+            }
 
             counter.on('data', chunk => progress.update(chunk.length))
             readStream.pipe(counter).pipe(gunzip).pipe(mysqlProc.stdin)
@@ -697,7 +723,7 @@ async function utxoTrackerVolumeHasData(coin, network) {
     try {
         await execFileAsync('docker', ['volume', 'inspect', volumeName])
     } catch {
-        return false // volume doesn't exist yet — fresh install
+        return false // volume doesn't exist yet (fresh install)
     }
     try {
         const { stdout } = await execFileAsync('docker',
@@ -743,7 +769,7 @@ async function downloadBootstrap(coin, network, module, destDir) {
     }
 
     // Also fetch the detached signature published next to the archive. A 404
-    // means this bootstrap is unsigned — remove any stale local .sig so the
+    // means this bootstrap is unsigned; remove any stale local .sig so the
     // restore's signature policy sees the true current state instead of
     // verifying today's archive against yesterday's signature.
     const sigPath = destPath + BOOTSTRAP_SIG_SUFFIX
@@ -769,7 +795,7 @@ async function downloadBootstrap(coin, network, module, destDir) {
 // logs a warning and returns so the install proceeds with a normal sync.
 async function ensureBootstrapUtxoTracker(coin, network) {
     if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
-        console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP) — syncing from scratch')
+        console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
         return false
     }
     try {
@@ -779,14 +805,14 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         console.log(`Checking for a published bootstrap for ${coin}/${network}...`)
         const fileName = await downloadBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, bootstrapDir)
         if (!fileName) {
-            console.log('No bootstrap available — the tracker will sync from scratch')
+            console.log('No bootstrap available; the tracker will sync from scratch')
             return false
         }
         await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
-        console.log('Bootstrap installed — tracker will continue from the bootstrap height')
+        console.log('Bootstrap installed; tracker will continue from the bootstrap height')
         return true
     } catch (err) {
-        console.log(`WARNING: bootstrap auto-restore failed (${err.message}) — the tracker will sync from scratch`)
+        console.log(`WARNING: bootstrap auto-restore failed (${err.message}): the tracker will sync from scratch`)
         return false
     }
 }
@@ -805,7 +831,7 @@ async function mariaDbModuleHasData(coin, network, module) {
     try {
         dbContainerId = await getDatabaseContainerId()
     } catch { return false }
-    if (!dbContainerId) return false // no DB container yet — fresh install
+    if (!dbContainerId) return false // no DB container yet (fresh install)
 
     let rootPassword
     try {
@@ -821,7 +847,7 @@ async function mariaDbModuleHasData(coin, network, module) {
         )
         if (parseInt(tblOut.trim(), 10) === 0) return false
 
-        // Table exists — does it hold any rows?
+        // Table exists: does it hold any rows?
         const countQuery = `SELECT COUNT(*) FROM \`${dbName}\`.blocks`
         const { stdout: cntOut } = await execFileAsync(
             'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', countQuery]),
@@ -839,7 +865,7 @@ async function mariaDbModuleHasData(coin, network, module) {
 // install proceeds with a normal sync from scratch.
 async function ensureBootstrapMariaDb(coin, network, module) {
     if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
-        console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP) — syncing from scratch')
+        console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
         return false
     }
     try {
@@ -851,14 +877,14 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         console.log(`Checking for a published ${module} bootstrap for ${coin}/${network}...`)
         const fileName = await downloadBootstrap(coin, network, module, bootstrapDir)
         if (!fileName) {
-            console.log('No bootstrap available — the service will sync from scratch')
+            console.log('No bootstrap available; the service will sync from scratch')
             return false
         }
         await restoreBootstrap(coin, network, module, fileName)
-        console.log('Bootstrap installed — the service will continue from the bootstrap height')
+        console.log('Bootstrap installed; the service will continue from the bootstrap height')
         return true
     } catch (err) {
-        console.log(`WARNING: bootstrap auto-restore failed (${err.message}) — the service will sync from scratch`)
+        console.log(`WARNING: bootstrap auto-restore failed (${err.message}): the service will sync from scratch`)
         return false
     }
 }
