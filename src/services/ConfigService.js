@@ -240,6 +240,17 @@ async function getDefaultConfig(module, coin, network) {
         if (module === XChainService.XCHAIN_ENCODER || module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_UTXO_TRACKER) {
             defaultValues["NETWORK"] = coin + "-" + network
         }
+
+        // e2e-test also derives addresses (test/cryptoHelper.js) and resolves its
+        // bitcoinjs network from COIN+NETWORK. initialCheck.test.js reads
+        // process.env.COIN and only splits NETWORK when COIN is absent; without COIN
+        // it mis-splits the bare network ("regtest" → COIN="regtest", NETWORK=undefined)
+        // → getBitcoinJsNetwork returns undefined → bitcoinjs falls back to MAINNET
+        // ("1..." addresses) and funded txs never confirm on regtest. Inject COIN so
+        // the resolution is correct while NETWORK stays bare for other env consumers.
+        if (module === XChainService.XCHAIN_E2E_TEST) {
+            defaultValues["COIN"] = coin
+        }
     } else {
         defaultValues = {
             "HUB_HOST":              "0.0.0.0",
