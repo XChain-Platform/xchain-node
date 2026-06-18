@@ -11,12 +11,12 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * DiscoveryService — container classification + registry reconciliation.
+ * DiscoveryService: container classification + registry reconciliation.
  *
  * Regression (node-host-b litecoin-mainnet xchain-indexer, 2026-06-11): the scan
  * keyed on the container's IMAGE name. Rebuilding a module's image while the
- * old container kept running steals the tag — docker reports the container's
- * image as a bare ID — so the scan went blind to a live container, and the
+ * old container kept running steals the tag; docker reports the container's
+ * image as a bare ID, so the scan went blind to a live container, and the
  * orphan purge then DELETED its registry row. From then on update/start/stop
  * silently no-op'd for that module while `sync` reported "already in sync".
  * Identity now comes from the CONTAINER NAME (image as fallback).
@@ -100,7 +100,7 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
         const { svc, db } = loadService({
             containers: [{
                 Names: 'xchain-node-litecoin-mainnet-xchain-indexer',
-                Image: 'b237b2d40093',                       // bare ID — old scan skipped this
+                Image: 'b237b2d40093',                       // bare ID: old scan skipped this
                 ID:    'cafebabecafebabecafebabe',
                 State: 'running',
             }],

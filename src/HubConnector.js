@@ -64,7 +64,7 @@ class HubConnector {
                 if(err.response && err.response.data && err.response.data.result !== undefined){
                     degraded = err.response.data.result;
                 } else {
-                    // Unreachable — record why so the caller can report which
+                    // Unreachable. Record why so the caller can report which
                     // endpoints failed instead of an undiagnosable null.
                     this.lastFailures.push(url + ' → ' + (err.code || err.message));
                 }
@@ -81,7 +81,7 @@ class HubConnector {
         // A reachable-but-degraded hub returns a non-null {status:"degraded"}
         // body. The hub is up, so report it as reachable rather than treating it
         // as down (which would make the install/restart loop exhaust its retries
-        // against a live hub) — but log the degraded state so it stays visible.
+        // against a live hub), but log the degraded state so it stays visible.
         if(result && typeof result === 'object' && result.status === 'degraded'){
             console.warn('Hub reachable but reporting degraded state: ', result);
         }

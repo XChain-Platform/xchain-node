@@ -11,7 +11,7 @@ const proxyquire = require('proxyquire').noCallThru()
 const { PassThrough, EventEmitter } = require('stream')
 
 // ---------------------------------------------------------------------------
-// Constants (real — no I/O side-effects)
+// Constants (real, no I/O side-effects)
 // ---------------------------------------------------------------------------
 const { XChainService, SEP, BOOTSTRAP_BASE_URL } = require('../../src/config/constants')
 
@@ -185,7 +185,7 @@ describe('BootstrapService', function () {
 
     // Signature ENFORCEMENT is fail-closed by default (see BootstrapSigning.test.js
     // for that policy). The restore/ensure tests below exercise restore MECHANICS
-    // with no pinned key/.sig in their stubbed fs, so they opt out of enforcement —
+    // with no pinned key/.sig in their stubbed fs, so they opt out of enforcement;
     // otherwise checkBootstrapSignature would (correctly) refuse and abort the restore.
     let _savedRequireSigned
     beforeEach(function () {
@@ -266,10 +266,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // makeBootstrap — dispatch
+    // makeBootstrap: dispatch
     // -----------------------------------------------------------------------
 
-    describe('makeBootstrap() — dispatch', function () {
+    describe('makeBootstrap(): dispatch', function () {
 
         it('throws for unsupported module', async function () {
             const stubs = makeStubs()
@@ -284,10 +284,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // restoreBootstrap — dispatch
+    // restoreBootstrap: dispatch
     // -----------------------------------------------------------------------
 
-    describe('restoreBootstrap() — dispatch', function () {
+    describe('restoreBootstrap(): dispatch', function () {
 
         it('throws for unsupported module', async function () {
             const stubs = makeStubs()
@@ -576,7 +576,7 @@ describe('BootstrapService', function () {
             // Stub the entire restoreBootstrapUtxoTracker path by making
             // existsSync say the archive+work files exist with sentinel,
             // so restoreBootstrap completes in the resumable-already-verified path.
-            // Signing pubkey (.pem) / signature (.sig) read as absent — a dev
+            // Signing pubkey (.pem) / signature (.sig) read as absent; a dev
             // checkout pins no key, so checkBootstrapSignature warns + proceeds.
             const stubs = makeStubs()
             stubs.fs.existsSync.callsFake(p => !/\.(pem|sig)$/.test(String(p)))
@@ -795,10 +795,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // restoreBootstrapUtxoTracker — archive-not-found
+    // restoreBootstrapUtxoTracker: archive not found
     // -----------------------------------------------------------------------
 
-    describe('restoreBootstrapUtxoTracker() — file not found', function () {
+    describe('restoreBootstrapUtxoTracker(): file not found', function () {
 
         it('throws when archive file does not exist', async function () {
             const stubs = makeStubs()
@@ -814,10 +814,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // restoreBootstrapUtxoTracker — resumable extraction skip path
+    // restoreBootstrapUtxoTracker: resumable extraction skip path
     // -----------------------------------------------------------------------
 
-    describe('restoreBootstrapUtxoTracker() — resumable skip (inner archive + checksum exist)', function () {
+    describe('restoreBootstrapUtxoTracker(): resumable skip (inner archive + checksum exist)', function () {
 
         it('skips outer extract when inner archive and checksum already present', async function () {
             const stubs = makeStubs()
@@ -847,7 +847,7 @@ describe('BootstrapService', function () {
             // Step 4: clear volume
             stubs.execFile = sinon.stub().resolves({ stdout: '' })
 
-            // Step 5: restore data.tar.gz into volume — supply a spawn that closes with 0
+            // Step 5: restore data.tar.gz into volume; supply a spawn that closes with 0
             const tarProc = makeSpawnProc()
             stubs.spawn = sinon.stub().returns(tarProc)
 
@@ -869,10 +869,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // restoreBootstrapUtxoTracker — fresh extract path (no prior run)
+    // restoreBootstrapUtxoTracker: fresh extract path (no prior run)
     // -----------------------------------------------------------------------
 
-    describe('restoreBootstrapUtxoTracker() — fresh extract', function () {
+    describe('restoreBootstrapUtxoTracker(): fresh extract', function () {
 
         it('extracts outer archive, verifies checksum, restores volume', async function () {
             const stubs = makeStubs()
@@ -995,7 +995,7 @@ describe('BootstrapService', function () {
                 await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
                 expect.fail()
             } catch (err) {
-                // Checksum verification throws before container stop — no finally restart expected
+                // Checksum verification throws before container stop; no finally restart expected
                 expect(err.message).to.include('Checksum mismatch')
             }
         })
@@ -1119,10 +1119,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // restoreBootstrapMariaDb — file-not-found
+    // restoreBootstrapMariaDb: file not found
     // -----------------------------------------------------------------------
 
-    describe('restoreBootstrapMariaDb() — file not found', function () {
+    describe('restoreBootstrapMariaDb(): file not found', function () {
 
         it('throws when archive file does not exist', async function () {
             const stubs = makeStubs()
@@ -1150,10 +1150,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // restoreBootstrapMariaDb — full happy path
+    // restoreBootstrapMariaDb: full happy path
     // -----------------------------------------------------------------------
 
-    describe('restoreBootstrapMariaDb() — happy path', function () {
+    describe('restoreBootstrapMariaDb(): happy path', function () {
 
         it('drops/recreates DB, restores dump, restarts service container', async function () {
             const stubs = makeStubs()
@@ -1409,10 +1409,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // ensureDirWritable — Docker fallback path (directory exists but not writable)
+    // ensureDirWritable: Docker fallback path (directory exists but not writable)
     // -----------------------------------------------------------------------
 
-    describe('ensureDirWritable() — Docker fallback (dir exists, not writable)', function () {
+    describe('ensureDirWritable(): Docker fallback (dir exists, not writable)', function () {
 
         it('invokes docker mkdir/chown/chmod when outputDir exists but accessSync throws', async function () {
             const stubs = makeStubs()
@@ -1471,10 +1471,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // makeBootstrap — XCHAIN_UTXO_TRACKER happy path
+    // makeBootstrap: XCHAIN_UTXO_TRACKER happy path
     // -----------------------------------------------------------------------
 
-    describe('makeBootstrapUtxoTracker() — happy path', function () {
+    describe('makeBootstrapUtxoTracker(): happy path', function () {
 
         it('creates a bootstrap for utxo-tracker: stops container, tars, checksums, wraps, restarts', async function () {
             const stubs = makeStubs()
@@ -1640,10 +1640,10 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
-    // makeBootstrapMariaDb — dispatch
+    // makeBootstrapMariaDb: dispatch
     // -----------------------------------------------------------------------
 
-    describe('makeBootstrapMariaDb() — happy path', function () {
+    describe('makeBootstrapMariaDb(): happy path', function () {
 
         it('dumps decoder DB: stops, streams dump, checksums, wraps, returns true', async function () {
             const stubs = makeStubs()

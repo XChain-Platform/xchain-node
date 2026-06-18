@@ -913,10 +913,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // restartContainer — error branch
+    // restartContainer: error branch
     // -------------------------------------------------------------------
 
-    describe('restartContainer() — error branches', function () {
+    describe('restartContainer(): error branches', function () {
 
         it('rejects when stdout does not match container ID', async function () {
             const stubs = makeStubs()
@@ -950,10 +950,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // killContainer — error branches
+    // killContainer: error branches
     // -------------------------------------------------------------------
 
-    describe('killContainer() — error branches', function () {
+    describe('killContainer(): error branches', function () {
 
         it('rejects when stdout does not match container ID', async function () {
             const stubs = makeStubs()
@@ -987,10 +987,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // execContainer — error branch
+    // execContainer: error branch
     // -------------------------------------------------------------------
 
-    describe('execContainer() — error branch', function () {
+    describe('execContainer(): error branch', function () {
 
         it('rejects when docker exec fails', async function () {
             const stubs = makeStubs()
@@ -1009,10 +1009,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // getDockerContainerFileData — error branch
+    // getDockerContainerFileData: error branch
     // -------------------------------------------------------------------
 
-    describe('getDockerContainerFileData() — error branch', function () {
+    describe('getDockerContainerFileData(): error branch', function () {
 
         it('rejects when docker cp fails', async function () {
             const stubs = makeStubs()
@@ -1031,10 +1031,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // getDockerContainerFileCat — error branch
+    // getDockerContainerFileCat: error branch
     // -------------------------------------------------------------------
 
-    describe('getDockerContainerFileCat() — error branch', function () {
+    describe('getDockerContainerFileCat(): error branch', function () {
 
         it('rejects when docker exec cat fails', async function () {
             const stubs = makeStubs()
@@ -1053,10 +1053,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // createDockerNetwork — network create failure
+    // createDockerNetwork: network create failure
     // -------------------------------------------------------------------
 
-    describe('createDockerNetwork() — network create failure', function () {
+    describe('createDockerNetwork(): network create failure', function () {
 
         it('rejects false when network create fails', async function () {
             const stubs = makeStubs()
@@ -1078,10 +1078,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // getDockerNetworkInspect — error branch
+    // getDockerNetworkInspect: error branch
     // -------------------------------------------------------------------
 
-    describe('getDockerNetworkInspect() — error branch', function () {
+    describe('getDockerNetworkInspect(): error branch', function () {
 
         it('rejects when docker network inspect fails', async function () {
             const stubs = makeStubs()
@@ -1100,10 +1100,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // stopContainer — error branches
+    // stopContainer: error branches
     // -------------------------------------------------------------------
 
-    describe('stopContainer() — error branches', function () {
+    describe('stopContainer(): error branches', function () {
 
         it('rejects on exec error', async function () {
             const stubs = makeStubs()
@@ -1122,10 +1122,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // logContainer — TTY + keypress branches
+    // logContainer: TTY + keypress branches
     // -------------------------------------------------------------------
 
-    describe('logContainer() — TTY keypress branches', function () {
+    describe('logContainer(): TTY keypress branches', function () {
 
         it('sets up stdin raw mode and keypress handler when follow=true and isTTY=true', async function () {
             const stubs = makeStubs()
@@ -1219,10 +1219,10 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // startDockerMonitor — with containers (blessed UI)
+    // startDockerMonitor: with containers (blessed UI)
     // -------------------------------------------------------------------
 
-    describe('startDockerMonitor() — with containers', function () {
+    describe('startDockerMonitor(): with containers', function () {
 
         it('sets up blessed UI, spawns docker logs for each container, resolves on q key', async function () {
             const stubs = makeStubs()

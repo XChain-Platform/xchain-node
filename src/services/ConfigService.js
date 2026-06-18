@@ -178,7 +178,7 @@ async function getDefaultConfig(module, coin, network) {
             "INDEXER_DB_PASS":   "xchain" + SEP + "password",
             // The e2e-test harness reaches the indexer DB via DATABASE_URL/DATABASE_PORT
             // (test/initialCheck.test.js), not INDEXER_DB_HOST/PORT. Default them here so
-            // the EXTERNAL_DB rewrite below can repoint them — on a host-native-DB box the
+            // the EXTERNAL_DB rewrite below can repoint them; on a host-native-DB box the
             // docker DNS name "mariadb" doesn't resolve and the suite fails at bootstrap.
             "DATABASE_URL":      "mariadb",
             "DATABASE_PORT":     3306,
@@ -209,14 +209,14 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues["REGTEST_MINER_PORT"]     = 3005
             // Encoder's express-rate-limit defaults to 60 RPM, which the e2e
             // suite blows past whenever the stale-UTXO retry shim fires (up
-            // to 15 retries per failing tx — easily 100+ RPM during the
+            // to 15 retries per failing tx, easily 100+ RPM during the
             // order/swap blocks). Production-safe defaults stay at 60; we
             // raise it for regtest where load is by-design bursty.
             defaultValues["ENCODER_RATE_LIMIT_RPM"] = 99999
         }
 
         // Native-coin protocol fee destination (per coin/network). Read from the host env
-        // (e.g. xchain-node's .env) so the protocol fee address stays out of source — mirrors
+        // (e.g. xchain-node's .env) so the protocol fee address stays out of source; mirrors
         // the TELEMETRY_IP_SALT injection pattern above. The decoder reads FEE_DESTINATION (to
         // persist the fee output to transaction_outputs); the indexer reads
         // XCHAIN_FEE_DESTINATION_<COIN>_<NETWORK> (src/configs/<COIN>.js). Injected as a default,
@@ -268,7 +268,7 @@ async function getDefaultConfig(module, coin, network) {
 
         // Allow the operator to override the explorer's published HOST ports via host
         // env. Shared services (explorer/hub) have no per-coin config file, so host env
-        // is the injection point — same pattern as the hub passthrough vars below. The
+        // is the injection point (same pattern as the hub passthrough vars below). The
         // motivating case: a second co-located xchain-node install (e.g. a federation
         // stack alongside the primary node) must publish the explorer on a non-default
         // port to avoid colliding with the primary's 18080/18081. Container-internal
@@ -302,8 +302,8 @@ async function getDefaultConfig(module, coin, network) {
         defaultValues["BTC_INDEXER_API_URL"]      = process.env.BTC_INDEXER_API_URL || ""
 
         // State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a
-        // shared service (no per coin/network config file), so — like the telemetry
-        // salt and BTC_INDEXER_API_URL above — the host env is the injection point.
+        // shared service (no per coin/network config file), so like the telemetry
+        // salt and BTC_INDEXER_API_URL above, the host env is the injection point.
         // Per-coin <COIN>_INDEXER_URLs feed getblockhashes (checkpoint state reads);
         // DOGE_* configures the on-chain ANCHOR/price publisher signer pipeline;
         // XDEX_* are the shared single-validator/regtest seams. Only set values are
@@ -321,7 +321,7 @@ async function getDefaultConfig(module, coin, network) {
             "ANCHOR_CHUNK_RETRY_MS",
             "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
             // Anchor every Nth checkpoint_seq on-chain (off-multiples stay in the
-            // free off-chain mirror) — decouples DOGE spend from checkpoint cadence.
+            // free off-chain mirror); decouples DOGE spend from checkpoint cadence.
             "ANCHOR_CHECKPOINT_EVERY_N",
             "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
             "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
@@ -334,13 +334,13 @@ async function getDefaultConfig(module, coin, network) {
             // Deployment network for the hub's consensus gates (notably
             // STAKE_WEIGHTED_QUORUM, whose activation height is per-network).
             // REQUIRED by the hub in validator mode (it fails loud on a
-            // blank/invalid value — no silent default here either) and must
+            // blank/invalid value; no silent default here either) and must
             // match the INDEXER_NETWORK of the chains this hub federates.
             "HUB_NETWORK",
             // Oracle price-round finalization threshold. Defaults to 2 in the hub
             // (a 2-hub diversity floor so a lone external source never becomes a
             // federation-signed price). Single-host prod / regtest deployments must
-            // set ORACLE_MIN_SUBMISSIONS=1 explicitly or NO round ever finalizes —
+            // set ORACLE_MIN_SUBMISSIONS=1 explicitly or no round ever finalizes,
             // which stalls every indexer's oracle price-sync barrier. Passed through
             // here so the host env survives a hub container regenerate.
             "ORACLE_MIN_SUBMISSIONS",
@@ -348,7 +348,7 @@ async function getDefaultConfig(module, coin, network) {
             // for legitimate multi-indexer re-bootstrap: every indexer on a box shares
             // one source IP, so a fleet bootstrapping HubDbSync tables (oracle_prices,
             // price_snapshots, cross_chain_calls, capability_snapshots, state_checkpoints)
-            // collectively blows 100/min and gets 429'd — the heartbeat gate then stays
+            // collectively blows 100/min and gets 429'd, so the heartbeat gate then stays
             // closed and the chain stalls. Raise for prod fleets. Passed through so the
             // host env survives a hub container regenerate.
             "HUB_RATE_LIMIT_RPM"
@@ -392,7 +392,7 @@ async function getDefaultConfig(module, coin, network) {
         let mainFileHasCreds = false
 
         if (!fs.existsSync(configFilePath)) {
-            console.warn("Warning: config file not found: " + configFilePath + " — using defaults")
+            console.warn("Warning: config file not found: " + configFilePath + " (using defaults)")
         } else {
             const configFileStream = fs.createReadStream(configFilePath)
             const rl = readline.createInterface({ input: configFileStream, crlfDelay: Infinity })
@@ -421,7 +421,7 @@ async function getDefaultConfig(module, coin, network) {
         // One-time migration for legacy installs: older versions appended NODE_USER /
         // NODE_PASSWORD into the main config file alongside non-secret settings. Move the
         // credentials into the sidecar and strip them from the main file so the two never
-        // share a file again. Existing creds keep working — they are simply relocated.
+        // share a file again. Existing creds keep working; they are simply relocated.
         if (mainFileHasCreds) {
             const creds = {}
             if ("NODE_USER" in defaultConfig)     creds["NODE_USER"]     = defaultConfig["NODE_USER"]
@@ -453,7 +453,7 @@ async function getDefaultConfig(module, coin, network) {
     // EXTERNAL_DB: rewrite the DB host/port keys so containerized services
     // reach the host-native MariaDB via the bridge gateway instead of the
     // docker DNS name "mariadb" (which no longer resolves once the bundled
-    // container is decommissioned). The DB name/user/pass keys stay as-is —
+    // container is decommissioned). The DB name/user/pass keys stay as-is;
     // those are about the credentials, not the network location.
     if (EXTERNAL_DB) {
         const dbHostKeys = ['HUB_DB_HOST', 'DECODER_DB_HOST', 'INDEXER_DB_HOST', 'DATABASE_URL']
@@ -567,7 +567,7 @@ function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = 
     if (expectBranch && !branch) branch = defaultBranch
 
     if (branch && !/^[a-zA-Z0-9._\-\/]+$/.test(branch)) {
-        throw new Error("Invalid branch name: " + branch + " — branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes")
+        throw new Error("Invalid branch name: " + branch + " (branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes)")
     }
 
     return { service, chain, network, branch }

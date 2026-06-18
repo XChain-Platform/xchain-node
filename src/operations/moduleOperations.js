@@ -52,18 +52,18 @@ async function updateModules(servicesList, branch = null) {
                     // Tear down the existing node container before rebuilding. The node
                     // branch of installModule calls buildCryptoNode, which `docker run
                     // --name`s the node but never removes a prior container of that name
-                    // — on `update` that collided and crashed (unhandled rejection).
+                    // on `update` that collided and crashed (unhandled rejection).
                     // Remove by NAME so it also clears a leftover Created-state carcass
                     // the module registry no longer tracks; a no-op on a clean or
                     // already-missing node. (Done here rather than inside buildCryptoNode
-                    // to keep that hot path — shared with fresh `install` — untouched;
+                    // to keep that hot path, shared with fresh `install`, untouched;
                     // the node is briefly down during the image rebuild, which an update
                     // implies anyway.)
                     await forceRemoveContainerByName(getDockerContainerImageName(NODE_MODULE_NAME, nextCoin, nextNetwork))
                     // Recreate even when the container was missing from the registry:
                     // the old `if (!moduleContainerId) continue` made `update node` a
                     // silent no-op (exit 0, nothing created) once the node had crashed or
-                    // been removed — only `install master node` could bring it back.
+                    // been removed; only `install master node` could bring it back.
                     // installModule's remoteUpdate path rebuilds it from local source.
                     await installModule(nextModule, nextCoin, nextNetwork, true, null)
                 } else {
@@ -73,16 +73,16 @@ async function updateModules(servicesList, branch = null) {
                         try { moduleBranch = await getModuleBranch(nextModule) } catch { /* use default */ }
                     }
                     // remoteUpdate=true so installModule actually rebuilds the
-                    // container — without it, the `if (!containerNodeVersion ||
+                    // container. Without it, the `if (!containerNodeVersion ||
                     // remoteUpdate)` guard short-circuits for any already-installed
                     // service and `update` becomes a silent no-op.
                     //
                     // moduleBranch MUST be threaded through: installModule re-clones the
                     // module on the remoteUpdate path (cloneGit with this `branch`), so a
                     // null branch here re-clones the default branch and clobbers the branch
-                    // the operator asked for — the cause of `update <svc> <chain> <net>
-                    // <branch>` silently deploying master. (installModule does the clone, so
-                    // no separate cloneGit is needed here.)
+                    // the operator asked for (the cause of `update <svc> <chain> <net>
+                    // <branch>` silently deploying master). installModule does the clone, so
+                    // no separate cloneGit is needed here.
                     await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId, false, moduleBranch)
                 }
             }
@@ -369,7 +369,7 @@ async function resetModules(service, coin, network) {
 
     if (startFailures.length > 0) {
         const detail = startFailures.map((f) => `${f.module}: ${f.error}`).join('; ')
-        throw new Error(`reset completed but ${startFailures.length} service(s) failed to restart — ${detail}. Start them manually (docker start) or re-run reset.`)
+        throw new Error(`reset completed but ${startFailures.length} service(s) failed to restart: ${detail}. Start them manually (docker start) or re-run reset.`)
     }
     return true
 }

@@ -247,7 +247,7 @@ describe('DatabaseService', function () {
             expect(child._args).to.include('mariadb')
             expect(child._args).to.include('-u')
             expect(child._args).to.include('root')
-            // The SQL must NOT appear anywhere in argv — it is piped via stdin.
+            // The SQL must NOT appear anywhere in argv; it is piped via stdin.
             expect(child._args.some(a => String(a).includes('SELECT 1'))).to.be.false
             expect(child._stdin).to.include('SELECT 1')
             // Password must travel via MYSQL_PWD env (forwarded with a bare
@@ -281,8 +281,8 @@ describe('DatabaseService', function () {
 
         // Security: a failed command must not leak the SQL (which can embed a
         // user password). The SQL is no longer in argv at all; this guards the
-        // remaining vector — mariadb's stderr echoing a fragment of the failing
-        // statement — which callers console.log.
+        // remaining vector: mariadb's stderr echoing a fragment of the failing
+        // statement, which callers console.log.
         it('scrubs the SQL from a failed command (avoids leaking an embedded password)', async function () {
             const stubs = makeStubs()
             const SECRET = 'us3r-pw-do-not-leak'
@@ -379,7 +379,7 @@ describe('DatabaseService', function () {
 
         it('aborts the install (no docker run) when a host-port conflict is detected', async function () {
             const stubs = makeStubs({
-                assertNoHostPortConflicts: sinon.stub().rejects(new Error('Host port conflict — host port 13306 is already published by: other-stack-database'))
+                assertNoHostPortConflicts: sinon.stub().rejects(new Error('Host port conflict: host port 13306 is already published by: other-stack-database'))
             })
             stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
             stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
@@ -390,7 +390,7 @@ describe('DatabaseService', function () {
             } catch (err) { threw = err }
             expect(threw).to.be.an.instanceOf(Error)
             expect(threw.message).to.include('Host port conflict')
-            // The guard runs after pull/tag but before run — so `docker run` must NOT fire.
+            // The guard runs after pull/tag but before run, so `docker run` must NOT fire.
             expect(findDockerRunArgs(stubs.execFileAsync)).to.be.null
         })
 
@@ -836,7 +836,7 @@ describe('DatabaseService', function () {
 
         it('falls back to password prompt when no container found', async function () {
             // When no container exists, prompt runs and setDbRootPassword is called.
-            // The while condition checks getDbRootPassword() — after prompt, we need
+            // The while condition checks getDbRootPassword(); after prompt, we need
             // it to return the set value so the loop exits.
             let dbRootPassword = null
             const stubs = makeStubs()
@@ -939,10 +939,10 @@ describe('DatabaseService', function () {
     })
 
     // -------------------------------------------------------------------
-    // addUserPasswordToDatabase — EXTERNAL_DB path
+    // addUserPasswordToDatabase: EXTERNAL_DB path
     // -------------------------------------------------------------------
 
-    describe('addUserPasswordToDatabase() — EXTERNAL_DB path', function () {
+    describe('addUserPasswordToDatabase(): EXTERNAL_DB path', function () {
 
         function setExtEnv() {
             const saved = {}
@@ -1110,10 +1110,10 @@ describe('DatabaseService', function () {
     })
 
     // -------------------------------------------------------------------
-    // buildDatabaseModule — EXTERNAL_DB path
+    // buildDatabaseModule: EXTERNAL_DB path
     // -------------------------------------------------------------------
 
-    describe('buildDatabaseModule() — EXTERNAL_DB path', function () {
+    describe('buildDatabaseModule(): EXTERNAL_DB path', function () {
 
         it('pings external MariaDB and returns true when reachable', async function () {
             const stubs = makeStubs()
@@ -1172,10 +1172,10 @@ describe('DatabaseService', function () {
     })
 
     // -------------------------------------------------------------------
-    // buildDatabaseModule — existing container + no coin/network
+    // buildDatabaseModule: existing container, no coin/network
     // -------------------------------------------------------------------
 
-    describe('buildDatabaseModule() — no coin/network', function () {
+    describe('buildDatabaseModule(): no coin/network', function () {
 
         it('returns true without network join when coin+network are empty', async function () {
             const stubs = makeStubs()
@@ -1257,10 +1257,10 @@ describe('DatabaseService', function () {
     })
 
     // -------------------------------------------------------------------
-    // ensureXchainNodeAccess — EXTERNAL_DB path
+    // ensureXchainNodeAccess: EXTERNAL_DB path
     // -------------------------------------------------------------------
 
-    describe('ensureXchainNodeAccess() — EXTERNAL_DB path', function () {
+    describe('ensureXchainNodeAccess(): EXTERNAL_DB path', function () {
 
         function extEnv() {
             return {
@@ -1352,7 +1352,7 @@ describe('DatabaseService', function () {
     })
 
     // -------------------------------------------------------------------
-    // ensureXchainNodeAccess — docker path
+    // ensureXchainNodeAccess: docker path
     // -------------------------------------------------------------------
 
     describe('ensureXchainNodeAccess()', function () {

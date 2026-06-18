@@ -73,7 +73,7 @@ module.exports = {
             }
         }
 
-        // Benchmark shared module path (no coin/network — hub/explorer config)
+        // Benchmark shared module path (no coin/network: hub/explorer config)
         {
             const label = 'shared-module'
 

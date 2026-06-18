@@ -145,12 +145,12 @@ async function getExternalDbConfig() {
     if (hasExternalDbConfig()) {
         const saved = loadExternalDbConfig()
         if (saved) {
-            // Verify still works — bad creds in storage mean we should re-prompt
+            // Verify still works; bad creds in storage mean we should re-prompt
             try {
                 await _pingMariaDb(saved)
                 return saved
             } catch {
-                console.log("Saved external-DB credentials no longer work — let's re-enter them.")
+                console.log("Saved external-DB credentials no longer work. Please re-enter them.")
             }
         }
     }
@@ -174,10 +174,10 @@ async function getExternalDbConfig() {
         try {
             await _pingMariaDb(candidate)
             saveExternalDbConfig(candidate)
-            console.log("External MariaDB connection verified — saved to ~/.xchain-node/credentials.json")
+            console.log("External MariaDB connection verified. Saved to ~/.xchain-node/credentials.json")
             cfg = candidate
         } catch (err) {
-            console.log("Could not connect: " + (err.message || err) + " — try again.")
+            console.log("Could not connect: " + (err.message || err) + ". Please try again.")
         }
     }
     return cfg
@@ -217,7 +217,7 @@ async function executeNativeMariaDbCommand(externalCfg, command, commandOptions 
     })
     try {
         const result = await conn.query(command)
-        // For DDL/DML, result has no .length property typically — return ''.
+        // For DDL/DML, result has no .length property typically; return ''.
         // For SELECTs, format to match docker-exec stdout shape.
         if (!Array.isArray(result)) return ''
         if (batchMode) {
@@ -275,7 +275,7 @@ async function askMariadbRootPassword(coin, network) {
     const dbContainerId = await checkIfDatabaseModuleExists(coin, network)
 
     // If the mariadb container is already up, its MYSQL_ROOT_PASSWORD env is
-    // the source of truth — read it directly so non-interactive runs (CI, the
+    // the source of truth. Read it directly so non-interactive runs (CI, the
     // review system's release-check producer, scripted resets) don't hang on
     // a stdin prompt. Falls through to the prompt if the env isn't readable.
     if (dbContainerId) {
@@ -324,8 +324,8 @@ async function askMariadbRootPassword(coin, network) {
 async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, command, commandOptions = "") {
     return new Promise((resolve, reject) => {
         // The SQL is fed to the mariadb client over STDIN, never as an
-        // `-e <sql>` argv entry. User-creation statements embed a secret —
-        // PASSWORD('<userPassword>') — so keeping the SQL out of argv keeps it
+        // `-e <sql>` argv entry. User-creation statements embed a secret
+        // (PASSWORD('<userPassword>')), so keeping the SQL out of argv keeps it
         // out of the child's /proc/<pid>/cmdline (world-readable on the host)
         // entirely, closing the transient exposure that a `-e <sql>` argv left
         // open during the exec. The mariadb client reads statements from stdin
@@ -349,7 +349,7 @@ async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPasswo
                 return
             }
             // mariadb's batch-mode error text can echo a fragment of the failing
-            // statement (which may carry the embedded secret) — scrub the SQL
+            // statement (which may carry the embedded secret): scrub the SQL
             // before the error propagates to callers that console.log it.
             let detail = stderr.trim()
             if (command && detail) detail = detail.split(command).join('<redacted-sql>')
@@ -507,7 +507,7 @@ async function setDatabaseParameters() {
     for (const nextCoin in installedCoinsAndNetworks) {
         for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
             try {
-                // External DB has no container to attach to per-coin networks —
+                // External DB has no container to attach to per-coin networks;
                 // it's reachable via the bridge gateway from inside containers.
                 if (!EXTERNAL_DB) {
                     await addContainerToNetwork(dbContainerId, getDockerNetwork(nextCoin, nextNetwork))
@@ -539,8 +539,8 @@ async function setDatabaseParameters() {
 
 async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]) {
     // External (host-native) MariaDB: there is no database container to exec
-    // into — `docker exec ... null` failed here and aborted the reset mid-way
-    // (data wiped, DBs stale, services left stopped). Use the driver-based
+    // into it (`docker exec ... null` failed here and aborted the reset mid-way,
+    // leaving data wiped, DBs stale, services stopped). Use the driver-based
     // helper instead. DROP and CREATE go as separate statements: unlike the
     // mariadb CLI, the driver rejects multi-statement strings.
     if (EXTERNAL_DB) {
@@ -568,7 +568,7 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
 
 async function buildDatabaseModule(coin, network) {
     // External (host-native) MariaDB mode: xchain-node doesn't own the DB
-    // engine — operator runs MariaDB themselves. We just need to confirm the
+    // engine; the operator runs MariaDB themselves. We just need to confirm the
     // configured external host is reachable and credentials work, then skip
     // everything else. All downstream callers (precheck, ModuleService,
     // moduleOperations, NodeService) are happy with this no-op return.
@@ -610,14 +610,14 @@ async function buildDatabaseModule(coin, network) {
         // `--env NAME` (value supplied in the execFile env below), NOT
         // `--env NAME=value` in argv. Otherwise the secret lands in the child
         // process command line, and a failed `docker run` rejects with it
-        // embedded in err.cmd/err.message — which upstream error logging
+        // embedded in err.cmd/err.message, which upstream error logging
         // (e.g. precheck's console.log(err)) would print. Mirrors the
         // mariadbEnv() MYSQL_PWD pattern used on the client path.
         runArgs.push('--env', 'MYSQL_ROOT_PASSWORD', containerPrefix)
 
-        // Optional MariaDB server tuning. These land as mysqld CLI args — the
+        // Optional MariaDB server tuning. These land as mysqld CLI args; the
         // mariadb image forwards any leading-dash args placed after the image
-        // straight to mysqld — so they persist across a container *recreate*,
+        // straight to mysqld, so they persist across a container *recreate*,
         // unlike a conf.d file written into a running container (its /etc isn't
         // a mounted volume, so a recreate drops it). Each is unset by default,
         // leaving image defaults unchanged. Size them to the host: a busy
@@ -636,7 +636,7 @@ async function buildDatabaseModule(coin, network) {
             if (value) runArgs.push(`--${mysqldFlag}=${value}`)
         }
 
-        // Pre-flight host-port collision check (multi-stack hosts) — the same
+        // Pre-flight host-port collision check (multi-stack hosts): same
         // guard the service-install path uses in ModuleService.buildAndUp. Two
         // different-NODE_PREFIX stacks on one host both try to bind the DB host
         // port; without this, `docker run` fails with a cryptic "port is already
@@ -687,7 +687,7 @@ async function ensureXchainNodeAccess() {
                 await conn.end()
                 return existing
             } catch {
-                console.log("Stored xchain-node credentials no longer work against the external MariaDB — reprovisioning")
+                console.log("Stored xchain-node credentials no longer work against the external MariaDB; reprovisioning")
             }
         }
 
@@ -710,13 +710,13 @@ async function ensureXchainNodeAccess() {
 
     const containerId = await getDatabaseContainerId()
     if (!containerId) {
-        throw new Error("MariaDB container not found — install it before requesting access")
+        throw new Error("MariaDB container not found; install it before requesting access")
     }
 
     if (existing) {
         const works = await checkIfDatabaseIsReady(existing.user, existing.password, XCHAIN_NODE_DB)
         if (works) return existing
-        console.log("Stored xchain-node credentials no longer work against this MariaDB (auth or xchain_node DB missing) — reprovisioning")
+        console.log("Stored xchain-node credentials no longer work against this MariaDB (auth or xchain_node DB missing); reprovisioning")
     }
 
     const rootPassword = await askMariadbRootPassword("", "")

@@ -8,13 +8,13 @@
 // Bootstrap archive signing (supply-chain integrity).
 //
 // The outer bootstrap archive bundles its own checksum, so that checksum only
-// detects transport corruption — a tampering publisher/CDN recomputes it.
+// detects transport corruption: a tampering publisher/CDN recomputes it.
 // These tests cover the detached Ed25519 signature layer: sign at create,
 // verify against the pinned public key at restore, and the fail-open/closed
 // policy around missing keys/signatures.
 //
 // Unlike BootstrapService.test.js (fully stubbed fs), this suite uses REAL
-// fs + crypto against a temp directory — the signing math is the subject
+// fs + crypto against a temp directory; the signing math is the subject
 // under test, not something to stub.
 
 const sinon      = require('sinon')
@@ -198,7 +198,7 @@ describe('Bootstrap signing', function () {
         })
     })
 
-    describe('downloadBootstrap() — companion signature fetch', function () {
+    describe('downloadBootstrap(): companion signature fetch', function () {
 
         function loadServiceWithAxios(axiosStub) {
             return proxyquire('../../src/services/BootstrapService', {

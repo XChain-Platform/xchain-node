@@ -20,7 +20,7 @@ const path = require('path')
 const DEFAULT_NODE_PREFIX    = "xchain-node"
 const rawPrefix              = process.env.NODE_PREFIX || DEFAULT_NODE_PREFIX
 if (!/^[a-z0-9][a-z0-9._-]*$/.test(rawPrefix)) {
-    throw new Error(`Invalid NODE_PREFIX: "${rawPrefix}" — must be lowercase alphanumeric with hyphens, dots, or underscores`)
+    throw new Error(`Invalid NODE_PREFIX: "${rawPrefix}" (must be lowercase alphanumeric with hyphens, dots, or underscores)`)
 }
 const NODE_PREFIX            = rawPrefix
 const NODE_MODULE_NAME       = "node"
@@ -108,7 +108,7 @@ const modulesUrls = {
     "xchain-e2e-test":      "git@github.com:XChain-Platform/xchain-e2e-test.git",
     "xchain-sync":          "git@github.com:XChain-Platform/xchain-sync.git",
     "xchain-vm":            "git@github.com:XChain-Platform/xchain-vm.git",
-    // Not an installable service — listed so LIBRARY_BUNDLES can stage it
+    // Not an installable service; listed so LIBRARY_BUNDLES can stage it
     // into the xchain-e2e-test build context (test:sdk suites).
     "xchain-sdk":           "git@github.com:XChain-Platform/xchain-sdk.git"
 }
@@ -128,14 +128,14 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
         const overrides = JSON.parse(process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE)
         for (const [mod, url] of Object.entries(overrides)) {
             if (!(mod in modulesUrls)) {
-                console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: unknown module '" + mod + "' — ignored")
+                console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: unknown module '" + mod + "' (ignored)")
                 continue
             }
             modulesUrls[mod] = url
             console.log("modulesUrls['" + mod + "'] overridden via env → " + url)
         }
     } catch (err) {
-        console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: parse failed (" + err.message + ") — using defaults")
+        console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: parse failed (" + err.message + "), using defaults")
     }
 }
 

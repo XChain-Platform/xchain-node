@@ -138,7 +138,7 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
 
         it('buildAndUp throws "module not found" when module dir missing', async function () {
             env.setupDefaultRoutes()
-            // Do NOT call setupFullStack — no fake modules created
+            // Do NOT call setupFullStack; no fake modules created
             env.writeConfigFile('bitcoin-regtest', '')
 
             cli = env.createCLI()

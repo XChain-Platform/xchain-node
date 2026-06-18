@@ -486,7 +486,7 @@ describe('Chaos: Docker Resilience', function () {
 
             try {
                 const result = await ds.getStatusFromContainer('abc123')
-                // [0] on empty array returns undefined — downstream code will fail
+                // [0] on empty array returns undefined; downstream code will fail
                 expect(result).to.be.undefined
             } catch {
                 // Also acceptable

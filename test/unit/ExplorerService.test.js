@@ -89,7 +89,7 @@ function loadExplorerService(stubs) {
 // updateExplorer()
 // ---------------------------------------------------------------------------
 
-describe('ExplorerService — updateExplorer()', function () {
+describe('ExplorerService: updateExplorer()', function () {
 
     it('returns true immediately when explorer entry is absent from lastStatus', async function () {
         const stubs = makeExplorerServiceStubs({
@@ -193,10 +193,10 @@ describe('ExplorerService — updateExplorer()', function () {
 })
 
 // ---------------------------------------------------------------------------
-// installExplorerModule() — already running
+// installExplorerModule(): already running
 // ---------------------------------------------------------------------------
 
-describe('ExplorerService — installExplorerModule() already running', function () {
+describe('ExplorerService: installExplorerModule() already running', function () {
 
     it('returns true immediately when ping succeeds and force=false', async function () {
         const stubs = makeExplorerServiceStubs({
@@ -229,10 +229,10 @@ describe('ExplorerService — installExplorerModule() already running', function
 })
 
 // ---------------------------------------------------------------------------
-// installExplorerModule() — force mode
+// installExplorerModule(): force mode
 // ---------------------------------------------------------------------------
 
-describe('ExplorerService — installExplorerModule() force=true', function () {
+describe('ExplorerService: installExplorerModule() force=true', function () {
 
     it('kills and removes existing container when force=true and container exists', async function () {
         const existingId = 'existing-id'
@@ -288,10 +288,10 @@ describe('ExplorerService — installExplorerModule() force=true', function () {
 })
 
 // ---------------------------------------------------------------------------
-// installExplorerModule() — fresh install (ping never succeeds → throw)
+// installExplorerModule(): fresh install (ping never succeeds → throw)
 // ---------------------------------------------------------------------------
 
-describe('ExplorerService — installExplorerModule() exhausts retries', function () {
+describe('ExplorerService: installExplorerModule() exhausts retries', function () {
 
     it('throws when explorer never responds after 10 tries', async function () {
         // ping always returns false → loop exhausts tries
@@ -312,10 +312,10 @@ describe('ExplorerService — installExplorerModule() exhausts retries', functio
 })
 
 // ---------------------------------------------------------------------------
-// installExplorerModule() — install + updateExplorer error in ping loop
+// installExplorerModule(): install + updateExplorer error in ping loop
 // ---------------------------------------------------------------------------
 
-describe('ExplorerService — installExplorerModule() updateExplorer error in loop', function () {
+describe('ExplorerService: installExplorerModule() updateExplorer error in loop', function () {
 
     it('retries on updateExplorer error and returns true when subsequent ping+updateExplorer succeed', async function () {
         // Scenario: first ping succeeds but updateExplorer throws on first try,
@@ -344,7 +344,7 @@ describe('ExplorerService — installExplorerModule() updateExplorer error in lo
             getInstalledCoinsAndNetworks: sinon.stub().resolves({})
         })
 
-        // Override updateExplorer via the StatusService stub — we need to build
+        // Override updateExplorer via the StatusService stub; we need to build
         // a custom service instance here because updateExplorer is called lazily
         // inside installExplorerModule via the same StatusService import.
         // Build it with an overridden getStatus that uses our updateExplorer stub.
@@ -380,7 +380,7 @@ describe('ExplorerService — installExplorerModule() updateExplorer error in lo
             '../ExplorerConnector.js': MockExplorerConnector
         })
 
-        // Manually inject updateExplorer by patching module — not possible with
+        // Manually inject updateExplorer by patching module; not possible with
         // proxyquire since updateExplorer is self-referential inside the module.
         // Instead, verify the retry mechanic by confirming that with the first
         // updateExplorer failing and sleep being called, the function eventually
@@ -392,10 +392,10 @@ describe('ExplorerService — installExplorerModule() updateExplorer error in lo
 })
 
 // ---------------------------------------------------------------------------
-// installExplorerModule() — fresh install that succeeds on first ping
+// installExplorerModule(): fresh install that succeeds on first ping
 // ---------------------------------------------------------------------------
 
-describe('ExplorerService — installExplorerModule() full happy path', function () {
+describe('ExplorerService: installExplorerModule() full happy path', function () {
 
     it('clones, builds, then returns true when first ping succeeds', async function () {
         let pingCount = 0

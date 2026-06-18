@@ -37,8 +37,8 @@ describe('Fuzz: resolveArgs()', function () {
         '-v',
         '--verbose',
         '--admin',
-        'BITCOIN',       // uppercase — not in enum
-        'MAINNET',       // uppercase — not in enum
+        'BITCOIN',       // uppercase, not in enum
+        'MAINNET',       // uppercase, not in enum
         'Bitcoin',       // title case
         'bitCOIN',
         'xchain-encoder; rm -rf /',

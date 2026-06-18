@@ -50,7 +50,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
 
     // The bundled MariaDB container is started with `--network <xchain net>`
     // (DatabaseService.buildDatabaseModule), so the base network MUST exist
-    // before it — otherwise a fresh box fails with "network not found".
+    // before it; otherwise a fresh box fails with "network not found".
     try {
         await createDockerNetwork(getDockerNetwork("", ""))
     } catch {
@@ -121,7 +121,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
 
     // Only push local config to the hub/explorer for state-changing commands.
     // Read-only commands (ps, tail, logs, …) pass syncHubConfig=false to skip
-    // this — the updateconfig round-trip can be slow on multi-coin nodes and
+    // this step. The updateconfig round-trip can be slow on multi-coin nodes and
     // pushing it adds nothing when local service state hasn't changed.
     if (syncHubConfig) {
         try {

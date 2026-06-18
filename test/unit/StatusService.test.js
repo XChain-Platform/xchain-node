@@ -87,7 +87,7 @@ function loadStatusService(state, overrides = {}) {
 // statusChanged()
 // ---------------------------------------------------------------------------
 
-describe('StatusService — statusChanged()', function () {
+describe('StatusService: statusChanged()', function () {
 
     it('sets statusUpdated to false and calls updateHub + updateExplorer', async function () {
         const state = makeStateStub()
@@ -104,10 +104,10 @@ describe('StatusService — statusChanged()', function () {
 })
 
 // ---------------------------------------------------------------------------
-// getStatus() — cache hit
+// getStatus(): cache hit
 // ---------------------------------------------------------------------------
 
-describe('StatusService — getStatus() cache hit', function () {
+describe('StatusService: getStatus() cache hit', function () {
 
     it('returns cached status immediately when isStatusUpdated is true', async function () {
         const cachedStatus = { bitcoin: { mainnet: {} } }
@@ -143,10 +143,10 @@ describe('StatusService — getStatus() cache hit', function () {
 })
 
 // ---------------------------------------------------------------------------
-// getStatus() — DB not ready
+// getStatus(): DB not ready
 // ---------------------------------------------------------------------------
 
-describe('StatusService — getStatus() DB not ready', function () {
+describe('StatusService: getStatus() DB not ready', function () {
 
     it('returns empty object when db is not ready', async function () {
         const state = makeStateStub({
@@ -164,10 +164,10 @@ describe('StatusService — getStatus() DB not ready', function () {
 })
 
 // ---------------------------------------------------------------------------
-// getStatus() — fresh, with installed modules
+// getStatus(): fresh, with installed modules
 // ---------------------------------------------------------------------------
 
-describe('StatusService — getStatus() with installed modules', function () {
+describe('StatusService: getStatus() with installed modules', function () {
 
     it('builds status for a running container and returns installedModules', async function () {
         // One installed module row in DB
@@ -417,7 +417,7 @@ describe('StatusService — getStatus() with installed modules', function () {
 // getInstalledCoinsAndNetworks()
 // ---------------------------------------------------------------------------
 
-describe('StatusService — getInstalledCoinsAndNetworks()', function () {
+describe('StatusService: getInstalledCoinsAndNetworks()', function () {
 
     it('returns coins and networks filtered by known Coin/Network values', async function () {
         // getStatus will call loadInstalledModules which calls db.getAllModuleContainers
@@ -496,7 +496,7 @@ describe('StatusService — getInstalledCoinsAndNetworks()', function () {
 // loadInstalledModules()
 // ---------------------------------------------------------------------------
 
-describe('StatusService — loadInstalledModules()', function () {
+describe('StatusService: loadInstalledModules()', function () {
 
     it('populates installedModules from db.getAllModuleContainers', async function () {
         const installedModulesObj = {}
@@ -553,10 +553,10 @@ describe('StatusService — loadInstalledModules()', function () {
 })
 
 // ---------------------------------------------------------------------------
-// getStatus() — non-master branch display
+// getStatus(): non-master branch display
 // ---------------------------------------------------------------------------
 
-describe('StatusService — getStatus() branch column', function () {
+describe('StatusService: getStatus() branch column', function () {
 
     it('includes branch column in output when any module is on a non-master branch', async function () {
         const installedModulesObj = {}

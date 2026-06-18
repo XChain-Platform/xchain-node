@@ -157,7 +157,7 @@ describe('Security', function () {
                 cb(null, 'output\n')
             })
             const ds = loadDockerService(stubs)
-            // Pass as array — shell metacharacters are treated as literals
+            // Pass as array; shell metacharacters are treated as literals
             await ds.execContainer('abc123', ['echo', '$(whoami)'])
             const [cmd, args] = stubs.execFile.firstCall.args
             expect(cmd).to.equal('docker')
@@ -176,11 +176,11 @@ describe('Security', function () {
             // The malicious string is passed as a single array element
             try {
                 await ds.stopContainer(maliciousId)
-            } catch { /* may reject due to ID mismatch — that's fine */ }
+            } catch { /* may reject due to ID mismatch; that's fine */ }
             const [, args] = stubs.execFile.firstCall.args
             expect(args[0]).to.equal('stop')
             expect(args[1]).to.equal(maliciousId)
-            // With execFile, this is safe — no shell interprets the semicolon
+            // With execFile, this is safe; no shell interprets the semicolon
         })
 
         it('buildAndUp passes env vars as raw array elements without shell escaping', async function () {
@@ -442,7 +442,7 @@ describe('Security', function () {
 
             const child = stubs.spawn.firstCall.returnValue
             expect(stubs.spawn.firstCall.args[0]).to.equal('docker')
-            // The SQL must NOT appear anywhere in argv — it is piped via stdin.
+            // The SQL must NOT appear anywhere in argv; it is piped via stdin.
             // This keeps a user-creation statement's embedded PASSWORD('...')
             // out of the child's /proc/<pid>/cmdline.
             expect(child._args.some(a => String(a).includes('mysql.user'))).to.be.false

@@ -263,7 +263,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
 
         it('startModules gracefully handles missing LevelDB entry', async function () {
-            // No modules inserted — LevelDB is empty
+            // No modules inserted; LevelDB is empty
             const moduleOps = proxyquire('../../src/operations/moduleOperations', {
                 '../services/DockerService': {
                     startContainer: sinon.stub().resolves(true),
@@ -280,7 +280,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             })
 
             const serviceList = { 'bitcoin': { 'mainnet': ['xchain-encoder'] } }
-            // Should not throw — the operation catches errors and logs them
+            // Should not throw; the operation catches errors and logs them
             const result = await moduleOps.startModules(serviceList)
             expect(result).to.be.true
         })

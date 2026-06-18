@@ -20,7 +20,7 @@ const os         = require('os')
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Homedir used by tests — never the real home
+// Homedir used by tests (never the real home)
 const FAKE_HOME = '/tmp/test-xchain-home'
 const CREDS_DIR  = path.join(FAKE_HOME, '.xchain-node')
 const CREDS_FILE = path.join(CREDS_DIR, 'credentials.json')
@@ -33,7 +33,7 @@ function loadCredentialsService(fsStub, osStub) {
     })
 }
 
-// Typical fs stub — all operations succeed by default
+// Typical fs stub; all operations succeed by default
 function makeFs(overrides = {}) {
     return {
         existsSync:    sinon.stub().returns(false),

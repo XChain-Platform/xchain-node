@@ -118,7 +118,7 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
             env.setupDefaultRoutes()
             cli = env.createCLI()
 
-            // No modules installed — logModules should handle gracefully
+            // No modules installed; logModules should handle gracefully
             const serviceList = filterCommandParameters(null, 'xchain-decoder', 'bitcoin', 'regtest')
             const result = await cli.moduleOps.logModules(serviceList, false)
             expect(result).to.be.true

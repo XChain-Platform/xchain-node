@@ -19,7 +19,7 @@
  * capability staking) instead of a standalone config oracle.
  *
  * Files (under configDir/validator/):
- *   signing.key       64-hex Ed25519 seed (mode 0600) — the SIGNING_PRIVKEY_HEX
+ *   signing.key       64-hex Ed25519 seed (mode 0600): the SIGNING_PRIVKEY_HEX
  *   validator.json    P2P + oracle settings + enabled flag + pubkey
  *   capabilities.json HUB_CAPABILITY_CONFIG: MIN_STAKE thresholds + self-test blocks
  *
@@ -86,7 +86,7 @@ async function initValidator(opts = {}) {
     if (isInitialized() && !opts.force) {
         const existing = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
         console.log('Validator already initialized. Pubkey: ' + existing.pubkey)
-        console.log('Re-run with --force to regenerate (this creates a NEW key — you would need to re-stake).')
+        console.log('Re-run with --force to regenerate (this creates a NEW key; you would need to re-stake).')
         return existing
     }
 
@@ -107,7 +107,7 @@ async function initValidator(opts = {}) {
         P2P_VALIDATOR_ADDR: opts.p2pAddr || ('0.0.0.0:' + p2pPort),
         P2P_PORT:           p2pPort,
         SEED_NODES:         seedNodes,
-        // Oracle round numbering anchor — MUST match across the federation.
+        // Oracle round numbering anchor. MUST match across the federation.
         ORACLE_EPOCH_START: opts.oracleEpochStart ? parseInt(opts.oracleEpochStart) : null,
         capabilities:       capabilities
     }
@@ -122,7 +122,7 @@ async function initValidator(opts = {}) {
 
     console.log('')
     console.log('Validator initialized.')
-    console.log('  signing key : ' + KEY_FILE + ' (mode 0600 — keep this secret, back it up)')
+    console.log('  signing key : ' + KEY_FILE + ' (mode 0600, keep this secret and back it up)')
     console.log('  settings    : ' + SETTINGS_FILE)
     console.log('  capabilities: ' + CAPS_FILE)
     console.log('')
@@ -132,7 +132,7 @@ async function initValidator(opts = {}) {
     if (!settings.ORACLE_EPOCH_START)
         console.log('  NOTE: set ORACLE_EPOCH_START (--oracle-epoch-start <unix-ms>) to the value shared by your federation before running the oracle.')
     if (seedNodes.length === 0)
-        console.log('  NOTE: no SEED_NODES set — add peer addresses (--seed-nodes host:port,...) to join the gossip mesh.')
+        console.log('  NOTE: no SEED_NODES set. Add peer addresses (--seed-nodes host:port,...) to join the gossip mesh.')
     console.log('  Edit capabilities.json to set real cross_chain RPC + oracle_publish DOGE values, then run: xchain-node install master xchain-hub')
     console.log('')
 

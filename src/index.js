@@ -17,7 +17,7 @@
  *
  ********************************************************************/
 
-// Node version guard — must run BEFORE any require() that transitively pulls
+// Node version guard. Must run BEFORE any require() that transitively pulls
 // in `mariadb` (cli → precheck → state → MariaDbStore). `mariadb` is ESM-only,
 // and require()-ing an ES module only works on Node 22+. On Node 18/20 the
 // load chain dies with a cryptic ERR_REQUIRE_ESM stack trace; fail fast here

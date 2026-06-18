@@ -379,10 +379,10 @@ describe('moduleOperations', function () {
     })
 
     // -------------------------------------------------------------------
-    // shellModule — error path
+    // shellModule: error path
     // -------------------------------------------------------------------
 
-    describe('shellModule() — error path', function () {
+    describe('shellModule(): error path', function () {
 
         it('continues after shellContainer error and returns true', async function () {
             const stubs = makeStubs()
@@ -403,10 +403,10 @@ describe('moduleOperations', function () {
     })
 
     // -------------------------------------------------------------------
-    // updateModules — branch handling
+    // updateModules: branch handling
     // -------------------------------------------------------------------
 
-    describe('updateModules() — branch handling', function () {
+    describe('updateModules(): branch handling', function () {
 
         it('skips module when container ID is not found', async function () {
             const stubs = makeStubs()
@@ -417,7 +417,7 @@ describe('moduleOperations', function () {
             expect(stubs.installModule.called).to.be.false
         })
 
-        // The branch must reach installModule (7th arg) — installModule re-clones on the
+        // The branch must reach installModule (7th arg); installModule re-clones on the
         // remoteUpdate path, so a null branch there clobbers the requested branch with the
         // default. Regression for `update <svc> <chain> <net> <branch>` deploying master.
         it('threads the provided branch through to installModule', async function () {
@@ -453,10 +453,10 @@ describe('moduleOperations', function () {
     })
 
     // -------------------------------------------------------------------
-    // uninstallModules — includeShared=true
+    // uninstallModules: includeShared=true
     // -------------------------------------------------------------------
 
-    describe('uninstallModules() — includeShared', function () {
+    describe('uninstallModules(): includeShared', function () {
 
         it('skips shared modules by default', async function () {
             const stubs = makeStubs()
@@ -623,10 +623,10 @@ describe('moduleOperations', function () {
     })
 
     // -------------------------------------------------------------------
-    // logModules — no containers case
+    // logModules: no containers case
     // -------------------------------------------------------------------
 
-    describe('logModules() — no containers', function () {
+    describe('logModules(): no containers', function () {
 
         it('prints "No service was selected" when no containers found', async function () {
             const stubs = makeStubs()
@@ -639,10 +639,10 @@ describe('moduleOperations', function () {
     })
 
     // -------------------------------------------------------------------
-    // restartModules — error path
+    // restartModules: error path
     // -------------------------------------------------------------------
 
-    describe('restartModules() — error path', function () {
+    describe('restartModules(): error path', function () {
 
         it('continues after restartContainer error', async function () {
             const stubs = makeStubs()
@@ -654,10 +654,10 @@ describe('moduleOperations', function () {
     })
 
     // -------------------------------------------------------------------
-    // stopModules/startModules — skip when no container
+    // stopModules/startModules: skip when no container
     // -------------------------------------------------------------------
 
-    describe('stopModules() — skip when no container', function () {
+    describe('stopModules(): skip when no container', function () {
 
         it('skips when container ID is not found', async function () {
             const stubs = makeStubs()
@@ -677,7 +677,7 @@ describe('moduleOperations', function () {
         })
     })
 
-    describe('startModules() — error path', function () {
+    describe('startModules(): error path', function () {
 
         it('continues after startContainer error', async function () {
             const stubs = makeStubs()
@@ -688,7 +688,7 @@ describe('moduleOperations', function () {
         })
     })
 
-    describe('execModules() — error path', function () {
+    describe('execModules(): error path', function () {
 
         it('continues after execContainer error', async function () {
             const stubs = makeStubs()

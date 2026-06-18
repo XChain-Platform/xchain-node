@@ -418,10 +418,10 @@ describe('GitHubDownloader', function () {
     })
 
     // -------------------------------------------------------------------
-    // hasHash — arch-specific tests
+    // hasHash: arch-specific tests
     // -------------------------------------------------------------------
 
-    describe('hasHash() — arch-specific', function () {
+    describe('hasHash(): arch-specific', function () {
 
         it('returns true for object entry with matching arch', function () {
             const xHash = 'b'.repeat(64)
@@ -458,10 +458,10 @@ describe('GitHubDownloader', function () {
     })
 
     // -------------------------------------------------------------------
-    // getReleases — generic API error (non-404)
+    // getReleases: generic API error (non-404)
     // -------------------------------------------------------------------
 
-    describe('getReleases() — generic error', function () {
+    describe('getReleases(): generic error', function () {
 
         it('throws with generic error message on non-404 errors', async function () {
             const axiosStub = makeAxiosStub()
@@ -479,10 +479,10 @@ describe('GitHubDownloader', function () {
     })
 
     // -------------------------------------------------------------------
-    // getReleaseByTag — error
+    // getReleaseByTag: error
     // -------------------------------------------------------------------
 
-    describe('getReleaseByTag() — error', function () {
+    describe('getReleaseByTag(): error', function () {
 
         it('throws with descriptive message on error', async function () {
             const axiosStub = makeAxiosStub()
@@ -606,7 +606,7 @@ describe('GitHubDownloader', function () {
             const release = {
                 tag_name: 'v1.0.0',
                 assets: [
-                    // Windows-only asset — no linux match
+                    // Windows-only asset; no linux match
                     { name: `bitcoin-win64-${arch}.zip`, browser_download_url: 'http://example.com/win.zip' }
                 ]
             }
@@ -960,10 +960,10 @@ describe('GitHubDownloader', function () {
     })
 
     // -------------------------------------------------------------------
-    // getAllFiles — directory traversal
+    // getAllFiles: directory traversal
     // -------------------------------------------------------------------
 
-    describe('getAllFiles() — directory traversal', function () {
+    describe('getAllFiles(): directory traversal', function () {
 
         it('returns all files recursively from a directory', function () {
             const fsStub = {
@@ -1001,10 +1001,10 @@ describe('GitHubDownloader', function () {
     })
 
     // -------------------------------------------------------------------
-    // loadHashesFile — invalid hash for object entry
+    // loadHashesFile: invalid hash for object entry
     // -------------------------------------------------------------------
 
-    describe('loadHashesFile() — invalid hash in object entry', function () {
+    describe('loadHashesFile(): invalid hash in object entry', function () {
 
         it('throws when arch hash is invalid in object entry', function () {
             const fsStub = {
@@ -1044,10 +1044,10 @@ describe('GitHubDownloader', function () {
     })
 
     // -------------------------------------------------------------------
-    // downloadReleaseAsset — verifyHash=true path
+    // downloadReleaseAsset: verifyHash=true path
     // -------------------------------------------------------------------
 
-    describe('downloadReleaseAsset() — verifyHash=true', function () {
+    describe('downloadReleaseAsset(): verifyHash=true', function () {
 
         it('calls verifyRepositoryHash when verifyHash=true', async function () {
             const { Readable, Writable } = require('stream')

@@ -25,7 +25,7 @@ function loadConnector(axiosStub) {
 }
 
 // Axios-style error for a non-2xx response that still carries a valid JSON-RPC
-// body — e.g. the hub's HTTP 503 "degraded" health response when its DB pool is
+// body (e.g. the hub's HTTP 503 "degraded" health response when its DB pool is
 // down. Axios attaches the full response to the thrown error as err.response.
 function degraded503Error(body) {
     const err = new Error('Request failed with status code 503')
@@ -137,7 +137,7 @@ describe('HubConnector', function () {
     })
 
     // -------------------------------------------------------------------
-    // _call() — degraded-response handling
+    // _call(): degraded-response handling
     // -------------------------------------------------------------------
 
     describe('_call()', function () {

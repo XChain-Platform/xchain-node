@@ -133,7 +133,7 @@ function eventForCommand(commandName) {
     return 'heartbeat'
 }
 
-// Main entry — call once per command (from the CLI preAction hook), after
+// Main entry. Call once per command (from the CLI preAction hook), after
 // precheck has populated install status. Never throws; best-effort.
 async function maybeReportTelemetry(commandName, cliOptOut) {
     let pref = loadPref()

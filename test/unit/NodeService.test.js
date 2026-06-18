@@ -161,10 +161,10 @@ function makeFakeHttps(stubs, { decompressErr = null, statusCode = 200 } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// getCryptoNode — bitcoin
+// getCryptoNode: bitcoin
 // ---------------------------------------------------------------------------
 
-describe('NodeService — getCryptoNode()', function () {
+describe('NodeService: getCryptoNode()', function () {
 
     it('downloads bitcoin node for x64 arch, decompresses and renames', async function () {
         const stubs = makeNodeServiceStubs()
@@ -204,7 +204,7 @@ describe('NodeService — getCryptoNode()', function () {
 
     it('throws on unsupported architecture', async function () {
         const stubs = makeNodeServiceStubs()
-        // No https needed — should throw before download
+        // No https needed; should throw before download
 
         const origArch = process.arch
         Object.defineProperty(process, 'arch', { value: 'mips', configurable: true })
@@ -353,7 +353,7 @@ describe('NodeService — getCryptoNode()', function () {
 // buildCryptoNode
 // ---------------------------------------------------------------------------
 
-describe('NodeService — buildCryptoNode()', function () {
+describe('NodeService: buildCryptoNode()', function () {
 
     it('runs docker build with correct image name and cwd', async function () {
         const stubs = makeNodeServiceStubs()
@@ -415,7 +415,7 @@ describe('NodeService — buildCryptoNode()', function () {
     it('aborts before the docker build when a host-port conflict is detected', async function () {
         const stubs = makeNodeServiceStubs()
         stubs.assertNoHostPortConflicts = sinon.stub().rejects(
-            new Error('Host port conflict — host port 8333 is already published by: other-stack-bitcoin-mainnet-node'))
+            new Error('Host port conflict: host port 8333 is already published by: other-stack-bitcoin-mainnet-node'))
         let built = false
         stubs.execFile.callsFake((cmd, args, opts, cb) => {
             if (args[0] === 'build') { built = true; return cb(null) }
@@ -429,7 +429,7 @@ describe('NodeService — buildCryptoNode()', function () {
         } catch (err) { threw = err }
         expect(threw).to.be.an.instanceOf(Error)
         expect(threw.message).to.include('Host port conflict')
-        // The guard runs before the build — so `docker build` must NOT fire.
+        // The guard runs before the build, so `docker build` must NOT fire.
         expect(built).to.be.false
     })
 
@@ -560,7 +560,7 @@ describe('NodeService — buildCryptoNode()', function () {
 
     it('rejects (does not hang) when docker run output is not a container id', async function () {
         // Regression: when `docker run` exited 0 but stdout was not a 64-hex id,
-        // there was no else branch — the Promise never settled and hung forever.
+        // there was no else branch; the Promise never settled and hung forever.
         const stubs = makeNodeServiceStubs()
         stubs.execFile.callsFake((cmd, args, opts, cb) => {
             if (args[0] === 'build') return cb(null)
@@ -583,7 +583,7 @@ describe('NodeService — buildCryptoNode()', function () {
         // inside the docker-build callback, escaping the Promise as an uncaught
         // exception so buildCryptoNode hung forever. It must reject instead.
         // NOTE: the build callback is invoked ASYNCHRONOUSLY here (as real execFile
-        // does) — a synchronous stub would let the throw be captured by the Promise
+        // does); a synchronous stub would let the throw be captured by the Promise
         // executor and mask the bug.
         const stubs = makeNodeServiceStubs()
         stubs.fs.mkdirSync.throws(new Error('EACCES: permission denied'))
@@ -634,7 +634,7 @@ describe('NodeService — buildCryptoNode()', function () {
 
     it('includes --ulimit nofile flag in docker run args', async function () {
         const stubs = makeNodeServiceStubs()
-        // Must be valid hex [a-f0-9]{64} — buildCryptoNode checks the regex before resolving
+        // Must be valid hex [a-f0-9]{64}; buildCryptoNode checks the regex before resolving
         const containerId = 'deadbeef'.repeat(8)
         let runArgs = null
 
@@ -669,10 +669,10 @@ describe('NodeService — buildCryptoNode()', function () {
 })
 
 // ---------------------------------------------------------------------------
-// installNode — exercises the orchestration (lazy-require branches)
+// installNode: exercises the orchestration (lazy-require branches)
 // ---------------------------------------------------------------------------
 
-describe('NodeService — installNode()', function () {
+describe('NodeService: installNode()', function () {
 
     it('succeeds when local node version already installed (skips getCryptoNode)', async function () {
         const stubs = makeNodeServiceStubs({
@@ -687,7 +687,7 @@ describe('NodeService — installNode()', function () {
         const ns = loadNodeService(stubs)
         const result = await ns.installNode('bitcoin', 'mainnet')
         expect(result).to.be.true
-        // gitHubDownloader should NOT have been called — version was local
+        // gitHubDownloader should NOT have been called; version was local
         expect(stubs.gitHubDownloader.downloadRepoVersion.called).to.be.false
     })
 

@@ -79,7 +79,7 @@ function saveCredentials(creds) {
     try {
         fs.chmodSync(filePath, 0o600)
     } catch {
-        // chmod may fail on Windows — file is in user's HOME so still protected by ACL
+        // chmod may fail on Windows; file is in user's HOME so still protected by ACL
     }
 }
 

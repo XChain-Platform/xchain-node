@@ -79,7 +79,7 @@ async function createDockerNetwork(networkName) {
     return new Promise((resolve, reject) => {
         execFile('docker', ['network', 'inspect', networkName], (error) => {
             if (error) {
-                // Network doesn't exist — create it
+                // Network doesn't exist; create it
                 console.log("Creating docker network " + networkName)
                 execFile('docker', ['network', 'create', networkName], (err2) => {
                     if (err2) {
@@ -129,7 +129,7 @@ async function getAllContainerFromModule(module, coin, network) {
 // name(s) of the container(s) holding it. Stopped containers don't bind host
 // ports, so `docker ps` (running only) is the correct scope. Used to detect
 // host-port collisions BEFORE `docker run` on multi-stack hosts, where two
-// NODE_PREFIX stacks — or a hand-created service container — can contend for
+// NODE_PREFIX stacks, or a hand-created service container, can contend for
 // the same host port and otherwise only surface a cryptic "port is already
 // allocated" after the image build. Best-effort: any docker failure yields an
 // empty map so the subsequent `docker run` still surfaces the real error.
@@ -225,7 +225,7 @@ async function removeContainer(containerId) {
     return new Promise((resolve, reject) => {
         execFile('docker', ['rm', containerId], (error, stdout, stderr) => {
             if (error) {
-                // Treat "No such container" as success — the desired state
+                // Treat "No such container" as success: the desired state
                 // (container is gone) is already met. Without this, callers
                 // like runE2ETest crash if the container was already cleaned
                 // up by something else (e.g. another invocation, manual rm,
@@ -417,16 +417,16 @@ async function killContainer(containerId) {
 // Force-remove a container by NAME (kill + remove in one shot), tolerating
 // "no such container". Used immediately before a `docker run --name X` to make
 // (re)creation idempotent: it clears both a previous running container of that
-// name (the `update` path — the old container is never auto-removed) AND a
+// name (the `update` path, where the old container is never auto-removed) AND a
 // leftover `Created`-state carcass from a failed earlier create, either of
 // which would otherwise collide on the name and fail the run. Keying on the
-// name (not a registry id) is deliberate — it also catches containers the
+// name (not a registry id) is deliberate: it also catches containers the
 // module registry never recorded (e.g. a create that died before insert).
 async function forceRemoveContainerByName(name) {
     return new Promise((resolve) => {
         execFile('docker', ['rm', '-f', name], (error, stdout, stderr) => {
             if (error) {
-                // "No such container" is the desired state already — succeed.
+                // "No such container" is the desired state already; succeed.
                 // Any other error (e.g. daemon unreachable) is surfaced by the
                 // subsequent `docker run` anyway, so don't reject here and risk
                 // masking the real run error or breaking the fresh-install path.
@@ -463,7 +463,7 @@ async function saveContainerLogs(containerId, filePath) {
         child.stderr.pipe(output, { end: false })
         child.on('close', () => output.end())
         child.on('error', reject)
-        // Resolve only after the output is fully flushed to disk — otherwise
+        // Resolve only after the output is fully flushed to disk; otherwise
         // the caller can read a truncated file.
         output.on('finish', () => resolve(true))
         output.on('error', reject)

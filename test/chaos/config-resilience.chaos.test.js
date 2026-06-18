@@ -346,7 +346,7 @@ describe('Chaos: Config Resilience', function () {
         it('handles extremely long argument strings without crashing', function () {
             const cs = makeConfigService()
             const longArg = 'a'.repeat(10000)
-            // Should not throw or hang — just treated as unknown arg
+            // Should not throw or hang; just treated as unknown arg
             const result = cs.resolveArgs([longArg])
             expect(result.service).to.equal('all')
         })

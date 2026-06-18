@@ -158,7 +158,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
         fs.writeFileSync(confFilePath, confContent)
     }
 
-    // Pre-flight host-port collision check (multi-stack hosts) — the same guard
+    // Pre-flight host-port collision check (multi-stack hosts): same guard
     // the service- and DB-install paths use. Two different-NODE_PREFIX stacks
     // each running this coin/network node would both bind the node RPC host
     // port; without this, `docker run` fails with a cryptic "port is already
@@ -188,7 +188,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
             const blocksHostPath   = blocksDir ? `${blocksDir}/${coin}/${network}` : null
             // txindex is enabled in every coin conf and stays in the datadir even
             // when blocks move (no daemon flag relocates it), so it is bind-
-            // mounted onto the big disk separately. Assumes a fresh install — an
+            // mounted onto the big disk separately. Assumes a fresh install; an
             // existing in-datadir txindex would be shadowed and rebuilt.
             const txindexHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
             if (blocksDir) {

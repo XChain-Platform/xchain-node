@@ -184,7 +184,7 @@ class GitHubDownloader {
   /**
    * Downloads the asset for a linux server matching the host architecture.
    * Picks the release asset whose name contains the host arch ("x86_64" /
-   * "aarch64") and "linux" — i.e. one of the prebuilt linux-gnu tarballs.
+   * "aarch64") and "linux" (one of the prebuilt linux-gnu tarballs).
    */
   async downloadReleaseAsset(release, outputPath, repoKey, version, verifyHash) {
     const arch = getHostArch();
@@ -227,7 +227,7 @@ class GitHubDownloader {
       // Extracts files by extension
       if (fileExtension === 'gz' || fileExtension === 'tgz') {
         // Refuse archives whose member paths could escape outputPath (absolute
-        // paths or '..' segments) — checked explicitly so safety doesn't depend
+        // paths or '..' segments). Checked explicitly so safety doesn't depend
         // on the host tar implementation's defaults.
         const listing = spawnSync('tar', ['-tzf', downloadPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
         if (listing.status !== 0) throw new Error(`tar exited with code ${listing.status}`);
@@ -309,7 +309,7 @@ class GitHubDownloader {
    * Verifies a downloaded FILE (e.g. a prebuilt release tarball) against the
    * registered SHA-256, before it is decompressed or executed. This is the
    * counterpart to verifyRepositoryHash (which hashes an extracted source
-   * directory) for binaries fetched as a single archive — notably the
+   * directory) for binaries fetched as a single archive, notably the
    * Bitcoin Core tarball from bitcoincore.org, whose registered hashes are
    * the project's own published+GPG-signed SHA256SUMS values. Fails closed:
    * throws when no hash is registered for the (repo, version, arch) tuple.

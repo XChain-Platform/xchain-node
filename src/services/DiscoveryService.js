@@ -42,12 +42,12 @@ function logIfNotSilent(silent, message) {
 // Resolve a docker container to its registry identity { module, coin, network }
 // (coin/network are '' for shared modules), or null for non-xchain containers.
 //
-// Identity comes from the CONTAINER NAME — the stable key the CLI itself
+// Identity comes from the CONTAINER NAME, the stable key the CLI itself
 // assigns at creation (and what the file header above promises). The image
 // tag is NOT reliable: rebuilding a module's image while the old container is
 // still running steals the tag, docker then reports that container's image as
-// a bare ID, and an image-keyed scan goes blind to a live, healthy container —
-// worse, the orphan purge below then DELETES its registry row, after which
+// a bare ID, and an image-keyed scan goes blind to a live, healthy container.
+// Worse, the orphan purge below then DELETES its registry row, after which
 // update/start/stop silently no-op for it (node-host-b litecoin-mainnet
 // xchain-indexer incident, 2026-06-11). The image name remains a fallback for
 // containers that were renamed externally.
@@ -100,7 +100,7 @@ async function scanAndRegisterModules({ silent = false } = {}) {
     const seen = new Set()
     const keyOf = (module, coin, network) => module + '|' + coin + '|' + network
 
-    // Sort containers so RUNNING ones come first — when multiple containers
+    // Sort containers so RUNNING ones come first. When multiple containers
     // share the same expected key (e.g. an old exited container and a fresh
     // running one), the running ID wins on the upsert.
     containers.sort((a, b) => {
@@ -122,7 +122,7 @@ async function scanAndRegisterModules({ silent = false } = {}) {
             logIfNotSilent(silent, "Added " + label + " (" + nextContainer.ID.slice(0,12) + ")")
             added++
         } else if (existing !== nextContainer.ID) {
-            // Stale registry — running container has a different ID than recorded
+            // Stale registry: running container has a different ID than recorded
             // (typically a rebuild that bypassed the CLI). insertModuleContainer
             // is an UPSERT, so this fixes the row in-place.
             await db.insertModuleContainer(module, coin, network, nextContainer.ID)
@@ -131,7 +131,7 @@ async function scanAndRegisterModules({ silent = false } = {}) {
         }
     }
 
-    // Purge orphan registry rows — modules table entries whose key we never
+    // Purge orphan registry rows: modules table entries whose key we never
     // saw in `docker ps -a`, meaning the container was deleted externally
     // (or the row is otherwise unreferenced). Leaving these around makes
     // downstream operations log spurious "couldn't connect to network" /

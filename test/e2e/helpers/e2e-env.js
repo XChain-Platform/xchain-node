@@ -22,7 +22,7 @@ const HttpCapture    = require('../../integration/helpers/http-capture')
 const ROOT = path.join(__dirname, '..', '..', '..')
 
 /**
- * E2EEnv — wires all xchain-node services together with stubbed
+ * E2EEnv: wires all xchain-node services together with stubbed
  * child_process / axios / blessed, but real config generation,
  * real LevelDB state (in-memory), and real service-list expansion.
  *
@@ -86,9 +86,9 @@ class E2EEnv extends TestEnv {
         this.capture.when(/docker start/).respondsWith(extractId)
         this.capture.when(/docker restart/).respondsWith(extractId)
 
-        // docker network inspect — return success with gateway info.
+        // docker network inspect: return success with gateway info.
         // createDockerNetwork checks if network exists first, and if inspect succeeds
-        // it skips creation (which is fine for tests — network "already exists").
+        // it skips creation (which is fine for tests, since the network "already exists").
         // addUserPasswordToDatabase also needs getDockerNetworkInspect to return gateway info.
         this.capture.when(/docker network inspect/).returns({
             stdout: JSON.stringify([{
@@ -128,7 +128,7 @@ class E2EEnv extends TestEnv {
         this.capture.when(/docker pull/).returns({ stdout: '' })
         this.capture.when(/docker tag/).returns({ stdout: '' })
 
-        // docker exec (for MariaDB commands) — return success
+        // docker exec (for MariaDB commands): return success
         this.capture.when(/docker exec/).returns({ stdout: '0' })
 
         // docker logs
@@ -224,7 +224,7 @@ class E2EEnv extends TestEnv {
             }
         })
 
-        // StatusService — uses real logic but with stubbed Docker.
+        // StatusService: uses real logic but with stubbed Docker.
         // Override statusChanged to avoid lazy require of real HubService/ExplorerService
         const { setStatusUpdated } = require(path.join(ROOT, 'src/state'))
         const RealStatusService = proxyquire(path.join(ROOT, 'src/services/StatusService'), {
@@ -310,7 +310,7 @@ class E2EEnv extends TestEnv {
             getContainerModuleVersion: async () => '0.0.1'
         }
 
-        // ModuleService — must also stub 'util' because getModuleBranch does
+        // ModuleService: must also stub 'util' because getModuleBranch does
         // promisify(execFile) inline, and our execFile stub lacks the custom promisify symbol
         const ModuleService = proxyquire(path.join(ROOT, 'src/services/ModuleService'), {
             'child_process': { execFile: execFileStub },
@@ -330,7 +330,7 @@ class E2EEnv extends TestEnv {
             }
         })
 
-        // moduleOperations — the main entry point
+        // moduleOperations: the main entry point.
         // Must also stub 'util' because resetModules uses promisify(execFile) at top level
         const moduleOps = proxyquire(path.join(ROOT, 'src/operations/moduleOperations'), {
             'child_process': { execFile: execFileStub },

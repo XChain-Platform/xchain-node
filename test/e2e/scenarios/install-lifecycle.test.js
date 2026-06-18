@@ -227,7 +227,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const modulesBefore = await env.getAllModules()
             expect(modulesBefore.length).to.be.greaterThanOrEqual(5)
 
-            // Uninstall — uninstallModule requires getStatus to return module status.
+            // Uninstall: uninstallModule requires getStatus to return module status.
             // Our StatusService will re-query LevelDB + docker inspect (stubbed).
             await cli.moduleOps.uninstallModules(serviceList)
 

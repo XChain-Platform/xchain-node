@@ -113,7 +113,7 @@ describe('Boundary Tests', function () {
     // 1. Config file parsing boundaries (Fix 1 & 2)
     // ===================================================================
 
-    describe('ConfigService — config file parsing', function () {
+    describe('ConfigService: config file parsing', function () {
 
         describe('values containing "=" (Fix 1)', function () {
 
@@ -229,7 +229,7 @@ describe('Boundary Tests', function () {
 
                 // Should have defaults, not crash
                 expect(config['NODE_PORT']).to.equal(8332)
-                // NODE_USER is randomly generated when absent — must be a non-empty, non-default string
+                // NODE_USER is randomly generated when absent; must be a non-empty, non-default string
                 expect(config['NODE_USER']).to.be.a('string').with.length.greaterThan(0)
                 expect(config['NODE_USER']).to.not.equal('rpc')
                 expect(config['HUB_PORT']).to.equal(10000)
@@ -287,7 +287,7 @@ describe('Boundary Tests', function () {
     // 2. resolveArgs boundaries
     // ===================================================================
 
-    describe('ConfigService — resolveArgs boundaries', function () {
+    describe('ConfigService: resolveArgs boundaries', function () {
         const { resolveArgs } = require('../../src/services/ConfigService')
 
         it('returns all defaults when all args are null', function () {
@@ -373,7 +373,7 @@ describe('Boundary Tests', function () {
     // 3. filterCommandParameters boundaries
     // ===================================================================
 
-    describe('ConfigService — filterCommandParameters boundaries', function () {
+    describe('ConfigService: filterCommandParameters boundaries', function () {
         const { filterCommandParameters } = require('../../src/services/ConfigService')
 
         it('returns empty module list for regtest-only service on mainnet', function () {
@@ -436,7 +436,7 @@ describe('Boundary Tests', function () {
     // 4. Docker env var escaping (Fix 3)
     // ===================================================================
 
-    describe('ModuleService — Docker env var passing (execFile)', function () {
+    describe('ModuleService: Docker env var passing (execFile)', function () {
 
         it('passes double quotes in environment variable values unescaped', async function () {
             const stubs = makeModuleServiceStubs()
@@ -581,7 +581,7 @@ describe('Boundary Tests', function () {
     // 5. Branch name validation (Fix 4)
     // ===================================================================
 
-    describe('ModuleService — branch name validation', function () {
+    describe('ModuleService: branch name validation', function () {
 
         it('accepts valid branch names: master', async function () {
             const stubs = makeModuleServiceStubs()
@@ -729,7 +729,7 @@ describe('Boundary Tests', function () {
     // 6. Grep/testName escaping (Fix 5)
     // ===================================================================
 
-    describe('moduleOperations — grep/testName handling', function () {
+    describe('moduleOperations: grep/testName handling', function () {
 
         function loadModuleOperations(stubs) {
             return proxyquire('../../src/operations/moduleOperations', {
@@ -875,7 +875,7 @@ describe('Boundary Tests', function () {
     // 7. Docker naming boundaries
     // ===================================================================
 
-    describe('ConfigService — naming helper boundaries', function () {
+    describe('ConfigService: naming helper boundaries', function () {
         const {
             getDockerContainerImageName,
             getDockerNetwork,

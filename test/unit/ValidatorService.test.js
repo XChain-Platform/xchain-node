@@ -20,7 +20,7 @@ const crypto     = require('crypto')
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Fake config dir — never touches the real filesystem
+// Fake config dir (never touches the real filesystem)
 const FAKE_CONFIG_DIR = '/tmp/test-xchain-config'
 const FAKE_VALIDATOR_DIR = path.join(FAKE_CONFIG_DIR, 'validator')
 const FAKE_KEY_FILE      = path.join(FAKE_VALIDATOR_DIR, 'signing.key')

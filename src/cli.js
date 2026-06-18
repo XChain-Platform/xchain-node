@@ -50,7 +50,7 @@ async function parseCommand() {
     // hub/explorer. Skipping the push keeps them fast and avoids the lengthy
     // updateconfig round-trip on multi-coin nodes. Any command NOT listed here
     // (install, update, start, stop, restart, uninstall, reset, sync, …) still
-    // pushes — the default is to sync, so a new/unknown command stays safe.
+    // pushes; the default is to sync, so a new/unknown command stays safe.
     const readOnlyCommands = ['ps', 'tail', 'logs', 'monitor', 'tailmonitor']
     program.hook('preAction', async (thisCommand, actionCommand) => {
         setVerbose(thisCommand.opts().verbose ?? false)
@@ -147,7 +147,7 @@ async function parseCommand() {
         .description('Scan Docker for xchain-node containers and register any missing in the database')
         .action(async () => {
             const added = await scanAndRegisterModules()
-            console.log(added === 0 ? "Nothing to add — already in sync" : `Registered ${added} module(s)`)
+            console.log(added === 0 ? "Nothing to add (already in sync)" : `Registered ${added} module(s)`)
             return process.exit(0)
         })
 
@@ -268,7 +268,7 @@ async function parseCommand() {
         .command('e2etest')
         .description('Run E2E tests on a regtest network')
         .argument('<chain>', '(bitcoin, litecoin, dogecoin)')
-        .argument('[testName]', 'optional test file name (e.g. "order", "issue") — runs only that suite')
+        .argument('[testName]', 'optional test file name (e.g. "order", "issue"); runs only that suite')
         .option('--grep <pattern>', 'only run tests matching this pattern (passed to mocha --grep)')
         .option('--script <npmScript>', 'run a specific e2e npm script (e.g. test:security) instead of the default suite')
         .action(async (chain, testName, options) => {
@@ -299,7 +299,7 @@ async function parseCommand() {
         .argument('<chain>',       '(bitcoin, litecoin, dogecoin)')
         .argument('<network>',     '(mainnet, testnet, regtest)')
         .action(async () => {
-            // Not yet implemented — fail loudly instead of silently doing nothing,
+            // Not yet implemented. Fail loudly instead of silently doing nothing,
             // so operators don't believe a rollback occurred.
             console.error('`rollback` is not yet implemented. To recover a service to a known-good block, use `reset` followed by a bootstrap restore.')
             process.exitCode = 1
@@ -335,7 +335,7 @@ Notes:
         .option('--seed-nodes <list>',        'comma-separated peer addresses (host:port,host:port)')
         .option('--p2p-addr <addr>',          'this validator\'s public address (host:port)')
         .option('--p2p-port <port>',          'P2P listen port (default 10001)')
-        .option('--oracle-epoch-start <ms>',  'shared oracle epoch start (unix ms) — must match the federation')
+        .option('--oracle-epoch-start <ms>',  'shared oracle epoch start (unix ms); must match the federation')
         .option('--capabilities <list>',      'enabled capabilities (default price,cross_chain,oracle_publish,attestation)')
         .option('--force',                    'overwrite existing validator config (generates a NEW key)')
         .action(async (opts) => {
@@ -357,7 +357,7 @@ Notes:
                 console.log('  pubkey       : ' + s.pubkey)
                 console.log('  p2p address  : ' + s.P2P_VALIDATOR_ADDR)
                 console.log('  seed nodes   : ' + ((s.SEED_NODES || []).join(', ') || '(none)'))
-                console.log('  oracle epoch : ' + (s.ORACLE_EPOCH_START || '(unset — required before oracle runs)'))
+                console.log('  oracle epoch : ' + (s.ORACLE_EPOCH_START || '(unset, required before oracle runs)'))
                 console.log('  capabilities : ' + ((s.capabilities || []).join(', ') || '(none)'))
             }
             return process.exit(0)
@@ -370,7 +370,7 @@ module.exports = { parseCommand }
 
 // Allow running this file directly (`node src/cli.js <cmd>`) as well as via the
 // bin entrypoint `src/index.js`. When cli.js is required as a module (index.js
-// does `require('./cli')`), require.main is the entrypoint — not this file — so
+// does `require('./cli')`), require.main is the entrypoint, not this file, so
 // parseCommand is NOT auto-invoked here and index.js remains the single caller.
 // Running it directly otherwise silently does nothing, because program.parse()
 // lives inside parseCommand() and would never be called.
