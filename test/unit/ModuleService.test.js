@@ -477,7 +477,111 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — singleton guard
+    // buildAndUp: healthcheck args
+    // -------------------------------------------------------------------
+
+    describe('buildAndUp() healthcheck args', function () {
+
+        function captureRunArgs(stubs) {
+            let runArgs = null
+            // Handle git clone (for modules with LIBRARY_BUNDLES like xchain-indexer)
+            // by responding immediately, and handle docker build/run normally.
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (cmd === 'git') { cb(null) }
+                else if (args[0] === 'build') { cb(null) }
+                else if (args[0] === 'run') { runArgs = args; cb(null, 'e'.repeat(64) + '\n') }
+            })
+            // Also stub fs.cpSync and fs.rmSync (used by bundled-library staging)
+            stubs.fs.cpSync = sinon.stub()
+            stubs.fs.rmSync = sinon.stub()
+            return () => runArgs
+        }
+
+        it('includes --health-cmd for encoder (http_get probe)', async function () {
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            const args = getRunArgs()
+            expect(args).to.include('--health-cmd')
+            const cmdIdx = args.indexOf('--health-cmd')
+            expect(args[cmdIdx + 1]).to.include('/status')
+            expect(args[cmdIdx + 1]).to.include('3003')
+        })
+
+        it('includes --health-cmd for decoder (http_get probe)', async function () {
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-decoder', 'bitcoin', 'mainnet')
+            const args = getRunArgs()
+            expect(args).to.include('--health-cmd')
+            const cmdIdx = args.indexOf('--health-cmd')
+            expect(args[cmdIdx + 1]).to.include('/status')
+            expect(args[cmdIdx + 1]).to.include('3002')
+        })
+
+        it('includes --health-cmd for indexer (http_get probe)', async function () {
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-indexer', 'bitcoin', 'mainnet')
+            const args = getRunArgs()
+            expect(args).to.include('--health-cmd')
+            const cmdIdx = args.indexOf('--health-cmd')
+            expect(args[cmdIdx + 1]).to.include('/status')
+            expect(args[cmdIdx + 1]).to.include('3004')
+        })
+
+        it('includes --health-cmd for hub (jsonrpc_ping probe)', async function () {
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-hub', null, null)
+            const args = getRunArgs()
+            expect(args).to.include('--health-cmd')
+            const cmdIdx = args.indexOf('--health-cmd')
+            expect(args[cmdIdx + 1]).to.include('ping')
+            expect(args[cmdIdx + 1]).to.include('10000')
+        })
+
+        it('includes --health-cmd for explorer (jsonrpc_ping probe)', async function () {
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-explorer', null, null)
+            const args = getRunArgs()
+            expect(args).to.include('--health-cmd')
+            const cmdIdx = args.indexOf('--health-cmd')
+            expect(args[cmdIdx + 1]).to.include('ping')
+            expect(args[cmdIdx + 1]).to.include('8080')
+        })
+
+        it('includes --health-interval, --health-timeout, --health-retries, --health-start-period for encoder', async function () {
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            const args = getRunArgs()
+            expect(args).to.include('--health-interval')
+            expect(args).to.include('--health-timeout')
+            expect(args).to.include('--health-retries')
+            expect(args).to.include('--health-start-period')
+        })
+
+        it('omits healthcheck args for onlyExecution containers', async function () {
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, true)
+            const args = getRunArgs()
+            expect(args).to.not.include('--health-cmd')
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // installModule: singleton guard
     // -------------------------------------------------------------------
 
     describe('installModule() singleton guard', function () {
@@ -498,7 +602,7 @@ describe('ModuleService', function () {
             const ms = loadModuleService(stubs)
             const result = await ms.installModule('xchain-hub', null, null)
             expect(result).to.be.false
-            // Must short-circuit before the build path — no git clone attempted.
+            // Must short-circuit before the build path; no git clone attempted.
             const clonedViaGit = stubs.execFile.getCalls().some(c => c.args[0] === 'git')
             expect(clonedViaGit).to.be.false
         })
@@ -601,7 +705,7 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // cloneGit — branch coverage
+    // cloneGit: branch coverage
     // -------------------------------------------------------------------
 
     describe('cloneGit() branch handling', function () {
@@ -674,10 +778,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — DB module path
+    // installModule: DB module path
     // -------------------------------------------------------------------
 
-    describe('installModule() — DB module', function () {
+    describe('installModule(): DB module', function () {
 
         it('calls buildDatabaseModule and statusChanged for DB module', async function () {
             const stubs = makeStubs()
@@ -795,10 +899,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — EXPLORER module path
+    // installModule: EXPLORER module path
     // -------------------------------------------------------------------
 
-    describe('installModule() — explorer module', function () {
+    describe('installModule(): explorer module', function () {
 
         it('calls installExplorerModule and statusChanged', async function () {
             const stubs = makeStubs()
@@ -857,10 +961,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — generic module, skip-when-version-present
+    // installModule: generic module, skip-when-version-present
     // -------------------------------------------------------------------
 
-    describe('installModule() — generic module, container version already known', function () {
+    describe('installModule(): generic module, container version already known', function () {
 
         it('returns false when container version is already set and remoteUpdate=false', async function () {
             const stubs = makeStubs()
@@ -923,10 +1027,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — generic module full build path
+    // installModule: generic module full build path
     // -------------------------------------------------------------------
 
-    describe('installModule() — generic module full build', function () {
+    describe('installModule(): generic module full build', function () {
 
         it('clones, builds, and returns containerId for a fresh generic module', async function () {
             const stubs = makeStubs()
@@ -963,10 +1067,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // buildAndUp — port validation + hub/sync/indexer/regtest branches
+    // buildAndUp: port validation + hub/sync/indexer/regtest branches
     // -------------------------------------------------------------------
 
-    describe('buildAndUp() — module-specific port/volume branches', function () {
+    describe('buildAndUp(): module-specific port/volume branches', function () {
 
         it('includes port mapping for xchain-hub', async function () {
             const stubs = makeStubs()
@@ -1314,10 +1418,10 @@ describe('ModuleService', function () {
     // -------------------------------------------------------------------
 
     // -------------------------------------------------------------------
-    // installModule — BootstrapService lazy-require paths (utxo-tracker / decoder fresh)
+    // installModule: BootstrapService lazy-require paths (utxo-tracker / decoder fresh)
     // -------------------------------------------------------------------
 
-    describe('installModule() — bootstrap paths via @global proxyquire', function () {
+    describe('installModule(): bootstrap paths via @global proxyquire', function () {
 
         it('calls ensureBootstrapUtxoTracker when utxo-tracker volume was fresh', async function () {
             const sinon3 = require('sinon')
@@ -1439,10 +1543,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — NODE_MODULE_NAME paths
+    // installModule: NODE_MODULE_NAME paths
     // -------------------------------------------------------------------
 
-    describe('installModule() — node module', function () {
+    describe('installModule(): node module', function () {
 
         it('builds crypto node when no container version and localNodeVersion is null', async function () {
             const stubs = makeStubs()
@@ -1577,10 +1681,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — explorer error path
+    // installModule: explorer error path
     // -------------------------------------------------------------------
 
-    describe('installModule() — explorer error path', function () {
+    describe('installModule(): explorer error path', function () {
 
         it('throws when installExplorerModule fails', async function () {
             const stubs = makeStubs()
@@ -1622,10 +1726,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — branch switch when module already on different branch
+    // installModule: branch switch when module already on different branch
     // -------------------------------------------------------------------
 
-    describe('installModule() — branch switch path', function () {
+    describe('installModule(): branch switch path', function () {
 
         it('reclones when existing branch differs from requested branch', async function () {
             const sinon3 = require('sinon')
@@ -1693,10 +1797,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // uninstallModule — removeModuleContainer returns false
+    // uninstallModule: removeModuleContainer returns false
     // -------------------------------------------------------------------
 
-    describe('uninstallModule() — removeModuleContainer returns false', function () {
+    describe('uninstallModule(): removeModuleContainer returns false', function () {
 
         it('throws when removeModuleContainer returns false after successful container removal', async function () {
             const stubs = makeStubs()
@@ -1723,10 +1827,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // installModule — NODE path: checkRemoteNodeVersion when not in remoteVersions
+    // installModule: NODE path: checkRemoteNodeVersion when not in remoteVersions
     // -------------------------------------------------------------------
 
-    describe('installModule() — node: checkRemoteNodeVersion called when coin not in remoteVersions', function () {
+    describe('installModule(): node: checkRemoteNodeVersion called when coin not in remoteVersions', function () {
 
         it('calls checkRemoteNodeVersion when coin not in remote versions map', async function () {
             const stubs = makeStubs()
@@ -1826,10 +1930,10 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // containerExistsByName — catch path (docker inspect rejects → false)
+    // containerExistsByName: catch path (docker inspect rejects → false)
     // -------------------------------------------------------------------
 
-    describe('containerExistsByName() — via singleton installModule with inspect rejection', function () {
+    describe('containerExistsByName(): via singleton installModule with inspect rejection', function () {
 
         it('treats docker inspect rejection as container-not-present (proceeds with install)', async function () {
             const stubs = makeStubs()
@@ -1853,7 +1957,7 @@ describe('ModuleService', function () {
                 'util': {
                     promisify: () => async (cmd, args) => {
                         asyncCallCount++
-                        // containerExistsByName calls docker inspect — simulate rejection
+                        // containerExistsByName calls docker inspect; simulate rejection
                         if (cmd === 'docker' && args && args[0] === 'inspect') {
                             throw new Error('no such container')
                         }
@@ -1945,7 +2049,7 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // assertNoHostPortConflicts — multi-stack host-port collision guard
+    // assertNoHostPortConflicts: multi-stack host-port collision guard
     // -------------------------------------------------------------------
 
     describe('assertNoHostPortConflicts()', function () {

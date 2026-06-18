@@ -57,7 +57,7 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
         }
 
         if (branch && !/^[a-zA-Z0-9._\-\/]+$/.test(branch)) {
-            reject("Invalid branch name: " + branch + " — branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes")
+            reject("Invalid branch name: " + branch + " (branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes)")
             return
         }
 
@@ -103,8 +103,8 @@ async function getModuleBranch(module) {
 // service container hand-created outside xchain-node) two containers can request
 // the same host port, which `docker run` only surfaces as a cryptic "port is
 // already allocated" AFTER the image build wastes minutes. `selfName` is the
-// container we're (re)creating — excluded so re-installs/updates of the same
-// service don't flag themselves (the old container is already killed+removed
+// container we're (re)creating (excluded so re-installs/updates of the same
+// service don't flag themselves; the old container is already killed+removed
 // before this runs, but the name-exclusion is belt-and-suspenders).
 async function assertNoHostPortConflicts(portArgs, selfName) {
     const requested = []
@@ -114,7 +114,7 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
             if (typeof pair !== 'string') continue
             const colonIdx = pair.lastIndexOf(':')
             if (colonIdx === -1) continue
-            // "-p HOST:CONTAINER" or "-p IP:HOST:CONTAINER" — the host port is the
+            // "-p HOST:CONTAINER" or "-p IP:HOST:CONTAINER": the host port is the
             // field before the final colon; take the last colon-separated pair's left side.
             const beforeContainer = pair.substring(0, colonIdx)
             const hostPort = beforeContainer.substring(beforeContainer.lastIndexOf(':') + 1)
@@ -134,13 +134,72 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
     if (conflicts.length > 0) {
         const lines = conflicts.map(c => `  host port ${c.hostPort} is already published by: ${c.holders.join(', ')}`)
         throw new Error(
-            'Host port conflict — cannot publish the following port(s):\n' +
+            'Host port conflict: cannot publish the following port(s):\n' +
             lines.join('\n') + '\n' +
             'Another stack or container already binds them on this host. Override the colliding ' +
             'port(s) in config/<coin>-<network> (e.g. EXPLORER_PORT_HTTP/HTTPS, INDEXER_PORT, HUB_PORT, ' +
             'DECODER_PORT, ENCODER_PORT, UTXO_TRACKER_PORT, SYNC_PORT) and re-run, or stop the conflicting container first.'
         )
     }
+}
+
+// Per-service healthcheck descriptors.
+// Each entry specifies how Docker should probe container readiness:
+//   portKey   - the env-var name whose value is the container-internal port to probe
+//   probe     - 'http_get' uses wget GET on /status; 'jsonrpc_ping' uses wget POST
+//               with a JSON-RPC ping payload; absent means no healthcheck added
+//   interval  - how often Docker reruns the check (--health-interval)
+//   timeout   - per-check timeout (--health-timeout)
+//   retries   - consecutive failures before marking unhealthy (--health-retries)
+//   startPeriod - grace period after container start before failures count
+//                 (--health-start-period); set long enough for npm start + DB connect
+//
+// Timing rationale:
+//   interval=15s  - frequent enough to detect a stuck service quickly without hammering
+//   timeout=5s    - generous but short of the interval; covers a slow DB query
+//   retries=3     - three misses (~45s) before marking unhealthy; avoids flapping
+//   startPeriod=  - varies: fast workers (encoder/miner) get 30s; DB-dependent services
+//                   (decoder, indexer, utxo-tracker) get 60s; hub/explorer/sync get 45s
+const SERVICE_HEALTHCHECK = {
+    [XChainService.XCHAIN_DECODER]:       { portKey: 'DECODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
+    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s' },
+    [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
+    [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
+    [XChainService.XCHAIN_REGTEST_MINER]: { portKey: 'REGTEST_MINER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s' },
+    'xchain-hub':                         { portKey: 'HUB_PORT',                probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
+    [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
+    [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' }
+    // xchain-e2e-test: one-shot execution container, never gets --restart, healthcheck not applicable
+    // coin nodes (node module): managed by NodeService / crypto_nodes; not built via buildAndUp
+    // database (mariadb): managed by DatabaseService with its own health tooling
+}
+
+// Build the --health-* flags for a service container's docker run invocation.
+// Returns an empty array when no healthcheck is configured for the module
+// (or when the required port env-var is missing), so callers are always safe.
+function buildHealthcheckArgs(module, environmentVariables) {
+    const hc = SERVICE_HEALTHCHECK[module]
+    if (!hc) return []
+
+    const port = environmentVariables[hc.portKey]
+    if (!port) return []
+
+    let cmd
+    if (hc.probe === 'jsonrpc_ping') {
+        // JSON-RPC POST ping; both hub and explorer use this protocol
+        cmd = `wget -qO- --post-data='{"jsonrpc":"2.0","method":"ping","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
+    } else {
+        // Default: plain HTTP GET on /status
+        cmd = `wget -qO- http://localhost:${port}/status || exit 1`
+    }
+
+    return [
+        '--health-cmd',      cmd,
+        '--health-interval', hc.interval,
+        '--health-timeout',  hc.timeout,
+        '--health-retries',  String(hc.retries),
+        '--health-start-period', hc.startPeriod
+    ]
 }
 
 async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null) {
@@ -179,7 +238,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     }
 
     return new Promise((resolve, reject) => {
-        // With execFile, env vars are passed as individual array elements — no shell escaping needed
+        // With execFile, env vars are passed as individual array elements (no shell escaping needed)
         const envArgs = []
         for (const key in environmentVariables) {
             envArgs.push('-e', `${key}=${String(environmentVariables[key])}`)
@@ -218,7 +277,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         // Two NODE_PREFIX stacks of the same coin+network must not share
                         // one tracker volume, so non-default prefixes get a prefixed
                         // volume name. The default prefix keeps the legacy unprefixed
-                        // name — renaming it would orphan every existing deployment's
+                        // name; renaming it would orphan every existing deployment's
                         // tracker data (forced fleet-wide resync).
                         const trackerVolumePrefix = NODE_PREFIX === DEFAULT_NODE_PREFIX ? '' : `${NODE_PREFIX}${SEP}`
                         volumeArgs.push(
@@ -314,10 +373,15 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 // them, re-running the suite and leaving the container "restarting" so the
                 // subsequent `docker rm` fails. Persistent service containers keep the policy.
                 const restartArgs = onlyExecution ? [] : ['--restart', 'unless-stopped']
+                // Healthchecks only apply to persistent service containers. One-shot
+                // execution containers exit immediately after their command; a healthcheck
+                // would fire during the exit window and falsely mark them unhealthy.
+                const healthcheckArgs = onlyExecution ? [] : buildHealthcheckArgs(module, environmentVariables)
                 const runArgs = [
                     'run', '-d', ...restartArgs, '--name', containerPrefix, '--hostname', containerPrefix,
                     ...volumeArgs,
                     ...ulimitArgs,
+                    ...healthcheckArgs,
                     '--network', getDockerNetwork(coin, network),
                     ...envArgs,
                     ...portArgs,
@@ -361,7 +425,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
 // Singleton modules share one coin/network-independent container name (see
 // getDockerContainerImageNamePrefix). DB and EXPLORER have dedicated install
 // branches that are already idempotent; HUB and SYNC fall through to the
-// generic branch whose "already built?" check is keyed per coin/network — which
+// generic branch whose "already built?" check is keyed per coin/network, which
 // can't see the one shared container, so installing across multiple networks
 // would re-run `docker run` with a duplicate name and crash.
 const SINGLETON_MODULES = [HUB_MODULE_NAME, SYNC_MODULE_NAME]
@@ -428,7 +492,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
     } else if (module === EXPLORER_MODULE_NAME) {
         try {
             // remoteUpdate=true means the user explicitly ran `update explorer`
-            // (or a force-reinstall) — bypass the ping/status-row early returns
+            // (or a force-reinstall): bypass the ping/status-row early returns
             // in installExplorerModule and tear down the existing container.
             await installExplorerModule(remoteUpdate)
             await statusChanged()
@@ -439,7 +503,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
     } else {
         // For a singleton module the container name is the same for every
         // coin/network, so once it exists this call is a redundant pass for
-        // another network in the same install run — skip it (an explicit
+        // another network in the same install run; skip it (an explicit
         // `update`, remoteUpdate=true, still rebuilds). Without this guard the
         // second network's `docker run` collides on the existing name.
         if (SINGLETON_MODULES.includes(module) && !remoteUpdate) {
@@ -474,7 +538,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                     const { utxoTrackerVolumeHasData } = require('./BootstrapService')
                     utxoWasFresh = !(await utxoTrackerVolumeHasData(coin, network))
                 }
-                // Decoder/indexer freshness must also be sampled BEFORE buildAndUp —
+                // Decoder/indexer freshness must also be sampled BEFORE buildAndUp;
                 // once the service starts it fills its `blocks` table, which would
                 // make a fresh install look populated.
                 let mariaWasFresh = false
@@ -534,7 +598,7 @@ async function uninstallModule(coin, network, module) {
     } else {
         // No live container found for this module (already removed, or never
         // built). A stale row can still linger in the `modules` tracking table
-        // — e.g. the container was `docker rm`'d out of band — which silently
+        // For example, the container may have been `docker rm`'d out of band, which silently
         // makes a later install/update misbehave. getStatus probes every tracked
         // container and drops the ones that are gone, so reaching here means the
         // container truly isn't present: clean up any orphaned row.
