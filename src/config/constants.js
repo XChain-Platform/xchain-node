@@ -110,7 +110,10 @@ const modulesUrls = {
     "xchain-vm":            "git@github.com:XChain-Platform/xchain-vm.git",
     // Not an installable service; listed so LIBRARY_BUNDLES can stage it
     // into the xchain-e2e-test build context (test:sdk suites).
-    "xchain-sdk":           "git@github.com:XChain-Platform/xchain-sdk.git"
+    "xchain-sdk":           "git@github.com:XChain-Platform/xchain-sdk.git",
+    // Also not installable; staged into the e2e-test build context so the
+    // template suites (amm/escrow/crowdsale/vesting) can load their source.
+    "xchain-contracts":     "git@github.com:XChain-Platform/xchain-contracts.git"
 }
 
 // Optional env-var override for local-source workflows. Lets you point any
@@ -152,7 +155,10 @@ const LIBRARY_BUNDLES = {
     // those tests can `require` its source from inside the dockerized image.
     // xchain-sdk rides along the same way for the test:sdk suites
     // (test/sdk/sdkHelper.js loadSDK resolves the file: dep first).
-    "xchain-e2e-test": ["xchain-hub", "xchain-sdk"]
+    // xchain-contracts carries the contract-template source the template
+    // suites load via XCHAIN_CONTRACTS_DIR (see ConfigService); without it
+    // those suites skip (they no longer abort the run).
+    "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts"]
 }
 
 // --- Directory paths ---
