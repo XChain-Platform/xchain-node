@@ -240,6 +240,15 @@ async function getDefaultConfig(module, coin, network) {
         if (module === XChainService.XCHAIN_ENCODER || module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_UTXO_TRACKER) {
             defaultValues["NETWORK"] = coin + "-" + network
         }
+
+        // The contract-template suites (test:sdk/*Template) load their source from
+        // xchain-contracts. LIBRARY_BUNDLES stages it into the e2e-test build context
+        // and the Dockerfile COPYs it to /XChainE2ETest/xchain-contracts, so point the
+        // resolver there. Without the bundle present the suites skip (they no longer
+        // abort the run).
+        if (module === XChainService.XCHAIN_E2E_TEST) {
+            defaultValues["XCHAIN_CONTRACTS_DIR"] = "/XChainE2ETest/xchain-contracts"
+        }
     } else {
         defaultValues = {
             "HUB_HOST":              "0.0.0.0",
@@ -277,6 +286,17 @@ async function getDefaultConfig(module, coin, network) {
             if (process.env[k] !== undefined && process.env[k] !== "") {
                 defaultValues[k] = process.env[k]
             }
+        }
+
+        // The explorer hard-requires a co-located hub-mirror DB (state_checkpoints /
+        // capability_snapshots / cross_chain_matches) per serving coin, since
+        // xchain-sync never replicates those tables. Regtest and dev stacks don't run
+        // that replication, so the explorer would crash-loop on startup there. Let the
+        // operator opt out via host env (ALLOW_NO_COLOCATED_HUB_DB=1): the hub-mirrored
+        // endpoints then fail loud per-request instead of blocking startup. Unset on
+        // mainnet/testnet so the missing-DB guard still catches a real misconfiguration.
+        if (process.env.ALLOW_NO_COLOCATED_HUB_DB !== undefined && process.env.ALLOW_NO_COLOCATED_HUB_DB !== "") {
+            defaultValues.ALLOW_NO_COLOCATED_HUB_DB = process.env.ALLOW_NO_COLOCATED_HUB_DB
         }
     }
 
