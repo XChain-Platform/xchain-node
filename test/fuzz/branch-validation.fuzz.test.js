@@ -145,7 +145,7 @@ describe('Fuzz: Branch Name Validation', function () {
         // Null bytes
         'branch\x00name',
         // Unicode
-        'br\u00e4nch',
+        'bränch',
     ]
 
     for (const branch of invalidBranches) {
@@ -171,11 +171,11 @@ describe('Fuzz: Branch Name Validation', function () {
         // These match ^[a-zA-Z0-9._\-\/]+$ but start with -
         // The regex allows hyphens, so "--upload-pack" could pass if it starts with valid chars
         // Actually: --upload-pack contains only [a-zA-Z-] so it DOES match the regex
-        // This is a known concern — we verify the git command includes -b flag properly
+        // This is a known concern; we verify the git command includes -b flag properly
     ]
 
     it('branch name starting with -- is rejected by regex (hyphen allowed but double-dash prefix is safe because -b flag precedes it)', async function () {
-        // "--upload-pack" matches [a-zA-Z0-9._\-\/]+ — let's verify behavior
+        // "--upload-pack" matches [a-zA-Z0-9._\-\/]+; let's verify behavior
         const branch = '--upload-pack'
         const stubs = makeStubs()
         let clonedCmd = null
@@ -191,7 +191,7 @@ describe('Fuzz: Branch Name Validation', function () {
         // This is safe because -b consumes the next argument
         await ms.cloneGit('xchain-encoder', false, false, branch)
         expect(clonedCmd).to.include('-b --upload-pack')
-        // Verify the structure: -b <branch> <url> <dest> — no unattached flags
+        // Verify the structure: -b <branch> <url> <dest> with no unattached flags
         const parts = clonedCmd.split(' ')
         const bIndex = parts.indexOf('-b')
         expect(parts[bIndex + 1]).to.equal('--upload-pack')
