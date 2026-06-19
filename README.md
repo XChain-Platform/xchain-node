@@ -18,19 +18,19 @@ CLI management and orchestration tool for the XChain Platform. Installs, configu
 
 ## Features
 
-- **Multi-chain orchestration** — manages Bitcoin, Litecoin, and Dogecoin across mainnet, testnet, and regtest; each chain/network gets its own Docker network and container set
-- **Order-independent argument parsing** — CLI arguments auto-classified as service, coin, network, or branch name regardless of position
-- **Docker container lifecycle** — install, start, stop, restart, update, uninstall, and reset services with single commands
-- **Configuration generation** — two-layer system (hardcoded defaults + config file overrides) producing 40+ environment variables per service
-- **Crypto node management** — downloads Bitcoin Core, Litecoin, and Dogecoin binaries from official sources with SHA-256 verification
-- **Database orchestration** — provisions shared MariaDB, creates per-service databases and users with subnet-based permissions
-- **Bootstrap snapshots** — create and restore gzipped snapshots of UTXO tracker, decoder, and indexer data with SHA-256 integrity verification
-- **Multi-pane monitoring** — Blessed terminal UI showing live logs from up to 6 containers in split-screen
-- **Pre-flight checks** — Docker verification, directory creation, LevelDB open, remote version fetch, Docker network creation
-- **State persistence** — LevelDB maps each module to its 64-char container ID via composite keys
-- **execFile security** — all child process calls use `execFile` with array arguments, eliminating shell injection
-- **Input validation** — branch name, port, and container ID validation with strict regex enforcement
-- **1,148 tests** — unit, integration, e2e, smoke, boundary, security, fuzz, chaos, performance, mutation, and regression testing
+- **Multi-chain orchestration**: manages Bitcoin, Litecoin, and Dogecoin across mainnet, testnet, and regtest; each chain/network gets its own Docker network and container set
+- **Order-independent argument parsing**: CLI arguments auto-classified as service, coin, network, or branch name regardless of position
+- **Docker container lifecycle**: install, start, stop, restart, update, uninstall, and reset services with single commands
+- **Configuration generation**: two-layer system (hardcoded defaults + config file overrides) producing 40+ environment variables per service
+- **Crypto node management**: downloads Bitcoin Core, Litecoin, and Dogecoin binaries from official sources with SHA-256 verification
+- **Database orchestration**: provisions shared MariaDB, creates per-service databases and users with subnet-based permissions
+- **Bootstrap snapshots**: create and restore gzipped snapshots of UTXO tracker, decoder, and indexer data with SHA-256 integrity verification
+- **Multi-pane monitoring**: Blessed terminal UI showing live logs from up to 6 containers in split-screen
+- **Pre-flight checks**: Docker verification, directory creation, LevelDB open, remote version fetch, Docker network creation
+- **State persistence**: LevelDB maps each module to its 64-char container ID via composite keys
+- **execFile security**: all child process calls use `execFile` with array arguments, eliminating shell injection
+- **Input validation**: branch name, port, and container ID validation with strict regex enforcement
+- **1,148 tests**: unit, integration, e2e, smoke, boundary, security, fuzz, chaos, performance, mutation, and regression testing
 
 ## Documentation
 
@@ -75,7 +75,7 @@ xchain-node start all bitcoin regtest
 
 By default the bundled `xchain-hub` runs as a standalone config oracle. To run it
 as a full validator (P2P + PBFT + capability staking), generate a validator
-identity first — this is offline and needs no running stack:
+identity first. This is offline and needs no running stack:
 
 ```bash
 xchain-node validator init \
@@ -88,7 +88,7 @@ xchain-node validator init \
 It generates an Ed25519 signing key (saved `0600` under `config/validator/`),
 prints the **pubkey to stake XCHAIN to**, and writes a starter `capabilities.json`.
 Edit that file to set real `cross_chain` RPC endpoints and `oracle_publish` DOGE
-values, then install/start the hub — it now boots in validator mode with your key
+values, then install/start the hub. It will boot in validator mode with your key
 and capability config mounted automatically:
 
 ```bash
@@ -112,18 +112,18 @@ On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 wi
 
 ### Bundled MariaDB tuning
 
-When xchain-node manages its own MariaDB container, these optional env vars override server defaults. They are applied as `mysqld` startup args at install time, so they **persist across a container recreate** (a `conf.d` file edited inside a running container does not). Each is unset by default — image defaults unchanged. Set them before `xchain-node install`.
+When xchain-node manages its own MariaDB container, these optional env vars override server defaults. They are applied as `mysqld` startup args at install time, so they **persist across a container recreate** (a `conf.d` file edited inside a running container does not). Each is unset by default so image defaults remain unchanged. Set them before `xchain-node install`.
 
 | Variable | mysqld setting | When to set |
 |---|---|---|
 | `XCHAIN_NODE_DB_DATA_DIR` | datadir bind-mount (`-v <dir>:/var/lib/mysql`) | Pin the datadir to a fast NVMe mount instead of the Docker data-root |
-| `XCHAIN_NODE_DB_BUFFER_POOL_SIZE` | `innodb-buffer-pool-size` (e.g. `16G`) | Large/multi-DB hosts — the stock 128 MB thrashes on multi-GB datasets |
+| `XCHAIN_NODE_DB_BUFFER_POOL_SIZE` | `innodb-buffer-pool-size` (e.g. `16G`) | Large/multi-DB hosts where the stock 128 MB thrashes on multi-GB datasets |
 | `XCHAIN_NODE_DB_MAX_CONNECTIONS` | `max-connections` (e.g. `300`) | Many connection pools against one DB (replicas, shared services) |
 | `XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT` | `innodb-flush-log-at-trx-commit` (e.g. `2`) | Replica/cache DBs where a 1-second crash window is acceptable for speed |
 
 ## Telemetry
 
-`xchain-node` sends an anonymous usage ping (xchain-node + service versions, which services are running, basic OS/Docker info). Your **IP address is never sent or stored** — the receiver derives only a coarse country/region and an anonymous one-way network hash from the connection, then discards the IP. It contains **no** secrets, wallet data, addresses, or config. It is **on by default**, sent only on install/update and at most once per day otherwise, and never blocks a command.
+`xchain-node` sends an anonymous usage ping (xchain-node + service versions, which services are running, basic OS/Docker info). Your **IP address is never sent or stored**: the receiver derives only a coarse country/region and an anonymous one-way network hash from the connection, then discards the IP. It contains **no** secrets, wallet data, addresses, or config. It is **on by default**, sent only on install/update and at most once per day otherwise, and never blocks a command.
 
 Turn it off with any of: `--no-telemetry` on any command (sticks for future runs), `XCHAIN_NODE_NO_TELEMETRY=1`, or `"optOut": true` in `~/.xchain-node/telemetry.json`. Point at a different collector with `XCHAIN_NODE_TELEMETRY_URL`. Full details: [Privacy & Telemetry](https://github.com/XChain-platform/xchain-documentation/blob/master/operations/TELEMETRY.md).
 
@@ -138,8 +138,8 @@ Turn it off with any of: `--no-telemetry` on any command (sticks for future runs
 | `npm run test:fuzz` | Fuzz tests (256 tests) |
 | `npm run test:chaos` | Chaos engineering tests (140 tests) |
 | `npm run test:regression` | Regression tests (60 tests) |
-| `npm run test:regression:p0` | Regression P0 — critical gate (28 tests) |
-| `npm run test:regression:p0p1` | Regression P0+P1 — standard gate (52 tests) |
+| `npm run test:regression:p0` | Regression P0: critical gate (28 tests) |
+| `npm run test:regression:p0p1` | Regression P0+P1: standard gate (52 tests) |
 | `npm run test:mutation` | Mutation testing (Stryker Mutator) |
 | `npm run test:all` | All tests (~1,148 tests) |
 | `npm run benchmark` | Performance benchmarks (6 scenarios) |
@@ -149,17 +149,17 @@ Turn it off with any of: `--no-telemetry` on any command (sticks for future runs
 
 | Type | Tests | Description |
 |---|---|---|
-| Unit — Core | 143 | `ConfigService.test.js`, `DockerService.test.js`, `LevelUpDb.test.js`, `state.test.js`, `helpers.test.js` — path helpers, naming, config generation, Docker commands, LevelDB CRUD, state singletons, utility functions |
-| Unit — Services | 72 | `ModuleService.test.js`, `DatabaseService.test.js`, `VersionService.test.js`, `ExplorerConnector.test.js`, `GitHubDownloader.test.js`, `HubConnector.test.js` — clone, build, install/uninstall, DB setup, version checks, RPC clients |
-| Unit — Operations | 38 | `moduleOperations.test.js` — install/update/uninstall/start/stop/restart/exec/shell/log/monitor bulk operations |
-| Unit — Security | 60 | `security.test.js` — shell injection prevention (execFile), container ID validation, NODE_PREFIX validation, branch name validation, path traversal, database command safety, source code scanning |
-| Unit — Boundary | 60 | `boundary.test.js` — config file parsing edge cases (values with `=`, base64, empty, blank lines), resolveArgs boundaries, filterCommandParameters, LevelDB key format |
-| Integration | 103 | 8 files — config pipeline, Docker commands, module lifecycle (LevelDB), status queries, hub/explorer config, database setup, network management, multi-module orchestration |
-| Smoke | 159 | 10 scenarios — module imports, CLI registration, global options, constants/enums, config templates, config composition, Docker exports, parameter expansion, state init, Dockerfiles |
-| E2E | 57 | 8 scenarios — install lifecycle, multi-coin, config overrides, precheck, update flow, reset, error handling, exec/logs |
-| Fuzz | 256 | 8 harnesses — port validation, resolveArgs, config parsing, command construction, env escaping, branch validation, filter params, container ID |
-| Chaos | 140 | 7 files — download resilience, LevelDB resilience, config resilience, Docker resilience, git clone resilience, process resilience, network resilience |
-| Regression | 60 | Three-tier suite: P0 critical (28), P1 high (24), P2 standard (8) — argument parsing, config generation, Docker commands, security, lifecycle, state, E2E workflows |
+| Unit - Core | 143 | `ConfigService.test.js`, `DockerService.test.js`, `LevelUpDb.test.js`, `state.test.js`, `helpers.test.js`: path helpers, naming, config generation, Docker commands, LevelDB CRUD, state singletons, utility functions |
+| Unit - Services | 72 | `ModuleService.test.js`, `DatabaseService.test.js`, `VersionService.test.js`, `ExplorerConnector.test.js`, `GitHubDownloader.test.js`, `HubConnector.test.js`: clone, build, install/uninstall, DB setup, version checks, RPC clients |
+| Unit - Operations | 38 | `moduleOperations.test.js`: install/update/uninstall/start/stop/restart/exec/shell/log/monitor bulk operations |
+| Unit - Security | 60 | `security.test.js`: shell injection prevention (execFile), container ID validation, NODE_PREFIX validation, branch name validation, path traversal, database command safety, source code scanning |
+| Unit - Boundary | 60 | `boundary.test.js`: config file parsing edge cases (values with `=`, base64, empty, blank lines), resolveArgs boundaries, filterCommandParameters, LevelDB key format |
+| Integration | 103 | 8 files: config pipeline, Docker commands, module lifecycle (LevelDB), status queries, hub/explorer config, database setup, network management, multi-module orchestration |
+| Smoke | 159 | 10 scenarios: module imports, CLI registration, global options, constants/enums, config templates, config composition, Docker exports, parameter expansion, state init, Dockerfiles |
+| E2E | 57 | 8 scenarios: install lifecycle, multi-coin, config overrides, precheck, update flow, reset, error handling, exec/logs |
+| Fuzz | 256 | 8 harnesses: port validation, resolveArgs, config parsing, command construction, env escaping, branch validation, filter params, container ID |
+| Chaos | 140 | 7 files: download resilience, LevelDB resilience, config resilience, Docker resilience, git clone resilience, process resilience, network resilience |
+| Regression | 60 | Three-tier suite: P0 critical (28), P1 high (24), P2 standard (8): argument parsing, config generation, Docker commands, security, lifecycle, state, E2E workflows |
 | Performance | 6 scenarios | Config generation, filter params, LevelDB operations, config parsing scale, resolveArgs, naming helpers |
 | Mutation | 2 configs | Full service and ConfigService-only pilot via Stryker Mutator |
 | **Total** | **1,148** | |
