@@ -9,64 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.23] - 2026-06-20
 
-### Changed
-- `src/services/ConfigService.js`, `src/services/HubService.js`, `test/chaos/config-resilience.chaos.test.js`: renamed the indexer service-host config key `INDEXER_HOST` → `INDEXER_URL` so it follows the `<SERVICE>_URL` convention every other service uses (`NODE_URL`, `ENCODER_URL`, `DECODER_URL`, `REGTEST_MINER_URL`). It was the lone `_HOST` outlier among the service-URL entries the node pushes into each module's environment and hub config, so an operator following the established pattern would set `INDEXER_URL` (no effect) and hit an opaque hub-fallback failure with no pointer to the wrong variable name. Value and behavior are unchanged, string rename only. The indexer's database host (`INDEXER_DB_HOST`) is a separate variable and is unchanged.
-- `package.json`: pinned `mariadb` 3.5.2 to exact versions (dropped the `^` caret ranges) so every install resolves a byte-identical dependency tree across operator nodes, matching the versions already frozen in `package-lock.json`. No source changes.
-- `src/services/ConfigService.js`: updated the regtest encoder rate-limit default to the renamed `ENCODER_RATE_LIMIT_RPM` key (was `RATE_LIMIT_RPM`), tracking the encoder's adoption of the per-service `<SERVICE>_RATE_LIMIT_RPM` naming convention. This keeps the regtest high-throughput default (`99999`) effective; without the rename the encoder would have silently fallen back to the production default of 60 RPM and re-introduced HTTP 429 back-pressure failures in the bursty e2e suite.
-- `package.json`: aligned the `mariadb` driver to the `^3.5.2` range used across the platform. The driver was previously pinned to `~3.4.5` (a patch-only range, one minor line behind another platform service); the caret range now tracks 3.x minor releases consistently with every other service, removing the version drift and the mix of `~`/`^` range operators across the platform. No source changes.
-
-### Fixed
-- `src/HubConnector.js`: `_call()` now records why each endpoint failed instead of discarding it. When an endpoint is unreachable (no `err.response`) the client pushes a `url → code` entry onto `connector.lastFailures` rather than silently moving on, so a caller that receives `null` can report exactly which endpoints were tried and what error each produced. Previously the unreachable branch dropped the error entirely, leaving operators with no diagnostic when every endpoint was down. The `null`/degraded return contract is unchanged.
-- `src/HubConnector.js`, `test/unit/HubConnector.test.js`: the hub JSON-RPC client no longer treats a reachable-but-unhealthy hub as down. The hub's `ping` endpoint returns HTTP 503 with a valid JSON-RPC `{status:"degraded",db:false}` body when its database pool is down; Axios throws on any non-2xx, and `_call()` swallowed the thrown error's `response`, so a live hub with a dead DB pool read the same as a crashed one, making the hub install/restart loop in `HubService.installHubModule()` exhaust its retries against a hub that is actually running and potentially trigger an unnecessary restart. `_call()` now reads `err.response.data.result` on a non-2xx throw (preferring any fully healthy endpoint first) and surfaces the degraded body instead of `null`, so `ping()` reports a degraded hub as reachable (`true`) and logs the degraded state. Truly unreachable endpoints (no `err.response`) still return `null`/`false` as before.
-- `src/HubConnector.js`: the hub JSON-RPC client now remembers the last endpoint that answered and starts each call there (wrapping through the remaining endpoints), instead of always trying the configured endpoints in fixed order. Previously, when the first endpoint was degraded enough to hit the request timeout, every call paid the full timeout penalty before falling back, and then retried that same endpoint first on the next call. The client now sticks to a known-good endpoint until it too fails, then rotates to the next responder.
-
 ### Added
 - `.env.example`: added a configuration template listing the environment variables `xchain-node` reads (directory overrides, managed and external MariaDB settings, telemetry opt-out), with safe defaults and inline comments.
 
+### Changed
+- Rename `INDEXER_HOST` to `INDEXER_URL` in `ConfigService.js` and `HubService.js` so it follows the `<SERVICE>_URL` convention used by every other service; string rename only, behavior unchanged.
+- Pin `mariadb` to exact version `3.5.2` (drop `^` caret) in `package.json` so every install resolves a byte-identical dependency tree matching `package-lock.json`; no source changes.
+- Update the regtest encoder rate-limit key from `RATE_LIMIT_RPM` to `ENCODER_RATE_LIMIT_RPM` in `ConfigService.js`, tracking the encoder's `<SERVICE>_RATE_LIMIT_RPM` naming convention so the regtest high-throughput default stays effective.
+- Align the `mariadb` driver range to `^3.5.2` in `package.json`, replacing the stale `~3.4.5` patch-only range and harmonizing with the rest of the platform; no source changes.
+
+### Fixed
+- `HubConnector._call()` now records each failed endpoint's URL and error code on `connector.lastFailures` instead of discarding it, so callers receiving `null` can diagnose which endpoints were tried.
+- `HubConnector._call()` now reads `err.response.data.result` on a non-2xx throw so a hub with a dead DB pool (HTTP 503 with a valid JSON-RPC body) is surfaced as degraded-but-reachable rather than treated as crashed.
+- `HubConnector` now remembers the last responding endpoint and starts each call there (wrapping around), avoiding the full timeout penalty on a degraded first endpoint every call.
+
 ### Security
-- `src/utils/dockerMariadb.js` (new), `src/services/DatabaseService.js`, `src/services/BootstrapService.js`: the MariaDB root (and module-user) password no longer appears in any process argv. All ten docker-exec'd MariaDB client invocations (readiness checks, root-password pings, `executeDockerMariaDbCommand`, bootstrap size estimate / dump / drop-recreate / restore / data-presence checks) previously passed `-p<password>` on the command line, where it was readable by any local user on the host via `/proc/<pid>/cmdline` for the lifetime of the call, recurring and long-lived in the case of multi-hour bootstrap dumps and restores, and likewise visible inside the DB container via the exec'd client's cmdline. The new `dockerMariadbArgs()`/`mariadbEnv()` helpers route the password through the `MYSQL_PWD` environment variable instead: the spawned docker client receives it in its environment and a bare `-e MYSQL_PWD` (no `=value`) makes docker forward it into the container process, which `mariadb`, `mariadb-admin`, and `mariadb-dump` all honor. The secret now lives only in process environments (owner/root-readable) and never in argv. Verified end-to-end against a live MariaDB container (all three clients authenticate via the forwarded variable). Unit tests assert the password is absent from argv and present in the spawn/exec env at the readiness-check, admin-command, bootstrap-dump, and bootstrap-restore sites.
-- `src/utils/helpers.js`, `src/GitHubDownloader.js`, `src/services/BootstrapService.js`: every tar extraction now validates the archive's member list before extracting, refusing any member whose path is absolute or contains a `..` segment. The four extraction sites (GitHub release assets, the Bitcoin Core tarball path through `decompressTarGz`, and both bootstrap outer-archive restores) previously relied on the host tar's default behavior to contain hostile member paths; GNU tar ≥1.30 does strip leading `/` and reject `..` members on its own, but that containment is implementation- and version-specific (bsdtar and busybox tar differ), and nothing in our code expressed the requirement. A new pure validator `assertSafeArchiveMemberNames()` (plus the async `assertSafeTarGzMembers()` wrapper) lists members via `tar -t` and fails closed before any extraction runs, so a tampered release asset or bootstrap archive cannot write outside its extraction directory regardless of which tar the host ships. Unit tests cover the validator (absolute, leading/interior/bare `..`, and benign dot-containing names) and the refusal path at each call site. verified before any restore. The SHA-256 checksum a bootstrap ships with lives *inside* the same archive it covers, so it only detects transport corruption, anyone able to alter the archive on (or en route from) the bootstrap server simply recomputes it, and a tampered LevelDB/SQL snapshot would seed a fresh node with attacker-chosen chain state. `bootstrap create` now signs the outer archive (digest-then-sign over its SHA-256) when `XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY` points at the publisher's Ed25519 private key, writing `<archive>.sig` for upload alongside; `downloadBootstrap` fetches `latest.tgz.sig` next to the archive (and removes a stale local `.sig` when the server has none, so a current archive is never checked against an old signature); every restore, manual and auto-bootstrap, LevelDB and MariaDB, runs `checkBootstrapSignature` first, verifying against a public key pinned in the consumer's checkout (`src/config/bootstrap_signing_pubkey.pem`, path overridable via `XCHAIN_NODE_BOOTSTRAP_PUBKEY`) so the trust anchor travels with the code rather than the data server. Verification is mandatory whenever the pinned key and a signature are both present; when either is missing the restore proceeds with a loud warning for compatibility with pre-signing archives, and `XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=1` switches that to fail-closed. Operator key-generation and publishing flow documented in `xchain-documentation/operations/DEPLOYMENT.md`; note the public key still needs to be generated and committed to arm verification by default.
-- `src/services/NodeService.js`, `src/GitHubDownloader.js`, `src/github_hashes.json`: the Bitcoin Core tarball downloaded from bitcoincore.org is now SHA-256-verified before extraction. Previously the BTC install path streamed the prebuilt tarball straight to disk and decompressed it with no integrity check, unlike the Dogecoin/Litecoin paths, which already verify downloads against hashes pinned in `github_hashes.json`: so anyone able to alter the bytes served at the download URL (server/CDN compromise, mis-issued certificate) could have a trojaned `bitcoind` docker-built and run as a long-lived daemon on every operator box installing a BTC node. `getCryptoNode()` now verifies the downloaded tarball via the new `GitHubDownloader.verifyFileHash()` against per-version/per-arch digests pinned in `github_hashes.json` (values taken from the project's GPG-signed `SHA256SUMS`; x86_64 and aarch64 for v28.1), failing closed on a mismatch or an unregistered version/arch and deleting the bad file so a retry re-downloads cleanly. The download promise also now rejects on write-stream errors, transport errors, and non-200 responses instead of logging and proceeding, so a truncated or error-page download can no longer reach `decompressTarGz`/`buildCryptoNode`. Unit tests cover digest-match proceeds, mismatch aborts before extraction, unregistered version fails closed, and non-200 rejection. Note: the pinned BTC digests must be extended when the supported Bitcoin Core version is bumped.
-- `src/services/ConfigService.js`, `.gitignore`: runtime RPC credentials (`NODE_USER`/`NODE_PASSWORD`, i.e. rpcuser/rpcpassword) are now stored in a separate, untracked `config/<coin>-<network>.local` sidecar instead of being written into the main `config/<coin>-<network>` file. Previously the generated credentials shared a file with non-secret operator overrides (`DUST_AMOUNT`, `NODE_EXPOSED_PORT`, etc.), so an operator who wanted to keep or share their template overrides had to first strip the credentials by hand, a recurring foot-gun that raised the chance of an accidental credential exposure over time. `getDefaultConfig()` now reads the sidecar (which takes precedence on key conflicts), and on first read of a legacy install it migrates any credentials still present in the main file into the sidecar and strips them from the main file, so existing installs keep working with no operator action. The new `config/*-*.local` glob is git-ignored alongside the existing per-network config ignores.
+- Move all ten `docker exec`'d MariaDB client invocations off `-p<password>` CLI args onto the `MYSQL_PWD` environment variable via new `dockerMariadbArgs()`/`mariadbEnv()` helpers, so the password is never visible in `/proc/<pid>/cmdline`.
+- Validate archive member lists via `assertSafeArchiveMemberNames()` before any tar extraction at all four sites, rejecting absolute paths and `..` traversals; sign bootstrap outer archives with Ed25519 (`XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY`) and verify against a pinned public key at every restore (`XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=1` makes missing signatures fatal).
+- SHA-256 verify the Bitcoin Core tarball against digests pinned in `github_hashes.json` (x86_64 + aarch64 for v28.1) before extraction, matching the existing DOGE/LTC verification; fail closed on mismatch or unregistered version/arch.
+- Store generated RPC credentials (`NODE_USER`/`NODE_PASSWORD`) in a separate, git-ignored `config/<coin>-<network>.local` sidecar instead of the main config file; `getDefaultConfig()` migrates existing installs automatically on first read.
 
 ## [0.0.22] - 2026-05-30
 
 ### Fixed
-- Managed containers are now created with `--restart unless-stopped`. Previously every container started by `xchain-node` (service modules, coin node daemons, and the MariaDB container) used Docker's default restart policy of `no`, so after a host reboot or Docker daemon restart none of them came back automatically, the platform stayed dark until an operator manually restarted each container in order. The flag was added to the `docker run` argument list at all three container-creation sites (`ModuleService`, `NodeService`, `DatabaseService`); containers now restart automatically after a crash or daemon restart and stay down only when the operator intentionally stops them. The policy is applied at creation time, so already-running containers must be migrated once with `docker update --restart unless-stopped <id>` (or recreated via `stop` + `start`) to pick it up.
+- Create all managed containers (`ModuleService`, `NodeService`, `DatabaseService`) with `--restart unless-stopped` so the platform resumes automatically after a host reboot or Docker daemon restart.
 
 ## [0.0.21] - 2026-05-29
 
 ### Security
-- Pin `tmp` to `>=0.2.3` via an `overrides` entry. The vulnerable `tmp@0.0.33` was pulled in transitively through the `@stryker-mutator/core` dev toolchain (`@inquirer/editor` → `external-editor` → `tmp`) and was flagged by GHSA-ph9p-34f9-6g65 (path traversal via unsanitized `prefix`/`postfix`) and GHSA-52f5-9888-hmc6 (symlink `dir` write). `tmp` is not used on any runtime code path, it only reaches the mutation-testing tooling, but the override upgrades it to a patched line (`0.2.7`) and clears the audit warning. No functional change; Stryker and the test suite resolve and run unchanged.
+- Pin `tmp` to `>=0.2.3` via an `overrides` entry to remediate GHSA-ph9p-34f9-6g65 and GHSA-52f5-9888-hmc6; `tmp` is only reached through Stryker dev tooling, no runtime impact.
 
 ## [0.0.20] - 2026-05-29
 
 ### Changed
-- Dependency installs are now reproducible: `package-lock.json` is committed to the repo (previously git-ignored). With the lockfile tracked, a fresh `npm install` resolves the exact dependency tree that was tested rather than whatever latest compatible minor/patch versions happen to be published at install time.
+- Commit `package-lock.json` to the repo (previously git-ignored) so `npm install` resolves the exact tested dependency tree on every fresh install.
 
 ## [0.0.19] - 2026-05-29
 
 ### Changed
-- `preCheck` no longer pushes local config to the hub/explorer for read-only commands (`ps`, `tail`, `logs`, `monitor`, `tailmonitor`). The `updateconfig` round-trip can take tens of seconds on multi-coin nodes and adds nothing when local service state hasn't changed, so display-only commands now return promptly. State-changing commands (`install`, `update`, `start`, `stop`, `restart`, `uninstall`, `reset`, `sync`, …) still push as before, the sync is the default, so any unlisted/new command keeps pushing.
+- Skip the `updateconfig` hub round-trip in `preCheck` for read-only commands (`ps`, `tail`, `logs`, `monitor`, `tailmonitor`) to avoid the multi-second sync delay; state-changing commands still push as before.
 
 ## [0.0.18] - 2026-05-28
 
 ### Security
-- Raise the minimum `axios` version from `^1.6.7` to `^1.16.0`. The installed version was already patched, but the stale lower bound left a path by which a clean install against an older registry snapshot could resolve a pre-1.8.2 release affected by GHSA-q8qp-cvcw-x6jj (prototype-pollution read-side gadgets in the HTTP adapter enabling credential injection / request hijacking). Tightening the floor closes that gap and silences the recurring audit warning.
+- Raise the minimum `axios` version from `^1.6.7` to `^1.16.0` to close the path by which a clean install could resolve a pre-1.8.2 release affected by GHSA-q8qp-cvcw-x6jj (credential injection / request hijacking).
 
 ## [0.0.17] - 2026-05-28
 
 ### Security
-- Pin `qs` to `^6.15.2` via an `overrides` entry, remediating GHSA-q8mj-m7cp-5q26 (moderate DoS: `qs.stringify` throws a `TypeError` on null/undefined entries in comma-format arrays when `encodeValuesOnly` is set). The override forces the patched version across all transitive dependency paths.
+- Pin `qs` to `^6.15.2` via an `overrides` entry to remediate GHSA-q8mj-m7cp-5q26 (DoS via `qs.stringify` on null/undefined entries in comma-format arrays when `encodeValuesOnly` is set).
 
 ## [0.0.16] - 2026-05-28
 
-### Fixed
-- Bootstrap restore now opens the MariaDB connection pool itself before looking up a module's container, so it works regardless of how it is invoked. Previously, when restore was driven outside the interactive CLI entry path the pool was never opened, `getModuleContainer()` silently returned null, and the restore failed with a misleading `utxo-tracker container not found` error even though the container was healthy and the `modules` row was correct.
-- The container-lookup failure in utxo-tracker restore now distinguishes "DB pool not initialized" from "no matching row in the modules table" so the actual cause is clear.
-
 ### Added
-- Bootstrap restore is now resumable. A late-stage failure no longer discards the (up to ~30 min each) outer-extract and SHA-256 verify work: an already-extracted `data.tar.gz`/`dump.sql.gz` + checksum pair in the work dir is reused instead of re-extracted, and a `verify.ok` sentinel lets a re-run skip re-verification and proceed straight to the restore steps. The work dir is still cleaned up after a successful restore.
+- Bootstrap restore is now resumable: a re-run reuses an already-extracted `data.tar.gz`/`dump.sql.gz` + checksum pair from the work dir and skips re-verification via a `verify.ok` sentinel, avoiding repeated hours-long extract/verify work.
+
+### Fixed
+- Bootstrap restore now opens the MariaDB connection pool before the container lookup so it works when invoked outside the interactive CLI path (previously failed with a misleading "utxo-tracker container not found" error).
+- Distinguish "DB pool not initialized" from "no matching row in `modules` table" in the utxo-tracker container-lookup failure path.
 
 ## [0.0.15] - 2026-04-06
 
@@ -131,6 +131,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.9] - 2026-04-05
 
+### Added
+- Security test suite (`test/unit/security.test.js`) with 27 tests covering shell injection prevention, container ID validation, NODE_PREFIX validation, branch name validation, path traversal prevention, database command safety, and source code scanning for remaining `exec()` calls
+
+### Changed
+- `CommandCapture` test helper gains `createExecFileStub()` and `createExecFileAsyncStub()` methods for the new `execFile` pattern
+- All existing tests (unit, integration, fuzz, e2e, smoke) updated to stub `execFile` instead of `exec`, with array-based assertions
+
 ### Security
 - Replace all `child_process.exec()` calls with `execFile()`/`spawn()` using array arguments across 11 source files (~44 call sites), eliminating shell command injection as a vulnerability class
 - Fix `stringToDockerContainerFile()` broken template literal bug, now uses `spawn()` with `tee` for safe stdin piping
@@ -147,18 +154,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `buildAndUp()` `dockerCmd` parameter changed from `string|null` to `string[]|null`
 - `GitHubDownloader` uses `spawnSync()` + `fs.unlinkSync()` instead of `execSync()` with shell `&&` chaining
 
-### Added
-- Security test suite (`test/unit/security.test.js`) with 27 tests covering shell injection prevention, container ID validation, NODE_PREFIX validation, branch name validation, path traversal prevention, database command safety, and source code scanning for remaining `exec()` calls
-
-### Changed
-- `CommandCapture` test helper gains `createExecFileStub()` and `createExecFileAsyncStub()` methods for the new `execFile` pattern
-- All existing tests (unit, integration, fuzz, e2e, smoke) updated to stub `execFile` instead of `exec`, with array-based assertions
-
 ## [0.0.8] - 2026-04-05
-
-### Fixed
-- Environment variable escaping now neutralizes newline (`\n`) and carriage return (`\r`) characters that could inject additional Docker flags via `-e` values
-- Container ID validation now requires 64-character lowercase hex (`/^[a-f0-9]{64}$/`) instead of only checking string length; rejects with a clear error on invalid IDs
 
 ### Added
 - `validatePort()` helper in ConfigService, strict validation accepting only integer numbers or digit-only strings in range 1-65535; rejects hex, scientific notation, floats, booleans
@@ -166,7 +162,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fuzz test suite (`test/fuzz/`) with 258 tests across 6 files covering env var escaping, branch name validation, resolveArgs robustness, config file parsing, container ID validation, port validation, command construction safety, and filterCommandParameters edge cases
 - `test:fuzz` npm script; fuzz tests included in `test:all` pipeline
 
+### Fixed
+- Environment variable escaping now neutralizes newline (`\n`) and carriage return (`\r`) characters that could inject additional Docker flags via `-e` values
+- Container ID validation now requires 64-character lowercase hex (`/^[a-f0-9]{64}$/`) instead of only checking string length; rejects with a clear error on invalid IDs
+
 ## [0.0.7] - 2026-04-05
+
+### Added
+- Boundary test suite (`test/unit/boundary.test.js`) with 60 tests covering config parsing edge cases, argument resolution boundaries, Docker env var escaping, branch name validation, grep/testName escaping, LevelDB non-TTY handling, and key format integrity
 
 ### Fixed
 - Config file parser now preserves values containing `=` (e.g., base64 tokens, passwords with `=`)
@@ -175,9 +178,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Branch names with shell metacharacters (`;`, `$()`, backticks, spaces, pipes) are rejected with a clear error
 - E2E test `--grep` patterns and test names with `"` or `\` are now escaped to prevent shell injection
 - LevelDB lock prompt no longer hangs in non-interactive (non-TTY) environments; throws immediately with instructions
-
-### Added
-- Boundary test suite (`test/unit/boundary.test.js`) with 60 tests covering config parsing edge cases, argument resolution boundaries, Docker env var escaping, branch name validation, grep/testName escaping, LevelDB non-TTY handling, and key format integrity
 
 ## [0.0.6] - 2026-04-05
 
