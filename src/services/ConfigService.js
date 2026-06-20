@@ -29,8 +29,6 @@ const {
 } = require('../config/constants')
 const { stringToCoin } = require('../utils/helpers')
 
-// --- Path helpers ---
-
 function getModuleDir(module) {
     return moduleDir + "/" + module
 }
@@ -83,8 +81,6 @@ function checkIfCryptoNodeSourceExists(coin) {
         && fs.existsSync(dir + "/src")
 }
 
-// --- Naming helpers ---
-
 function getDockerContainerImageNamePrefix(module, coin, network) {
     if (module === DB_MODULE_NAME || module === HUB_MODULE_NAME || module === EXPLORER_MODULE_NAME || module === SYNC_MODULE_NAME) {
         return NODE_PREFIX
@@ -110,8 +106,6 @@ function getModuleDatabaseName(module, coin, network) {
         + moduleName.charAt(0).toUpperCase() + moduleName.slice(1)
 }
 
-// --- Validation helpers ---
-
 function validatePort(value) {
     if (typeof value === 'number') {
         return Number.isInteger(value) && value >= 1 && value <= 65535
@@ -122,8 +116,6 @@ function validatePort(value) {
     }
     return false
 }
-
-// --- Default config ---
 
 // Persist RPC credentials to the untracked <coin>-<network>.local sidecar. A fresh sidecar
 // is created with writeFileSync; an existing one is appended to, unless overwrite is set
@@ -498,8 +490,6 @@ async function getDefaultConfig(module, coin, network) {
     return defaultConfig
 }
 
-// --- Command parameter filtering ---
-
 function filterCommandParameters(branch, modules, coins, networks) {
     const servicesList = {}
     let addExplorer = false
@@ -558,8 +548,6 @@ function filterCommandParameters(branch, modules, coins, networks) {
 
     return servicesList
 }
-
-// --- Argument resolution (order-independent) ---
 
 function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = {}) {
     let service = 'all', chain = 'all', network = 'all', branch = null

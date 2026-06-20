@@ -16,7 +16,6 @@
 
 const path = require('path')
 
-// --- String constants ---
 const DEFAULT_NODE_PREFIX    = "xchain-node"
 const rawPrefix              = process.env.NODE_PREFIX || DEFAULT_NODE_PREFIX
 if (!/^[a-z0-9][a-z0-9._-]*$/.test(rawPrefix)) {
@@ -49,7 +48,6 @@ const EXTERNAL_DB_HOST              = process.env.XCHAIN_NODE_EXTERNAL_DB_HOST |
 const EXTERNAL_DB_PORT              = parseInt(process.env.XCHAIN_NODE_EXTERNAL_DB_PORT || EXTERNAL_DB_DEFAULT_PORT, 10)
 const EXTERNAL_DB_ROOT_USER         = process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER || EXTERNAL_DB_DEFAULT_ROOT_USER
 
-// --- Enums ---
 const XChainService = {
     XCHAIN_ENCODER:       "xchain-encoder",
     XCHAIN_DECODER:       "xchain-decoder",
@@ -82,7 +80,7 @@ const CoinTickerSymbol = {
     "litecoin": "LTC"
 }
 
-// --- Project folder names (used for paths inside containers) ---
+// Project folder names used for paths inside containers
 const projectFolders = {
     "xchain-encoder":       "XChainEncoder",
     "xchain-decoder":       "XChainDecoder",
@@ -96,7 +94,6 @@ const projectFolders = {
     "xchain-vm":            "XChainVM"
 }
 
-// --- Module Git URLs ---
 const modulesUrls = {
     "xchain-encoder":       "git@github.com:XChain-Platform/xchain-encoder.git",
     "xchain-decoder":       "git@github.com:XChain-Platform/xchain-decoder.git",
@@ -142,7 +139,6 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
     }
 }
 
-// --- Library bundles ---
 // Maps a service to the library modules that must be staged into its build
 // context before docker build. Used by ModuleService.buildAndUp to clone +
 // copy each library into the service's modules/ subdir; the service's
@@ -161,8 +157,7 @@ const LIBRARY_BUNDLES = {
     "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts"]
 }
 
-// --- Directory paths ---
-// These five operator-relevant roots are env-var-overridable so that hosts
+// Operator-relevant directory roots are env-var-overridable so that hosts
 // with a small / partition and a large data volume (e.g., OVH RISE-3 with
 // /misc on a SATA mirror) can land bootstrap work + outputs on the big disk
 // without symlink surgery. Falling back to the in-repo default preserves
@@ -175,7 +170,6 @@ const dataDir            = process.env.XCHAIN_NODE_DATA_DIR         || path.join
 const configDir          = process.env.XCHAIN_NODE_CONFIG_DIR       || path.join(__dirname, "..", "..", "config")
 const containersFilesDir = path.join(tmpDir, "containers_files")
 
-// --- Bootstrap auto-restore ---
 // On a fresh install, xchain-node can download a published bootstrap and restore
 // it instead of syncing from genesis. Distribution layout (per service):
 //   <base>/<module>/<coin>/<network>/latest.tgz

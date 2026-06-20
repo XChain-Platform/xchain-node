@@ -66,8 +66,6 @@ function assertSafeArchiveMemberNames(listing, archivePath) {
     }
 }
 
-// Lists a .tar.gz's member names and rejects the archive if any could write
-// outside the extraction directory.
 async function assertSafeTarGzMembers(file) {
     const listing = await new Promise((resolve, reject) => {
         execFile('tar', ['-tzf', file], { maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {

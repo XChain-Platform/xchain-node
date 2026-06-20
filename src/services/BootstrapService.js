@@ -34,9 +34,7 @@ const { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, execute
 const { assertSafeArchiveMemberNames }                = require('../utils/helpers')
 const { dockerMariadbArgs, mariadbEnv }               = require('../utils/dockerMariadb')
 
-// ─── Private helpers ─────────────────────────────────────────────
-
-// ─── Bootstrap signing (supply-chain integrity) ──────────────────
+// Bootstrap signing (supply-chain integrity):
 //
 // The outer archive bundles data.tar.gz together with its own data.sha256,
 // so that checksum only proves the download wasn't corrupted in transit;

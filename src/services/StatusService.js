@@ -32,7 +32,6 @@ const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, get
 
 async function statusChanged() {
     setStatusUpdated(false)
-    // Lazy requires to avoid circular dependency
     const { updateHub }      = require('./HubService')
     const { updateExplorer } = require('./ExplorerService')
     await updateHub()

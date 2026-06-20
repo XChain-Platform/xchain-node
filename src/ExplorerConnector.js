@@ -16,7 +16,6 @@
  * 
  ********************************************************************/
 
-// Load required libraries
 const axios = require('axios');
 
 class ExplorerConnector {
@@ -32,7 +31,6 @@ class ExplorerConnector {
             id: 1
         }
         
-        // Make the request to the node
         var response = null
         try {
             response = await axios.post(this.url, data)
@@ -41,7 +39,6 @@ class ExplorerConnector {
             return false
         }
 
-        // Verify if there is a result and return it
         if (response.data && response.data.result) {
             return true;
         } else {

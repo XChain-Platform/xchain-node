@@ -18,7 +18,6 @@
  *
  ********************************************************************/
 
-// Load required libraries
 const axios = require('axios');
 
 class HubConnector {

@@ -18,13 +18,11 @@ const { srcDir } = require('./config/constants')
 const MariaDbStore      = require('./MariaDbStore.js')
 const GitHubDownloader  = require('./GitHubDownloader.js')
 
-// --- Singleton service instances ---
 // db starts unconfigured; precheck.js calls db.createDatabase(config) once
 // the mariadb container is up and per-OS-user credentials are loaded
 const db              = new MariaDbStore()
 const gitHubDownloader = new GitHubDownloader(srcDir + "/github_hashes.json")
 
-// --- Mutable shared state ---
 let dbRootPassword    = null
 let installedModules  = {}
 let remoteModuleVersions = {}
