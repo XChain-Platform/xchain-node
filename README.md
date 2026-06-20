@@ -36,19 +36,19 @@ CLI management and orchestration tool for the XChain Platform. Installs, configu
 
 ## Documentation
 
-Full xchain-node documentation is available in the [xchain-documentation](https://github.com/XChain-platform/xchain-documentation/tree/master/components/node) repository:
+Full xchain-node documentation is available in the [xchain-documentation](https://github.com/XChain-Platform/xchain-documentation/tree/master/components/node) repository:
 
 | Document | Description |
 |---|---|
-| [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/README.md) | Overview, features, installation, quick start, scripts, dependencies |
-| [Architecture](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/ARCHITECTURE.md) | Data pipeline position, internal components, source files, runtime directory structure |
-| [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md) | Config file system, generated environment variables, naming conventions, internal constants |
-| [Operations](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/OPERATIONS.md) | CLI commands reference, global options, parameters, troubleshooting |
+| [README](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/README.md) | Overview, features, installation, quick start, scripts, dependencies |
+| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/ARCHITECTURE.md) | Data pipeline position, internal components, source files, runtime directory structure |
+| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md) | Config file system, generated environment variables, naming conventions, internal constants |
+| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/OPERATIONS.md) | CLI commands reference, global options, parameters, troubleshooting |
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/XChain-platform/xchain-node.git
+git clone https://github.com/XChain-Platform/xchain-node.git
 cd xchain-node
 npm install
 npm link
@@ -110,7 +110,7 @@ Five env vars override where xchain-node stores its filesystem state. Set them i
 | `XCHAIN_NODE_CRYPTO_NODES_DIR` | Downloaded coin-node binaries |
 | `XCHAIN_NODE_CONFIG_DIR` | Generated per-service `.env` files |
 
-On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md).
+On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md).
 
 ### Bundled MariaDB tuning
 
@@ -127,7 +127,7 @@ When xchain-node manages its own MariaDB container, these optional env vars over
 
 `xchain-node` sends an anonymous usage ping (xchain-node + service versions, which services are running, basic OS/Docker info). Your **IP address is never sent or stored**: the receiver derives only a coarse country/region and an anonymous one-way network hash from the connection, then discards the IP. It contains **no** secrets, wallet data, addresses, or config. It is **on by default**, sent only on install/update and at most once per day otherwise, and never blocks a command.
 
-Turn it off with any of: `--no-telemetry` on any command (sticks for future runs), `XCHAIN_NODE_NO_TELEMETRY=1`, or `"optOut": true` in `~/.xchain-node/telemetry.json`. Point at a different collector with `XCHAIN_NODE_TELEMETRY_URL`. Full details: [Privacy & Telemetry](https://github.com/XChain-platform/xchain-documentation/blob/master/operations/TELEMETRY.md).
+Turn it off with any of: `--no-telemetry` on any command (sticks for future runs), `XCHAIN_NODE_NO_TELEMETRY=1`, or `"optOut": true` in `~/.xchain-node/telemetry.json`. Point at a different collector with `XCHAIN_NODE_TELEMETRY_URL`. Full details: [Privacy & Telemetry](https://github.com/XChain-Platform/xchain-documentation/blob/master/operations/TELEMETRY.md).
 
 ## Scripts
 

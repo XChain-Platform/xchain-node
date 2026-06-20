@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.23] - 2026-06-20
+
 ### Changed
 - `src/services/ConfigService.js`, `src/services/HubService.js`, `test/chaos/config-resilience.chaos.test.js` — renamed the indexer service-host config key `INDEXER_HOST` → `INDEXER_URL` so it follows the `<SERVICE>_URL` convention every other service uses (`NODE_URL`, `ENCODER_URL`, `DECODER_URL`, `REGTEST_MINER_URL`). It was the lone `_HOST` outlier among the service-URL entries the node pushes into each module's environment and hub config, so an operator following the established pattern would set `INDEXER_URL` (no effect) and hit an opaque hub-fallback failure with no pointer to the wrong variable name. Value and behavior are unchanged — string rename only. The indexer's database host (`INDEXER_DB_HOST`) is a separate variable and is unchanged.
 - `package.json` — pinned `mariadb` 3.5.2 to exact versions (dropped the `^` caret ranges) so every install resolves a byte-identical dependency tree across operator nodes, matching the versions already frozen in `package-lock.json`. No source changes.
