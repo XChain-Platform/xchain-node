@@ -4,14 +4,14 @@
 # XChain Platform Node
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.0.15-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.0.23-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-1148%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
-  <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20boundary%20%7C%20smoke%20%7C%20security%20%7C%20performance%20%7C%20regression-brightgreen" alt="Coverage">
+  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20smoke%20%7C%20boundary%20%7C%20security%20%7C%20fuzz%20%7C%20chaos%20%7C%20regression%20%7C%20performance%20%7C%20mutation-brightgreen" alt="Coverage">
 </p>
 
 CLI management and orchestration tool for the XChain Platform. Installs, configures, and manages all XChain services and coin nodes (bitcoind, litecoind, dogecoind) as Docker containers. Generates per-service environment variables from a two-layer configuration system, manages LevelDB state, provisions MariaDB databases, and provides multi-pane log monitoring.
@@ -22,15 +22,17 @@ CLI management and orchestration tool for the XChain Platform. Installs, configu
 - **Order-independent argument parsing**: CLI arguments auto-classified as service, coin, network, or branch name regardless of position
 - **Docker container lifecycle**: install, start, stop, restart, update, uninstall, and reset services with single commands
 - **Configuration generation**: two-layer system (hardcoded defaults + config file overrides) producing 40+ environment variables per service
-- **Crypto node management**: downloads Bitcoin Core, Litecoin, and Dogecoin binaries from official sources with SHA-256 verification
+- **Crypto node management**: downloads Bitcoin Core, Litecoin, and Dogecoin binaries from official sources with SHA-256 verification; includes per-chain regtest tuning applied automatically
 - **Database orchestration**: provisions shared MariaDB, creates per-service databases and users with subnet-based permissions
-- **Bootstrap snapshots**: create and restore gzipped snapshots of UTXO tracker, decoder, and indexer data with SHA-256 integrity verification
+- **Bootstrap snapshots**: create and restore gzipped snapshots of UTXO tracker, decoder, and indexer data; integrity is double-verified with SHA-256 checksums and a detached Ed25519 signature pinned to a bundled public key
+- **Validator mode**: `validator init` generates an Ed25519 signing key and capabilities config; the hub boots in PBFT validator mode when a key is present
+- **Anonymous telemetry**: opt-out usage ping reports service versions and running module set; IP is never stored; respects `--no-telemetry`, env var, or preference file
 - **Multi-pane monitoring**: Blessed terminal UI showing live logs from up to 6 containers in split-screen
-- **Pre-flight checks**: Docker verification, directory creation, LevelDB open, remote version fetch, Docker network creation
+- **Pre-flight checks**: Docker verification, directory creation, LevelDB open, remote version fetch, Docker network creation, and stale container-registry GC on every command
 - **State persistence**: LevelDB maps each module to its 64-char container ID via composite keys
 - **execFile security**: all child process calls use `execFile` with array arguments, eliminating shell injection
 - **Input validation**: branch name, port, and container ID validation with strict regex enforcement
-- **1,148 tests**: unit, integration, e2e, smoke, boundary, security, fuzz, chaos, performance, mutation, and regression testing
+- **1,148 tests**: unit, integration, e2e, smoke, boundary, security, fuzz, chaos, regression, performance, and mutation testing
 
 ## Documentation
 
@@ -176,14 +178,3 @@ with a commercial license available for proprietary use.
 You may use, modify, and distribute this material under the terms of the License.
 See [LICENSE](./LICENSE.md) and [NOTICE](./NOTICE.md) for full terms.
 See the [licensing overview](https://docs.xchain.io/legal/licensing).
-
-## License
-
-XChain Platform is **open source**, dual-licensed under:
-
-- the **[GNU Affero General Public License v3.0](./LICENSE.md)** (`AGPL-3.0-or-later`), free for everyone, and
-- a **[commercial license](https://docs.xchain.io/legal/commercial-license)** for companies that need to keep modifications private.
-
-See the **[licensing overview](https://docs.xchain.io/legal/licensing)** for which one applies to you. "XChain" is a trademark of Dankest, LLC. See the **[Trademark Policy](https://docs.xchain.io/legal/trademark)**.
-
-Copyright © 2025-2026 Dankest, LLC.
