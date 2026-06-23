@@ -343,6 +343,48 @@ describe('ConfigService', function () {
                 })
             })
 
+            describe('genesis-ledger bootstrap passthrough', function () {
+                const GENESIS_VARS = [
+                    'XCHAIN_GENESIS_BLOCK', 'XCHAIN_GENESIS_LEDGER_HASH', 'XCHAIN_GENESIS_DUMP_HASH',
+                    'GENESIS_LEDGER_PATH', 'GENESIS_DUMP_PATH',
+                    'GENESIS_BLOCK_TIMEOUT_MS', 'GENESIS_DUMP_TIMEOUT_MS'
+                ]
+                let saved
+                beforeEach(function () {
+                    saved = {}
+                    for (const v of GENESIS_VARS) { saved[v] = process.env[v]; delete process.env[v] }
+                })
+                afterEach(function () {
+                    for (const v of GENESIS_VARS) {
+                        if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v]
+                    }
+                })
+
+                it('injects the genesis env vars into the indexer config from the host env', async function () {
+                    process.env.XCHAIN_GENESIS_BLOCK       = '105'
+                    process.env.XCHAIN_GENESIS_LEDGER_HASH = 'deadbeef'
+                    process.env.XCHAIN_GENESIS_DUMP_HASH   = 'cafef00d'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['XCHAIN_GENESIS_BLOCK']).to.equal('105')
+                    expect(config['XCHAIN_GENESIS_LEDGER_HASH']).to.equal('deadbeef')
+                    expect(config['XCHAIN_GENESIS_DUMP_HASH']).to.equal('cafef00d')
+                })
+
+                it('does NOT inject genesis vars into a non-indexer module (decoder)', async function () {
+                    process.env.XCHAIN_GENESIS_BLOCK = '105'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
+                    expect(config).to.not.have.property('XCHAIN_GENESIS_BLOCK')
+                })
+
+                it('omits genesis vars entirely when unset (genesis stays disabled)', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    for (const v of GENESIS_VARS) expect(config).to.not.have.property(v)
+                })
+            })
+
             it('returns correct INDEXER_COIN ticker', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
