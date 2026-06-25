@@ -62,11 +62,14 @@ const REGTEST_MODULES = [
     XChainService.XCHAIN_E2E_TEST
 ]
 
-const Coin = {
-    BITCOIN:  "bitcoin",
-    DOGECOIN: "dogecoin",
-    LITECOIN: "litecoin"
-}
+// Coin name/ticker maps, generated from the canonical coin registry (src/coins)
+// so xchain-node never drifts from the rest of the platform.
+const coins = require('../coins');
+
+// fullname-uppercase -> fullname (e.g. BITCOIN -> "bitcoin")
+const Coin = {};
+for(const tick of coins.ALLOWED_COINS)
+    Coin[coins.COIN_FULL_NAME[tick].toUpperCase()] = coins.COIN_FULL_NAME[tick];
 
 const Network = {
     MAINNET: "mainnet",
@@ -74,11 +77,10 @@ const Network = {
     REGTEST: "regtest"
 }
 
-const CoinTickerSymbol = {
-    "bitcoin":  "BTC",
-    "dogecoin": "DOGE",
-    "litecoin": "LTC"
-}
+// fullname -> ticker (e.g. "bitcoin" -> "BTC")
+const CoinTickerSymbol = {};
+for(const tick of coins.ALLOWED_COINS)
+    CoinTickerSymbol[coins.COIN_FULL_NAME[tick]] = tick;
 
 // Project folder names used for paths inside containers
 const projectFolders = {
