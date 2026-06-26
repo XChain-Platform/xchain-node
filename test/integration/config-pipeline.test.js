@@ -65,7 +65,8 @@ describe('Integration: Config Pipeline', function () {
 
             const config = await ConfigService.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
 
-            expect(config['NETWORK']).to.equal('mainnet')
+            // encoder/decoder/utxo-tracker coin-prefix NETWORK (see f744334), e.g. "bitcoin-mainnet"
+            expect(config['NETWORK']).to.equal('bitcoin-mainnet')
             expect(config['NODE_PORT']).to.equal(8332)
             expect(config['NODE_URL']).to.equal('node')
             expect(config['ENCODER_API_PORT']).to.equal(3003)
@@ -223,7 +224,8 @@ describe('Integration: Config Pipeline', function () {
 
                     expect(config['NODE_PORT']).to.equal(expectedPorts[network])
                     expect(config['INDEXER_COIN']).to.equal(CoinTickerSymbol[coin])
-                    expect(config['NETWORK']).to.equal(network)
+                    // decoder coin-prefixes NETWORK (see f744334), e.g. "dogecoin-mainnet"
+                    expect(config['NETWORK']).to.equal(`${coin}-${network}`)
 
                     // UTXO tracker URL includes coin/network
                     const expectedUtxoUrl = ConfigService.getDockerContainerImageName(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
