@@ -396,24 +396,22 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 console.log("Database " + databaseName + " created!")
             }
 
-            const userCount = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
-                "SELECT COUNT(*) FROM mysql.user WHERE user = '" + user + "' AND host = '" + host + "' AND password = PASSWORD('" + userPassword + "')", "-B -N"
+            // Ensure the account exists and force its password to the intended value on every
+            // run. The previous COUNT(*) guard keyed off the deprecated `mysql.user.password`
+            // column, which is empty under MariaDB's default auth plugin (the hash lives in
+            // authentication_string), so the guard could mis-evaluate and SKIP the rotation,
+            // leaving a recreated container's sidecar password out of sync with the live DB
+            // account (observed: a single-service `update` regenerated the sidecar password but
+            // the `@'%'` row was never rotated -> ER_ACCESS_DENIED). ALTER USER ... IDENTIFIED BY
+            // is idempotent, so running CREATE-IF-NOT-EXISTS + ALTER unconditionally is safe and
+            // self-heals any sidecar-vs-DB drift.
+            await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
             )
-            if (userCount == 0) {
-                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
-                    "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
-                )
-                // Force the password in case the user already existed with a different one:
-                // userCount==0 also covers "user exists but password mismatches", and
-                // CREATE USER IF NOT EXISTS is a silent no-op for an existing user. This
-                // ALTER (mirroring the external-DB path below) is what rotates an existing
-                // install from the legacy static password to the generated per-install one
-                // on the next update.
-                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
-                    "ALTER USER " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
-                )
-                console.log("User " + mariadbUser + " created!")
-            }
+            await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                "ALTER USER " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+            )
+            console.log("User " + mariadbUser + " ensured (password set)!")
 
             let userGrants = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                 "SHOW GRANTS FOR " + mariadbUser, "-B -N"
@@ -464,19 +462,17 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 console.log("Database " + databaseName + " created!")
             }
 
-            const userCount = await executeNativeMariaDbCommand(externalCfg,
-                "SELECT COUNT(*) FROM mysql.user WHERE user = '" + user + "' AND host = '" + host + "' AND password = PASSWORD('" + userPassword + "')", "-B -N"
+            // Force-set the password on every run (idempotent). See the docker branch above:
+            // the old COUNT(*)/PASSWORD() guard keyed off the deprecated mysql.user.password
+            // column and could skip the rotation, leaving the live account out of sync with the
+            // per-install sidecar password. CREATE-IF-NOT-EXISTS + unconditional ALTER self-heals.
+            await executeNativeMariaDbCommand(externalCfg,
+                "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
             )
-            if (userCount == 0) {
-                await executeNativeMariaDbCommand(externalCfg,
-                    "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
-                )
-                // Force password in case the user already existed with a different one
-                await executeNativeMariaDbCommand(externalCfg,
-                    "ALTER USER " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
-                )
-                console.log("User " + mariadbUser + " created!")
-            }
+            await executeNativeMariaDbCommand(externalCfg,
+                "ALTER USER " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+            )
+            console.log("User " + mariadbUser + " ensured (password set)!")
 
             let userGrants = await executeNativeMariaDbCommand(externalCfg,
                 "SHOW GRANTS FOR " + mariadbUser, "-B -N"
