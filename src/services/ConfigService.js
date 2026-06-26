@@ -138,6 +138,23 @@ function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
     try { fs.chmodSync(localFilePath, 0o600) } catch {}
 }
 
+// Update specific KEY=VALUE entries in a sidecar while PRESERVING all other keys. Unlike
+// persistSidecarCreds({overwrite:true}) (which rewrites the file with only the keys it is
+// given), this reads the existing sidecar, overlays the supplied values, and rewrites it
+// 0600. Used by the DB-password rotation to set DECODER_DB_PASS/INDEXER_DB_PASS (or
+// HUB_DB_PASS) without clobbering the NODE_USER/NODE_PASSWORD already in the sidecar.
+function upsertSidecarValues(localFilePath, values) {
+    const merged = {}
+    if (fs.existsSync(localFilePath)) {
+        for (const line of fs.readFileSync(localFilePath, "utf8").split(/\r?\n/)) {
+            const eqIndex = line.indexOf("=")
+            if (eqIndex > 0) merged[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
+        }
+    }
+    for (const k in values) merged[k] = values[k]
+    persistSidecarCreds(localFilePath, merged, { overwrite: true })
+}
+
 // Read a single KEY=VALUE from a sidecar file, or undefined if the file or key is absent.
 // Uses the same createReadStream + readline path as the main config reader above.
 async function readSidecarValue(localFilePath, key) {
@@ -151,6 +168,23 @@ async function readSidecarValue(localFilePath, key) {
     return undefined
 }
 
+// Whether a per-install random DB password can actually be APPLIED to the live MariaDB
+// account on the next provision. Rotation runs either via the external-DB path (EXTERNAL_DB)
+// or by exec-ing into a local MariaDB container; on a native, non-container host neither
+// runs, so a generated password would never reach the DB and would desync the sidecar from a
+// DB still on the old password (the 2026-06-26 indexer outage). Returns false on any error
+// (e.g. docker absent), the safe direction: prefer the static default over a password we
+// cannot apply. Lazy require avoids a load-time cycle with DatabaseService.
+async function dbPasswordCanRotate() {
+    if (EXTERNAL_DB) return true
+    try {
+        const { getDatabaseContainerId } = require('./DatabaseService')
+        return !!(await getDatabaseContainerId())
+    } catch {
+        return false
+    }
+}
+
 // HUB_DB_PASS is a SHARED-service credential: the hub and every coin/network stack that
 // connects to the hub DB must present the SAME password, so it cannot be generated per
 // coin/network. Resolve it once from a shared 0600 sidecar (config/hub.local), generating
@@ -160,8 +194,14 @@ async function getOrCreateHubDbPass() {
     const hubLocalPath = path.resolve(configDir, "hub.local")
     let pass = await readSidecarValue(hubLocalPath, "HUB_DB_PASS")
     if (!pass) {
-        pass = crypto.randomBytes(24).toString('hex')
-        persistSidecarCreds(hubLocalPath, { HUB_DB_PASS: pass })
+        // Only mint a random shared password where the rotation can apply it; otherwise use
+        // the static default so the sidecar never diverges from a DB the rotation cannot reach.
+        if (await dbPasswordCanRotate()) {
+            pass = crypto.randomBytes(24).toString('hex')
+            upsertSidecarValues(hubLocalPath, { HUB_DB_PASS: pass })
+        } else {
+            pass = "xchain" + SEP + "password"
+        }
     }
     return pass
 }
@@ -558,20 +598,23 @@ async function getDefaultConfig(module, coin, network) {
 
         // Generate and persist a per-install password for each per-coin/network DB account
         // (decoder, indexer) on first provision, so installs no longer share the static
-        // default. An operator override in the main config file or the sidecar wins (the
-        // merge above already loaded those into defaultConfig). On an existing install whose
-        // sidecar predates this change, the missing keys are generated and appended here; the
-        // docker user-creation path (DatabaseService.addUserPasswordToDatabase) then rotates
-        // the live MariaDB account to the persisted value on the next update.
+        // default. An operator override in the main config file or the sidecar wins (the merge
+        // above already loaded those into defaultConfig). Only generate where the next provision
+        // can rotate the live account to the new value (EXTERNAL_DB or a DB container); on a
+        // native, non-container host the rotation no-ops, so generating would desync the sidecar
+        // from the DB and lock the service out (the 2026-06-26 indexer outage). There these fall
+        // through to the static default in defaultValues, matching the un-rotatable live account.
         const freshDbCreds = {}
-        for (const k of ["DECODER_DB_PASS", "INDEXER_DB_PASS"]) {
-            if (!(k in defaultConfig)) {
-                const val = crypto.randomBytes(24).toString('hex')
-                defaultConfig[k] = val
-                freshDbCreds[k] = val
+        if (await dbPasswordCanRotate()) {
+            for (const k of ["DECODER_DB_PASS", "INDEXER_DB_PASS"]) {
+                if (!(k in defaultConfig)) {
+                    const val = crypto.randomBytes(24).toString('hex')
+                    defaultConfig[k] = val
+                    freshDbCreds[k] = val
+                }
             }
         }
-        if (Object.keys(freshDbCreds).length) persistSidecarCreds(localFilePath, freshDbCreds)
+        if (Object.keys(freshDbCreds).length) upsertSidecarValues(localFilePath, freshDbCreds)
 
         // The indexer's hub-DB connection reuses its OWN DB account (HUB_DB_NAME/USER are set
         // to the indexer's in the indexer block above, mainnet/testnet), so its hub-DB password
@@ -732,6 +775,8 @@ module.exports = {
     getModuleDatabaseName,
     validatePort,
     getDefaultConfig,
+    persistSidecarCreds,
+    upsertSidecarValues,
     filterCommandParameters,
     resolveArgs
 }

@@ -542,6 +542,20 @@ async function setDatabaseParameters() {
     return true
 }
 
+// Provision/rotate the SHARED hub DB account. setDatabaseParameters above covers the
+// per-coin decoder/indexer accounts but not the hub (a shared service with no coin/network),
+// so an `update xchain-hub` would rebuild the container with a new HUB_DB_PASS in its env yet
+// leave the live hub account on the old password -> ER_ACCESS_DENIED lockout. Mirror the
+// install-time provisioning (HubService.installHubModule) so a hub update force-sets the hub
+// account to the configured password too. Reuses addUserPasswordToDatabase's unconditional
+// CREATE IF NOT EXISTS + ALTER, so it self-heals any sidecar-vs-DB drift. The caller invokes
+// this only after a successful hub buildAndUp, so the hub exists.
+async function setHubDatabaseParameters() {
+    const cfg = await getDefaultConfig(HUB_MODULE_NAME, null, null)
+    await addUserPasswordToDatabase(HUB_MODULE_NAME, "", "", cfg["HUB_DB_NAME"], cfg["HUB_DB_USER"], cfg["HUB_DB_PASS"])
+    return true
+}
+
 async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]) {
     // External (host-native) MariaDB: there is no database container to exec
     // into it (`docker exec ... null` failed here and aborted the reset mid-way,
@@ -764,6 +778,7 @@ module.exports = {
     getExternalDbConfig,
     addUserPasswordToDatabase,
     setDatabaseParameters,
+    setHubDatabaseParameters,
     buildDatabaseModule,
     resetDatabases,
     getDatabaseContainerId,

@@ -33,7 +33,7 @@ const {
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
 const { killContainer, removeContainer, getPublishedHostPorts } = require('./DockerService')
-const { setDatabaseParameters }  = require('./DatabaseService')
+const { setDatabaseParameters, setHubDatabaseParameters }  = require('./DatabaseService')
 
 async function cloneGit(module, rewrite = false, useTmp = false, branch = null) {
     return new Promise((resolve, reject) => {
@@ -549,6 +549,11 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                 const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
                     await setDatabaseParameters()
+                } else if (module === HUB_MODULE_NAME) {
+                    // Rotate the hub DB account to match the (possibly just-changed) HUB_DB_PASS
+                    // env the new container started with; without this an `update xchain-hub`
+                    // leaves the live hub account on the old password and locks the hub out.
+                    await setHubDatabaseParameters()
                 }
                 if (utxoWasFresh) {
                     const { ensureBootstrapUtxoTracker } = require('./BootstrapService')
