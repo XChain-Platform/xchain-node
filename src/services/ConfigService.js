@@ -313,6 +313,21 @@ async function getDefaultConfig(module, coin, network) {
             if (process.env.HUB_API_KEY !== undefined && process.env.HUB_API_KEY !== "") {
                 defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
             }
+
+            // Point the indexer's hub-DB connection (its price_snapshots/oracle_prices source)
+            // at its OWN database on mainnet/testnet: in this single-box topology HubDbSync
+            // mirrors those hub tables into the indexer DB, so the indexer reads prices from
+            // itself using its own DB account. Without HUB_DB_NAME the connection is never made
+            // and the mainnet native-fee price-source gate (XChainIndexer.start) fails closed.
+            // This mirrors the proven prod per-coin override; operator config overrides still
+            // win. regtest has no hub to sync from and the gate is mainnet-only, so it keeps the
+            // local-price fallback. HUB_DB_PASS is reconciled after the per-install DB password
+            // is resolved (see below); HUB_DB_HOST/PORT are already set above.
+            if (network !== "regtest") {
+                defaultValues.HUB_DB_NAME         = defaultValues.INDEXER_DB_NAME
+                defaultValues.HUB_DB_USER         = defaultValues.INDEXER_DB_USER
+                defaultValues.HUB_DB_SYNC_ENABLED = "true"
+            }
         }
     } else {
         defaultValues = {
@@ -549,6 +564,15 @@ async function getDefaultConfig(module, coin, network) {
             }
         }
         if (Object.keys(freshDbCreds).length) persistSidecarCreds(localFilePath, freshDbCreds)
+
+        // The indexer's hub-DB connection reuses its OWN DB account (HUB_DB_NAME/USER are set
+        // to the indexer's in the indexer block above, mainnet/testnet), so its hub-DB password
+        // must be the per-install INDEXER_DB_PASS just resolved, not the shared hub password.
+        // Set it here, before the shared HUB_DB_PASS fallback below, so that fallback sees the
+        // key already present and skips. An operator override (already in defaultConfig) wins.
+        if (module === XChainService.XCHAIN_INDEXER && network !== "regtest" && !("HUB_DB_PASS" in defaultConfig)) {
+            defaultConfig["HUB_DB_PASS"] = defaultConfig["INDEXER_DB_PASS"]
+        }
     }
 
     // HUB_DB_PASS is shared across the hub and every coin/network stack (decoder/indexer
