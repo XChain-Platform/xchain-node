@@ -922,6 +922,29 @@ describe('DatabaseService', function () {
             expect(mvhGrant).to.exist
         })
 
+        it('rotates the password via ALTER USER on the docker path when the user does not match', async function () {
+            // userCount == 0 covers both "user absent" and "user exists with a different
+            // password". The docker path must ALTER USER (not just CREATE USER IF NOT EXISTS,
+            // a no-op for an existing user) so an existing install is migrated off the legacy
+            // static password to the generated per-install one on the next update.
+            const stubs = makeStubs()
+            const executedCommands = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executedCommands.push(sql)
+                if (sql.startsWith('SELECT COUNT(SCHEMA_NAME)')) return { stdout: '1\n' } // DB already exists
+                if (sql.startsWith('SELECT COUNT(*)')) return { stdout: '0\n' }            // user missing OR password mismatch
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' }
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs)
+            await ds.addUserPasswordToDatabase(
+                'xchain-decoder', 'bitcoin', 'mainnet',
+                'XChain_BTC_Mainnet_Decoder', 'xchain_decoder_bitcoin_mainnet', 'rotated-pass'
+            )
+            const alter = executedCommands.find(c => c && /^ALTER USER .* IDENTIFIED BY 'rotated-pass'/.test(c))
+            expect(alter, 'docker path must ALTER USER to force the new password').to.exist
+        })
+
         it('throws when docker exec fails', async function () {
             const stubs = makeStubs()
             stubs.spawn.callsFake(fakeSpawn(() => ({ error: new Error('docker exec failed') })))

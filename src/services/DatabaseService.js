@@ -403,6 +403,15 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                     "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
                 )
+                // Force the password in case the user already existed with a different one:
+                // userCount==0 also covers "user exists but password mismatches", and
+                // CREATE USER IF NOT EXISTS is a silent no-op for an existing user. This
+                // ALTER (mirroring the external-DB path below) is what rotates an existing
+                // install from the legacy static password to the generated per-install one
+                // on the next update.
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                    "ALTER USER " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+                )
                 console.log("User " + mariadbUser + " created!")
             }
 

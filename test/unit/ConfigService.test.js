@@ -288,6 +288,61 @@ describe('ConfigService', function () {
                 expect(config['NODE_PASSWORD']).to.not.equal('rpc')
             })
 
+            // A memory-backed fs so generate -> persist -> read-back is observable across
+            // calls (the default makeServiceWithConfig stub no-ops writes). Keyed by the
+            // exact paths ConfigService resolves: config/<coin>-<network>, its .local
+            // sidecar, and the shared config/hub.local.
+            function makeMemoryConfigService(initialFiles = {}) {
+                const files = { ...initialFiles }
+                const fsStub = {
+                    existsSync: (p) => Object.prototype.hasOwnProperty.call(files, p),
+                    createReadStream: (p) => streamFromString(files[p] || ''),
+                    writeFileSync: (p, body) => { files[p] = String(body) },
+                    appendFileSync: (p, body) => { files[p] = (files[p] || '') + String(body) },
+                    chmodSync: () => {},
+                    mkdirSync: () => {},
+                    rmSync: (p) => { delete files[p] }
+                }
+                return { cs: makeConfigService(fsStub), files }
+            }
+            const coinSidecar = path.resolve(configDir, 'bitcoin-mainnet') + '.local'
+            const coinMain    = path.resolve(configDir, 'bitcoin-mainnet')
+            const hubSidecar  = path.resolve(configDir, 'hub.local')
+
+            it('generates per-install decoder/indexer DB passwords (not the static default) and persists them to the sidecar', async function () {
+                const { cs, files } = makeMemoryConfigService()
+                const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
+                expect(config['DECODER_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
+                expect(config['INDEXER_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
+                expect(config['DECODER_DB_PASS']).to.not.equal('xchain' + SEP + 'password')
+                expect(files[coinSidecar]).to.include('DECODER_DB_PASS=')
+                expect(files[coinSidecar]).to.include('INDEXER_DB_PASS=')
+            })
+
+            it('reuses the persisted DB password on subsequent calls (stable across installs/updates)', async function () {
+                const { cs } = makeMemoryConfigService()
+                const first  = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
+                const second = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
+                expect(second['DECODER_DB_PASS']).to.equal(first['DECODER_DB_PASS'])
+                expect(second['INDEXER_DB_PASS']).to.equal(first['INDEXER_DB_PASS'])
+            })
+
+            it('an operator override in the main config file wins and is not regenerated', async function () {
+                const { cs } = makeMemoryConfigService({ [coinMain]: 'DECODER_DB_PASS=operatorsecret\n' })
+                const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
+                expect(config['DECODER_DB_PASS']).to.equal('operatorsecret')
+            })
+
+            it('HUB_DB_PASS is shared and identical between a coin stack and the hub service', async function () {
+                const { cs, files } = makeMemoryConfigService()
+                const coinCfg = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
+                const hubCfg  = await cs.getDefaultConfig(HUB_MODULE_NAME, '', '')
+                expect(coinCfg['HUB_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
+                expect(coinCfg['HUB_DB_PASS']).to.not.equal('xchain' + SEP + 'password')
+                expect(hubCfg['HUB_DB_PASS']).to.equal(coinCfg['HUB_DB_PASS'])
+                expect(files[hubSidecar]).to.include('HUB_DB_PASS=')
+            })
+
             it('returns correct UTXO_TRACKER_URL as Docker image name', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
