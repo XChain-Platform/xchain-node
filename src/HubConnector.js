@@ -54,7 +54,13 @@ class HubConnector {
             let idx = (this._lastGoodIdx + i) % this.urls.length;
             let url = this.urls[idx];
             try {
-                let response = await axios.post(url, data, { timeout });
+                // Authenticate to a key-enforcing hub: write methods (e.g. updateConfig)
+                // are gated by HUB_API_KEY on the hub, so the CLI must present the same key
+                // via x-api-key or its config push 401s. Read methods ignore it, so sending
+                // it unconditionally is safe; an unset key leaves the header off (keyless).
+                let headers = {};
+                if(process.env.HUB_API_KEY) headers['x-api-key'] = process.env.HUB_API_KEY;
+                let response = await axios.post(url, data, { timeout, headers });
                 if(response.data && response.data.result !== undefined){
                     this._lastGoodIdx = idx;
                     return response.data.result;

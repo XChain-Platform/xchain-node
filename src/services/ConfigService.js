@@ -119,16 +119,51 @@ function validatePort(value) {
 
 // Persist RPC credentials to the untracked <coin>-<network>.local sidecar. A fresh sidecar
 // is created with writeFileSync; an existing one is appended to, unless overwrite is set
-// (used by the legacy-migration path to replace it outright).
+// (used by the legacy-migration path to replace it outright). The sidecar holds the live
+// node RPC user/password, so it is forced to 0600 the same way credentials.json is: without
+// an explicit mode the file lands at the process umask (commonly 0644), leaving the RPC
+// credentials readable by any local user on the host.
 function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
     const body = Object.keys(creds).map(k => `${k}=${creds[k]}`).join("\n") + "\n"
     if (overwrite || !fs.existsSync(localFilePath)) {
         const dir = path.dirname(localFilePath)
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(localFilePath, body)
+        fs.writeFileSync(localFilePath, body, { mode: 0o600 })
     } else {
         fs.appendFileSync(localFilePath, body)
     }
+    // chmod unconditionally: writeFileSync's mode only applies on create, and an
+    // already-existing sidecar (append path, or one written before this fix) keeps its
+    // old permissions otherwise.
+    try { fs.chmodSync(localFilePath, 0o600) } catch {}
+}
+
+// Read a single KEY=VALUE from a sidecar file, or undefined if the file or key is absent.
+// Uses the same createReadStream + readline path as the main config reader above.
+async function readSidecarValue(localFilePath, key) {
+    if (!fs.existsSync(localFilePath)) return undefined
+    const stream = fs.createReadStream(localFilePath)
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
+    for await (const line of rl) {
+        const eqIndex = line.indexOf("=")
+        if (eqIndex > 0 && line.substring(0, eqIndex) === key) return line.substring(eqIndex + 1)
+    }
+    return undefined
+}
+
+// HUB_DB_PASS is a SHARED-service credential: the hub and every coin/network stack that
+// connects to the hub DB must present the SAME password, so it cannot be generated per
+// coin/network. Resolve it once from a shared 0600 sidecar (config/hub.local), generating
+// and persisting it on first use. getDefaultConfig() calls are sequential in the installer,
+// so the read-or-generate is not racy in practice.
+async function getOrCreateHubDbPass() {
+    const hubLocalPath = path.resolve(configDir, "hub.local")
+    let pass = await readSidecarValue(hubLocalPath, "HUB_DB_PASS")
+    if (!pass) {
+        pass = crypto.randomBytes(24).toString('hex')
+        persistSidecarCreds(hubLocalPath, { HUB_DB_PASS: pass })
+    }
+    return pass
 }
 
 async function getDefaultConfig(module, coin, network) {
@@ -271,6 +306,13 @@ async function getDefaultConfig(module, coin, network) {
                     defaultValues[varName] = process.env[varName]
                 }
             }
+            // The indexer pushes chain tips / config to the hub (HUB_API_URL); when that
+            // hub enforces HUB_API_KEY, the indexer must present the same key or its writes
+            // 401. Sourced from host env (.env) so it persists across `update`. Unset leaves
+            // the indexer sending no key (keyless, the prior default).
+            if (process.env.HUB_API_KEY !== undefined && process.env.HUB_API_KEY !== "") {
+                defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
+            }
         }
     } else {
         defaultValues = {
@@ -352,6 +394,11 @@ async function getDefaultConfig(module, coin, network) {
         // XDEX_* are the shared single-validator/regtest seams. Only set values are
         // injected, so unset host env leaves the hub's own defaults untouched.
         const hubPassthroughVars = [
+            // HUB_API_KEY gates the hub's consensus-affecting write methods. Sourced from
+            // host env (.env) so it persists across `update` (a hand-set container value is
+            // dropped on rebuild). Set it on the publicly-fronted master hub so writes are
+            // authenticated; unset leaves the hub keyless (the prior default).
+            "HUB_API_KEY",
             "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL",
             "BTC_INDEXER_API_KEY", "LTC_INDEXER_API_KEY", "DOGE_INDEXER_API_KEY",
             "CHECKPOINT_ENABLED", "CHECKPOINT_INTERVAL_BLOCKS", "CHECKPOINT_CONFIRMATIONS",
@@ -485,6 +532,31 @@ async function getDefaultConfig(module, coin, network) {
             defaultConfig["NODE_PASSWORD"] = nodePassword
             persistSidecarCreds(localFilePath, { NODE_USER: nodeUser, NODE_PASSWORD: nodePassword })
         }
+
+        // Generate and persist a per-install password for each per-coin/network DB account
+        // (decoder, indexer) on first provision, so installs no longer share the static
+        // default. An operator override in the main config file or the sidecar wins (the
+        // merge above already loaded those into defaultConfig). On an existing install whose
+        // sidecar predates this change, the missing keys are generated and appended here; the
+        // docker user-creation path (DatabaseService.addUserPasswordToDatabase) then rotates
+        // the live MariaDB account to the persisted value on the next update.
+        const freshDbCreds = {}
+        for (const k of ["DECODER_DB_PASS", "INDEXER_DB_PASS"]) {
+            if (!(k in defaultConfig)) {
+                const val = crypto.randomBytes(24).toString('hex')
+                defaultConfig[k] = val
+                freshDbCreds[k] = val
+            }
+        }
+        if (Object.keys(freshDbCreds).length) persistSidecarCreds(localFilePath, freshDbCreds)
+    }
+
+    // HUB_DB_PASS is shared across the hub and every coin/network stack (decoder/indexer
+    // connect to the hub DB). Resolve it from the shared sidecar (generate on first use)
+    // unless an operator override already supplied it. Applies to both the coin/network
+    // callers (HUB_DB_PASS in their defaults) and the shared-service hub caller.
+    if (("HUB_DB_PASS" in defaultValues) && !("HUB_DB_PASS" in defaultConfig)) {
+        defaultConfig["HUB_DB_PASS"] = await getOrCreateHubDbPass()
     }
 
     for (const key in defaultValues) {
