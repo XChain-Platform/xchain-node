@@ -343,6 +343,31 @@ describe('ConfigService', function () {
                 expect(files[hubSidecar]).to.include('HUB_DB_PASS=')
             })
 
+            it('passes INDEXER_API_KEY through from host env to the indexer config (federation auth)', async function () {
+                const prev = process.env.INDEXER_API_KEY
+                process.env.INDEXER_API_KEY = 'fed-secret-123'
+                try {
+                    const { cs } = makeMemoryConfigService()
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
+                    expect(config['INDEXER_API_KEY']).to.equal('fed-secret-123')
+                } finally {
+                    if (prev === undefined) delete process.env.INDEXER_API_KEY
+                    else process.env.INDEXER_API_KEY = prev
+                }
+            })
+
+            it('omits INDEXER_API_KEY when unset in host env (indexer stays fail-closed)', async function () {
+                const prev = process.env.INDEXER_API_KEY
+                delete process.env.INDEXER_API_KEY
+                try {
+                    const { cs } = makeMemoryConfigService()
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
+                    expect(config['INDEXER_API_KEY']).to.equal(undefined)
+                } finally {
+                    if (prev !== undefined) process.env.INDEXER_API_KEY = prev
+                }
+            })
+
             it('returns correct UTXO_TRACKER_URL as Docker image name', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')

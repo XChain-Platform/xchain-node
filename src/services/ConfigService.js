@@ -314,6 +314,14 @@ async function getDefaultConfig(module, coin, network) {
                 defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
             }
 
+            // The hub authenticates to each indexer's federation API (attestation, stake polling,
+            // capability snapshots) with <COIN>_INDEXER_API_KEY; the indexer fails closed unless its
+            // INDEXER_API_KEY matches. Source from host env so it persists across `update`, mirroring
+            // HUB_API_KEY above. Unset leaves the indexer fail-closed (keyless reads rejected).
+            if (process.env.INDEXER_API_KEY !== undefined && process.env.INDEXER_API_KEY !== "") {
+                defaultValues.INDEXER_API_KEY = process.env.INDEXER_API_KEY
+            }
+
             // Point the indexer's hub-DB connection (its price_snapshots/oracle_prices source)
             // at its OWN database on mainnet/testnet: in this single-box topology HubDbSync
             // mirrors those hub tables into the indexer DB, so the indexer reads prices from
