@@ -156,7 +156,13 @@ const LIBRARY_BUNDLES = {
     // xchain-contracts carries the contract-template source the template
     // suites load via XCHAIN_CONTRACTS_DIR (see ConfigService); without it
     // those suites skip (they no longer abort the run).
-    "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts"]
+    // xchain-indexer is staged so the e2e suites that share the indexer's
+    // consensus-critical primitives can `require('../../../xchain-indexer/src/...')`
+    // from inside the dockerized image (those relative paths resolve to the
+    // monorepo root locally, but to the image root /xchain-indexer here — the
+    // Dockerfile COPYs it there). Without it attestationHelper (and the
+    // integration/parity/regression suites) die with MODULE_NOT_FOUND at load.
+    "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts", "xchain-indexer"]
 }
 
 // Operator-relevant directory roots are env-var-overridable so that hosts
