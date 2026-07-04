@@ -558,6 +558,21 @@ describe('ModuleService', function () {
             expect(args[cmdIdx + 1]).to.include('8080')
         })
 
+        it('includes --health-cmd for regtest-miner (jsonrpc_ping probe)', async function () {
+            // The miner's API is JSON-RPC only (no GET /status route); an http_get
+            // probe 500s forever and marks the container permanently unhealthy.
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-regtest-miner', 'bitcoin', 'mainnet')
+            const args = getRunArgs()
+            expect(args).to.include('--health-cmd')
+            const cmdIdx = args.indexOf('--health-cmd')
+            expect(args[cmdIdx + 1]).to.include('ping')
+            expect(args[cmdIdx + 1]).to.not.include('/status')
+            expect(args[cmdIdx + 1]).to.include('3005')
+        })
+
         it('includes --health-interval, --health-timeout, --health-retries, --health-start-period for encoder', async function () {
             const stubs = makeStubs()
             const getRunArgs = captureRunArgs(stubs)

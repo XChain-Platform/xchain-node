@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Probe the regtest miner's Docker healthcheck via `jsonrpc_ping` instead of `http_get` (the miner has no GET `/status` route, so every probe 500'd and the container sat permanently unhealthy).
+
 ## [0.0.23] - 2026-06-20
 
 ### Added
