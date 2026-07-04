@@ -654,6 +654,15 @@ async function buildDatabaseModule(coin, network) {
             const value = process.env[envVar]
             if (value) runArgs.push(`--${mysqldFlag}=${value}`)
         }
+        // max_connections is the exception to "unset = image default": the image's 151
+        // saturates on a shared multi-chain container (three chains' services plus one
+        // e2e run sit just under it, and any extra consumer tips it over with misleading
+        // "Can't connect to mariadb" errors - audit F-9). Default to the prod-standard
+        // 1000; XCHAIN_NODE_DB_MAX_CONNECTIONS above still overrides, and idle threads
+        // are cheap enough that single-chain installs are unaffected.
+        if (!process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS) {
+            runArgs.push('--max-connections=1000')
+        }
 
         // Pre-flight host-port collision check (multi-stack hosts): same
         // guard the service-install path uses in ModuleService.buildAndUp. Two

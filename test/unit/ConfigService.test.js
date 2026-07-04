@@ -401,8 +401,36 @@ describe('ConfigService', function () {
                     const { cs } = makeMemoryConfigService()
                     const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
                     expect(config['INDEXER_API_KEY']).to.equal(undefined)
+                    // mainnet/testnet must NOT get the keyless escape hatch.
+                    expect(config['INDEXER_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
                 } finally {
                     if (prev !== undefined) process.env.INDEXER_API_KEY = prev
+                }
+            })
+
+            it('defaults INDEXER_ALLOW_UNAUTHENTICATED=true on keyless regtest installs (gated methods usable)', async function () {
+                const prev = process.env.INDEXER_API_KEY
+                delete process.env.INDEXER_API_KEY
+                try {
+                    const { cs } = makeMemoryConfigService()
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['INDEXER_ALLOW_UNAUTHENTICATED']).to.equal('true')
+                } finally {
+                    if (prev !== undefined) process.env.INDEXER_API_KEY = prev
+                }
+            })
+
+            it('keeps regtest fail-closed when a host INDEXER_API_KEY is provided', async function () {
+                const prev = process.env.INDEXER_API_KEY
+                process.env.INDEXER_API_KEY = 'fed-secret-123'
+                try {
+                    const { cs } = makeMemoryConfigService()
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['INDEXER_API_KEY']).to.equal('fed-secret-123')
+                    expect(config['INDEXER_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
+                } finally {
+                    if (prev === undefined) delete process.env.INDEXER_API_KEY
+                    else process.env.INDEXER_API_KEY = prev
                 }
             })
 
@@ -453,11 +481,33 @@ describe('ConfigService', function () {
                     expect(config[FEE_ENV]).to.equal('mGenericFeeAddr222')
                 })
 
-                it('omits fee keys entirely when unset (feature stays disabled)', async function () {
+                it('defaults to the vendored coin-registry pin when no host env is set', async function () {
+                    const { getCoinConfigByFullName } = require('../../src/coins')
+                    const pinned = getCoinConfigByFullName('bitcoin', 'regtest').addresses.FEE_DESTINATION
                     const cs = makeServiceWithConfig('')
                     const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
-                    expect(config).to.not.have.property('FEE_DESTINATION')
-                    expect(config).to.not.have.property(FEE_ENV)
+                    expect(config['FEE_DESTINATION']).to.equal(pinned)
+                    expect(config[FEE_ENV]).to.equal(pinned)
+                })
+
+                it('ignores host env overrides on mainnet and injects the registry pin', async function () {
+                    const MAINNET_ENV = 'XCHAIN_FEE_DESTINATION_BTC_MAINNET'
+                    const savedMainnet = process.env[MAINNET_ENV]
+                    process.env[MAINNET_ENV] = 'mEvilOverrideAddr333'
+                    process.env.FEE_DESTINATION = 'mEvilGenericAddr444'
+                    try {
+                        const { getCoinConfigByFullName } = require('../../src/coins')
+                        const cs = makeServiceWithConfig('')
+                        const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
+                        // resolveFeeDestination ignores the per-coin override on mainnet; the
+                        // generic var must be ignored there too (fee acceptance is consensus).
+                        const pinned = '1FeesxM9LTEjBYVTkynK6jfDBgvksuh2WL'
+                        expect(getCoinConfigByFullName('bitcoin', 'mainnet').addresses.FEE_DESTINATION).to.equal(pinned)
+                        expect(config['FEE_DESTINATION']).to.equal(pinned)
+                        expect(config[MAINNET_ENV]).to.equal(pinned)
+                    } finally {
+                        if (savedMainnet === undefined) delete process.env[MAINNET_ENV]; else process.env[MAINNET_ENV] = savedMainnet
+                    }
                 })
             })
 

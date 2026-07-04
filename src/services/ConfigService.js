@@ -28,6 +28,7 @@ const {
     EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT
 } = require('../config/constants')
 const { stringToCoin } = require('../utils/helpers')
+const { getCoinConfigByFullName } = require('../coins')
 
 function getModuleDir(module) {
     return moduleDir + "/" + module
@@ -282,15 +283,21 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues["ENCODER_RATE_LIMIT_RPM"] = 99999
         }
 
-        // Native-coin protocol fee destination (per coin/network). Read from the host env
-        // (e.g. xchain-node's .env) so the protocol fee address stays out of source; mirrors
-        // the TELEMETRY_IP_SALT injection pattern above. The decoder reads FEE_DESTINATION (to
-        // persist the fee output to transaction_outputs); the indexer reads
-        // XCHAIN_FEE_DESTINATION_<COIN>_<NETWORK> (src/configs/<COIN>.js). Injected as a default,
-        // so a value in the <coin>-<network> config file still takes precedence; when unset,
-        // native-coin fee payment stays disabled (config placeholder).
+        // Native-coin protocol fee destination (per coin/network). Defaults from the vendored
+        // canonical coin registry (src/coins), so a stock install provisions the decoder's
+        // FEE_DESTINATION (fee-output capture into transaction_outputs) and the indexer's
+        // XCHAIN_FEE_DESTINATION_<COIN>_<NETWORK> without any operator env. Previously these
+        // were host-env-only, so default installs left the decoder capturing nothing and
+        // native-fee validation failing closed on every fee-bearing LTC/DOGE action (audit
+        // F-11). getCoinConfigByFullName applies the per-coin host-env override itself
+        // (ignored + warned on mainnet: fee acceptance is consensus and must not depend on
+        // operator env); the generic FEE_DESTINATION host var is honored on non-mainnet only.
+        // Injected as a default, so a value in the <coin>-<network> config file still wins.
         const feeDestEnvName = 'XCHAIN_FEE_DESTINATION_' + CoinTickerSymbol[coin] + '_' + network.toUpperCase()
-        const feeDestination = process.env[feeDestEnvName] || process.env.FEE_DESTINATION || null
+        const registryFeeDestination = getCoinConfigByFullName(coin, network).addresses.FEE_DESTINATION
+        const feeDestination = (network !== Network.MAINNET && !process.env[feeDestEnvName] && process.env.FEE_DESTINATION)
+            ? process.env.FEE_DESTINATION
+            : registryFeeDestination
         if (feeDestination) {
             defaultValues['FEE_DESTINATION'] = feeDestination
             defaultValues[feeDestEnvName]    = feeDestination
@@ -360,6 +367,14 @@ async function getDefaultConfig(module, coin, network) {
             // HUB_API_KEY above. Unset leaves the indexer fail-closed (keyless reads rejected).
             if (process.env.INDEXER_API_KEY !== undefined && process.env.INDEXER_API_KEY !== "") {
                 defaultValues.INDEXER_API_KEY = process.env.INDEXER_API_KEY
+            } else if (network === Network.REGTEST) {
+                // With no key configured the indexer fails closed: every gated method
+                // (feequotedryrun, the federation reads the staking e2e family asserts
+                // against) 401s, so a fresh regtest install can never pass those suites
+                // (audit F-10). Regtest is a local single-operator venue, so default the
+                // indexer's own documented keyless escape hatch on. A config-file value
+                // or host INDEXER_API_KEY still wins; mainnet/testnet stay fail-closed.
+                defaultValues.INDEXER_ALLOW_UNAUTHENTICATED = "true"
             }
 
             // Point the indexer's hub-DB connection (its price_snapshots/oracle_prices source)

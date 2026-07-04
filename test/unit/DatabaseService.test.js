@@ -466,6 +466,25 @@ describe('DatabaseService', function () {
             }
         })
 
+        it('defaults max-connections to 1000 when the env var is unset (multi-chain saturation guard)', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS
+            delete process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS
+            try {
+                const stubs = makeStubs()
+                stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+                stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                const ds = loadDatabaseService(stubs)
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+
+                const runArgs = findDockerRunArgs(stubs.execFileAsync)
+                expect(runArgs, 'docker run call not found').to.not.be.null
+                expect(runArgs).to.include('--max-connections=1000')
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS
+                else process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS = saved
+            }
+        })
+
         it('omits MariaDB tuning args when env vars are unset', async function () {
             const saved = {
                 XCHAIN_NODE_DB_BUFFER_POOL_SIZE:        process.env.XCHAIN_NODE_DB_BUFFER_POOL_SIZE,
@@ -485,7 +504,9 @@ describe('DatabaseService', function () {
                 const runArgs = findDockerRunArgs(stubs.execFileAsync)
                 expect(runArgs, 'docker run call not found').to.not.be.null
                 expect(runArgs.some(a => a.startsWith('--innodb-buffer-pool-size'))).to.be.false
-                expect(runArgs.some(a => a.startsWith('--max-connections'))).to.be.false
+                // max-connections is deliberately NOT omitted when unset: it falls back to
+                // the 1000 default (see the saturation-guard test above).
+                expect(runArgs).to.include('--max-connections=1000')
                 expect(runArgs.some(a => a.startsWith('--innodb-flush-log-at-trx-commit'))).to.be.false
             } finally {
                 for (const [k, v] of Object.entries(saved)) {
