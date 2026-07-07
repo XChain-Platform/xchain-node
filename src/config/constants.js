@@ -147,6 +147,11 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
 // Dockerfile then COPYs them in and npm resolves the file: link.
 const LIBRARY_BUNDLES = {
     "xchain-indexer":  ["xchain-vm"],
+    // xchain-explorer's flag-gated contract-simulation endpoint
+    // (EXPLORER_VM_QUERY_ENABLED) lazy-requires xchain-vm as an
+    // optionalDependency; staging it makes the feature available in built
+    // images. Builds still succeed without it (endpoint 503s).
+    "xchain-explorer": ["xchain-vm"],
     // xchain-e2e-test's multiValidatorHubHelper boots in-process XChainHub
     // instances against the regtest stack (multiHubAttestation,
     // llmAttestation). xchain-hub needs to ride into the build context so
@@ -159,8 +164,8 @@ const LIBRARY_BUNDLES = {
     // xchain-indexer is staged so the e2e suites that share the indexer's
     // consensus-critical primitives can `require('../../../xchain-indexer/src/...')`
     // from inside the dockerized image (those relative paths resolve to the
-    // monorepo root locally, but to the image root /xchain-indexer here — the
-    // Dockerfile COPYs it there). Without it attestationHelper (and the
+    // monorepo root locally, but to the image root /xchain-indexer here, where
+    // the Dockerfile COPYs it). Without it attestationHelper (and the
     // integration/parity/regression suites) die with MODULE_NOT_FOUND at load.
     "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts", "xchain-indexer"]
 }
