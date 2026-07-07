@@ -663,6 +663,34 @@ describe('ConfigService', function () {
                 expect(config['SYNC_MODE']).to.equal('server')
             })
 
+            it('passes HUB_API_KEY through from host env to shared-service configs (keyed sensitive-read tier)', async function () {
+                const prev = process.env.HUB_API_KEY
+                process.env.HUB_API_KEY = 'hub-secret-456'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const syncCfg = await cs.getDefaultConfig(SYNC_MODULE_NAME, null, null)
+                    expect(syncCfg['HUB_API_KEY']).to.equal('hub-secret-456')
+                    const explorerCfg = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                    expect(explorerCfg['HUB_API_KEY']).to.equal('hub-secret-456')
+                } finally {
+                    if (prev === undefined) delete process.env.HUB_API_KEY
+                    else process.env.HUB_API_KEY = prev
+                }
+            })
+
+            it('omits HUB_API_KEY from shared-service configs when unset in host env', async function () {
+                const prev = process.env.HUB_API_KEY
+                delete process.env.HUB_API_KEY
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const syncCfg = await cs.getDefaultConfig(SYNC_MODULE_NAME, null, null)
+                    expect(syncCfg['HUB_API_KEY']).to.equal(undefined)
+                } finally {
+                    if (prev === undefined) delete process.env.HUB_API_KEY
+                    else process.env.HUB_API_KEY = prev
+                }
+            })
+
             it('returns SYNC_API_PORT as 3006', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig(SYNC_MODULE_NAME, null, null)

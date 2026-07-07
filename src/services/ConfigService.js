@@ -441,6 +441,16 @@ async function getDefaultConfig(module, coin, network) {
         if (process.env.ALLOW_NO_COLOCATED_HUB_DB !== undefined && process.env.ALLOW_NO_COLOCATED_HUB_DB !== "") {
             defaultValues.ALLOW_NO_COLOCATED_HUB_DB = process.env.ALLOW_NO_COLOCATED_HUB_DB
         }
+
+        // Shared services that call the hub as clients (the sync server's config
+        // discovery via getallconfigs, the explorer's hub reads) must present the
+        // hub's API key once the hub enforces its sensitive-read tier: getallconfigs
+        // 401s keyless when HUB_API_KEY is set hub-side. Sourced from host env so it
+        // persists across `update`, mirroring the indexer's passthrough above. Unset
+        // keeps the prior keyless behavior (fine against a keyless hub).
+        if (process.env.HUB_API_KEY !== undefined && process.env.HUB_API_KEY !== "") {
+            defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
+        }
     }
 
     // Usage-telemetry env is only meaningful to the hub (the telemetry collector).
