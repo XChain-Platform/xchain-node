@@ -1104,12 +1104,16 @@ describe('ModuleService', function () {
 
         it('includes two port mappings for xchain-explorer', async function () {
             const stubs = makeStubs()
+            // xchain-explorer has LIBRARY_BUNDLES=['xchain-vm'], so buildAndUp clones + stages it first.
+            stubs.fs.cpSync = sinon.stub()
             let runArgs = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let opts = {}, cb
                 if (typeof rest[0] === 'function') { cb = rest[0] } else { opts = rest[0] || {}; cb = rest[1] }
-                if (args[0] === 'build') { cb(null) }
+                if (cmd === 'git') { cb(null) } // handle cloneGit for xchain-vm
+                else if (args[0] === 'build') { cb(null) }
                 else if (args[0] === 'run') { runArgs = args; cb(null, 'e'.repeat(64) + '\n') }
+                else { cb(null, '') }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp('xchain-explorer', null, null)
