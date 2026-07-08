@@ -165,6 +165,63 @@ describe('GitHubDownloader', function () {
                 expect(e.message).to.include("Can't find")
             }
         })
+
+        it('sends no Authorization header without a token', async function () {
+            delete process.env.GITHUB_TOKEN
+            delete process.env.GH_TOKEN
+            const axiosStub = makeAxiosStub()
+            axiosStub.get.resolves({ data: [] })
+            const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            await dl.getReleases('bitcoin', 'bitcoin')
+            expect(axiosStub.get.firstCall.args[1].headers).to.not.have.property('Authorization')
+        })
+
+        it('sends Authorization: Bearer when GITHUB_TOKEN is set', async function () {
+            process.env.GITHUB_TOKEN = 'test-token-value'
+            try {
+                const axiosStub = makeAxiosStub()
+                axiosStub.get.resolves({ data: [] })
+                const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
+                const dl = new GitHubDownloader('/test/hashes.json')
+                await dl.getReleases('bitcoin', 'bitcoin')
+                expect(axiosStub.get.firstCall.args[1].headers.Authorization).to.equal('Bearer test-token-value')
+            } finally {
+                delete process.env.GITHUB_TOKEN
+            }
+        })
+
+        it('surfaces a rate-limit-specific error on 403 with remaining=0', async function () {
+            const axiosStub = makeAxiosStub()
+            const err = new Error('Request failed with status code 403')
+            err.response = { status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1783529945' } }
+            axiosStub.get.rejects(err)
+            const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            try {
+                await dl.getReleases('bitcoin', 'bitcoin')
+                expect.fail()
+            } catch (e) {
+                expect(e.message).to.include('rate limit exhausted')
+                expect(e.message).to.include('GITHUB_TOKEN')
+                expect(e.message).to.include('2026-07-08T16:59:05')
+            }
+        })
+
+        it('a plain 403 (not rate-limited) keeps the generic API error', async function () {
+            const axiosStub = makeAxiosStub()
+            const err = new Error('Request failed with status code 403')
+            err.response = { status: 403, headers: { 'x-ratelimit-remaining': '42' } }
+            axiosStub.get.rejects(err)
+            const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            try {
+                await dl.getReleases('bitcoin', 'bitcoin')
+                expect.fail()
+            } catch (e) {
+                expect(e.message).to.include('GitHub API Error')
+            }
+        })
     })
 
     // -------------------------------------------------------------------

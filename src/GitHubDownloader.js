@@ -41,6 +41,25 @@ function getHostArch() {
     return arch;
 }
 
+// Unauthenticated api.github.com calls share a 60-req/hr per-IP quota, which a busy host
+// exhausts (403 on every version check). An optional token (GITHUB_TOKEN or GH_TOKEN, any
+// scope) raises it to 5000/hr. api.github.com endpoints only: release-asset downloads
+// follow a redirect to S3, which rejects requests carrying an extra Authorization header.
+function githubApiHeaders() {
+    const headers = { 'User-Agent': 'GitHubDownloader' };
+    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+}
+
+function githubRateLimitError(error) {
+    const res = error.response;
+    if (!res || res.status !== 403 || res.headers?.['x-ratelimit-remaining'] !== '0') return null;
+    const resetSec = Number(res.headers['x-ratelimit-reset']);
+    const resetAt  = Number.isFinite(resetSec) ? new Date(resetSec * 1000).toISOString() : 'unknown';
+    return new Error(`GitHub API rate limit exhausted for this IP (resets ${resetAt}); set GITHUB_TOKEN to raise the limit`);
+}
+
 class GitHubDownloader {
   constructor(hashesFilePath = './github_hashes.json') {
     this.hashesFilePath = path.resolve(hashesFilePath);
@@ -92,14 +111,14 @@ class GitHubDownloader {
     try {
       const response = await axios.get(
         `https://api.github.com/repos/${owner}/${repoName}/releases`,
-        { headers: { 'User-Agent': 'GitHubDownloader' } }
+        { headers: githubApiHeaders() }
       );
       return response.data;
     } catch (error) {
       if (error.response?.status === 404) {
         throw new Error(`Can't find ${owner}/${repoName} repository using github api`);
       }
-      throw new Error(`GitHub API Error: ${error.message}`);
+      throw githubRateLimitError(error) || new Error(`GitHub API Error: ${error.message}`);
     }
   }
 
@@ -173,11 +192,11 @@ class GitHubDownloader {
     try {
       const response = await axios.get(
         `https://api.github.com/repos/${owner}/${repoName}/releases/tags/${tag}`,
-        { headers: { 'User-Agent': 'GitHubDownloader' } }
+        { headers: githubApiHeaders() }
       );
       return response.data;
     } catch (error) {
-      throw new Error(`Error getting the release ${tag}: ${error.message}`);
+      throw githubRateLimitError(error) || new Error(`Error getting the release ${tag}: ${error.message}`);
     }
   }
 
@@ -393,3 +412,5 @@ class GitHubDownloader {
 }
 
 module.exports = GitHubDownloader;
+module.exports.githubApiHeaders = githubApiHeaders;
+module.exports.githubRateLimitError = githubRateLimitError;

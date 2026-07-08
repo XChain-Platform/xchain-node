@@ -23,12 +23,18 @@ const {
     XChainService, Coin, NODE_VERSION_FILE_NAME, projectFolders
 } = require('../config/constants')
 const { gitHubDownloader, getRemoteModuleVersions, setRemoteModuleVersion } = require('../state')
+const { githubApiHeaders, githubRateLimitError }                             = require('../GitHubDownloader')
 const { getModuleDir, getModuleTmpDir, getCryptoNodeDir }                   = require('./ConfigService')
 const { getDockerContainerFileData }                                         = require('./DockerService')
 
 async function getGithubProjectVersion(owner, repoName) {
     const url = "https://api.github.com/repos/" + owner + "/" + repoName + "/releases/latest"
-    const result = await axios.get(url)
+    let result
+    try {
+        result = await axios.get(url, { headers: githubApiHeaders() })
+    } catch (error) {
+        throw githubRateLimitError(error) || error
+    }
     const json = result.data
 
     let tagName = json["tag_name"]
