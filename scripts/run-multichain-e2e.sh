@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# run-multichain-e2e.sh — run the xchain-e2e-test full suite across every chain.
+# run-multichain-e2e.sh - run the xchain-e2e-test full suite across every chain.
 #
 # The platform is otherwise validated BTC-only end-to-end. This runs the same
 # regtest suite against bitcoin, litecoin and dogecoin so per-chain behavior
@@ -15,7 +15,7 @@
 # PREREQUISITES (per the local-regtest-stack runbook):
 #   - Each coin's stack must be installable/runnable by xchain-node on this host.
 #   - Start xchain-node-database before the first install.
-#   - Native ext4 data dir (set XCHAIN_NODE_DATA_DIR) — the Parallels share is not safe
+#   - Native ext4 data dir (set XCHAIN_NODE_DATA_DIR) - the Parallels share is not safe
 #     for bitcoind/litecoind/dogecoind data.
 #
 # NOTE on exit codes: `xchain-node e2etest` propagates the suite's real exit
@@ -23,7 +23,7 @@
 # authoritative. The printed "E2E tests finished with exit code N" line is
 # still parsed as a belt-and-braces fallback for an older xchain-node on PATH
 # (whose CLI always exited 0). Note $? here relies on `set -o pipefail`
-# applying inside the command substitution — the pipeline ends in `tee`.
+# applying inside the command substitution - the pipeline ends in `tee`.
 #
 # Usage:
 #   scripts/run-multichain-e2e.sh                 # all three coins

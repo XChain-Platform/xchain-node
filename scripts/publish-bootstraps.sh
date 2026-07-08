@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# publish-bootstraps.sh — create SIGNED bootstrap archives and publish them to
+# publish-bootstraps.sh - create SIGNED bootstrap archives and publish them to
 # the sync host, on demand or from cron.
 #
 # This is the publisher (origin-box) counterpart to the consumer-side serving
@@ -11,7 +11,7 @@
 #   - Signs each archive inline (XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY) so consumers
 #     can verify provenance against the pinned public key.
 #   - Redirects the (large) work + output dirs onto a roomy volume via
-#     XCHAIN_NODE_DATA_DIR / XCHAIN_NODE_TMP_DIR — the defaults live under the
+#     XCHAIN_NODE_DATA_DIR / XCHAIN_NODE_TMP_DIR - the defaults live under the
 #     repo on the small root fs and WILL fill it mid-create otherwise.
 #   - Transfers each archive + its .sig to the sync host (scp, origin->sync).
 #   - Prunes old archives locally and on the sync host (keep newest $KEEP).
@@ -91,7 +91,7 @@ die() { log "FATAL: $*"; exit 1; }
 command -v "$XCHAIN_NODE_BIN" >/dev/null || die "xchain-node CLI not found ($XCHAIN_NODE_BIN)"
 if [ ! -f "$SIGNING_KEY" ]; then
   [ "$ALLOW_UNSIGNED" = 1 ] || die "signing key not found: $SIGNING_KEY (use --allow-unsigned to publish unsigned)"
-  log "WARNING: no signing key — archives will be UNSIGNED (--allow-unsigned)"
+  log "WARNING: no signing key - archives will be UNSIGNED (--allow-unsigned)"
 fi
 mkdir -p "$STAGE_DIR" "$TMP_DIR" 2>/dev/null || die "cannot create STAGE_DIR/TMP_DIR (need writable $STAGE_DIR and $TMP_DIR)"
 
@@ -139,7 +139,7 @@ if [ "$DRY_RUN" = 1 ]; then log "dry-run: nothing executed."; exit 0; fi
 
 # ── Single-instance lock (cron-safe) ──────────────────────────────────────
 exec 9>"$LOCK_FILE"
-flock -n 9 || die "another publish run holds $LOCK_FILE — exiting."
+flock -n 9 || die "another publish run holds $LOCK_FILE - exiting."
 
 # ── Per-combo: create -> verify signed -> publish -> prune ────────────────
 fail=0; declare -a SUMMARY=()
@@ -158,7 +158,7 @@ for c in "${SELECTED[@]}"; do
   archive="$(ls -t "$out_dir"/*.tar.gz 2>/dev/null | head -1 || true)"
   [ -n "$archive" ] || { log "  no archive produced in $out_dir"; SUMMARY+=("$c: NO-ARCHIVE"); fail=1; continue; }
   if [ ! -f "$archive.sig" ] && [ "$ALLOW_UNSIGNED" != 1 ]; then
-    log "  archive is UNSIGNED ($archive) — not publishing"; SUMMARY+=("$c: UNSIGNED"); fail=1; continue
+    log "  archive is UNSIGNED ($archive) - not publishing"; SUMMARY+=("$c: UNSIGNED"); fail=1; continue
   fi
 
   if [ "$NO_PUBLISH" = 1 ]; then

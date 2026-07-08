@@ -1,13 +1,13 @@
 name: Nightly E2E (regtest)
 
 # Cross-component integration gate. Boots the FULL XChain stack on regtest via
-# xchain-node — which clones every service repo at its master HEAD and runs them
-# as Docker containers — then runs the live xchain-e2e-test suites against it
+# xchain-node - which clones every service repo at its master HEAD and runs them
+# as Docker containers - then runs the live xchain-e2e-test suites against it
 # (real transactions, real indexing, reorg convergence): the default ACTION suite,
 # the SECURITY suite (test/security), and the PERFORMANCE suite (test/perf), each
 # driven via `e2etest --script`. This is the only gate that exercises consensus /
 # money movement end-to-end; the per-repo CI jobs are single-process unit tests.
-# On-demand (workflow_dispatch) — a full bring-up is heavy (clones + image builds
+# On-demand (workflow_dispatch) - a full bring-up is heavy (clones + image builds
 # + a coin daemon), so it is NOT per-push; the nightly schedule is deferred (see
 # the `on:` block) until the repos are public.
 #
@@ -15,21 +15,21 @@ name: Nightly E2E (regtest)
 # STATUS: VALIDATED THROUGH STACK CLONE-PREP (manual workflow_dispatch, bitcoin,
 # 2026-06-03). Green through: checkout, node 22, disk reclaim, headless MariaDB
 # bring-up, dep install, and the SSH→HTTPS clone rewrite. The install process
-# reaches the external DB (creates its DB on 172.17.0.1:3306) — so that env path
+# reaches the external DB (creates its DB on 172.17.0.1:3306) - so that env path
 # is proven. BLOCKER: the sub-repos are PRIVATE, so cloning them on a hosted
 # runner needs a SUBREPO_CLONE_TOKEN secret (see the rewrite step) OR the repos
-# to be made public — until one of those, the boot step fails at the first clone,
+# to be made public - until one of those, the boot step fails at the first clone,
 # so on GitHub this runs only with a token; locally (dev box with the stack up)
 # the same `e2etest --script test:security|test:perf:budget` commands work today
 # and are verified (13 + 8 passing). A dedicated self-hosted runner was considered
-# and dropped as premature — once the repos are public this hosted job runs for
+# and dropped as premature - once the repos are public this hosted job runs for
 # free with no box. Still to confirm once it boots on a hosted runner: service→DB
 # container networking, then add litecoin / dogecoin (run-multichain-e2e.sh).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
   # Manual / on-demand gate. The nightly schedule is intentionally DISABLED while the
-  # sub-repos are PRIVATE — a scheduled run would fail at the first private clone and
+  # sub-repos are PRIVATE - a scheduled run would fail at the first private clone and
   # spam nightly failures. Re-enable it once the repos are public per the launch plan
   # (anonymous HTTPS clones just work then, and no SUBREPO_CLONE_TOKEN is needed):
   #   schedule:
@@ -54,9 +54,9 @@ jobs:
       # Headless DB: point xchain-node at an external MariaDB instead of its
       # bundled DB container, so the first install does NOT stop on the
       # interactive root-password prompt (see DatabaseService.getExternalDbConfig
-      # — these five vars are the documented headless fast-path).
+      # - these five vars are the documented headless fast-path).
       XCHAIN_NODE_EXTERNAL_DB: '1'
-      # VALIDATE: 172.17.0.1 is the default docker-bridge gateway — reachable from
+      # VALIDATE: 172.17.0.1 is the default docker-bridge gateway - reachable from
       # xchain-node's spawned service containers to the host-published MariaDB
       # port below. If xchain-node puts services on a custom network, this host
       # may need to be the runner's LAN IP or the DB run on that same network.
@@ -109,7 +109,7 @@ jobs:
       #     GitHub App installation token granting read on the XChain-Platform
       #     sub-repos), and this step authenticates the HTTPS clones with it.
       #   - Once the sub-repos are made public (pre-launch plan), the token
-      #     becomes unnecessary — the anonymous-HTTPS fallback below just works.
+      #     becomes unnecessary - the anonymous-HTTPS fallback below just works.
       # If neither applies, the next step fails fast at the first private clone.
       - name: Rewrite sub-repo clones to HTTPS (token-auth if SUBREPO_CLONE_TOKEN set)
         env:
@@ -119,16 +119,16 @@ jobs:
             echo "Using SUBREPO_CLONE_TOKEN for authenticated HTTPS clones."
             git config --global url."https://x-access-token:${SUBREPO_CLONE_TOKEN}@github.com/".insteadOf "git@github.com:"
           else
-            echo "::warning::SUBREPO_CLONE_TOKEN not set — falling back to anonymous HTTPS."
+            echo "::warning::SUBREPO_CLONE_TOKEN not set - falling back to anonymous HTTPS."
             echo "::warning::This only works once the XChain-Platform sub-repos are public; private repos will fail at clone."
             git config --global url."https://github.com/".insteadOf "git@github.com:"
           fi
 
       - name: Boot the regtest stack (clones every service at master HEAD)
-        # First heavy step — repo clones + docker image builds + coin daemon.
+        # First heavy step - repo clones + docker image builds + coin daemon.
         # Watch disk and image-build time here (the 120-min job timeout covers it).
         # Note: the external-DB connection for the install process itself is
-        # already proven — it creates the xchain-node DB on 172.17.0.1:3306 before
+        # already proven - it creates the xchain-node DB on 172.17.0.1:3306 before
         # this step. Service→DB networking (spawned containers → host DB) is the
         # remaining thing to confirm once the stack boots.
         run: |
