@@ -22,7 +22,8 @@
   "scripts": {
     "test": "mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive",
     "coverage": "c8 --reporter=text --reporter=html --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive --exit",
-    "ci": "mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive --exit",
+    "ci": "mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive --exit && npm run ci:security",
+    "ci:security": "mocha 'test/security/**/*.test.js' --timeout 10000 --recursive --exit",
     "test:integration": "mocha 'test/integration/**/*.test.js' --timeout 30000 --recursive",
     "test:smoke": "mocha 'test/smoke/**/*.test.js' --timeout 5000 --exit --recursive",
     "test:boundary": "mocha 'test/boundary/**/*.test.js' --timeout 10000 --recursive",

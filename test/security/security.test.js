@@ -91,7 +91,11 @@ function loadModuleService(stubs, configOverrides) {
         '../state': { db: stubs.db || { insertModuleContainer: sinon.stub().resolves(true) }, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
         './ConfigService': configServiceStub,
         './StatusService': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
-        './DockerService': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), getStatusFromContainer: sinon.stub().resolves({}) },
+        './DockerService': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), getStatusFromContainer: sinon.stub().resolves({}),
+            // buildAndUp now runs a host-port-conflict pre-check (assertNoHostPortConflicts ->
+            // getPublishedHostPorts), which returns a Map<hostPort, Set<name>>. Empty Map = no
+            // conflict, so the container-ID validation path under test is reached.
+            getPublishedHostPorts: sinon.stub().resolves(new Map()) },
         './DatabaseService': { setDatabaseParameters: sinon.stub().resolves() }
     })
 }
@@ -416,15 +420,21 @@ describe('Security', function () {
 
     describe('Config path traversal prevention', function () {
 
-        it('getDefaultConfig rejects path traversal in coin parameter', async function () {
+        it('getDefaultConfig rejects a path-traversal coin parameter', async function () {
             const ConfigService = require('../../src/services/ConfigService')
+            // A traversal string in `coin` must be refused. The guard is a known-coin
+            // allowlist (coin-name resolution rejects an unknown coin before it can reach
+            // any path join), so '../../../etc' is refused as an unknown coin; an explicit
+            // 'Config path traversal detected' guard also exists on other paths. Either way
+            // the malicious input must be rejected, not silently accepted.
+            let threw = null
             try {
                 await ConfigService.getDefaultConfig('xchain-encoder', '../../../etc', 'passwd')
-                // If it doesn't throw, it should have used defaults (file not found)
-                // The path traversal check should catch this
             } catch (err) {
-                expect(err.message).to.include('traversal')
+                threw = err
             }
+            expect(threw, 'a traversal coin parameter must be rejected').to.not.equal(null)
+            expect(threw.message).to.match(/traversal|unknown coin|invalid/i)
         })
     })
 
@@ -570,12 +580,20 @@ describe('Security', function () {
                     const line = lines[i].trim()
                     if (line.startsWith('//') || line.startsWith('*')) continue
                     if (line.includes("require('child_process')")) continue
-                    // Check for bare exec( that isn't execFile(
-                    if (/\bexec\s*\(/.test(line) && !/\bexecFile/.test(line)) {
+                    // Check for a BARE exec( (the imported child_process.exec), but not a
+                    // method call like RegExp.prototype.exec (`re.exec(...)`) or execFile(.
+                    // Requiring the char before `exec` to be start-of-line or a non-dot,
+                    // non-word char excludes `x.exec(` method calls (the false positive that
+                    // flagged a regex `.exec()`), while still catching a bare imported exec(.
+                    if (/(^|[^.\w])exec\s*\(/.test(line) && !/\bexecFile/.test(line)) {
                         // Allow promisify references and variable names
                         if (/promisify/.test(line)) continue
                         if (/execAsync/.test(line)) continue
                         expect.fail(`${relPath}:${i + 1} contains exec() call: ${line}`)
+                    }
+                    // Also catch an aliased child_process.exec( (e.g. cp.exec / childProcess.exec)
+                    if (/\b(child_?[pP]rocess|cp)\s*\.\s*exec\s*\(/.test(line)) {
+                        expect.fail(`${relPath}:${i + 1} contains child_process.exec() call: ${line}`)
                     }
                     // Check for execSync
                     if (/\bexecSync\s*\(/.test(line)) {
