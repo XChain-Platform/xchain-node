@@ -126,6 +126,48 @@ function makeStubs(overrides = {}) {
     }
 }
 
+// Configure fs + execFile so ensureVerifiedInnerArchive sees a well-formed,
+// signature-verified outer archive: `tar tzf` lists the two members,
+// `tar xzOf <checksum>` returns the checksum the archive declares for the inner
+// member, `tar xzf` performs the fresh extract, and createReadStream feeds the
+// inner bytes to computeSha256. Set innerHashOverride to a different valid hash
+// to model an archive whose declared checksum does not match its inner bytes.
+function stubVerifiedInner(stubs, {
+    archivePath,
+    innerName = 'data.tar.gz',
+    checksumName = 'data.sha256',
+    innerBytes = Buffer.from('verified-archive-bytes'),
+    initiallyPresent = false,
+    innerHashOverride = null,
+    manageExistsSync = true,
+} = {}) {
+    const crypto = require('crypto')
+    const expectedHash = crypto.createHash('sha256').update(innerBytes).digest('hex')
+    const declaredHash = innerHashOverride || expectedHash
+    let extracted = initiallyPresent
+    if (manageExistsSync) {
+        stubs.fs.existsSync.callsFake(p => {
+            p = String(p)
+            if (/\.(pem|sig)$/.test(p)) return false
+            if (archivePath && p === archivePath) return true
+            if (p.includes('bootstrap-work')) return extracted
+            return false
+        })
+    }
+    stubs.fs.createReadStream.callsFake(() => {
+        const s = new PassThrough()
+        setImmediate(() => { s.emit('data', innerBytes); s.emit('end') })
+        return s
+    })
+    stubs.execFile.callsFake((cmd, args) => {
+        if (cmd === 'tar' && args[0] === 'tzf')  return Promise.resolve({ stdout: `${innerName}\n${checksumName}\n` })
+        if (cmd === 'tar' && args[0] === 'xzOf') return Promise.resolve({ stdout: `${declaredHash}  ${innerName}\n` })
+        if (cmd === 'tar' && args[0] === 'xzf')  { extracted = true; return Promise.resolve({ stdout: '' }) }
+        return Promise.resolve({ stdout: '' })
+    })
+    return { expectedHash, declaredHash }
+}
+
 // ---------------------------------------------------------------------------
 // proxyquire loader
 // ---------------------------------------------------------------------------
@@ -580,6 +622,9 @@ describe('BootstrapService', function () {
             // checkout pins no key, so checkBootstrapSignature warns + proceeds.
             const stubs = makeStubs()
             stubs.fs.existsSync.callsFake(p => !/\.(pem|sig)$/.test(String(p)))
+            // Inner archive is already present (reuse path); its bytes match the
+            // checksum the verified outer archive declares, so restore proceeds.
+            stubVerifiedInner(stubs, { innerName: 'data.tar.gz', checksumName: 'data.sha256', manageExistsSync: false })
 
             const dataStream  = new PassThrough()
             const writeStream = new PassThrough()
@@ -591,7 +636,6 @@ describe('BootstrapService', function () {
             // For restoreBootstrap(utxo-tracker, 'latest.tgz'):
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
-            stubs.execFile = sinon.stub().resolves({ stdout: '' })   // clear volume
             stubs.fs.promises.stat.resolves({ size: 512 })
 
             const tarProc = makeSpawnProc()
@@ -667,9 +711,10 @@ describe('BootstrapService', function () {
 
         it('returns true when download succeeds and restoreBootstrap resolves for decoder', async function () {
             const stubs = makeStubs()
-            // archive + work files exist with sentinel (fast-path through restore);
+            // archive + inner archive present (reuse path through restore);
             // signing pubkey/.sig absent → checkBootstrapSignature warns + proceeds
             stubs.fs.existsSync.callsFake(p => !/\.(pem|sig)$/.test(String(p)))
+            stubVerifiedInner(stubs, { innerName: 'dump.sql.gz', checksumName: 'dump.sha256', manageExistsSync: false })
 
             const dataStream  = new PassThrough()
             const writeStream = new PassThrough()
@@ -681,7 +726,6 @@ describe('BootstrapService', function () {
             stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves('svc-cid')
-            stubs.execFile = sinon.stub().resolves({ stdout: '' })
             stubs.fs.promises.stat.resolves({ size: 512 })
 
             const mysqlProc = makeSpawnProc()
@@ -817,54 +861,64 @@ describe('BootstrapService', function () {
     // restoreBootstrapUtxoTracker: resumable extraction skip path
     // -----------------------------------------------------------------------
 
-    describe('restoreBootstrapUtxoTracker(): resumable skip (inner archive + checksum exist)', function () {
+    describe('restoreBootstrapUtxoTracker(): resumable reuse (inner archive already matches verified checksum)', function () {
 
-        it('skips outer extract when inner archive and checksum already present', async function () {
+        it('reuses a work-dir inner archive whose bytes match the verified checksum (skips outer extract)', async function () {
             const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
 
-            // archivePath exists, inner archive exists, checksum exists, verify
-            // sentinel exists; signing pubkey/.sig absent so the signature
-            // policy takes its warn-and-proceed branch
-            stubs.fs.existsSync.callsFake(p => !/\.(pem|sig)$/.test(String(p)))
+            // Inner archive already on disk; its bytes hash to exactly the
+            // checksum the signature-verified outer archive declares, so the
+            // outer extract is skipped and the reused bytes are trusted.
+            stubVerifiedInner(stubs, { archivePath, innerName: 'data.tar.gz', checksumName: 'data.sha256', initiallyPresent: true })
 
-            // checksum file: stored = computed (pass by returning same hash in both places)
-            stubs.fs.promises.readFile.resolves('deadbeef  data.tar.gz\n')
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
 
-            // For computeSha256: createReadStream emits data then ends
-            const hashStream = new PassThrough()
-            stubs.fs.createReadStream.callsFake(() => {
-                const s = new PassThrough()
-                setImmediate(() => {
-                    s.emit('data', Buffer.from('hello'))
-                    s.emit('end')
-                })
-                return s
+            const tarProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 0) })
+                return tarProc
+            })
+            stubs.fs.promises.stat.resolves({ size: 1024, isFile: () => true })
+
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+            expect(result).to.be.true
+            expect(stubs.dockerService.startContainer.called).to.be.true
+            // The big outer archive was NOT re-extracted (tar xzf never called).
+            const xzfCall = stubs.execFile.getCalls().find(c => c.args[0] === 'tar' && c.args[1][0] === 'xzf')
+            expect(xzfCall, 'outer extract should be skipped on a valid reuse').to.be.undefined
+        })
+
+        it('discards a pre-planted work-dir inner archive that does NOT match the verified checksum, and re-extracts', async function () {
+            const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+
+            // Adversarial: a malicious inner archive is already on disk (e.g.
+            // pre-planted in a shared XCHAIN_NODE_TMP_DIR), but the checksum the
+            // signature-verified outer archive declares is for the legit bytes.
+            // The reused bytes must be rejected and re-extracted from the archive.
+            stubVerifiedInner(stubs, {
+                archivePath, innerName: 'data.tar.gz', checksumName: 'data.sha256',
+                initiallyPresent: true, innerHashOverride: 'b'.repeat(64),
             })
 
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
 
-            // Step 4: clear volume
-            stubs.execFile = sinon.stub().resolves({ stdout: '' })
-
-            // Step 5: restore data.tar.gz into volume; supply a spawn that closes with 0
-            const tarProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(tarProc)
-
-            stubs.fs.promises.stat.resolves({ size: 1024, isFile: () => true })
-
             const bs = loadBootstrapService(stubs)
-            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
-
-            // Emit close=0 on the tar proc to resolve the inner Promise
-            setImmediate(() => {
-                drainPassThrough(tarProc.stdin)
-                tarProc.emit('close', 0)
-            })
-
-            const result = await promise
-            expect(result).to.be.true
-            expect(stubs.dockerService.startContainer.called).to.be.true
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
+                expect.fail('should not restore an inner archive that fails the verified checksum')
+            } catch (err) {
+                expect(err.message).to.include('checksum mismatch')
+            }
+            // It DID try to re-extract from the verified outer archive (not trust the plant).
+            const xzfCall = stubs.execFile.getCalls().find(c => c.args[0] === 'tar' && c.args[1][0] === 'xzf')
+            expect(xzfCall, 'a mismatched reuse must force a re-extract').to.not.be.undefined
+            // And it never started restoring into the volume / touched the container.
+            expect(stubs.dockerService.stopContainer.called).to.be.false
         })
     })
 
@@ -874,63 +928,27 @@ describe('BootstrapService', function () {
 
     describe('restoreBootstrapUtxoTracker(): fresh extract', function () {
 
-        it('extracts outer archive, verifies checksum, restores volume', async function () {
+        it('extracts outer archive, verifies inner against the declared checksum, restores volume', async function () {
             const stubs = makeStubs()
 
             const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
 
-            // extractDone tracks whether execFile (tar xzf) has been called
-            let extractDone = false
-
-            // Single definitive existsSync stub
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return false       // no sentinel
-                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return extractDone
-                if (p.includes('data.sha256')) return extractDone
-                return false
-            })
-
-            // tar xzf sets extractDone=true
-            stubs.execFile = sinon.stub().callsFake(() => {
-                extractDone = true
-                return Promise.resolve({ stdout: '' })
-            })
-
-            // computeSha256 needs createReadStream
-            const sourceData = Buffer.from('some archive data')
-            stubs.fs.createReadStream.callsFake(() => {
-                const s = new PassThrough()
-                setImmediate(() => {
-                    s.emit('data', sourceData)
-                    s.emit('end')
-                })
-                return s
-            })
-
-            // Make readFile return a hash that matches what computeSha256 will compute
-            const crypto = require('crypto')
-            const expectedHash = crypto.createHash('sha256').update(sourceData).digest('hex')
-            stubs.fs.promises.readFile.resolves(`${expectedHash}  data.tar.gz\n`)
+            // No prior extraction: inner archive absent until `tar xzf` runs, then
+            // its bytes hash to the checksum the verified outer archive declares.
+            stubVerifiedInner(stubs, { archivePath, innerName: 'data.tar.gz', checksumName: 'data.sha256', initiallyPresent: false })
             stubs.fs.promises.stat.resolves({ size: 2048, isFile: () => true })
-            stubs.fs.promises.writeFile.resolves()
 
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
 
             const tarProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(tarProc)
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 0) })
+                return tarProc
+            })
 
             const bs = loadBootstrapService(stubs)
-            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
-
-            // After sha256 is computed and container is stopped, emit close on tar proc
-            setTimeout(() => {
-                drainPassThrough(tarProc.stdin)
-                tarProc.emit('close', 0)
-            }, 100)
-
-            const result = await promise
+            const result = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
             expect(result).to.be.true
             expect(stubs.dockerService.stopContainer.called).to.be.true
             expect(stubs.dockerService.startContainer.called).to.be.true
@@ -961,30 +979,15 @@ describe('BootstrapService', function () {
             expect(extracted).to.be.false
         })
 
-        it('throws on checksum mismatch (error before container stop, no finally restart)', async function () {
+        it('throws when the inner archive fails the declared checksum (before container stop, no finally restart)', async function () {
             const stubs = makeStubs()
-
             const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return false
-                // Simulate: inner archive and checksum ARE present (skip outer extract path)
-                // but verify sentinel is NOT (force checksum verification)
-                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('data.sha256')) return true
-                return false
-            })
 
-            // readFile returns a hash that won't match computed
-            stubs.fs.promises.readFile.resolves('wronghash  data.tar.gz\n')
-
-            stubs.fs.createReadStream.callsFake(() => {
-                const s = new PassThrough()
-                setImmediate(() => {
-                    s.emit('data', Buffer.from('correct data'))
-                    s.emit('end')
-                })
-                return s
+            // Freshly extracted inner archive whose bytes do NOT hash to the
+            // checksum the verified outer archive declares (a tampered archive).
+            stubVerifiedInner(stubs, {
+                archivePath, innerName: 'data.tar.gz', checksumName: 'data.sha256',
+                initiallyPresent: false, innerHashOverride: 'c'.repeat(64),
             })
 
             stubs.databaseService.ensureDatabasePool.resolves()
@@ -995,22 +998,18 @@ describe('BootstrapService', function () {
                 await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
                 expect.fail()
             } catch (err) {
-                // Checksum verification throws before container stop; no finally restart expected
-                expect(err.message).to.include('Checksum mismatch')
+                expect(err.message).to.include('checksum mismatch')
             }
+            // Verification fails before the container is stopped; no finally restart.
+            expect(stubs.dockerService.stopContainer.called).to.be.false
+            expect(stubs.dockerService.startContainer.called).to.be.false
         })
 
         it('throws when container ID is null (pool not ready)', async function () {
             const stubs = makeStubs()
 
             const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return true   // skip checksum
-                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('data.sha256')) return true
-                return false
-            })
+            stubVerifiedInner(stubs, { archivePath, innerName: 'data.tar.gz', checksumName: 'data.sha256', initiallyPresent: true })
 
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(null)
@@ -1029,13 +1028,7 @@ describe('BootstrapService', function () {
             const stubs = makeStubs()
 
             const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return true
-                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('data.sha256')) return true
-                return false
-            })
+            stubVerifiedInner(stubs, { archivePath, innerName: 'data.tar.gz', checksumName: 'data.sha256', initiallyPresent: true })
 
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(null)
@@ -1054,32 +1047,20 @@ describe('BootstrapService', function () {
             const stubs = makeStubs()
 
             const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return true
-                if (p.includes('data.tar.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('data.sha256')) return true
-                return false
-            })
-
-            stubs.execFile = sinon.stub().resolves({ stdout: '' })   // clear volume
+            stubVerifiedInner(stubs, { archivePath, innerName: 'data.tar.gz', checksumName: 'data.sha256', initiallyPresent: true })
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
             stubs.fs.promises.stat.resolves({ size: 512 })
 
             const tarProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(tarProc)
-
-            const bs = loadBootstrapService(stubs)
-            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
-
-            setImmediate(() => {
-                drainPassThrough(tarProc.stdin)
-                tarProc.emit('close', 1)
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 1) })
+                return tarProc
             })
 
+            const bs = loadBootstrapService(stubs)
             try {
-                await promise
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
                 expect.fail()
             } catch (err) {
                 expect(err.message).to.include('docker tar restore exited with code 1')
@@ -1160,15 +1141,7 @@ describe('BootstrapService', function () {
 
             const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
 
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return true
-                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('dump.sha256')) return true
-                return false
-            })
-
-            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            stubVerifiedInner(stubs, { archivePath, innerName: 'dump.sql.gz', checksumName: 'dump.sha256', initiallyPresent: true })
             stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
             stubs.databaseService.askMariadbRootPassword.resolves('rootpass')
             stubs.databaseService.ensureDatabasePool.resolves()
@@ -1177,17 +1150,13 @@ describe('BootstrapService', function () {
             stubs.fs.promises.stat.resolves({ size: 2048 })
 
             const mysqlProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(mysqlProc)
-
-            const bs = loadBootstrapService(stubs)
-            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
-
-            setImmediate(() => {
-                drainPassThrough(mysqlProc.stdin)
-                mysqlProc.emit('close', 0)
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(mysqlProc.stdin); mysqlProc.emit('close', 0) })
+                return mysqlProc
             })
 
-            const result = await promise
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
             expect(result).to.be.true
             expect(stubs.dockerService.stopContainer.calledWith('svc-container-id')).to.be.true
             expect(stubs.dockerService.startContainer.calledWith('svc-container-id')).to.be.true
@@ -1206,15 +1175,7 @@ describe('BootstrapService', function () {
 
             const archivePath = '/data/bitcoin/mainnet/xchain-indexer/bootstrap/dump.sql.gz'
 
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return true
-                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('dump.sha256')) return true
-                return false
-            })
-
-            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            stubVerifiedInner(stubs, { archivePath, innerName: 'dump.sql.gz', checksumName: 'dump.sha256', initiallyPresent: true })
             stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(null)  // service not installed yet
@@ -1222,17 +1183,13 @@ describe('BootstrapService', function () {
             stubs.fs.promises.stat.resolves({ size: 1024 })
 
             const mysqlProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(mysqlProc)
-
-            const bs = loadBootstrapService(stubs)
-            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_INDEXER, 'dump.sql.gz')
-
-            setImmediate(() => {
-                drainPassThrough(mysqlProc.stdin)
-                mysqlProc.emit('close', 0)
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(mysqlProc.stdin); mysqlProc.emit('close', 0) })
+                return mysqlProc
             })
 
-            const result = await promise
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_INDEXER, 'dump.sql.gz')
             expect(result).to.be.true
             // service container was null → stopContainer should NOT be called for it
             expect(stubs.dockerService.stopContainer.called).to.be.false
@@ -1242,33 +1199,21 @@ describe('BootstrapService', function () {
             const stubs = makeStubs()
 
             const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return true
-                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('dump.sha256')) return true
-                return false
-            })
-
-            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            stubVerifiedInner(stubs, { archivePath, innerName: 'dump.sql.gz', checksumName: 'dump.sha256', initiallyPresent: true })
             stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves('svc-container-id')
             stubs.fs.promises.stat.resolves({ size: 512 })
 
             const mysqlProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(mysqlProc)
-
-            const bs = loadBootstrapService(stubs)
-            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
-
-            setImmediate(() => {
-                drainPassThrough(mysqlProc.stdin)
-                mysqlProc.emit('close', 2)
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(mysqlProc.stdin); mysqlProc.emit('close', 2) })
+                return mysqlProc
             })
 
+            const bs = loadBootstrapService(stubs)
             try {
-                await promise
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
                 expect.fail()
             } catch (err) {
                 expect(err.message).to.include('mariadb restore exited with code 2')
@@ -1280,13 +1225,7 @@ describe('BootstrapService', function () {
         it('throws when getDatabaseContainerId returns null', async function () {
             const stubs = makeStubs()
             const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return true
-                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('dump.sha256')) return true
-                return false
-            })
+            stubVerifiedInner(stubs, { archivePath, innerName: 'dump.sql.gz', checksumName: 'dump.sha256', initiallyPresent: true })
             stubs.databaseService.getDatabaseContainerId.resolves(null)
             const bs = loadBootstrapService(stubs)
             try {
@@ -1315,86 +1254,41 @@ describe('BootstrapService', function () {
             }
         })
 
-        it('verifies checksum for mariadb dump on fresh run (verify.ok absent)', async function () {
+        it('extracts + verifies the mariadb dump against the declared checksum on a fresh run', async function () {
             const stubs = makeStubs()
             const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
 
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return false  // no sentinel
-                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('dump.sha256')) return true
-                return false
-            })
-
-            // Make checksum match
-            const crypto = require('crypto')
-            const dumpData = Buffer.from('dump data')
-            const expectedHash = crypto.createHash('sha256').update(dumpData).digest('hex')
-            stubs.fs.promises.readFile.resolves(`${expectedHash}  dump.sql.gz\n`)
-
-            // createReadStream returns different streams on different calls:
-            // call 1: computeSha256 (needs data+end)
-            // call 2: restore stream piped into mysql (needs to pipe through, mysql close=0 resolves)
-            let rsCallCount = 0
-            stubs.fs.createReadStream.callsFake(() => {
-                rsCallCount++
-                const s = new PassThrough()
-                setImmediate(() => {
-                    s.emit('data', dumpData)
-                    s.emit('end')
-                })
-                return s
-            })
+            // Fresh run: inner dump absent until `tar xzf`, then matches the checksum.
+            stubVerifiedInner(stubs, { archivePath, innerName: 'dump.sql.gz', checksumName: 'dump.sha256', initiallyPresent: false })
             stubs.fs.promises.stat.resolves({ size: 1024 })
-            stubs.fs.promises.writeFile.resolves()
-
-            stubs.execFile = sinon.stub().resolves({ stdout: '' })
             stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(null)
 
             const mysqlProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(mysqlProc)
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(mysqlProc.stdin); mysqlProc.emit('close', 0) })
+                return mysqlProc
+            })
 
             const bs = loadBootstrapService(stubs)
-            const promise = bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
-
-            // Allow the sha256 computeSha256 to finish, then emit close on mysqlProc
-            // Use a slightly longer delay to let stream piping settle
-            setTimeout(() => {
-                drainPassThrough(mysqlProc.stdin)
-                mysqlProc.emit('close', 0)
-            }, 100)
-
-            const result = await promise
+            const result = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
             expect(result).to.be.true
-            // writeFile should have been called for the sentinel
-            expect(stubs.fs.promises.writeFile.called).to.be.true
+            // A fresh run really re-extracted from the verified outer archive.
+            const xzfCall = stubs.execFile.getCalls().find(c => c.args[0] === 'tar' && c.args[1][0] === 'xzf')
+            expect(xzfCall).to.not.be.undefined
         })
 
-        it('throws checksum mismatch for mariadb dump', async function () {
+        it('throws when the mariadb dump fails the declared checksum', async function () {
             const stubs = makeStubs()
             const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
 
-            stubs.fs.existsSync.callsFake(p => {
-                if (p === archivePath) return true
-                if (p.includes('verify.ok')) return false
-                if (p.includes('dump.sql.gz') && p.includes('bootstrap-work')) return true
-                if (p.includes('dump.sha256')) return true
-                return false
+            stubVerifiedInner(stubs, {
+                archivePath, innerName: 'dump.sql.gz', checksumName: 'dump.sha256',
+                initiallyPresent: false, innerHashOverride: 'd'.repeat(64),
             })
 
-            stubs.fs.promises.readFile.resolves('badhash  dump.sql.gz\n')
-            stubs.fs.createReadStream.callsFake(() => {
-                const s = new PassThrough()
-                setImmediate(() => {
-                    s.emit('data', Buffer.from('actual data'))
-                    s.emit('end')
-                })
-                return s
-            })
-
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
             stubs.databaseService.ensureDatabasePool.resolves()
             stubs.db.getModuleContainer.resolves(null)
 
@@ -1403,7 +1297,7 @@ describe('BootstrapService', function () {
                 await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
                 expect.fail()
             } catch (err) {
-                expect(err.message).to.include('Checksum mismatch')
+                expect(err.message).to.include('checksum mismatch')
             }
         })
     })

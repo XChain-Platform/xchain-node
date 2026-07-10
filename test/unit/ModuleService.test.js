@@ -290,9 +290,10 @@ describe('ModuleService', function () {
             expect(buildArgs).to.include('xchain-node-bitcoin-mainnet-xchain-encoder')
         })
 
-        it('constructs docker run command with environment variables', async function () {
+        it('passes environment variables via the child env (bare --env NAME), not as argv values', async function () {
             const stubs = makeStubs()
             let runArgs = null
+            let runOpts = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let opts = {}, cb
                 if (typeof rest[0] === 'function') { cb = rest[0] }
@@ -301,14 +302,20 @@ describe('ModuleService', function () {
                     cb(null)
                 } else if (args[0] === 'run') {
                     runArgs = args
+                    runOpts = opts
                     cb(null, 'a'.repeat(64) + '\n')
                 }
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(runArgs).to.include('-e')
-            expect(runArgs).to.include('NETWORK=bitcoin-mainnet')
-            expect(runArgs).to.include('NODE_PORT=8332')
+            // Names on the command line...
+            expect(runArgs).to.include('--env')
+            expect(runArgs).to.include('NETWORK')
+            expect(runArgs).to.include('NODE_PORT')
+            // ...values only in the child process env (keeps secrets off argv).
+            expect(runOpts.env.NETWORK).to.equal('bitcoin-mainnet')
+            expect(runOpts.env.NODE_PORT).to.equal('8332')
+            expect(runArgs).to.not.include('NETWORK=bitcoin-mainnet')
         })
 
         it('includes port mapping for encoder', async function () {

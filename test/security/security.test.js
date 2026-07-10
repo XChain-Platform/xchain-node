@@ -187,13 +187,16 @@ describe('Security', function () {
             // With execFile, this is safe; no shell interprets the semicolon
         })
 
-        it('buildAndUp passes env vars as raw array elements without shell escaping', async function () {
+        it('buildAndUp passes env vars via the child env (bare --env NAME), never as values in argv', async function () {
             const stubs = { execFile: makeExecFileStub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
             let runArgs = null
+            let runOpts = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const opts = typeof rest[0] === 'object' && rest[0] !== null ? rest[0] : null
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 if (args[0] === 'run') {
                     runArgs = args
+                    runOpts = opts
                     cb(null, 'a'.repeat(64) + '\n')
                 } else {
                     cb(null, '')
@@ -202,18 +205,28 @@ describe('Security', function () {
 
             const ms = loadModuleService(stubs, {
                 getDefaultConfig: sinon.stub().resolves({
-                    'DANGEROUS_VAR': 'value$(whoami)',
-                    'QUOTE_VAR': 'hello"world',
-                    'BACKTICK_VAR': 'hello`cmd`world'
+                    'HUB_DB_PASS': 's3cr3t-pw',
+                    'HUB_API_KEY': 'api-key-xyz',
+                    'DANGEROUS_VAR': 'value$(whoami)'
                 })
             })
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
 
-            // With execFile, the raw values are passed without escaping
-            expect(runArgs).to.include('DANGEROUS_VAR=value$(whoami)')
-            expect(runArgs).to.include('QUOTE_VAR=hello"world')
-            expect(runArgs).to.include('BACKTICK_VAR=hello`cmd`world')
-            // These would be dangerous with exec() but are safe with execFile()
+            // Secrets (and every env value) reach the container through the child
+            // process env, keeping them out of argv / /proc/<pid>/cmdline and out
+            // of a failed-run error.message.
+            expect(runOpts).to.be.an('object')
+            expect(runOpts.env).to.include({ HUB_DB_PASS: 's3cr3t-pw', HUB_API_KEY: 'api-key-xyz' })
+            // argv carries only the NAME (bare --env), never the value.
+            expect(runArgs).to.include('--env')
+            expect(runArgs).to.include('HUB_DB_PASS')
+            const argvStr = runArgs.join(' ')
+            expect(argvStr).to.not.include('s3cr3t-pw')
+            expect(argvStr).to.not.include('api-key-xyz')
+            expect(argvStr).to.not.include('HUB_DB_PASS=')
+            // A hostile value in the env still can't reach a shell (execFile, no shell).
+            expect(runArgs).to.not.include('DANGEROUS_VAR=value$(whoami)')
+            expect(runOpts.env.DANGEROUS_VAR).to.equal('value$(whoami)')
         })
     })
 

@@ -71,7 +71,15 @@ const BOOTSTRAP_SIG_SUFFIX = '.sig'
 const DEFAULT_BOOTSTRAP_PUBKEY_PATH = path.join(__dirname, '..', 'config', 'bootstrap_signing_pubkey.pem')
 
 function loadBootstrapPublicKey() {
-    const pubkeyPath = process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY || DEFAULT_BOOTSTRAP_PUBKEY_PATH
+    const override = process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY
+    const pubkeyPath = override || DEFAULT_BOOTSTRAP_PUBKEY_PATH
+    // The pinned key is the whole trust anchor. Swapping it via env silently
+    // moves the trust root to a non-pinned key, so make it as loud as the
+    // REQUIRE_SIGNED=0 opt-out: an operator watching the "signature OK" line
+    // must be told the pinned anchor is NOT the one that validated the archive.
+    if (override && path.resolve(override) !== path.resolve(DEFAULT_BOOTSTRAP_PUBKEY_PATH)) {
+        console.log(`WARNING: bootstrap signature trust anchor overridden via XCHAIN_NODE_BOOTSTRAP_PUBKEY=${override}; the repo-pinned public key (${DEFAULT_BOOTSTRAP_PUBKEY_PATH}) is NOT in use.`)
+    }
     if (!fs.existsSync(pubkeyPath)) return null
     return crypto.createPublicKey(fs.readFileSync(pubkeyPath, 'utf8'))
 }
@@ -175,6 +183,68 @@ function buildDateTimeString() {
     const now = new Date()
     const pad = n => String(n).padStart(2, '0')
     return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+}
+
+// Extract + verify the inner archive (data.tar.gz / dump.sql.gz) from a
+// bootstrap archive whose detached signature has ALREADY been verified by the
+// caller, leaving workDir holding a verified `innerName`.
+//
+// Security-critical: the ONLY trust anchor is that outer-archive signature, so
+// the expected inner checksum is read fresh from the (verified) outer archive,
+// never from workDir. workDir is NOT a trust boundary: it lives under
+// getWorkDir() -> tmpDir, which an operator may point at shared/NFS storage via
+// XCHAIN_NODE_TMP_DIR, so a co-tenant or a hostile-env attacker could pre-plant
+// a self-consistent malicious inner archive + checksum + sentinel there. The
+// prior implementation skipped both the outer extract (when data.tar.gz +
+// data.sha256 already existed) and the checksum verify (when a `verify.ok`
+// sentinel existed), so those planted bytes were restored under a green
+// signature. Here a prior extraction is reused ONLY when the on-disk inner
+// archive re-hashes to the checksum that shipped inside the verified outer
+// archive; anything else is discarded and re-extracted from that archive. The
+// expensive inner re-hash runs every time (a work-dir marker can never be
+// trusted), but the outer full-extract is still skipped on a clean resume.
+async function ensureVerifiedInnerArchive(archivePath, workDir, innerName, checksumName) {
+    const innerArchive = path.join(workDir, innerName)
+
+    // Read the trusted expected inner checksum from the signature-verified
+    // outer archive (also validates member paths before any extraction).
+    const { stdout: memberList } = await execFileAsync('tar', ['tzf', archivePath], { maxBuffer: 64 * 1024 * 1024 })
+    assertSafeArchiveMemberNames(memberList, archivePath)
+    const checksumMember = memberList.split('\n').filter(Boolean).find(m => path.basename(m) === checksumName)
+    if (!checksumMember) throw new Error(`Archive is malformed: missing ${checksumName}`)
+    const { stdout: checksumBody } = await execFileAsync('tar', ['xzOf', archivePath, checksumMember], { maxBuffer: 1024 * 1024 })
+    const expectedInnerSha = checksumBody.trim().split(/\s+/)[0]
+    if (!/^[a-f0-9]{64}$/i.test(expectedInnerSha)) {
+        throw new Error(`Archive ${checksumName} does not contain a valid SHA-256`)
+    }
+
+    // Reuse a prior extraction only when its bytes match the verified checksum.
+    if (fs.existsSync(innerArchive)) {
+        process.stdout.write('Checking existing work-dir archive against the verified checksum... ')
+        const computed = await computeSha256(innerArchive)
+        if (computed === expectedInnerSha) {
+            console.log('OK (reusing)')
+            return innerArchive
+        }
+        console.log('mismatch; discarding and re-extracting')
+    }
+
+    // Fresh extraction from the verified outer archive.
+    if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
+    ensureDir(workDir)
+    console.log('Extracting outer archive...')
+    await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
+    if (!fs.existsSync(innerArchive)) {
+        fs.rmSync(workDir, { recursive: true })
+        throw new Error(`Archive is malformed: missing ${innerName}`)
+    }
+    const computed = await computeSha256(innerArchive)
+    if (computed !== expectedInnerSha) {
+        fs.rmSync(workDir, { recursive: true })
+        throw new Error(`Inner archive checksum mismatch\n  Expected: ${expectedInnerSha}\n  Got:      ${computed}`)
+    }
+    console.log('Outer archive extracted and inner checksum verified')
+    return innerArchive
 }
 
 function getWorkDir(coin, network, module) {
@@ -456,48 +526,10 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
 
-    const innerArchive   = path.join(workDir, 'data.tar.gz')
-    const checksumFile    = path.join(workDir, 'data.sha256')
-    const verifySentinel = path.join(workDir, 'verify.ok')
-
-    // Step 1: Extract outer archive (resumable: if a prior run already
-    // extracted a valid inner archive + checksum into the work dir, keep them.
-    // Extracting + SHA-256 verifying a mainnet archive can take ~30 min each,
-    // so a late-stage failure must not force redoing that work.)
-    if (fs.existsSync(innerArchive) && fs.existsSync(checksumFile)) {
-        console.log('Found previously extracted archive in work dir, skipping outer extract')
-    } else {
-        if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
-        ensureDir(workDir)
-        console.log('Extracting outer archive...')
-        // Refuse member paths that could escape the work dir (absolute paths
-        // or '..' segments) so a tampered bootstrap archive cannot write
-        // outside it, regardless of the host tar implementation's defaults.
-        const { stdout: memberList } = await execFileAsync('tar', ['tzf', archivePath], { maxBuffer: 64 * 1024 * 1024 })
-        assertSafeArchiveMemberNames(memberList, archivePath)
-        await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
-
-        if (!fs.existsSync(innerArchive) || !fs.existsSync(checksumFile)) {
-            fs.rmSync(workDir, { recursive: true })
-            throw new Error('Archive is malformed: missing data.tar.gz or data.sha256')
-        }
-    }
-
-    // Step 2: Verify checksum (resumable: skip if a prior run already verified
-    // this inner archive and dropped the sentinel)
-    if (fs.existsSync(verifySentinel)) {
-        console.log('Checksum already verified in a prior run, skipping verification')
-    } else {
-        process.stdout.write('Verifying checksum... ')
-        const stored   = (await fs.promises.readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0]
-        const computed = await computeSha256(innerArchive)
-        if (stored !== computed) {
-            fs.rmSync(workDir, { recursive: true })
-            throw new Error(`Checksum mismatch!\n  Expected: ${stored}\n  Got:      ${computed}`)
-        }
-        await fs.promises.writeFile(verifySentinel, `${computed}  data.tar.gz\n`)
-        console.log('OK')
-    }
+    // Steps 1-2: extract + verify the inner archive against the checksum that
+    // shipped inside the signature-verified outer archive (resumable, but the
+    // reused bytes are always re-bound to the verified archive; see the helper).
+    const innerArchive = await ensureVerifiedInnerArchive(archivePath, workDir, 'data.tar.gz', 'data.sha256')
 
     // Step 3: Get container ID and stop service
     // Make sure the DB pool is open first; when this routine is invoked outside
@@ -575,47 +607,10 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
 
-    const innerArchive   = path.join(workDir, 'dump.sql.gz')
-    const checksumFile    = path.join(workDir, 'dump.sha256')
-    const verifySentinel = path.join(workDir, 'verify.ok')
-
-    // Step 1: Extract outer archive (resumable: keep a prior run's extracted
-    // inner archive + checksum so a late-stage failure doesn't force redoing
-    // the extract + SHA-256 verify work)
-    if (fs.existsSync(innerArchive) && fs.existsSync(checksumFile)) {
-        console.log('Found previously extracted archive in work dir, skipping outer extract')
-    } else {
-        if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
-        ensureDir(workDir)
-        console.log('Extracting outer archive...')
-        // Refuse member paths that could escape the work dir (absolute paths
-        // or '..' segments) so a tampered bootstrap archive cannot write
-        // outside it, regardless of the host tar implementation's defaults.
-        const { stdout: memberList } = await execFileAsync('tar', ['tzf', archivePath], { maxBuffer: 64 * 1024 * 1024 })
-        assertSafeArchiveMemberNames(memberList, archivePath)
-        await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
-
-        if (!fs.existsSync(innerArchive) || !fs.existsSync(checksumFile)) {
-            fs.rmSync(workDir, { recursive: true })
-            throw new Error('Archive is malformed: missing dump.sql.gz or dump.sha256')
-        }
-    }
-
-    // Step 2: Verify checksum (resumable: skip if a prior run already verified
-    // this inner archive and dropped the sentinel)
-    if (fs.existsSync(verifySentinel)) {
-        console.log('Checksum already verified in a prior run, skipping verification')
-    } else {
-        process.stdout.write('Verifying checksum... ')
-        const stored   = (await fs.promises.readFile(checksumFile, 'utf8')).trim().split(/\s+/)[0]
-        const computed = await computeSha256(innerArchive)
-        if (stored !== computed) {
-            fs.rmSync(workDir, { recursive: true })
-            throw new Error(`Checksum mismatch!\n  Expected: ${stored}\n  Got:      ${computed}`)
-        }
-        await fs.promises.writeFile(verifySentinel, `${computed}  dump.sql.gz\n`)
-        console.log('OK')
-    }
+    // Steps 1-2: extract + verify the inner archive against the checksum that
+    // shipped inside the signature-verified outer archive (resumable, but the
+    // reused bytes are always re-bound to the verified archive; see the helper).
+    const innerArchive = await ensureVerifiedInnerArchive(archivePath, workDir, 'dump.sql.gz', 'dump.sha256')
 
     // Step 3: Get DB credentials (and container ID when not using external DB)
     let dbContainerId = null
@@ -902,5 +897,6 @@ module.exports = {
     signBootstrapArchive,
     verifyBootstrapSignature,
     checkBootstrapSignature,
-    loadBootstrapPublicKey
+    loadBootstrapPublicKey,
+    ensureVerifiedInnerArchive
 }

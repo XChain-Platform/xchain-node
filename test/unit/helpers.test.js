@@ -309,6 +309,31 @@ describe('utils/helpers', function () {
             expect(out).to.include("PASSWORD('<redacted>')")
         })
 
+        it('masks the per-install service secrets in a failed docker-run argv', function () {
+            const out = redactSecrets(
+                'Command failed: docker run -e HUB_DB_PASS=9f3caabb -e NODE_PASSWORD=sekret ' +
+                '-e HUB_API_KEY=abc123 -e INDEXER_API_KEY=k -e BTC_ENCODER_API_KEY=k2 ' +
+                '-e TELEMETRY_ADMIN_KEY=k3 -e DECODER_PORT=8080 -t img'
+            )
+            for (const secret of ['9f3caabb', 'sekret', 'abc123', 'k2', 'k3']) {
+                expect(out).to.not.include(secret)
+            }
+            expect(out).to.include('HUB_DB_PASS=<redacted>')
+            expect(out).to.include('HUB_API_KEY=<redacted>')
+            // A non-secret env value (a port) is left intact.
+            expect(out).to.include('DECODER_PORT=8080')
+        })
+
+        it('masks credentials embedded in a git/remote URL', function () {
+            const out = redactSecrets(
+                'Error cloning project: Command failed: git clone ' +
+                'https://x-access-token:ghp_REALTOKEN@github.com/acme/x.git /dst'
+            )
+            expect(out).to.not.include('ghp_REALTOKEN')
+            expect(out).to.not.include('x-access-token')
+            expect(out).to.include('https://<redacted>@github.com/acme/x.git')
+        })
+
         it('returns clean strings unchanged and handles null', function () {
             expect(redactSecrets('nothing secret here')).to.equal('nothing secret here')
             expect(redactSecrets(null)).to.equal('')

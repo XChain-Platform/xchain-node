@@ -34,6 +34,7 @@ const {
 const { statusChanged, getStatus } = require('./StatusService')
 const { killContainer, removeContainer, getPublishedHostPorts } = require('./DockerService')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./DatabaseService')
+const { redactSecrets } = require('../utils/helpers')
 
 async function cloneGit(module, rewrite = false, useTmp = false, branch = null) {
     return new Promise((resolve, reject) => {
@@ -77,13 +78,13 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
                     console.warn(`WARNING: Branch '${branch}' not found for module '${module}'. Falling back to default branch (master).`)
                     execFile('git', ['clone', gitUrl, destination], (fallbackError) => {
                         if (fallbackError) {
-                            reject("Error cloning project: " + fallbackError.message)
+                            reject("Error cloning project: " + redactSecrets(fallbackError.message))
                         } else {
                             resolve(true)
                         }
                     })
                 } else {
-                    reject("Error cloning project: " + error.message)
+                    reject("Error cloning project: " + redactSecrets(error.message))
                 }
             } else {
                 resolve(true)
@@ -240,10 +241,20 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     }
 
     return new Promise((resolve, reject) => {
-        // With execFile, env vars are passed as individual array elements (no shell escaping needed)
+        // Pass every container env var as a bare `--env NAME` (value supplied in
+        // the execFile `env` option below), NOT `--env NAME=value` in argv. The
+        // config map carries per-install secrets (HUB_DB_PASS/DECODER_DB_PASS/
+        // INDEXER_DB_PASS, NODE_PASSWORD, HUB_API_KEY/INDEXER_API_KEY, the per-coin
+        // *_API_KEY, TELEMETRY_ADMIN_KEY). In argv those would land in
+        // /proc/<docker-pid>/cmdline (world-readable, no hidepid) AND in a failed
+        // `docker run` error.message (which upstream logging prints, and an operator
+        // pastes into a bug report). Mirrors DatabaseService's MYSQL_ROOT_PASSWORD
+        // treatment. The value reaches the container identically; only argv changes.
         const envArgs = []
+        const dockerEnv = { ...process.env }
         for (const key in environmentVariables) {
-            envArgs.push('-e', `${key}=${String(environmentVariables[key])}`)
+            envArgs.push('--env', key)
+            dockerEnv[key] = String(environmentVariables[key])
         }
 
         const containerPrefix = getDockerContainerImageName(module, coin, network)
@@ -251,7 +262,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
         execFile('docker', ['build', '.', '-t', containerPrefix], { cwd: dir }, async (error) => {
             if (error) {
-                reject("Error creating Docker image: " + error.message)
+                reject("Error creating Docker image: " + redactSecrets(error.message))
                 return
             }
 
@@ -392,9 +403,11 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 ]
 
                 console.log("Creating container of module " + module + (coin && network ? " in " + coin + " " + network : ""))
-                execFile('docker', runArgs, { cwd: dir }, async (error2, stdout) => {
+                execFile('docker', runArgs, { cwd: dir, env: dockerEnv }, async (error2, stdout) => {
                     if (error2) {
-                        reject("Error creating the container: " + error2.message)
+                        // error2.message embeds the full argv; redact any secret-shaped
+                        // token defensively even though values now live in the child env.
+                        reject("Error creating the container: " + redactSecrets(error2.message))
                         return
                     }
                     try {

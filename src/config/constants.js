@@ -134,7 +134,13 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
                 continue
             }
             modulesUrls[mod] = url
-            console.log("modulesUrls['" + mod + "'] overridden via env → " + url)
+            // Redact any credentials embedded in an https remote
+            // (https://user:token@host) before logging: git URLs routinely carry
+            // an inline PAT, and this line lands in install transcripts operators
+            // share. Inlined (not via helpers.redactSecrets) to avoid a
+            // constants<->helpers require cycle.
+            const safeUrl = String(url).replace(/([a-z][a-z0-9+.\-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1<redacted>@')
+            console.log("modulesUrls['" + mod + "'] overridden via env → " + safeUrl)
         }
     } catch (err) {
         console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: parse failed (" + err.message + "), using defaults")

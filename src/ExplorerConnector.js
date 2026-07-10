@@ -33,7 +33,10 @@ class ExplorerConnector {
         
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            // Bounded timeout (matches HubConnector): without it, an explorer that
+            // accepts the connection but never replies hangs the install/status
+            // flow forever, since installExplorerModule awaits this ping.
+            response = await axios.post(this.url, data, { timeout: 5000 })
         } catch (err) {
             console.error('ExplorerConnector: failed to check explorer connectivity:', err.message);
             return false

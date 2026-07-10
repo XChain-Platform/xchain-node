@@ -107,8 +107,15 @@ function redactSecrets(input) {
         .replace(/PASSWORD\(\s*'(?:[^'\\]|\\.)*'\s*\)/gi, "PASSWORD('<redacted>')")
         // SQL: IDENTIFIED BY '<secret>'  /  IDENTIFIED BY PASSWORD '<secret>'
         .replace(/IDENTIFIED BY\s+(?:PASSWORD\s+)?'(?:[^'\\]|\\.)*'/gi, "IDENTIFIED BY '<redacted>'")
-        // env-forwarded creds surfaced in a docker err.cmd: MYSQL_PWD=… etc.
-        .replace(/\b(MYSQL_(?:PWD|ROOT_PASSWORD))=\S+/gi, '$1=<redacted>')
+        // Credentials embedded in a URL (git remote / connection string):
+        // scheme://user:pass@host → scheme://<redacted>@host. Catches a
+        // credentialed clone URL surfaced in a git error.message or a logged
+        // XCHAIN_NODE_MODULES_URLS_OVERRIDE value.
+        .replace(/([a-z][a-z0-9+.\-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1<redacted>@')
+        // Secret-shaped env assignments surfaced in a docker command's err.cmd or
+        // any argv-bearing error string: KEY=value where KEY names a credential
+        // (covers -e KEY=value / --env KEY=value and MYSQL_PWD/MYSQL_ROOT_PASSWORD).
+        .replace(/\b([A-Za-z0-9_]*?(?:PASSWORD|_PASS|_PWD|_API_KEY|_KEY|_SECRET|_TOKEN))=\S+/gi, '$1=<redacted>')
 }
 
 module.exports = {
