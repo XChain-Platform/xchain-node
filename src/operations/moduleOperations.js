@@ -23,6 +23,7 @@ const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir } = require('../config/constants')
 const { db }                 = require('../state')
+const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases } = require('../services/DatabaseService')
@@ -385,7 +386,7 @@ async function resetModules(service, coin, network, force = false) {
             await startContainer(containerId)
         } catch (firstErr) {
             console.warn(`Failed to start ${module} (${firstErr && firstErr.message}); retrying in 3s...`)
-            await new Promise((r) => setTimeout(r, 3000))
+            await sleep(3000)
             try {
                 await startContainer(containerId)
             } catch (retryErr) {
@@ -404,7 +405,7 @@ async function resetModules(service, coin, network, force = false) {
     const bounceCandidates = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]
         .filter((m) => modulesToStop.includes(m))
     if (bounceCandidates.length > 0) {
-        await new Promise((r) => setTimeout(r, 5000))
+        await sleep(5000)
         for (const module of bounceCandidates) {
             try {
                 const containerId = await db.getModuleContainer(module, coin, network)

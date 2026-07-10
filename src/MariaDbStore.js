@@ -20,6 +20,7 @@
  ********************************************************************/
 
 const mariadb = require('mariadb')
+const { sleep } = require('./utils/helpers')
 
 class MariaDbStore {
     constructor(config = null) {
@@ -63,7 +64,7 @@ class MariaDbStore {
                 break
             } catch (err) {
                 lastErr = err
-                await new Promise(r => setTimeout(r, 2000))
+                await sleep(2000)
             }
         }
         if (!conn) {

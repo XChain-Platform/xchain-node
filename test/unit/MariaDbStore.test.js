@@ -146,6 +146,61 @@ describe('MariaDbStore', function () {
         })
     })
 
+    describe('createDatabase() connection retry', function () {
+
+        const config = {
+            host: '127.0.0.1', port: 3306,
+            user: 'u', password: 'p', database: 'xchain_node'
+        }
+
+        // Load a store whose pool.getConnection() rejects `failCount` times
+        // before succeeding, with helpers.sleep swapped for a counter so the
+        // 2s backoff between attempts costs no real wall-clock time.
+        function loadStoreWithFlakyConnect(failCount) {
+            let attempts = 0
+            let sleepCalls = 0
+            const fakeConn = { query: async () => undefined, release: () => {} }
+            const fakePool = {
+                getConnection: async () => {
+                    attempts++
+                    if (attempts <= failCount) throw new Error('ECONNREFUSED')
+                    return fakeConn
+                },
+                query: async () => undefined,
+                end: async () => {}
+            }
+            const MariaDbStore = proxyquire('../../src/MariaDbStore', {
+                'mariadb': { createPool: () => fakePool },
+                './utils/helpers': { sleep: async () => { sleepCalls++ } }
+            })
+            return { MariaDbStore, getAttempts: () => attempts, getSleepCalls: () => sleepCalls }
+        }
+
+        it('retries and succeeds after transient connection failures', async function () {
+            const { MariaDbStore, getAttempts, getSleepCalls } = loadStoreWithFlakyConnect(2)
+            const store = new MariaDbStore()
+            await store.createDatabase(config)
+            expect(store.isReady()).to.be.true
+            expect(getAttempts()).to.equal(3)     // 2 failed + 1 successful
+            expect(getSleepCalls()).to.equal(2)   // one backoff per failure
+            await store.close()
+        })
+
+        it('throws after 6 failed connection attempts', async function () {
+            const { MariaDbStore, getAttempts, getSleepCalls } = loadStoreWithFlakyConnect(99)
+            const store = new MariaDbStore()
+            try {
+                await store.createDatabase(config)
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.match(/Couldn't open\/create MariaDB database/)
+            }
+            expect(getAttempts()).to.equal(6)     // loop caps at 6 attempts
+            expect(getSleepCalls()).to.equal(6)   // backoff after each failure
+            await store.close()
+        })
+    })
+
     describe('insertModuleContainer() + getModuleContainer()', function () {
 
         it('stores and retrieves a container ID', async function () {
