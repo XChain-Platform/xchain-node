@@ -21,7 +21,7 @@ const path     = require('path')
 const readline = require('readline')
 
 const {
-    NODE_PREFIX, SEP, DB_SEP,
+    NODE_PREFIX, DEFAULT_NODE_PREFIX, SEP, DB_SEP,
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     Coin, Network, XChainService, CoinTickerSymbol, REGTEST_MODULES,
     moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir,
@@ -91,6 +91,20 @@ function getDockerContainerImageNamePrefix(module, coin, network) {
 
 function getDockerContainerImageName(module, coin, network) {
     return getDockerContainerImageNamePrefix(module, coin, network) + SEP + module
+}
+
+// Single source of truth for the UTXO tracker's Docker volume name. Two
+// NODE_PREFIX stacks of the same coin+network must not share one volume, so
+// non-default prefixes get a prefixed volume name; the default prefix keeps
+// the legacy unprefixed name (renaming it would orphan every existing
+// deployment's tracker data, forcing a fleet-wide resync). Previously this
+// rule lived only in ModuleService.buildAndUp; moduleOperations.resetModules
+// and all three BootstrapService sites re-derived the unprefixed name
+// independently, so a non-default NODE_PREFIX made reset/bootstrap/restore
+// silently operate on the wrong stack's volume (uuid:7523dd94, uuid:a61fc673).
+function getUtxoTrackerVolumeName(coin, network) {
+    const prefix = NODE_PREFIX === DEFAULT_NODE_PREFIX ? '' : `${NODE_PREFIX}${SEP}`
+    return `${prefix}${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
 }
 
 function getDockerNetwork(coin, network) {
@@ -796,6 +810,7 @@ module.exports = {
     checkIfCryptoNodeSourceExists,
     getDockerContainerImageNamePrefix,
     getDockerContainerImageName,
+    getUtxoTrackerVolumeName,
     getDockerNetwork,
     getModuleDatabaseName,
     validatePort,

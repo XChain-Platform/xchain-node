@@ -69,13 +69,18 @@ function loadCredentials() {
     }
 }
 
+// Read-modify-write, mirroring saveExternalDbConfig() below: a whole-file
+// overwrite here would destroy the sibling `externalDb` block written moments
+// earlier in the same provisioning run (uuid:7ed329f7).
 function saveCredentials(creds) {
     const dir = getCredentialsDir()
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     }
     const filePath = getCredentialsPath()
-    fs.writeFileSync(filePath, JSON.stringify(creds, null, 2), { mode: 0o600 })
+    const existing = _readCredentialsRaw() || {}
+    Object.assign(existing, creds)
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), { mode: 0o600 })
     try {
         fs.chmodSync(filePath, 0o600)
     } catch {

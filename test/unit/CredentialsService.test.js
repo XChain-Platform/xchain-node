@@ -303,6 +303,33 @@ describe('CredentialsService', function () {
             // Should not throw
             expect(() => cs.saveCredentials({ user: 'u', password: 'test-pass', database: 'xchain_node' })).to.not.throw()
         })
+
+        // Regression guard for uuid:7ed329f7: saveCredentials() used to
+        // fs.writeFileSync(creds) wholesale, destroying any sibling key
+        // (notably the externalDb block written moments earlier by
+        // saveExternalDbConfig() in the same provisioning run). It must now
+        // read-modify-write like its sibling.
+        it('preserves the externalDb block written by saveExternalDbConfig', function () {
+            const existingContent = JSON.stringify({
+                externalDb: { host: 'db.example.com', port: 3306, root_user: 'root', root_password: 'r' }
+            })
+            const fs = makeFs({
+                existsSync: sinon.stub().returns(true),
+                readFileSync: sinon.stub().returns(existingContent)
+            })
+            const cs = loadCredentialsService(fs)
+            cs.saveCredentials({ user: 'u', password: 'test-pass', database: 'xchain_node' })
+
+            expect(fs.writeFileSync.calledOnce).to.be.true
+            const [filePath, content, opts] = fs.writeFileSync.firstCall.args
+            expect(filePath).to.equal(CREDS_FILE)
+            const written = JSON.parse(content)
+            expect(written.externalDb).to.deep.equal({ host: 'db.example.com', port: 3306, root_user: 'root', root_password: 'r' })
+            expect(written.user).to.equal('u')
+            expect(written.password).to.equal('test-pass')
+            expect(written.database).to.equal('xchain_node')
+            expect(opts.mode).to.equal(0o600)
+        })
     })
 
     // -------------------------------------------------------------------

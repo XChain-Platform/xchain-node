@@ -97,7 +97,11 @@ function makeStubs(overrides = {}) {
             DECODER_BOOTSTRAP_VOLUME:      '/data/bitcoin/mainnet/xchain-decoder/bootstrap/',
             INDEXER_BOOTSTRAP_VOLUME:      '/data/bitcoin/mainnet/xchain-indexer/bootstrap/'
         }),
-        getModuleDatabaseName: sinon.stub().returns('xchain_btc_mainnet_decoder')
+        getModuleDatabaseName: sinon.stub().returns('xchain_btc_mainnet_decoder'),
+        // Mirrors ConfigService.getUtxoTrackerVolumeName's default-NODE_PREFIX
+        // (unprefixed) shape; NODE_PREFIX-override behavior is covered in
+        // ConfigService's own unit tests.
+        getUtxoTrackerVolumeName: sinon.stub().callsFake((coin, net) => `xchain-utxo-tracker-${coin}-${net}-data`)
     }
 
     const dockerServiceStub = {
@@ -205,7 +209,8 @@ function loadBootstrapService(stubs) {
         },
         './ConfigService':   {
             getDefaultConfig:         stubs.configService.getDefaultConfig,
-            getModuleDatabaseName:    stubs.configService.getModuleDatabaseName
+            getModuleDatabaseName:    stubs.configService.getModuleDatabaseName,
+            getUtxoTrackerVolumeName: stubs.configService.getUtxoTrackerVolumeName
         },
         './DockerService':    {
             stopContainer:  stubs.dockerService.stopContainer,

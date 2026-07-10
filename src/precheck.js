@@ -78,7 +78,12 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
     try {
         // External-DB mode connects to the configured host:port directly.
         // Default (docker) mode reads the live port-forward from the running
-        // container (port can drift if operator overrode DB_PORT).
+        // container. Note: buildDatabaseModule is always called as ("", "")
+        // above, and getDefaultConfig only reads a config file when both coin
+        // and network are truthy, so a DB_PORT override in a coin/network
+        // config file is unreachable on this path; the port is always
+        // XCHAIN_NODE_DB_DEFAULT_PORT unless XCHAIN_NODE_DB_DATA_DIR-style env
+        // plumbing is added for it (uuid:ee2849ef).
         const dbHost = EXTERNAL_DB ? EXTERNAL_DB_HOST : "127.0.0.1"
         const dbPort = EXTERNAL_DB ? EXTERNAL_DB_PORT : await getDatabaseHostPort()
         await db.createDatabase({

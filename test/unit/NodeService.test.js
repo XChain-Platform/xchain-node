@@ -111,9 +111,10 @@ function loadNodeService(stubs) {
             getLocalModuleVersion:    stubs.getLocalModuleVersion    || sinon.stub().resolves('1.0.0'),
             getContainerModuleVersion: stubs.getContainerModuleVersion || sinon.stub().resolves('1.0.0')
         },
-        // Lazy requires inside installNode
+        // Lazy requires inside installNode / buildCryptoNode
         './DockerService':   {
-            createDockerNetwork: sinon.stub().resolves()
+            createDockerNetwork: sinon.stub().resolves(),
+            forceRemoveContainerByName: sinon.stub().resolves(true)
         },
         './DatabaseService': {
             buildDatabaseModule:   sinon.stub().resolves(),
@@ -791,7 +792,7 @@ describe('NodeService: installNode()', function () {
                 getLocalModuleVersion:   sinon.stub().resolves('1.0.0'),
                 getContainerModuleVersion: sinon.stub().resolves('1.0.0')
             },
-            './DockerService':   { createDockerNetwork: sinon.stub().resolves() },
+            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': {
                 buildDatabaseModule:   sinon.stub().resolves(),
                 setDatabaseParameters: sinon.stub().resolves()
@@ -841,7 +842,7 @@ describe('NodeService: installNode()', function () {
             './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
-            './DockerService':   { createDockerNetwork: sinon.stub().resolves() },
+            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
             './ModuleService': { cloneGit: cloneGitStub, buildAndUp: buildAndUpStub, assertNoHostPortConflicts: sinon.stub().resolves() },
             './BootstrapService': { utxoTrackerVolumeHasData: sinon.stub().resolves(true), ensureBootstrapUtxoTracker: sinon.stub().resolves() }
@@ -878,7 +879,7 @@ describe('NodeService: installNode()', function () {
             './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
-            './DockerService':   { createDockerNetwork: sinon.stub().resolves() },
+            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
             './ModuleService': { cloneGit: sinon.stub().resolves(true), buildAndUp: sinon.stub().resolves('e'.repeat(64)), assertNoHostPortConflicts: sinon.stub().resolves() },
             './BootstrapService': {

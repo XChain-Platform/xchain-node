@@ -27,13 +27,19 @@ const { execFile } = require('child_process')
 
 const {
     NODE_PREFIX, SEP,
-    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
+    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     XChainService, Coin, Network
 } = require('../config/constants')
 const { db } = require('../state')
 const { stringToXChainService } = require('../utils/helpers')
 
-const SHARED_MODULES = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME]
+// Every coin/network-independent service whose container is named bare
+// NODE_PREFIX+SEP+module and whose registry row is (module,'',''). Must stay in
+// lockstep with ConfigService.getDockerContainerImageNamePrefix and buildAndUp's
+// shared-service cases: omitting one (as happened with sync) makes
+// classifyContainer return null, so the per-command orphan-purge sweep deletes
+// the live row and its module ops silently no-op.
+const SHARED_MODULES = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
 
 function logIfNotSilent(silent, message) {
     if (!silent) console.log(message)

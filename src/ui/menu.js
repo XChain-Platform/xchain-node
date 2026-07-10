@@ -18,7 +18,7 @@ const { Select } = require('enquirer')
 const semver    = require('semver')
 
 const {
-    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
+    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     XChainService, Coin, Network, SEP
 } = require('../config/constants')
 const { db, getRemoteModuleVersions }   = require('../state')
@@ -207,7 +207,7 @@ async function modulesSelectionInterface(coin, network) {
                 moduleActions.push({ name: "Update locale version", value: "update locale version" })
             }
 
-            const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME]
+            const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
             if (!sharedModules.includes(selectedValue)) {
                 moduleActions.push({ name: "Uninstall", value: "uninstall" })
                 if (selectedValue === XChainService.XCHAIN_UTXO_TRACKER) {

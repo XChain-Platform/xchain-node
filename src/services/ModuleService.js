@@ -23,16 +23,16 @@ const fs        = require('fs')
 const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, NODE_PREFIX, DEFAULT_NODE_PREFIX
+    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES
 } = require('../config/constants')
 const { db }                = require('../state')
 const {
     getModuleDir, getModuleTmpDir, moduleDirExists, checkIfModuleExists,
     removeModuleDir, removeModuleTmpDir, createModuleTmpDir,
-    getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort
+    getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
-const { killContainer, removeContainer, getPublishedHostPorts } = require('./DockerService')
+const { killContainer, removeContainer, getPublishedHostPorts, forceRemoveContainerByName } = require('./DockerService')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./DatabaseService')
 const { redactSecrets } = require('../utils/helpers')
 
@@ -287,14 +287,13 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         if ("UTXO_TRACKER_PORT" in environmentVariables && "UTXO_TRACKER_API_PORT" in environmentVariables) {
                             portArgs.push('-p', `${environmentVariables["UTXO_TRACKER_PORT"]}:${environmentVariables["UTXO_TRACKER_API_PORT"]}`)
                         }
-                        // Two NODE_PREFIX stacks of the same coin+network must not share
-                        // one tracker volume, so non-default prefixes get a prefixed
-                        // volume name. The default prefix keeps the legacy unprefixed
-                        // name; renaming it would orphan every existing deployment's
-                        // tracker data (forced fleet-wide resync).
-                        const trackerVolumePrefix = NODE_PREFIX === DEFAULT_NODE_PREFIX ? '' : `${NODE_PREFIX}${SEP}`
+                        // Volume name derivation lives in one place now
+                        // (ConfigService.getUtxoTrackerVolumeName), consumed here and by
+                        // moduleOperations.resetModules + all three BootstrapService
+                        // sites, so a non-default NODE_PREFIX can never drift between
+                        // them again (uuid:7523dd94, uuid:a61fc673).
                         volumeArgs.push(
-                            '-v', `${trackerVolumePrefix}${module}${SEP}${coin}-${network}-data:/data/xchain-utxo-tracker`,
+                            '-v', `${getUtxoTrackerVolumeName(coin, network)}:/data/xchain-utxo-tracker`,
                             '-v', `${environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"]}:/bootstrap/xchain-utxo-tracker`
                         )
                         ulimitArgs.push('--ulimit', 'nofile=2048:2048')
@@ -374,6 +373,16 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         await removeContainer(overwriteContainerId)
                     } catch { /* container may have been removed manually */ }
                 }
+
+                // Name-keyed cleanup immediately before `docker run --name`, making
+                // (re)creation idempotent against a leftover carcass the registry
+                // never recorded: an interrupted onlyExecution run (registry insert
+                // skipped, ModuleService.js ~L416), or a container that exists but
+                // whose registry insert failed. The overwriteContainerId removal
+                // above is id-keyed and misses both cases (uuid:9533ee7a).
+                try {
+                    await forceRemoveContainerByName(containerPrefix)
+                } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
 
                 // Pre-flight host-port collision check (multi-stack hosts). Runs
                 // after the overwrite removal so a re-install of THIS service never

@@ -28,8 +28,8 @@ const {
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
 const { sleep }                   = require('../utils/helpers')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
-const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName } = require('./ConfigService')
-const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork } = require('./DockerService')
+const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort } = require('./ConfigService')
+const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName } = require('./DockerService')
 const { statusChanged }           = require('./StatusService')
 const {
     XCHAIN_NODE_DB, getOsUserDbName, generatePassword,
@@ -267,12 +267,30 @@ async function askMariadbRootPassword(coin, network) {
         return cfg.root_password
     }
 
-    if (process.env.XCHAIN_NODE_DB_ROOT_PASSWORD) {
-        setDbRootPassword(process.env.XCHAIN_NODE_DB_ROOT_PASSWORD)
-        return process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
-    }
-
     const dbContainerId = await checkIfDatabaseModuleExists(coin, network)
+
+    if (process.env.XCHAIN_NODE_DB_ROOT_PASSWORD) {
+        const envPassword = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+        if (!dbContainerId) {
+            // No running container to verify against yet (fresh install): the
+            // env override becomes the password the container is created with,
+            // so there is nothing to ping. Accept as-is, same as before.
+            setDbRootPassword(envPassword)
+            return envPassword
+        }
+        // A container is already up; its MYSQL_ROOT_PASSWORD is the source of
+        // truth (see below). Verify the override actually works before
+        // caching it, instead of accepting an unverified value that could
+        // later burn ~100s of silent retries in checkIfDatabaseIsReady with no
+        // indication the root password was the problem (uuid:2c5ec698).
+        try {
+            const ping = await execFileAsync('docker', dockerMariadbArgs(dbContainerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(envPassword) })
+            if (ping.stdout.includes('mysqld is alive')) {
+                setDbRootPassword(envPassword)
+                return envPassword
+            }
+        } catch { /* fall through to the container-env read / prompt below */ }
+    }
 
     // If the mariadb container is already up, its MYSQL_ROOT_PASSWORD env is
     // the source of truth. Read it directly so non-interactive runs (CI, the
@@ -616,6 +634,14 @@ async function buildDatabaseModule(coin, network) {
         const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb']
         runArgs.push('--network', getDockerNetwork(coin, network))
         const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
+        // Every other docker run port in this file is validated before reaching
+        // execFile (see buildAndUp's portArgs loop); this one previously wasn't
+        // (uuid:ee2849ef). No shell-injection risk either way (house execFile-
+        // array convention), but an out-of-contract DB_PORT should fail loud
+        // here instead of surfacing as a cryptic docker argument-parse error.
+        if (!validatePort(dbHostPort)) {
+            throw new Error("Invalid port value in configuration: DB_PORT=" + dbHostPort)
+        }
         runArgs.push('-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`)
         // Optional: pin the MariaDB datadir to a host path (e.g. a fast NVMe
         // mount) instead of the image's default anonymous volume, which lands
@@ -670,6 +696,16 @@ async function buildDatabaseModule(coin, network) {
         // port; without this, `docker run` fails with a cryptic "port is already
         // allocated". Lazy require avoids a load-time cycle (ModuleService
         // requires this module at top).
+        // Name-keyed cleanup immediately before `docker run --name`, making
+        // (re)creation idempotent against a leftover carcass this registry-gated
+        // branch (`if (!existingId)`) cannot see: a container that exists but
+        // whose registry insert failed on an earlier run. Runs before the
+        // port-conflict check so this container's own carcass never self-flags
+        // as a conflict (uuid:9533ee7a).
+        try {
+            await forceRemoveContainerByName(containerPrefix)
+        } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
+
         const { assertNoHostPortConflicts } = require('./ModuleService')
         await assertNoHostPortConflicts(['-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`], containerPrefix)
 

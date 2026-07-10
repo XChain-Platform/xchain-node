@@ -113,7 +113,7 @@ async function parseCommand() {
         .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .option('--include-shared', 'Also uninstall shared services (database, xchain-hub, xchain-explorer)')
+        .option('--include-shared', 'Also uninstall shared services (database, xchain-hub, xchain-explorer, xchain-sync)')
         .action(async (service, chain, network, options) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
             await uninstallModules(serviceList, options.includeShared)
@@ -286,9 +286,10 @@ async function parseCommand() {
         .argument('<service>', '(node, xchain-utxo-tracker, xchain-decoder, xchain-indexer, all)')
         .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet, testnet, regtest)')
-        .action(async (service, chain, network) => {
-            await resetModules(service, chain, network)
-            return process.exit(0)
+        .option('--yes', 'Skip the destructive-reset confirmation prompt (for CI/scripted resets)')
+        .action(async (service, chain, network, options) => {
+            const confirmed = await resetModules(service, chain, network, !!(options && options.yes))
+            return process.exit(confirmed ? 0 : 1)
         })
 
     program

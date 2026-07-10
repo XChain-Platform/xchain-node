@@ -69,6 +69,12 @@ describe('DiscoveryService.classifyContainer', function () {
             .to.deep.equal({ module: 'xchain-hub', coin: '', network: '' })
         expect(svc.classifyContainer({ Names: 'xchain-node-xchain-explorer', Image: 'x' }))
             .to.deep.equal({ module: 'xchain-explorer', coin: '', network: '' })
+        // Regression (2026-07-09): sync was missing from SHARED_MODULES, so
+        // 'xchain-sync' fell through to the coin/network parser (2 parts < 3)
+        // and returned null; the per-command orphan purge then deleted its
+        // live (xchain-sync,'','') registry row and sync ops silently no-op'd.
+        expect(svc.classifyContainer({ Names: 'xchain-node-xchain-sync', Image: 'x' }))
+            .to.deep.equal({ module: 'xchain-sync', coin: '', network: '' })
     })
 
     it('classifies the coin node module', function () {
@@ -123,6 +129,27 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
                 getModuleContainer:     sinon.stub().resolves('cafebabecafebabecafebabe'),
                 getAllModuleContainers: sinon.stub().resolves([
                     { module: 'xchain-indexer', coin: 'litecoin', network: 'mainnet', container_id: 'cafebabecafebabecafebabe' },
+                ]),
+            },
+        })
+        const changed = await svc.scanAndRegisterModules({ silent: true })
+        expect(changed).to.equal(0)
+        sinon.assert.notCalled(db.removeModuleContainer)
+    })
+
+    it('does NOT purge the live sync service row (shared, coin/network-independent)', async function () {
+        // Regression (2026-07-09): with sync absent from SHARED_MODULES its key
+        // never entered `seen`, so every CLI command's sweep purged the row
+        // buildAndUp had just inserted.
+        const { svc, db } = loadService({
+            containers: [{
+                Names: 'xchain-node-xchain-sync', Image: 'xchain-node-xchain-sync',
+                ID: 'sync1234sync1234', State: 'running',
+            }],
+            db: {
+                getModuleContainer:     sinon.stub().resolves('sync1234sync1234'),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-sync', coin: '', network: '', container_id: 'sync1234sync1234' },
                 ]),
             },
         })

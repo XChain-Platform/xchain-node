@@ -14,7 +14,7 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
-const { modulesUrls, XChainService } = require('../../src/config/constants')
+const { modulesUrls, XChainService, DEFAULT_NODE_PREFIX } = require('../../src/config/constants')
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,6 +38,7 @@ function makeStubs() {
         getStatus: sinon.stub().resolves({}),
         killContainer: sinon.stub().resolves(true),
         removeContainer: sinon.stub().resolves(true),
+        forceRemoveContainerByName: sinon.stub().resolves(true),
         getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } }),
         // No published host ports by default → buildAndUp's pre-flight conflict
         // check is a no-op. Conflict tests override this with a populated Map.
@@ -61,6 +62,14 @@ function loadModuleService(stubs, constantsOverride) {
             return 'xchain-node-' + coin + '-' + net + '-' + mod
         },
         getDockerNetwork: (coin, net) => 'xchain-node' + (coin ? '-' + coin : '') + (net ? '-' + net : ''),
+        // Mirrors ConfigService.getUtxoTrackerVolumeName's real NODE_PREFIX
+        // handling (see the F11 test below): the legacy exemption for the
+        // default prefix, and a prefixed name otherwise.
+        getUtxoTrackerVolumeName: (coin, net) => {
+            const nodePrefix = (constantsOverride && constantsOverride.NODE_PREFIX) || DEFAULT_NODE_PREFIX
+            const prefix = nodePrefix === DEFAULT_NODE_PREFIX ? '' : `${nodePrefix}-`
+            return `${prefix}xchain-utxo-tracker-${coin}-${net}-data`
+        },
         validatePort: (v) => { if (typeof v === 'number') return Number.isInteger(v) && v >= 1 && v <= 65535; if (typeof v === 'string' && /^\d+$/.test(v)) { const p = parseInt(v, 10); return p >= 1 && p <= 65535 } return false },
         getDefaultConfig: sinon.stub().resolves({
             'NETWORK': 'bitcoin-mainnet',
@@ -104,6 +113,7 @@ function loadModuleService(stubs, constantsOverride) {
         './DockerService': {
             killContainer: stubs.killContainer,
             removeContainer: stubs.removeContainer,
+            forceRemoveContainerByName: stubs.forceRemoveContainerByName,
             getStatusFromContainer: stubs.getStatusFromContainer,
             getPublishedHostPorts: stubs.getPublishedHostPorts
         },
@@ -196,7 +206,7 @@ describe('ModuleService', function () {
                     getDefaultConfig: sinon.stub().resolves({})
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, getStatusFromContainer: stubs.getStatusFromContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName, getStatusFromContainer: stubs.getStatusFromContainer },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() }
             })
             try {
@@ -259,7 +269,7 @@ describe('ModuleService', function () {
                     getDefaultConfig: sinon.stub().resolves({})
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, getStatusFromContainer: stubs.getStatusFromContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName, getStatusFromContainer: stubs.getStatusFromContainer },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() }
             })
             try {
@@ -836,6 +846,7 @@ describe('ModuleService', function () {
                 './DockerService': {
                     killContainer: stubs.killContainer,
                     removeContainer: stubs.removeContainer,
+                    forceRemoveContainerByName: stubs.forceRemoveContainerByName,
                     getStatusFromContainer: stubs.getStatusFromContainer
                 },
                 './DatabaseService': {
@@ -892,6 +903,7 @@ describe('ModuleService', function () {
                 './DockerService': {
                     killContainer: stubs.killContainer,
                     removeContainer: stubs.removeContainer,
+                    forceRemoveContainerByName: stubs.forceRemoveContainerByName,
                     getStatusFromContainer: stubs.getStatusFromContainer
                 },
                 './DatabaseService': {
@@ -957,6 +969,7 @@ describe('ModuleService', function () {
                 './DockerService': {
                     killContainer: stubs.killContainer,
                     removeContainer: stubs.removeContainer,
+                    forceRemoveContainerByName: stubs.forceRemoveContainerByName,
                     getStatusFromContainer: stubs.getStatusFromContainer
                 },
                 './DatabaseService': {
@@ -1025,6 +1038,7 @@ describe('ModuleService', function () {
                 './DockerService': {
                     killContainer: stubs.killContainer,
                     removeContainer: stubs.removeContainer,
+                    forceRemoveContainerByName: stubs.forceRemoveContainerByName,
                     getStatusFromContainer: stubs.getStatusFromContainer
                 },
                 './DatabaseService': {
@@ -1232,6 +1246,7 @@ describe('ModuleService', function () {
                 './DockerService': {
                     killContainer: stubs.killContainer,
                     removeContainer: stubs.removeContainer,
+                    forceRemoveContainerByName: stubs.forceRemoveContainerByName,
                     getStatusFromContainer: stubs.getStatusFromContainer,
                     getPublishedHostPorts: stubs.getPublishedHostPorts
                 },
@@ -1284,7 +1299,7 @@ describe('ModuleService', function () {
                     })
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './VersionService': { getLocalNodeVersion: sinon.stub().resolves(null), getLocalModuleVersion: sinon.stub().resolves(null), checkRemoteNodeVersion: sinon.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon.stub().resolves(true), getCryptoNode: sinon.stub().resolves() },
@@ -1489,7 +1504,7 @@ describe('ModuleService', function () {
                 },
                 './ConfigService': configStub,
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './BootstrapService': {
                     utxoTrackerVolumeHasData: utxoTrackerVolumeHasDataStub,
@@ -1548,7 +1563,7 @@ describe('ModuleService', function () {
                 },
                 './ConfigService': configStub,
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: setDatabaseParametersStub },
                 './BootstrapService': {
                     utxoTrackerVolumeHasData: sinon3.stub().resolves(true),
@@ -1606,6 +1621,7 @@ describe('ModuleService', function () {
                 './DockerService': {
                     killContainer: stubs.killContainer,
                     removeContainer: stubs.removeContainer,
+                    forceRemoveContainerByName: stubs.forceRemoveContainerByName,
                     getStatusFromContainer: stubs.getStatusFromContainer
                 },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
@@ -1653,7 +1669,7 @@ describe('ModuleService', function () {
                     getDefaultConfig: sinon.stub().resolves({})
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './VersionService': { getLocalNodeVersion: sinon.stub().resolves('v25.0.0'), getLocalModuleVersion: sinon.stub().resolves(null), checkRemoteNodeVersion: sinon.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon.stub().resolves(true), getCryptoNode: sinon.stub().resolves() },
@@ -1689,7 +1705,7 @@ describe('ModuleService', function () {
                     getDefaultConfig: sinon.stub().resolves({})
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './VersionService': {
                     getLocalNodeVersion: sinon.stub().resolves('v25.0.0'), // has local version
@@ -1736,7 +1752,7 @@ describe('ModuleService', function () {
                     getDefaultConfig: sinon.stub().resolves({})
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './VersionService': { getLocalNodeVersion: sinon.stub().resolves(null), getLocalModuleVersion: sinon.stub().resolves(null), checkRemoteNodeVersion: sinon.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon.stub().resolves(true), getCryptoNode: sinon.stub().resolves() },
@@ -1803,7 +1819,7 @@ describe('ModuleService', function () {
                     })
                 },
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './VersionService': {
                     getLocalNodeVersion: sinon3.stub().resolves(null),
@@ -1894,7 +1910,7 @@ describe('ModuleService', function () {
                     getDefaultConfig: sinon.stub().resolves({})
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './VersionService': {
                     getLocalNodeVersion: sinon.stub().resolves(null),
@@ -1933,7 +1949,7 @@ describe('ModuleService', function () {
                     getDefaultConfig: sinon.stub().resolves({})
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './VersionService': {
                     getLocalNodeVersion: sinon.stub().resolves(null),
@@ -2012,7 +2028,7 @@ describe('ModuleService', function () {
                     })
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer },
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon3.stub().resolves(true), getCryptoNode: sinon3.stub().resolves() },
@@ -2063,7 +2079,7 @@ describe('ModuleService', function () {
                     getDefaultConfig: sinon2.stub().resolves({})
                 },
                 './StatusService': { statusChanged: sinon2.stub().resolves(), getStatus: sinon2.stub().resolves({}) },
-                './DockerService': { killContainer: sinon2.stub().resolves(true), removeContainer: sinon2.stub().resolves(true) },
+                './DockerService': { killContainer: sinon2.stub().resolves(true), removeContainer: sinon2.stub().resolves(true), forceRemoveContainerByName: sinon2.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: sinon2.stub().resolves() },
                 './VersionService': { getLocalNodeVersion: sinon2.stub().resolves(null), getLocalModuleVersion: sinon2.stub().resolves(null), checkRemoteNodeVersion: sinon2.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon2.stub().resolves(true), getCryptoNode: sinon2.stub().resolves() },

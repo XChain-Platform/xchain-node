@@ -88,6 +88,7 @@ function makeStubs(overrides = {}) {
         setDbRootPassword: sinon.stub(),
         statusChanged: sinon.stub().resolves(),
         getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } }),
+        forceRemoveContainerByName: sinon.stub().resolves(true),
         addContainerToNetwork: sinon.stub().resolves(true),
         getDockerNetworkInspect: sinon.stub().resolves({
             IPAM: { Config: [{ Gateway: '172.18.0.1' }] }
@@ -150,12 +151,14 @@ function loadDatabaseService(stubs, constants = {}) {
             }),
             getDockerContainerImageName: (mod) => 'xchain-node-' + mod,
             getDockerNetwork: (coin, net) => 'xchain-node' + (coin ? '-' + coin : '') + (net ? '-' + net : ''),
-            getModuleDatabaseName: (mod, coin, net) => 'XChain_BTC_Mainnet_Decoder'
+            getModuleDatabaseName: (mod, coin, net) => 'XChain_BTC_Mainnet_Decoder',
+            validatePort: require('../../src/services/ConfigService').validatePort
         },
         './DockerService': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             getDockerNetworkInspect: stubs.getDockerNetworkInspect,
-            addContainerToNetwork: stubs.addContainerToNetwork
+            addContainerToNetwork: stubs.addContainerToNetwork,
+            forceRemoveContainerByName: stubs.forceRemoveContainerByName
         },
         // buildDatabaseModule lazy-requires this for the multi-stack host-port
         // pre-flight; stub it so the install branch doesn't load the real
@@ -814,16 +817,64 @@ describe('DatabaseService', function () {
             }
         })
 
-        it('reads from XCHAIN_NODE_DB_ROOT_PASSWORD env var when not cached', async function () {
+        it('reads from XCHAIN_NODE_DB_ROOT_PASSWORD env var when not cached and no container is running', async function () {
             const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
             process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'env-root-pass'
             try {
                 const stubs = makeStubs()
                 stubs.getDbRootPassword.returns(null)
+                // No container up yet (fresh install): checkIfDatabaseModuleExists ->
+                // getDatabaseContainerId's inspect call resolves a non-hex id, so it
+                // returns null and there is nothing to verify the env override
+                // against; it must be accepted as-is (uuid:2c5ec698).
+                stubs.execFileAsync.resolves({ stdout: 'Error: No such object\n' })
                 const ds = loadDatabaseService(stubs)
                 const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
                 expect(result).to.equal('env-root-pass')
                 expect(stubs.setDbRootPassword.calledWith('env-root-pass')).to.be.true
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('verifies XCHAIN_NODE_DB_ROOT_PASSWORD against a running container before trusting it', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'env-root-pass'
+            try {
+                const stubs = makeStubs()
+                stubs.getDbRootPassword.returns(null)
+                // Container IS running: inspect finds it, then the env password
+                // must be verified with a ping before being trusted.
+                stubs.execFileAsync
+                    .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' }) // getDatabaseContainerId (inspect)
+                    .onCall(1).resolves({ stdout: 'mysqld is alive\n' })       // ping with the env password
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('env-root-pass')
+                expect(stubs.setDbRootPassword.calledWith('env-root-pass')).to.be.true
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('falls through to the container-env read when XCHAIN_NODE_DB_ROOT_PASSWORD does not verify', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'stale-env-pass'
+            try {
+                const stubs = makeStubs()
+                stubs.getDbRootPassword.returns(null)
+                stubs.execFileAsync
+                    .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })    // getDatabaseContainerId (inspect)
+                    .onCall(1).resolves({ stdout: 'Access denied\n' })           // ping with the stale env password: fails
+                    .onCall(2).resolves({ stdout: 'container-root-pass\n' })     // docker exec printenv
+                    .onCall(3).resolves({ stdout: 'mysqld is alive\n' })         // ping with the container's real password
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('container-root-pass')
+                expect(stubs.setDbRootPassword.calledWith('container-root-pass')).to.be.true
+                expect(stubs.setDbRootPassword.calledWith('stale-env-pass')).to.be.false
             } finally {
                 if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
                 else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
@@ -1428,7 +1479,10 @@ describe('DatabaseService', function () {
             //   1. getDatabaseContainerId (call 0) -> valid container ID
             //   2. checkIfDatabaseIsReady(existing.user, existing.password, ...) ->
             //      getDatabaseContainerId (call 1) -> valid ID, then mariadb SELECT fails (calls 2-11)
-            //   3. askMariadbRootPassword uses env var -> no extra exec calls
+            //   3. askMariadbRootPassword returns the CACHED password (this test
+            //      never overrides getDbRootPassword, so it stays the makeStubs()
+            //      default 'rootpass') and returns before reaching env-var /
+            //      ping-verification logic (uuid:2c5ec698) -> no extra exec calls
             //   4. checkIfDatabaseIsReady("root", rootPassword) ->
             //      getDatabaseContainerId (call 12) -> valid ID, then mariadb SELECT succeeds (call 13)
             //   5. DDL via executeDockerMariaDbCommand (execFile callback style)

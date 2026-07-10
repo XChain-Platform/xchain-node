@@ -188,6 +188,26 @@ describe('ConfigService', function () {
         })
     })
 
+    // Regression coverage for uuid:7523dd94 / uuid:a61fc673: this helper is
+    // the single source of truth for the tracker volume name, consumed by
+    // ModuleService.buildAndUp, moduleOperations.resetModules, and all three
+    // BootstrapService sites so they can no longer drift from each other.
+    describe('getUtxoTrackerVolumeName()', function () {
+        const { getUtxoTrackerVolumeName } = require('../../src/services/ConfigService')
+
+        it('keeps the legacy unprefixed name under the default NODE_PREFIX', function () {
+            expect(getUtxoTrackerVolumeName('bitcoin', 'mainnet')).to.equal('xchain-utxo-tracker-bitcoin-mainnet-data')
+        })
+
+        it('prefixes the name under a non-default NODE_PREFIX', function () {
+            const stubbedConstants = Object.assign({}, require('../../src/config/constants'), { NODE_PREFIX: 'xchain-fed' })
+            const { getUtxoTrackerVolumeName: getName } = proxyquire('../../src/services/ConfigService', {
+                '../config/constants': stubbedConstants
+            })
+            expect(getName('bitcoin', 'regtest')).to.equal('xchain-fed-xchain-utxo-tracker-bitcoin-regtest-data')
+        })
+    })
+
     describe('getDockerNetwork()', function () {
         const { getDockerNetwork } = require('../../src/services/ConfigService')
 
@@ -245,6 +265,9 @@ describe('ConfigService', function () {
             const fsStub = {
                 createReadStream: sinon.stub().callsFake(() => streamFromString(configContent)),
                 existsSync: sinon.stub().returns(true),
+                // existsSync=true routes upsertSidecarValues into fs.readFileSync on the
+                // sidecar; return an empty sidecar so the merge starts from nothing.
+                readFileSync: sinon.stub().returns(''),
                 appendFileSync: sinon.stub(),
                 writeFileSync: sinon.stub(),
                 rmSync: sinon.stub(),

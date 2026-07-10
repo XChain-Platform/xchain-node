@@ -28,7 +28,7 @@ const execFileAsync   = promisify(execFile)
 
 const { XChainService, DB_MODULE_NAME, SEP, tmpDir, BOOTSTRAP_BASE_URL, EXTERNAL_DB } = require('../config/constants')
 const { db }                                          = require('../state')
-const { getDefaultConfig, getModuleDatabaseName }    = require('./ConfigService')
+const { getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
 const { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('./DatabaseService')
 const { assertSafeArchiveMemberNames }                = require('../utils/helpers')
@@ -337,7 +337,10 @@ async function makeBootstrap(coin, network, module) {
 async function makeBootstrapUtxoTracker(coin, network) {
     const defaultConfig = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     const outputDir     = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"]
-    const volumeName    = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
+    // Routed through the shared helper (uuid:a61fc673): the unprefixed name
+    // used here previously backed up the wrong stack's data under a
+    // non-default NODE_PREFIX.
+    const volumeName    = getUtxoTrackerVolumeName(coin, network)
     const archiveName   = `${network}${SEP}${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${buildDateTimeString()}.tar.gz`
     const workDir       = getWorkDir(coin, network, XChainService.XCHAIN_UTXO_TRACKER)
     const innerArchive  = path.join(workDir, 'data.tar.gz')
@@ -516,7 +519,10 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     const defaultConfig = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     const bootstrapDir  = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"]
     const archivePath   = path.join(bootstrapDir, fileName)
-    const volumeName    = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
+    // Routed through the shared helper (uuid:a61fc673): the unprefixed name
+    // used here previously unpacked into the wrong stack's volume under a
+    // non-default NODE_PREFIX.
+    const volumeName    = getUtxoTrackerVolumeName(coin, network)
     const workDir       = getWorkDir(coin, network, `${XChainService.XCHAIN_UTXO_TRACKER}-restore`)
 
     if (!fs.existsSync(archivePath)) throw new Error(`Bootstrap file not found: ${archivePath}`)
@@ -712,7 +718,10 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
 // because a freshly-started tracker creates an (empty) LevelDB immediately.
 // Returns false when the volume is absent or empty (i.e. a fresh install).
 async function utxoTrackerVolumeHasData(coin, network) {
-    const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
+    // Routed through the shared helper (uuid:a61fc673): the unprefixed name
+    // used here previously read the wrong stack's freshness under a
+    // non-default NODE_PREFIX.
+    const volumeName = getUtxoTrackerVolumeName(coin, network)
     try {
         await execFileAsync('docker', ['volume', 'inspect', volumeName])
     } catch {

@@ -57,6 +57,7 @@ function loadOperations(stubs) {
         '../state': { db: stubs.db },
         '../services/ConfigService': {
             getDockerContainerImageName: (mod, coin, net) => `${coin}-${net}-${mod}`,
+            getUtxoTrackerVolumeName: (coin, net) => `xchain-utxo-tracker-${coin}-${net}-data`,
             filterCommandParameters: require('../../src/services/ConfigService').filterCommandParameters,
             getDockerNetwork: (coin, net) => 'xchain-node-' + coin + '-' + net
         },
@@ -475,6 +476,22 @@ describe('moduleOperations', function () {
             expect(stubs.uninstallModule.callCount).to.equal(2)
         })
 
+        it('skips xchain-sync by default (shared singleton, same guard as database/hub/explorer)', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-sync', 'xchain-encoder'] } })
+            // xchain-sync is shared -> skipped; only xchain-encoder is uninstalled
+            expect(stubs.uninstallModule.callCount).to.equal(1)
+            expect(stubs.uninstallModule.firstCall.args[2]).to.equal('xchain-encoder')
+        })
+
+        it('includes xchain-sync when includeShared=true', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-sync', 'xchain-encoder'] } }, true)
+            expect(stubs.uninstallModule.callCount).to.equal(2)
+        })
+
         it('skips module when container ID is null', async function () {
             const stubs = makeStubs()
             stubs.db.getModuleContainer.resolves(null)
@@ -556,7 +573,7 @@ describe('moduleOperations', function () {
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
             const ops = loadOperations(stubs)
             const clock = sinon.useFakeTimers()
-            const promise = ops.resetModules('all', 'bitcoin', 'mainnet')
+            const promise = ops.resetModules('all', 'bitcoin', 'mainnet', true)
             await clock.tickAsync(6000) // advance past 5000ms bounce delay
             clock.restore()
             const result = await promise
@@ -570,7 +587,7 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
             const ops = loadOperations(stubs)
-            const result = await ops.resetModules('node', 'bitcoin', 'mainnet')
+            const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
             expect(result).to.be.true
             expect(stubs.stopContainer.called).to.be.true
             // No bounce candidates for node-only reset
@@ -580,7 +597,7 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
             const ops = loadOperations(stubs)
-            const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet')
+            const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
             expect(result).to.be.true
             expect(stubs.stopContainer.called).to.be.true
         })
@@ -590,7 +607,7 @@ describe('moduleOperations', function () {
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
             const ops = loadOperations(stubs)
             const clock = sinon.useFakeTimers()
-            const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet')
+            const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true)
             await clock.tickAsync(6000)
             clock.restore()
             const result = await promise
@@ -604,7 +621,7 @@ describe('moduleOperations', function () {
             stubs.fs.existsSync.returns(true) // nodeDataPath exists
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
             const ops = loadOperations(stubs)
-            const result = await ops.resetModules('node', 'bitcoin', 'mainnet')
+            const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
             expect(result).to.be.true
             // execFile called for docker run --rm to clear data
             expect(stubs.execFile.called).to.be.true
@@ -617,8 +634,54 @@ describe('moduleOperations', function () {
             stubs.stopContainer.rejects(new Error('stop failed'))
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
             const ops = loadOperations(stubs)
-            const result = await ops.resetModules('node', 'bitcoin', 'mainnet')
+            const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
             expect(result).to.be.true // errors are caught/swallowed
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // resetModules(): destructive-reset confirmation guard
+    // -------------------------------------------------------------------
+
+    describe('resetModules(): confirmation guard', function () {
+
+        it('force=true skips the confirmation prompt entirely', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+            Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
+            try {
+                const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
+                expect(result).to.be.true
+                expect(stubs.stopContainer.called).to.be.true
+            } finally {
+                if (isTTYDescriptor) Object.defineProperty(process.stdin, 'isTTY', isTTYDescriptor)
+                else delete process.stdin.isTTY
+            }
+        })
+
+        it('refuses to reset on a non-interactive terminal without --yes/force', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+            Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
+            try {
+                let thrown = null
+                try {
+                    await ops.resetModules('node', 'bitcoin', 'mainnet', false)
+                } catch (err) {
+                    thrown = err
+                }
+                expect(thrown).to.not.be.null
+                expect(thrown.message).to.match(/--yes/)
+                expect(stubs.stopContainer.called).to.be.false
+                expect(stubs.execFile.called).to.be.false
+            } finally {
+                if (isTTYDescriptor) Object.defineProperty(process.stdin, 'isTTY', isTTYDescriptor)
+                else delete process.stdin.isTTY
+            }
         })
     })
 

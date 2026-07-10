@@ -17,12 +17,13 @@
 
 const path      = require('path')
 const fs        = require('fs')
+const readline  = require('readline')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
-const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, XChainService, SEP, dataDir } = require('../config/constants')
+const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir } = require('../config/constants')
 const { db }                 = require('../state')
-const { getDockerContainerImageName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
+const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
@@ -92,7 +93,7 @@ async function updateModules(servicesList, branch = null) {
 }
 
 async function uninstallModules(servicesList, includeShared = false) {
-    const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME]
+    const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
@@ -273,12 +274,47 @@ async function runE2ETest(coin, network, testName = null, grep = null, script = 
     return { logFile, exitCode }
 }
 
-async function resetModules(service, coin, network) {
+// Prompts the operator to type "yes" before a destructive reset proceeds.
+// Reused instead of duplicated so every call site aborts the exact same way
+// on a non-affirmative answer. Not called at all when the caller passes
+// force=true (CI/scripted resets).
+async function confirmDestructiveReset(coin, network, targets) {
+    if (!process.stdin.isTTY) {
+        throw new Error(
+            'reset: refusing to run a destructive reset on a non-interactive terminal without --yes. ' +
+            'Re-run with --yes to confirm.'
+        )
+    }
+    console.warn(`\nWARNING: this will IRREVERSIBLY destroy ${coin} ${network} data.`)
+    console.warn(`  Affected stores: ${targets.join(', ')}`)
+    console.warn('  This forces a full resync afterward. There is no undo.\n')
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    const answer = await new Promise((resolve) => {
+        rl.question('Type "yes" to confirm: ', resolve)
+    })
+    rl.close()
+    return answer.trim().toLowerCase() === 'yes'
+}
+
+async function resetModules(service, coin, network, force = false) {
     const resetAll         = service === 'all'
     const resetNode        = resetAll || service === NODE_MODULE_NAME
     const resetUtxoTracker = resetAll || service === XChainService.XCHAIN_UTXO_TRACKER
     const resetDecoder     = resetAll || service === XChainService.XCHAIN_DECODER
     const resetIndexer     = resetAll || service === XChainService.XCHAIN_INDEXER
+
+    if (!force) {
+        const targets = []
+        if (resetNode)        targets.push('node datadir')
+        if (resetUtxoTracker) targets.push(`xchain-utxo-tracker Docker volume (${getUtxoTrackerVolumeName(coin, network)})`)
+        if (resetDecoder)     targets.push('xchain-decoder database')
+        if (resetIndexer)     targets.push('xchain-indexer database')
+        const confirmed = await confirmDestructiveReset(coin, network, targets)
+        if (!confirmed) {
+            console.log('Aborted: reset was not confirmed. No data was touched.')
+            return false
+        }
+    }
 
     const modulesToStop = []
     if (resetNode)        modulesToStop.push(NODE_MODULE_NAME)
@@ -291,6 +327,10 @@ async function resetModules(service, coin, network) {
     for (const module of modulesToStop) {
         try {
             const containerId = await db.getModuleContainer(module, coin, network)
+            // Latent today only because the catch below hides a null-arg
+            // failure; guard explicitly so a future narrower catch stays
+            // correct (uuid:fd7cc224 sibling site).
+            if (!containerId) continue
             await stopContainer(containerId)
         } catch { /* not installed, skip */ }
     }
@@ -304,7 +344,10 @@ async function resetModules(service, coin, network) {
     }
 
     if (resetUtxoTracker) {
-        const volumeName = `${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
+        // Routed through the shared helper (uuid:7523dd94): the unprefixed name
+        // used here previously wiped the DEFAULT_NODE_PREFIX stack's volume
+        // under a non-default NODE_PREFIX, silently missing the intended target.
+        const volumeName = getUtxoTrackerVolumeName(coin, network)
         try {
             console.log(`Clearing Docker volume ${volumeName}...`)
             await execFileAsync('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
@@ -331,6 +374,13 @@ async function resetModules(service, coin, network) {
         try {
             containerId = await db.getModuleContainer(module, coin, network)
         } catch { continue /* not installed, skip */ }
+        // getModuleContainer never throws on a registry miss (MariaDbStore
+        // returns null), so the catch above cannot catch "not installed" -
+        // only this explicit null check can. Without it, startContainer(null)
+        // fails on every branch and every `reset all` on mainnet/testnet
+        // (where the regtest-only miner has no registry row) reports a false
+        // failure after the reset actually succeeded (uuid:fd7cc224).
+        if (!containerId) continue /* not installed, skip */
         try {
             await startContainer(containerId)
         } catch (firstErr) {
@@ -358,6 +408,10 @@ async function resetModules(service, coin, network) {
         for (const module of bounceCandidates) {
             try {
                 const containerId = await db.getModuleContainer(module, coin, network)
+                // Latent today only because the catch below hides a null-arg
+                // failure; guard explicitly so a future narrower catch stays
+                // correct (uuid:fd7cc224 sibling site).
+                if (!containerId) continue
                 // restartContainer = docker stop + docker start; sufficient to
                 // re-enter Node's bootstrap with the freshly-created DB ready.
                 await restartContainer(containerId)

@@ -150,9 +150,17 @@ async function updateHubOrExplorer(module) {
     }
 
     if (module === "xchain-explorer") {
+        const explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
+        // getModuleContainer returns null on a registry miss rather than
+        // throwing, so an uninstalled explorer previously fell through into
+        // stringToDockerContainerFile(null, ...) and surfaced as the same
+        // generic "problem trying to update a config" error as a real
+        // failure, masking the actual cause (uuid:fd7cc224 sibling site).
+        if (!explorerContainerId) {
+            throw "xchain-explorer module is not installed; cannot update its config"
+        }
         try {
             const { stringToDockerContainerFile } = require('./DockerService')
-            const explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
             await stringToDockerContainerFile(explorerContainerId, JSON.stringify(jsonConfig), "/XChainExplorer/src/config.json")
         } catch {
             throw "There was a problem trying to update a config in the " + module + " module"

@@ -171,12 +171,22 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
 
     return new Promise((resolve, reject) => {
         console.log("Building image of " + coin + " " + network + " node")
-        execFile('docker', ['build', '.', '--build-arg', 'CONF_FILE=' + coin + '-' + network + '.conf', '-t', containerPrefix], { cwd: nodeDir }, (error) => {
+        execFile('docker', ['build', '.', '--build-arg', 'CONF_FILE=' + coin + '-' + network + '.conf', '-t', containerPrefix], { cwd: nodeDir }, async (error) => {
             if (error) {
                 console.error("Error creating Docker image: " + error.message)
                 reject("Error creating Docker image: " + error.message)
                 return
             }
+
+            // Name-keyed cleanup immediately before `docker run --name`, making
+            // (re)creation idempotent against a leftover carcass unregistered by
+            // an insert-failure at the tail of this function (see reject() below)
+            // or an interrupted earlier run. Unlike ModuleService.buildAndUp, this
+            // path had no cleanup at all before a name collision (uuid:9533ee7a).
+            const { forceRemoveContainerByName } = require('./DockerService')
+            try {
+                await forceRemoveContainerByName(containerPrefix)
+            } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
 
             const { dataDir } = require('../config/constants')
             const blocksDir = process.env.XCHAIN_NODE_BLOCKS_DIR
