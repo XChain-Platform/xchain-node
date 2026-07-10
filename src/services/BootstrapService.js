@@ -434,21 +434,36 @@ async function makeBootstrapMariaDb(coin, network, module) {
     const checksumFile  = path.join(workDir, 'dump.sha256')
     const finalOutput   = path.join(outputDir, archiveName)
 
-    // Step 1: Get DB container ID and credentials
-    const dbContainerId = await getDatabaseContainerId()
-    if (!dbContainerId) throw new Error('MariaDB container not found')
-
-    const rootPassword = await askMariadbRootPassword(coin, network)
+    // Step 1: Get DB credentials (and container ID when not using external DB).
+    // In external-DB mode there is no local container; talk to the DB over the
+    // native connection (mirrors restoreBootstrapMariaDb's EXTERNAL_DB branch)
+    // so bootstrap publishing works from an external-DB host too.
+    let dbContainerId = null
+    let rootPassword  = null
+    let externalCfg   = null
+    if (EXTERNAL_DB) {
+        externalCfg = await getExternalDbConfig()
+    } else {
+        dbContainerId = await getDatabaseContainerId()
+        if (!dbContainerId) throw new Error('MariaDB container not found')
+        rootPassword = await askMariadbRootPassword(coin, network)
+    }
 
     // Step 2: Estimate DB size
     let totalBytes = 0
     try {
         const sizeQuery = `SELECT SUM(DATA_LENGTH + INDEX_LENGTH) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}'`
-        const { stdout } = await execFileAsync(
-            'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', sizeQuery, 'information_schema']),
-            { env: mariadbEnv(rootPassword) }
-        )
-        totalBytes = parseInt(stdout.trim(), 10) || 0
+        let sizeOut
+        if (EXTERNAL_DB) {
+            sizeOut = await executeNativeMariaDbCommand(externalCfg, sizeQuery, '-BN')
+        } else {
+            const { stdout } = await execFileAsync(
+                'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', sizeQuery, 'information_schema']),
+                { env: mariadbEnv(rootPassword) }
+            )
+            sizeOut = stdout
+        }
+        totalBytes = parseInt(String(sizeOut).trim(), 10) || 0
     } catch {
         console.log('Could not estimate DB size, progress will show as ?%')
     }
@@ -461,7 +476,12 @@ async function makeBootstrapMariaDb(coin, network, module) {
     // Step 3: Stream mysqldump → gzip → dump.sql.gz
     const progress = startProgress(`Dumping ${dbName}...`, totalBytes)
     await new Promise((resolve, reject) => {
-        const dumpProc    = spawn('docker', dockerMariadbArgs(dbContainerId, ['mariadb-dump', '-u', 'root', '--single-transaction', '--routines', '--triggers', dbName], { interactive: true }), { env: mariadbEnv(rootPassword) })
+        const dumpProc    = EXTERNAL_DB
+            ? spawn('mariadb-dump',
+                ['-h', externalCfg.host, '-P', String(externalCfg.port), '-u', externalCfg.root_user,
+                 '--single-transaction', '--routines', '--triggers', dbName],
+                { env: mariadbEnv(externalCfg.root_password) })
+            : spawn('docker', dockerMariadbArgs(dbContainerId, ['mariadb-dump', '-u', 'root', '--single-transaction', '--routines', '--triggers', dbName], { interactive: true }), { env: mariadbEnv(rootPassword) })
         const counter     = new PassThrough()
         const gzipStream  = zlib.createGzip()
         const writeStream = fs.createWriteStream(innerArchive)
@@ -828,6 +848,26 @@ async function ensureBootstrapUtxoTracker(coin, network) {
 async function mariaDbModuleHasData(coin, network, module) {
     const { askMariadbRootPassword } = require('./DatabaseService')
     const dbName = getModuleDatabaseName(module, coin, network)
+
+    // External-DB mode has no local `xchain-node-database` container, so the
+    // container-id lookup below always returns null and would report "fresh"
+    // regardless of how much data the external DB holds, re-triggering the
+    // bootstrap DROP/restore over a populated database on every install/update.
+    // Check freshness over the native connection instead (mirrors the
+    // EXTERNAL_DB branch in restoreBootstrapMariaDb / resetDatabases).
+    if (EXTERNAL_DB) {
+        try {
+            const externalCfg = await getExternalDbConfig()
+            const existsQuery = `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}' AND TABLE_NAME = 'blocks'`
+            const tblOut = await executeNativeMariaDbCommand(externalCfg, existsQuery, '-BN')
+            if (parseInt(String(tblOut).trim(), 10) === 0) return false
+            const countQuery = `SELECT COUNT(*) FROM \`${dbName}\`.blocks`
+            const cntOut = await executeNativeMariaDbCommand(externalCfg, countQuery, '-BN')
+            return parseInt(String(cntOut).trim(), 10) > 0
+        } catch {
+            return false
+        }
+    }
 
     let dbContainerId
     try {

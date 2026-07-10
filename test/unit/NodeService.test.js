@@ -99,7 +99,8 @@ function loadNodeService(stubs) {
         './ConfigService': {
             getDockerContainerImageName: stubs.getDockerContainerImageName,
             getDockerNetwork:            stubs.getDockerNetwork,
-            getDefaultConfig:            stubs.getDefaultConfig
+            getDefaultConfig:            stubs.getDefaultConfig,
+            validatePort:                () => true
         },
         './StatusService': {
             statusChanged: stubs.statusChanged
@@ -782,7 +783,8 @@ describe('NodeService: installNode()', function () {
             './ConfigService': {
                 getDockerContainerImageName: stubs.getDockerContainerImageName,
                 getDockerNetwork:            stubs.getDockerNetwork,
-                getDefaultConfig:            stubs.getDefaultConfig
+                getDefaultConfig:            stubs.getDefaultConfig,
+                validatePort:                () => true
             },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': {
@@ -839,7 +841,7 @@ describe('NodeService: installNode()', function () {
                 XChainService: { XCHAIN_ENCODER: 'xchain-encoder', XCHAIN_DECODER: 'xchain-decoder', XCHAIN_UTXO_TRACKER: 'xchain-utxo-tracker', XCHAIN_REGTEST_MINER: 'xchain-regtest-miner', XCHAIN_INDEXER: 'xchain-indexer', XCHAIN_E2E_TEST: 'xchain-e2e-test' },
                 cryptoNodesDir: '/crypto_nodes', dataDir: '/data', path: require('path')
             },
-            './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig },
+            './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
             './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
@@ -876,7 +878,7 @@ describe('NodeService: installNode()', function () {
                 XChainService: { XCHAIN_ENCODER: 'xchain-encoder', XCHAIN_DECODER: 'xchain-decoder', XCHAIN_UTXO_TRACKER: 'xchain-utxo-tracker', XCHAIN_REGTEST_MINER: 'xchain-regtest-miner', XCHAIN_INDEXER: 'xchain-indexer', XCHAIN_E2E_TEST: 'xchain-e2e-test' },
                 cryptoNodesDir: '/crypto_nodes', dataDir: '/data', path: require('path')
             },
-            './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig },
+            './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
             './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },

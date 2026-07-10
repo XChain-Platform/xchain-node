@@ -30,7 +30,7 @@ const nodeVersion = process.versions.node
 const { gitHubDownloader, db, getRemoteModuleVersions } = require('../state')
 const { decompressTarGz }               = require('../utils/helpers')
 const { cryptoNodesDir }                = require('../config/constants')
-const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig } = require('./ConfigService')
+const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('./ConfigService')
 const { statusChanged }                 = require('./StatusService')
 const { checkRemoteNodeVersion }        = require('./VersionService')
 
@@ -235,6 +235,17 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 runArgs.push('-v', `${txindexHostPath}:/root/.${coin}${netSubdir}/indexes/txindex`)
             }
             if (defaultExposedPort && defaultNodePort) {
+                // NODE_EXPOSED_PORT/NODE_PORT come from the operator-supplied
+                // <coin>-<network> config. Validate before the docker run push so
+                // a malformed value fails loud here instead of surfacing as a
+                // cryptic docker argument-parse error (matches the DB_PORT guard
+                // in DatabaseService and the portArgs guard in ModuleService).
+                if (!validatePort(defaultExposedPort)) {
+                    throw new Error("Invalid port value in configuration: NODE_EXPOSED_PORT=" + defaultExposedPort)
+                }
+                if (!validatePort(defaultNodePort)) {
+                    throw new Error("Invalid port value in configuration: NODE_PORT=" + defaultNodePort)
+                }
                 runArgs.push('-p', `${defaultExposedPort}:${defaultNodePort}`)
             }
             runArgs.push('-e', `CRYPTO_NODE_VERSION=${bitcoinVer}`, '-t', containerPrefix)
