@@ -255,6 +255,12 @@ class GitHubDownloader {
         if (result.status !== 0) throw new Error(`tar exited with code ${result.status}`);
         fs.unlinkSync(downloadPath);
       } else if (fileExtension === 'zip') {
+        // Refuse archives whose member paths could escape outputPath (absolute
+        // paths or '..' segments), mirroring the tar branch above, so safety
+        // doesn't depend on the host unzip implementation's defaults.
+        const listing = spawnSync('unzip', ['-Z1', downloadPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+        if (listing.status !== 0) throw new Error(`unzip listing exited with code ${listing.status}`);
+        assertSafeArchiveMemberNames(listing.stdout, downloadPath);
         const result = spawnSync('unzip', [downloadPath, '-d', outputPath], { stdio: 'inherit' });
         if (result.status !== 0) throw new Error(`unzip exited with code ${result.status}`);
         fs.unlinkSync(downloadPath);
