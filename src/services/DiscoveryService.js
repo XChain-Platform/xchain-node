@@ -121,7 +121,14 @@ async function scanAndRegisterModules({ silent = false } = {}) {
         const { module, coin, network } = identity
         const label = (coin || network) ? (coin + SEP + network + SEP + module) : module
 
-        seen.add(keyOf(module, coin, network))
+        // First-seen wins the upsert. Because the list is sorted RUNNING-first,
+        // the running container reconciles the row first; any later duplicate
+        // (e.g. a stopped container that classifies to the same key via the
+        // image fallback) is skipped so it cannot overwrite the live ID with a
+        // dead one. The key still records into `seen` for the orphan purge.
+        const key = keyOf(module, coin, network)
+        if (seen.has(key)) continue
+        seen.add(key)
         const existing = await db.getModuleContainer(module, coin, network)
         if (existing == null) {
             await db.insertModuleContainer(module, coin, network, nextContainer.ID)
