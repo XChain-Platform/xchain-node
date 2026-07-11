@@ -101,6 +101,15 @@ class E2EEnv extends TestEnv {
         // setup inspect always succeeds so createDockerNetwork skips creation)
         this.capture.when(/docker network create/).returns({ stdout: '' })
 
+        // docker inspect --type container --format {{.Id}}: the DB fail-fast
+        // precheck (getDatabaseContainerId, 32224ab) expects a bare 64-hex id;
+        // the generic inspect route below would feed it a JSON blob and the
+        // precheck would abort installs with "MariaDB container not found".
+        // Must be registered BEFORE the generic route (first match wins).
+        this.capture.when(/docker inspect --type container --format/).returns({
+            stdout: 'd'.repeat(64) + '\n'
+        })
+
         // docker inspect (container) returns running status
         this.capture.when(/docker inspect(?! .*network)/).respondsWith(() => {
             return {
@@ -163,6 +172,9 @@ class E2EEnv extends TestEnv {
         this.createFakeModule('xchain-explorer')
         this.createFakeModule('xchain-e2e-test')
         this.createFakeModule('xchain-sync')
+        // Staged into dependent build contexts by cpSync (5c82dba); installs
+        // lstat it even though no container is built from it directly.
+        this.createFakeModule('xchain-vm')
     }
 
     /**
@@ -285,9 +297,24 @@ class E2EEnv extends TestEnv {
             '../ExplorerConnector.js': StubExplorerConnector
         })
 
+        // DatabaseService pipes SQL to `docker exec -i ... mariadb` over STDIN
+        // via spawn (secret-leak hardening: SQL and passwords stay out of argv),
+        // so its child needs a writable stdin and a routed stdout+close. '0'
+        // satisfies both consumers: the schema-count check (0 -> CREATE) and
+        // generic command success.
+        const dbSpawnStub = function (command, args, options) {
+            const child = spawnStub(command, args, options)
+            child.stdin = { on: () => {}, end: () => {} }
+            process.nextTick(() => {
+                child.stdout.emit('data', '0')
+                child.emit('close', 0)
+            })
+            return child
+        }
+
         // DatabaseService
         const DatabaseService = proxyquire(path.join(ROOT, 'src/services/DatabaseService'), {
-            'child_process': { execFile: execFileStub },
+            'child_process': { execFile: execFileStub, spawn: dbSpawnStub },
             'util': { promisify: () => execFileAsyncStub },
             '../config/constants': patchedConstants,
             './ConfigService': ConfigService,

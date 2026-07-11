@@ -370,12 +370,17 @@ describe('Regression Suite', function () {
             expect(args).to.include('xchain-node-bitcoin-mainnet')
         })
 
-        it('R-DCK-004: env vars from config are passed as -e flags in docker run', async function () {
+        it('R-DCK-004: env vars from config reach docker run via --env NAME + process env, never argv values', async function () {
             const stubs = { execFile: sinon.stub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
             let runArgs = null
+            let runOpts = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                if (args[0] === 'run') { runArgs = args; cb(null, 'a'.repeat(64) + '\n') }
+                if (args[0] === 'run') {
+                    runArgs = args
+                    runOpts = typeof rest[0] === 'object' ? rest[0] : null
+                    cb(null, 'a'.repeat(64) + '\n')
+                }
                 else cb(null, '')
             })
 
@@ -387,9 +392,17 @@ describe('Regression Suite', function () {
             })
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
 
-            // Env vars passed as KEY=VALUE strings after -e flags
-            expect(runArgs).to.include('MY_KEY=my_value')
-            expect(runArgs).to.include('ANOTHER=42')
+            // Values must NOT appear in argv (secret-leak hardening: argv is
+            // world-readable via /proc/<pid>/cmdline). The name travels as a
+            // bare `--env NAME`; the value rides the child's environment.
+            expect(runArgs).to.include('--env')
+            expect(runArgs).to.include('MY_KEY')
+            expect(runArgs).to.include('ANOTHER')
+            expect(runArgs).to.not.include('MY_KEY=my_value')
+            expect(runArgs).to.not.include('ANOTHER=42')
+            expect(runOpts, 'docker run must receive an options.env').to.be.an('object')
+            expect(runOpts.env['MY_KEY']).to.equal('my_value')
+            expect(runOpts.env['ANOTHER']).to.equal('42')
         })
 
         it('R-DCK-005: checkDockerInstalledAndReachable rejects when Docker missing', async function () {
@@ -491,12 +504,17 @@ describe('Regression Suite', function () {
             expect(args).to.be.an('array')
         })
 
-        it('R-SEC-006: shell metacharacters in env vars passed literally via execFile', async function () {
+        it('R-SEC-006: shell metacharacters in env values pass literally via the child env, never argv', async function () {
             const stubs = { execFile: sinon.stub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
             let runArgs = null
+            let runOpts = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                if (args[0] === 'run') { runArgs = args; cb(null, 'a'.repeat(64) + '\n') }
+                if (args[0] === 'run') {
+                    runArgs = args
+                    runOpts = typeof rest[0] === 'object' ? rest[0] : null
+                    cb(null, 'a'.repeat(64) + '\n')
+                }
                 else cb(null, '')
             })
             const ms = loadModuleService(stubs, {
@@ -506,8 +524,14 @@ describe('Regression Suite', function () {
                 })
             })
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(runArgs).to.include('DANGEROUS=value$(whoami)')
-            expect(runArgs).to.include('BACKTICK=hello`cmd`world')
+            // execFile + env-channel: metacharacters are never shell-evaluated
+            // AND never appear in argv (secret-leak hardening).
+            expect(runArgs).to.include('--env')
+            expect(runArgs).to.include('DANGEROUS')
+            expect(runArgs).to.include('BACKTICK')
+            expect(runArgs.join(' ')).to.not.include('value$(whoami)')
+            expect(runOpts.env['DANGEROUS']).to.equal('value$(whoami)')
+            expect(runOpts.env['BACKTICK']).to.equal('hello`cmd`world')
         })
 
         it('R-SEC-007: NODE_PREFIX regex rejects shell metacharacters', function () {
@@ -909,7 +933,12 @@ describe('Regression Suite', function () {
                 existsSync: sinon.stub().returns(false),
                 createReadStream: sinon.stub(),
                 rmSync: sinon.stub(),
-                mkdirSync: sinon.stub()
+                mkdirSync: sinon.stub(),
+                // getDefaultConfig now persists generated RPC creds to the
+                // .local sidecar (6648722): persistSidecarCreds needs these.
+                writeFileSync: sinon.stub(),
+                appendFileSync: sinon.stub(),
+                chmodSync: sinon.stub()
             }
             const cs = makeConfigService(fsStub)
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
@@ -979,8 +1008,11 @@ describe('Regression Suite', function () {
             const ConfigService = require('../../src/services/ConfigService')
             try {
                 await ConfigService.getDefaultConfig('xchain-encoder', '../../../etc', 'passwd')
+                expect.fail('expected getDefaultConfig to reject a traversal coin')
             } catch (err) {
-                expect(err.message).to.include('traversal')
+                // The coin allow-list rejects it before any path is built; the
+                // message is "Unknown coin ..." rather than mentioning traversal.
+                expect(err.message).to.match(/Unknown coin|traversal/)
             }
         })
     })
