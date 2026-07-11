@@ -202,8 +202,9 @@ describe('StatusService: getStatus() with installed modules', function () {
         expect(state.setStatusUpdated.calledWith(true)).to.be.true
     })
 
-    it('removes module from installedModules when getStatusFromContainer throws', async function () {
+    it('removes module from installedModules AND reconciles the registry when docker confirms the container is gone', async function () {
         const installedModulesObj = {}
+        const removeModuleContainer = sinon.stub().resolves(true)
         const state = makeStateStub({
             isStatusUpdated:  sinon.stub().returns(false),
             getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
@@ -214,20 +215,26 @@ describe('StatusService: getStatus() with installed modules', function () {
                 isReady: sinon.stub().returns(true),
                 getAllModuleContainers: sinon.stub().resolves([
                     { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'bbb' }
-                ])
+                ]),
+                removeModuleContainer
             }
         })
 
-        const getStatusFromContainer = sinon.stub().rejects(new Error('container gone'))
+        // Realistic `docker inspect` failure for a container that no longer exists.
+        const goneErr = new Error('Command failed: docker inspect bbb\nError: No such object: bbb')
+        goneErr.stderr = 'Error: No such object: bbb\n'
+        const getStatusFromContainer = sinon.stub().rejects(goneErr)
         const ss = loadStatusService(state, { getStatusFromContainer })
         const result = await ss.getStatus('bitcoin', 'mainnet', false)
 
         // Module should have been removed from the coin/network slot
         const coinNetModules = (result.bitcoin || {})[`mainnet`] || {}
         expect(coinNetModules['xchain-encoder']).to.be.undefined
+        // ...and the persistent registry row reconciled, not only in-memory status.
+        expect(removeModuleContainer.calledOnceWith('xchain-encoder', 'bitcoin', 'mainnet')).to.be.true
     })
 
-    it('cleans up empty coin slot when all containers fail', async function () {
+    it('cleans up empty coin slot when all containers are confirmed gone', async function () {
         const installedModulesObj = {}
         const state = makeStateStub({
             isStatusUpdated:  sinon.stub().returns(false),
@@ -239,16 +246,51 @@ describe('StatusService: getStatus() with installed modules', function () {
                 isReady: sinon.stub().returns(true),
                 getAllModuleContainers: sinon.stub().resolves([
                     { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'ccc' }
-                ])
+                ]),
+                removeModuleContainer: sinon.stub().resolves(true)
             }
         })
 
-        const getStatusFromContainer = sinon.stub().rejects(new Error('gone'))
+        const goneErr = new Error('No such container: ccc')
+        const getStatusFromContainer = sinon.stub().rejects(goneErr)
         const ss = loadStatusService(state, { getStatusFromContainer })
         const result = await ss.getStatus('bitcoin', 'mainnet', false)
 
         // bitcoin key should be cleaned up
         expect(result.bitcoin).to.be.undefined
+    })
+
+    it('does NOT prune or touch the registry on a transient inspect failure (daemon unreachable)', async function () {
+        const installedModulesObj = {}
+        const removeModuleContainer = sinon.stub().resolves(true)
+        const state = makeStateStub({
+            isStatusUpdated:  sinon.stub().returns(false),
+            getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+            resetInstalledModules: sinon.stub().callsFake(() => {
+                for (const k of Object.keys(installedModulesObj)) delete installedModulesObj[k]
+            }),
+            db: {
+                isReady: sinon.stub().returns(true),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'ddd' }
+                ]),
+                removeModuleContainer
+            }
+        })
+
+        // Daemon-down: the container may well still be live, so dropping it here
+        // would silently orphan it and let uninstall false-succeed.
+        const transientErr = new Error('Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?')
+        const getStatusFromContainer = sinon.stub().rejects(transientErr)
+        const ss = loadStatusService(state, { getStatusFromContainer })
+        const result = await ss.getStatus('bitcoin', 'mainnet', false)
+
+        // Module is retained with an explicit unknown state...
+        const mod = result.bitcoin.mainnet['xchain-encoder']
+        expect(mod).to.exist
+        expect(mod.status.State.Status).to.equal('unknown')
+        // ...and no registry row is deleted on an ambiguous/transient failure.
+        expect(removeModuleContainer.called).to.be.false
     })
 
     it('sets remote_version on module from remoteModuleVersions', async function () {

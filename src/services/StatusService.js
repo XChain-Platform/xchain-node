@@ -30,6 +30,19 @@ const { getStatusFromContainer }         = require('./DockerService')
 const { checkRemoteNodeVersion }         = require('./VersionService')
 const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./VersionService')
 
+// Distinguish a `docker inspect` failure that means the container is genuinely
+// gone (safe to reconcile out of the persistent registry) from a transient one
+// (daemon down, timeout, permission) where the container may still be live.
+// `docker inspect <id>` on a missing id exits non-zero with "No such
+// object/container"; anything we cannot positively identify as gone is treated
+// as transient, so an ambiguous error never deletes a registry row (fail-safe:
+// keep the row rather than risk dropping a live container from management).
+function isContainerGoneError(err) {
+    if (!err) return false
+    const text = String((err.stderr || '') + ' ' + (err.message || '')).toLowerCase()
+    return /no such (object|container|image)/.test(text)
+}
+
 async function statusChanged() {
     setStatusUpdated(false)
     const { updateHub }      = require('./HubService')
@@ -170,8 +183,37 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 ports: portParts.length > 0 ? portParts.join(", ") : "-"
                             })
 
-                        } catch {
-                            toRemove.push(nextModule)
+                        } catch (err) {
+                            if (isContainerGoneError(err)) {
+                                // Docker confirms the container no longer exists:
+                                // reconcile the persistent registry too, not only
+                                // in-memory status, so start/stop/update/uninstall
+                                // stop resolving a dead container id (the row would
+                                // otherwise linger forever after an out-of-band
+                                // `docker rm`). Best-effort: an in-memory prune still
+                                // happens even if the registry delete fails.
+                                toRemove.push(nextModule)
+                                try {
+                                    await db.removeModuleContainer(nextModule, nextCoin, nextCoinNetwork)
+                                } catch { /* registry cleanup is best-effort */ }
+                            } else {
+                                // Transient inspect failure (daemon unreachable /
+                                // timeout / permission): do NOT prune. Dropping the
+                                // module here would delete a still-live container
+                                // from management and let uninstallModule
+                                // false-succeed on a hiccup. Keep it visible with an
+                                // explicit unknown state so callers act on reality,
+                                // not on a mis-inferred 'gone'.
+                                nextCoinNetworkModules[nextModule]["status"] = { State: { Status: "unknown" }, NetworkSettings: { Ports: {} } }
+                                rows.push({
+                                    name:    nextModule,
+                                    coin:    nextCoin        || "-",
+                                    network: nextCoinNetwork || "-",
+                                    branch:  "-",
+                                    state:   "unknown",
+                                    ports:   "-"
+                                })
+                            }
                         }
                     }
 

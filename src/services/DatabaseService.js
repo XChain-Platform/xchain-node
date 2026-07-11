@@ -27,6 +27,7 @@ const {
 } = require('../config/constants')
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
 const { sleep }                   = require('../utils/helpers')
+const { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../utils/sqlSafety')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort } = require('./ConfigService')
 const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName } = require('./DockerService')
@@ -382,6 +383,14 @@ async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPasswo
 }
 
 async function addUserPasswordToDatabase(module, coin, network, databaseName, user, userPassword, inDocker = true) {
+    // Provisioning DDL (CREATE USER / CREATE DATABASE / GRANT) cannot bind
+    // identifiers as parameters, and the docker-exec path pipes raw SQL text, so
+    // these statements are built by concatenation. Gate the config-supplied
+    // database name and account user through a strict [A-Za-z0-9_]+ allowlist
+    // before they touch any SQL string; the password is the only value that may
+    // carry arbitrary bytes and is escaped as a literal at each use site below.
+    assertSafeDbIdentifier(databaseName, 'database name')
+    assertSafeDbIdentifier(user, 'database user')
     const mariadbRootPassword = await askMariadbRootPassword(coin, network)
     const moduleContainerId = await db.getModuleContainer(module, coin, network)
 
@@ -436,10 +445,10 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             // is idempotent, so running CREATE-IF-NOT-EXISTS + ALTER unconditionally is safe and
             // self-heals any sidecar-vs-DB drift.
             await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
-                "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+                "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY " + escapeSqlStringLiteral(userPassword)
             )
             await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
-                "ALTER USER " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+                "ALTER USER " + mariadbUser + " IDENTIFIED BY " + escapeSqlStringLiteral(userPassword)
             )
             console.log("User " + mariadbUser + " ensured (password set)!")
 
@@ -497,10 +506,10 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             // column and could skip the rotation, leaving the live account out of sync with the
             // per-install sidecar password. CREATE-IF-NOT-EXISTS + unconditional ALTER self-heals.
             await executeNativeMariaDbCommand(externalCfg,
-                "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+                "CREATE USER IF NOT EXISTS " + mariadbUser + " IDENTIFIED BY " + escapeSqlStringLiteral(userPassword)
             )
             await executeNativeMariaDbCommand(externalCfg,
-                "ALTER USER " + mariadbUser + " IDENTIFIED BY '" + userPassword + "'"
+                "ALTER USER " + mariadbUser + " IDENTIFIED BY " + escapeSqlStringLiteral(userPassword)
             )
             console.log("User " + mariadbUser + " ensured (password set)!")
 
@@ -776,11 +785,14 @@ async function ensureXchainNodeAccess() {
         const dbUser     = existing?.user     || getOsUserDbName()
         const dbPassword = existing?.password || generatePassword()
 
+        // Same allowlist/escape contract as addUserPasswordToDatabase: dbUser is
+        // an identifier (validate), dbPassword may carry arbitrary bytes (escape).
+        assertSafeDbIdentifier(dbUser, 'database user')
         console.log("Creating xchain-node database and user " + dbUser + " on external MariaDB")
         await executeNativeMariaDbCommand(externalCfg, "CREATE DATABASE IF NOT EXISTS " + XCHAIN_NODE_DB)
-        await executeNativeMariaDbCommand(externalCfg, "CREATE USER IF NOT EXISTS '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'")
+        await executeNativeMariaDbCommand(externalCfg, "CREATE USER IF NOT EXISTS '" + dbUser + "'@'%' IDENTIFIED BY " + escapeSqlStringLiteral(dbPassword))
         // Force password in case user exists from earlier with a different one
-        await executeNativeMariaDbCommand(externalCfg, "ALTER USER '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'")
+        await executeNativeMariaDbCommand(externalCfg, "ALTER USER '" + dbUser + "'@'%' IDENTIFIED BY " + escapeSqlStringLiteral(dbPassword))
         await executeNativeMariaDbCommand(externalCfg, "GRANT ALL PRIVILEGES ON " + XCHAIN_NODE_DB + ".* TO '" + dbUser + "'@'%'")
         await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
 
@@ -810,16 +822,19 @@ async function ensureXchainNodeAccess() {
     const dbUser     = existing?.user     || getOsUserDbName()
     const dbPassword = existing?.password || generatePassword()
 
+    // Same allowlist/escape contract as addUserPasswordToDatabase: dbUser is an
+    // identifier (validate), dbPassword may carry arbitrary bytes (escape).
+    assertSafeDbIdentifier(dbUser, 'database user')
     console.log("Creating xchain-node database and user " + dbUser)
     await executeDockerMariaDbCommand(containerId, rootPassword,
         "CREATE DATABASE IF NOT EXISTS " + XCHAIN_NODE_DB
     )
     await executeDockerMariaDbCommand(containerId, rootPassword,
-        "CREATE USER IF NOT EXISTS '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'"
+        "CREATE USER IF NOT EXISTS '" + dbUser + "'@'%' IDENTIFIED BY " + escapeSqlStringLiteral(dbPassword)
     )
     // Force the password in case the user existed with a different one (stale state)
     await executeDockerMariaDbCommand(containerId, rootPassword,
-        "ALTER USER '" + dbUser + "'@'%' IDENTIFIED BY '" + dbPassword + "'"
+        "ALTER USER '" + dbUser + "'@'%' IDENTIFIED BY " + escapeSqlStringLiteral(dbPassword)
     )
     await executeDockerMariaDbCommand(containerId, rootPassword,
         "GRANT ALL PRIVILEGES ON " + XCHAIN_NODE_DB + ".* TO '" + dbUser + "'@'%'"
