@@ -240,11 +240,17 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 // a malformed value fails loud here instead of surfacing as a
                 // cryptic docker argument-parse error (matches the DB_PORT guard
                 // in DatabaseService and the portArgs guard in ModuleService).
+                // This runs inside the async docker-build callback; a throw here
+                // escapes the Promise as an uncaught exception and hangs the
+                // build (same hazard as the mkdir guard above). Reject + return
+                // so the Promise settles instead.
                 if (!validatePort(defaultExposedPort)) {
-                    throw new Error("Invalid port value in configuration: NODE_EXPOSED_PORT=" + defaultExposedPort)
+                    reject(new Error("Invalid port value in configuration: NODE_EXPOSED_PORT=" + defaultExposedPort))
+                    return
                 }
                 if (!validatePort(defaultNodePort)) {
-                    throw new Error("Invalid port value in configuration: NODE_PORT=" + defaultNodePort)
+                    reject(new Error("Invalid port value in configuration: NODE_PORT=" + defaultNodePort))
+                    return
                 }
                 runArgs.push('-p', `${defaultExposedPort}:${defaultNodePort}`)
             }

@@ -731,7 +731,9 @@ describe('ModuleService', function () {
                 await ms.uninstallModule('bitcoin', 'mainnet', 'xchain-encoder')
                 expect.fail()
             } catch (err) {
-                expect(err).to.include('problem trying to kill')
+                // The catch now rethrows the original error instead of masking
+                // every failure in the block with a fixed "kill" message.
+                expect(err.message).to.include('kill failed')
             }
         })
     })
@@ -767,44 +769,23 @@ describe('ModuleService', function () {
             expect(cloneArgs).to.include('feature/test')
         })
 
-        it('falls back to default branch when branch not found error', async function () {
+        it('rejects (no silent fallback) when the requested branch is not found', async function () {
+            // uuid:4f649bd0: a typo'd or deleted branch must fail the install
+            // rather than silently building the default branch's code.
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 callCount++
-                if (callCount === 1) {
-                    // First call: branch clone fails with "not found"
-                    cb(new Error('git error'), '', 'remote: branch not found on server')
-                } else {
-                    // Second call: fallback clone succeeds
-                    cb(null)
-                }
-            })
-            const ms = loadModuleService(stubs)
-            const result = await ms.cloneGit('xchain-encoder', false, false, 'missing-branch')
-            expect(result).to.be.true
-            expect(callCount).to.equal(2)
-        })
-
-        it('rejects if fallback clone also fails', async function () {
-            const stubs = makeStubs()
-            let callCount = 0
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                callCount++
-                if (callCount === 1) {
-                    cb(new Error('git error'), '', 'remote: branch not found on server')
-                } else {
-                    cb(new Error('fallback also failed'))
-                }
+                cb(new Error('git error'), '', 'remote: branch not found on server')
             })
             const ms = loadModuleService(stubs)
             try {
                 await ms.cloneGit('xchain-encoder', false, false, 'missing-branch')
                 expect.fail()
             } catch (err) {
-                expect(err).to.include('Error cloning')
+                expect(err).to.include("branch 'missing-branch' not found")
+                expect(callCount).to.equal(1)
             }
         })
     })

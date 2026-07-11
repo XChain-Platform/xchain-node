@@ -115,56 +115,30 @@ describe('Chaos: Git Clone Resilience', function () {
         })
     })
 
-    describe('Experiment 7b: Invalid branch fallback to master', function () {
+    describe('Experiment 7b: Invalid branch fails loud (no silent master fallback)', function () {
 
-        it('falls back to master when specified branch is not found', async function () {
+        it('rejects (no fallback clone attempt) when specified branch is not found', async function () {
+            // uuid:4f649bd0: install/update pass `branch` as an explicit operator
+            // request; silently building master instead is a silent-wrong-code
+            // hazard, so cloneGit must fail rather than fall back.
             const stubs = makeStubs()
             let cloneAttempts = 0
 
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 cloneAttempts++
-                if (cloneAttempts === 1) {
-                    // First attempt with branch fails
-                    expect(args).to.include('-b')
-                    expect(args).to.include('nonexistent-branch')
-                    cb(new Error('Remote branch nonexistent-branch not found'), '', 'Remote branch nonexistent-branch not found')
-                } else {
-                    // Fallback to default branch succeeds
-                    expect(args).to.not.include('-b')
-                    cb(null)
-                }
+                expect(args).to.include('-b')
+                expect(args).to.include('nonexistent-branch')
+                cb(new Error('Remote branch nonexistent-branch not found'), '', 'Remote branch nonexistent-branch not found')
             })
-            const warnSpy = sinon.stub(console, 'warn')
-            const ms = loadModuleService(stubs)
-
-            await ms.cloneGit('xchain-encoder', false, false, 'nonexistent-branch')
-            expect(cloneAttempts).to.equal(2)
-            expect(warnSpy.called).to.be.true
-            expect(warnSpy.firstCall.args[0]).to.include('not found')
-            expect(warnSpy.firstCall.args[0]).to.include('Falling back')
-        })
-
-        it('rejects when both branch and fallback clone fail', async function () {
-            const stubs = makeStubs()
-
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                if (args.includes('-b')) {
-                    cb(new Error('not found'), '', 'Remote branch not found')
-                } else {
-                    cb(new Error('Authentication failed'))
-                }
-            })
-            sinon.stub(console, 'warn')
             const ms = loadModuleService(stubs)
 
             try {
-                await ms.cloneGit('xchain-encoder', false, false, 'bad-branch')
+                await ms.cloneGit('xchain-encoder', false, false, 'nonexistent-branch')
                 expect.fail('should have rejected')
             } catch (err) {
-                expect(err).to.include('Error cloning')
-                expect(err).to.include('Authentication failed')
+                expect(err).to.include('not found')
+                expect(cloneAttempts).to.equal(1) // no fallback clone attempt
             }
         })
 

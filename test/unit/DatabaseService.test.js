@@ -365,6 +365,22 @@ describe('DatabaseService', function () {
             expect(stubs.execFileAsync.called).to.be.true
         })
 
+        it('throws instead of returning undefined when docker run output is not a 64-hex id', async function () {
+            // uuid:fb0c275d: a mismatched id (e.g. a warning line ahead of the id)
+            // means the container IS running but unregistered; falling through
+            // silently would orphan it and cause a duplicate on the next run.
+            const stubs = makeStubs()
+            stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+            stubs.execFileAsync.resolves({ stdout: 'Warning: some notice\nnot-a-valid-id\n' })
+            const ds = loadDatabaseService(stubs)
+            let threw = null
+            try {
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+            } catch (err) { threw = err }
+            expect(threw).to.not.be.null
+            expect(String(threw)).to.include('Unexpected docker run output')
+        })
+
         it('runs the multi-stack host-port pre-flight before docker run', async function () {
             const stubs = makeStubs()
             stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))

@@ -401,7 +401,19 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
 
     if (useDocker) {
         try {
-            await checkIfDatabaseIsReady("root", mariadbRootPassword)
+            // Fail fast when the DB container is missing or not ready, instead of
+            // burning ~100s of silent readiness retries and then issuing docker
+            // exec against a null container id with an opaque "mariadb command
+            // failed" error. getDatabaseContainerId() returns null when no MariaDB
+            // container exists at all (e.g. a fresh box), so check it first.
+            const preCheckContainerId = await getDatabaseContainerId()
+            if (!preCheckContainerId) {
+                throw new Error("MariaDB container not found; install the database first")
+            }
+            const ready = await checkIfDatabaseIsReady("root", mariadbRootPassword)
+            if (!ready) {
+                throw new Error("MariaDB is not ready after waiting; check the database container logs")
+            }
             const mariadbContainerId = await getDatabaseContainerId()
 
             const dbCount = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
@@ -718,6 +730,12 @@ async function buildDatabaseModule(coin, network) {
             await statusChanged()
             return containerId
         }
+        // docker run succeeded (no error thrown) but stdout wasn't a clean 64-hex
+        // id, e.g. a warning line printed before it. The container is running and
+        // unregistered at this point; falling through with a plain `undefined`
+        // return would let the caller treat this as success and leave an orphaned
+        // container behind (uuid:fb0c275d).
+        throw "Unexpected docker run output for " + DB_MODULE_NAME + " container: " + JSON.stringify(containerId)
     } else {
         try {
             if (coin && network) {

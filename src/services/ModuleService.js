@@ -75,14 +75,12 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
         execFile('git', cloneArgs, (error, stdout, stderr) => {
             if (error) {
                 if (branch && stderr && stderr.toLowerCase().includes('not found')) {
-                    console.warn(`WARNING: Branch '${branch}' not found for module '${module}'. Falling back to default branch (master).`)
-                    execFile('git', ['clone', gitUrl, destination], (fallbackError) => {
-                        if (fallbackError) {
-                            reject("Error cloning project: " + redactSecrets(fallbackError.message))
-                        } else {
-                            resolve(true)
-                        }
-                    })
+                    // Do NOT silently fall back to the default branch: install/update
+                    // callers pass `branch` as an explicit operator request (cli.js),
+                    // and running different code than what was asked for with only a
+                    // scrolling console.warn is a silent-wrong-code hazard
+                    // (uuid:4f649bd0). Fail the clone instead.
+                    reject(`Error cloning project: branch '${branch}' not found for module '${module}'`)
                 } else {
                     reject("Error cloning project: " + redactSecrets(error.message))
                 }
@@ -621,8 +619,14 @@ async function uninstallModule(coin, network, module) {
             } else {
                 throw "There was a problem trying to remove a container from the database"
             }
-        } catch {
-            throw "There was a problem trying to kill a container"
+        } catch (err) {
+            // Preserve the original error instead of masking every failure in
+            // this multi-step block (kill/remove/statusChanged/registry delete)
+            // as a fixed "kill" message. Notably a successful `docker rm` with a
+            // failed registry-row delete leaves the container gone but the
+            // `modules` row stale, and the misleading message points diagnosis
+            // at the wrong step.
+            throw err
         }
     } else {
         // No live container found for this module (already removed, or never

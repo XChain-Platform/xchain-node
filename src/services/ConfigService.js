@@ -114,6 +114,14 @@ function getDockerNetwork(coin, network) {
 }
 
 function getModuleDatabaseName(module, coin, network) {
+    // Defense in depth: an unknown coin (e.g. 'all' or a typo passed straight
+    // from a raw CLI arg) yields CoinTickerSymbol[coin] === undefined, which
+    // would otherwise produce a junk `XChain_undefined_*` name that reaches
+    // CREATE DATABASE on the live MariaDB while the command still exits 0.
+    // Fail loud so an unresolved coin never materializes a database.
+    if (coin !== "" && CoinTickerSymbol[coin] === undefined) {
+        throw new Error("Unknown coin '" + coin + "'; cannot derive a database name")
+    }
     const moduleName = module.slice("xchain-".length)
     return "XChain" + DB_SEP
         + CoinTickerSymbol[coin] + DB_SEP
