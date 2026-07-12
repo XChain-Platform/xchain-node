@@ -167,7 +167,7 @@ const SERVICE_HEALTHCHECK = {
     // The miner's API is JSON-RPC only (no GET /status route); an http_get probe 500s
     // on every check and marks the container permanently unhealthy.
     [XChainService.XCHAIN_REGTEST_MINER]: { portKey: 'REGTEST_MINER_API_PORT',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s' },
-    'xchain-hub':                         { portKey: 'HUB_PORT',                probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
+    [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
     [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
     [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' }
     // xchain-e2e-test: one-shot execution container, never gets --restart, healthcheck not applicable
@@ -306,7 +306,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                             portArgs.push('-p', `${environmentVariables["REGTEST_MINER_PORT"]}:${environmentVariables["REGTEST_MINER_API_PORT"]}`)
                         }
                         break
-                    case 'xchain-hub':
+                    case HUB_MODULE_NAME:
                         coin = ""
                         network = ""
                         portArgs.push('-p', `${environmentVariables["HUB_PORT"]}:${environmentVariables["HUB_PORT"]}`)

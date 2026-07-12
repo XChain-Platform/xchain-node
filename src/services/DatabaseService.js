@@ -80,8 +80,20 @@ async function ensureDatabasePool() {
     if (db.isReady()) return
 
     const dbCreds = await ensureXchainNodeAccess()
-    const dbHost  = EXTERNAL_DB ? EXTERNAL_DB_HOST : XCHAIN_NODE_DB_HOST
-    const dbPort  = EXTERNAL_DB ? EXTERNAL_DB_PORT : await getDatabaseHostPort()
+    // External mode: resolve host/port from getExternalDbConfig() (env →
+    // saved credentials.json → prompt), not the load-time EXTERNAL_DB_HOST/PORT
+    // constants, which only reflect env vars or the 127.0.0.1:3306 defaults. A
+    // host/port the operator saved at the first-run prompt would otherwise be
+    // ignored and the pool would open against the wrong server (uuid:52c5b5f1).
+    let dbHost, dbPort
+    if (EXTERNAL_DB) {
+        const extCfg = await getExternalDbConfig()
+        dbHost = extCfg.host
+        dbPort = extCfg.port
+    } else {
+        dbHost = XCHAIN_NODE_DB_HOST
+        dbPort = await getDatabaseHostPort()
+    }
     await db.createDatabase({
         host:     dbHost,
         port:     dbPort,

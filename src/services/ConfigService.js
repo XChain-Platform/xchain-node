@@ -693,13 +693,24 @@ async function getDefaultConfig(module, coin, network) {
     // container is decommissioned). The DB name/user/pass keys stay as-is;
     // those are about the credentials, not the network location.
     if (EXTERNAL_DB) {
+        // Resolve the real external host/port via getExternalDbConfig() (env →
+        // saved credentials.json → prompt) rather than the load-time
+        // EXTERNAL_DB_HOST/PORT constants, which only reflect env vars or the
+        // 127.0.0.1:3306 defaults. Otherwise a host/port saved at the first-run
+        // prompt is ignored and provisioned containers get *_DB_HOST=127.0.0.1
+        // (their own loopback), unreachable to the real DB (uuid:52c5b5f1).
+        // Lazy require avoids a load-time cycle with DatabaseService.
+        const { getExternalDbConfig } = require('./DatabaseService')
+        const extCfg = await getExternalDbConfig()
+        const extHost = extCfg.host
+        const extPort = extCfg.port
         const dbHostKeys = ['HUB_DB_HOST', 'DECODER_DB_HOST', 'INDEXER_DB_HOST', 'DATABASE_URL']
         const dbPortKeys = ['HUB_DB_PORT', 'DECODER_DB_PORT', 'INDEXER_DB_PORT', 'DATABASE_PORT']
         for (const k of dbHostKeys) {
-            if (k in defaultConfig) defaultConfig[k] = EXTERNAL_DB_HOST
+            if (k in defaultConfig) defaultConfig[k] = extHost
         }
         for (const k of dbPortKeys) {
-            if (k in defaultConfig) defaultConfig[k] = EXTERNAL_DB_PORT
+            if (k in defaultConfig) defaultConfig[k] = extPort
         }
     }
 

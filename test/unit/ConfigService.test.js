@@ -333,7 +333,10 @@ describe('ConfigService', function () {
                 }
                 const cs = proxyquire('../../src/services/ConfigService', {
                     'fs': fsStub,
-                    './DatabaseService': { getDatabaseContainerId: async () => dbContainerId },
+                    './DatabaseService': {
+                        getDatabaseContainerId: async () => dbContainerId,
+                        getExternalDbConfig: async () => ({ host: '172.18.0.1', port: 3307, root_user: 'root', root_password: 'x' })
+                    },
                     '../config/constants': { ...require('../../src/config/constants'), EXTERNAL_DB: externalDb }
                 })
                 return { cs, files }

@@ -39,6 +39,7 @@ function makeStubs() {
         saveContainerLogs: sinon.stub().resolves(true),
         buildDatabaseModule: sinon.stub().resolves(true),
         resetDatabases: sinon.stub().resolves(true),
+        getDatabaseContainerId: sinon.stub().resolves('mariadb-container-id'),
         cloneGit: sinon.stub().resolves(true),
         getModuleBranch: sinon.stub().resolves('master'),
         installModule: sinon.stub().resolves('new-container-id'),
@@ -78,7 +79,8 @@ function loadOperations(stubs) {
         },
         '../services/DatabaseService': {
             buildDatabaseModule: stubs.buildDatabaseModule,
-            resetDatabases: stubs.resetDatabases
+            resetDatabases: stubs.resetDatabases,
+            getDatabaseContainerId: stubs.getDatabaseContainerId
         },
         '../services/ModuleService': {
             cloneGit: stubs.cloneGit,

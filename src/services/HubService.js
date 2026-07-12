@@ -30,14 +30,14 @@ const { addUserPasswordToDatabase }            = require('./DatabaseService')
 const HubConnector                             = require('../HubConnector.js')
 
 async function updateHubOrExplorer(module) {
-    if (!["xchain-hub", "xchain-explorer"].includes(module)) {
+    if (![HUB_MODULE_NAME, EXPLORER_MODULE_NAME].includes(module)) {
         throw "Only the xchain-hub or the xchain-explorer could be updated"
     }
 
     const defaultConfig = await getDefaultConfig(module, null, null)
     let moduleConnector = null
 
-    if (module === "xchain-hub") {
+    if (module === HUB_MODULE_NAME) {
         moduleConnector = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
     } else {
         const ExplorerConnector = require('../ExplorerConnector.js')
@@ -201,7 +201,7 @@ async function updateHub() {
                 }
             }
         }
-        await updateHubOrExplorer("xchain-hub")
+        await updateHubOrExplorer(HUB_MODULE_NAME)
     }
 
     // Connect xchain-sync container to all chain/network Docker networks (same pattern as hub)

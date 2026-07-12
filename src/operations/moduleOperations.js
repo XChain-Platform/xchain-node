@@ -21,12 +21,12 @@ const readline  = require('readline')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
-const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir } = require('../config/constants')
+const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir, EXTERNAL_DB } = require('../config/constants')
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
-const { buildDatabaseModule, resetDatabases } = require('../services/DatabaseService')
+const { buildDatabaseModule, resetDatabases, getDatabaseContainerId } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { statusChanged } = require('../services/StatusService')
 
@@ -304,9 +304,23 @@ async function resetModules(service, coin, network, force = false) {
     const resetDecoder     = resetAll || service === XChainService.XCHAIN_DECODER
     const resetIndexer     = resetAll || service === XChainService.XCHAIN_INDEXER
 
+    // Relocated blocks/txindex host paths (XCHAIN_NODE_BLOCKS_DIR mode): these
+    // live OUTSIDE the in-datadir path the node wipe clears, so they must be
+    // wiped explicitly and named in the confirmation, else a reset restarts the
+    // daemon over a stale blocks dir + stale txindex (uuid:90630038).
+    const blocksDir     = process.env.XCHAIN_NODE_BLOCKS_DIR
+    const blocksHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}` : null
+    const txindexHostPath = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
+
     if (!force) {
         const targets = []
-        if (resetNode)        targets.push('node datadir')
+        if (resetNode) {
+            targets.push('node datadir')
+            if (blocksDir) {
+                targets.push(`relocated blocks dir (${blocksHostPath})`)
+                targets.push(`relocated txindex dir (${txindexHostPath})`)
+            }
+        }
         if (resetUtxoTracker) targets.push(`xchain-utxo-tracker Docker volume (${getUtxoTrackerVolumeName(coin, network)})`)
         if (resetDecoder)     targets.push('xchain-decoder database')
         if (resetIndexer)     targets.push('xchain-indexer database')
@@ -336,11 +350,34 @@ async function resetModules(service, coin, network, force = false) {
         } catch { /* not installed, skip */ }
     }
 
+    // Fail fast BEFORE any destructive wipe: in docker (non-external) mode a
+    // DB reset needs the MariaDB container, and resetDatabases would otherwise
+    // `docker exec null` and abort mid-reset with node/utxo data already wiped
+    // (the half-reset failure the EXTERNAL_DB branch already guards). Probe here
+    // so nothing is touched when the container is gone (uuid:6f6584dc).
+    const dbResetNeeded = resetDecoder || resetIndexer
+    if (dbResetNeeded && !EXTERNAL_DB) {
+        const dbContainerId = await getDatabaseContainerId()
+        if (!dbContainerId) {
+            console.log('Aborted: MariaDB container not found; install the database first. No data was touched.')
+            return false
+        }
+    }
+
     if (resetNode) {
         const nodeDataPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
         if (fs.existsSync(nodeDataPath)) {
             console.log(`Clearing node data at ${nodeDataPath}...`)
             await execFileAsync('docker', ['run', '--rm', '-v', `${nodeDataPath}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
+        }
+        // Relocated blocks/txindex (XCHAIN_NODE_BLOCKS_DIR) live outside the
+        // datadir, so wipe them here too or the daemon restarts over stale
+        // chain data (uuid:90630038).
+        for (const relocated of [blocksHostPath, txindexHostPath]) {
+            if (relocated && fs.existsSync(relocated)) {
+                console.log(`Clearing relocated node data at ${relocated}...`)
+                await execFileAsync('docker', ['run', '--rm', '-v', `${relocated}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
+            }
         }
     }
 
