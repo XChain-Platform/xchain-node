@@ -102,6 +102,34 @@ function _readCredentialsRaw() {
     }
 }
 
+// --- Bundled-container MariaDB root password ---
+// Stored as a flat `dbRootPassword` string in credentials.json (0600). The
+// container's MYSQL_ROOT_PASSWORD env is still the preferred source when
+// readable; this copy exists so non-interactive runs (cron, ssh BatchMode,
+// scripted updates) don't dead-end on the stdin prompt when the container
+// was created without that env var (observed on installs whose DB container
+// predates the env-injection path). Written whenever a root password is
+// accepted, read back as the last non-interactive fallback.
+
+function loadDbRootPassword() {
+    const raw = _readCredentialsRaw()
+    return (raw && typeof raw.dbRootPassword === 'string' && raw.dbRootPassword.length > 0)
+        ? raw.dbRootPassword
+        : null
+}
+
+function saveDbRootPassword(password) {
+    const dir = getCredentialsDir()
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+    }
+    const filePath = getCredentialsPath()
+    const existing = _readCredentialsRaw() || {}
+    existing.dbRootPassword = String(password)
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), { mode: 0o600 })
+    try { fs.chmodSync(filePath, 0o600) } catch {}
+}
+
 function hasExternalDbConfig() {
     const raw = _readCredentialsRaw()
     return !!(raw && raw.externalDb
@@ -146,5 +174,7 @@ module.exports = {
     sanitizeForMariaDb,
     hasExternalDbConfig,
     loadExternalDbConfig,
-    saveExternalDbConfig
+    saveExternalDbConfig,
+    loadDbRootPassword,
+    saveDbRootPassword
 }

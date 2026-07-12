@@ -35,7 +35,8 @@ const { statusChanged }           = require('./StatusService')
 const {
     XCHAIN_NODE_DB, getOsUserDbName, generatePassword,
     hasCredentials, loadCredentials, saveCredentials,
-    hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig
+    hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig,
+    loadDbRootPassword, saveDbRootPassword
 } = require('./CredentialsService')
 
 const XCHAIN_NODE_DB_HOST = "127.0.0.1"
@@ -277,6 +278,7 @@ async function askMariadbRootPassword(coin, network) {
             // env override becomes the password the container is created with,
             // so there is nothing to ping. Accept as-is, same as before.
             setDbRootPassword(envPassword)
+            saveDbRootPassword(envPassword)
             return envPassword
         }
         // A container is already up; its MYSQL_ROOT_PASSWORD is the source of
@@ -288,6 +290,7 @@ async function askMariadbRootPassword(coin, network) {
             const ping = await execFileAsync('docker', dockerMariadbArgs(dbContainerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(envPassword) })
             if (ping.stdout.includes('mysqld is alive')) {
                 setDbRootPassword(envPassword)
+                saveDbRootPassword(envPassword)
                 return envPassword
             }
         } catch { /* fall through to the container-env read / prompt below */ }
@@ -305,10 +308,44 @@ async function askMariadbRootPassword(coin, network) {
                 const ping = await execFileAsync('docker', dockerMariadbArgs(dbContainerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(fromEnv) })
                 if (ping.stdout.includes('mysqld is alive')) {
                     setDbRootPassword(fromEnv)
+                    saveDbRootPassword(fromEnv)
                     return fromEnv
                 }
             }
-        } catch { /* fall through to interactive prompt */ }
+        } catch { /* fall through to the credentials-store read / prompt below */ }
+    }
+
+    // Last non-interactive source: the copy persisted to credentials.json the
+    // last time a root password was accepted. Covers installs whose DB
+    // container carries no MYSQL_ROOT_PASSWORD env (created before the
+    // env-injection path), where the printenv read above has nothing to find.
+    // Verified with a ping before trusting, same as the env override; only
+    // consulted when a container exists to verify against, so a stale copy
+    // can never silently become a fresh install's root password.
+    if (dbContainerId) {
+        const stored = loadDbRootPassword()
+        if (stored) {
+            try {
+                const ping = await execFileAsync('docker', dockerMariadbArgs(dbContainerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(stored) })
+                if (ping.stdout.includes('mysqld is alive')) {
+                    setDbRootPassword(stored)
+                    return stored
+                }
+            } catch { /* stale copy; fall through to the prompt */ }
+        }
+    }
+
+    // Non-interactive run (cron, ssh BatchMode, CI): enquirer's prompt would
+    // block forever on a stdin that never answers (observed as a multi-hour
+    // hang on a scripted `update`). Fail fast with the ways to supply the
+    // password instead.
+    if (!process.stdin.isTTY) {
+        throw new Error(
+            'MariaDB root password required but no TTY to prompt on. Supply it ' +
+            'non-interactively via the XCHAIN_NODE_DB_ROOT_PASSWORD env var, or ' +
+            'run any xchain-node command once interactively so the accepted ' +
+            'password is persisted to credentials.json for future runs.'
+        )
     }
 
     while (!getDbRootPassword()) {
@@ -325,12 +362,14 @@ async function askMariadbRootPassword(coin, network) {
                 const { stdout } = await execFileAsync('docker', dockerMariadbArgs(dbContainerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(answer) })
                 if (stdout.includes('mysqld is alive')) {
                     setDbRootPassword(answer)
+                    saveDbRootPassword(answer)
                     return answer
                 } else {
                     console.log("Wrong password, please try again")
                 }
             } else {
                 setDbRootPassword(answer)
+                saveDbRootPassword(answer)
                 return answer
             }
         } catch (err) {

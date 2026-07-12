@@ -99,6 +99,8 @@ function makeStubs(overrides = {}) {
         hasExternalDbConfig: sinon.stub().returns(false),
         loadExternalDbConfig: sinon.stub().returns(null),
         saveExternalDbConfig: sinon.stub(),
+        loadDbRootPassword: sinon.stub().returns(null),
+        saveDbRootPassword: sinon.stub(),
         getOsUserDbName: sinon.stub().returns('xchain_node_testuser'),
         generatePassword: sinon.stub().returns('test-generated-pass'),
         assertNoHostPortConflicts: sinon.stub().resolves(),
@@ -179,7 +181,9 @@ function loadDatabaseService(stubs, constants = {}) {
             saveCredentials: stubs.saveCredentials,
             hasExternalDbConfig: stubs.hasExternalDbConfig,
             loadExternalDbConfig: stubs.loadExternalDbConfig,
-            saveExternalDbConfig: stubs.saveExternalDbConfig
+            saveExternalDbConfig: stubs.saveExternalDbConfig,
+            loadDbRootPassword: stubs.loadDbRootPassword,
+            saveDbRootPassword: stubs.saveDbRootPassword
         }
     })
 }
@@ -922,6 +926,101 @@ describe('DatabaseService', function () {
             }
         })
 
+        it('persists the container-env password to the credentials store on accept', async function () {
+            const stubs = makeStubs()
+            stubs.getDbRootPassword.returns(null)
+            stubs.execFileAsync
+                .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // getDatabaseContainerId (inspect)
+                .onCall(1).resolves({ stdout: 'container-root-pass\n' })    // docker exec printenv
+                .onCall(2).resolves({ stdout: 'mysqld is alive\n' })        // ping
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            try {
+                const ds = loadDatabaseService(stubs)
+                await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(stubs.saveDbRootPassword.calledWith('container-root-pass')).to.be.true
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('falls back to the credentials-store copy when the container has no MYSQL_ROOT_PASSWORD env', async function () {
+            const stubs = makeStubs()
+            stubs.getDbRootPassword.returns(null)
+            stubs.loadDbRootPassword.returns('stored-root-pass')
+            stubs.execFileAsync
+                .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // getDatabaseContainerId (inspect)
+                .onCall(1).rejects(new Error('printenv: MYSQL_ROOT_PASSWORD not set')) // container env missing
+                .onCall(2).resolves({ stdout: 'mysqld is alive\n' })        // ping with the stored copy
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            try {
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('stored-root-pass')
+                expect(stubs.setDbRootPassword.calledWith('stored-root-pass')).to.be.true
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('throws an actionable error instead of prompting when stdin is not a TTY', async function () {
+            const stubs = makeStubs()
+            stubs.getDbRootPassword.returns(null)
+            stubs.loadDbRootPassword.returns(null)
+            stubs.execFileAsync
+                .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // getDatabaseContainerId (inspect)
+                .onCall(1).rejects(new Error('printenv: MYSQL_ROOT_PASSWORD not set')) // container env missing
+            const savedEnv = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            const savedIsTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+            Object.defineProperty(process.stdin, 'isTTY', { value: undefined, configurable: true })
+            try {
+                const ds = loadDatabaseService(stubs)
+                let err = null
+                try { await ds.askMariadbRootPassword('bitcoin', 'mainnet') } catch (e) { err = e }
+                expect(err).to.be.an('error')
+                expect(err.message).to.include('XCHAIN_NODE_DB_ROOT_PASSWORD')
+                expect(err.message).to.include('no TTY')
+            } finally {
+                if (savedIsTTY) Object.defineProperty(process.stdin, 'isTTY', savedIsTTY)
+                else delete process.stdin.isTTY
+                if (savedEnv === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = savedEnv
+            }
+        })
+
+        it('ignores a stale credentials-store copy and reaches the prompt on a TTY', async function () {
+            let dbRootPassword = null
+            const stubs = makeStubs()
+            stubs.getDbRootPassword.callsFake(() => dbRootPassword)
+            stubs.setDbRootPassword.callsFake(p => { dbRootPassword = p })
+            stubs.loadDbRootPassword.returns('stale-stored-pass')
+            stubs.execFileAsync
+                .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })  // getDatabaseContainerId (inspect)
+                .onCall(1).rejects(new Error('printenv: MYSQL_ROOT_PASSWORD not set')) // container env missing
+                .onCall(2).resolves({ stdout: 'Access denied\n' })          // ping with the stale stored copy: fails
+                .onCall(3).resolves({ stdout: 'mysqld is alive\n' })        // ping with the prompted answer
+            const savedEnv = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            const savedIsTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+            Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+            try {
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('rootpass')                          // the prompt stub's answer
+                expect(stubs.saveDbRootPassword.calledWith('rootpass')).to.be.true
+                expect(stubs.setDbRootPassword.calledWith('stale-stored-pass')).to.be.false
+            } finally {
+                if (savedIsTTY) Object.defineProperty(process.stdin, 'isTTY', savedIsTTY)
+                else delete process.stdin.isTTY
+                if (savedEnv === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = savedEnv
+            }
+        })
+
         it('falls back to password prompt when no container found', async function () {
             // When no container exists, prompt runs and setDbRootPassword is called.
             // The while condition checks getDbRootPassword(); after prompt, we need
@@ -934,6 +1033,10 @@ describe('DatabaseService', function () {
             stubs.execFileAsync.rejects(new Error('no container'))
             const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
             delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            // The non-TTY guard fails fast before the prompt; force a TTY so
+            // this test exercises the prompt path regardless of the runner.
+            const savedIsTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+            Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
             try {
                 const ds = loadDatabaseService(stubs)
                 const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
@@ -942,6 +1045,8 @@ describe('DatabaseService', function () {
                 expect(result).to.equal('rootpass')
                 expect(dbRootPassword).to.equal('rootpass')
             } finally {
+                if (savedIsTTY) Object.defineProperty(process.stdin, 'isTTY', savedIsTTY)
+                else delete process.stdin.isTTY
                 if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
                 else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
             }

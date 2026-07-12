@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `HUB_API_KEY` host-env passthrough to shared-service configs (sync, explorer), so their hub clients authenticate against the keyed sensitive-read tier (`getallconfigs`).
+- Accepted MariaDB root passwords persist to `~/.xchain-node/credentials.json` (0600) and are read back, ping-verified, as a non-interactive fallback when the DB container carries no `MYSQL_ROOT_PASSWORD` env.
 
 ### Fixed
+- Non-interactive runs (cron, ssh BatchMode) fail fast with an actionable error naming `XCHAIN_NODE_DB_ROOT_PASSWORD` instead of hanging forever on the root-password prompt when stdin is not a TTY.
 - Probe the regtest miner's Docker healthcheck via `jsonrpc_ping` instead of `http_get` (the miner has no GET `/status` route, so every probe 500'd and the container sat permanently unhealthy).
 
 ## [0.0.23] - 2026-06-20
