@@ -49,10 +49,12 @@ function makeServiceWithConfig(configContent) {
     const fsStub = {
         createReadStream: sinon.stub().callsFake(() => streamFromString(configContent)),
         existsSync: sinon.stub().returns(true),
+        readFileSync: sinon.stub().returns(''),
         appendFileSync: sinon.stub(),
         writeFileSync: sinon.stub(),
         rmSync: sinon.stub(),
-        mkdirSync: sinon.stub()
+        mkdirSync: sinon.stub(),
+        chmodSync: sinon.stub()
     }
     return makeConfigService(fsStub)
 }
