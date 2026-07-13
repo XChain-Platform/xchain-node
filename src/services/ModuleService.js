@@ -302,7 +302,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         }
                         break
                     case XChainService.XCHAIN_REGTEST_MINER:
-                        if ("REGTEST_MINER_PORT" in environmentVariables) {
+                        if ("REGTEST_MINER_PORT" in environmentVariables && "REGTEST_MINER_API_PORT" in environmentVariables) {
                             portArgs.push('-p', `${environmentVariables["REGTEST_MINER_PORT"]}:${environmentVariables["REGTEST_MINER_API_PORT"]}`)
                         }
                         break
