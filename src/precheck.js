@@ -18,7 +18,7 @@
 const fs = require('fs')
 
 const { dataDir, moduleDir, tmpDir, containersFilesDir,
-        EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT } = require('./config/constants')
+        EXTERNAL_DB } = require('./config/constants')
 const { db, isVerbose }                = require('./state')
 const { redactSecrets }                = require('./utils/helpers')
 const { checkDockerInstalledAndReachable, createDockerNetwork } = require('./services/DockerService')
@@ -27,7 +27,7 @@ const { checkAllRemoteVersions }       = require('./services/VersionService')
 const { getStatus }                    = require('./services/StatusService')
 const { installHubModule, updateHub }  = require('./services/HubService')
 const { updateExplorer }               = require('./services/ExplorerService')
-const { buildDatabaseModule, ensureXchainNodeAccess, getDatabaseHostPort } = require('./services/DatabaseService')
+const { buildDatabaseModule, ensureXchainNodeAccess, getDatabaseHostPort, getExternalDbConfig } = require('./services/DatabaseService')
 const { scanAndRegisterModules }       = require('./services/DiscoveryService')
 
 function createDirectories() {
@@ -76,16 +76,27 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
 
     if (isVerbose()) console.log("Opening MariaDB connection")
     try {
-        // External-DB mode connects to the configured host:port directly.
+        // External mode resolves host/port through getExternalDbConfig() (env →
+        // saved credentials.json → prompt), NOT the load-time EXTERNAL_DB_HOST/PORT
+        // constants: those only carry env vars or the 127.0.0.1:3306 defaults, so a
+        // host the operator entered at the first-run prompt would be ignored and this
+        // pool would open against the wrong server. Same resolution ensureDatabasePool
+        // uses (uuid:52c5b5f1).
         // Default (docker) mode reads the live port-forward from the running
-        // container. Note: buildDatabaseModule is always called as ("", "")
-        // above, and getDefaultConfig only reads a config file when both coin
-        // and network are truthy, so a DB_PORT override in a coin/network
-        // config file is unreachable on this path; the port is always
-        // XCHAIN_NODE_DB_DEFAULT_PORT unless XCHAIN_NODE_DB_DATA_DIR-style env
-        // plumbing is added for it (uuid:ee2849ef).
-        const dbHost = EXTERNAL_DB ? EXTERNAL_DB_HOST : "127.0.0.1"
-        const dbPort = EXTERNAL_DB ? EXTERNAL_DB_PORT : await getDatabaseHostPort()
+        // container. Note: buildDatabaseModule is always called as ("", "") above,
+        // and getDefaultConfig only reads a config file when both coin and network
+        // are truthy, so a DB_PORT override in a coin/network config file is
+        // unreachable on this path; the port is always XCHAIN_NODE_DB_DEFAULT_PORT
+        // unless XCHAIN_NODE_DB_DATA_DIR-style env plumbing is added (uuid:ee2849ef).
+        let dbHost, dbPort
+        if (EXTERNAL_DB) {
+            const extCfg = await getExternalDbConfig()
+            dbHost = extCfg.host
+            dbPort = extCfg.port
+        } else {
+            dbHost = "127.0.0.1"
+            dbPort = await getDatabaseHostPort()
+        }
         await db.createDatabase({
             host:     dbHost,
             port:     dbPort,

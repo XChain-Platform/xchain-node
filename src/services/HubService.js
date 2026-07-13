@@ -18,7 +18,7 @@
 const {
     HUB_MODULE_NAME, DB_MODULE_NAME, NODE_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     XChainService, SEP,
-    EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT
+    EXTERNAL_DB
 } = require('../config/constants')
 const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
 const { sleep }                                = require('../utils/helpers')
@@ -26,7 +26,7 @@ const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = requ
 const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./StatusService')
 const { addContainerToNetwork }                = require('./DockerService')
 const { cloneGit, buildAndUp }                 = require('./ModuleService')
-const { addUserPasswordToDatabase }            = require('./DatabaseService')
+const { addUserPasswordToDatabase, getExternalDbConfig } = require('./DatabaseService')
 const HubConnector                             = require('../HubConnector.js')
 
 async function updateHubOrExplorer(module) {
@@ -53,6 +53,13 @@ async function updateHubOrExplorer(module) {
     const lastStatus = getLastStatus()
     let jsonConfig = {}
 
+    // Resolved once, outside the loops: in external-DB mode the module-config view
+    // must report the host/port the pool actually opened against, which comes from
+    // getExternalDbConfig() (env → saved credentials.json), not the load-time
+    // EXTERNAL_DB_HOST/PORT constants. Those default to 127.0.0.1:3306, so a host
+    // saved at the first-run prompt would be misreported to the hub (uuid:52c5b5f1).
+    const externalDbCfg = EXTERNAL_DB ? await getExternalDbConfig() : null
+
     if (module === "xchain-explorer") {
         jsonConfig["configs"] = []
         jsonConfig = jsonConfig["configs"]
@@ -77,7 +84,7 @@ async function updateHubOrExplorer(module) {
                         // configured external host so its module-config view
                         // reflects reality.
                         config = EXTERNAL_DB
-                            ? { "host": EXTERNAL_DB_HOST, "port": EXTERNAL_DB_PORT }
+                            ? { "host": externalDbCfg.host, "port": externalDbCfg.port }
                             : { "host": "mariadb", "port": 3306 }
                         break
                     case NODE_MODULE_NAME:
