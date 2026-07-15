@@ -115,16 +115,6 @@ async function addContainerToNetwork(containerId, networkName) {
     })
 }
 
-async function getAllContainerFromModule(module, coin, network) {
-    const { getDockerContainerImageName } = require('./ConfigService')
-    return new Promise((resolve) => {
-        const imageName = getDockerContainerImageName(module, coin, network)
-        execFile('docker', ['ps', '--no-trunc', '-q', '-a', '-f', 'ancestor=' + imageName], () => {
-            resolve(true)
-        })
-    })
-}
-
 // Map every host port currently published by a RUNNING container to the
 // name(s) of the container(s) holding it. Stopped containers don't bind host
 // ports, so `docker ps` (running only) is the correct scope. Used to detect
@@ -476,7 +466,6 @@ module.exports = {
     getDockerNetworkInspect,
     createDockerNetwork,
     addContainerToNetwork,
-    getAllContainerFromModule,
     getPublishedHostPorts,
     getDockerContainerFileData,
     getDockerContainerFileCat,

@@ -252,6 +252,14 @@ describe('ConfigService', function () {
             expect(getModuleDatabaseName('xchain-decoder', 'dogecoin', 'mainnet')).to.include('DOGE')
             expect(getModuleDatabaseName('xchain-decoder', 'litecoin', 'mainnet')).to.include('LTC')
         })
+
+        it('throws on an unknown network (e.g. a typo from a raw CLI arg)', function () {
+            expect(() => getModuleDatabaseName('xchain-decoder', 'bitcoin', 'mainet')).to.throw(/Unknown network/)
+        })
+
+        it('allows the shared-service empty-string network', function () {
+            expect(() => getModuleDatabaseName('xchain-hub', '', '')).to.not.throw()
+        })
     })
 
     // -------------------------------------------------------------------

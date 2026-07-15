@@ -163,7 +163,24 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 try { branch = await getModuleBranch(nextModule) } catch { /* not available */ }
                             }
 
-                            const state       = containerStatus["State"]["Status"]
+                            // Fold restart churn and healthcheck status into the
+                            // displayed state so a container being cycled by
+                            // `--restart unless-stopped`, or one whose configured
+                            // healthcheck (see ModuleService.buildHealthcheckArgs)
+                            // is failing, doesn't print a reassuring plain
+                            // "running" indistinguishable from a clean uptime.
+                            const restartCount = containerStatus["State"]["RestartCount"] || 0
+                            const healthStatus = containerStatus["State"]["Health"] && containerStatus["State"]["Health"]["Status"]
+                            let state = containerStatus["State"]["Status"]
+                            let isChurning = false
+                            if (restartCount > 0) {
+                                state += " x" + restartCount
+                                isChurning = true
+                            }
+                            if (healthStatus && healthStatus !== "healthy") {
+                                state += " (" + healthStatus + ")"
+                                isChurning = true
+                            }
                             const name        = nextModule
                             const rawPorts    = containerStatus["NetworkSettings"]["Ports"] || {}
                             const portParts   = []
@@ -180,6 +197,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 network: nextCoinNetwork || "-",
                                 branch,
                                 state,
+                                isChurning,
                                 ports: portParts.length > 0 ? portParts.join(", ") : "-"
                             })
 
@@ -255,7 +273,9 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
         + "STATUS".padEnd(COL_STATUS)
         + "PORTS\x1b[0m\n"
     for (const row of rows) {
-        const color = row.state === "running" ? "\x1b[32m" : "\x1b[31m"
+        const color = row.state.startsWith("running") && !row.isChurning ? "\x1b[32m"
+            : row.isChurning ? "\x1b[33m"
+            : "\x1b[31m"
         output += row.coin.padEnd(COL_COIN)
             + row.network.padEnd(COL_NETWORK)
             + row.name.padEnd(COL_NAME)

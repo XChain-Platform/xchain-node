@@ -703,7 +703,9 @@ async function buildDatabaseModule(coin, network) {
         await execFileAsync('docker', ['pull', 'mariadb:10.11'])
         await execFileAsync('docker', ['tag', 'mariadb:10.11', containerPrefix])
 
-        const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb']
+        // Cap json-file log growth so a long-running node cannot fill the
+        // host disk; sized to keep --tail reads inside a single rotated file.
+        const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb', '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3']
         runArgs.push('--network', getDockerNetwork(coin, network))
         const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
         // Every other docker run port in this file is validated before reaching

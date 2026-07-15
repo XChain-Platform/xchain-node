@@ -397,8 +397,15 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 // execution containers exit immediately after their command; a healthcheck
                 // would fire during the exit window and falsely mark them unhealthy.
                 const healthcheckArgs = onlyExecution ? [] : buildHealthcheckArgs(module, environmentVariables)
+                // Cap json-file log growth on persistent containers so a
+                // long-running node cannot fill the host disk. Sized so the
+                // --tail 100 log reader still lands inside a single rotated
+                // file. One-shot execution containers exit immediately and
+                // need no cap.
+                const logOptArgs = onlyExecution ? [] : ['--log-opt', 'max-size=10m', '--log-opt', 'max-file=3']
                 const runArgs = [
                     'run', '-d', ...restartArgs, '--name', containerPrefix, '--hostname', containerPrefix,
+                    ...logOptArgs,
                     ...volumeArgs,
                     ...ulimitArgs,
                     ...healthcheckArgs,

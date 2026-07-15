@@ -363,6 +363,20 @@ describe('moduleOperations', function () {
             await ops.logModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, false)
             expect(stubs.logContainer.firstCall.args[1]).to.be.false
         })
+
+        it('non-follow: dumps every selected service, not just the first', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.logModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } }, false)
+            expect(stubs.logContainer.calledTwice).to.be.true
+        })
+
+        it('follow: only attaches to the first service (single-TTY limit)', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.logModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } }, true)
+            expect(stubs.logContainer.calledOnce).to.be.true
+        })
     })
 
     // -------------------------------------------------------------------

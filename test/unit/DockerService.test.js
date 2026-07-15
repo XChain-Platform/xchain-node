@@ -588,38 +588,6 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
-    // getAllContainerFromModule
-    // -------------------------------------------------------------------
-
-    describe('getAllContainerFromModule()', function () {
-
-        it('resolves true after running docker ps -a with ancestor filter', async function () {
-            const stubs = makeStubs()
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                expect(cmd).to.equal('docker')
-                expect(args[0]).to.equal('ps')
-                expect(args).to.include('-a')
-                expect(args.some(a => a.includes('ancestor='))).to.be.true
-                cb(null, 'container1\n')
-            })
-            const ds = proxyquire('../../src/services/DockerService', {
-                'child_process': { execFile: stubs.execFile, spawn: stubs.spawn, spawnSync: stubs.spawnSync },
-                'fs': { readFileSync: sinon.stub(), mkdirSync: sinon.stub(), createWriteStream: sinon.stub() },
-                'blessed': {
-                    screen: sinon.stub().returns({ key: sinon.stub(), on: sinon.stub(), render: sinon.stub(), destroy: sinon.stub() }),
-                    text: sinon.stub(), log: sinon.stub().returns({ log: sinon.stub() })
-                },
-                './ConfigService': {
-                    getDockerContainerImageName: (mod, coin, net) => `${coin}-${net}-${mod}`
-                }
-            })
-            const result = await ds.getAllContainerFromModule('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(result).to.be.true
-        })
-    })
-
-    // -------------------------------------------------------------------
     // getPublishedHostPorts
     // -------------------------------------------------------------------
 

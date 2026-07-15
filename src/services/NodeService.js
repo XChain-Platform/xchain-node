@@ -217,6 +217,10 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 'run', '-d',
                 '--restart', 'unless-stopped',
                 '--name', containerPrefix,
+                // Cap json-file log growth so a long-running node cannot
+                // fill the host disk; sized to keep --tail reads inside a
+                // single rotated file.
+                '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3',
                 '-v', `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`,
                 '--hostname', NODE_MODULE_NAME,
                 '--network-alias', NODE_MODULE_NAME,

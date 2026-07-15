@@ -404,6 +404,70 @@ describe('StatusService: getStatus() with installed modules', function () {
         expect(state.setLastPrintedStatus.called).to.be.true
     })
 
+    it('annotates the STATUS cell with restart count and non-healthy health status', async function () {
+        const installedModulesObj = {}
+        const state = makeStateStub({
+            isStatusUpdated: sinon.stub().returns(false),
+            getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+            resetInstalledModules: sinon.stub().callsFake(() => {
+                for (const k of Object.keys(installedModulesObj)) delete installedModulesObj[k]
+            }),
+            db: {
+                isReady: sinon.stub().returns(true),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'ggg' }
+                ])
+            }
+        })
+
+        const containerStatus = {
+            State: { Status: 'running', RestartCount: 3, Health: { Status: 'unhealthy' } },
+            NetworkSettings: { Ports: {} }
+        }
+        const ss = loadStatusService(state, {
+            getStatusFromContainer: sinon.stub().resolves(containerStatus)
+        })
+        await ss.getStatus('bitcoin', 'mainnet', false)
+
+        const printedOutput = state.setLastPrintedStatus.lastCall.args[0]
+        expect(printedOutput).to.include('running x3')
+        expect(printedOutput).to.include('(unhealthy)')
+        // Churning state is downgraded from the plain "running" green to yellow.
+        expect(printedOutput).to.include('\x1b[33m')
+    })
+
+    it('leaves a clean container (no restarts, healthy) unchanged and green', async function () {
+        const installedModulesObj = {}
+        const state = makeStateStub({
+            isStatusUpdated: sinon.stub().returns(false),
+            getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+            resetInstalledModules: sinon.stub().callsFake(() => {
+                for (const k of Object.keys(installedModulesObj)) delete installedModulesObj[k]
+            }),
+            db: {
+                isReady: sinon.stub().returns(true),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'ggg' }
+                ])
+            }
+        })
+
+        const containerStatus = {
+            State: { Status: 'running', RestartCount: 0, Health: { Status: 'healthy' } },
+            NetworkSettings: { Ports: {} }
+        }
+        const ss = loadStatusService(state, {
+            getStatusFromContainer: sinon.stub().resolves(containerStatus)
+        })
+        await ss.getStatus('bitcoin', 'mainnet', false)
+
+        const printedOutput = state.setLastPrintedStatus.lastCall.args[0]
+        expect(printedOutput).to.include('running')
+        expect(printedOutput).to.not.include('x0')
+        expect(printedOutput).to.not.include('(healthy)')
+        expect(printedOutput).to.include('\x1b[32m')
+    })
+
     it('calls checkRemoteNodeVersion when checkVersions=true and version absent', async function () {
         const installedModulesObj = {}
         const checkRemote = sinon.stub().resolves()

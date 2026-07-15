@@ -122,6 +122,13 @@ function getModuleDatabaseName(module, coin, network) {
     if (coin !== "" && CoinTickerSymbol[coin] === undefined) {
         throw new Error("Unknown coin '" + coin + "'; cannot derive a database name")
     }
+    // Mirror the coin guard above: a typo'd network (e.g. from a raw CLI arg
+    // on the reset/bootstrap paths, which bypass filterCommandParameters)
+    // would otherwise derive a well-formed-but-bogus name that still reaches
+    // CREATE DATABASE while the command exits 0.
+    if (network !== "" && !Object.values(Network).includes(network)) {
+        throw new Error("Unknown network '" + network + "'; cannot derive a database name")
+    }
     const moduleName = module.slice("xchain-".length)
     return "XChain" + DB_SEP
         + CoinTickerSymbol[coin] + DB_SEP

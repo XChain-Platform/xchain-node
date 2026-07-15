@@ -128,12 +128,31 @@ async function logModules(servicesList, follow = true) {
     }
 
     if (moduleContainerIds.length > 0) {
-        const moduleName = moduleContainerIds[0]["name"]
-        console.log("")
-        console.log("")
-        console.log("####" + moduleName + " LOGS####")
-        console.log("")
-        await logContainer(moduleContainerIds[0]["id"], follow)
+        if (follow) {
+            // A single interleaved TTY stream only makes sense for one
+            // container; warn instead of silently dropping the rest so the
+            // operator knows N-1 services are omitted from `tail all`.
+            if (moduleContainerIds.length > 1) {
+                const omitted = moduleContainerIds.slice(1).map(c => c["name"]).join(", ")
+                console.log("Following only " + moduleContainerIds[0]["name"] + "; omitted: " + omitted)
+            }
+            const moduleName = moduleContainerIds[0]["name"]
+            console.log("")
+            console.log("")
+            console.log("####" + moduleName + " LOGS####")
+            console.log("")
+            await logContainer(moduleContainerIds[0]["id"], follow)
+        } else {
+            // Non-follow dumps can safely iterate every selected service in
+            // sequence (no shared TTY to interleave).
+            for (const container of moduleContainerIds) {
+                console.log("")
+                console.log("")
+                console.log("####" + container["name"] + " LOGS####")
+                console.log("")
+                await logContainer(container["id"], follow)
+            }
+        }
     } else {
         console.log("No service was selected")
     }
