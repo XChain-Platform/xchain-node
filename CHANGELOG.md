@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-interactive runs (cron, ssh BatchMode) fail fast with an actionable error naming `XCHAIN_NODE_DB_ROOT_PASSWORD` instead of hanging forever on the root-password prompt when stdin is not a TTY.
 - Probe the regtest miner's Docker healthcheck via `jsonrpc_ping` instead of `http_get` (the miner has no GET `/status` route, so every probe 500'd and the container sat permanently unhealthy).
 
+## [0.0.25] - 2026-07-16
+
+### Fixed
+- ConfigService: indexer HUB_DB_PASS mirrors the resolved INDEXER_DB_PASS including the static default, so it is never undefined ().
+- BootstrapService.downloadBootstrap pins the .sig fetch to the archive's final redirected URL with a latest.tgz.sig fallback ().
+
+
 ## [0.0.23] - 2026-06-20
 
 ### Added

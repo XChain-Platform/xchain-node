@@ -794,10 +794,23 @@ async function downloadBootstrap(coin, network, module, destDir) {
     // means this bootstrap is unsigned; remove any stale local .sig so the
     // restore's signature policy sees the true current state instead of
     // verifying today's archive against yesterday's signature.
+    //
+    // Pin the .sig to the archive we ACTUALLY downloaded (#2259): latest.tgz
+    // resolves per-request to the newest archive, and a multi-GB download spans
+    // a long window, so a second independent "latest" resolution for the
+    // signature can land on an archive published mid-download; the bytes of
+    // archive A then verify against B's signature and the restore is refused
+    // (fail-closed) on perfectly good data. The archive request's final
+    // redirected URL names the concrete archive, and the publisher writes
+    // <archive>.sig next to it, so derive the sig URL from that. Fall back to
+    // latest.tgz.sig when no redirect happened (a manually-dropped real
+    // latest.tgz is served directly and its .sig sits beside it).
+    const finalUrl = response.request && response.request.res && response.request.res.responseUrl
+        ? response.request.res.responseUrl : url
     const sigPath = destPath + BOOTSTRAP_SIG_SUFFIX
     const sigResponse = await axios({
         method: 'get',
-        url: url + BOOTSTRAP_SIG_SUFFIX,
+        url: finalUrl + BOOTSTRAP_SIG_SUFFIX,
         responseType: 'text',
         maxRedirects: 5,
         timeout: 60000,

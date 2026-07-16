@@ -415,6 +415,26 @@ describe('ConfigService', function () {
                 expect(files[hubSidecar]).to.include('HUB_DB_PASS=')
             })
 
+            // #2246: on the non-rotatable path INDEXER_DB_PASS is not yet in
+            // defaultConfig when the indexer's HUB_DB_PASS bind runs, so the old
+            // unconditional copy planted HUB_DB_PASS=undefined - the key then
+            // "existed", the shared/static fallbacks skipped it, and the container
+            // got HUB_DB_PASS="undefined" against an account whose password fell
+            // through to the static default (HubDbSync ER_ACCESS_DENIED lockout).
+            it('indexer HUB_DB_PASS matches the indexer account static default when rotation cannot apply (never undefined)', async function () {
+                const { cs } = makeMemoryConfigService()
+                const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
+                expect(config['HUB_DB_PASS']).to.equal('xchain' + SEP + 'password')
+                expect(config['HUB_DB_PASS']).to.equal(config['INDEXER_DB_PASS'])
+            })
+
+            it('indexer HUB_DB_PASS matches the generated per-install INDEXER_DB_PASS when rotation can apply', async function () {
+                const { cs } = makeMemoryConfigService({}, { dbContainerId: CONTAINER_ID })
+                const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
+                expect(config['INDEXER_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
+                expect(config['HUB_DB_PASS']).to.equal(config['INDEXER_DB_PASS'])
+            })
+
             it('passes INDEXER_API_KEY through from host env to the indexer config (federation auth)', async function () {
                 const prev = process.env.INDEXER_API_KEY
                 process.env.INDEXER_API_KEY = 'fed-secret-123'

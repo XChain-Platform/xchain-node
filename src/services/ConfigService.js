@@ -672,11 +672,18 @@ async function getDefaultConfig(module, coin, network) {
 
         // The indexer's hub-DB connection reuses its OWN DB account (HUB_DB_NAME/USER are set
         // to the indexer's in the indexer block above, mainnet/testnet), so its hub-DB password
-        // must be the per-install INDEXER_DB_PASS just resolved, not the shared hub password.
-        // Set it here, before the shared HUB_DB_PASS fallback below, so that fallback sees the
-        // key already present and skips. An operator override (already in defaultConfig) wins.
+        // must be the INDEXER_DB_PASS the container will actually get, not the shared hub
+        // password. Set it here, before the shared HUB_DB_PASS fallback below, so that fallback
+        // sees the key already present and skips. An operator override (already in
+        // defaultConfig) wins. On the non-rotatable path (dbPasswordCanRotate() false, the
+        // 2026-06-26 outage fallback) INDEXER_DB_PASS is still absent here and only lands via
+        // the static-defaults merge below; mirror that same static default instead of copying
+        // `undefined`, which would both mismatch the account AND occupy the key so the
+        // fallback/merge never repaired it (HubDbSync ER_ACCESS_DENIED lockout, #2246).
         if (module === XChainService.XCHAIN_INDEXER && network !== "regtest" && !("HUB_DB_PASS" in defaultConfig)) {
-            defaultConfig["HUB_DB_PASS"] = defaultConfig["INDEXER_DB_PASS"]
+            defaultConfig["HUB_DB_PASS"] = defaultConfig["INDEXER_DB_PASS"] !== undefined
+                ? defaultConfig["INDEXER_DB_PASS"]
+                : defaultValues["INDEXER_DB_PASS"]
         }
     }
 

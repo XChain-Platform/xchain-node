@@ -446,6 +446,61 @@ describe('BootstrapService', function () {
             expect(result).to.equal('latest.tgz')
         })
 
+        // #2259: latest.tgz and its signature resolve independently to "the
+        // newest" per request, so a publish landing mid-download can pair
+        // archive A's bytes with archive B's signature (spurious fail-closed
+        // refusal). The sig fetch must be pinned to the archive request's
+        // final redirected URL, the concrete archive the bytes came from.
+        it('pins the .sig fetch to the archive redirect target, not latest.tgz.sig', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true)
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const concreteUrl = 'https://sync.example/bootstraps/xchain-utxo-tracker/BTC/mainnet/mainnet-utxo-20260716_010203.tar.gz'
+            stubs.axios.onFirstCall().resolves({
+                status:  200,
+                headers: { 'content-length': '100' },
+                data:    dataStream,
+                request: { res: { responseUrl: concreteUrl } },
+            })
+            stubs.axios.onSecondCall().resolves({ status: 200, data: 'sig-bytes' })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+            setImmediate(() => { dataStream.end(); writeStream.emit('finish') })
+            await promise
+
+            expect(stubs.axios.secondCall.args[0].url).to.equal(concreteUrl + '.sig')
+        })
+
+        it('falls back to latest.tgz.sig when the archive response carries no redirect URL', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(true)
+
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            stubs.axios.onFirstCall().resolves({
+                status:  200,
+                headers: {},
+                data:    dataStream,
+            })
+            stubs.axios.onSecondCall().resolves({ status: 404 })
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+            setImmediate(() => { dataStream.end(); writeStream.emit('finish') })
+            await promise
+
+            expect(stubs.axios.secondCall.args[0].url).to.match(/\/latest\.tgz\.sig$/)
+        })
+
         it('creates destDir when it does not exist', async function () {
             const stubs = makeStubs()
             stubs.fs.existsSync.returns(false)
