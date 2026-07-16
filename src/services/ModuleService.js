@@ -211,6 +211,11 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     const environmentVariables = await getDefaultConfig(module, coin, network)
     const dir = getModuleDir(module)
 
+    // Go-live pre-flight: warns pre-launch, refuses a mainnet write-surface
+    // deploy with un-armed settings once XCHAIN_NODE_GO_LIVE=1 (A1 / ).
+    const { assertGoLiveReady } = require('./GoLiveGate')
+    assertGoLiveReady(module, coin, network, environmentVariables, dir)
+
     // Stage any bundled library modules into this service's build context.
     // The service's Dockerfile COPYs them in and npm resolves the
     // "file:./<lib>" deps recursively at install.
