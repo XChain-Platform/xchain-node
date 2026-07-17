@@ -301,6 +301,28 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
     })
 }
 
+// Optional exact-version pin for a coin daemon, read from
+// XCHAIN_NODE_NODE_VERSION_<COIN> (e.g. XCHAIN_NODE_NODE_VERSION_LITECOIN=v0.21.4).
+// Test harnesses (notably the multi-chain parity sweep, ) set this so the
+// installed daemon matches the DEPLOYED fleet image instead of drifting to the
+// latest upstream release. Returns null when no pin is set.
+function resolveNodeVersionPin(coin) {
+    const pin = process.env['XCHAIN_NODE_NODE_VERSION_' + String(coin).toUpperCase()]
+    return pin && pin.trim() !== '' ? pin.trim() : null
+}
+
+// Enforce a version pin against an already-installed local daemon. A silent
+// mismatch would defeat the pin (installNode skips the download when a local
+// copy exists), so fail loudly with the remediation instead.
+function assertNodeVersionPin(coin, network, localNodeVersion, pin) {
+    if (pin && localNodeVersion != null && localNodeVersion !== pin) {
+        throw new Error(
+            `Installed ${coin} node is ${localNodeVersion} but ` +
+            `XCHAIN_NODE_NODE_VERSION_${String(coin).toUpperCase()} pins ${pin}. ` +
+            `Remove the ${coin}/${network} stack (or the cached crypto node) and reinstall.`)
+    }
+}
+
 async function installNode(coin, network) {
     console.log("Creating xchain docker network...")
     const { createDockerNetwork } = require('./DockerService')
@@ -318,15 +340,23 @@ async function installNode(coin, network) {
         localNodeVersion = await getLocalNodeVersion(coin, network)
     } catch { /* not installed */ }
 
+    const versionPin = resolveNodeVersionPin(coin)
+    assertNodeVersionPin(coin, network, localNodeVersion, versionPin)
+
     if (localNodeVersion == null) {
-        if (!(NODE_MODULE_NAME + SEP + coin in getRemoteModuleVersions())) {
-            await checkRemoteNodeVersion(coin)
-        }
-        const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]["tag_name"]
-        if (remoteNodeVersion != null) {
-            await getCryptoNode(coin, network, remoteNodeVersion)
+        if (versionPin) {
+            console.log("Node version pinned via env: installing " + coin + " " + versionPin)
+            await getCryptoNode(coin, network, versionPin)
         } else {
-            throw new Error("There is no valid version to download for the " + coin + "/" + network + " node")
+            if (!(NODE_MODULE_NAME + SEP + coin in getRemoteModuleVersions())) {
+                await checkRemoteNodeVersion(coin)
+            }
+            const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]["tag_name"]
+            if (remoteNodeVersion != null) {
+                await getCryptoNode(coin, network, remoteNodeVersion)
+            } else {
+                throw new Error("There is no valid version to download for the " + coin + "/" + network + " node")
+            }
         }
     }
     await buildCryptoNode(coin, network)
@@ -377,5 +407,7 @@ async function installNode(coin, network) {
 module.exports = {
     getCryptoNode,
     buildCryptoNode,
-    installNode
+    installNode,
+    resolveNodeVersionPin,
+    assertNodeVersionPin
 }
