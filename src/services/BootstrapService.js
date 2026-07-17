@@ -184,9 +184,14 @@ async function computeSha256(filePath) {
 }
 
 function buildDateTimeString() {
+    // UTC, not local time: the <network>-<service>-<YYYYMMDD_HHMMSS> suffix is the
+    // sort key both the listing (bootstraps.build.js) and latest-resolution
+    // (latest.php) rely on for "lexically sortable => newest". Local accessors let a
+    // DST fall-back hour, a host timezone change, or a cross-timezone migration stamp
+    // a newer archive with an older suffix, so latest.tgz would serve a stale snapshot.
     const now = new Date()
     const pad = n => String(n).padStart(2, '0')
-    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+    return `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}_${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`
 }
 
 // Extract + verify the inner archive (data.tar.gz / dump.sql.gz) from a
