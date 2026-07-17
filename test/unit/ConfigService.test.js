@@ -396,6 +396,31 @@ describe('ConfigService', function () {
                 expect(config['DECODER_DB_PASS']).to.equal('operatorsecret')
             })
 
+            it('generates the MISSING RPC credential when only one of NODE_USER/NODE_PASSWORD is present (#2404: no both-or-nothing fallback to "rpc")', async function () {
+                // The old both-absent (&&) guard let a partial sidecar generate nothing, so
+                // the missing half silently resolved to the static "rpc" default.
+                const { cs } = makeMemoryConfigService({ [coinSidecar]: 'NODE_PASSWORD=operatorpass\n' })
+                const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
+                expect(config['NODE_PASSWORD']).to.equal('operatorpass')        // present half preserved
+                expect(config['NODE_USER']).to.be.a('string').with.length.greaterThan(0)
+                expect(config['NODE_USER']).to.not.equal('rpc')                 // missing half generated, not the static default
+            })
+
+            it('recovers RPC credentials glued onto a preceding setting with no separating newline (#2405)', async function () {
+                // Older appenders wrote NODE_USER= onto the last main-file line with no
+                // leading newline (e.g. `DUST_AMOUNT=546NODE_USER=<hex>`), corrupting the
+                // value and hiding the credential from the migration.
+                const gluedUser = 'a'.repeat(24)
+                const gluedPass = 'b'.repeat(48)
+                const { cs, files } = makeMemoryConfigService({ [coinMain]: 'DUST_AMOUNT=546NODE_USER=' + gluedUser + '\nNODE_PASSWORD=' + gluedPass + '\n' })
+                const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
+                expect(String(config['DUST_AMOUNT'])).to.equal('546')           // value no longer corrupted by the glued credential
+                expect(config['NODE_USER']).to.equal(gluedUser)                 // credential recovered, not regenerated
+                expect(config['NODE_PASSWORD']).to.equal(gluedPass)
+                expect(files[coinMain] || '').to.not.include('NODE_USER=')      // stripped from the main file
+                expect(files[coinSidecar] || '').to.include('NODE_USER=' + gluedUser)  // relocated to the sidecar
+            })
+
             it('HUB_DB_PASS falls back to the shared static default when rotation cannot apply it', async function () {
                 const { cs, files } = makeMemoryConfigService()
                 const coinCfg = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')

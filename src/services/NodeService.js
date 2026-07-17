@@ -396,8 +396,14 @@ async function installNode(coin, network) {
     try {
         const { setDatabaseParameters } = require('./DatabaseService')
         await setDatabaseParameters()
-    } catch {
-        console.log("WARNING! The database parameters couldn't be set")
+    } catch (e) {
+        // setDatabaseParameters is the ONLY step that force-sets the live decoder/indexer
+        // MariaDB accounts to the per-install passwords getDefaultConfig just minted and
+        // baked into the container env. If it fails, both containers are already up with a
+        // password that exists nowhere in the DB (ER_ACCESS_DENIED crash-loop), so the
+        // install has NOT succeeded. Fail loudly (matching installNode's throw-on-error
+        // convention) rather than logging a warning and returning true.
+        throw new Error("Node install failed: could not set database parameters, so the decoder/indexer would be locked out of MariaDB: " + (e && e.message ? e.message : e))
     }
 
     await statusChanged()

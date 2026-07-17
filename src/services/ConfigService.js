@@ -606,8 +606,24 @@ async function getDefaultConfig(module, coin, network) {
             for await (const line of rl) {
                 const eqIndex = line.indexOf("=")
                 if (eqIndex > 0) {
-                    const key = line.substring(0, eqIndex)
-                    defaultConfig[key] = line.substring(eqIndex + 1)
+                    const key   = line.substring(0, eqIndex)
+                    let   value = line.substring(eqIndex + 1)
+                    // Recover RPC credentials glued onto the tail of a preceding setting by
+                    // an older appender that wrote NODE_USER=/NODE_PASSWORD= with no leading
+                    // newline (e.g. `DUST_AMOUNT=546NODE_USER=<hex>`). Peel each credential
+                    // off the value tail, password first so a double-glue
+                    // `...NODE_USER=<u>NODE_PASSWORD=<p>` resolves cleanly, so the real value
+                    // is uncorrupted and mainFileHasCreds arms the migration below, which
+                    // relocates the credential to the sidecar and strips it from this file.
+                    for (const credKey of ["NODE_PASSWORD", "NODE_USER"]) {
+                        const at = value.indexOf(credKey + "=")
+                        if (at >= 0) {
+                            defaultConfig[credKey] = value.substring(at + credKey.length + 1)
+                            value = value.substring(0, at)
+                            mainFileHasCreds = true
+                        }
+                    }
+                    defaultConfig[key] = value
                     if (key === "NODE_USER" || key === "NODE_PASSWORD") mainFileHasCreds = true
                 }
             }
@@ -641,14 +657,23 @@ async function getDefaultConfig(module, coin, network) {
             fs.writeFileSync(configFilePath, remaining.length ? remaining.join("\n") + "\n" : "")
         }
 
-        // Generate and persist RPC credentials to the sidecar on first provision if absent everywhere.
-        if (!("NODE_USER" in defaultConfig) && !("NODE_PASSWORD" in defaultConfig)) {
-            const nodeUser     = crypto.randomBytes(12).toString('hex')
-            const nodePassword = crypto.randomBytes(24).toString('hex')
-            defaultConfig["NODE_USER"]     = nodeUser
-            defaultConfig["NODE_PASSWORD"] = nodePassword
-            persistSidecarCreds(localFilePath, { NODE_USER: nodeUser, NODE_PASSWORD: nodePassword })
+        // Generate and persist to the sidecar whichever RPC credential is missing,
+        // evaluated PER KEY. The old both-absent (&&) guard meant a partial sidecar (one
+        // key present, one absent) generated nothing, and the missing half then silently
+        // resolved to the static "rpc" default via the merge below, leaving a well-known
+        // default credential on a live stack with no operator signal.
+        const genRpcCreds = {}
+        if (!("NODE_USER" in defaultConfig)) {
+            const nodeUser = crypto.randomBytes(12).toString('hex')
+            defaultConfig["NODE_USER"] = nodeUser
+            genRpcCreds["NODE_USER"]   = nodeUser
         }
+        if (!("NODE_PASSWORD" in defaultConfig)) {
+            const nodePassword = crypto.randomBytes(24).toString('hex')
+            defaultConfig["NODE_PASSWORD"] = nodePassword
+            genRpcCreds["NODE_PASSWORD"]   = nodePassword
+        }
+        if (Object.keys(genRpcCreds).length) persistSidecarCreds(localFilePath, genRpcCreds)
 
         // Generate and persist a per-install password for each per-coin/network DB account
         // (decoder, indexer) on first provision, so installs no longer share the static
