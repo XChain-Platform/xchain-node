@@ -159,6 +159,10 @@ function startProgress(message, totalBytes) {
             : '?'
         process.stdout.write(`\r${frames[frameIndex++ % 10]} ${message} ${mb} MB (${pct}%)`)
     }, 100)
+    // Never let the progress ticker by itself hold the event loop open. If a
+    // dump/restore path throws before stop() clears this interval, an un-unref'd
+    // timer keeps the process (and the test runner) alive forever.
+    interval.unref()
 
     return {
         update(bytes) { written += bytes },
