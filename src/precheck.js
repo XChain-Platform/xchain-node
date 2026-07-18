@@ -123,7 +123,15 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
     }
     if (checkVersions) {
         if (isVerbose()) console.log("Getting all remote project versions")
-        await checkAllRemoteVersions()
+        try {
+            await checkAllRemoteVersions()
+        } catch (err) {
+            // GitHub API 403 rate limits (or transient network failures) must
+            // not abort the whole command: version info is advisory. Degrade
+            // to a status listing without remote-version columns.
+            console.log("Warning: couldn't fetch remote versions (GitHub unreachable or rate-limited); continuing without version check: " + redactSecrets(err))
+            checkVersions = false
+        }
     }
     if (isVerbose()) console.log("Getting modules status")
     await getStatus(null, null, false, checkVersions)

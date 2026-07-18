@@ -26,7 +26,9 @@ function loadPrecheck(overrides) {
         externalDb:          false,
         getExternalDbConfig: sinon.stub().resolves({ host: 'saved.example.com', port: 3307 }),
         getDatabaseHostPort: sinon.stub().resolves(13306),
-        createDatabase:      sinon.stub().resolves()
+        createDatabase:      sinon.stub().resolves(),
+        checkAllRemoteVersions: sinon.stub().resolves(),
+        getStatus:              sinon.stub().resolves()
     }, overrides)
 
     const precheck = proxyquire('../../src/precheck.js', {
@@ -42,8 +44,8 @@ function loadPrecheck(overrides) {
             createDockerNetwork:              sinon.stub().resolves()
         },
         './services/ConfigService':    { getDockerNetwork: () => 'xchain' },
-        './services/VersionService':   { checkAllRemoteVersions: sinon.stub().resolves() },
-        './services/StatusService':    { getStatus: sinon.stub().resolves() },
+        './services/VersionService':   { checkAllRemoteVersions: stubs.checkAllRemoteVersions },
+        './services/StatusService':    { getStatus: stubs.getStatus },
         './services/HubService':       { installHubModule: sinon.stub().resolves(), updateHub: sinon.stub().resolves() },
         './services/ExplorerService':  { updateExplorer: sinon.stub().resolves() },
         './services/DatabaseService': {
@@ -100,5 +102,38 @@ describe('preCheck(): xchain_node pool host/port resolution @regression', functi
         } catch (err) {
             expect(err.message).to.equal("Couldn't open the xchain_node MariaDB database")
         }
+    })
+})
+
+describe('preCheck(): remote version check degrades gracefully @regression', function () {
+
+    it('a GitHub 403 rate-limit rejection does not abort preCheck', async function () {
+        const { precheck, stubs } = loadPrecheck({
+            checkAllRemoteVersions: sinon.stub().rejects(new Error('API rate limit exceeded (403)'))
+        })
+        const log = sinon.stub(console, 'log')
+        try {
+            await precheck.preCheck(true, false)
+        } finally {
+            log.restore()
+        }
+        // Degrades: status still fetched, but without remote-version columns.
+        expect(stubs.getStatus.calledOnce).to.be.true
+        expect(stubs.getStatus.firstCall.args[3]).to.be.false
+        expect(log.args.some(a => String(a[0]).includes('rate-limited'))).to.be.true
+    })
+
+    it('a successful version check keeps checkVersions=true for getStatus', async function () {
+        const { precheck, stubs } = loadPrecheck({})
+        await precheck.preCheck(true, false)
+        expect(stubs.checkAllRemoteVersions.calledOnce).to.be.true
+        expect(stubs.getStatus.firstCall.args[3]).to.be.true
+    })
+
+    it('checkVersions=false skips the remote version fetch entirely', async function () {
+        const { precheck, stubs } = loadPrecheck({})
+        await precheck.preCheck(false, false)
+        expect(stubs.checkAllRemoteVersions.called).to.be.false
+        expect(stubs.getStatus.firstCall.args[3]).to.be.false
     })
 })
