@@ -152,6 +152,12 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
     const confFileName = `${coin}-${network}.conf`
     const confFilePath = path.join(nodeDir, confFileName)
     if (fs.existsSync(confFilePath)) {
+        // The bundled conf ships __XCHAIN_NODE_RPC_USER__/__XCHAIN_NODE_RPC_PASSWORD__
+        // placeholder tokens ; fail closed if the provisioned credentials are
+        // missing rather than baking the placeholder (or "undefined") into the image.
+        if (!defaultConfig['NODE_USER'] || !defaultConfig['NODE_PASSWORD']) {
+            throw new Error(`Missing NODE_USER/NODE_PASSWORD for ${coin} ${network}; refusing to build node with placeholder RPC credentials`)
+        }
         let confContent = fs.readFileSync(confFilePath, 'utf8')
         confContent = confContent.replace(/^rpcuser=.*$/m,     `rpcuser=${defaultConfig['NODE_USER']}`)
         confContent = confContent.replace(/^rpcpassword=.*$/m, `rpcpassword=${defaultConfig['NODE_PASSWORD']}`)
