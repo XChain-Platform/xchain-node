@@ -40,6 +40,7 @@ const { maybeReportTelemetry } = require('./services/TelemetryService')
 const { makeBootstrap }        = require('./services/BootstrapService')
 const { initValidator, getValidatorSettings, isInitialized } = require('./services/ValidatorService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
+const { acquireCommandLock } = require('./utils/commandLock')
 
 async function parseCommand() {
     const program = new Command()
@@ -52,6 +53,11 @@ async function parseCommand() {
     // (install, update, start, stop, restart, uninstall, reset, sync, …) still
     // pushes; the default is to sync, so a new/unknown command stays safe.
     const readOnlyCommands = ['ps', 'tail', 'logs', 'monitor', 'tailmonitor']
+    // Commands that mutate stack state (containers, images, DBs, config
+    // pushes). Two of these interleaving from concurrent shells can corrupt an
+    // install mid-flight, so they serialize on a pidfile lock; a second
+    // invocation is refused with a clear message instead of interleaving.
+    const mutatingCommands = ['install', 'update', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback']
     program.hook('preAction', async (thisCommand, actionCommand) => {
         setVerbose(thisCommand.opts().verbose ?? false)
         if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
@@ -61,6 +67,21 @@ async function parseCommand() {
         // operator can prepare their validator identity before any stack is up.
         const parentName = actionCommand.parent && actionCommand.parent.name()
         if (commandName === 'validator' || parentName === 'validator') return
+        if (mutatingCommands.includes(commandName)) {
+            let release
+            try {
+                release = acquireCommandLock({ command: commandName })
+            } catch (err) {
+                console.error(err.message)
+                return process.exit(1)
+            }
+            // Actions terminate via process.exit(), so the only reliable
+            // release point is the process 'exit' hook (also covers throws
+            // and SIGINT/SIGTERM via the default handlers ending the process).
+            process.on('exit', release)
+            process.on('SIGINT', () => process.exit(130))
+            process.on('SIGTERM', () => process.exit(143))
+        }
         await preCheck(
             commandsNeedingVersions.includes(commandName),
             !readOnlyCommands.includes(commandName)
