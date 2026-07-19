@@ -263,6 +263,44 @@ describe('ConfigService', function () {
     })
 
     // -------------------------------------------------------------------
+    // persistSidecarCreds (#2406: append must not glue onto an
+    // unterminated existing file)
+    // -------------------------------------------------------------------
+
+    describe('persistSidecarCreds()', function () {
+        const fs = require('fs')
+        const os = require('os')
+        const { persistSidecarCreds } = require('../../src/services/ConfigService')
+
+        let tmpFile
+
+        beforeEach(function () {
+            tmpFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-sidecar-')), 'bitcoin-mainnet.local')
+        })
+
+        afterEach(function () {
+            try { fs.rmSync(path.dirname(tmpFile), { recursive: true, force: true }) } catch {}
+        })
+
+        it('inserts a separating newline when appending to a file not ending in one (#2406)', function () {
+            fs.writeFileSync(tmpFile, 'EXISTING=1')
+            persistSidecarCreds(tmpFile, { NEW: '2' })
+            expect(fs.readFileSync(tmpFile, 'utf8')).to.equal('EXISTING=1\nNEW=2\n')
+        })
+
+        it('does not add a blank line when the existing file already ends in a newline', function () {
+            fs.writeFileSync(tmpFile, 'EXISTING=1\n')
+            persistSidecarCreds(tmpFile, { NEW: '2' })
+            expect(fs.readFileSync(tmpFile, 'utf8')).to.equal('EXISTING=1\nNEW=2\n')
+        })
+
+        it('does not prepend a newline when creating a fresh file', function () {
+            persistSidecarCreds(tmpFile, { NEW: '2' })
+            expect(fs.readFileSync(tmpFile, 'utf8')).to.equal('NEW=2\n')
+        })
+    })
+
+    // -------------------------------------------------------------------
     // getDefaultConfig
     // -------------------------------------------------------------------
 

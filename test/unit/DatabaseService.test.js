@@ -355,6 +355,25 @@ describe('DatabaseService', function () {
             expect(stubs.addContainerToNetwork.calledOnce).to.be.true
         })
 
+        it('fails fast with an actionable error when the existing DB container is not running', async function () {
+            // A stopped/exited MariaDB container must not be treated as installed:
+            // otherwise the readiness probe burns ~100s of retries before a
+            // misleading abort. It must also NOT be auto-started or recreated.
+            const stubs = makeStubs({
+                getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'exited' } })
+            })
+            const ds = loadDatabaseService(stubs)
+            let threw = null
+            try {
+                await ds.buildDatabaseModule('bitcoin', 'mainnet')
+            } catch (err) { threw = err }
+            expect(threw).to.be.an.instanceOf(Error)
+            expect(threw.message).to.match(/exists but is exited/)
+            expect(threw.message).to.match(/docker start/)
+            // No network mutation and no recreate attempt on a stopped container.
+            expect(stubs.addContainerToNetwork.called).to.be.false
+        })
+
         it('installs mariadb when no existing database found', async function () {
             const stubs = makeStubs()
             // First execFileAsync call is `docker inspect` inside getDatabaseContainerId()

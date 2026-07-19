@@ -160,7 +160,23 @@ function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
         fs.writeFileSync(localFilePath, body, { mode: 0o600 })
     } else {
-        fs.appendFileSync(localFilePath, body)
+        let needsLeadingNewline = false
+        try {
+            const size = fs.statSync(localFilePath).size
+            if (size > 0) {
+                const fd = fs.openSync(localFilePath, 'r')
+                try {
+                    const buf = Buffer.alloc(1)
+                    fs.readSync(fd, buf, 0, 1, size - 1)
+                    needsLeadingNewline = buf.toString('utf8') !== '\n'
+                } finally {
+                    fs.closeSync(fd)
+                }
+            }
+        } catch {
+            needsLeadingNewline = false
+        }
+        fs.appendFileSync(localFilePath, needsLeadingNewline ? '\n' + body : body)
     }
     // chmod unconditionally: writeFileSync's mode only applies on create, and an
     // already-existing sidecar (append path, or one written before this fix) keeps its

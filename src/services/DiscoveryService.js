@@ -78,6 +78,14 @@ function classifyContainer(container) {
     let module = stringToXChainService(moduleStr)
     if (module != null) {
         module = XChainService[module]
+        // The e2e-test runner is a one-shot container: the run path (ModuleService
+        // buildAndUp, onlyExecution) deliberately skips the registry insert and
+        // never applies --restart/healthcheck to it. Mirror that exemption here so
+        // a scan observing a transient (or crash-left carcass) e2e container never
+        // writes a persistent modules-table row that ps/getStatus would then report
+        // as an installed module. Safe specifically for e2e because it never has a
+        // legitimate registry row for the orphan purge to delete.
+        if (module === XChainService.XCHAIN_E2E_TEST) return null
     } else if (moduleStr === NODE_MODULE_NAME) {
         module = NODE_MODULE_NAME
     } else {

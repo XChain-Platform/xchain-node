@@ -1353,6 +1353,118 @@ describe('DockerService', function () {
             expect(mockScreen.destroy.calledOnce).to.be.true
         })
 
+        it('warns and names omitted containers plus labels banner "n of N" when more than MAX_CONTAINERS are requested', async function () {
+            const stubs = makeStubs()
+            const EventEmitter = require('events')
+            const { Readable } = require('stream')
+
+            let keyHandler = null
+            const mockScreen = {
+                key: sinon.stub().callsFake((keys, handler) => { keyHandler = handler }),
+                on: sinon.stub(),
+                render: sinon.stub(),
+                destroy: sinon.stub()
+            }
+            const mockLogger = { log: sinon.stub() }
+            let bannerContent = null
+            const blessedStub = {
+                screen: sinon.stub().returns(mockScreen),
+                text: sinon.stub().callsFake((opts) => { bannerContent = opts.content }),
+                log: sinon.stub().returns(mockLogger)
+            }
+
+            const childStdout = new Readable({ read() {} })
+            const childStderr = new Readable({ read() {} })
+            const logChild = new EventEmitter()
+            logChild.stdout = childStdout
+            logChild.stderr = childStderr
+            logChild.kill = sinon.stub()
+            stubs.spawn.returns(logChild)
+
+            const logSpy = sinon.spy(console, 'log')
+            try {
+                const ds = proxyquire('../../src/services/DockerService', {
+                    'child_process': { execFile: stubs.execFile, spawn: stubs.spawn, spawnSync: stubs.spawnSync },
+                    'fs': { readFileSync: sinon.stub(), mkdirSync: sinon.stub(), createWriteStream: sinon.stub() },
+                    'blessed': blessedStub
+                })
+
+                // 8 containers: first 6 monitored, node7/node8 must be named as omitted
+                const containers = []
+                for (let i = 1; i <= 8; i++) {
+                    containers.push({ name: 'node' + i, id: 'id' + i })
+                }
+                const promise = ds.startDockerMonitor(containers, true)
+
+                const warned = logSpy.getCalls().map(c => c.args.join(' ')).join('\n')
+                expect(warned).to.match(/omitted:.*node7/)
+                expect(warned).to.match(/node8/)
+                expect(warned).to.match(/6 of 8/)
+                // Only MAX_CONTAINERS panes rendered
+                expect(blessedStub.log.callCount).to.equal(6)
+                // Banner discloses truncation
+                expect(bannerContent).to.contain('6 of 8')
+
+                keyHandler()
+                await promise
+            } finally {
+                logSpy.restore()
+            }
+        })
+
+        it('does not warn and keeps the plain banner when at most MAX_CONTAINERS are requested', async function () {
+            const stubs = makeStubs()
+            const EventEmitter = require('events')
+            const { Readable } = require('stream')
+
+            let keyHandler = null
+            const mockScreen = {
+                key: sinon.stub().callsFake((keys, handler) => { keyHandler = handler }),
+                on: sinon.stub(),
+                render: sinon.stub(),
+                destroy: sinon.stub()
+            }
+            const mockLogger = { log: sinon.stub() }
+            let bannerContent = null
+            const blessedStub = {
+                screen: sinon.stub().returns(mockScreen),
+                text: sinon.stub().callsFake((opts) => { bannerContent = opts.content }),
+                log: sinon.stub().returns(mockLogger)
+            }
+
+            const childStdout = new Readable({ read() {} })
+            const childStderr = new Readable({ read() {} })
+            const logChild = new EventEmitter()
+            logChild.stdout = childStdout
+            logChild.stderr = childStderr
+            logChild.kill = sinon.stub()
+            stubs.spawn.returns(logChild)
+
+            const logSpy = sinon.spy(console, 'log')
+            try {
+                const ds = proxyquire('../../src/services/DockerService', {
+                    'child_process': { execFile: stubs.execFile, spawn: stubs.spawn, spawnSync: stubs.spawnSync },
+                    'fs': { readFileSync: sinon.stub(), mkdirSync: sinon.stub(), createWriteStream: sinon.stub() },
+                    'blessed': blessedStub
+                })
+
+                const containers = [
+                    { name: 'encoder', id: 'abc123' },
+                    { name: 'decoder', id: 'def456' }
+                ]
+                const promise = ds.startDockerMonitor(containers, true)
+
+                const warned = logSpy.getCalls().map(c => c.args.join(' ')).join('\n')
+                expect(warned).to.not.match(/omitted/)
+                expect(bannerContent).to.equal(' Monitoring 2 containers (Q - Exit) ')
+
+                keyHandler()
+                await promise
+            } finally {
+                logSpy.restore()
+            }
+        })
+
         it('spawns docker logs without -f flag when follow=false', async function () {
             const stubs = makeStubs()
             const EventEmitter = require('events')

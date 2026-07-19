@@ -89,6 +89,16 @@ describe('DiscoveryService.classifyContainer', function () {
         })).to.deep.equal({ module: 'xchain-indexer', coin: 'bitcoin', network: 'mainnet' })
     })
 
+    it('exempts the one-shot e2e-test runner from classification (never registered)', function () {
+        // The run path installs xchain-e2e-test with onlyExecution=true and skips the
+        // registry insert; the discovery scan must mirror that so a transient e2e
+        // container (or a crash-left carcass) is never recorded as an installed module.
+        expect(svc.classifyContainer({ Names: 'xchain-node-bitcoin-regtest-xchain-e2e-test', Image: 'x' }))
+            .to.equal(null)
+        expect(svc.classifyContainer({ Names: 'renamed', Image: 'xchain-node-bitcoin-regtest-xchain-e2e-test' }))
+            .to.equal(null)
+    })
+
     it('returns null for foreign containers and malformed identities', function () {
         expect(svc.classifyContainer({ Names: 'nginx', Image: 'nginx:latest' })).to.equal(null)
         expect(svc.classifyContainer({ Names: 'xchain-node-fakecoin-mainnet-xchain-indexer', Image: 'x' })).to.equal(null)

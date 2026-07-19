@@ -799,6 +799,30 @@ async function buildDatabaseModule(coin, network) {
         // container behind (uuid:fb0c275d).
         throw "Unexpected docker run output for " + DB_MODULE_NAME + " container: " + JSON.stringify(containerId)
     } else {
+        // Existing-container branch. checkIfDatabaseModuleExists returns the id on
+        // mere existence of State.Status, so a stopped/exited MariaDB container
+        // reaches here and would otherwise be treated as installed: this function
+        // returns success and the downstream readiness probe (checkIfDatabaseIsReady)
+        // then burns ~100s of blind retries before aborting with a misleading
+        // "MariaDB is not responding". Fail fast with an actionable message instead.
+        //
+        // We deliberately do NOT auto-start or recreate the container:
+        //  - recreating would mean routing into the install branch above, which
+        //    calls forceRemoveContainerByName + docker run and would orphan the
+        //    MariaDB data volume (data loss);
+        //  - auto-starting an operator-stopped container overrides a deliberate
+        //    `docker stop` (the restart policy is unless-stopped, so a stop is
+        //    plausibly intentional). That self-heal is an operator-policy decision,
+        //    left out of scope here; the actionable error tells them what to run.
+        let dbState = null
+        try {
+            const containerStatus = await getStatusFromContainer(existingId)
+            dbState = containerStatus && containerStatus["State"] && containerStatus["State"]["Status"]
+        } catch { /* inspect failed: fall through and let the existing path surface it */ }
+        if (dbState && dbState !== 'running') {
+            const name = getDockerContainerImageName(DB_MODULE_NAME, coin, network)
+            throw new Error("MariaDB container " + name + " exists but is " + dbState + "; run: docker start " + name)
+        }
         try {
             if (coin && network) {
                 const dbContainerId = await getDatabaseContainerId()

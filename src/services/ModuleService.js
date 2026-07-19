@@ -183,11 +183,19 @@ function buildHealthcheckArgs(module, environmentVariables) {
     if (!hc) return []
 
     const port = environmentVariables[hc.portKey]
-    if (!port) return []
+    if (!port) {
+        // Every descriptor's portKey currently ships in ConfigService.getDefaultConfig,
+        // so this guard should never fire. If a future rename or config regression drops
+        // the key, the container would otherwise be created with NO healthcheck and no
+        // trace of why: make that drift loud at install/update time. Empty-array return
+        // is preserved so callers stay safe.
+        console.log("WARNING: no healthcheck for " + module + ": env " + hc.portKey + " is unset")
+        return []
+    }
 
     let cmd
     if (hc.probe === 'jsonrpc_ping') {
-        // JSON-RPC POST ping; both hub and explorer use this protocol
+        // JSON-RPC POST ping; hub, explorer, and the regtest miner all use this protocol
         cmd = `wget -qO- --post-data='{"jsonrpc":"2.0","method":"ping","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
     } else {
         // Default: plain HTTP GET on /status
@@ -304,6 +312,46 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         })
     }
 
+    const containerPrefix = getDockerContainerImageName(module, coin, network)
+
+    // Table-driven per-service run-args (SERVICE_REGISTRY in constants.js)
+    // replaces the old per-service switch/case: a new service is one table
+    // entry, not four hand-edited dispatch sites (H1 / ). Singleton
+    // services (hub/explorer/sync) clear coin/network so the shared container
+    // name and network resolve correctly below.
+    const built = buildModuleDockerArgs(module, environmentVariables, coin, network)
+    if (built.singleton) {
+        coin = ""
+        network = ""
+    }
+    const portArgs = built.portArgs
+    const volumeArgs = built.volumeArgs
+    const ulimitArgs = built.ulimitArgs
+
+    // Validate all port values
+    if (portArgs.length > 0) {
+        for (let i = 0; i < portArgs.length; i++) {
+            if (portArgs[i] === '-p') {
+                const pair = portArgs[i + 1]
+                const colonIdx = pair.indexOf(':')
+                if (colonIdx === -1) continue
+                const hostPort = pair.substring(0, colonIdx)
+                const containerPort = pair.substring(colonIdx + 1)
+                if (!validatePort(hostPort) || !validatePort(containerPort)) {
+                    throw "Invalid port value in configuration: " + pair
+                }
+            }
+        }
+    }
+
+    // Pre-flight host-port collision check (multi-stack hosts), run BEFORE the
+    // docker build so a collision fails fast instead of only surfacing after
+    // minutes of image build are wasted (#2594). Safe to run ahead of the
+    // overwrite/teardown below: assertNoHostPortConflicts excludes selfName
+    // (containerPrefix) from conflicts by container name regardless of whether
+    // the old container has been removed yet.
+    await assertNoHostPortConflicts(portArgs, containerPrefix)
+
     return new Promise((resolve, reject) => {
         // Pass every container env var as a bare `--env NAME` (value supplied in
         // the execFile `env` option below), NOT `--env NAME=value` in argv. The
@@ -321,8 +369,6 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             dockerEnv[key] = String(environmentVariables[key])
         }
 
-        const containerPrefix = getDockerContainerImageName(module, coin, network)
-
         console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
         execFile('docker', ['build', '.', '-t', containerPrefix], { cwd: dir }, async (error) => {
             if (error) {
@@ -331,38 +377,6 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             }
 
             try {
-                // Table-driven per-service run-args (SERVICE_REGISTRY in
-                // constants.js) replaces the old per-service switch/case: a new
-                // service is one table entry, not four hand-edited dispatch sites
-                // (H1 / ). Singleton services (hub/explorer/sync) clear
-                // coin/network so the shared container name and network resolve
-                // correctly below.
-                const built = buildModuleDockerArgs(module, environmentVariables, coin, network)
-                if (built.singleton) {
-                    coin = ""
-                    network = ""
-                }
-                const portArgs = built.portArgs
-                const volumeArgs = built.volumeArgs
-                const ulimitArgs = built.ulimitArgs
-
-                // Validate all port values
-                if (portArgs.length > 0) {
-                    for (let i = 0; i < portArgs.length; i++) {
-                        if (portArgs[i] === '-p') {
-                            const pair = portArgs[i + 1]
-                            const colonIdx = pair.indexOf(':')
-                            if (colonIdx === -1) continue
-                            const hostPort = pair.substring(0, colonIdx)
-                            const containerPort = pair.substring(colonIdx + 1)
-                            if (!validatePort(hostPort) || !validatePort(containerPort)) {
-                                reject("Invalid port value in configuration: " + pair)
-                                return
-                            }
-                        }
-                    }
-                }
-
                 if (overwriteContainerId) {
                     try {
                         await killContainer(overwriteContainerId)
@@ -381,12 +395,6 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 try {
                     await forceRemoveContainerByName(containerPrefix)
                 } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
-
-                // Pre-flight host-port collision check (multi-stack hosts). Runs
-                // after the overwrite removal so a re-install of THIS service never
-                // flags its own just-removed container. Throws here reject the
-                // promise via the surrounding try/catch.
-                await assertNoHostPortConflicts(portArgs, containerPrefix)
 
                 // One-shot execution containers (e.g. the e2e-test runner) must NOT get a
                 // restart policy: after their command exits, `unless-stopped` would restart
@@ -656,6 +664,7 @@ module.exports = {
     cloneGit,
     getModuleBranch,
     buildAndUp,
+    buildHealthcheckArgs,
     buildModuleDockerArgs,
     assertNoHostPortConflicts,
     installModule,

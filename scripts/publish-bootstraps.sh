@@ -183,13 +183,52 @@ for c in "${SELECTED[@]}"; do
     files=("$archive")
     [ -f "$archive.sig" ]    && files+=("$archive.sig")
     [ -f "$archive.sha256" ] && files+=("$archive.sha256")
-    if scp -o BatchMode=yes "${files[@]}" "$SYNC_HOST:$dest/"; then
-      log "  published $(basename "$archive") (+sig) to $SYNC_HOST:$dest"
+    a_base="$(basename "$archive")"
+
+    # Atomic publish. Upload every file under a `.part` temp name that no
+    # `*.tar.gz` consumer glob can match, then rename into place on the sync
+    # host with `mv` - sidecars (.sig/.sha256) FIRST, the archive LAST - so the
+    # moment an archive is visible under its final name its signature already
+    # exists. Consumers resolve "newest" by globbing `*.tar.gz`, so streaming an
+    # archive under its final name (as before) exposed a truncated, not-yet-
+    # signed file for the whole multi-GB transfer window, and a dead scp left
+    # that truncated file shadowing the last good archive. With temp-name+mv, a
+    # partial upload only ever exists as a `.part` file and is cleaned up.
+    cleanup_parts() {
+      local rm_cmd="cd '$dest'"
+      local f
+      for f in "${files[@]}"; do rm_cmd="$rm_cmd; rm -f '$(basename "$f").part'"; done
+      ssh -o BatchMode=yes "$SYNC_HOST" "$rm_cmd" || true
+    }
+
+    scp_ok=1
+    for f in "${files[@]}"; do
+      if ! scp -o BatchMode=yes "$f" "$SYNC_HOST:$dest/$(basename "$f").part"; then scp_ok=0; break; fi
+    done
+    if [ "$scp_ok" != 1 ]; then
+      cleanup_parts
+      log "  scp FAILED"; SUMMARY+=("$c: PUBLISH-FAIL"); fail=1; continue
+    fi
+
+    # Rename sidecars first, the archive last (single ssh; each mv is atomic
+    # within the destination directory). `&&` chains so a mid-rename failure
+    # stops before the archive is exposed.
+    mv_cmd="cd '$dest'"
+    for f in "${files[@]}"; do
+      bn="$(basename "$f")"
+      [ "$bn" = "$a_base" ] && continue   # archive is renamed last, below
+      mv_cmd="$mv_cmd && mv -f '$bn.part' '$bn'"
+    done
+    mv_cmd="$mv_cmd && mv -f '$a_base.part' '$a_base'"
+
+    if ssh -o BatchMode=yes "$SYNC_HOST" "$mv_cmd"; then
+      log "  published $a_base (+sig) to $SYNC_HOST:$dest"
       SUMMARY+=("$c: PUBLISHED")
       # Prune remote: keep newest $KEEP archives + their sidecars.
       ssh -o BatchMode=yes "$SYNC_HOST" "cd '$dest' && ls -t *.tar.gz 2>/dev/null | tail -n +$((KEEP+1)) | while read -r f; do rm -f \"\$f\" \"\$f.sig\" \"\$f.sha256\"; done" || log "  (remote prune warning)"
     else
-      log "  scp FAILED"; SUMMARY+=("$c: PUBLISH-FAIL"); fail=1; continue
+      cleanup_parts
+      log "  publish rename FAILED"; SUMMARY+=("$c: PUBLISH-FAIL"); fail=1; continue
     fi
   fi
 

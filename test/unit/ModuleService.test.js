@@ -590,6 +590,50 @@ describe('ModuleService', function () {
             expect(args[cmdIdx + 1]).to.include('3005')
         })
 
+        it('warns and returns [] when the descriptor portKey is missing from the env', function () {
+            const stubs = makeStubs()
+            const ms = loadModuleService(stubs)
+            const logSpy = sinon.spy(console, 'log')
+            try {
+                // DECODER_API_PORT deliberately absent from the env
+                const args = ms.buildHealthcheckArgs('xchain-decoder', {})
+                expect(args).to.deep.equal([])
+                const warned = logSpy.getCalls().map(c => c.args.join(' ')).join('\n')
+                expect(warned).to.match(/WARNING: no healthcheck for xchain-decoder/)
+                expect(warned).to.match(/DECODER_API_PORT is unset/)
+            } finally {
+                logSpy.restore()
+            }
+        })
+
+        it('does not warn and returns health args when the portKey is present', function () {
+            const stubs = makeStubs()
+            const ms = loadModuleService(stubs)
+            const logSpy = sinon.spy(console, 'log')
+            try {
+                const args = ms.buildHealthcheckArgs('xchain-decoder', { DECODER_API_PORT: '3002' })
+                expect(args).to.include('--health-cmd')
+                const warned = logSpy.getCalls().map(c => c.args.join(' ')).join('\n')
+                expect(warned).to.not.match(/WARNING: no healthcheck/)
+            } finally {
+                logSpy.restore()
+            }
+        })
+
+        it('returns [] with no warning for a module that has no healthcheck descriptor', function () {
+            const stubs = makeStubs()
+            const ms = loadModuleService(stubs)
+            const logSpy = sinon.spy(console, 'log')
+            try {
+                const args = ms.buildHealthcheckArgs('xchain-e2e-test', { WHATEVER: '1' })
+                expect(args).to.deep.equal([])
+                const warned = logSpy.getCalls().map(c => c.args.join(' ')).join('\n')
+                expect(warned).to.not.match(/WARNING: no healthcheck/)
+            } finally {
+                logSpy.restore()
+            }
+        })
+
         it('includes --health-interval, --health-timeout, --health-retries, --health-start-period for encoder', async function () {
             const stubs = makeStubs()
             const getRunArgs = captureRunArgs(stubs)
@@ -1292,6 +1336,29 @@ describe('ModuleService', function () {
             } catch (err) {
                 expect(err).to.include('Invalid port value')
             }
+        })
+
+        it('runs the host-port preflight BEFORE docker build so a conflict fails fast (#2594)', async function () {
+            const stubs = makeStubs()
+            // ENCODER_PORT/ENCODER_API_PORT both resolve to 3003 (see makeStubs'
+            // getDefaultConfig); report that host port as already published by a
+            // differently-named container so assertNoHostPortConflicts rejects.
+            stubs.getPublishedHostPorts = sinon.stub().resolves(new Map([['3003', new Set(['other-stack-container'])]]))
+            let buildInvoked = false
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] } else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') { buildInvoked = true; cb(null) }
+                else if (args[0] === 'run') { cb(null, 'a'.repeat(64) + '\n') }
+            })
+            const ms = loadModuleService(stubs)
+            try {
+                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+                expect.fail('Should have rejected on host port conflict')
+            } catch (err) {
+                expect(String(err)).to.include('Host port conflict')
+            }
+            expect(buildInvoked).to.be.false
         })
 
         it('includes --restart unless-stopped for non-execution containers', async function () {

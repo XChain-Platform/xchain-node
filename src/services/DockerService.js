@@ -399,6 +399,17 @@ async function startDockerMonitor(containerIds, follow) {
         const idsToMonitor = containerIds.slice(0, MAX_CONTAINERS)
         const n = idsToMonitor.length
 
+        // Disclose truncation: when more than MAX_CONTAINERS were requested, the
+        // split-pane view can only show the first MAX_CONTAINERS, so name every
+        // container that is being dropped (mirrors the logModules omission warning)
+        // and label the banner `n of N` so a truncated view is never mistaken for
+        // the whole fleet.
+        const truncated = containerIds.length > MAX_CONTAINERS
+        if (truncated) {
+            const omitted = containerIds.slice(MAX_CONTAINERS).map(c => c["name"]).join(", ")
+            console.log("Monitoring only " + n + " of " + containerIds.length + " containers; omitted: " + omitted)
+        }
+
         const screen = blessed.screen({
             smartCSR: true,
             title: 'XChain Containers Logs',
@@ -409,7 +420,9 @@ async function startDockerMonitor(containerIds, follow) {
             parent: screen,
             top: 0,
             left: 'center',
-            content: ` Monitoring ${n} containers (Q - Exit) `,
+            content: truncated
+                ? ` Monitoring ${n} of ${containerIds.length} containers (Q - Exit) `
+                : ` Monitoring ${n} containers (Q - Exit) `,
             style: { bg: 'blue', fg: 'white', bold: true }
         })
 

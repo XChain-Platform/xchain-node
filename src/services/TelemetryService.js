@@ -15,7 +15,8 @@
  *
  * Anonymous usage telemetry for node operators. Default-on with a real,
  * documented off-switch. Collects only: an anonymous install id, version
- * numbers, which services are running, and basic OS/Docker info. The IP
+ * numbers, which services are running (and their Docker healthcheck state),
+ * and basic OS/Docker info. The IP
  * is never sent here; the hub derives only a coarse country/region from the
  * connection and discards the IP (it is never stored).
  * No secrets, wallet data, addresses, or config values are ever included.
@@ -103,9 +104,15 @@ async function gatherModules() {
             for (const mod in mods) {
                 const m = mods[mod] || {}
                 const running = !!(m.status && m.status.State && m.status.State.Status === 'running')
+                // Additive healthcheck state: `running` stays a pure Docker-liveness
+                // signal, but a container whose healthcheck is failing (or wedged in
+                // `starting`) still reports State.Status === 'running', so the fleet
+                // rollup would otherwise look healthy while a probe is red. Surface the
+                // Docker health string separately (null when no healthcheck configured).
+                const health = (m.status && m.status.State && m.status.State.Health && m.status.State.Health.Status) || null
                 let version = m.container_version || m.local_version || null
                 if (version === '-' || version === undefined) version = null
-                modules.push({ module: mod, coin, network, version, running })
+                modules.push({ module: mod, coin, network, version, running, health })
             }
         }
     }
