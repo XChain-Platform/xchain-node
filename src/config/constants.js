@@ -176,6 +176,140 @@ const LIBRARY_BUNDLES = {
     "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts", "xchain-indexer"]
 }
 
+// Single source of truth for the per-service Docker run-args and the
+// hub/explorer config descriptor. Replaces the hand-maintained switch/case
+// blocks that used to live in ModuleService.buildAndUp() and
+// HubService.updateHubOrExplorer(): adding or renaming a service now means
+// editing exactly one table entry, and a forgotten service surfaces as a
+// missing key here rather than as a silently omitted install branch (H1 /
+// ). The table is pure data; the two dispatch sites interpret it
+// (ModuleService owns the docker-arg builder, HubService owns the config
+// builder) so constants.js stays free of service-layer requires.
+//
+// docker facet (consumed by ModuleService.buildModuleDockerArgs):
+//   singleton - true clears coin/network before naming/network resolution
+//               (shared containers: hub, explorer, sync)
+//   ports     - [{ host, container, always }]; pushed as `-p host:container`.
+//               `always:true` pushes unconditionally (hub/explorer, whose
+//               ports are structurally present); otherwise the pair is pushed
+//               only when both env keys exist (preserves the old
+//               `if (X in env && Y in env)` guards).
+//   volumes   - each entry is one of:
+//                 { hostKey, container }        static env-keyed bind mount
+//                 { hostFn: 'utxoTrackerVolume', container }  dynamic volume name
+//                 { type: 'hubCapabilityConfig' }  validator caps mount (ro)
+//                 { type: 'hubSignerDir' }         operator signer mount (ro)
+//   ulimits   - raw `--ulimit` values (e.g. 'nofile=2048:2048')
+//
+// hubConfig facet (consumed by HubService.buildHubModuleConfig):
+//   { type: 'database' }  external-vs-dockerized MariaDB descriptor
+//   { fields: { outKey: envKey, ... } }  descriptor read from the coin/network
+//                                        default config. Absent = the module
+//                                        contributes no hub config (hub,
+//                                        explorer, sync, e2e-test).
+const SERVICE_REGISTRY = {
+    [NODE_MODULE_NAME]: {
+        hubConfig: {
+            fields: {
+                host:        'NODE_URL',
+                port:        'NODE_PORT',
+                server_port: 'NODE_EXPOSED_PORT',
+                user:        'NODE_USER',
+                pass:        'NODE_PASSWORD'
+            }
+        }
+    },
+    [DB_MODULE_NAME]: {
+        hubConfig: { type: 'database' }
+    },
+    [XChainService.XCHAIN_ENCODER]: {
+        docker: {
+            ports: [{ host: 'ENCODER_PORT', container: 'ENCODER_API_PORT' }]
+        },
+        hubConfig: {
+            fields: { host: 'ENCODER_URL', port: 'ENCODER_API_PORT', server_port: 'ENCODER_PORT' }
+        }
+    },
+    [XChainService.XCHAIN_DECODER]: {
+        docker: {
+            ports:   [{ host: 'DECODER_PORT', container: 'DECODER_API_PORT' }],
+            volumes: [{ hostKey: 'DECODER_BOOTSTRAP_VOLUME', container: '/bootstrap/xchain-decoder' }]
+        },
+        hubConfig: {
+            fields: {
+                host:        'DECODER_URL',
+                port:        'DECODER_API_PORT',
+                server_port: 'DECODER_PORT',
+                db_host:     'DECODER_DB_HOST',
+                db_port:     'DECODER_DB_PORT',
+                name:        'DECODER_DB_NAME',
+                user:        'DECODER_DB_USER',
+                pass:        'DECODER_DB_PASS'
+            }
+        }
+    },
+    [XChainService.XCHAIN_UTXO_TRACKER]: {
+        docker: {
+            ports:   [{ host: 'UTXO_TRACKER_PORT', container: 'UTXO_TRACKER_API_PORT' }],
+            volumes: [
+                { hostFn: 'utxoTrackerVolume', container: '/data/xchain-utxo-tracker' },
+                { hostKey: 'UTXO_TRACKER_BOOTSTRAP_VOLUME', container: '/bootstrap/xchain-utxo-tracker' }
+            ],
+            ulimits: ['nofile=2048:2048']
+        },
+        hubConfig: {
+            fields: { host: 'UTXO_TRACKER_URL', port: 'UTXO_TRACKER_API_PORT', server_port: 'UTXO_TRACKER_PORT' }
+        }
+    },
+    [XChainService.XCHAIN_INDEXER]: {
+        docker: {
+            ports: [{ host: 'INDEXER_PORT', container: 'INDEXER_API_PORT' }]
+        },
+        hubConfig: {
+            fields: {
+                host:        'INDEXER_URL',
+                port:        'INDEXER_API_PORT',
+                server_port: 'INDEXER_PORT',
+                db_host:     'INDEXER_DB_HOST',
+                db_port:     'INDEXER_DB_PORT',
+                name:        'INDEXER_DB_NAME',
+                user:        'INDEXER_DB_USER',
+                pass:        'INDEXER_DB_PASS'
+            }
+        }
+    },
+    [XChainService.XCHAIN_REGTEST_MINER]: {
+        docker: {
+            ports: [{ host: 'REGTEST_MINER_PORT', container: 'REGTEST_MINER_API_PORT' }]
+        },
+        hubConfig: {
+            fields: { host: 'REGTEST_MINER_URL', port: 'REGTEST_MINER_API_PORT', server_port: 'REGTEST_MINER_PORT' }
+        }
+    },
+    [HUB_MODULE_NAME]: {
+        docker: {
+            singleton: true,
+            ports:   [{ host: 'HUB_PORT', container: 'HUB_PORT', always: true }],
+            volumes: [{ type: 'hubCapabilityConfig' }, { type: 'hubSignerDir' }]
+        }
+    },
+    [EXPLORER_MODULE_NAME]: {
+        docker: {
+            singleton: true,
+            ports: [
+                { host: 'EXPLORER_PORT_HTTP',  container: 'EXPLORER_API_PORT_HTTP',  always: true },
+                { host: 'EXPLORER_PORT_HTTPS', container: 'EXPLORER_API_PORT_HTTPS', always: true }
+            ]
+        }
+    },
+    [SYNC_MODULE_NAME]: {
+        docker: {
+            singleton: true,
+            ports: [{ host: 'SYNC_PORT', container: 'SYNC_API_PORT' }]
+        }
+    }
+}
+
 // Operator-relevant directory roots are env-var-overridable so that hosts
 // with a small / partition and a large data volume (e.g., OVH RISE-3 with
 // /misc on a SATA mirror) can land bootstrap work + outputs on the big disk
@@ -216,6 +350,7 @@ module.exports = {
     XChainService,
     REGTEST_MODULES,
     LIBRARY_BUNDLES,
+    SERVICE_REGISTRY,
     Coin,
     Network,
     CoinTickerSymbol,

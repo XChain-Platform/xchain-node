@@ -16,10 +16,35 @@
  ********************************************************************/
 
 const {
-    HUB_MODULE_NAME, DB_MODULE_NAME, NODE_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    XChainService, SEP,
-    EXTERNAL_DB
+    HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
+    EXTERNAL_DB, SERVICE_REGISTRY
 } = require('../config/constants')
+
+// Build the hub/explorer per-module config descriptor from the table-driven
+// SERVICE_REGISTRY (constants.js) instead of a hand-maintained switch/case.
+// Returns null for modules that contribute no hub config (hub/explorer/sync
+// themselves, e2e-test) so the caller skips them, matching the old
+// switch's default-no-op. The database descriptor is external-vs-dockerized
+// and resolved from `ctx`; every other descriptor is a straight field map
+// read from the coin/network default config (H1 / ).
+function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
+    const hubConfig = (SERVICE_REGISTRY[nextModule] || {}).hubConfig
+    if (!hubConfig) return null
+
+    if (hubConfig.type === 'database') {
+        // External DB has no container; point the hub at the configured
+        // external host so its module-config view reflects reality.
+        return ctx.EXTERNAL_DB
+            ? { host: ctx.externalDbCfg.host, port: ctx.externalDbCfg.port }
+            : { host: 'mariadb', port: 3306 }
+    }
+
+    const config = {}
+    for (const [outKey, envKey] of Object.entries(hubConfig.fields)) {
+        config[outKey] = defaultConfigCoinNetwork[envKey]
+    }
+    return config
+}
 const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
 const { sleep }                                = require('../utils/helpers')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = require('./ConfigService')
@@ -76,72 +101,7 @@ async function updateHubOrExplorer(module) {
             }
 
             for (const nextModule in lastStatus[nextCoin][nextNetwork]) {
-                let config = null
-
-                switch (nextModule) {
-                    case DB_MODULE_NAME:
-                        // External DB has no container; point the hub at the
-                        // configured external host so its module-config view
-                        // reflects reality.
-                        config = EXTERNAL_DB
-                            ? { "host": externalDbCfg.host, "port": externalDbCfg.port }
-                            : { "host": "mariadb", "port": 3306 }
-                        break
-                    case NODE_MODULE_NAME:
-                        config = {
-                            "host":        defaultConfigCoinNetwork["NODE_URL"],
-                            "port":        defaultConfigCoinNetwork["NODE_PORT"],
-                            "server_port": defaultConfigCoinNetwork["NODE_EXPOSED_PORT"],
-                            "user":        defaultConfigCoinNetwork["NODE_USER"],
-                            "pass":        defaultConfigCoinNetwork["NODE_PASSWORD"]
-                        }
-                        break
-                    case XChainService.XCHAIN_DECODER:
-                        config = {
-                            "host":        defaultConfigCoinNetwork["DECODER_URL"],
-                            "port":        defaultConfigCoinNetwork["DECODER_API_PORT"],
-                            "server_port": defaultConfigCoinNetwork["DECODER_PORT"],
-                            "db_host":     defaultConfigCoinNetwork["DECODER_DB_HOST"],
-                            "db_port":     defaultConfigCoinNetwork["DECODER_DB_PORT"],
-                            "name":        defaultConfigCoinNetwork["DECODER_DB_NAME"],
-                            "user":        defaultConfigCoinNetwork["DECODER_DB_USER"],
-                            "pass":        defaultConfigCoinNetwork["DECODER_DB_PASS"]
-                        }
-                        break
-                    case XChainService.XCHAIN_ENCODER:
-                        config = {
-                            "host":        defaultConfigCoinNetwork["ENCODER_URL"],
-                            "port":        defaultConfigCoinNetwork["ENCODER_API_PORT"],
-                            "server_port": defaultConfigCoinNetwork["ENCODER_PORT"]
-                        }
-                        break
-                    case XChainService.XCHAIN_INDEXER:
-                        config = {
-                            "host":        defaultConfigCoinNetwork["INDEXER_URL"],
-                            "port":        defaultConfigCoinNetwork["INDEXER_API_PORT"],
-                            "server_port": defaultConfigCoinNetwork["INDEXER_PORT"],
-                            "db_host":     defaultConfigCoinNetwork["INDEXER_DB_HOST"],
-                            "db_port":     defaultConfigCoinNetwork["INDEXER_DB_PORT"],
-                            "name":        defaultConfigCoinNetwork["INDEXER_DB_NAME"],
-                            "user":        defaultConfigCoinNetwork["INDEXER_DB_USER"],
-                            "pass":        defaultConfigCoinNetwork["INDEXER_DB_PASS"]
-                        }
-                        break
-                    case XChainService.XCHAIN_UTXO_TRACKER:
-                        config = {
-                            "host":        defaultConfigCoinNetwork["UTXO_TRACKER_URL"],
-                            "port":        defaultConfigCoinNetwork["UTXO_TRACKER_API_PORT"],
-                            "server_port": defaultConfigCoinNetwork["UTXO_TRACKER_PORT"]
-                        }
-                        break
-                    case XChainService.XCHAIN_REGTEST_MINER:
-                        config = {
-                            "host":        defaultConfigCoinNetwork["REGTEST_MINER_URL"],
-                            "port":        defaultConfigCoinNetwork["REGTEST_MINER_API_PORT"],
-                            "server_port": defaultConfigCoinNetwork["REGTEST_MINER_PORT"]
-                        }
-                        break
-                }
+                const config = buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, { EXTERNAL_DB, externalDbCfg })
 
                 if (config != null) {
                     if (module === "xchain-explorer") {

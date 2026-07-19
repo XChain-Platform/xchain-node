@@ -23,7 +23,7 @@ const fs        = require('fs')
 const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES
+    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, SERVICE_REGISTRY
 } = require('../config/constants')
 const { db }                = require('../state')
 const {
@@ -203,6 +203,67 @@ function buildHealthcheckArgs(module, environmentVariables) {
     ]
 }
 
+// Build the per-service docker-run port/volume/ulimit args from the
+// table-driven SERVICE_REGISTRY (constants.js) instead of a hand-maintained
+// switch/case. A module with no `docker` facet (or no registry entry, e.g.
+// the one-shot e2e-test runner) yields empty arg arrays. `singleton` tells the
+// caller to clear coin/network before container-name and network resolution
+// (shared hub/explorer/sync containers). Preserves the previous exact
+// semantics: `always` ports push unconditionally, other ports push only when
+// both env keys are present, and the two hub-only dynamic mounts (validator
+// capability config, operator signer dir) resolve here where ValidatorService
+// and the filesystem are available.
+function buildModuleDockerArgs(module, environmentVariables, coin, network) {
+    const portArgs = []
+    const volumeArgs = []
+    const ulimitArgs = []
+    const docker = (SERVICE_REGISTRY[module] || {}).docker
+    if (!docker) return { portArgs, volumeArgs, ulimitArgs, singleton: false }
+
+    for (const p of docker.ports || []) {
+        if (p.always || (p.host in environmentVariables && p.container in environmentVariables)) {
+            portArgs.push('-p', `${environmentVariables[p.host]}:${environmentVariables[p.container]}`)
+        }
+    }
+
+    for (const v of docker.volumes || []) {
+        if (v.hostKey) {
+            volumeArgs.push('-v', `${environmentVariables[v.hostKey]}:${v.container}`)
+        } else if (v.hostFn === 'utxoTrackerVolume') {
+            // Volume name derivation lives in one place (ConfigService), consumed
+            // here and by resetModules + BootstrapService, so a non-default
+            // NODE_PREFIX can never drift between them (uuid:7523dd94, uuid:a61fc673).
+            volumeArgs.push('-v', `${getUtxoTrackerVolumeName(coin, network)}:${v.container}`)
+        } else if (v.type === 'hubCapabilityConfig') {
+            // Validator mode: mount the capability config (read-only) so the
+            // hub's HUB_CAPABILITY_CONFIG path resolves inside the container.
+            // No-op for a standalone hub (no validator configured).
+            if ('HUB_CAPABILITY_CONFIG' in environmentVariables) {
+                const { getCapabilityConfigHostPath, CAPS_CONTAINER_PATH } = require('./ValidatorService')
+                const capsHost = getCapabilityConfigHostPath()
+                if (capsHost) {
+                    volumeArgs.push('-v', `${capsHost}:${CAPS_CONTAINER_PATH}:ro`)
+                }
+            }
+        } else if (v.type === 'hubSignerDir') {
+            // Operator signer for the on-chain DOGE publishers (PRICE v0 / ANCHOR).
+            // The directory carries the operator's signer.js plus its own
+            // node_modules and key file, so the whole directory is mounted
+            // read-only; ConfigService sets HUB_SIGNER_MODULE to the matching
+            // in-container path. No-op when unconfigured.
+            if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR && fs.existsSync(process.env.XCHAIN_NODE_HUB_SIGNER_DIR)) {
+                volumeArgs.push('-v', `${process.env.XCHAIN_NODE_HUB_SIGNER_DIR}:/XChainHub/operator-signer:ro`)
+            }
+        }
+    }
+
+    for (const u of docker.ulimits || []) {
+        ulimitArgs.push('--ulimit', u)
+    }
+
+    return { portArgs, volumeArgs, ulimitArgs, singleton: !!docker.singleton }
+}
+
 async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null) {
     if (!checkIfModuleExists(module)) {
         throw "module not found"
@@ -270,86 +331,20 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             }
 
             try {
-                const portArgs = []
-                const volumeArgs = []
-                const ulimitArgs = []
-
-                switch (module) {
-                    case XChainService.XCHAIN_DECODER:
-                        if ("DECODER_PORT" in environmentVariables && "DECODER_API_PORT" in environmentVariables) {
-                            portArgs.push('-p', `${environmentVariables["DECODER_PORT"]}:${environmentVariables["DECODER_API_PORT"]}`)
-                        }
-                        volumeArgs.push('-v', `${environmentVariables["DECODER_BOOTSTRAP_VOLUME"]}:/bootstrap/xchain-decoder`)
-                        break
-                    case XChainService.XCHAIN_ENCODER:
-                        if ("ENCODER_PORT" in environmentVariables && "ENCODER_API_PORT" in environmentVariables) {
-                            portArgs.push('-p', `${environmentVariables["ENCODER_PORT"]}:${environmentVariables["ENCODER_API_PORT"]}`)
-                        }
-                        break
-                    case XChainService.XCHAIN_UTXO_TRACKER:
-                        if ("UTXO_TRACKER_PORT" in environmentVariables && "UTXO_TRACKER_API_PORT" in environmentVariables) {
-                            portArgs.push('-p', `${environmentVariables["UTXO_TRACKER_PORT"]}:${environmentVariables["UTXO_TRACKER_API_PORT"]}`)
-                        }
-                        // Volume name derivation lives in one place now
-                        // (ConfigService.getUtxoTrackerVolumeName), consumed here and by
-                        // moduleOperations.resetModules + all three BootstrapService
-                        // sites, so a non-default NODE_PREFIX can never drift between
-                        // them again (uuid:7523dd94, uuid:a61fc673).
-                        volumeArgs.push(
-                            '-v', `${getUtxoTrackerVolumeName(coin, network)}:/data/xchain-utxo-tracker`,
-                            '-v', `${environmentVariables["UTXO_TRACKER_BOOTSTRAP_VOLUME"]}:/bootstrap/xchain-utxo-tracker`
-                        )
-                        ulimitArgs.push('--ulimit', 'nofile=2048:2048')
-                        break
-                    case XChainService.XCHAIN_INDEXER:
-                        if ("INDEXER_PORT" in environmentVariables && "INDEXER_API_PORT" in environmentVariables) {
-                            portArgs.push('-p', `${environmentVariables["INDEXER_PORT"]}:${environmentVariables["INDEXER_API_PORT"]}`)
-                        }
-                        break
-                    case XChainService.XCHAIN_REGTEST_MINER:
-                        if ("REGTEST_MINER_PORT" in environmentVariables && "REGTEST_MINER_API_PORT" in environmentVariables) {
-                            portArgs.push('-p', `${environmentVariables["REGTEST_MINER_PORT"]}:${environmentVariables["REGTEST_MINER_API_PORT"]}`)
-                        }
-                        break
-                    case HUB_MODULE_NAME:
-                        coin = ""
-                        network = ""
-                        portArgs.push('-p', `${environmentVariables["HUB_PORT"]}:${environmentVariables["HUB_PORT"]}`)
-                        // Validator mode: mount the capability config (read-only) so the
-                        // hub's HUB_CAPABILITY_CONFIG path resolves inside the container.
-                        // No-op for a standalone hub (no validator configured).
-                        if ("HUB_CAPABILITY_CONFIG" in environmentVariables) {
-                            const { getCapabilityConfigHostPath, CAPS_CONTAINER_PATH } = require('./ValidatorService')
-                            const capsHost = getCapabilityConfigHostPath()
-                            if (capsHost) {
-                                volumeArgs.push('-v', `${capsHost}:${CAPS_CONTAINER_PATH}:ro`)
-                            }
-                        }
-                        // Operator signer for the on-chain DOGE publishers (PRICE v0 /
-                        // ANCHOR). The directory carries the operator's signer.js plus
-                        // its own node_modules and key file, so the whole directory is
-                        // mounted read-only; ConfigService sets HUB_SIGNER_MODULE to the
-                        // matching in-container path. No-op when unconfigured.
-                        if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR && fs.existsSync(process.env.XCHAIN_NODE_HUB_SIGNER_DIR)) {
-                            volumeArgs.push('-v', `${process.env.XCHAIN_NODE_HUB_SIGNER_DIR}:/XChainHub/operator-signer:ro`)
-                        }
-                        break
-                    case EXPLORER_MODULE_NAME:
-                        coin = ""
-                        network = ""
-                        portArgs.push(
-                            '-p', `${environmentVariables["EXPLORER_PORT_HTTP"]}:${environmentVariables["EXPLORER_API_PORT_HTTP"]}`,
-                            '-p', `${environmentVariables["EXPLORER_PORT_HTTPS"]}:${environmentVariables["EXPLORER_API_PORT_HTTPS"]}`
-                        )
-                        break
-                    case SYNC_MODULE_NAME:
-                        coin = ""
-                        network = ""
-                        if ("SYNC_PORT" in environmentVariables && "SYNC_API_PORT" in environmentVariables) {
-                            portArgs.push('-p', `${environmentVariables["SYNC_PORT"]}:${environmentVariables["SYNC_API_PORT"]}`)
-                        }
-                        break
+                // Table-driven per-service run-args (SERVICE_REGISTRY in
+                // constants.js) replaces the old per-service switch/case: a new
+                // service is one table entry, not four hand-edited dispatch sites
+                // (H1 / ). Singleton services (hub/explorer/sync) clear
+                // coin/network so the shared container name and network resolve
+                // correctly below.
+                const built = buildModuleDockerArgs(module, environmentVariables, coin, network)
+                if (built.singleton) {
+                    coin = ""
+                    network = ""
                 }
+                const portArgs = built.portArgs
+                const volumeArgs = built.volumeArgs
+                const ulimitArgs = built.ulimitArgs
 
                 // Validate all port values
                 if (portArgs.length > 0) {
@@ -661,6 +656,7 @@ module.exports = {
     cloneGit,
     getModuleBranch,
     buildAndUp,
+    buildModuleDockerArgs,
     assertNoHostPortConflicts,
     installModule,
     uninstallModule
