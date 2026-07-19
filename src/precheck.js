@@ -21,7 +21,7 @@ const { dataDir, moduleDir, tmpDir, containersFilesDir,
         EXTERNAL_DB } = require('./config/constants')
 const { db, isVerbose }                = require('./state')
 const { redactSecrets }                = require('./utils/helpers')
-const { checkDockerInstalledAndReachable, createDockerNetwork } = require('./services/DockerService')
+const { checkDockerInstalledAndReachable, createDockerNetwork, checkContainerdDataRootRelocation } = require('./services/DockerService')
 const { getDockerNetwork } = require('./services/ConfigService')
 const { checkAllRemoteVersions }       = require('./services/VersionService')
 const { getStatus }                    = require('./services/StatusService')
@@ -43,6 +43,28 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
         await checkDockerInstalledAndReachable()
     } catch {
         throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
+    }
+
+    // : warn (never block) when Docker's data-root was relocated off the
+    // root filesystem but containerd's store was left behind on `/`, where it
+    // silently fills the root disk. Guarded + best-effort: a stubbed/older
+    // DockerService without this probe, or any failure, degrades to a no-op.
+    try {
+        if (typeof checkContainerdDataRootRelocation === 'function') {
+            const relo = await checkContainerdDataRootRelocation()
+            if (relo) {
+                console.log(
+                    "Warning: Docker's data-root is on a separate disk (" + relo.dockerRootDir + "), " +
+                    "but containerd's store is still on the root filesystem (" + relo.containerdRoot + "). " +
+                    "The Docker data-root setting does NOT move containerd's content/snapshot store, so it " +
+                    "keeps growing on `/` and can fill the root disk. Relocate containerd too: point its `root` " +
+                    "(in /etc/containerd/config.toml, or bind-mount " + relo.containerdRoot + ") onto the same disk " +
+                    "and restart the containerd + docker services. Set XCHAIN_NODE_CONTAINERD_ROOT to silence a false positive."
+                )
+            }
+        }
+    } catch {
+        // Diagnostic only; never block a command on the containerd probe.
     }
 
     if (isVerbose()) console.log("Checking/Creating directories")

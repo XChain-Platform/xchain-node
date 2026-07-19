@@ -28,7 +28,8 @@ function loadPrecheck(overrides) {
         getDatabaseHostPort: sinon.stub().resolves(13306),
         createDatabase:      sinon.stub().resolves(),
         checkAllRemoteVersions: sinon.stub().resolves(),
-        getStatus:              sinon.stub().resolves()
+        getStatus:              sinon.stub().resolves(),
+        checkContainerdDataRootRelocation: sinon.stub().resolves(null)
     }, overrides)
 
     const precheck = proxyquire('../../src/precheck.js', {
@@ -41,7 +42,8 @@ function loadPrecheck(overrides) {
         './utils/helpers': { redactSecrets: (e) => e },
         './services/DockerService': {
             checkDockerInstalledAndReachable: sinon.stub().resolves(),
-            createDockerNetwork:              sinon.stub().resolves()
+            createDockerNetwork:              sinon.stub().resolves(),
+            checkContainerdDataRootRelocation: stubs.checkContainerdDataRootRelocation
         },
         './services/ConfigService':    { getDockerNetwork: () => 'xchain' },
         './services/VersionService':   { checkAllRemoteVersions: stubs.checkAllRemoteVersions },
@@ -135,5 +137,45 @@ describe('preCheck(): remote version check degrades gracefully @regression', fun
         await precheck.preCheck(false, false)
         expect(stubs.checkAllRemoteVersions.called).to.be.false
         expect(stubs.getStatus.firstCall.args[3]).to.be.false
+    })
+})
+
+describe('preCheck(): containerd data-root relocation warning  @regression', function () {
+
+    it('prints a warning when Docker data-root moved off / but containerd is still on /', async function () {
+        const { precheck } = loadPrecheck({
+            checkContainerdDataRootRelocation: sinon.stub().resolves({
+                dockerRootDir: '/misc/docker', containerdRoot: '/var/lib/containerd'
+            })
+        })
+        const log = sinon.stub(console, 'log')
+        try {
+            await precheck.preCheck(false, false)
+        } finally {
+            log.restore()
+        }
+        expect(log.args.some(a => String(a[0]).includes('containerd'))).to.be.true
+    })
+
+    it('prints no containerd warning when the probe reports no relocation hazard', async function () {
+        const { precheck } = loadPrecheck({
+            checkContainerdDataRootRelocation: sinon.stub().resolves(null)
+        })
+        const log = sinon.stub(console, 'log')
+        try {
+            await precheck.preCheck(false, false)
+        } finally {
+            log.restore()
+        }
+        expect(log.args.some(a => String(a[0]).includes('containerd'))).to.be.false
+    })
+
+    it('does not block the command when the containerd probe throws', async function () {
+        const { precheck, stubs } = loadPrecheck({
+            checkContainerdDataRootRelocation: sinon.stub().rejects(new Error('probe blew up'))
+        })
+        // preCheck must still complete its normal flow despite the probe failing.
+        await precheck.preCheck(false, false)
+        expect(stubs.createDatabase.calledOnce).to.be.true
     })
 })

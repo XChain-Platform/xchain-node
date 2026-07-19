@@ -128,6 +128,102 @@ describe('DockerService', function () {
     })
 
     // -------------------------------------------------------------------
+    // checkContainerdDataRootRelocation 
+    // -------------------------------------------------------------------
+
+    describe('checkContainerdDataRootRelocation()', function () {
+
+        // Helper: stub `docker info` to return a data-root, and fs.statSync to
+        // report a device id per path so we can simulate cross-filesystem layouts.
+        function load(dockerRootDir, devByPath, { dockerError } = {}) {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args[0]).to.equal('info')
+                expect(args).to.include('--format')
+                if (dockerError) { cb(new Error('daemon unreachable')); return }
+                cb(null, dockerRootDir === null ? '' : dockerRootDir + '\n')
+            })
+            const fsStub = {
+                readFileSync: sinon.stub(),
+                statSync: (p) => {
+                    if (!(p in devByPath)) {
+                        const err = new Error('ENOENT: ' + p)
+                        err.code = 'ENOENT'
+                        throw err
+                    }
+                    return { dev: devByPath[p] }
+                }
+            }
+            return loadDockerService(stubs, fsStub)
+        }
+
+        const ORIG_ENV = process.env.XCHAIN_NODE_CONTAINERD_ROOT
+        afterEach(function () {
+            if (ORIG_ENV === undefined) delete process.env.XCHAIN_NODE_CONTAINERD_ROOT
+            else process.env.XCHAIN_NODE_CONTAINERD_ROOT = ORIG_ENV
+        })
+
+        it('warns when data-root moved off / but containerd is still on /', async function () {
+            // `/` = dev 1, data-root on dev 2 (moved), containerd still on dev 1.
+            const ds = load('/misc/docker', { '/': 1, '/misc/docker': 2, '/var/lib/containerd': 1 })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.deep.equal({ dockerRootDir: '/misc/docker', containerdRoot: '/var/lib/containerd' })
+        })
+
+        it('returns null when data-root is still on the root filesystem', async function () {
+            const ds = load('/var/lib/docker', { '/': 1, '/var/lib/docker': 1, '/var/lib/containerd': 1 })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.be.null
+        })
+
+        it('returns null when containerd was also relocated off / (same disk as data-root)', async function () {
+            const ds = load('/misc/docker', { '/': 1, '/misc/docker': 2, '/var/lib/containerd': 2 })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.be.null
+        })
+
+        it('returns null when containerd lives on a third off-root disk', async function () {
+            const ds = load('/misc/docker', { '/': 1, '/misc/docker': 2, '/var/lib/containerd': 3 })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.be.null
+        })
+
+        it('honors XCHAIN_NODE_CONTAINERD_ROOT override', async function () {
+            process.env.XCHAIN_NODE_CONTAINERD_ROOT = '/data/containerd'
+            const ds = load('/misc/docker', { '/': 1, '/misc/docker': 2, '/data/containerd': 1 })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.deep.equal({ dockerRootDir: '/misc/docker', containerdRoot: '/data/containerd' })
+        })
+
+        it('returns null when the containerd path does not exist', async function () {
+            // data-root moved off /, but /var/lib/containerd is absent → nothing to warn.
+            const ds = load('/misc/docker', { '/': 1, '/misc/docker': 2 })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.be.null
+        })
+
+        it('returns null when the data-root path is unreadable', async function () {
+            const ds = load('/misc/docker', { '/': 1, '/var/lib/containerd': 1 })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.be.null
+        })
+
+        it('returns null (best-effort) when docker info fails', async function () {
+            const ds = load('/misc/docker', { '/': 1 }, { dockerError: true })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.be.null
+        })
+
+        it('returns null when docker info returns an empty data-root', async function () {
+            const ds = load(null, { '/': 1 })
+            const result = await ds.checkContainerdDataRootRelocation()
+            expect(result).to.be.null
+        })
+    })
+
+    // -------------------------------------------------------------------
     // Container lifecycle commands
     // -------------------------------------------------------------------
 

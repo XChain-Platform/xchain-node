@@ -47,6 +47,75 @@ async function checkDockerInstalledAndReachable() {
     })
 }
 
+// : When an operator relocates Docker's data-root off the root
+// filesystem (the common "move Docker to a big NVMe/HDD" recipe: set
+// `"data-root": "/misc/docker"` in /etc/docker/daemon.json), Docker's own
+// image + overlay2 store moves with it, but the containerd content and
+// snapshot store at /var/lib/containerd does NOT: that setting never touches
+// containerd's root. The containerd store keeps growing on the (often small)
+// root filesystem and can silently fill `/`, wedging the whole box even though
+// the operator believes storage lives on the big disk.
+//
+// This is a DIAGNOSTIC only, never automation: relocating containerd means
+// editing /etc/containerd/config.toml (or bind-mounting /var/lib/containerd)
+// and restarting the containerd + docker daemons, which is far too disruptive
+// to perform silently from a precheck. It is fully best-effort: any probe
+// failure resolves to null so a command is never blocked by it.
+//
+// Returns { dockerRootDir, containerdRoot } when Docker's data-root sits on a
+// different filesystem than `/` while containerd's store is still on `/`
+// (the disk-fill hazard), otherwise null.
+async function checkContainerdDataRootRelocation() {
+    return new Promise((resolve) => {
+        execFile('docker', ['info', '--format', '{{.DockerRootDir}}'], (error, stdout) => {
+            if (error || !stdout || !stdout.trim()) {
+                resolve(null)
+                return
+            }
+            const dockerRootDir  = stdout.trim()
+            // Default containerd root on Debian/Ubuntu Docker installs; overridable
+            // for non-standard installs (or to silence a false positive when
+            // containerd was already relocated to a path we can't infer).
+            const containerdRoot = process.env.XCHAIN_NODE_CONTAINERD_ROOT || '/var/lib/containerd'
+            try {
+                const rootDev = fs.statSync('/').dev
+                let dockerRootDev
+                try {
+                    dockerRootDev = fs.statSync(dockerRootDir).dev
+                } catch {
+                    // data-root path unreadable/missing: can't judge relocation.
+                    resolve(null)
+                    return
+                }
+                // Docker data-root still on the root filesystem: nothing was
+                // relocated, so containerd staying on `/` is expected and fine.
+                if (dockerRootDev === rootDev) {
+                    resolve(null)
+                    return
+                }
+                // Data-root has moved off `/`. Is containerd's store still on `/`?
+                let containerdDev
+                try {
+                    containerdDev = fs.statSync(containerdRoot).dev
+                } catch {
+                    // No containerd dir present (or unreadable): nothing to warn about.
+                    resolve(null)
+                    return
+                }
+                if (containerdDev === rootDev) {
+                    resolve({ dockerRootDir, containerdRoot })
+                    return
+                }
+                // containerd already lives off `/` (same disk as data-root or a
+                // third mount): no root-fill hazard.
+                resolve(null)
+            } catch {
+                resolve(null)
+            }
+        })
+    })
+}
+
 async function getStatusFromContainer(containerId) {
     return new Promise((resolve, reject) => {
         try {
@@ -462,6 +531,7 @@ async function saveContainerLogs(containerId, filePath) {
 
 module.exports = {
     checkDockerInstalledAndReachable,
+    checkContainerdDataRootRelocation,
     getStatusFromContainer,
     getDockerNetworkInspect,
     createDockerNetwork,
