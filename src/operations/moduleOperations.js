@@ -28,6 +28,7 @@ const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandPara
 const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases, getDatabaseContainerId } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
+const { assertHubNotBehind } = require('../services/SkewGuardService')
 const { statusChanged } = require('../services/StatusService')
 
 async function installModules(servicesList, branch = null) {
@@ -79,6 +80,12 @@ async function updateModules(servicesList, branch = null) {
                     // remoteUpdate)` guard short-circuits for any already-installed
                     // service and `update` becomes a silent no-op.
                     //
+                    // Version-skew guard : a hub-dependent service whose new
+                    // source declares `xchainRequiresHub` in its package.json is
+                    // REFUSED when the installed hub is behind that version, before
+                    // anything is torn down. Throws out of updateModules so the
+                    // update fails closed with nothing modified for this module.
+                    await assertHubNotBehind(nextModule, moduleBranch)
                     // moduleBranch MUST be threaded through: installModule re-clones the
                     // module on the remoteUpdate path (cloneGit with this `branch`), so a
                     // null branch here re-clones the default branch and clobbers the branch
