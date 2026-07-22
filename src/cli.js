@@ -57,7 +57,7 @@ async function parseCommand() {
     // pushes). Two of these interleaving from concurrent shells can corrupt an
     // install mid-flight, so they serialize on a pidfile lock; a second
     // invocation is refused with a clear message instead of interleaving.
-    const mutatingCommands = ['install', 'update', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback']
+    const mutatingCommands = ['install', 'update', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal']
     program.hook('preAction', async (thisCommand, actionCommand) => {
         setVerbose(thisCommand.opts().verbose ?? false)
         if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
@@ -206,6 +206,19 @@ async function parseCommand() {
             const serviceList = filterCommandParameters(null, service, chain, network)
             await restartModules(serviceList)
             return process.exit(0)
+        })
+
+    program
+        .command('autoheal')
+        .description('Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe')
+        .option('--dry-run', 'report restart candidates without acting')
+        .action(async (options) => {
+            const { runAutoheal } = require('./services/AutohealService')
+            const result = await runAutoheal({ dryRun: options.dryRun ?? false })
+            // Exit non-zero ONLY when a restart was attempted and failed, so a
+            // timer unit can alert on real remediation failures without paging
+            // on "nothing to do" passes.
+            return process.exit(result.failed.length > 0 ? 1 : 0)
         })
 
     program

@@ -152,6 +152,13 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 //   retries   - consecutive failures before marking unhealthy (--health-retries)
 //   startPeriod - grace period after container start before failures count
 //                 (--health-start-period); set long enough for npm start + DB connect
+//   autoheal  - opt-in flag consumed by AutohealService/`xchain-node autoheal`:
+//               when true, a container that stays unhealthy past the grace window
+//               gets `docker restart`ed. Default OFF. Only set it where a restart
+//               plausibly clears the wedge (stalled event loop, dead DB pool).
+//               NEVER set it on xchain-utxo-tracker: that service deliberately
+//               enters a stable halted state (503 while halted) instead of
+//               exiting, and a restart would just re-enter the same halt.
 //
 // Timing rationale:
 //   interval=15s  - frequent enough to detect a stuck service quickly without hammering
@@ -160,10 +167,10 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 //   startPeriod=  - varies: fast workers (encoder/miner) get 30s; DB-dependent services
 //                   (decoder, indexer, utxo-tracker) get 60s; hub/explorer/sync get 45s
 const SERVICE_HEALTHCHECK = {
-    [XChainService.XCHAIN_DECODER]:       { portKey: 'DECODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
-    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s' },
+    [XChainService.XCHAIN_DECODER]:       { portKey: 'DECODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
+    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s', autoheal: true },
     [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
-    [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
+    [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
     // The miner's API is JSON-RPC only (no GET /status route); an http_get probe 500s
     // on every check and marks the container permanently unhealthy.
     [XChainService.XCHAIN_REGTEST_MINER]: { portKey: 'REGTEST_MINER_API_PORT',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s' },
@@ -661,6 +668,7 @@ async function uninstallModule(coin, network, module) {
 }
 
 module.exports = {
+    SERVICE_HEALTHCHECK,
     cloneGit,
     getModuleBranch,
     buildAndUp,

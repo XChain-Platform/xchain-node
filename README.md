@@ -123,6 +123,18 @@ When xchain-node manages its own MariaDB container, these optional env vars over
 | `XCHAIN_NODE_DB_MAX_CONNECTIONS` | `max-connections` (e.g. `300`) | Many connection pools against one DB (replicas, shared services) |
 | `XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT` | `innodb-flush-log-at-trx-commit` (e.g. `2`) | Replica/cache DBs where a 1-second crash window is acceptable for speed |
 
+## Autoheal (restart-on-unhealthy)
+
+Every persistent service container carries a Docker healthcheck, but Docker itself takes no action on the `unhealthy` state (`--restart unless-stopped` only fires when the process exits). An alive-but-stalled service would otherwise stay wedged until an operator notices it in `docker ps`. `xchain-node autoheal` closes that loop: it restarts containers that have been continuously unhealthy past a grace window, for services opted in via `autoheal: true` in the healthcheck table (currently the decoder, encoder, and indexer; the utxo-tracker is deliberately excluded because it halts on purpose rather than exiting, and a restart would just re-halt it).
+
+The command is one-shot and never prompts or daemonizes. Unattended remediation requires wiring it to a cron entry or systemd timer, e.g. `*/5 * * * * xchain_node autoheal`. Detection-to-restart latency is the timer interval plus the health retry budget plus the grace window. Use `--dry-run` to see restart candidates without acting. Exit code is non-zero only when a restart was attempted and failed.
+
+| Variable | Default | What it controls |
+|---|---|---|
+| `XCHAIN_NODE_AUTOHEAL_GRACE_MS` | `120000` | How long a container must be continuously unhealthy before a restart is considered |
+| `XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS` | `600000` | Minimum time between two autoheal restarts of the same container (anti-flap) |
+| `XCHAIN_NODE_AUTOHEAL_STATE_DIR` | `~/.xchain-node` | Where the anti-flap state file (`autoheal-state.json`) lives |
+
 ## Telemetry
 
 `xchain-node` sends an anonymous usage ping (xchain-node + service versions, which services are running, basic OS/Docker info). Your **IP address is never sent or stored**: the receiver derives only a coarse country/region and an anonymous one-way network hash from the connection, then discards the IP. It contains **no** secrets, wallet data, addresses, or config. It is **on by default**, sent only on install/update and at most once per day otherwise, and never blocks a command.
