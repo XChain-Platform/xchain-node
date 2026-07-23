@@ -590,6 +590,23 @@ describe('ModuleService', function () {
             expect(args[cmdIdx + 1]).to.include('3005')
         })
 
+        it('probes /health (not /status) for sync (http_get probe)', async function () {
+            // Sync's /status runs a SELECT COUNT(*) census over every replicated
+            // table; on a heavy multi-chain host that exceeds the 5s healthcheck
+            // timeout and marks a correctly-serving container UNHEALTHY .
+            // The probe must hit the O(1) /health liveness route instead.
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-sync', null, null)
+            const args = getRunArgs()
+            expect(args).to.include('--health-cmd')
+            const cmdIdx = args.indexOf('--health-cmd')
+            expect(args[cmdIdx + 1]).to.include('/health')
+            expect(args[cmdIdx + 1]).to.not.include('/status')
+            expect(args[cmdIdx + 1]).to.include('3006')
+        })
+
         it('warns and returns [] when the descriptor portKey is missing from the env', function () {
             const stubs = makeStubs()
             const ms = loadModuleService(stubs)

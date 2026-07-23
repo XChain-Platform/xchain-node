@@ -145,8 +145,18 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 // Per-service healthcheck descriptors.
 // Each entry specifies how Docker should probe container readiness:
 //   portKey   - the env-var name whose value is the container-internal port to probe
-//   probe     - 'http_get' uses wget GET on /status; 'jsonrpc_ping' uses wget POST
-//               with a JSON-RPC ping payload; absent means no healthcheck added
+//   probe     - 'http_get' uses wget GET on `path` (default /status); 'jsonrpc_ping'
+//               uses wget POST with a JSON-RPC ping payload; absent means no
+//               healthcheck added
+//   path      - http_get only: route to probe. Defaults to /status. Set it for
+//               services whose /status is expensive: sync's /status runs a
+//               SELECT COUNT(*) census over every replicated table, which on a
+//               heavy multi-chain host (node-host-b, LTC+DOGE) takes longer than the
+//               5s timeout and marks a correctly-serving container UNHEALTHY
+//               . Sync's /health is O(1) liveness (circuit-breaker +
+//               poll-error state, no table scans) and still 503s when the
+//               replicator is genuinely wedged, so the probe measures liveness
+//               rather than a full table census.
 //   interval  - how often Docker reruns the check (--health-interval)
 //   timeout   - per-check timeout (--health-timeout)
 //   retries   - consecutive failures before marking unhealthy (--health-retries)
@@ -176,7 +186,7 @@ const SERVICE_HEALTHCHECK = {
     [XChainService.XCHAIN_REGTEST_MINER]: { portKey: 'REGTEST_MINER_API_PORT',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s' },
     [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
     [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
-    [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' }
+    [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     path: '/health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' }
     // xchain-e2e-test: one-shot execution container, never gets --restart, healthcheck not applicable
     // coin nodes (node module): managed by NodeService / crypto_nodes; not built via buildAndUp
     // database (mariadb): managed by DatabaseService with its own health tooling
@@ -205,8 +215,9 @@ function buildHealthcheckArgs(module, environmentVariables) {
         // JSON-RPC POST ping; hub, explorer, and the regtest miner all use this protocol
         cmd = `wget -qO- --post-data='{"jsonrpc":"2.0","method":"ping","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
     } else {
-        // Default: plain HTTP GET on /status
-        cmd = `wget -qO- http://localhost:${port}/status || exit 1`
+        // Default: plain HTTP GET on /status; descriptors override via `path`
+        // where /status is too expensive to double as a liveness probe (sync).
+        cmd = `wget -qO- http://localhost:${port}${hc.path || '/status'} || exit 1`
     }
 
     return [

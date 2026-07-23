@@ -52,8 +52,8 @@
   },
   "overrides": {
     "qs": "^6.15.2",
-    "serialize-javascript": ">=6.0.4",
-    "tmp": ">=0.2.3"
+    "serialize-javascript": "^7.0.5",
+    "tmp": "^0.2.7"
   },
   "bin": {
     "xchain-node": "./src/index.js"
