@@ -326,6 +326,14 @@ async function getDefaultConfig(module, coin, network) {
             // order/swap blocks). Production-safe defaults stay at 60; we
             // raise it for regtest where load is by-design bursty.
             defaultValues["ENCODER_RATE_LIMIT_RPM"] = 99999
+            // : the browser wallet calls the encoder cross-origin (create_tx,
+            // ping). The encoder disables CORS unless CORS_ORIGIN is set, so a fresh
+            // regtest stack blocks every browser request and the wallet reports the
+            // chain "degraded". regtest is a local single-operator dev venue (same
+            // reasoning as INDEXER_ALLOW_UNAUTHENTICATED below), so default it open;
+            // a host CORS_ORIGIN or config-file value still wins. mainnet/testnet keep
+            // the fail-safe default (CORS off unless the operator opts in).
+            defaultValues["CORS_ORIGIN"] = process.env.CORS_ORIGIN || "*"
         }
 
         // Native-coin protocol fee destination (per coin/network). Defaults from the vendored
@@ -495,6 +503,38 @@ async function getDefaultConfig(module, coin, network) {
         // keeps the prior keyless behavior (fine against a keyless hub).
         if (process.env.HUB_API_KEY !== undefined && process.env.HUB_API_KEY !== "") {
             defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
+        }
+
+        // : the browser wallet calls the hub cross-origin (ping, config reads).
+        // The hub disables CORS unless CORS_ORIGIN is set, so a browser wallet is
+        // blocked and reports the chain "degraded". The hub is a shared, network-
+        // agnostic service (it may front mainnet), so unlike the per-network encoder
+        // above it is NOT auto-defaulted open: the operator opts in via host env.
+        // On a local regtest dev box set CORS_ORIGIN=* when installing the hub.
+        if (process.env.CORS_ORIGIN !== undefined && process.env.CORS_ORIGIN !== "") {
+            defaultValues.CORS_ORIGIN = process.env.CORS_ORIGIN
+        }
+
+        // : the explorer resolves each coin's utxo-tracker and decoder from
+        // UTXO_TRACKER_URL_<CODE> (e.g. UTXO_TRACKER_URL_RBTC) and
+        // DECODER_API_URL_<COIN>_<NETWORK> (e.g. DECODER_API_URL_BTC_REGTEST).
+        // The explorer is a shared service with no per-venue config file, so these
+        // were never emitted anywhere: every coin reported tracker_available:false
+        // and decoder_health 'unconfigured', which blanks address balances/UTXOs
+        // (the wallet's balance source). Emit the pair for every coin/network at
+        // the venue containers' internal ports; entries for venues not installed
+        // on this host are inert because the explorer only probes coins it serves.
+        if (module === EXPLORER_MODULE_NAME) {
+            const networkCodePrefix = { [Network.MAINNET]: "", [Network.TESTNET]: "T", [Network.REGTEST]: "R" }
+            for (const coinName of Object.values(Coin)) {
+                for (const net of Object.values(Network)) {
+                    const tick = CoinTickerSymbol[coinName]
+                    defaultValues["UTXO_TRACKER_URL_" + networkCodePrefix[net] + tick] =
+                        "http://" + getDockerContainerImageName(XChainService.XCHAIN_UTXO_TRACKER, coinName, net) + ":3001"
+                    defaultValues["DECODER_API_URL_" + tick + "_" + net.toUpperCase()] =
+                        "http://" + getDockerContainerImageName(XChainService.XCHAIN_DECODER, coinName, net) + ":3002"
+                }
+            }
         }
     }
 
