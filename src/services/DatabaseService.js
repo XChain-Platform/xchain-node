@@ -141,6 +141,23 @@ async function checkIfDatabaseIsReady(user, userPassword, database = null) {
 // Precedence: env vars (all four) → credentials.json `externalDb` block →
 // interactive prompt → verify → persist. Cached in state.dbRootPassword for
 // the rest of the process so we don't re-prompt within a single CLI run.
+// Parse + validate an external-DB port at the single resolver chokepoint. Every
+// other operator/config-supplied port is validatePort-gated before it reaches a
+// child process (DB_PORT here, NODE_*_PORT in NodeService, the portArgs loop in
+// ModuleService); the external-DB port was the one that escaped. A malformed
+// value would otherwise propagate as NaN/0/70000 into spawn('mariadb'/'mariadb-
+// dump', '-P', ...) and be baked into every provisioned container's DECODER_/
+// INDEXER_/HUB_DB_PORT env via the ConfigService EXTERNAL_DB rewrite, surfacing
+// far from its cause as an opaque driver error. Fail loud at config resolution.
+function resolveExternalDbPort(raw) {
+    const port = typeof raw === 'number' ? raw : parseInt(String(raw), 10)
+    if (!validatePort(port)) {
+        throw new Error('Invalid external-DB port: ' + String(raw)
+            + ' (set XCHAIN_NODE_EXTERNAL_DB_PORT to an integer 1-65535)')
+    }
+    return port
+}
+
 async function getExternalDbConfig() {
     // Fast path: env vars supply everything for headless flows
     if (process.env.XCHAIN_NODE_EXTERNAL_DB_HOST
@@ -149,7 +166,7 @@ async function getExternalDbConfig() {
         && process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD) {
         return {
             host:          process.env.XCHAIN_NODE_EXTERNAL_DB_HOST,
-            port:          parseInt(process.env.XCHAIN_NODE_EXTERNAL_DB_PORT, 10),
+            port:          resolveExternalDbPort(process.env.XCHAIN_NODE_EXTERNAL_DB_PORT),
             root_user:     process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER,
             root_password: process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD
         }
@@ -159,8 +176,10 @@ async function getExternalDbConfig() {
     if (hasExternalDbConfig()) {
         const saved = loadExternalDbConfig()
         if (saved) {
-            // Verify still works; bad creds in storage mean we should re-prompt
+            // Verify still works; bad creds (or an out-of-range persisted port)
+            // mean we should re-prompt rather than propagate a bad value.
             try {
+                saved.port = resolveExternalDbPort(saved.port)
                 await _pingMariaDb(saved)
                 return saved
             } catch {
@@ -184,8 +203,8 @@ async function getExternalDbConfig() {
         const passPrompt = new Password({ name: 'root_password', message: 'Root password' })
         const root_password = await passPrompt.run()
 
-        const candidate = { host: String(host).trim(), port: Number(port), root_user: String(root_user).trim(), root_password }
         try {
+            const candidate = { host: String(host).trim(), port: resolveExternalDbPort(port), root_user: String(root_user).trim(), root_password }
             await _pingMariaDb(candidate)
             saveExternalDbConfig(candidate)
             console.log("External MariaDB connection verified. Saved to ~/.xchain-node/credentials.json")

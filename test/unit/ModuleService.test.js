@@ -637,6 +637,39 @@ describe('ModuleService', function () {
             }
         })
 
+        // #3169: the healthcheck grace window is env-tunable per service so an
+        // operator can widen it for a long bootstrap restore.
+        it('honors XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE> override', function () {
+            const stubs = makeStubs()
+            const ms = loadModuleService(stubs)
+            const saved = process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+            process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = '900s'
+            try {
+                const args = ms.buildHealthcheckArgs('xchain-utxo-tracker', { UTXO_TRACKER_API_PORT: '3003' })
+                const i = args.indexOf('--health-start-period')
+                expect(i).to.be.greaterThan(-1)
+                expect(args[i + 1]).to.equal('900s')
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+                else process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = saved
+            }
+        })
+
+        it('ignores a malformed start-period override and keeps the descriptor default', function () {
+            const stubs = makeStubs()
+            const ms = loadModuleService(stubs)
+            const saved = process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+            process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = 'not-a-duration'
+            try {
+                const args = ms.buildHealthcheckArgs('xchain-utxo-tracker', { UTXO_TRACKER_API_PORT: '3003' })
+                const i = args.indexOf('--health-start-period')
+                expect(args[i + 1]).to.equal('60s')
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+                else process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = saved
+            }
+        })
+
         it('returns [] with no warning for a module that has no healthcheck descriptor', function () {
             const stubs = makeStubs()
             const ms = loadModuleService(stubs)
@@ -1569,7 +1602,7 @@ describe('ModuleService', function () {
                 },
                 './ConfigService': configStub,
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './BootstrapService': {
                     utxoTrackerVolumeHasData: utxoTrackerVolumeHasDataStub,
@@ -1628,7 +1661,7 @@ describe('ModuleService', function () {
                 },
                 './ConfigService': configStub,
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
                 './DatabaseService': { setDatabaseParameters: setDatabaseParametersStub },
                 './BootstrapService': {
                     utxoTrackerVolumeHasData: sinon3.stub().resolves(true),
@@ -1884,7 +1917,7 @@ describe('ModuleService', function () {
                     })
                 },
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './VersionService': {
                     getLocalNodeVersion: sinon3.stub().resolves(null),

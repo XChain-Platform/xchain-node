@@ -653,6 +653,35 @@ describe('moduleOperations', function () {
             const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
             expect(result).to.be.true // errors are caught/swallowed
         })
+
+        // #3144: reset must fail loud on bad args rather than reporting success
+        // after resetting nothing (an unknown service leaves every flag false).
+        it('throws on an unknown service instead of a silent no-op success', async function () {
+            const ops = loadOperations(makeStubs())
+            let threw = null
+            try { await ops.resetModules('xchain-encoder', 'bitcoin', 'mainnet', true) }
+            catch (e) { threw = e }
+            expect(threw, 'expected a thrown error for an unknown service').to.be.an('error')
+            expect(threw.message).to.match(/unknown service/)
+        })
+
+        it('throws on an unknown coin', async function () {
+            const ops = loadOperations(makeStubs())
+            let threw = null
+            try { await ops.resetModules('all', 'notacoin', 'mainnet', true) }
+            catch (e) { threw = e }
+            expect(threw, 'expected a thrown error for an unknown coin').to.be.an('error')
+            expect(threw.message).to.match(/unknown coin/)
+        })
+
+        it('throws on an unknown network', async function () {
+            const ops = loadOperations(makeStubs())
+            let threw = null
+            try { await ops.resetModules('all', 'bitcoin', 'stagenet', true) }
+            catch (e) { threw = e }
+            expect(threw, 'expected a thrown error for an unknown network').to.be.an('error')
+            expect(threw.message).to.match(/unknown network/)
+        })
     })
 
     // -------------------------------------------------------------------

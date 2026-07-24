@@ -96,6 +96,30 @@ describe('commandLock', () => {
         assert.doesNotThrow(() => release())
     })
 
+    // #3142: waitMs makes a non-mutating command block-and-poll for a live
+    // holder up to the bound, then error, instead of failing immediately.
+    it('waitMs blocks for roughly waitMs against a live holder, then throws', () => {
+        const release = acquireCommandLock({ command: 'update' })
+        const start = Date.now()
+        assert.throws(
+            () => acquireCommandLock({ command: 'ps', waitMs: 300, pollMs: 50 }),
+            /Another xchain-node instance.*update/s
+        )
+        const elapsed = Date.now() - start
+        assert.ok(elapsed >= 250, 'should have waited close to waitMs (got ' + elapsed + 'ms)')
+        // The winner's lock must survive the loser's give-up.
+        assert.ok(fs.existsSync(getLockFilePath()))
+        release()
+    })
+
+    it('waitMs still steals a stale lock immediately (no needless wait)', () => {
+        fs.writeFileSync(getLockFilePath(), JSON.stringify({ pid: 999999, command: 'update' }) + '\n')
+        const start = Date.now()
+        const release = acquireCommandLock({ command: 'ps', waitMs: 5000, pollMs: 100 })
+        assert.ok(Date.now() - start < 1000, 'a stale lock is stolen at once, not waited on')
+        release()
+    })
+
     it('isPidAlive: our own pid is alive, pid 0/negative/junk are not', () => {
         assert.strictEqual(isPidAlive(process.pid), true)
         assert.strictEqual(isPidAlive(0), false)

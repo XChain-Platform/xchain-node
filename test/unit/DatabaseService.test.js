@@ -742,6 +742,35 @@ describe('DatabaseService', function () {
             expect(stubs.saveExternalDbConfig.calledOnce).to.be.true
             expect(result).to.be.an('object')
         })
+
+        // #3143: the external-DB port must be validatePort-gated at the resolver,
+        // so a malformed env value fails loud here rather than propagating NaN
+        // into spawn('mariadb', '-P', ...) and every container's *_DB_PORT env.
+        it('throws on a malformed external-DB port from env instead of returning NaN', async function () {
+            process.env.XCHAIN_NODE_EXTERNAL_DB_HOST          = 'db.example.com'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_PORT          = 'not-a-port'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER     = 'admin'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD = 'test-pass'
+
+            const ds = loadDatabaseService(makeStubs())
+            let threw = null
+            try { await ds.getExternalDbConfig() } catch (e) { threw = e }
+            expect(threw, 'expected a thrown error for a bad port').to.be.an('error')
+            expect(threw.message).to.match(/Invalid external-DB port/)
+        })
+
+        it('throws on an out-of-range external-DB port from env', async function () {
+            process.env.XCHAIN_NODE_EXTERNAL_DB_HOST          = 'db.example.com'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_PORT          = '70000'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER     = 'admin'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD = 'test-pass'
+
+            const ds = loadDatabaseService(makeStubs())
+            let threw = null
+            try { await ds.getExternalDbConfig() } catch (e) { threw = e }
+            expect(threw, 'expected a thrown error for an out-of-range port').to.be.an('error')
+            expect(threw.message).to.match(/Invalid external-DB port/)
+        })
     })
 
     // -------------------------------------------------------------------

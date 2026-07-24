@@ -21,7 +21,7 @@ const readline  = require('readline')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
-const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir, EXTERNAL_DB } = require('../config/constants')
+const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir, EXTERNAL_DB, Coin, Network } = require('../config/constants')
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
@@ -323,7 +323,35 @@ async function confirmDestructiveReset(coin, network, targets) {
     return answer.trim().toLowerCase() === 'yes'
 }
 
+// The service names `reset` can act on. `reset` is the only destructive CLI path
+// and the only one that bypasses resolveArgs/filterCommandParameters, so it must
+// validate its own raw args: without this an unrecognised service (a typo, or a
+// non-resettable module like xchain-encoder) leaves every reset flag false, so
+// `targets` is empty, no branch fires, and resetModules returns true - the CLI
+// exits 0 reporting success after resetting nothing (#3144). Fail loud instead,
+// matching resolveArgs/rollback and the "fail fast BEFORE any destructive wipe"
+// convention this file already follows.
+const RESETTABLE_SERVICES = [
+    'all',
+    NODE_MODULE_NAME,
+    XChainService.XCHAIN_UTXO_TRACKER,
+    XChainService.XCHAIN_DECODER,
+    XChainService.XCHAIN_INDEXER
+]
+
 async function resetModules(service, coin, network, force = false) {
+    if (!RESETTABLE_SERVICES.includes(service)) {
+        throw new Error("reset: unknown service '" + service + "'; expected one of "
+            + RESETTABLE_SERVICES.join(', '))
+    }
+    if (!Object.values(Coin).includes(coin)) {
+        throw new Error("reset: unknown coin '" + coin + "'; expected one of "
+            + Object.values(Coin).join(', '))
+    }
+    if (!Object.values(Network).includes(network)) {
+        throw new Error("reset: unknown network '" + network + "'; expected one of "
+            + Object.values(Network).join(', '))
+    }
     const resetAll         = service === 'all'
     const resetNode        = resetAll || service === NODE_MODULE_NAME
     const resetUtxoTracker = resetAll || service === XChainService.XCHAIN_UTXO_TRACKER

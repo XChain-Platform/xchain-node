@@ -57,7 +57,13 @@ async function parseCommand() {
     // pushes). Two of these interleaving from concurrent shells can corrupt an
     // install mid-flight, so they serialize on a pidfile lock; a second
     // invocation is refused with a clear message instead of interleaving.
-    const mutatingCommands = ['install', 'update', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal']
+    // `e2etest` is included: its action does its own docker build/run/rm, so it
+    // must stay serialized against install/update the same way the others are.
+    const mutatingCommands = ['install', 'update', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest']
+    // How long a non-mutating command blocks for a lock-holding mutator before
+    // giving up (bounded so a read-only command pauses, then errors clearly,
+    // rather than corrupting the stack by provisioning concurrently). Tunable.
+    const LOCK_WAIT_MS = parseInt(process.env.XCHAIN_NODE_LOCK_WAIT_MS || '15000', 10) || 15000
     program.hook('preAction', async (thisCommand, actionCommand) => {
         setVerbose(thisCommand.opts().verbose ?? false)
         if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
@@ -67,25 +73,48 @@ async function parseCommand() {
         // operator can prepare their validator identity before any stack is up.
         const parentName = actionCommand.parent && actionCommand.parent.name()
         if (commandName === 'validator' || parentName === 'validator') return
-        if (mutatingCommands.includes(commandName)) {
-            let release
-            try {
-                release = acquireCommandLock({ command: commandName })
-            } catch (err) {
-                console.error(err.message)
-                return process.exit(1)
-            }
-            // Actions terminate via process.exit(), so the only reliable
-            // release point is the process 'exit' hook (also covers throws
-            // and SIGINT/SIGTERM via the default handlers ending the process).
+
+        // preCheck provisions shared containers/DB/hub (buildDatabaseModule,
+        // ensureXchainNodeAccess, scanAndRegisterModules, installHubModule) for
+        // EVERY non-validator command, not just the mutating ones. Running that
+        // provisioning unlocked lets a concurrent `ps`/`e2etest`/`exec` tear down
+        // and rebuild the hub out from under a lock-holding `update` mid docker
+        // build (#3142). So acquire the lock around preCheck for every command.
+        //
+        // A mutating command keeps the lock through its whole action (released on
+        // process exit, since actions terminate via process.exit()) and refuses
+        // immediately if another instance holds it. A non-mutating command holds
+        // the lock only across preCheck, releasing it right after, so a
+        // long-running `monitor`/`tail`/`logs` does not pin the lock for its
+        // lifetime; it waits a bounded time for a busy mutator, then errors.
+        const holdThroughAction = mutatingCommands.includes(commandName)
+        let release
+        try {
+            release = acquireCommandLock({
+                command: commandName,
+                waitMs: holdThroughAction ? 0 : LOCK_WAIT_MS
+            })
+        } catch (err) {
+            console.error(err.message)
+            return process.exit(1)
+        }
+        if (holdThroughAction) {
+            // Release only on process exit (also covers throws and SIGINT/SIGTERM
+            // via the default handlers ending the process).
             process.on('exit', release)
             process.on('SIGINT', () => process.exit(130))
             process.on('SIGTERM', () => process.exit(143))
         }
-        await preCheck(
-            commandsNeedingVersions.includes(commandName),
-            !readOnlyCommands.includes(commandName)
-        )
+        try {
+            await preCheck(
+                commandsNeedingVersions.includes(commandName),
+                !readOnlyCommands.includes(commandName)
+            )
+        } finally {
+            // Non-mutating commands hand the lock back as soon as provisioning is
+            // done; mutating commands keep it (released on exit) for their action.
+            if (!holdThroughAction) release()
+        }
         // Anonymous usage telemetry (default-on, opt-out). Fire-and-forget:
         // a failure here must never block or break the command being run.
         try {

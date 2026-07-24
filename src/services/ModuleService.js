@@ -195,6 +195,27 @@ const SERVICE_HEALTHCHECK = {
 // Build the --health-* flags for a service container's docker run invocation.
 // Returns an empty array when no healthcheck is configured for the module
 // (or when the required port env-var is missing), so callers are always safe.
+// Resolve the healthcheck grace window, allowing a per-service env override.
+// A fresh install starts the container (with this window already counting down)
+// and THEN restores its bootstrap archive -- installModule runs
+// ensureBootstrapUtxoTracker / ensureBootstrapMariaDb AFTER buildAndUp -- which
+// on a large chain takes many minutes, far past the default 60s startPeriod, so
+// the container is marked cosmetically unhealthy mid-restore (#3169). An install
+// holds the command lock, which already keeps `autoheal` from firing (no watchdog
+// restart mid-restore), but operators expecting a long restore can widen the
+// Docker grace window via XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE> (service
+// upper-cased, non-alnum -> underscore), e.g.
+// XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER=900s. Accepts a Docker
+// duration (bare seconds or a value with an s/m/h unit); anything else is ignored
+// and the descriptor default stands.
+function resolveStartPeriod(module, fallback) {
+    const key = 'XCHAIN_NODE_HEALTH_START_PERIOD_'
+        + String(module).toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+    const raw = process.env[key]
+    if (raw && /^\d+(ms|s|m|h)?$/.test(raw.trim())) return raw.trim()
+    return fallback
+}
+
 function buildHealthcheckArgs(module, environmentVariables) {
     const hc = SERVICE_HEALTHCHECK[module]
     if (!hc) return []
@@ -225,7 +246,7 @@ function buildHealthcheckArgs(module, environmentVariables) {
         '--health-interval', hc.interval,
         '--health-timeout',  hc.timeout,
         '--health-retries',  String(hc.retries),
-        '--health-start-period', hc.startPeriod
+        '--health-start-period', resolveStartPeriod(module, hc.startPeriod)
     ]
 }
 

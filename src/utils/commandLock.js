@@ -53,17 +53,19 @@ function isPidAlive(pid) {
     }
 }
 
-// Acquire the command lock or throw. On success returns a release()
-// function; call it when the command finishes (also wired to process
-// exit by the caller).
-function acquireCommandLock({ pid = process.pid, command = '' } = {}) {
-    const lockFile = getLockFilePath()
-    fs.mkdirSync(path.dirname(lockFile), { recursive: true })
+// Blocking sleep that keeps acquireCommandLock synchronous (its callers use it
+// synchronously). Atomics.wait on a private SharedArrayBuffer parks the thread
+// for ms without a busy-loop and without pulling in a dependency.
+function sleepSync(ms) {
+    if (ms <= 0) return
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
 
-    const payload = JSON.stringify({ pid, command, startedAt: new Date().toISOString() }) + '\n'
-
-    // Two attempts: the second one runs only after a stale lock removal,
-    // so a genuinely held lock always throws on the first pass.
+// One acquire pass with the stale-lock removal + single retry. Returns a
+// release() on success; throws a tagged ELOCKHELD error when a LIVE holder owns
+// the lock (the caller may then choose to wait and retry); throws any other
+// error (fs failure, or lost post-stale race) as fatal.
+function tryAcquireOnce(lockFile, payload, pid) {
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
             fs.writeFileSync(lockFile, payload, { flag: 'wx', mode: 0o600 })
@@ -73,11 +75,13 @@ function acquireCommandLock({ pid = process.pid, command = '' } = {}) {
             const holder = readLockHolder(lockFile)
             if (holder && isPidAlive(holder.pid)) {
                 const what = holder.command ? ` (running "${holder.command}")` : ''
-                throw new Error(
+                const held = new Error(
                     `Another xchain-node instance${what} holds the command lock ` +
                     `(pid ${holder.pid}, ${lockFile}). Wait for it to finish, ` +
                     `or delete the lock file if that pid is not xchain-node.`
                 )
+                held.code = 'ELOCKHELD'
+                throw held
             }
             // Holder pid is dead (or the file is unreadable garbage): the
             // lock is stale, likely from a crashed/killed run. Remove and
@@ -89,6 +93,34 @@ function acquireCommandLock({ pid = process.pid, command = '' } = {}) {
     }
     // Both attempts hit EEXIST: another invocation won the post-stale race.
     throw new Error(`Could not acquire the xchain-node command lock at ${lockFile} (lost the race to another invocation).`)
+}
+
+// Acquire the command lock or throw. On success returns a release()
+// function; call it when the command finishes (also wired to process
+// exit by the caller).
+//
+// waitMs > 0 makes a LIVE-held lock block-and-poll (every pollMs) up to waitMs
+// before giving up, so a short/read-only command pauses for a lock-holding
+// mutator instead of failing outright (#3142). The default waitMs=0 preserves
+// the original refuse-immediately behavior for mutating commands.
+function acquireCommandLock({ pid = process.pid, command = '', waitMs = 0, pollMs = 200 } = {}) {
+    const lockFile = getLockFilePath()
+    fs.mkdirSync(path.dirname(lockFile), { recursive: true })
+
+    const deadline = Date.now() + Math.max(0, waitMs)
+    for (;;) {
+        const payload = JSON.stringify({ pid, command, startedAt: new Date().toISOString() }) + '\n'
+        try {
+            return tryAcquireOnce(lockFile, payload, pid)
+        } catch (err) {
+            // Only a live-held lock is retryable; anything else is fatal.
+            if (err.code === 'ELOCKHELD' && Date.now() < deadline) {
+                sleepSync(Math.min(pollMs, Math.max(0, deadline - Date.now())))
+                continue
+            }
+            throw err
+        }
+    }
 }
 
 function readLockHolder(lockFile) {
