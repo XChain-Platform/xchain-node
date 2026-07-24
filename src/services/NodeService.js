@@ -140,6 +140,46 @@ function nodeNetworkSubdir(coin, network) {
     return coin === 'litecoin' ? '/testnet4' : '/testnet3'
 }
 
+// Resolve the relocated-blocks root. The env var wins and, when present, is
+// persisted to the config/node.local sidecar so later invocations that lack it
+// (non-interactive SSH, cron: the profile is never sourced) inherit the same
+// value instead of silently building mount-less containers (, the
+// 2026-07-23 node-host-b crash-loop). With no env var the sidecar value applies.
+// Returns null when neither source has a value (in-datadir layout).
+async function resolveBlocksDir() {
+    const { configDir } = require('../config/constants')
+    const { readSidecarValue, upsertSidecarValues } = require('./ConfigService')
+    const sidecarPath = path.resolve(configDir, 'node.local')
+    const envValue = process.env.XCHAIN_NODE_BLOCKS_DIR
+    if (envValue && envValue.trim() !== '') {
+        const value = envValue.trim()
+        try {
+            if (await readSidecarValue(sidecarPath, 'XCHAIN_NODE_BLOCKS_DIR') !== value) {
+                upsertSidecarValues(sidecarPath, { XCHAIN_NODE_BLOCKS_DIR: value })
+            }
+        } catch (err) {
+            // Persistence is a convenience; the env value still applies this run.
+            console.error('Warning: could not persist XCHAIN_NODE_BLOCKS_DIR to ' + sidecarPath + ': ' + err.message)
+        }
+        return value
+    }
+    const persisted = await readSidecarValue(sidecarPath, 'XCHAIN_NODE_BLOCKS_DIR')
+    return persisted && persisted.trim() !== '' ? persisted.trim() : null
+}
+
+// mkdirSync-if-absent that tolerates an existing SYMLINK. The node-host-b live fix
+// left $BLOCKS_DIR/<coin>/<net>[-txindex] as symlinks to the real stores;
+// mkdirSync({recursive}) lstat-fails through a symlink whose target the caller
+// cannot traverse and surfaced as a misleading EACCES "failed to create"
+// . Any existing entry (dir or symlink) counts as already provisioned.
+function ensureHostDir(dirPath) {
+    try {
+        fs.lstatSync(dirPath)
+        return
+    } catch { /* absent: create below */ }
+    fs.mkdirSync(dirPath, { recursive: true })
+}
+
 async function buildCryptoNode(coin, network, bitcoinVer = null) {
     const defaultConfig = await getDefaultConfig(NODE_MODULE_NAME, coin, network)
     const defaultExposedPort = defaultConfig["NODE_EXPOSED_PORT"]
@@ -184,18 +224,19 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 return
             }
 
-            // Name-keyed cleanup immediately before `docker run --name`, making
-            // (re)creation idempotent against a leftover carcass unregistered by
-            // an insert-failure at the tail of this function (see reject() below)
-            // or an interrupted earlier run. Unlike ModuleService.buildAndUp, this
-            // path had no cleanup at all before a name collision (uuid:9533ee7a).
-            const { forceRemoveContainerByName } = require('./DockerService')
-            try {
-                await forceRemoveContainerByName(containerPrefix)
-            } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
-
             const { dataDir } = require('../config/constants')
-            const blocksDir = process.env.XCHAIN_NODE_BLOCKS_DIR
+            // Env-first with config/node.local fallback (see resolveBlocksDir):
+            // a profile-less invocation no longer silently reverts to the
+            // in-datadir layout on a relocated-blocks host. Reject (not throw)
+            // on failure: a throw in this async callback escapes the Promise
+            // and hangs the build.
+            let blocksDir
+            try {
+                blocksDir = await resolveBlocksDir()
+            } catch (err) {
+                reject(`XCHAIN_NODE_BLOCKS_DIR resolution failed: ${err.message}`)
+                return
+            }
             // Daemons that ignore -blocksdir (dogecoin) get their blocks
             // relocated by nest-mounting onto the in-datadir blocks path, which
             // is network-specific; the others use -blocksdir against /blocks.
@@ -207,10 +248,59 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
             // mounted onto the big disk separately. Assumes a fresh install; an
             // existing in-datadir txindex would be shadowed and rebuilt.
             const txindexHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
+
+            // The full bind-mount set of the NEW container, [{ spec, destination }],
+            // composed before the old container is touched so the drift guard
+            // below can compare against it.
+            const volumeMounts = [
+                { spec: `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`, destination: `/root/.${coin}` }
+            ]
+            if (blocksDir) {
+                const blocksDest = useBlocksdirFlag
+                    ? '/blocks'
+                    // doged ignores -blocksdir: mount straight onto the blocks
+                    // dir it actually writes to, under the network subdir.
+                    : `/root/.${coin}${netSubdir}/blocks`
+                volumeMounts.push({ spec: `${blocksHostPath}:${blocksDest}`, destination: blocksDest })
+                // Relocate txindex for every coin (nested under the network subdir).
+                const txindexDest = `/root/.${coin}${netSubdir}/indexes/txindex`
+                volumeMounts.push({ spec: `${txindexHostPath}:${txindexDest}`, destination: txindexDest })
+            }
+
+            // Mount-drift guard : if the container being replaced has
+            // bind mounts the new spec lacks, refuse BEFORE removing it. The
+            // 2026-07-23 node-host-b crash-loop came from exactly this: an env-less
+            // rebuild dropped the relocated blocks/txindex mounts, so the daemon
+            // restarted over an empty blocks store with a current chainstate.
+            const { forceRemoveContainerByName, getContainerBindMounts } = require('./DockerService')
+            let existingMounts = []
+            try {
+                existingMounts = await getContainerBindMounts(containerPrefix)
+            } catch { /* no previous container or docker unreachable: nothing to preserve */ }
+            const newDestinations = new Set(volumeMounts.map(m => m.destination))
+            const droppedMounts = existingMounts.filter(m => !newDestinations.has(m.destination))
+            if (droppedMounts.length > 0) {
+                reject(`Refusing to replace container ${containerPrefix}: the new spec would drop bind mount(s) ` +
+                    droppedMounts.map(m => `${m.source} -> ${m.destination}`).join(', ') +
+                    `. This usually means XCHAIN_NODE_BLOCKS_DIR is missing from this environment ` +
+                    `(non-interactive shells do not source the profile). Set it, or persist it in ` +
+                    `config/node.local as XCHAIN_NODE_BLOCKS_DIR=<path>, then retry. The existing container was left untouched.`)
+                return
+            }
+
+            // Name-keyed cleanup immediately before `docker run --name`, making
+            // (re)creation idempotent against a leftover carcass unregistered by
+            // an insert-failure at the tail of this function (see reject() below)
+            // or an interrupted earlier run. Unlike ModuleService.buildAndUp, this
+            // path had no cleanup at all before a name collision (uuid:9533ee7a).
+            try {
+                await forceRemoveContainerByName(containerPrefix)
+            } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
+
             if (blocksDir) {
                 try {
-                    fs.mkdirSync(blocksHostPath, { recursive: true })
-                    fs.mkdirSync(txindexHostPath, { recursive: true })
+                    ensureHostDir(blocksHostPath)
+                    ensureHostDir(txindexHostPath)
                 } catch (err) {
                     // This runs inside the async docker-build callback; a throw here
                     // escapes the Promise as an uncaught exception and hangs the
@@ -227,22 +317,13 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 // fill the host disk; sized to keep --tail reads inside a
                 // single rotated file.
                 '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3',
-                '-v', `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`,
                 '--hostname', NODE_MODULE_NAME,
                 '--network-alias', NODE_MODULE_NAME,
                 '--ulimit', 'nofile=2048:2048',
                 '--network', getDockerNetwork(coin, network)
             ]
-            if (blocksDir) {
-                if (useBlocksdirFlag) {
-                    runArgs.push('-v', `${blocksHostPath}:/blocks`)
-                } else {
-                    // doged ignores -blocksdir: mount straight onto the blocks
-                    // dir it actually writes to, under the network subdir.
-                    runArgs.push('-v', `${blocksHostPath}:/root/.${coin}${netSubdir}/blocks`)
-                }
-                // Relocate txindex for every coin (nested under the network subdir).
-                runArgs.push('-v', `${txindexHostPath}:/root/.${coin}${netSubdir}/indexes/txindex`)
+            for (const mount of volumeMounts) {
+                runArgs.push('-v', mount.spec)
             }
             if (defaultExposedPort && defaultNodePort) {
                 // NODE_EXPOSED_PORT/NODE_PORT come from the operator-supplied
@@ -420,6 +501,7 @@ module.exports = {
     getCryptoNode,
     buildCryptoNode,
     installNode,
+    resolveBlocksDir,
     resolveNodeVersionPin,
     assertNodeVersionPin
 }

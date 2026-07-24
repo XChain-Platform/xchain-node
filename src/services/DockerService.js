@@ -510,6 +510,29 @@ async function forceRemoveContainerByName(name) {
     })
 }
 
+// Bind mounts of a container, by name, as [{ source, destination }]. Returns []
+// when the container does not exist (or inspect output is unparseable): the
+// caller (the mount-drift guard in NodeService.buildCryptoNode) treats "no
+// previous container" as "nothing to preserve", so absence must not throw.
+async function getContainerBindMounts(name) {
+    return new Promise((resolve) => {
+        execFile('docker', ['inspect', '--format', '{{json .Mounts}}', name], (error, stdout) => {
+            if (error) {
+                resolve([])
+                return
+            }
+            try {
+                const mounts = JSON.parse(stdout.trim())
+                resolve((Array.isArray(mounts) ? mounts : [])
+                    .filter(m => m && m.Type === 'bind')
+                    .map(m => ({ source: m.Source, destination: m.Destination })))
+            } catch {
+                resolve([])
+            }
+        })
+    })
+}
+
 async function waitContainer(containerId) {
     return new Promise((resolve, reject) => {
         execFile('docker', ['wait', containerId], (error, stdout) => {
@@ -558,6 +581,7 @@ module.exports = {
     restartContainer,
     removeContainer,
     killContainer,
+    getContainerBindMounts,
     forceRemoveContainerByName,
     execContainer,
     shellContainer,

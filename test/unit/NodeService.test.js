@@ -30,6 +30,8 @@ function makeNodeServiceStubs(overrides = {}) {
         writeFileSync:     sinon.stub(),
         readFileSync:      sinon.stub().returns('rpcuser=old\nrpcpassword=old\n'),
         mkdirSync:         sinon.stub(),
+        // ensureHostDir lstats before mkdir; default: path absent.
+        lstatSync:         sinon.stub().throws(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
     }
     const dbStub = {
         insertModuleContainer: sinon.stub().resolves(true),
@@ -94,13 +96,19 @@ function loadNodeService(stubs) {
             },
             cryptoNodesDir: '/crypto_nodes',
             dataDir:        '/data',
+            configDir:      '/config',
             path:           require('path')
         },
         './ConfigService': {
             getDockerContainerImageName: stubs.getDockerContainerImageName,
             getDockerNetwork:            stubs.getDockerNetwork,
             getDefaultConfig:            stubs.getDefaultConfig,
-            validatePort:                () => true
+            validatePort:                () => true,
+            // resolveBlocksDir sidecar persistence . Defaults: nothing
+            // persisted, persistence is a no-op. Tests override to simulate a
+            // config/node.local value.
+            readSidecarValue:            stubs.readSidecarValue    || sinon.stub().resolves(undefined),
+            upsertSidecarValues:         stubs.upsertSidecarValues || sinon.stub()
         },
         './StatusService': {
             statusChanged: stubs.statusChanged
@@ -115,7 +123,9 @@ function loadNodeService(stubs) {
         // Lazy requires inside installNode / buildCryptoNode
         './DockerService':   {
             createDockerNetwork: sinon.stub().resolves(),
-            forceRemoveContainerByName: sinon.stub().resolves(true)
+            forceRemoveContainerByName: stubs.forceRemoveContainerByName || sinon.stub().resolves(true),
+            // Mount-drift guard . Default: no previous container.
+            getContainerBindMounts: stubs.getContainerBindMounts || sinon.stub().resolves([])
         },
         './DatabaseService': {
             buildDatabaseModule:   sinon.stub().resolves(),
@@ -504,6 +514,106 @@ describe('NodeService: buildCryptoNode()', function () {
         })
     })
 
+    describe(': blocks-dir persistence + mount-drift guard', function () {
+        // Run buildCryptoNode with the env var controlled and stubs injectable.
+        async function build(stubs, { envBlocksDir = null, coin = 'bitcoin', network = 'mainnet' } = {}) {
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
+                if (args[0] === 'build') return setImmediate(() => cb(null))
+                if (args[0] === 'run') { runArgs = args; return setImmediate(() => cb(null, 'd'.repeat(64) + '\n')) }
+            })
+            const old = process.env.XCHAIN_NODE_BLOCKS_DIR
+            if (envBlocksDir === null) delete process.env.XCHAIN_NODE_BLOCKS_DIR
+            else process.env.XCHAIN_NODE_BLOCKS_DIR = envBlocksDir
+            try {
+                const ns = loadNodeService(stubs)
+                await ns.buildCryptoNode(coin, network)
+                return runArgs
+            } finally {
+                if (old === undefined) delete process.env.XCHAIN_NODE_BLOCKS_DIR
+                else process.env.XCHAIN_NODE_BLOCKS_DIR = old
+            }
+        }
+        function mounts(runArgs) {
+            const out = []
+            for (let i = 0; i < runArgs.length - 1; i++) if (runArgs[i] === '-v') out.push(runArgs[i + 1])
+            return out
+        }
+
+        it('persists the env value to the config/node.local sidecar', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.readSidecarValue    = sinon.stub().resolves(undefined)
+            stubs.upsertSidecarValues = sinon.stub()
+            await build(stubs, { envBlocksDir: '/bigdisk' })
+            expect(stubs.upsertSidecarValues.calledOnce).to.be.true
+            const [sidecarPath, values] = stubs.upsertSidecarValues.firstCall.args
+            expect(sidecarPath).to.equal('/config/node.local')
+            expect(values).to.deep.equal({ XCHAIN_NODE_BLOCKS_DIR: '/bigdisk' })
+        })
+
+        it('does not rewrite the sidecar when it already holds the same value', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.readSidecarValue    = sinon.stub().resolves('/bigdisk')
+            stubs.upsertSidecarValues = sinon.stub()
+            await build(stubs, { envBlocksDir: '/bigdisk' })
+            expect(stubs.upsertSidecarValues.called).to.be.false
+        })
+
+        it('falls back to the persisted sidecar value when the env var is absent', async function () {
+            // The 2026-07-23 node-host-b failure mode: a profile-less invocation must
+            // still mount the relocated stores once the value has been persisted.
+            const stubs = makeNodeServiceStubs()
+            stubs.readSidecarValue = sinon.stub().resolves('/bigdisk')
+            const args = await build(stubs, { envBlocksDir: null })
+            expect(mounts(args)).to.include('/bigdisk/bitcoin/mainnet:/blocks')
+            expect(mounts(args)).to.include('/bigdisk/bitcoin/mainnet-txindex:/root/.bitcoin/indexes/txindex')
+        })
+
+        it('refuses to replace a container whose bind mounts the new spec would drop', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.forceRemoveContainerByName = sinon.stub().resolves(true)
+            stubs.getContainerBindMounts = sinon.stub().resolves([
+                { source: '/data/node/dogecoin/mainnet', destination: '/root/.dogecoin' },
+                { source: '/bigdisk/dogecoin/mainnet',   destination: '/root/.dogecoin/blocks' },
+                { source: '/bigdisk/dogecoin/mainnet-txindex', destination: '/root/.dogecoin/indexes/txindex' }
+            ])
+            let threw = null
+            try {
+                await build(stubs, { envBlocksDir: null, coin: 'dogecoin', network: 'mainnet' })
+            } catch (err) { threw = err }
+            expect(String(threw)).to.include('Refusing to replace container')
+            expect(String(threw)).to.include('XCHAIN_NODE_BLOCKS_DIR')
+            expect(String(threw)).to.include('/root/.dogecoin/blocks')
+            // The old container must be left running and no new one created.
+            expect(stubs.forceRemoveContainerByName.called).to.be.false
+            expect(stubs.execFile.getCalls().some(c => c.args[1][0] === 'run')).to.be.false
+        })
+
+        it('replaces normally when the new spec keeps every existing bind mount', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.forceRemoveContainerByName = sinon.stub().resolves(true)
+            stubs.getContainerBindMounts = sinon.stub().resolves([
+                { source: '/data/node/bitcoin/mainnet', destination: '/root/.bitcoin' },
+                { source: '/bigdisk/bitcoin/mainnet',   destination: '/blocks' },
+                { source: '/bigdisk/bitcoin/mainnet-txindex', destination: '/root/.bitcoin/indexes/txindex' }
+            ])
+            const args = await build(stubs, { envBlocksDir: '/bigdisk' })
+            expect(args).to.not.be.null
+            expect(stubs.forceRemoveContainerByName.calledOnce).to.be.true
+        })
+
+        it('treats an existing symlink at the blocks host path as provisioned (no mkdir)', async function () {
+            // Regression: mkdirSync on an existing symlink surfaced a misleading
+            // EACCES "failed to create"; ensureHostDir lstats first and skips.
+            const stubs = makeNodeServiceStubs()
+            stubs.fs.lstatSync = sinon.stub().returns({ isSymbolicLink: () => true })
+            stubs.fs.mkdirSync.throws(new Error('EACCES: permission denied'))
+            const args = await build(stubs, { envBlocksDir: '/bigdisk' })
+            expect(args).to.not.be.null
+            expect(stubs.fs.mkdirSync.called).to.be.false
+        })
+    })
+
     it('rejects when docker run fails', async function () {
         const stubs = makeNodeServiceStubs()
         stubs.execFile.callsFake((cmd, args, opts, cb) => {
@@ -778,13 +888,16 @@ describe('NodeService: installNode()', function () {
                 },
                 cryptoNodesDir: '/crypto_nodes',
                 dataDir:        '/data',
+                configDir:      '/config',
                 path:           require('path')
             },
             './ConfigService': {
                 getDockerContainerImageName: stubs.getDockerContainerImageName,
                 getDockerNetwork:            stubs.getDockerNetwork,
                 getDefaultConfig:            stubs.getDefaultConfig,
-                validatePort:                () => true
+                validatePort:                () => true,
+                readSidecarValue:            sinon.stub().resolves(undefined),
+                upsertSidecarValues:         sinon.stub()
             },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': {
@@ -839,9 +952,9 @@ describe('NodeService: installNode()', function () {
                 Coin:    { BITCOIN: 'bitcoin', DOGECOIN: 'dogecoin', LITECOIN: 'litecoin' },
                 Network: { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' },
                 XChainService: { XCHAIN_ENCODER: 'xchain-encoder', XCHAIN_DECODER: 'xchain-decoder', XCHAIN_UTXO_TRACKER: 'xchain-utxo-tracker', XCHAIN_REGTEST_MINER: 'xchain-regtest-miner', XCHAIN_INDEXER: 'xchain-indexer', XCHAIN_E2E_TEST: 'xchain-e2e-test' },
-                cryptoNodesDir: '/crypto_nodes', dataDir: '/data', path: require('path')
+                cryptoNodesDir: '/crypto_nodes', dataDir: '/data', configDir: '/config', path: require('path')
             },
-            './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true },
+            './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true, readSidecarValue: sinon.stub().resolves(undefined), upsertSidecarValues: sinon.stub() },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
             './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
@@ -876,9 +989,9 @@ describe('NodeService: installNode()', function () {
                 Coin:    { BITCOIN: 'bitcoin', DOGECOIN: 'dogecoin', LITECOIN: 'litecoin' },
                 Network: { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' },
                 XChainService: { XCHAIN_ENCODER: 'xchain-encoder', XCHAIN_DECODER: 'xchain-decoder', XCHAIN_UTXO_TRACKER: 'xchain-utxo-tracker', XCHAIN_REGTEST_MINER: 'xchain-regtest-miner', XCHAIN_INDEXER: 'xchain-indexer', XCHAIN_E2E_TEST: 'xchain-e2e-test' },
-                cryptoNodesDir: '/crypto_nodes', dataDir: '/data', path: require('path')
+                cryptoNodesDir: '/crypto_nodes', dataDir: '/data', configDir: '/config', path: require('path')
             },
-            './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true },
+            './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true, readSidecarValue: sinon.stub().resolves(undefined), upsertSidecarValues: sinon.stub() },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
             './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },

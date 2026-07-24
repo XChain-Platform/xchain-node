@@ -891,6 +891,7 @@ module.exports = {
     getDefaultConfig,
     persistSidecarCreds,
     upsertSidecarValues,
+    readSidecarValue,
     filterCommandParameters,
     resolveArgs
 }

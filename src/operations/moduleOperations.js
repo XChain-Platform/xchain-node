@@ -334,7 +334,11 @@ async function resetModules(service, coin, network, force = false) {
     // live OUTSIDE the in-datadir path the node wipe clears, so they must be
     // wiped explicitly and named in the confirmation, else a reset restarts the
     // daemon over a stale blocks dir + stale txindex (uuid:90630038).
-    const blocksDir     = process.env.XCHAIN_NODE_BLOCKS_DIR
+    // Env-first with config/node.local fallback : a reset from a
+    // profile-less shell must still see the relocated stores, or it restarts
+    // the daemon over stale out-of-datadir chain data.
+    const { resolveBlocksDir } = require('../services/NodeService')
+    const blocksDir     = await resolveBlocksDir()
     const blocksHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}` : null
     const txindexHostPath = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
 
