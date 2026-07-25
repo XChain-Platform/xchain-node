@@ -552,6 +552,25 @@ async function getDefaultConfig(module, coin, network) {
                         "http://" + getDockerContainerImageName(XChainService.XCHAIN_UTXO_TRACKER, coinName, net) + ":3001"
                     defaultValues["DECODER_API_URL_" + tick + "_" + net.toUpperCase()] =
                         "http://" + getDockerContainerImageName(XChainService.XCHAIN_DECODER, coinName, net) + ":3002"
+
+                    // : same omission, one service later. The explorer's
+                    // quote/pre-flight proxies (/api/preflight, /api/feequote,
+                    // /api/oraclefeequote) resolve their upstream from
+                    // INDEXER_API_URL_<COIN>_<NETWORK>, which was never emitted
+                    // here, so every one of them answered INDEXER_NOT_CONFIGURED
+                    // on a container install. That silently reduced the wallet's
+                    // pre-flight to its client-side tier: the confirm surface
+                    // still renders a verdict, just never the indexer's own.
+                    //
+                    // Unlike the two above, this one yields to the host env. The
+                    // explorer is also run natively (systemd) on hosts where the
+                    // indexers live on OTHER boxes, and those set this var by
+                    // hand to a remote address ; a container-local
+                    // default that overrode it would point a working production
+                    // explorer at a hostname that does not resolve.
+                    const indexerVar = "INDEXER_API_URL_" + tick + "_" + net.toUpperCase()
+                    defaultValues[indexerVar] = process.env[indexerVar]
+                        || "http://" + getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coinName, net) + ":3004"
                 }
             }
         }

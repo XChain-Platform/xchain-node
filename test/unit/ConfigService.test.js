@@ -784,6 +784,44 @@ describe('ConfigService', function () {
                 expect(config['EXPLORER_PORT_HTTP']).to.equal(18080)
             })
 
+            // . The explorer's quote/pre-flight proxies resolve their
+            // upstream from these, and their absence fails SOFT: the routes
+            // answer INDEXER_NOT_CONFIGURED and the wallet quietly drops to
+            // its client-side pre-flight tier rather than erroring. Nothing
+            // in the running system complains, so pin the emission here.
+            it('emits INDEXER_API_URL_<COIN>_<NETWORK> for every coin and network', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                expect(config['INDEXER_API_URL_BTC_REGTEST'])
+                    .to.equal('http://xchain-node-bitcoin-regtest-xchain-indexer:3004')
+                expect(config['INDEXER_API_URL_BTC_MAINNET'])
+                    .to.equal('http://xchain-node-bitcoin-mainnet-xchain-indexer:3004')
+                expect(config['INDEXER_API_URL_LTC_REGTEST'])
+                    .to.equal('http://xchain-node-litecoin-regtest-xchain-indexer:3004')
+                expect(config['INDEXER_API_URL_DOGE_TESTNET'])
+                    .to.equal('http://xchain-node-dogecoin-testnet-xchain-indexer:3004')
+            })
+
+            // The container-local default must never win over an operator's
+            // value: an explorer whose indexers live on other boxes sets this
+            // by hand , and overriding it would point a working
+            // production explorer at a hostname that does not resolve.
+            it('yields INDEXER_API_URL_<COIN>_<NETWORK> to the host env', async function () {
+                const prev = process.env.INDEXER_API_URL_BTC_MAINNET
+                process.env.INDEXER_API_URL_BTC_MAINNET = 'http://10.0.0.5:3004'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                    expect(config['INDEXER_API_URL_BTC_MAINNET']).to.equal('http://10.0.0.5:3004')
+                    // Unrelated coins keep the container-local default.
+                    expect(config['INDEXER_API_URL_LTC_MAINNET'])
+                        .to.equal('http://xchain-node-litecoin-mainnet-xchain-indexer:3004')
+                } finally {
+                    if (prev === undefined) delete process.env.INDEXER_API_URL_BTC_MAINNET
+                    else process.env.INDEXER_API_URL_BTC_MAINNET = prev
+                }
+            })
+
             it('returns EXPLORER_API_PORT_HTTP as 8080', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
