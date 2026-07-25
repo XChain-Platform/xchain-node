@@ -688,6 +688,28 @@ describe('ConfigService', function () {
                 expect(config['HUB_PORT']).to.equal(10000)
             })
 
+            // : the indexer's hub client is enabled purely by HUB_API_URL
+            // (hub_client.js `this.enabled = !!this.hubUrl`). HUB_API_HOST is set here
+            // but read by nothing in xchain-indexer, so while HUB_API_URL was unset the
+            // client stayed disabled on every installed stack and no push ever left the
+            // indexer, including the PRICE v1 oracle_price pushes a FIAT dispenser later
+            // prices against.
+            it('sets HUB_API_URL so the indexer hub client is enabled', async function () {
+                const cs = makeServiceWithConfig('')
+                for (const network of ['regtest', 'testnet', 'mainnet']) {
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', network)
+                    expect(config['HUB_API_URL'], network).to.be.a('string')
+                    expect(config['HUB_API_URL'], network).to.match(/^http:\/\/.+:10000$/)
+                }
+            })
+
+            it('points HUB_API_URL at the same hub container HUB_API_HOST names', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                expect(config['HUB_API_URL']).to.equal(
+                    'http://' + config['HUB_API_HOST'] + ':' + config['HUB_PORT'])
+            })
+
             it('includes REGTEST_MINER_URL for regtest network', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'regtest')

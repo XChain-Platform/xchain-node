@@ -298,6 +298,25 @@ async function getDefaultConfig(module, coin, network) {
             "HUB_HOST":          "0.0.0.0",
             "HUB_API_HOST":      getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
             "HUB_PORT":          10000,
+            // The indexer's hub client keys ENTIRELY off HUB_API_URL (hub_client.js:
+            // `this.enabled = !!this.hubUrl`). HUB_API_HOST above is set but read by
+            // nothing in xchain-indexer, so without this the client stayed disabled on
+            // every installed stack and no push ever left the indexer: chain tips,
+            // config, and in particular the PRICE v1 oracle_price pushes that a FIAT
+            // dispenser later prices against. Prod sets HUB_API_URL by hand in the
+            // per-coin config file, which is why this went unnoticed .
+            //
+            // Composed from the same container name + port as HUB_API_HOST/HUB_PORT, so
+            // it resolves on the docker network exactly as the sibling *_API_HOST vars
+            // do. An operator config-file value still wins, so prod's explicit
+            // cross-host URL is unaffected.
+            //
+            // This enables the push half only. The read-back half (hub tables mirrored
+            // into the indexer) additionally needs HUB_DB_NAME + HUB_DB_SYNC_ENABLED,
+            // which regtest deliberately leaves unset (see the network !== "regtest"
+            // block below), so turning this on cannot start a mirror bootstrap and
+            // cannot re-page price_snapshots out from under a seeded test venue.
+            "HUB_API_URL":       "http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":10000",
             // The e2e federation suites (test:federation / test:attestation:llm) boot
             // in-process MultiValidatorHubs that create + drop XChain_<coin>_<net>_MVH_*
             // databases, so the container needs the hub DB credentials. DatabaseService
