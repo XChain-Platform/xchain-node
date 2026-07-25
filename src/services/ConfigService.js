@@ -652,7 +652,26 @@ async function getDefaultConfig(module, coin, network) {
             // collectively blows 100/min and gets 429'd, so the heartbeat gate then stays
             // closed and the chain stalls. Raise for prod fleets. Passed through so the
             // host env survives a hub container regenerate.
-            "HUB_RATE_LIMIT_RPM"
+            "HUB_RATE_LIMIT_RPM",
+            // XCHAIN derived-price source . XCHAIN is listed on no exchange, so
+            // a validator computes XCHAIN/USD from realized fills in its OWN BTC indexer
+            // database instead of fetching it. Every native-coin fee decision on LTC and
+            // DOGE needs that pair, and without it those chains cannot price a fee at all.
+            //
+            // Read-only access; unset means the hub simply abstains from the pair and
+            // submits the 36 API pairs exactly as before, which is a supported state.
+            // Passed through here so the values survive a hub container regenerate - a
+            // config file alone never reaches the container.
+            "XCHAIN_PRICE_INDEXER_DB_HOST", "XCHAIN_PRICE_INDEXER_DB_PORT",
+            "XCHAIN_PRICE_INDEXER_DB_NAME", "XCHAIN_PRICE_INDEXER_DB_USER",
+            "XCHAIN_PRICE_INDEXER_DB_PASS", "XCHAIN_PRICE_INDEXER_DB_COIN",
+            // Consensus-uniform derivation parameters (window length, confirmation
+            // buffer, bootstrap price). Overrides exist for regtest and e2e only: a hub
+            // running different values computes a different XCHAIN/BTC leg and lands
+            // outside the co-sign deviation band, so on a real network leave them unset
+            // and move them only by a coordinated flag-day.
+            "XCHAIN_PRICE_WINDOW_BLOCKS", "XCHAIN_PRICE_CONFIRMATION_BUFFER",
+            "XCHAIN_PRICE_BOOTSTRAP_USD"
         ]
         for (const varName of hubPassthroughVars) {
             if (process.env[varName] !== undefined && process.env[varName] !== "") {
