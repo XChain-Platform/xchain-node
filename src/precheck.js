@@ -161,8 +161,13 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
     try {
         if (isVerbose()) console.log("Checking/Installing hub module")
         await installHubModule()
-    } catch {
-        throw new Error("There was an error trying to install the hub module")
+    } catch (err) {
+        // Preserve the cause. A bare `catch {}` here discarded the ONLY description
+        // of what actually went wrong and replaced it with a message that names no
+        // reason, so every hub install failure looked identical and was undebuggable
+        // without editing this file first ( lost two cycles to exactly that).
+        // Secrets are redacted because installHubModule handles DB credentials.
+        throw new Error("There was an error trying to install the hub module: " + redactSecrets(err), { cause: err })
     }
 
     // Only push local config to the hub/explorer for state-changing commands.
