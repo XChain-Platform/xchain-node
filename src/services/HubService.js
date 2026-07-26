@@ -46,7 +46,7 @@ function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
     return config
 }
 const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
-const { sleep }                                = require('../utils/helpers')
+const { sleep, redactSecrets }                 = require('../utils/helpers')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = require('./ConfigService')
 const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./StatusService')
 const { addContainerToNetwork }                = require('./DockerService')
@@ -135,17 +135,26 @@ async function updateHubOrExplorer(module) {
     } else {
         let hubUpdated = false
         let tries = 10
+        // Keep the last failure. updateConfig is an HTTP call to the module's own
+        // API, so when the container is crash-looping every attempt fails with a
+        // connection error and this loop reports only "there was a problem" - which
+        // hides the fact that the CONFIG is fine and the SERVICE never came up. That
+        // misdirection cost  real time: the true cause was in the container's
+        // own log, not here.
+        let lastErr = null
         while (!hubUpdated) {
             try {
                 hubUpdated = await moduleConnector.updateConfig(jsonConfig)
-            } catch { /* retry */ }
+            } catch (err) { lastErr = err }
 
             tries--
             if (tries <= 0) {
-                throw "There was a problem trying to update a config in the " + module + " module"
+                throw "There was a problem trying to update a config in the " + module + " module" +
+                    (lastErr ? " (last error: " + redactSecrets(lastErr) + "; if this is a connection failure, check `docker logs` for the module - the service is not starting)" : "")
             }
             if (!hubUpdated) {
-                console.log("There was a problem trying to update a config in the " + module + " module. Trying again in 3 seconds...")
+                console.log("There was a problem trying to update a config in the " + module + " module" +
+                    (lastErr ? " (" + redactSecrets(lastErr) + ")" : "") + ". Trying again in 3 seconds...")
                 await sleep(3000)
             }
         }
