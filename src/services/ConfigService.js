@@ -455,9 +455,25 @@ async function getDefaultConfig(module, coin, network) {
             // itself using its own DB account. Without HUB_DB_NAME the connection is never made
             // and the mainnet native-fee price-source gate (XChainIndexer.start) fails closed.
             // This mirrors the proven prod per-coin override; operator config overrides still
-            // win. regtest has no hub to sync from and the gate is mainnet-only, so it keeps the
-            // local-price fallback. HUB_DB_PASS is reconciled after the per-install DB password
-            // is resolved (see below); HUB_DB_HOST/PORT are already set above.
+            // win. HUB_DB_PASS is reconciled after the per-install DB password is resolved
+            // (see below); HUB_DB_HOST/PORT are already set above.
+            //
+            // WHY regtest IS EXCLUDED, corrected 2026-07-26. The old note here said "regtest
+            // has no hub to sync from", which stopped being true at 336a7d5 (HUB_API_URL is
+            // now composed for regtest too, and a regtest indexer does reach the hub: enabling
+            // this on litecoin-regtest bootstrapped 3 real rows into oracle_prices). The
+            // exclusion is still right, for a different and harder reason: turning the mirror
+            // on ARMS the block-loop price barriers, and `_priceTimeSyncSatisfied` only opens
+            // on `streamWatermark >= blockTime + 600s` (the frozen price grace). Production
+            // block timestamps LAG wall clock, so the watermark runs ahead and the escape
+            // fires; regtest blocks are stamped at ~now, so it can NEVER be 600s ahead and
+            // every freshly mined block defers forever. Observed live: block 1479 deferred on
+            // a 60s timeout, repeatedly, until this was reverted.
+            //
+            // To enable it on regtest deliberately (the  mirror-leg test venue), the
+            // operator must ALSO set HUB_SYNC_PRICE_GRACE_S=0 and HUB_SYNC_ORACLE_GRACE_S=0,
+            // which hub_db_sync honours on regtest only, precisely for this. Do not "fix" the
+            // wedge by widening those off regtest: a per-node grace forks settlement.
             if (network !== "regtest") {
                 defaultValues.HUB_DB_NAME         = defaultValues.INDEXER_DB_NAME
                 defaultValues.HUB_DB_USER         = defaultValues.INDEXER_DB_USER
@@ -693,6 +709,32 @@ async function getDefaultConfig(module, coin, network) {
             if (process.env[varName] !== undefined && process.env[varName] !== "") {
                 defaultValues[varName] = process.env[varName]
             }
+        }
+
+        // : the hub now REFUSES to boot when HUB_API_KEY is unset unless
+        // keyless operation is declared with HUB_ALLOW_UNAUTHENTICATED. A managed
+        // deploy with no key in the host env is a legitimate posture (single-host
+        // regtest, a hub reachable only on a private network), so make the
+        // declaration here rather than letting the container crash-loop: the point
+        // of the hub-side change is that keyless is a stated choice, and the
+        // deployer is what states it. An operator who wants the refusal instead
+        // sets HUB_ALLOW_UNAUTHENTICATED=false in the host env, which the
+        // passthrough above preserves. `xchain-node go-live` still refuses a
+        // keyless mainnet hub outright (GoLiveGate).
+        // MAINNET is the exception: there the review's "invert the defaults, fail
+        // closed" applies with real funds behind it, so we do NOT declare keyless
+        // on the operator's behalf and the hub's own refusal stands. (A mainnet
+        // VALIDATOR hub is already covered: the hub has refused keyless validator
+        // boots since before this change, so no running one can be keyless and
+        // undeclared. This only reaches a mainnet config-only hub.)
+        const hubNetworkIsMainnet = String(defaultValues["HUB_NETWORK"] || "").toLowerCase() === Network.MAINNET
+        if (!defaultValues["HUB_API_KEY"] && defaultValues["HUB_ALLOW_UNAUTHENTICATED"] === undefined
+            && !hubNetworkIsMainnet) {
+            defaultValues["HUB_ALLOW_UNAUTHENTICATED"] = "true"
+            console.warn("WARNING: HUB_API_KEY is not set, so this hub is deployed with an UNAUTHENTICATED " +
+                "write surface (HUB_ALLOW_UNAUTHENTICATED=true). Anyone who can reach the hub port can drive " +
+                "updateconfig / registervalidator / reportreorg. Set HUB_API_KEY in the host env before " +
+                "exposing this hub beyond a trusted network.")
         }
 
         // Operator signer for the on-chain DOGE publishers: when the host sets
