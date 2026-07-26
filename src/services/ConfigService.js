@@ -671,7 +671,23 @@ async function getDefaultConfig(module, coin, network) {
             // outside the co-sign deviation band, so on a real network leave them unset
             // and move them only by a coordinated flag-day.
             "XCHAIN_PRICE_WINDOW_BLOCKS", "XCHAIN_PRICE_CONFIRMATION_BUFFER",
-            "XCHAIN_PRICE_BOOTSTRAP_USD"
+            "XCHAIN_PRICE_BOOTSTRAP_USD",
+            // Hub API authentication. Without these two passed through, VALIDATOR MODE
+            // IS UNREACHABLE: the hub refuses to boot in validator mode unless one of
+            // them is set ("HUB_API_KEY is not set in validator mode. Write methods
+            // would be UNAUTHENTICATED"), and neither could previously reach the
+            // container at all.
+            //
+            // That failure also WEDGES the installer, so it is worth more than a
+            // one-line fix: once P2P_VALIDATOR_ADDR is baked into the container env the
+            // hub crash-loops, and `update xchain-hub` then fails because its own
+            // precheck tries to restart the container that cannot start. Recovery is
+            // `docker rm -f` the container and update again.
+            //
+            // HUB_ALLOW_UNAUTHENTICATED=true is the documented keyless escape hatch and
+            // suits a single-host regtest venue that already ran open; a real network
+            // sets HUB_API_KEY instead.
+            "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED"
         ]
         for (const varName of hubPassthroughVars) {
             if (process.env[varName] !== undefined && process.env[varName] !== "") {
