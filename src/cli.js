@@ -376,15 +376,24 @@ async function parseCommand() {
         .argument('<service>', '(xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-hub)')
         .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet, testnet, regtest)')
+        .option('--latest',       'restore the newest bootstrap without prompting (scriptable)')
+        .option('--file <name>',  'restore this exact bootstrap archive without prompting')
         .addHelpText('after', `
 Notes:
     bootstrap create  - generates a bootstrap file
-    bootstrap restore - restores a bootstrap file`)
-        .action(async (action, service, chain, network) => {
+    bootstrap restore - restores a bootstrap file
+
+    restore prompts only on a TTY. With --latest, --file, or no TTY it
+    resolves non-interactively, so a script cannot wedge on an unanswerable
+    menu while holding the command lock.`)
+        .action(async (action, service, chain, network, options) => {
             if (action === "create") {
                 await makeBootstrap(chain, network, service)
             } else {
-                await restoreBootstrapInterface(chain, network, service)
+                await restoreBootstrapInterface(chain, network, service, {
+                    latest: options.latest === true,
+                    file:   options.file || null,
+                })
             }
             return process.exit(0)
         })

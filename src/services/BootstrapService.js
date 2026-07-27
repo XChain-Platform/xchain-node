@@ -260,6 +260,52 @@ function getWorkDir(coin, network, module) {
     return path.join(tmpDir, `bootstrap-work-${coin}-${network}-${module}`)
 }
 
+// . Staging a bootstrap writes the whole dataset into the work dir, and
+// tmpDir defaults to <repo>/tmp, which on a normal install is the ROOT
+// filesystem. A 30G tracker archive staged there filled node-host-b's / to 100%
+// and took the host down; the recovery was to point XCHAIN_NODE_TMP_DIR at the
+// big volume, which works but only if you already know to do it.
+//
+// So refuse up front instead of discovering it at 100%. Deliberately checked
+// BEFORE the service container is stopped: failing after the stop would take
+// the tracker down to accomplish nothing. estimatedBytes is the UNCOMPRESSED
+// size, which is the honest worst case, since we cannot know the ratio before
+// compressing and an incompressible dataset is exactly the one that fills a
+// disk. A reserve on top keeps the filesystem off zero even if the estimate is
+// slightly low, because filling root is far worse than refusing a bootstrap.
+const BOOTSTRAP_FS_RESERVE_BYTES = 2 * 1024 * 1024 * 1024
+
+function assertWorkDirCapacity(workDir, estimatedBytes, label) {
+    if (!estimatedBytes || estimatedBytes <= 0) return   // unknown size: nothing to assert against
+
+    // statfs needs a path that exists; walk up to the nearest existing ancestor.
+    let probe = path.resolve(workDir)
+    while (!fs.existsSync(probe)) {
+        const parent = path.dirname(probe)
+        if (parent === probe) break
+        probe = parent
+    }
+
+    let free
+    try {
+        const st = fs.statfsSync(probe)
+        free = st.bavail * st.bsize
+    } catch {
+        return   // cannot measure (unsupported platform): do not block the operator
+    }
+
+    const needed = estimatedBytes + BOOTSTRAP_FS_RESERVE_BYTES
+    if (free >= needed) return
+
+    const gb = n => (n / 1024 / 1024 / 1024).toFixed(1) + 'G'
+    throw new Error(
+        `Not enough space to stage the ${label} bootstrap under ${probe}: ` +
+        `${gb(free)} free, need about ${gb(needed)} (${gb(estimatedBytes)} of data plus a ${gb(BOOTSTRAP_FS_RESERVE_BYTES)} reserve). ` +
+        `Point the work dir at a larger volume with XCHAIN_NODE_TMP_DIR=/path/on/big/disk and re-run; ` +
+        `the default is <install>/tmp, which is usually the root filesystem.`
+    )
+}
+
 function ensureDir(dirPath) {
     if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true })
@@ -321,12 +367,29 @@ async function getBootstrapFilesList(coin, network, module) {
         for (const fileName of entries) {
             const filePath = path.join(directory, fileName)
             const stats    = await fs.promises.stat(filePath)
-            if (stats.isFile()) fileList.push(fileName)
+            // : only real archives are restorable. The directory also holds
+            // the detached .sig (and older .sha256) sidecars, and listing those as
+            // choices invites restoring a signature file.
+            if (stats.isFile() && isBootstrapArchiveName(fileName))
+                fileList.push({ name: fileName, mtimeMs: Number(stats.mtimeMs) || 0 })
         }
-        return fileList
+        // : NEWEST FIRST. This came back in raw readdir order, which is
+        // effectively arbitrary and in practice oldest-first, so every caller
+        // that reached for "the latest" by taking the head of the list restored
+        // the OLDEST archive instead. Sorting here fixes the interactive menu
+        // and any scripted driver at once; ties break on the name, which embeds
+        // the build timestamp, so the order is total and reproducible even when
+        // mtimes are equal or unavailable.
+        fileList.sort((a, b) => (b.mtimeMs - a.mtimeMs) || b.name.localeCompare(a.name))
+        return fileList.map(f => f.name)
     } catch (err) {
         throw err
     }
+}
+
+// A published bootstrap is the outer wrapper archive; .sig/.sha256 sit beside it.
+function isBootstrapArchiveName(fileName) {
+    return /\.(tar\.gz|tgz)$/.test(fileName)
 }
 
 // ─── Public: makeBootstrap ────────────────────────────────────────
@@ -366,6 +429,10 @@ async function makeBootstrapUtxoTracker(coin, network) {
     } catch {
         console.log('Could not estimate volume size, progress will show as ?%')
     }
+
+    // Step 1b: refuse now if the work dir cannot hold it . Before the
+    // stop below, so a capacity failure never costs the tracker any downtime.
+    assertWorkDirCapacity(workDir, totalBytes, `${coin}/${network} utxo-tracker`)
 
     // Step 2: Get container ID and stop service
     const containerId = await db.getModuleContainer(XChainService.XCHAIN_UTXO_TRACKER, coin, network)

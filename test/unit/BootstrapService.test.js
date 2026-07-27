@@ -253,10 +253,14 @@ describe('BootstrapService', function () {
         it('returns file list for XCHAIN_UTXO_TRACKER', async function () {
             const stubs = makeStubs()
             stubs.fs.promises.readdir.resolves(['boot1.tar.gz', 'boot2.tar.gz'])
-            stubs.fs.promises.stat.resolves({ isFile: () => true })
+            // : the list is NEWEST FIRST now, so give the stub real mtimes
+            // rather than asserting whatever order readdir happened to return.
+            stubs.fs.promises.stat
+                .onFirstCall().resolves({ isFile: () => true, mtimeMs: 1000 })
+                .onSecondCall().resolves({ isFile: () => true, mtimeMs: 2000 })
             const bs = loadBootstrapService(stubs)
             const list = await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
-            expect(list).to.deep.equal(['boot1.tar.gz', 'boot2.tar.gz'])
+            expect(list).to.deep.equal(['boot2.tar.gz', 'boot1.tar.gz'])
         })
 
         it('returns file list for XCHAIN_DECODER', async function () {
@@ -1770,4 +1774,91 @@ describe('BootstrapService', function () {
             }
         })
     })
+
+    // -----------------------------------------------------------------------
+    // : the three defects that came out of the  rotation session
+    // -----------------------------------------------------------------------
+
+    describe('bootstrap listing and staging safety ', function () {
+
+        it('lists archives NEWEST first, so "the latest" is the head of the list', async function () {
+            // The list came back in raw readdir order, so a driver taking [0]
+            // restored the OLDEST archive.
+            const stubs = makeStubs()
+            stubs.fs.promises.readdir.resolves(['old.tar.gz', 'newest.tar.gz', 'middle.tar.gz'])
+            stubs.fs.promises.stat
+                .onCall(0).resolves({ isFile: () => true, mtimeMs: 100 })
+                .onCall(1).resolves({ isFile: () => true, mtimeMs: 900 })
+                .onCall(2).resolves({ isFile: () => true, mtimeMs: 500 })
+            const bs = loadBootstrapService(stubs)
+            const list = await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+            expect(list).to.deep.equal(['newest.tar.gz', 'middle.tar.gz', 'old.tar.gz'])
+        })
+
+        it('orders deterministically when mtimes tie or are unavailable', async function () {
+            const stubs = makeStubs()
+            stubs.fs.promises.readdir.resolves(['a-2026-06-04.tar.gz', 'b-2026-07-24.tar.gz'])
+            stubs.fs.promises.stat.resolves({ isFile: () => true })   // no mtimeMs at all
+            const bs = loadBootstrapService(stubs)
+            const list = await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+            expect(list).to.have.length(2)
+            expect(list[0]).to.equal('b-2026-07-24.tar.gz')
+        })
+
+        it('excludes the .sig and .sha256 sidecars from the restorable list', async function () {
+            // Otherwise the menu offers a signature file as something to restore.
+            const stubs = makeStubs()
+            stubs.fs.promises.readdir.resolves([
+                'boot.tar.gz', 'boot.tar.gz.sig', 'boot.sha256', 'notes.txt',
+            ])
+            stubs.fs.promises.stat.resolves({ isFile: () => true, mtimeMs: 1 })
+            const bs = loadBootstrapService(stubs)
+            const list = await bs.getBootstrapFilesList(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+            expect(list).to.deep.equal(['boot.tar.gz'])
+        })
+
+        it('refuses to stage a bootstrap the work-dir filesystem cannot hold', async function () {
+            // Staging 30G under <repo>/tmp filled node-host-b's root filesystem.
+            const stubs = makeStubs()
+            stubs.execFile.resolves({ stdout: '32212254720\t/data' })   // 30G volume
+            stubs.fs.statfsSync = sinon.stub().returns({ bavail: 1000, bsize: 4096 })  // ~4MB free
+            const bs = loadBootstrapService(stubs)
+
+            let err = null
+            try {
+                await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+            } catch (e) { err = e }
+
+            expect(err, 'a full work-dir filesystem must be refused').to.not.equal(null)
+            expect(err.message).to.match(/Not enough space/)
+            expect(err.message).to.match(/XCHAIN_NODE_TMP_DIR/)
+        })
+
+        it('refuses BEFORE stopping the container, so a capacity failure costs no downtime', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.resolves({ stdout: '32212254720\t/data' })
+            stubs.fs.statfsSync = sinon.stub().returns({ bavail: 1000, bsize: 4096 })
+            const bs = loadBootstrapService(stubs)
+
+            try { await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER) } catch { /* expected */ }
+
+            sinon.assert.notCalled(stubs.dockerService.stopContainer)
+        })
+
+        it('proceeds when the filesystem has room for the data plus the reserve', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.resolves({ stdout: '1024\t/data' })         // tiny volume
+            stubs.fs.statfsSync = sinon.stub().returns({ bavail: 10 * 1024 * 1024, bsize: 4096 })  // ~40G free
+            const bs = loadBootstrapService(stubs)
+
+            let err = null
+            try { await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER) } catch (e) { err = e }
+
+            // It may still fail further down the (heavily stubbed) pipeline, but
+            // never on capacity, and the container stop must have been reached.
+            if (err) expect(err.message).to.not.match(/Not enough space/)
+            sinon.assert.called(stubs.dockerService.stopContainer)
+        })
+    })
+
 })
