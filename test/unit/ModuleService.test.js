@@ -141,7 +141,44 @@ function loadModuleService(stubs, constantsOverride) {
     return proxyquire('../../src/services/ModuleService', proxies)
 }
 
+// A few tests need call-through (they stub only part of a dependency and want the
+// real exports for the rest). `proxyquire` is a process-wide SINGLETON, so calling
+// .callThru() on it leaves call-through ON for every later proxyquire in the whole
+// mocha run, including other test files. Scope the flip to the single load that
+// asked for it .
+function proxyquireCallThru(request, stubs) {
+    const pq = require('proxyquire')
+    pq.callThru()
+    try {
+        return pq(request, stubs)
+    } finally {
+        pq.noCallThru()
+    }
+}
+
 describe('ModuleService', function () {
+
+    // Venue independence : under call-through, a DockerService stub that
+    // omits getPublishedHostPorts silently falls back to the REAL probe, which
+    // shells out to `docker ps` on the host running the suite. Such a test passes
+    // on a laptop with no docker and fails on a CI venue that happens to publish
+    // the port the test asks for (test-host held 3001 with a live utxo-tracker).
+    // Replace the real probe for the duration of this file so a missing stub fails
+    // the same way everywhere instead of depending on what the host is running.
+    const RealDockerService = require('../../src/services/DockerService')
+    const realGetPublishedHostPorts = RealDockerService.getPublishedHostPorts
+
+    before(function () {
+        RealDockerService.getPublishedHostPorts = async function () {
+            throw new Error(
+                'unit test reached the real host-port probe: stub DockerService.getPublishedHostPorts'
+            )
+        }
+    })
+
+    after(function () {
+        RealDockerService.getPublishedHostPorts = realGetPublishedHostPorts
+    })
 
     // -------------------------------------------------------------------
     // cloneGit
@@ -1575,7 +1612,6 @@ describe('ModuleService', function () {
                 else if (cmd === 'docker' && args[0] === 'run') { cb(null, containerId + '\n') }
                 else { cb(null, '') }
             })
-            const pq = require('proxyquire').noCallThru()
             const configStub = {
                 getModuleDir: (mod) => '/modules/' + mod,
                 getModuleTmpDir: (mod) => '/tmp/' + mod,
@@ -1592,7 +1628,7 @@ describe('ModuleService', function () {
                     UTXO_TRACKER_BOOTSTRAP_VOLUME: '/bootstrap'
                 })
             }
-            const ms = pq.callThru()('../../src/services/ModuleService', {
+            const ms = proxyquireCallThru('../../src/services/ModuleService', {
                 'child_process': { execFile: execFileStub },
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub() },
                 '../state': {
@@ -1634,7 +1670,6 @@ describe('ModuleService', function () {
                 else if (cmd === 'docker' && args[0] === 'run') { cb(null, containerId + '\n') }
                 else { cb(null, '') }
             })
-            const pq = require('proxyquire').noCallThru()
             const configStub = {
                 getModuleDir: (mod) => '/modules/' + mod,
                 getModuleTmpDir: (mod) => '/tmp/' + mod,
@@ -1651,7 +1686,7 @@ describe('ModuleService', function () {
                     DECODER_BOOTSTRAP_VOLUME: '/bootstrap'
                 })
             }
-            const ms = pq.callThru()('../../src/services/ModuleService', {
+            const ms = proxyquireCallThru('../../src/services/ModuleService', {
                 'child_process': { execFile: execFileStub },
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub() },
                 '../state': {
@@ -1887,10 +1922,9 @@ describe('ModuleService', function () {
                 else { cb(null, '') }
             })
             // getModuleBranch uses promisify(execFile) → needs util stub
-            const pq = require('proxyquire').noCallThru()
             const currentBranchStub = sinon3.stub().resolves({ stdout: 'master\n', stderr: '' })
             const moduleDirExistsStub = sinon3.stub().returns(true)
-            const ms = pq.callThru()('../../src/services/ModuleService', {
+            const ms = proxyquireCallThru('../../src/services/ModuleService', {
                 'child_process': { execFile: execFileStub },
                 'util': {
                     promisify: () => async (...args) => currentBranchStub(...args)
@@ -2089,10 +2123,9 @@ describe('ModuleService', function () {
                 else { cb(null, '') }
             })
             // Use a util stub so execFileAsync resolves with {stdout} shape for containerExistsByName
-            const pq = require('proxyquire').noCallThru()
             const sinon3 = require('sinon')
             let asyncCallCount = 0
-            const ms = pq.callThru()('../../src/services/ModuleService', {
+            const ms = proxyquireCallThru('../../src/services/ModuleService', {
                 'child_process': { execFile: stubs.execFile },
                 'util': {
                     promisify: () => async (cmd, args) => {
@@ -2126,7 +2159,10 @@ describe('ModuleService', function () {
                     })
                 },
                 './StatusService': { statusChanged: stubs.statusChanged, getStatus: stubs.getStatus },
-                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName },
+                // getPublishedHostPorts must be stubbed: this load calls through, and
+                // HUB_PORT below is published as a host port, so the real probe would
+                // shell out to the host's docker and fail wherever 10000 is taken.
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName, getPublishedHostPorts: stubs.getPublishedHostPorts },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon3.stub().resolves(true), getCryptoNode: sinon3.stub().resolves() },
@@ -2252,6 +2288,52 @@ describe('ModuleService', function () {
             expect(threw).to.be.an.instanceOf(Error)
             expect(threw.message).to.include('host port 80')
             expect(threw.message).to.include('host port 443')
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // Venue independence of the suite itself 
+    // -------------------------------------------------------------------
+
+    describe('unit-suite venue independence', function () {
+
+        it('trips the guard instead of probing the host when a call-through load forgets the stub', async function () {
+            const stubs = makeStubs()
+            const ms = proxyquireCallThru('../../src/services/ModuleService', {
+                'child_process': { execFile: stubs.execFile },
+                'fs': stubs.fs,
+                '../state': { db: stubs.db, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
+                // Deliberately omits getPublishedHostPorts, the mistake this guard catches.
+                './DockerService': { killContainer: stubs.killContainer, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName }
+            })
+            let threw = null
+            try {
+                await ms.assertNoHostPortConflicts(['-p', '3001:3001'], 'self')
+            } catch (err) { threw = err }
+            expect(threw).to.be.an.instanceOf(Error)
+            expect(threw.message).to.include('stub DockerService.getPublishedHostPorts')
+        })
+
+        it('leaves proxyquire in noCallThru mode after a call-through load', async function () {
+            const stubs = makeStubs()
+            proxyquireCallThru('../../src/services/ModuleService', {
+                'child_process': { execFile: stubs.execFile },
+                './DockerService': { getPublishedHostPorts: stubs.getPublishedHostPorts }
+            })
+            // The flip must not outlive that one load: a plain proxyquire with the same
+            // partial stub has to shadow the whole dependency, so the missing probe reads
+            // as undefined rather than falling back to the real (here guarded) export.
+            const ms = proxyquire('../../src/services/ModuleService', {
+                'child_process': { execFile: stubs.execFile },
+                'fs': stubs.fs,
+                '../state': { db: stubs.db, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
+                './DockerService': { killContainer: stubs.killContainer }
+            })
+            let threw = null
+            try {
+                await ms.assertNoHostPortConflicts(['-p', '3001:3001'], 'self')
+            } catch (err) { threw = err }
+            expect(threw).to.be.an.instanceOf(TypeError)
         })
     })
 })
