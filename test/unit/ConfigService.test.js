@@ -855,6 +855,61 @@ describe('ConfigService', function () {
                 }
             })
 
+            // : the hub refuses to boot on an UNDECLARED unauthenticated
+            // write surface. A managed keyless deploy is still legitimate, so the
+            // deployer makes the declaration; without it the container would
+            // crash-loop the way over-tightening the indexer (771880c) and the
+            // encoder (e2bf7c4) did pre-launch.
+            describe('hub keyless declaration ', function () {
+
+                async function hubConfigWith(env) {
+                    const saved = {}
+                    for (const k of ['HUB_API_KEY', 'HUB_ALLOW_UNAUTHENTICATED', 'HUB_NETWORK']) {
+                        saved[k] = process.env[k]
+                        delete process.env[k]
+                    }
+                    Object.assign(process.env, env)
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        return await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    } finally {
+                        for (const [k, v] of Object.entries(saved)) {
+                            if (v === undefined) delete process.env[k]
+                            else process.env[k] = v
+                        }
+                    }
+                }
+
+                it('declares keyless operation when no HUB_API_KEY is in the host env', async function () {
+                    const cfg = await hubConfigWith({})
+                    expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal('true')
+                })
+
+                it('does not declare keyless when a key is present (the hub is keyed)', async function () {
+                    const cfg = await hubConfigWith({ HUB_API_KEY: 'hub-secret-456' })
+                    expect(cfg['HUB_API_KEY']).to.equal('hub-secret-456')
+                    expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
+                })
+
+                it('yields to an explicit host-env refusal (HUB_ALLOW_UNAUTHENTICATED=false)', async function () {
+                    const cfg = await hubConfigWith({ HUB_ALLOW_UNAUTHENTICATED: 'false' })
+                    expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal('false')
+                })
+
+                // Real funds behind it: on mainnet the deployer does NOT declare
+                // keyless for the operator, so the hub's refusal stands and the
+                // deploy fails loudly instead of serving an open write surface.
+                it('does NOT declare keyless on a mainnet hub', async function () {
+                    const cfg = await hubConfigWith({ HUB_NETWORK: 'mainnet' })
+                    expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
+                })
+
+                it('still declares keyless on a regtest hub', async function () {
+                    const cfg = await hubConfigWith({ HUB_NETWORK: 'regtest' })
+                    expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal('true')
+                })
+            })
+
             it('omits HUB_API_KEY from shared-service configs when unset in host env', async function () {
                 const prev = process.env.HUB_API_KEY
                 delete process.env.HUB_API_KEY

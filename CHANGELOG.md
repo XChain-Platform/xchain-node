@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Command lock covers all provisioning commands, external-DB ports validated at every branch, reset validates inputs and fails loud, bootstrap-aware healthcheck start-period.
 
 ### Added
+- Keyless hub deploys now declare `HUB_ALLOW_UNAUTHENTICATED=true` (never on mainnet), which the hub requires since  before it will boot with an unauthenticated write surface.
 - `HUB_API_KEY` host-env passthrough to shared-service configs (sync, explorer), so their hub clients authenticate against the keyed sensitive-read tier (`getallconfigs`).
 - Accepted MariaDB root passwords persist to `~/.xchain-node/credentials.json` (0600) and are read back, ping-verified, as a non-interactive fallback when the DB container carries no `MYSQL_ROOT_PASSWORD` env.
 
