@@ -661,6 +661,12 @@ async function getDefaultConfig(module, coin, network) {
             // which stalls every indexer's oracle price-sync barrier. Passed through
             // here so the host env survives a hub container regenerate.
             "ORACLE_MIN_SUBMISSIONS",
+            // Oracle round cadence. CONSENSUS-UNIFORM: every hub in a federation must
+            // share these or round numbering and the submission cutoff diverge. Passed
+            // through for single-validator regtest/e2e venues, where short rounds keep
+            // a live drill from waiting 10 minutes per finalization; real networks
+            // leave them unset and take the hub defaults.
+            "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
             // Per-IP request/min cap on the hub's express API (default 100). Too low
             // for legitimate multi-indexer re-bootstrap: every indexer on a box shares
             // one source IP, so a fleet bootstrapping HubDbSync tables (oracle_prices,
@@ -688,6 +694,12 @@ async function getDefaultConfig(module, coin, network) {
             // and move them only by a coordinated flag-day.
             "XCHAIN_PRICE_WINDOW_BLOCKS", "XCHAIN_PRICE_CONFIRMATION_BUFFER",
             "XCHAIN_PRICE_BOOTSTRAP_USD",
+            // D2 supersession threshold override. The shipped constant keeps
+            // supersession disabled (bootstrap carry-forward only); regtest/e2e drills
+            // set '0' so any realized volume supersedes, which is what lets a live
+            // proof distinguish a derived print from the carry-forward it would
+            // otherwise silently match.
+            "XCHAIN_PRICE_MIN_BTC_VOLUME",
             // Hub API authentication. Without these two passed through, VALIDATOR MODE
             // IS UNREACHABLE: the hub refuses to boot in validator mode unless one of
             // them is set ("HUB_API_KEY is not set in validator mode. Write methods
