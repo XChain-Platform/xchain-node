@@ -1832,6 +1832,7 @@ describe('BootstrapService', function () {
             expect(err, 'a full work-dir filesystem must be refused').to.not.equal(null)
             expect(err.message).to.match(/Not enough space/)
             expect(err.message).to.match(/XCHAIN_NODE_TMP_DIR/)
+            expect(err.message).to.match(/staging/)
         })
 
         it('refuses BEFORE stopping the container, so a capacity failure costs no downtime', async function () {
@@ -1842,6 +1843,26 @@ describe('BootstrapService', function () {
 
             try { await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER) } catch { /* expected */ }
 
+            sinon.assert.notCalled(stubs.dockerService.stopContainer)
+        })
+
+        it('also refuses when only the OUTPUT filesystem is too small', async function () {
+            // The finished archive lands in the bootstrap output dir, which on a
+            // default install is <install>/data, i.e. root as well. Guarding only
+            // the staging dir would have left the outage half-fixed.
+            const stubs = makeStubs()
+            stubs.execFile.resolves({ stdout: '32212254720\t/data' })
+            stubs.fs.statfsSync = sinon.stub()
+            stubs.fs.statfsSync.onFirstCall().returns({ bavail: 20 * 1024 * 1024, bsize: 4096 })  // staging: ~80G, fine
+            stubs.fs.statfsSync.returns({ bavail: 1000, bsize: 4096 })                            // output: ~4MB
+            const bs = loadBootstrapService(stubs)
+
+            let err = null
+            try { await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER) } catch (e) { err = e }
+
+            expect(err, 'a full output filesystem must be refused too').to.not.equal(null)
+            expect(err.message).to.match(/Not enough space/)
+            expect(err.message).to.match(/published archives/)
             sinon.assert.notCalled(stubs.dockerService.stopContainer)
         })
 

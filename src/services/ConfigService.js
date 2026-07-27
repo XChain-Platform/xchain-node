@@ -24,7 +24,7 @@ const {
     NODE_PREFIX, DEFAULT_NODE_PREFIX, SEP, DB_SEP,
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     Coin, Network, XChainService, CoinTickerSymbol, REGTEST_MODULES,
-    moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir,
+    moduleDir, tmpDir, cryptoNodesDir, dataDir, bootstrapDir, configDir,
     EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT
 } = require('../config/constants')
 const { stringToCoin } = require('../utils/helpers')
@@ -265,7 +265,7 @@ async function getDefaultConfig(module, coin, network) {
             "UTXO_TRACKER_URL":              getDockerContainerImageName(XChainService.XCHAIN_UTXO_TRACKER, coin, network),
             "UTXO_TRACKER_API_PORT":         3001,
             "UTXO_TRACKER_PORT":             3001,
-            "UTXO_TRACKER_BOOTSTRAP_VOLUME": dataDir + "/" + coin + "/" + network + "/" + module + "/bootstrap/",
+            "UTXO_TRACKER_BOOTSTRAP_VOLUME": bootstrapDir + "/" + coin + "/" + network + "/" + module + "/bootstrap/",
             "DECODER_DB_NAME":   getModuleDatabaseName(XChainService.XCHAIN_DECODER, coin, network),
             "DECODER_DB_HOST":   "mariadb",
             "DECODER_DB_PORT":   3306,
@@ -274,8 +274,8 @@ async function getDefaultConfig(module, coin, network) {
             "DECODER_URL":       getDockerContainerImageName(XChainService.XCHAIN_DECODER, coin, network),
             "DECODER_API_PORT":  3002,
             "DECODER_PORT":      3002,
-            "DECODER_BOOTSTRAP_VOLUME": dataDir + "/" + coin + "/" + network + "/" + module + "/bootstrap/",
-            "INDEXER_BOOTSTRAP_VOLUME": dataDir + "/" + coin + "/" + network + "/" + module + "/bootstrap/",
+            "DECODER_BOOTSTRAP_VOLUME": bootstrapDir + "/" + coin + "/" + network + "/" + module + "/bootstrap/",
+            "INDEXER_BOOTSTRAP_VOLUME": bootstrapDir + "/" + coin + "/" + network + "/" + module + "/bootstrap/",
             "ENCODER_URL":       getDockerContainerImageName(XChainService.XCHAIN_ENCODER, coin, network),
             "ENCODER_API_PORT":  3003,
             "ENCODER_PORT":      3003,

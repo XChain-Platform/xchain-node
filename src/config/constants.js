@@ -320,6 +320,14 @@ const tmpDir             = process.env.XCHAIN_NODE_TMP_DIR          || path.join
 const srcDir             = path.join(__dirname, "..")
 const cryptoNodesDir     = process.env.XCHAIN_NODE_CRYPTO_NODES_DIR || path.join(__dirname, "..", "..", "crypto_nodes")
 const dataDir            = process.env.XCHAIN_NODE_DATA_DIR         || path.join(__dirname, "..", "..", "data")
+// : published bootstraps get their own root, defaulting to dataDir so
+// nothing moves unless asked. They are the one artifact whose size is unbounded
+// by the install (a mainnet tracker archive is tens of GB, and LTC mainnet alone
+// is 45G of source data), so an operator needs to land them on the big volume
+// WITHOUT relocating live module data, which is what moving XCHAIN_NODE_DATA_DIR
+// would do. Setting this after containers exist only changes where new archives
+// are written; a container still mounts the path it was created with.
+const bootstrapDir       = process.env.XCHAIN_NODE_BOOTSTRAP_DIR    || dataDir
 const configDir          = process.env.XCHAIN_NODE_CONFIG_DIR       || path.join(__dirname, "..", "..", "config")
 const containersFilesDir = path.join(tmpDir, "containers_files")
 
@@ -361,6 +369,7 @@ module.exports = {
     srcDir,
     cryptoNodesDir,
     dataDir,
+    bootstrapDir,
     configDir,
     containersFilesDir,
     BOOTSTRAP_BASE_URL

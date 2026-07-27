@@ -275,11 +275,21 @@ function getWorkDir(coin, network, module) {
 // slightly low, because filling root is far worse than refusing a bootstrap.
 const BOOTSTRAP_FS_RESERVE_BYTES = 2 * 1024 * 1024 * 1024
 
-function assertWorkDirCapacity(workDir, estimatedBytes, label) {
+// Both the staging dir AND the output dir have to hold it, and on a default
+// install they are DIFFERENT filesystems only if the operator made them so:
+// tmpDir defaults to <install>/tmp and the bootstrap output to <install>/data,
+// i.e. both on root. Checking only the work dir would have left the outage
+// half-fixed, since the finished archive lands in the output dir.
+function assertBootstrapCapacity(workDir, outputDir, estimatedBytes, label) {
+    assertPathCapacity(workDir, estimatedBytes, label, 'staging (XCHAIN_NODE_TMP_DIR)')
+    assertPathCapacity(outputDir, estimatedBytes, label, 'published archives (XCHAIN_NODE_BOOTSTRAP_DIR)')
+}
+
+function assertPathCapacity(targetDir, estimatedBytes, label, role) {
     if (!estimatedBytes || estimatedBytes <= 0) return   // unknown size: nothing to assert against
 
     // statfs needs a path that exists; walk up to the nearest existing ancestor.
-    let probe = path.resolve(workDir)
+    let probe = path.resolve(targetDir)
     while (!fs.existsSync(probe)) {
         const parent = path.dirname(probe)
         if (parent === probe) break
@@ -299,10 +309,9 @@ function assertWorkDirCapacity(workDir, estimatedBytes, label) {
 
     const gb = n => (n / 1024 / 1024 / 1024).toFixed(1) + 'G'
     throw new Error(
-        `Not enough space to stage the ${label} bootstrap under ${probe}: ` +
+        `Not enough space for the ${label} bootstrap's ${role} under ${probe}: ` +
         `${gb(free)} free, need about ${gb(needed)} (${gb(estimatedBytes)} of data plus a ${gb(BOOTSTRAP_FS_RESERVE_BYTES)} reserve). ` +
-        `Point the work dir at a larger volume with XCHAIN_NODE_TMP_DIR=/path/on/big/disk and re-run; ` +
-        `the default is <install>/tmp, which is usually the root filesystem.`
+        `Point it at a larger volume and re-run; both default to the install dir, which is usually the root filesystem.`
     )
 }
 
@@ -430,9 +439,9 @@ async function makeBootstrapUtxoTracker(coin, network) {
         console.log('Could not estimate volume size, progress will show as ?%')
     }
 
-    // Step 1b: refuse now if the work dir cannot hold it . Before the
-    // stop below, so a capacity failure never costs the tracker any downtime.
-    assertWorkDirCapacity(workDir, totalBytes, `${coin}/${network} utxo-tracker`)
+    // Step 1b: refuse now if either filesystem cannot hold it . Before
+    // the stop below, so a capacity failure never costs the tracker any downtime.
+    assertBootstrapCapacity(workDir, outputDir, totalBytes, `${coin}/${network} utxo-tracker`)
 
     // Step 2: Get container ID and stop service
     const containerId = await db.getModuleContainer(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
