@@ -614,9 +614,27 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
 }
 
 async function setDatabaseParameters() {
+    // Both callers (NodeService.installNode, ModuleService update) run this straight
+    // after a decoder/indexer buildAndUp, and it is the ONLY step that writes the
+    // freshly-minted per-install password into MariaDB. If the module set comes back
+    // empty the loop body never executes and we used to `return true`, so the caller's
+    // throw-on-error guard never fires and the install reports success while the new
+    // container crash-loops on ER_ACCESS_DENIED. Provisioning nothing is never success
+    // here: fail closed on an unready store and on an empty set alike.
+    db.assertReady("setting decoder/indexer database parameters")
+
     const { getInstalledCoinsAndNetworks } = require('./StatusService')
     const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
     const dbContainerId = EXTERNAL_DB ? null : await getDatabaseContainerId()
+
+    if (Object.keys(installedCoinsAndNetworks).length === 0) {
+        throw new Error(
+            "setDatabaseParameters found no installed coin/network, so no decoder/indexer MariaDB " +
+            "account would be provisioned. The module registry is empty or unreadable."
+        )
+    }
+
+    let accountsProvisioned = 0
 
     for (const nextCoin in installedCoinsAndNetworks) {
         for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
@@ -632,6 +650,7 @@ async function setDatabaseParameters() {
                 if (containerId) {
                     const cfg = await getDefaultConfig(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork)
                     await addUserPasswordToDatabase(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork, cfg["DECODER_DB_NAME"], cfg["DECODER_DB_USER"], cfg["DECODER_DB_PASS"])
+                    accountsProvisioned++
                 }
 
                 containerId = await db.getModuleContainer(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork)
@@ -639,6 +658,7 @@ async function setDatabaseParameters() {
                     const cfg = await getDefaultConfig(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork)
                     await addUserPasswordToDatabase(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork, cfg["INDEXER_DB_NAME"], cfg["INDEXER_DB_USER"], cfg["INDEXER_DB_PASS"])
                     await addUserPasswordToDatabase(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork, cfg["DECODER_DB_NAME"], cfg["DECODER_DB_USER"], cfg["DECODER_DB_PASS"])
+                    accountsProvisioned += 2
                 }
             } catch (err) {
                 console.log(err)
@@ -646,6 +666,18 @@ async function setDatabaseParameters() {
                 throw err
             }
         }
+    }
+
+    // A registry that lists coins but no decoder/indexer container is the same
+    // silent-success hazard one level down: every getModuleContainer missed, so
+    // nothing was force-set and the just-built container keeps a password that
+    // exists nowhere in MariaDB.
+    if (accountsProvisioned === 0) {
+        throw new Error(
+            "setDatabaseParameters provisioned no MariaDB account: the registry lists " +
+            Object.keys(installedCoinsAndNetworks).join(", ") +
+            " but holds no decoder or indexer container for them."
+        )
     }
 
     return true

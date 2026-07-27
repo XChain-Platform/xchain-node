@@ -38,6 +38,15 @@ class InMemoryStore {
     async close()          { this._ready = false }
     isReady()              { return this._ready }
 
+    // Mirrors MariaDbStore.assertReady: callers that act on the row set refuse
+    // to run against a store that isn't connected, rather than reading its
+    // empty result as "nothing installed" and reporting success.
+    assertReady(operation) {
+        if (!this._ready) {
+            throw new Error("InMemoryStore is not connected, so " + operation + " would operate on an empty module set")
+        }
+    }
+
     async countModules() {
         return this.modules.size
     }
@@ -132,7 +141,7 @@ class TestEnv {
         const store = this._store
 
         const methodNames = [
-            'createDatabase', 'close', 'isReady', 'countModules',
+            'createDatabase', 'close', 'isReady', 'assertReady', 'countModules',
             'getAllModuleContainers', 'insertModuleContainer',
             'getModuleContainer', 'removeModuleContainer'
         ]

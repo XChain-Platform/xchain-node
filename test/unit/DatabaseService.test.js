@@ -80,10 +80,12 @@ function makeStubs(overrides = {}) {
         mariadb: mariadbStub,
         db: {
             isReady: sinon.stub().returns(true),
+            assertReady: sinon.stub(),
             createDatabase: sinon.stub().resolves(),
             getModuleContainer: sinon.stub().resolves('db-container-id'),
             insertModuleContainer: sinon.stub().resolves(true)
         },
+        getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['mainnet'] }),
         getDbRootPassword: sinon.stub().returns('rootpass'),
         setDbRootPassword: sinon.stub(),
         statusChanged: sinon.stub().resolves(),
@@ -170,7 +172,7 @@ function loadDatabaseService(stubs, constants = {}) {
         },
         './StatusService': {
             statusChanged: stubs.statusChanged,
-            getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['mainnet'] })
+            getInstalledCoinsAndNetworks: stubs.getInstalledCoinsAndNetworks
         },
         './CredentialsService': {
             XCHAIN_NODE_DB: 'xchain_node',
@@ -1454,6 +1456,49 @@ describe('DatabaseService', function () {
                 expect.fail('should have thrown')
             } catch (err) {
                 expect(err.message).to.equal('network error')
+            }
+        })
+
+        // : this is the ONLY step that writes the freshly-minted decoder /
+        // indexer password into MariaDB, and both callers run it right after a
+        // buildAndUp. An empty iteration used to return true, so the caller's
+        // throw-on-error guard never fired and the install reported success
+        // while the new container crash-looped on ER_ACCESS_DENIED.
+        it('refuses to run against an unconfigured module registry', async function () {
+            const stubs = makeStubs()
+            stubs.db.assertReady.throws(new Error('MariaDbStore is not connected'))
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.setDatabaseParameters()
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.match(/not connected/)
+            }
+            expect(stubs.addContainerToNetwork.called).to.be.false
+        })
+
+        it('throws instead of reporting success when no coin/network is installed', async function () {
+            const stubs = makeStubs()
+            stubs.getInstalledCoinsAndNetworks.resolves({})
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.setDatabaseParameters()
+                expect.fail('an empty iteration must not read as success')
+            } catch (err) {
+                expect(err.message).to.match(/no installed coin\/network/)
+            }
+        })
+
+        it('throws when the registry lists a coin but holds no decoder/indexer container', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.setDatabaseParameters()
+                expect.fail('provisioning zero accounts must not read as success')
+            } catch (err) {
+                expect(err.message).to.match(/provisioned no MariaDB account/)
+                expect(err.message).to.match(/bitcoin/)
             }
         })
     })

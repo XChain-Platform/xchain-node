@@ -95,6 +95,12 @@ function classifyContainer(container) {
 }
 
 async function scanAndRegisterModules({ silent = false } = {}) {
+    // Every write below is a no-op against an unconfigured store, and the
+    // counters/logs below don't read the write result, so a scan that persisted
+    // nothing still prints "Added ..." and returns a healthy-looking count.
+    // precheck opens the pool before it calls us; anything else is a bug.
+    db.assertReady("module discovery")
+
     const containers = await new Promise((resolve, reject) => {
         execFile('docker', ['ps', '-a', '--no-trunc', '--format', 'json'], (error, stdout) => {
             if (error) return reject(error)
@@ -139,14 +145,21 @@ async function scanAndRegisterModules({ silent = false } = {}) {
         seen.add(key)
         const existing = await db.getModuleContainer(module, coin, network)
         if (existing == null) {
-            await db.insertModuleContainer(module, coin, network, nextContainer.ID)
+            // insertModuleContainer swallows query errors and answers false, so
+            // counting the row as added without reading that answer is how a
+            // registry silently stays empty across a "successful" scan.
+            if (!await db.insertModuleContainer(module, coin, network, nextContainer.ID)) {
+                throw new Error("Couldn't register " + label + " (" + nextContainer.ID.slice(0,12) + ") in the module registry")
+            }
             logIfNotSilent(silent, "Added " + label + " (" + nextContainer.ID.slice(0,12) + ")")
             added++
         } else if (existing !== nextContainer.ID) {
             // Stale registry: running container has a different ID than recorded
             // (typically a rebuild that bypassed the CLI). insertModuleContainer
             // is an UPSERT, so this fixes the row in-place.
-            await db.insertModuleContainer(module, coin, network, nextContainer.ID)
+            if (!await db.insertModuleContainer(module, coin, network, nextContainer.ID)) {
+                throw new Error("Couldn't reconcile " + label + " to " + nextContainer.ID.slice(0,12) + " in the module registry")
+            }
             logIfNotSilent(silent, "Reconciled " + label + " (was " + existing.slice(0,12) + ", now " + nextContainer.ID.slice(0,12) + ")")
             reconciled++
         }

@@ -103,6 +103,20 @@ class MariaDbStore {
         return this.pool !== null
     }
 
+    // Callers that treat "no rows" as a valid answer (status printing, early
+    // precheck) can live with the empty array getAllModuleContainers returns
+    // when the pool isn't open yet. Callers that act ON the row set cannot: an
+    // unconfigured store is indistinguishable from an empty install, so they
+    // silently do nothing and report success. Those sites assert first.
+    assertReady(operation) {
+        if (!this.pool) {
+            throw new Error(
+                "MariaDbStore is not connected, so " + operation + " would silently operate on an empty " +
+                "module set and report success. Run precheck (db.createDatabase) before this call."
+            )
+        }
+    }
+
     async getAllModuleContainers(coin, network) {
         if (!this.pool) return []
 

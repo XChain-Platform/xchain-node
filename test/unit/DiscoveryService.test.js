@@ -28,10 +28,13 @@ const proxyquire = require('proxyquire').noCallThru()
 
 function loadService({ containers = [], db = {} } = {}) {
     const dbStub = {
+        // insertModuleContainer answers true/false rather than throwing, and the
+        // scan now honors that answer, so the stub has to model it truthfully.
         getModuleContainer:     sinon.stub().resolves(null),
-        insertModuleContainer:  sinon.stub().resolves(),
+        insertModuleContainer:  sinon.stub().resolves(true),
         getAllModuleContainers: sinon.stub().resolves([]),
         removeModuleContainer:  sinon.stub().resolves(),
+        assertReady:            sinon.stub(),
         ...db,
     }
     const svc = proxyquire('../../src/services/DiscoveryService', {
@@ -199,5 +202,62 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
         expect(changed).to.equal(1)
         sinon.assert.calledWith(db.insertModuleContainer, 'database', '', '', 'newid')
         sinon.assert.notCalled(db.removeModuleContainer)
+    })
+})
+
+// : the devhost regtest stack was reported "lost" because a probe read
+// the registry through an unconfigured store, which answers [] instead of
+// erroring. The store's fail-open is what makes that indistinguishable from an
+// empty install, so every path that ACTS on the row set now asserts first.
+describe('DiscoveryService.scanAndRegisterModules fail-closed registry', function () {
+
+    it('refuses to scan against an unconfigured store instead of reporting a clean run', async function () {
+        const { svc } = loadService({
+            containers: [{
+                Names: 'xchain-node-database', Image: 'xchain-node-database',
+                ID: 'abc', State: 'running',
+            }],
+            db: {
+                assertReady: sinon.stub().throws(new Error('MariaDbStore is not connected')),
+            },
+        })
+        let err = null
+        try { await svc.scanAndRegisterModules({ silent: true }) } catch (e) { err = e }
+        expect(err, 'scan should surface the unconfigured store').to.not.equal(null)
+        expect(err.message).to.match(/not connected/)
+    })
+
+    it('throws when the registry write fails rather than counting the row as added', async function () {
+        const { svc, db } = loadService({
+            containers: [{
+                Names: 'xchain-node-database', Image: 'xchain-node-database',
+                ID: 'abc', State: 'running',
+            }],
+            db: {
+                insertModuleContainer: sinon.stub().resolves(false),
+            },
+        })
+        let err = null
+        try { await svc.scanAndRegisterModules({ silent: true }) } catch (e) { err = e }
+        expect(err, 'a swallowed write error must not read as success').to.not.equal(null)
+        expect(err.message).to.match(/Couldn't register database/)
+        sinon.assert.calledOnce(db.insertModuleContainer)
+    })
+
+    it('throws when a reconcile write fails', async function () {
+        const { svc } = loadService({
+            containers: [{
+                Names: 'xchain-node-database', Image: 'xchain-node-database',
+                ID: 'newid', State: 'running',
+            }],
+            db: {
+                getModuleContainer:    sinon.stub().resolves('oldid'),
+                insertModuleContainer: sinon.stub().resolves(false),
+            },
+        })
+        let err = null
+        try { await svc.scanAndRegisterModules({ silent: true }) } catch (e) { err = e }
+        expect(err).to.not.equal(null)
+        expect(err.message).to.match(/Couldn't reconcile database/)
     })
 })

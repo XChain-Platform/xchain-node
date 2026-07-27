@@ -352,6 +352,22 @@ describe('MariaDbStore', function () {
         })
     })
 
+    // : the empty array above is why a probe against an uninitialized
+    // singleton read as "the node lost track of its whole stack". Reads can live
+    // with it; callers that ACT on the row set need a distinguishable signal.
+    describe('assertReady()', function () {
+
+        it('throws on an unconfigured store, naming the operation', function () {
+            const { MariaDbStore } = loadStore()
+            const bare = new MariaDbStore()
+            expect(() => bare.assertReady('autoheal')).to.throw(/not connected.*autoheal/)
+        })
+
+        it('passes once the pool is open', function () {
+            expect(() => store.assertReady('module discovery')).to.not.throw()
+        })
+    })
+
     describe('countModules()', function () {
 
         it('returns 0 when no rows', async function () {

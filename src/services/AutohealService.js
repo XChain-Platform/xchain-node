@@ -123,6 +123,11 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
 
     const result = { candidates: [], restarted: [], failed: [], skipped: [] }
 
+    // An unconfigured store yields zero rows, which autoheal would report as a
+    // clean "nothing to heal" run while every unhealthy container stays down.
+    // A watchdog that cannot read its own registry must say so.
+    db.assertReady("autoheal")
+
     const modules = await db.getAllModuleContainers(null, null)
     for (const row of modules) {
         const { module, coin, network, container_id: containerId } = row

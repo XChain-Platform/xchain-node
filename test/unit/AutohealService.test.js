@@ -52,7 +52,7 @@ function unhealthyInsideGrace() {
 
 function makeStubs() {
     return {
-        db: { getAllModuleContainers: sinon.stub().resolves([]) },
+        db: { getAllModuleContainers: sinon.stub().resolves([]), assertReady: sinon.stub() },
         getStatusFromContainer: sinon.stub(),
         restartContainer: sinon.stub().resolves(true)
     }
@@ -92,6 +92,20 @@ describe('AutohealService', () => {
     function registryRow(module, containerId) {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
+
+    // : an unconfigured store answers [] rather than erroring, so autoheal
+    // would sweep zero candidates and report a clean run while every unhealthy
+    // container stayed down. A watchdog that cannot read its registry must say so.
+    it('refuses to run against an unconfigured module registry', async () => {
+        stubs.db.assertReady.throws(new Error('MariaDbStore is not connected'))
+
+        let err = null
+        try { await service.runAutoheal({ now: NOW }) } catch (e) { err = e }
+
+        expect(err, 'autoheal must not report a clean sweep it never performed').to.not.equal(null)
+        expect(err.message).to.match(/not connected/)
+        expect(stubs.db.getAllModuleContainers.called).to.equal(false)
+    })
 
     it('restarts an unhealthy container whose service opted in (autoheal: true)', async () => {
         stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'aaa')])
