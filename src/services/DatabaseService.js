@@ -549,6 +549,29 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 console.log("MVH test-database permissions granted to " + mariadbUser + "!")
             }
 
+            // Same shape as the MVH grant above, for the other suite that needs a
+            // throwaway schema without a privileged account: the two-node parity drills
+            // (xchain-e2e-test scripts/bet-parity-node.sh) clone the live indexer
+            // database into a second one and run a SECOND indexer against it, to prove
+            // two nodes commit identical state hashes over a lifecycle. Without this the
+            // drill is BTC-only for a reason that has nothing to do with the protocol:
+            // the BTC account happens to hold ALL PRIVILEGES on three "Drill" schemas
+            // left behind by the flag-day drill, while every other chain's account holds
+            // them on its own schema and nothing else, so node B's CREATE DATABASE is
+            // refused (found taking the BET family cross-chain, /).
+            //
+            // Escaped underscores, so the pattern matches nothing but a DrillB schema.
+            // Gated to non-mainnet, which is stricter than the MVH grant beside it:
+            // these are drill venues, and there is no reason for a mainnet indexer
+            // account to hold CREATE/DROP over any pattern at all.
+            if (module === XChainService.XCHAIN_INDEXER && network && network !== "mainnet") {
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                    "GRANT ALL PRIVILEGES ON `XChain\\_%\\_DrillB\\_%`.* TO " + mariadbUser
+                )
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
+                console.log("DrillB parity-database permissions granted to " + mariadbUser + "!")
+            }
+
             return true
         } catch (err) {
             console.log(err)
@@ -604,6 +627,18 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
                 console.log("MVH test-database permissions granted to " + mariadbUser + "!")
+            }
+
+            // See the docker branch above: the same DrillB parity grant, since the
+            // native-DB venues are exactly the ones that run these drills. Missing it
+            // here would make the fix look chain-specific all over again, just on a
+            // different axis.
+            if (module === XChainService.XCHAIN_INDEXER && network && network !== "mainnet") {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "GRANT ALL PRIVILEGES ON `XChain\\_%\\_DrillB\\_%`.* TO " + mariadbUser
+                )
+                await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
+                console.log("DrillB parity-database permissions granted to " + mariadbUser + "!")
             }
             return true
         } catch (err) {

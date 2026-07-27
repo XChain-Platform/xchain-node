@@ -1165,6 +1165,51 @@ describe('DatabaseService', function () {
             expect(mvhGrant).to.exist
         })
 
+        it('grants DrillB parity permissions to a NON-mainnet indexer', async function () {
+            // Two-node parity drills clone the live indexer DB into a second schema and
+            // run a second indexer against it. Without this grant the drill is BTC-only
+            // by accident: the BTC account happens to hold ALL PRIVILEGES on Drill
+            // schemas left by the flag-day drill, every other chain's account does not,
+            // and node B's CREATE DATABASE is simply refused .
+            const stubs = makeStubs();
+            const executedCommands = [];
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executedCommands.push(sql);
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' };
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' };
+                return { stdout: '' };
+            }));
+            const ds = loadDatabaseService(stubs);
+            await ds.addUserPasswordToDatabase(
+                'xchain-indexer', 'litecoin', 'regtest',
+                'XChain_LTC_Regtest_Indexer', 'xchain_indexer_litecoin_regtest', 'test-pass'
+            );
+            const grant = executedCommands.find(c => c && c.includes('DrillB'));
+            expect(grant, 'a regtest indexer account can create its own parity schema').to.exist;
+            // Escaped underscores: the pattern must match DrillB schemas and nothing else.
+            expect(grant).to.include('XChain\\_%\\_DrillB\\_%');
+        });
+
+        it('withholds the DrillB grant from a MAINNET indexer', async function () {
+            // Stricter than the MVH grant beside it, deliberately: drills run on drill
+            // venues, and a mainnet indexer account has no business holding CREATE/DROP
+            // over any name pattern.
+            const stubs = makeStubs();
+            const executedCommands = [];
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executedCommands.push(sql);
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' };
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' };
+                return { stdout: '' };
+            }));
+            const ds = loadDatabaseService(stubs);
+            await ds.addUserPasswordToDatabase(
+                'xchain-indexer', 'bitcoin', 'mainnet',
+                'XChain_BTC_Mainnet_Indexer', 'xchain_indexer_bitcoin_mainnet', 'test-pass'
+            );
+            expect(executedCommands.find(c => c && c.includes('DrillB')), 'no wildcard grant on mainnet').to.not.exist;
+        });
+
         it('rotates the password via ALTER USER on the docker path when the user does not match', async function () {
             // userCount == 0 covers both "user absent" and "user exists with a different
             // password". The docker path must ALTER USER (not just CREATE USER IF NOT EXISTS,
