@@ -283,7 +283,15 @@ async function modulesSelectionInterface(coin, network) {
                     else console.log(err)
                 }
             } else if (actionAnswer === "Restore Bootstrap") {
-                await restoreBootstrapInterface(coin, network, selectedValue)
+                try {
+                    await restoreBootstrapInterface(coin, network, selectedValue)
+                } catch (err) {
+                    // Same contract as "Make Bootstrap" above: an integrity
+                    // refusal is an expected outcome, so report it and stay in
+                    // the TUI instead of tearing it down with a stack trace.
+                    if (err && err.name === 'BootstrapIntegrityError') console.log(err.message)
+                    else throw err
+                }
             } else if (actionAnswer === "Reinstall from remote") {
                 await updateModules({ [coin]: { [network]: [selectedValue] } })
             } else if (actionAnswer === "Tail logs") {

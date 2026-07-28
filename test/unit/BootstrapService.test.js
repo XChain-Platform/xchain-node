@@ -1378,6 +1378,120 @@ describe('BootstrapService', function () {
     })
 
     // -----------------------------------------------------------------------
+    // : integrity refusals are classified, and land BEFORE the DROP.
+    //
+    // The destructive restore was first exercised end-to-end on test-host against
+    // a throwaway MariaDB. Two properties matter and both were only implicit:
+    //
+    //   1. A refused archive must not have cost the operator their database.
+    //      The refusal is raised before DROP DATABASE, so a tampered archive
+    //      leaves the existing data intact and the operator can retry with a
+    //      good one. Nothing pinned that ordering, so a future edit that moved
+    //      the gate below the DROP would still pass every other test here.
+    //   2. The refusal must be distinguishable from a crash. Uncaught, it
+    //      printed a Node stack trace, which reads as "the tool broke, retry"
+    //      when it means "this archive is not trustworthy". The named class is
+    //      what lets cli.js/menu.js print the reason and exit 1 instead.
+    // -----------------------------------------------------------------------
+
+    describe('restoreBootstrapMariaDb(): integrity refusal is fail-closed and classified', function () {
+
+        // Wire a decoder restore whose inner dump does not match the checksum
+        // the (signature-verified) outer archive declares for it.
+        function makeCorruptRestore() {
+            const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+            stubVerifiedInner(stubs, {
+                archivePath, innerName: 'dump.sql.gz', checksumName: 'dump.sha256',
+                initiallyPresent: false, innerHashOverride: 'd'.repeat(64),
+            })
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves('svc-container-id')
+            stubs.spawn = sinon.stub()
+            return stubs
+        }
+
+        it('never issues DROP DATABASE, and never starts the import, when the archive fails integrity', async function () {
+            const stubs = makeCorruptRestore()
+            const bs = loadBootstrapService(stubs)
+
+            try {
+                await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+                expect.fail('a corrupt archive must be refused')
+            } catch (err) {
+                expect(err.message).to.include('checksum mismatch')
+            }
+
+            // The DROP/CREATE goes out as `docker ... mariadb -e "DROP DATABASE ..."`
+            // through execFile; the import is the spawn. Neither may have happened.
+            const dropCall = stubs.execFile.getCalls().find(c =>
+                JSON.stringify(c.args).includes('DROP DATABASE'))
+            expect(dropCall, 'the database must survive a refused restore').to.be.undefined
+            expect(stubs.spawn.called, 'no dump may be piped into mariadb').to.be.false
+        })
+
+        it('does not stop the running service for a restore it is going to refuse', async function () {
+            const stubs = makeCorruptRestore()
+            const bs = loadBootstrapService(stubs)
+
+            await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz').catch(() => {})
+
+            expect(stubs.dockerService.stopContainer.called,
+                'a refused restore must not take the service down').to.be.false
+        })
+
+        it('raises BootstrapIntegrityError so the CLI can report it as a refusal, not a crash', async function () {
+            const stubs = makeCorruptRestore()
+            const bs = loadBootstrapService(stubs)
+
+            const err = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+                .then(() => null, e => e)
+            expect(err).to.not.be.null
+            expect(err.name).to.equal('BootstrapIntegrityError')
+            expect(err).to.be.instanceOf(bs.BootstrapIntegrityError)
+        })
+
+        it('classifies a malformed archive (missing inner members) the same way', async function () {
+            const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+            stubs.fs.existsSync.callsFake(p => p === archivePath)
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+
+            const bs = loadBootstrapService(stubs)
+            const err = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+                .then(() => null, e => e)
+            expect(err).to.not.be.null
+            expect(err.name).to.equal('BootstrapIntegrityError')
+        })
+
+        it('leaves an operational failure unclassified so it is not mistaken for tampering', async function () {
+            // A non-zero mariadb exit is a real failure but NOT an integrity
+            // refusal: it must keep the generic name, or the CLI would swallow
+            // its stack and the operator would go hunting for a bad archive.
+            const stubs = makeStubs()
+            const archivePath = '/data/bitcoin/mainnet/xchain-decoder/bootstrap/dump.sql.gz'
+            stubVerifiedInner(stubs, { archivePath, innerName: 'dump.sql.gz', checksumName: 'dump.sha256', initiallyPresent: true })
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.ensureDatabasePool.resolves()
+            stubs.db.getModuleContainer.resolves(null)
+            stubs.fs.promises.stat.resolves({ size: 512 })
+
+            const mysqlProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(mysqlProc.stdin); mysqlProc.emit('close', 2) })
+                return mysqlProc
+            })
+
+            const bs = loadBootstrapService(stubs)
+            const err = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
+                .then(() => null, e => e)
+            expect(err).to.not.be.null
+            expect(err.name).to.not.equal('BootstrapIntegrityError')
+        })
+    })
+
+    // -----------------------------------------------------------------------
     // ensureDirWritable: Docker fallback path (directory exists but not writable)
     // -----------------------------------------------------------------------
 

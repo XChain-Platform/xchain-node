@@ -198,6 +198,61 @@ describe('Bootstrap signing', function () {
         })
     })
 
+    // : the first real destructive restore (test-host, throwaway MariaDB)
+    // showed the gate refusing a tampered archive correctly but reporting it as
+    // an uncaught exception: `throw` source line, stack, "Node.js v22.x" banner.
+    // An operator reads that as a broken tool and retries; the archive is in
+    // fact untrustworthy and no retry can help. Every refusal below therefore
+    // carries the name the CLI/TUI switch on to print the reason and exit 1.
+    describe('refusals are classified as BootstrapIntegrityError', function () {
+
+        async function refusalFrom(fn) {
+            return fn().then(() => null, err => err)
+        }
+
+        it('names a bad signature', async function () {
+            await svc.signBootstrapArchive(archivePath, privPath)
+            fs.appendFileSync(archivePath, 'evil-bytes')
+            process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY = pubPath
+
+            const err = await refusalFrom(() => svc.checkBootstrapSignature(archivePath))
+            expect(err, 'a tampered archive must be refused').to.not.be.null
+            expect(err.name).to.equal('BootstrapIntegrityError')
+            expect(err).to.be.instanceOf(svc.BootstrapIntegrityError)
+        })
+
+        it('names a malformed signature file', async function () {
+            fs.writeFileSync(archivePath + '.sig', 'not a real signature')
+            process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY = pubPath
+
+            const err = await refusalFrom(() => svc.checkBootstrapSignature(archivePath))
+            expect(err).to.not.be.null
+            expect(err.name).to.equal('BootstrapIntegrityError')
+        })
+
+        it('names an unsigned-bootstrap refusal', async function () {
+            process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY = pubPath
+            process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP = '1'
+
+            const err = await refusalFrom(() => svc.checkBootstrapSignature(archivePath))
+            expect(err).to.not.be.null
+            expect(err.name).to.equal('BootstrapIntegrityError')
+        })
+
+        it('still carries the operator-facing reason in the message', async function () {
+            // The CLI prints err.message INSTEAD of the stack, so the message has
+            // to stand alone as the whole explanation.
+            await svc.signBootstrapArchive(archivePath, privPath)
+            fs.appendFileSync(archivePath, 'evil-bytes')
+            process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY = pubPath
+
+            const err = await refusalFrom(() => svc.checkBootstrapSignature(archivePath))
+            expect(err.message).to.match(/signature verification FAILED/)
+            expect(err.message).to.match(/Refusing to restore/)
+            expect(err.message).to.include(archivePath)
+        })
+    })
+
     describe('downloadBootstrap(): companion signature fetch', function () {
 
         function loadServiceWithAxios(axiosStub) {

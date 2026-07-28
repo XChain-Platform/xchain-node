@@ -402,10 +402,24 @@ Notes:
                     throw err
                 }
             } else {
-                await restoreBootstrapInterface(chain, network, service, {
-                    latest: options.latest === true,
-                    file:   options.file || null,
-                })
+                try {
+                    await restoreBootstrapInterface(chain, network, service, {
+                        latest: options.latest === true,
+                        file:   options.file || null,
+                    })
+                } catch (err) {
+                    // Mirror the create path above: an integrity/provenance
+                    // refusal (bad signature, unsigned archive, inner-checksum
+                    // mismatch) is the supply-chain gate doing its job, so print
+                    // the reason and exit non-zero. Leaving it uncaught printed a
+                    // stack trace that reads as a tool crash and invites a retry
+                    // of a restore that must never succeed .
+                    if (err && err.name === 'BootstrapIntegrityError') {
+                        console.error(err.message)
+                        return process.exit(1)
+                    }
+                    throw err
+                }
             }
             return process.exit(0)
         })

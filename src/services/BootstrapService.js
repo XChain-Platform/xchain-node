@@ -71,6 +71,22 @@ const { assertBootstrapSourceHealthy }                = require('./BootstrapHeal
 const BOOTSTRAP_SIG_SUFFIX = '.sig'
 const DEFAULT_BOOTSTRAP_PUBKEY_PATH = path.join(__dirname, '..', 'config', 'bootstrap_signing_pubkey.pem')
 
+// A restore that stops because the archive failed its provenance/integrity
+// gates is the gate WORKING, not the tool breaking. Left as a bare Error it
+// escaped the CLI action uncaught, so the operator saw the `throw` source
+// line, a stack, and the "Node.js v22.x" banner: indistinguishable from a
+// crash, and the natural read is "the restore tool is broken, retry it" when
+// the correct read is "this archive is not trustworthy, do not restore it".
+//  saw exactly that on test-host against a tampered archive. Naming the
+// class lets the CLI/TUI print the reason and exit 1 cleanly, mirroring how
+// BootstrapSourceUnhealthyError is already classified on the create path.
+class BootstrapIntegrityError extends Error {
+    constructor(message) {
+        super(message)
+        this.name = 'BootstrapIntegrityError'
+    }
+}
+
 function loadBootstrapPublicKey() {
     const override = process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY
     const pubkeyPath = override || DEFAULT_BOOTSTRAP_PUBKEY_PATH
@@ -98,12 +114,12 @@ async function verifyBootstrapSignature(archivePath, sigPath, publicKey) {
     const sigText = (await fs.promises.readFile(sigPath, 'utf8')).trim()
     const parts   = sigText.split(/\s+/)
     if (parts.length !== 3 || parts[0] !== 'v1' || parts[1] !== 'ed25519') {
-        throw new Error(`Bootstrap signature file is malformed: ${sigPath}`)
+        throw new BootstrapIntegrityError(`Bootstrap signature file is malformed: ${sigPath}`)
     }
     const digestHex = await computeSha256(archivePath)
     const valid = crypto.verify(null, Buffer.from(digestHex, 'hex'), publicKey, Buffer.from(parts[2], 'base64'))
     if (!valid) {
-        throw new Error(`Bootstrap signature verification FAILED for ${archivePath}: the archive does not match its published signature. Refusing to restore.`)
+        throw new BootstrapIntegrityError(`Bootstrap signature verification FAILED for ${archivePath}: the archive does not match its published signature. Refusing to restore.`)
     }
 }
 
@@ -129,7 +145,7 @@ async function checkBootstrapSignature(archivePath) {
         ? 'no bootstrap signing public key is pinned (src/config/bootstrap_signing_pubkey.pem)'
         : `no signature file found (${sigPath})`
     if (requireSigned) {
-        throw new Error(`Refusing unsigned bootstrap: ${missing}. Signed bootstraps are required by default; set XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 to override.`)
+        throw new BootstrapIntegrityError(`Refusing unsigned bootstrap: ${missing}. Signed bootstraps are required by default; set XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 to override.`)
     }
     console.log(`WARNING: restoring bootstrap WITHOUT signature verification (${missing}). Signature enforcement disabled via XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0; the embedded checksum only detects transport corruption, not tampering.`)
 }
@@ -221,11 +237,11 @@ async function ensureVerifiedInnerArchive(archivePath, workDir, innerName, check
     const { stdout: memberList } = await execFileAsync('tar', ['tzf', archivePath], { maxBuffer: 64 * 1024 * 1024 })
     assertSafeArchiveMemberNames(memberList, archivePath)
     const checksumMember = memberList.split('\n').filter(Boolean).find(m => path.basename(m) === checksumName)
-    if (!checksumMember) throw new Error(`Archive is malformed: missing ${checksumName}`)
+    if (!checksumMember) throw new BootstrapIntegrityError(`Archive is malformed: missing ${checksumName}`)
     const { stdout: checksumBody } = await execFileAsync('tar', ['xzOf', archivePath, checksumMember], { maxBuffer: 1024 * 1024 })
     const expectedInnerSha = checksumBody.trim().split(/\s+/)[0]
     if (!/^[a-f0-9]{64}$/i.test(expectedInnerSha)) {
-        throw new Error(`Archive ${checksumName} does not contain a valid SHA-256`)
+        throw new BootstrapIntegrityError(`Archive ${checksumName} does not contain a valid SHA-256`)
     }
 
     // Reuse a prior extraction only when its bytes match the verified checksum.
@@ -246,12 +262,12 @@ async function ensureVerifiedInnerArchive(archivePath, workDir, innerName, check
     await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
     if (!fs.existsSync(innerArchive)) {
         fs.rmSync(workDir, { recursive: true })
-        throw new Error(`Archive is malformed: missing ${innerName}`)
+        throw new BootstrapIntegrityError(`Archive is malformed: missing ${innerName}`)
     }
     const computed = await computeSha256(innerArchive)
     if (computed !== expectedInnerSha) {
         fs.rmSync(workDir, { recursive: true })
-        throw new Error(`Inner archive checksum mismatch\n  Expected: ${expectedInnerSha}\n  Got:      ${computed}`)
+        throw new BootstrapIntegrityError(`Inner archive checksum mismatch\n  Expected: ${expectedInnerSha}\n  Got:      ${computed}`)
     }
     console.log('Outer archive extracted and inner checksum verified')
     return innerArchive
@@ -1048,6 +1064,7 @@ async function ensureBootstrapMariaDb(coin, network, module) {
 // ─── Exports ──────────────────────────────────────────────────────
 
 module.exports = {
+    BootstrapIntegrityError,
     getBootstrapFilesList,
     makeBootstrap,
     restoreBootstrap,
