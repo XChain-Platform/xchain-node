@@ -42,8 +42,8 @@
     "benchmark:quick": "node test/benchmarks/harness.js --quick"
   },
   "devDependencies": {
-    "@stryker-mutator/core": "^8.7.1",
-    "@stryker-mutator/mocha-runner": "^8.7.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/mocha-runner": "^9.6.1",
     "c8": "^11.0.0",
     "chai": "^4.5.0",
     "mocha": "^11.7.5",
