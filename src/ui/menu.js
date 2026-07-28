@@ -273,7 +273,15 @@ async function modulesSelectionInterface(coin, network) {
             } else if (actionAnswer === "Update container version" || actionAnswer === "Install Local Version in Container") {
                 await installModule(selectedValue, coin, network, false, selected["container_id"])
             } else if (actionAnswer === "Make Bootstrap") {
-                await makeBootstrap(coin, network, selectedValue)
+                try {
+                    await makeBootstrap(coin, network, selectedValue)
+                } catch (err) {
+                    // A source-health refusal  is an expected outcome here,
+                    // so print the reasons and stay in the menu rather than tearing
+                    // the TUI down with a stack trace.
+                    if (err && err.name === 'BootstrapSourceUnhealthyError') console.log(err.message)
+                    else console.log(err)
+                }
             } else if (actionAnswer === "Restore Bootstrap") {
                 await restoreBootstrapInterface(coin, network, selectedValue)
             } else if (actionAnswer === "Reinstall from remote") {

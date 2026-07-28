@@ -33,6 +33,7 @@ const { stopContainer, startContainer }               = require('./DockerService
 const { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('./DatabaseService')
 const { assertSafeArchiveMemberNames }                = require('../utils/helpers')
 const { dockerMariadbArgs, mariadbEnv }               = require('../utils/dockerMariadb')
+const { assertBootstrapSourceHealthy }                = require('./BootstrapHealthGate')
 
 // Bootstrap signing (supply-chain integrity):
 //
@@ -406,12 +407,27 @@ function isBootstrapArchiveName(fileName) {
 async function makeBootstrap(coin, network, module) {
     switch (module) {
         case XChainService.XCHAIN_UTXO_TRACKER:
-            return makeBootstrapUtxoTracker(coin, network)
         case XChainService.XCHAIN_DECODER:
         case XChainService.XCHAIN_INDEXER:
-            return makeBootstrapMariaDb(coin, network, module)
+            break
         default:
             throw new Error(`Unsupported module for bootstrap create: ${module}`)
+    }
+
+    // : refuse to snapshot a source that is not known-good, BEFORE any work
+    // (and, for the utxo-tracker, before the container is stopped, so a refusal
+    // costs no downtime). A published archive becomes the newest file in the served
+    // directory and so the default choice for every restore path, including
+    // `bootstrap restore --latest`; publishing an unverified snapshot silently
+    // replaces the last good archive. The unsupported-module throw above stays
+    // first so an unknown module still fails on its own message.
+    await assertBootstrapSourceHealthy(coin, network, module)
+
+    switch (module) {
+        case XChainService.XCHAIN_UTXO_TRACKER:
+            return makeBootstrapUtxoTracker(coin, network)
+        default:
+            return makeBootstrapMariaDb(coin, network, module)
     }
 }
 

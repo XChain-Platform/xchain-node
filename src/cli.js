@@ -388,7 +388,19 @@ Notes:
     menu while holding the command lock.`)
         .action(async (action, service, chain, network, options) => {
             if (action === "create") {
-                await makeBootstrap(chain, network, service)
+                try {
+                    await makeBootstrap(chain, network, service)
+                } catch (err) {
+                    // A source-health refusal  is an expected, actionable
+                    // outcome, not a crash: print the reasons and exit non-zero so
+                    // the cron publisher can classify it, with no stack trace to
+                    // read past. Anything else keeps its stack.
+                    if (err && err.name === 'BootstrapSourceUnhealthyError') {
+                        console.error(err.message)
+                        return process.exit(1)
+                    }
+                    throw err
+                }
             } else {
                 await restoreBootstrapInterface(chain, network, service, {
                     latest: options.latest === true,

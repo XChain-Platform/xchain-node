@@ -24,6 +24,14 @@
 #
 #   - Signs each archive inline (XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY) so consumers
 #     can verify provenance against the pinned public key.
+#   - Refuses an unhealthy source. `bootstrap create` runs a source health gate
+#     : a service that is stopped, crash-looping, reporting unhealthy,
+#     materially behind its tip, or carrying a durable halt marker (a decoder
+#     REORG_HALT row, an uncleared sync_halt) is NOT snapshotted. Such a combo is
+#     summarised as SOURCE-UNHEALTHY and the run exits non-zero, leaving the last
+#     good archive in place as the newest. This exists because the weekly cron
+#     once published a halted litecoin/mainnet decoder as the newest "good"
+#     archive, which every "take the latest" path then selected.
 #   - Redirects the (large) work + output dirs onto a roomy volume via
 #     XCHAIN_NODE_DATA_DIR / XCHAIN_NODE_TMP_DIR - the defaults live under the
 #     repo on the small root fs and WILL fill it mid-create otherwise.
@@ -162,12 +170,29 @@ for c in "${SELECTED[@]}"; do
   out_dir="$STAGE_DIR/$coin/$net/$svc/bootstrap"
   log "=== $svc $coin $net ==="
 
-  if ! XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY="$SIGNING_KEY" \
-       XCHAIN_NODE_DATA_DIR="$STAGE_DIR" \
-       XCHAIN_NODE_TMP_DIR="$TMP_DIR" \
-       "$XCHAIN_NODE_BIN" bootstrap create "$svc" "$coin" "$net"; then
-    log "  create FAILED for $c"; SUMMARY+=("$c: CREATE-FAIL"); fail=1; continue
+  # Capture the create output so a source-health REFUSAL  is reported as
+  # its own outcome rather than being flattened into a generic CREATE-FAIL. The
+  # two need different operator responses: a refusal means the SERVICE is broken
+  # (and the last good archive correctly stays newest), a create-fail means the
+  # publish machinery is broken.
+  create_log="$(mktemp)"
+  create_rc=0
+  XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY="$SIGNING_KEY" \
+  XCHAIN_NODE_DATA_DIR="$STAGE_DIR" \
+  XCHAIN_NODE_TMP_DIR="$TMP_DIR" \
+  "$XCHAIN_NODE_BIN" bootstrap create "$svc" "$coin" "$net" >"$create_log" 2>&1 || create_rc=$?
+  cat "$create_log"
+  if [ "$create_rc" != 0 ]; then
+    if grep -q 'Refusing to create a bootstrap' "$create_log"; then
+      log "  REFUSED: $c source is not known-good (reasons above). Nothing published; the previous archive stays newest."
+      SUMMARY+=("$c: SOURCE-UNHEALTHY")
+    else
+      log "  create FAILED for $c"
+      SUMMARY+=("$c: CREATE-FAIL")
+    fi
+    rm -f "$create_log"; fail=1; continue
   fi
+  rm -f "$create_log"
 
   archive="$(ls -t "$out_dir"/*.tar.gz 2>/dev/null | head -1 || true)"
   [ -n "$archive" ] || { log "  no archive produced in $out_dir"; SUMMARY+=("$c: NO-ARCHIVE"); fail=1; continue; }

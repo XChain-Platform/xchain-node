@@ -115,7 +115,15 @@ function makeStubs(overrides = {}) {
         askMariadbRootPassword:   sinon.stub().resolves('rootpass')
     }
 
+    //  source health gate. These suites exercise create MECHANICS, so the
+    // gate is stubbed open here; the gate's own policy (and the fact that
+    // makeBootstrap consults it at all) is covered in BootstrapHealthGate.test.js.
+    const healthGateStub = {
+        assertBootstrapSourceHealthy: sinon.stub().resolves({ skipped: false, reasons: [] })
+    }
+
     return {
+        healthGate:     healthGateStub,
         fs:             fsStub,
         db:             dbStub,
         axios:          axiosStub,
@@ -220,6 +228,9 @@ function loadBootstrapService(stubs) {
             getDatabaseContainerId:  stubs.databaseService.getDatabaseContainerId,
             ensureDatabasePool:      stubs.databaseService.ensureDatabasePool,
             askMariadbRootPassword:  stubs.databaseService.askMariadbRootPassword
+        },
+        './BootstrapHealthGate': {
+            assertBootstrapSourceHealthy: stubs.healthGate.assertBootstrapSourceHealthy
         }
     })
 }
