@@ -63,7 +63,9 @@ jobs:
       XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1'
       XCHAIN_NODE_EXTERNAL_DB_PORT: '3306'
       XCHAIN_NODE_EXTERNAL_DB_ROOT_USER: 'root'
-      XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: 'ci_root_pw'
+      # Root password is GENERATED per run by the "Start headless MariaDB" step
+      # below and exported through GITHUB_ENV, so no credential-shaped literal is
+      # committed ( gate). The container is ephemeral and runner-local.
       # GH runners are native ext4, so coin-node data is safe in the workspace
       # (the native-ext4 requirement only bites on the Parallels dev VM).
       XCHAIN_NODE_DATA_DIR: ${{ github.workspace }}/.xchain-data
@@ -83,6 +85,12 @@ jobs:
 
       - name: Start headless MariaDB (host-published so spawned containers reach it)
         run: |
+          XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD="$(openssl rand -hex 24)"
+
+          echo "::add-mask::$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD"
+
+          echo "XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD=$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" >> "$GITHUB_ENV"
+
           docker run -d --name xchain-ci-db \
             -e MARIADB_ROOT_PASSWORD="$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" \
             -p 3306:3306 mariadb:11
