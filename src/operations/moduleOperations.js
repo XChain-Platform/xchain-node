@@ -21,12 +21,12 @@ const readline  = require('readline')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
-const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir, EXTERNAL_DB, Coin, Network } = require('../config/constants')
+const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir, EXTERNAL_DB, Coin, CoinTickerSymbol, Network } = require('../config/constants')
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
-const { buildDatabaseModule, resetDatabases, getDatabaseContainerId } = require('../services/DatabaseService')
+const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
 const { statusChanged } = require('../services/StatusService')
@@ -381,7 +381,12 @@ async function resetModules(service, coin, network, force = false) {
         }
         if (resetUtxoTracker) targets.push(`xchain-utxo-tracker Docker volume (${getUtxoTrackerVolumeName(coin, network)})`)
         if (resetDecoder)     targets.push('xchain-decoder database')
-        if (resetIndexer)     targets.push('xchain-indexer database')
+        if (resetIndexer) {
+            targets.push('xchain-indexer database')
+            // Named in the confirmation because it is a change to the HUB's state, not
+            // this chain's: the operator should see that the reset reaches across.
+            targets.push('hub price ingest fence row for this chain (price_ingest_watermarks)')
+        }
         const confirmed = await confirmDestructiveReset(coin, network, targets)
         if (!confirmed) {
             console.log('Aborted: reset was not confirmed. No data was touched.')
@@ -456,6 +461,24 @@ async function resetModules(service, coin, network, force = false) {
     ]
     if (dbModulesToReset.length > 0) {
         await resetDatabases(coin, network, dbModulesToReset)
+    }
+
+    // : a wiped indexer DB restarts push_generations at 0, which the hub's
+    // price ingest fence reads as a stale replay and DROPS, killing this chain's
+    // price rail (and the native-fee / XCHAIN-USD path) with no error. Clear the
+    // fence row here, while the indexer is still stopped, so the first push after
+    // the restart below lands. Never fatal: the wipe already happened, so a
+    // failure must not abort the restart pass and leave the stack down. It is
+    // reported loudly instead, with the statement to run by hand.
+    if (resetIndexer) {
+        try {
+            await clearHubPriceIngestWatermark(coin, network)
+        } catch (err) {
+            console.warn('WARNING: clearing the hub price ingest fence failed: ' + (err && err.message ? err.message : err))
+            console.warn("  Run on the hub DB before the indexer catches up :")
+            console.warn("    DELETE FROM price_ingest_watermarks WHERE source_chain = '"
+                + (CoinTickerSymbol[coin] || coin) + "';")
+        }
     }
 
     console.log(`Restarting ${coin} ${network} services...`)

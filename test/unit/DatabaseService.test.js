@@ -110,7 +110,9 @@ function makeStubs(overrides = {}) {
     }
 }
 
-function loadDatabaseService(stubs, constants = {}) {
+// configValues merges into the getDefaultConfig() result, for tests that need a
+// key the shared default does not carry (e.g. HUB_DB_NAME).
+function loadDatabaseService(stubs, constants = {}, configValues = {}) {
     const defaultConstants = {
         DB_MODULE_NAME: 'database',
         HUB_MODULE_NAME: 'xchain-hub',
@@ -119,6 +121,7 @@ function loadDatabaseService(stubs, constants = {}) {
             XCHAIN_INDEXER: 'xchain-indexer'
         },
         SEP: '-',
+        CoinTickerSymbol: { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' },
         EXTERNAL_DB: false,
         EXTERNAL_DB_HOST: '127.0.0.1',
         EXTERNAL_DB_PORT: 3306,
@@ -151,7 +154,8 @@ function loadDatabaseService(stubs, constants = {}) {
                 'DECODER_DB_PASS': 'test-pass',
                 'INDEXER_DB_NAME': 'XChain_BTC_Mainnet_Indexer',
                 'INDEXER_DB_USER': 'xchain_indexer_bitcoin_mainnet',
-                'INDEXER_DB_PASS': 'test-pass'
+                'INDEXER_DB_PASS': 'test-pass',
+                ...configValues
             }),
             getDockerContainerImageName: (mod) => 'xchain-node-' + mod,
             getDockerNetwork: (coin, net) => 'xchain-node' + (coin ? '-' + coin : '') + (net ? '-' + net : ''),
@@ -1467,6 +1471,120 @@ describe('DatabaseService', function () {
             // Should have executed DROP + CREATE for decoder and indexer
             const dropCmds = executed.filter(c => c && c.includes('DROP DATABASE'))
             expect(dropCmds.length).to.be.greaterThan(0)
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // clearHubPriceIngestWatermark 
+    //
+    // A wiped indexer DB restarts push_generations at 0, which the hub's price
+    // ingest fence reads as a stale replay and drops, taking that chain's price
+    // rail down. The reset clears the fence row so the rail comes back.
+    // -------------------------------------------------------------------
+
+    describe('clearHubPriceIngestWatermark()', function () {
+
+        const HUB_CFG = { HUB_DB_NAME: 'XChain_Hub' }
+
+        // Fake MariaDB that answers the information_schema probe with `tableCount`
+        // and records every statement it is handed.
+        function dockerRunner(stubs, tableCount) {
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                if (/information_schema/.test(sql)) return { stdout: String(tableCount) + '\n' }
+                return { stdout: '' }
+            }))
+            return executed
+        }
+
+        it('deletes only the reset chain\'s fence row from the hub DB', async function () {
+            const stubs = makeStubs()
+            const executed = dockerRunner(stubs, 1)
+            const ds = loadDatabaseService(stubs, {}, HUB_CFG)
+            expect(await ds.clearHubPriceIngestWatermark('dogecoin', 'mainnet')).to.be.true
+            const del = executed.find(s => /^DELETE FROM/.test(s))
+            expect(del).to.contain('`XChain_Hub`.price_ingest_watermarks')
+            expect(del).to.contain("source_chain = 'DOGE'")
+            // Never a blanket wipe: BTC/LTC fences still guard their live ingest.
+            expect(del).to.not.match(/TRUNCATE|DELETE FROM `XChain_Hub`\.price_ingest_watermarks\s*$/)
+        })
+
+        it('prints the manual statement and returns false when this MariaDB has no hub table', async function () {
+            const stubs = makeStubs()
+            const executed = dockerRunner(stubs, 0)
+            const warn = sinon.stub(console, 'warn')
+            const ds = loadDatabaseService(stubs, {}, HUB_CFG)
+            const result = await ds.clearHubPriceIngestWatermark('bitcoin', 'mainnet')
+            const lines = warn.getCalls().map(c => String(c.args[0])).join('\n')
+            warn.restore()
+            expect(result).to.be.false
+            expect(executed.some(s => /^DELETE FROM/.test(s))).to.be.false
+            expect(lines).to.contain("DELETE FROM price_ingest_watermarks WHERE source_chain = 'BTC';")
+            expect(lines).to.contain('')
+        })
+
+        it('warns instead of throwing when the hub config carries no HUB_DB_NAME', async function () {
+            const stubs = makeStubs()
+            const executed = dockerRunner(stubs, 1)
+            const warn = sinon.stub(console, 'warn')
+            const ds = loadDatabaseService(stubs)      // no HUB_DB_NAME in the config
+            const result = await ds.clearHubPriceIngestWatermark('litecoin', 'mainnet')
+            const lines = warn.getCalls().map(c => String(c.args[0])).join('\n')
+            warn.restore()
+            expect(result).to.be.false
+            expect(executed.length).to.equal(0)
+            expect(lines).to.contain("source_chain = 'LTC'")
+        })
+
+        it('goes through the native driver in EXTERNAL_DB mode', async function () {
+            const stubs = makeStubs()
+            const queries = []
+            stubs.mariadb._fakeConn.query.callsFake((sql) => {
+                queries.push(sql)
+                if (/information_schema/.test(sql)) return Promise.resolve([['1']])
+                return Promise.resolve([])
+            })
+            const savedEnv = {}
+            const env = {
+                XCHAIN_NODE_EXTERNAL_DB_HOST:          '127.0.0.1',
+                XCHAIN_NODE_EXTERNAL_DB_PORT:          '3306',
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_USER:     'root',
+                XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: 'test-pass'
+            }
+            for (const [k, v] of Object.entries(env)) { savedEnv[k] = process.env[k]; process.env[k] = v }
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true }, HUB_CFG)
+                expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'mainnet')).to.be.true
+                expect(queries.some(q => /^DELETE FROM `XChain_Hub`\.price_ingest_watermarks/.test(q))).to.be.true
+                expect(stubs.spawn.called).to.be.false
+            } finally {
+                for (const [k, v] of Object.entries(savedEnv)) {
+                    if (v === undefined) delete process.env[k]
+                    else process.env[k] = v
+                }
+            }
+        })
+
+        it('throws on an unknown coin rather than deleting nothing and reporting success', async function () {
+            const stubs = makeStubs()
+            dockerRunner(stubs, 1)
+            const ds = loadDatabaseService(stubs, {}, HUB_CFG)
+            let threw = null
+            try { await ds.clearHubPriceIngestWatermark('notacoin', 'mainnet') } catch (e) { threw = e }
+            expect(threw).to.be.an('error')
+            expect(threw.message).to.match(/unknown coin/)
+        })
+
+        it('refuses a hub DB name that is not a safe identifier', async function () {
+            const stubs = makeStubs()
+            const executed = dockerRunner(stubs, 1)
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub`; DROP DATABASE x' })
+            let threw = null
+            try { await ds.clearHubPriceIngestWatermark('bitcoin', 'mainnet') } catch (e) { threw = e }
+            expect(threw).to.be.an('error')
+            expect(threw.message).to.match(/Unsafe MariaDB database name/)
+            expect(executed.length).to.equal(0)
         })
     })
 

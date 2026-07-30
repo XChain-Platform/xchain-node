@@ -39,6 +39,7 @@ function makeStubs() {
         saveContainerLogs: sinon.stub().resolves(true),
         buildDatabaseModule: sinon.stub().resolves(true),
         resetDatabases: sinon.stub().resolves(true),
+        clearHubPriceIngestWatermark: sinon.stub().resolves(true),
         getDatabaseContainerId: sinon.stub().resolves('mariadb-container-id'),
         cloneGit: sinon.stub().resolves(true),
         getModuleBranch: sinon.stub().resolves('master'),
@@ -80,6 +81,7 @@ function loadOperations(stubs) {
         '../services/DatabaseService': {
             buildDatabaseModule: stubs.buildDatabaseModule,
             resetDatabases: stubs.resetDatabases,
+            clearHubPriceIngestWatermark: stubs.clearHubPriceIngestWatermark,
             getDatabaseContainerId: stubs.getDatabaseContainerId
         },
         '../services/ModuleService': {
@@ -630,6 +632,57 @@ describe('moduleOperations', function () {
             expect(result).to.be.true
             expect(stubs.resetDatabases.calledOnce).to.be.true
             expect(stubs.restartContainer.called).to.be.true // bounce
+        })
+
+        // : wiping the indexer DB restarts its push_generations at 0, which the
+        // hub's price ingest fence silently drops. The reset owns clearing the fence.
+        it('clears the hub price ingest fence when the indexer DB is reset', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const clock = sinon.useFakeTimers()
+            const promise = ops.resetModules('xchain-indexer', 'bitcoin', 'mainnet', true)
+            await clock.tickAsync(6000)
+            clock.restore()
+            expect(await promise).to.be.true
+            expect(stubs.clearHubPriceIngestWatermark.calledOnceWith('bitcoin', 'mainnet')).to.be.true
+            // After the wipe and before the indexer is started again, so the first
+            // push after the restart is not the one that gets dropped.
+            expect(stubs.resetDatabases.calledBefore(stubs.clearHubPriceIngestWatermark)).to.be.true
+            expect(stubs.clearHubPriceIngestWatermark.calledBefore(stubs.startContainer)).to.be.true
+        })
+
+        it('leaves the fence alone on a decoder-only reset (that chain keeps pushing prices)', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const clock = sinon.useFakeTimers()
+            const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true)
+            await clock.tickAsync(6000)
+            clock.restore()
+            expect(await promise).to.be.true
+            expect(stubs.clearHubPriceIngestWatermark.called).to.be.false
+        })
+
+        it('reports a fence-clear failure without aborting the restart pass', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            stubs.clearHubPriceIngestWatermark.rejects(new Error('hub DB unreachable'))
+            const warn = sinon.stub(console, 'warn')
+            const ops = loadOperations(stubs)
+            const clock = sinon.useFakeTimers()
+            const promise = ops.resetModules('xchain-indexer', 'bitcoin', 'mainnet', true)
+            await clock.tickAsync(6000)
+            clock.restore()
+            const result = await promise
+            const lines = warn.getCalls().map(c => String(c.args[0])).join('\n')
+            warn.restore()
+            // The wipe already happened: leaving the stack stopped would be worse than
+            // an uncleared fence, so this is loud but not fatal.
+            expect(result).to.be.true
+            expect(stubs.startContainer.called).to.be.true
+            expect(lines).to.contain('price_ingest_watermarks')
+            expect(lines).to.contain("source_chain = 'BTC'")
         })
 
         it('resets node data when nodeDataPath exists', async function () {

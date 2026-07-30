@@ -22,7 +22,7 @@ const mariadb     = require('mariadb')
 const { Password, Input, NumberPrompt } = require('enquirer')
 
 const {
-    DB_MODULE_NAME, HUB_MODULE_NAME, XChainService, SEP,
+    DB_MODULE_NAME, HUB_MODULE_NAME, XChainService, SEP, CoinTickerSymbol,
     EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER
 } = require('../config/constants')
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
@@ -761,6 +761,85 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
     }
 }
 
+const PRICE_FENCE_TABLE = 'price_ingest_watermarks'
+
+// : clear the hub's price ingest fence row for one source chain.
+//
+// `price_ingest_watermarks` holds, per source chain, the highest rollback
+// generation whose price retraction the hub has processed. PriceAggregator drops
+// any push at or below that generation whose action_index sits in the retracted
+// range. A reset indexer DB restarts its `push_generations` counter at 0 and,
+// after replay, re-covers the same action indices, so EVERY price push from it
+// matches that condition: the chain's price rail (and the native-fee /
+// XCHAIN-USD path riding on it) stops, and until the hub-side warning landed
+// nothing anywhere named the cause. So the fence row is cleared in the same step
+// that wipes the indexer DB, never left to a runbook line.
+//
+// Returns true when the row was cleared, false when this MariaDB holds no hub DB
+// to clear it in (a stack pushing to a hub elsewhere), in which case the manual
+// statement is printed. Only the calling chain's row is touched: another chain's
+// fence is still protecting that chain's live ingest.
+async function clearHubPriceIngestWatermark(coin, network) {
+    const ticker = CoinTickerSymbol[coin]
+    if (!ticker) {
+        throw new Error("clearHubPriceIngestWatermark: unknown coin '" + coin + "'")
+    }
+
+    const cfg = await getDefaultConfig(HUB_MODULE_NAME, null, null)
+    const hubDbName = cfg && cfg["HUB_DB_NAME"]
+    if (!hubDbName) {
+        warnPriceFenceNotCleared(ticker, "the hub configuration carries no HUB_DB_NAME")
+        return false
+    }
+    // Same contract as addUserPasswordToDatabase: the DB name is an identifier
+    // and cannot be bound, so allowlist it before it reaches a SQL string. The
+    // ticker is a value and is escaped as a literal at the use site.
+    assertSafeDbIdentifier(hubDbName, 'database name')
+
+    let runner
+    if (EXTERNAL_DB) {
+        const externalCfg = await getExternalDbConfig()
+        runner = (sql, options) => executeNativeMariaDbCommand(externalCfg, sql, options)
+    } else {
+        const mariadbContainerId = await getDatabaseContainerId()
+        if (!mariadbContainerId) {
+            warnPriceFenceNotCleared(ticker, "no MariaDB container was found")
+            return false
+        }
+        const mariadbRootPassword = await askMariadbRootPassword(coin, network)
+        runner = (sql, options) => executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, sql, options)
+    }
+
+    // Probe first rather than DELETE-and-swallow: a hub on another host (the
+    // common prod shape) has no table here, and that case must print the manual
+    // statement instead of being indistinguishable from a failed delete.
+    const probe = await runner(
+        "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = "
+        + escapeSqlStringLiteral(hubDbName) + " AND TABLE_NAME = "
+        + escapeSqlStringLiteral(PRICE_FENCE_TABLE), "-B -N")
+    if (parseInt(String(probe).trim(), 10) !== 1) {
+        warnPriceFenceNotCleared(ticker, "this MariaDB holds no " + hubDbName + "." + PRICE_FENCE_TABLE + " table")
+        return false
+    }
+
+    await runner("DELETE FROM `" + hubDbName + "`." + PRICE_FENCE_TABLE
+        + " WHERE source_chain = " + escapeSqlStringLiteral(ticker))
+    console.log("Cleared the hub price ingest fence for " + ticker + " ("
+        + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted")
+    return true
+}
+
+// One wording for every "could not clear it here" branch, so the operator always
+// gets the exact statement to run on whichever DB the hub actually uses.
+function warnPriceFenceNotCleared(ticker, reason) {
+    console.warn("WARNING: the hub price ingest fence for " + ticker + " was NOT cleared (" + reason + ").")
+    console.warn("  A reset indexer DB restarts its push_generations at 0, and the hub DROPS every")
+    console.warn("  price push at or below its recorded retraction generation, taking that chain's price rail")
+    console.warn("  and the native-fee / XCHAIN-USD path down with it. Run this on the hub's OWN database")
+    console.warn("  before the indexer resumes pushing :")
+    console.warn("    DELETE FROM " + PRICE_FENCE_TABLE + " WHERE source_chain = '" + ticker + "';")
+}
+
 async function buildDatabaseModule(coin, network) {
     // External (host-native) MariaDB mode: xchain-node doesn't own the DB
     // engine; the operator runs MariaDB themselves. We just need to confirm the
@@ -1022,6 +1101,7 @@ module.exports = {
     setHubDatabaseParameters,
     buildDatabaseModule,
     resetDatabases,
+    clearHubPriceIngestWatermark,
     getDatabaseContainerId,
     getDatabaseHostPort,
     ensureDatabasePool,
