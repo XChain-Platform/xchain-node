@@ -137,12 +137,52 @@ function scanSql(limit) {
          + 'ORDER BY t.tx_index ASC LIMIT ' + Number(limit);
 }
 
-/** Human-readable gate result for the deploy report. */
-function formatReport(scan, label) {
+/**
+ * The size of the corpus the filtered scan ran against. Reported alongside the
+ * scan, because "0 hits" over 0 rows and "0 hits" over 40k rows are different
+ * facts and only one of them is a scan.
+ *
+ * This was not theoretical. The first fleet-wide run (2026-07-29) printed the
+ * confident CLEAN verdict for nine of ten stores whose `transactions` table is
+ * EMPTY, and the report gave the reader nothing to tell that apart from a real
+ * scan. The verdict was true in both cases; the evidence behind it was not
+ * comparable, and a gate that reads identically either way trains people to
+ * skim it.
+ */
+function corpusSql() {
+    return 'SELECT COUNT(*) AS payload_rows FROM transactions '
+         + 'WHERE data IS NOT NULL AND data <> ' + "''";
+}
+
+/**
+ * Human-readable gate result for the deploy report.
+ *
+ * `corpus` is the payload-bearing row count from corpusSql(), or null when it
+ * was not measured. A null corpus is reported as unmeasured rather than
+ * silently omitted: the whole point is that the reader can see which kind of
+ * clean this is.
+ */
+function formatReport(scan, label, corpus) {
     const lines = [];
+    const known = (corpus !== undefined && corpus !== null && Number.isFinite(Number(corpus)));
+    const n     = known ? Number(corpus) : null;
     lines.push(' nine-field FILE scan: ' + (label || 'store'));
-    lines.push('payload rows scanned: ' + scan.scanned + '  (raw decoder payloads, upstream of format truncation)');
+    lines.push('payload rows scanned: ' + scan.scanned +
+               (known ? ' of ' + n + ' payload-bearing rows in the store' : '') +
+               '  (raw decoder payloads, upstream of format truncation)');
     if (scan.hits.length === 0) {
+        if (known && n === 0) {
+            lines.push('RESULT: CLEAN BY EMPTINESS - this store holds NO payload rows at all, so');
+            lines.push('        nothing here could carry a ninth field. That is a valid answer for');
+            lines.push('        the gate, but it is NOT evidence that the scan works: read it as');
+            lines.push('        "nothing to examine", not as "examined and found nothing".');
+            return lines.join('\n');
+        }
+        if (!known) {
+            lines.push('RESULT: CLEAN over the rows scanned, corpus size UNMEASURED - rerun with the');
+            lines.push('        corpus query so a clean-by-emptiness store cannot read as a scan.');
+            return lines.join('\n');
+        }
         lines.push('RESULT: CLEAN - no FILE carries a non-empty ninth field, so STRICT');
         lines.push('        GATE_MIN_AMOUNT validation cannot flip any historical FILE.');
         return lines.join('\n');
@@ -160,5 +200,5 @@ function formatReport(scan, label) {
 }
 
 module.exports = {
-    FILE_V0_FIELD_COUNT, splitCommands, inspectCommand, scanRows, scanSql, formatReport
+    FILE_V0_FIELD_COUNT, splitCommands, inspectCommand, scanRows, scanSql, corpusSql, formatReport
 };

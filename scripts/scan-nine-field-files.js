@@ -67,6 +67,18 @@ async function main() {
     // Keyset paging over tx_index: a mainnet decoder holds millions of rows and the point
     // of the gate is to scan ALL of them, so it streams rather than materializing the set.
     const total = { scanned: 0, hits: [] };
+    // Measured BEFORE the scan so the report can say which kind of clean this is. A store
+    // with zero payload rows yields a true but vacuous verdict, and the 2026-07-29 fleet
+    // run hit that on nine of ten stores; if the count cannot be read, say so rather than
+    // printing a confident CLEAN over an unknown corpus.
+    let corpus = null;
+    try {
+        const c = await conn.query(scanner.corpusSql());
+        if (c && c.length) corpus = Number(c[0].payload_rows);
+    } catch (e) {
+        console.error('warning: could not measure the payload corpus (' +
+                      ((e && e.message) || e) + '); the report will say so.');
+    }
     try {
         let after = -1;
         for (;;) {
@@ -84,7 +96,7 @@ async function main() {
         try { await conn.end(); } catch (_e) { /* a read-only conn cannot change the verdict */ }
     }
 
-    console.log(scanner.formatReport(total, label));
+    console.log(scanner.formatReport(total, label, corpus));
     process.exit(total.hits.length === 0 ? 0 : 1);
 }
 

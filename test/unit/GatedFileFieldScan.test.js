@@ -162,10 +162,46 @@ describe(' nine-field FILE scan (spec section 7)', function () {
     describe('the gate report', function () {
 
         it('says CLEAN in a way that states what was established', function () {
-            const text = scan.formatReport(scan.scanRows([{ data: fileWith(eight) }]), 'BTC mainnet');
+            // The corpus argument is required for this verdict now: without it the report
+            // says UNMEASURED, because a confident CLEAN over an unknown corpus is the
+            // shape the fleet run showed to be misleading.
+            const text = scan.formatReport(scan.scanRows([{ data: fileWith(eight) }]), 'BTC mainnet', 1);
             assert.match(text, /RESULT: CLEAN/);
             assert.match(text, /cannot flip any historical FILE/);
             assert.match(text, /upstream of format truncation/);
+        });
+
+        // The 2026-07-29 fleet run printed the confident CLEAN above for NINE of ten
+        // stores whose `transactions` table is empty. The verdict was true; the evidence
+        // was not comparable to a real scan, and the report read identically either way.
+        it('distinguishes clean-by-emptiness from a scan that examined rows', function () {
+            const empty = scan.formatReport({ scanned: 0, hits: [] }, 'LTC mainnet', 0);
+            assert.match(empty, /CLEAN BY EMPTINESS/);
+            assert.match(empty, /NO payload rows at all/);
+            assert.match(empty, /not as "examined and found nothing"/,
+                         'the distinction has to be stated, not left to the reader');
+            assert.doesNotMatch(empty, /cannot flip any historical FILE/,
+                         'an empty store establishes nothing about the scan working');
+
+            const real = scan.formatReport({ scanned: 56, hits: [] }, 'DOGE mainnet', 56);
+            assert.match(real, /scanned: 56 of 56 payload-bearing rows/);
+            assert.match(real, /RESULT: CLEAN\b/);
+            assert.match(real, /cannot flip any historical FILE/);
+            assert.doesNotMatch(real, /EMPTINESS/);
+        });
+
+        it('says so when the corpus was not measured, rather than implying a full scan', function () {
+            const text = scan.formatReport({ scanned: 3, hits: [] }, 'BTC mainnet');
+            assert.match(text, /corpus size UNMEASURED/);
+            assert.doesNotMatch(text, /payload-bearing rows in the store/);
+        });
+
+        it('counts only payload-bearing rows as the corpus', function () {
+            const sql = scan.corpusSql();
+            assert.match(sql, /FROM transactions/);
+            assert.match(sql, /data IS NOT NULL/);
+            assert.match(sql, /data <> ''/, 'an empty payload is not a row worth counting');
+            assert.doesNotMatch(sql, /LIKE/, 'the corpus is the unfiltered payload set, not the FILE subset');
         });
 
         it('names every hit and refuses to let it pass as a footnote', function () {
