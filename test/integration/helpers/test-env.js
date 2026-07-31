@@ -174,7 +174,16 @@ class TestEnv {
      * Create a fake module directory with minimal structure (Dockerfile, src, package.json).
      */
     createFakeModule(moduleName, packageVersion) {
-        const dir = path.join(this.moduleDir, moduleName)
+        this.writeFakeModuleAt(path.join(this.moduleDir, moduleName), moduleName, packageVersion)
+    }
+
+    /**
+     * Same minimal structure, written at an arbitrary path. Used by the fake
+     * `git clone` route, which must materialize whatever destination it is
+     * handed (cloneGit stages a rewrite-clone in a sibling directory and swaps
+     * it in, so the destination is not always the module directory).
+     */
+    writeFakeModuleAt(dir, moduleName, packageVersion) {
         fs.mkdirSync(dir, { recursive: true })
         fs.mkdirSync(path.join(dir, 'src'), { recursive: true })
         fs.writeFileSync(path.join(dir, 'Dockerfile'), 'FROM node:20\n')

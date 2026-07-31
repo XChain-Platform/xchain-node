@@ -42,7 +42,25 @@ const { initValidator, getValidatorSettings, isInitialized } = require('./servic
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 const { acquireCommandLock } = require('./utils/commandLock')
 
+// Commander's action handlers are async, but program.parse() is synchronous:
+// anything an action rejects with escapes as an unhandled rejection, which Node
+// prints as an ERR_UNHANDLED_REJECTION stack. Several services reject with a
+// plain string (cloneGit, buildAndUp), and a string reason turns that stack into
+// noise with the actual message buried in it . Register one backstop
+// that prints the reason readably and exits non-zero, keeping the stack when the
+// reason is a real Error so genuine bugs stay debuggable.
+function installUnhandledRejectionHandler() {
+    process.on('unhandledRejection', (reason) => {
+        const detail = reason instanceof Error
+            ? (reason.stack || reason.message)
+            : String(reason)
+        console.error('xchain-node: command failed: ' + detail)
+        process.exit(1)
+    })
+}
+
 async function parseCommand() {
+    installUnhandledRejectionHandler()
     const program = new Command()
 
     const commandsNeedingVersions = ['install', 'update', 'reinstall']
@@ -176,11 +194,20 @@ async function parseCommand() {
         .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .argument('[branch]',  '(master, develop, or any branch name)')
+        .argument('[branch]',  '(master, develop, or any branch name; resolved on the module\'s remote, so push it first, or point the module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE)')
         .action(async (service, chain, network, branch) => {
             const resolved = resolveArgs([service, chain, network, branch], { expectBranch: true, defaultBranch: null })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
-            await updateModules(serviceList, resolved.branch)
+            // Report a failed update as an error and exit non-zero instead of
+            // letting it escape as an unhandled rejection . The deploy
+            // checkout is left intact by cloneGit, so the message is the whole
+            // outcome: nothing to roll back by hand.
+            try {
+                await updateModules(serviceList, resolved.branch)
+            } catch (err) {
+                console.error('update failed: ' + (err && err.message ? err.message : err))
+                return process.exit(1)
+            }
             return process.exit(0)
         })
 
@@ -465,7 +492,9 @@ Notes:
     program.parse(process.argv)
 }
 
-module.exports = { parseCommand }
+// installUnhandledRejectionHandler is exported for its unit test only; the CLI
+// installs it itself at the top of parseCommand().
+module.exports = { parseCommand, installUnhandledRejectionHandler }
 
 // Allow running this file directly (`node src/cli.js <cmd>`) as well as via the
 // bin entrypoint `src/index.js`. When cli.js is required as a module (index.js

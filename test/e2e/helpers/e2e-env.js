@@ -146,8 +146,16 @@ class E2EEnv extends TestEnv {
         // docker wait
         this.capture.when(/docker wait/).returns({ stdout: '0' })
 
-        // git clone succeeds
-        this.capture.when(/git clone/).returns({ stdout: '' })
+        // git clone succeeds AND creates its destination, the way real git does.
+        // cloneGit stages a rewrite-clone in a sibling directory and swaps it in
+        // only once git reports success , so a route that produced no
+        // directory would leave the swap with nothing to move into place.
+        this.capture.when(/git clone/).respondsWith((cmd) => {
+            const parts = cmd.trim().split(/\s+/)
+            const destination = parts[parts.length - 1]
+            self.writeFakeModuleAt(destination, path.basename(destination).split('.')[0])
+            return { stdout: '' }
+        })
 
         // git rev-parse (branch check)
         this.capture.when(/git.*rev-parse/).returns({ stdout: 'master\n' })
@@ -196,9 +204,11 @@ class E2EEnv extends TestEnv {
         })
 
         // ConfigService with patched paths.
-        // Override removeModuleDir/removeModuleTmpDir to be no-ops so that after
-        // cloneGit "re-clones" (which uses our exec stub), the fake module dirs
-        // remain intact for buildAndUp's checkIfModuleExists check.
+        // removeModuleDir/removeModuleTmpDir are no-ops so nothing deletes the
+        // fake module dirs out from under buildAndUp's checkIfModuleExists check.
+        // (cloneGit's rewrite path no longer deletes them at all: it stages the
+        // clone and swaps it in, and the fake `git clone` route materializes the
+        // staged copy.)
         const RealConfigService = proxyquire(path.join(ROOT, 'src/services/ConfigService'), {
             '../config/constants': patchedConstants
         })

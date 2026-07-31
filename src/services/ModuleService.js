@@ -28,7 +28,7 @@ const {
 const { db }                = require('../state')
 const {
     getModuleDir, getModuleTmpDir, moduleDirExists, checkIfModuleExists,
-    removeModuleDir, removeModuleTmpDir, createModuleTmpDir,
+    removeModuleTmpDir, createModuleTmpDir,
     getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
@@ -36,34 +36,18 @@ const { killContainer, removeContainer, getPublishedHostPorts, forceRemoveContai
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./DatabaseService')
 const { redactSecrets } = require('../utils/helpers')
 
-async function cloneGit(module, rewrite = false, useTmp = false, branch = null) {
+// Sibling directories used to make a rewrite-clone atomic-ish (see cloneGit).
+// Both live beside the module checkout inside the modules dir, so the two
+// renames below stay on one filesystem and cannot fail with EXDEV.
+const CLONE_STAGING_SUFFIX  = '.xchain-node-staging'
+const CLONE_PREVIOUS_SUFFIX = '.xchain-node-previous'
+
+// Run `git clone` into `destination`. Rejects with the operator-facing string
+// the callers already surface; performs no filesystem cleanup of its own so
+// the caller owns the rollback decision.
+function runGitClone(module, branch, destination) {
     return new Promise((resolve, reject) => {
-        if (useTmp) {
-            removeModuleTmpDir(module)
-            createModuleTmpDir(module)
-        } else {
-            if (moduleDirExists(module)) {
-                if (rewrite) {
-                    removeModuleDir(module)
-                } else {
-                    reject("Module directory already exists")
-                    return
-                }
-            }
-        }
-
-        if (!(module in modulesUrls)) {
-            reject("module doesn't have an url")
-            return
-        }
-
-        if (branch && !/^[a-zA-Z0-9._\-\/]+$/.test(branch)) {
-            reject("Invalid branch name: " + branch + " (branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes)")
-            return
-        }
-
         const gitUrl = modulesUrls[module]
-        const destination = useTmp ? getModuleTmpDir(module) : getModuleDir(module)
         const cloneArgs = ['clone']
         if (branch) cloneArgs.push('-b', branch)
         // Local-path sources (no ':' i.e. not a URL/SCP-style remote) on the
@@ -80,7 +64,16 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
                     // and running different code than what was asked for with only a
                     // scrolling console.warn is a silent-wrong-code hazard
                     // (uuid:4f649bd0). Fail the clone instead.
-                    reject(`Error cloning project: branch '${branch}' not found for module '${module}'`)
+                    //
+                    // The hint matters because the mechanism is routinely misread
+                    // (, and the  note it corrects): install/update clone
+                    // from the module's REMOTE, so a branch that exists only in the
+                    // checkout on this box is invisible here. Push it, or point the
+                    // module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE.
+                    reject(`Error cloning project: branch '${branch}' not found for module '${module}'`
+                        + ` (clones come from the module's remote, so a branch that exists only in the`
+                        + ` local checkout is not visible: push it, or set`
+                        + ` XCHAIN_NODE_MODULES_URLS_OVERRIDE='{"${module}":"/path/to/local/checkout"}')`)
                 } else {
                     reject("Error cloning project: " + redactSecrets(error.message))
                 }
@@ -89,6 +82,86 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
             }
         })
     })
+}
+
+// Clone a module's source into its deploy checkout.
+//
+// A clone that would replace an EXISTING checkout is staged in a sibling
+// directory and swapped in only once git has succeeded . The previous
+// implementation deleted the destination as its first step, so any clone
+// failure (a branch absent from the remote, a network drop, an auth refusal)
+// left the module directory simply gone: on origin-host an `update xchain-hub
+// ... <branch>` destroyed the deploy source including a local-only hotfix
+// branch, and because the running container was untouched nothing surfaced the
+// loss. Validation of the module URL and the branch name also moved ahead of
+// every filesystem mutation for the same reason.
+//
+// Failure semantics: on any error the pre-existing checkout is still in place
+// and unmodified, and the error is thrown (never an unhandled rejection).
+async function cloneGit(module, rewrite = false, useTmp = false, branch = null) {
+    if (!(module in modulesUrls)) {
+        throw "module doesn't have an url"
+    }
+
+    if (branch && !/^[a-zA-Z0-9._\-\/]+$/.test(branch)) {
+        throw "Invalid branch name: " + branch + " (branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes)"
+    }
+
+    // The tmp tree is scratch space (version probes, the skew guard) that is
+    // rebuilt on every use and holds nothing unrecoverable, so it keeps the
+    // cheap wipe-then-clone shape.
+    if (useTmp) {
+        removeModuleTmpDir(module)
+        createModuleTmpDir(module)
+        return await runGitClone(module, branch, getModuleTmpDir(module))
+    }
+
+    const destination = getModuleDir(module)
+
+    if (!moduleDirExists(module)) {
+        return await runGitClone(module, branch, destination)
+    }
+
+    if (!rewrite) {
+        throw "Module directory already exists"
+    }
+
+    const staging  = destination + CLONE_STAGING_SUFFIX
+    const previous = destination + CLONE_PREVIOUS_SUFFIX
+    // Clear leftovers from an interrupted earlier swap before reusing the names.
+    fs.rmSync(staging,  { recursive: true, force: true })
+    fs.rmSync(previous, { recursive: true, force: true })
+
+    try {
+        await runGitClone(module, branch, staging)
+    } catch (err) {
+        fs.rmSync(staging, { recursive: true, force: true })
+        throw err
+    }
+
+    // Swap: move the live checkout aside, move the new one in, then drop the
+    // old one. Only the middle rename can leave the destination missing, and
+    // it is immediately undone below.
+    try {
+        fs.renameSync(destination, previous)
+    } catch (err) {
+        fs.rmSync(staging, { recursive: true, force: true })
+        throw "Error replacing module checkout for '" + module + "': " + redactSecrets(String(err && err.message ? err.message : err))
+            + " (the existing checkout was left in place)"
+    }
+
+    try {
+        fs.renameSync(staging, destination)
+    } catch (err) {
+        try {
+            fs.renameSync(previous, destination)
+        } catch { /* nothing else to try; the original is at `previous` */ }
+        fs.rmSync(staging, { recursive: true, force: true })
+        throw "Error replacing module checkout for '" + module + "': " + redactSecrets(String(err && err.message ? err.message : err))
+    }
+
+    fs.rmSync(previous, { recursive: true, force: true })
+    return true
 }
 
 async function getModuleBranch(module) {

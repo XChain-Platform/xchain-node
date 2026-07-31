@@ -26,7 +26,9 @@ function makeStubs() {
         fs: {
             existsSync: sinon.stub().returns(true),
             rmSync: sinon.stub(),
-            mkdirSync: sinon.stub()
+            mkdirSync: sinon.stub(),
+            // cloneGit's rewrite path stages the clone and swaps it in 
+            renameSync: sinon.stub()
         }
     }
 }
@@ -231,7 +233,7 @@ describe('Chaos: Git Clone Resilience', function () {
             }
         })
 
-        it('removes existing directory when rewrite is true', async function () {
+        it('replaces the existing directory when rewrite is true', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
@@ -243,6 +245,9 @@ describe('Chaos: Git Clone Resilience', function () {
 
             await ms.cloneGit('xchain-encoder', true, false)
             expect(stubs.execFile.calledOnce).to.be.true
+            // The replacement is a swap of the staged clone, not a delete-then-clone:
+            // the old directory only goes away after git has succeeded .
+            expect(stubs.fs.renameSync.callCount).to.equal(2)
         })
     })
 

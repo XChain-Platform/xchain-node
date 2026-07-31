@@ -1630,7 +1630,10 @@ describe('ModuleService', function () {
             }
             const ms = proxyquireCallThru('../../src/services/ModuleService', {
                 'child_process': { execFile: execFileStub },
-                'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub() },
+                // renameSync must be stubbed under a call-through load: cloneGit's
+                // rewrite path stages the clone and swaps it in , and a
+                // call-through would rename real paths on the test host.
+                'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
                     db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
@@ -1688,7 +1691,10 @@ describe('ModuleService', function () {
             }
             const ms = proxyquireCallThru('../../src/services/ModuleService', {
                 'child_process': { execFile: execFileStub },
-                'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub() },
+                // renameSync must be stubbed under a call-through load: cloneGit's
+                // rewrite path stages the clone and swaps it in , and a
+                // call-through would rename real paths on the test host.
+                'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
                     db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
@@ -1929,7 +1935,10 @@ describe('ModuleService', function () {
                 'util': {
                     promisify: () => async (...args) => currentBranchStub(...args)
                 },
-                'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub() },
+                // renameSync must be stubbed under a call-through load: cloneGit's
+                // rewrite path stages the clone and swaps it in , and a
+                // call-through would rename real paths on the test host.
+                'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
                     db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
@@ -2334,6 +2343,157 @@ describe('ModuleService', function () {
                 await ms.assertNoHostPortConflicts(['-p', '3001:3001'], 'self')
             } catch (err) { threw = err }
             expect(threw).to.be.an.instanceOf(TypeError)
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // cloneGit: non-destructive rewrite 
+    // -------------------------------------------------------------------
+
+    describe('cloneGit() rewrite over an existing checkout', function () {
+
+        const MODULE = 'xchain-encoder'
+        const DEST   = '/modules/' + MODULE
+
+        // Loads ModuleService with a real-ish fs surface (spies) and an
+        // existing module checkout, which is the only case that used to be
+        // destructive.
+        function loadWithExistingCheckout(execFileFake) {
+            const fsStub = {
+                existsSync: sinon.stub().returns(true),
+                rmSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                renameSync: sinon.stub()
+            }
+            const execFileStub = sinon.stub().callsFake(execFileFake)
+            const removeModuleDir = sinon.stub()
+            const ms = proxyquire('../../src/services/ModuleService', {
+                'child_process': { execFile: execFileStub },
+                'fs': fsStub,
+                '../state': { db: { insertModuleContainer: sinon.stub().resolves(true) }, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
+                './ConfigService': {
+                    getModuleDir: (mod) => '/modules/' + mod,
+                    getModuleTmpDir: (mod) => '/tmp/' + mod,
+                    moduleDirExists: sinon.stub().returns(true),
+                    checkIfModuleExists: sinon.stub().returns(true),
+                    removeModuleDir,
+                    removeModuleTmpDir: sinon.stub(),
+                    createModuleTmpDir: sinon.stub(),
+                    getDockerContainerImageName: sinon.stub(),
+                    getDockerNetwork: sinon.stub(),
+                    validatePort: () => true,
+                    getDefaultConfig: sinon.stub().resolves({})
+                },
+                './StatusService': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
+                './DockerService': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(), getPublishedHostPorts: sinon.stub().resolves(new Map()) },
+                './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() }
+            })
+            return { ms, fs: fsStub, execFile: execFileStub, removeModuleDir }
+        }
+
+        function callbackOf(rest) {
+            return typeof rest[0] === 'function' ? rest[0] : rest[1]
+        }
+
+        it('clones into a staging dir, never over the live checkout', async function () {
+            let destArg = null
+            const { ms, fs } = loadWithExistingCheckout((cmd, args, ...rest) => {
+                destArg = args[args.length - 1]
+                callbackOf(rest)(null)
+            })
+            await ms.cloneGit(MODULE, true)
+            expect(destArg).to.not.equal(DEST)
+            expect(destArg).to.have.string(DEST)
+            // Swap order: live checkout aside first, staged clone in second.
+            expect(fs.renameSync.callCount).to.equal(2)
+            expect(fs.renameSync.firstCall.args[0]).to.equal(DEST)
+            expect(fs.renameSync.secondCall.args[0]).to.equal(destArg)
+            expect(fs.renameSync.secondCall.args[1]).to.equal(DEST)
+        })
+
+        it('leaves the checkout in place when the branch is missing from the remote', async function () {
+            // : `update <svc> <chain> <net> <branch>` used to delete the
+            // deploy checkout as its first step, so a branch that exists only on
+            // the box took the whole module directory with it.
+            const { ms, fs, removeModuleDir } = loadWithExistingCheckout((cmd, args, ...rest) => {
+                callbackOf(rest)(new Error('Remote branch not found'), '', 'Remote branch xc952-mainnet-hotfix not found in upstream origin')
+            })
+            let threw = null
+            try {
+                await ms.cloneGit(MODULE, true, false, 'xc952-mainnet-hotfix')
+            } catch (err) { threw = err }
+            expect(threw).to.include('not found')
+            expect(removeModuleDir.called).to.be.false
+            expect(fs.renameSync.called).to.be.false
+            // Only the staging dir is cleaned up, never the destination itself.
+            for (const call of fs.rmSync.getCalls()) {
+                expect(call.args[0]).to.not.equal(DEST)
+            }
+        })
+
+        it('points a missing branch at the real mechanism (remote clone / local-path override)', async function () {
+            const { ms } = loadWithExistingCheckout((cmd, args, ...rest) => {
+                callbackOf(rest)(new Error('not found'), '', 'Remote branch not found in upstream origin')
+            })
+            let threw = null
+            try {
+                await ms.cloneGit(MODULE, true, false, 'local-only')
+            } catch (err) { threw = err }
+            expect(threw).to.include('XCHAIN_NODE_MODULES_URLS_OVERRIDE')
+            expect(threw).to.include("remote")
+        })
+
+        it('leaves the checkout in place when the clone fails for any other reason', async function () {
+            const { ms, fs, removeModuleDir } = loadWithExistingCheckout((cmd, args, ...rest) => {
+                callbackOf(rest)(new Error('fatal: could not read from remote repository'))
+            })
+            let threw = null
+            try {
+                await ms.cloneGit(MODULE, true)
+            } catch (err) { threw = err }
+            expect(threw).to.include('Error cloning')
+            expect(removeModuleDir.called).to.be.false
+            expect(fs.renameSync.called).to.be.false
+        })
+
+        it('restores the original checkout when the swap-in rename fails', async function () {
+            const { ms, fs } = loadWithExistingCheckout((cmd, args, ...rest) => {
+                callbackOf(rest)(null)
+            })
+            fs.renameSync.onSecondCall().throws(new Error('EPERM: operation not permitted'))
+            let threw = null
+            try {
+                await ms.cloneGit(MODULE, true)
+            } catch (err) { threw = err }
+            expect(threw).to.include('Error replacing module checkout')
+            // Third rename is the restore of the set-aside original.
+            expect(fs.renameSync.callCount).to.equal(3)
+            expect(fs.renameSync.thirdCall.args[1]).to.equal(DEST)
+        })
+
+        it('rejects an invalid branch name before touching the filesystem', async function () {
+            const { ms, fs, execFile, removeModuleDir } = loadWithExistingCheckout(() => {})
+            let threw = null
+            try {
+                await ms.cloneGit(MODULE, true, false, 'bad branch!')
+            } catch (err) { threw = err }
+            expect(threw).to.include('Invalid branch name')
+            expect(execFile.called).to.be.false
+            expect(removeModuleDir.called).to.be.false
+            expect(fs.rmSync.called).to.be.false
+            expect(fs.renameSync.called).to.be.false
+        })
+
+        it('rejects an unknown module before touching the filesystem', async function () {
+            const { ms, fs, removeModuleDir } = loadWithExistingCheckout(() => {})
+            let threw = null
+            try {
+                await ms.cloneGit('not-a-module', true)
+            } catch (err) { threw = err }
+            expect(threw).to.include("doesn't have an url")
+            expect(removeModuleDir.called).to.be.false
+            expect(fs.rmSync.called).to.be.false
+            expect(fs.renameSync.called).to.be.false
         })
     })
 })
