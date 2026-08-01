@@ -4,8 +4,8 @@
 # XChain Platform Node
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.0.23-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-1148%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.0.25-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-1636%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -29,10 +29,14 @@ CLI management and orchestration tool for the XChain Platform. Installs, configu
 - **Anonymous telemetry**: opt-out usage ping reports service versions and running module set; IP is never stored; respects `--no-telemetry`, env var, or preference file
 - **Multi-pane monitoring**: Blessed terminal UI showing live logs from up to 6 containers in split-screen
 - **Pre-flight checks**: Docker verification, directory creation, LevelDB open, remote version fetch, Docker network creation, and stale container-registry GC on every command
+- **Go-live gate**: asserts safe launch settings together at the one chokepoint every service deploy passes through; warns pre-launch, refuses a mainnet write surface once `XCHAIN_NODE_GO_LIVE=1` is set (escape hatch: `XCHAIN_NODE_SKIP_GO_LIVE_GATE=1`, logged loudly)
+- **Skew guard**: refuses an `update` that would deploy a downstream module (e.g. the indexer) past the hub version it requires, per a `xchainRequiresHub` minimum-semver field in the module's own `package.json`
+- **Container auto-discovery**: rebuilds the module-to-container-ID registry from `docker ps -a` when it drifts from LevelDB state, since container names deterministically encode module/coin/network
+- **Credentials persistence**: accepted MariaDB root passwords persist per-OS-user to `~/.xchain-node/credentials.json` (0600), ping-verified and reused as a non-interactive fallback
 - **State persistence**: LevelDB maps each module to its 64-char container ID via composite keys
 - **execFile security**: all child process calls use `execFile` with array arguments, eliminating shell injection
 - **Input validation**: branch name, port, and container ID validation with strict regex enforcement
-- **1,148 tests**: unit, integration, e2e, smoke, boundary, security, fuzz, chaos, regression, performance, and mutation testing
+- **1,636+ tests**: unit, integration, e2e, smoke, boundary, security, fuzz, chaos, regression, performance, and mutation testing
 
 ## Documentation
 
@@ -41,9 +45,9 @@ Full xchain-node documentation is available in the [xchain-documentation](https:
 | Document | Description |
 |---|---|
 | [README](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/README.md) | Overview, features, installation, quick start, scripts, dependencies |
-| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/ARCHITECTURE.md) | Data pipeline position, internal components, source files, runtime directory structure |
-| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md) | Config file system, generated environment variables, naming conventions, internal constants |
-| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/OPERATIONS.md) | CLI commands reference, global options, parameters, troubleshooting |
+| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/architecture.md) | Data pipeline position, internal components, source files, runtime directory structure |
+| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/configuration.md) | Config file system, generated environment variables, naming conventions, internal constants |
+| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/operations.md) | CLI commands reference, global options, parameters, troubleshooting |
 
 ## Quick Start
 
@@ -110,7 +114,7 @@ Five env vars override where xchain-node stores its filesystem state. Set them i
 | `XCHAIN_NODE_CRYPTO_NODES_DIR` | Downloaded coin-node binaries |
 | `XCHAIN_NODE_CONFIG_DIR` | Generated per-service `.env` files |
 
-On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/CONFIGURATION.md).
+On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/configuration.md).
 
 ### Bundled MariaDB tuning
 
@@ -139,44 +143,44 @@ The command is one-shot and never prompts or daemonizes. Unattended remediation 
 
 `xchain-node` sends an anonymous usage ping (xchain-node + service versions, which services are running, basic OS/Docker info). Your **IP address is never sent or stored**: the receiver derives only a coarse country/region and an anonymous one-way network hash from the connection, then discards the IP. It contains **no** secrets, wallet data, addresses, or config. It is **on by default**, sent only on install/update and at most once per day otherwise, and never blocks a command.
 
-Turn it off with any of: `--no-telemetry` on any command (sticks for future runs), `XCHAIN_NODE_NO_TELEMETRY=1`, or `"optOut": true` in `~/.xchain-node/telemetry.json`. Point at a different collector with `XCHAIN_NODE_TELEMETRY_URL`. Full details: [Privacy & Telemetry](https://github.com/XChain-Platform/xchain-documentation/blob/master/operations/TELEMETRY.md).
+Turn it off with any of: `--no-telemetry` on any command (sticks for future runs), `XCHAIN_NODE_NO_TELEMETRY=1`, or `"optOut": true` in `~/.xchain-node/telemetry.json`. Point at a different collector with `XCHAIN_NODE_TELEMETRY_URL`. Full details: [Privacy & Telemetry](https://github.com/XChain-Platform/xchain-documentation/blob/master/operations/telemetry.md).
 
 ## Scripts
 
 | Command | Description |
 |---|---|
-| `npm test` | Unit tests (373 tests) |
-| `npm run test:integration` | Integration tests (103 tests) |
-| `npm run test:smoke` | Smoke tests (159 tests) |
+| `npm test` | Unit tests (1,084 tests) |
+| `npm run test:integration` | Integration tests (87 tests) |
+| `npm run test:smoke` | Smoke tests (50 tests) |
+| `npm run test:boundary` | Boundary condition tests (57 tests) |
+| `npm run test:security` | Security tests (27 tests) |
 | `npm run test:e2e` | End-to-end tests (57 tests) |
-| `npm run test:fuzz` | Fuzz tests (256 tests) |
-| `npm run test:chaos` | Chaos engineering tests (140 tests) |
-| `npm run test:regression` | Regression tests (60 tests) |
-| `npm run test:regression:p0` | Regression P0: critical gate (28 tests) |
-| `npm run test:regression:p0p1` | Regression P0+P1: standard gate (52 tests) |
+| `npm run test:fuzz` | Fuzz tests (95 tests) |
+| `npm run test:chaos` | Chaos engineering tests (121 tests) |
+| `npm run test:regression` | Regression tests (58 tests) |
+| `npm run test:regression:p0` | Regression P0: critical gate (33 tests) |
+| `npm run test:regression:p0p1` | Regression P0+P1: standard gate (51 tests) |
 | `npm run test:mutation` | Mutation testing (Stryker Mutator) |
-| `npm run test:all` | All tests (~1,148 tests) |
-| `npm run benchmark` | Performance benchmarks (6 scenarios) |
+| `npm run test:all` | All tests (~1,552 tests; excludes security/boundary) |
+| `npm run benchmark` | Performance benchmarks (5 scenarios) |
 | `npm run benchmark:quick` | Quick benchmarks |
 
 ## Test Suite
 
 | Type | Tests | Description |
 |---|---|---|
-| Unit - Core | 143 | `ConfigService.test.js`, `DockerService.test.js`, `LevelUpDb.test.js`, `state.test.js`, `helpers.test.js`: path helpers, naming, config generation, Docker commands, LevelDB CRUD, state singletons, utility functions |
-| Unit - Services | 72 | `ModuleService.test.js`, `DatabaseService.test.js`, `VersionService.test.js`, `ExplorerConnector.test.js`, `GitHubDownloader.test.js`, `HubConnector.test.js`: clone, build, install/uninstall, DB setup, version checks, RPC clients |
-| Unit - Operations | 38 | `moduleOperations.test.js`: install/update/uninstall/start/stop/restart/exec/shell/log/monitor bulk operations |
-| Unit - Security | 60 | `security.test.js`: shell injection prevention (execFile), container ID validation, NODE_PREFIX validation, branch name validation, path traversal, database command safety, source code scanning |
-| Unit - Boundary | 60 | `boundary.test.js`: config file parsing edge cases (values with `=`, base64, empty, blank lines), resolveArgs boundaries, filterCommandParameters, LevelDB key format |
-| Integration | 103 | 8 files: config pipeline, Docker commands, module lifecycle (LevelDB), status queries, hub/explorer config, database setup, network management, multi-module orchestration |
-| Smoke | 159 | 10 scenarios: module imports, CLI registration, global options, constants/enums, config templates, config composition, Docker exports, parameter expansion, state init, Dockerfiles |
-| E2E | 57 | 8 scenarios: install lifecycle, multi-coin, config overrides, precheck, update flow, reset, error handling, exec/logs |
-| Fuzz | 256 | 8 harnesses: port validation, resolveArgs, config parsing, command construction, env escaping, branch validation, filter params, container ID |
-| Chaos | 140 | 7 files: download resilience, LevelDB resilience, config resilience, Docker resilience, git clone resilience, process resilience, network resilience |
-| Regression | 60 | Three-tier suite: P0 critical (28), P1 high (24), P2 standard (8): argument parsing, config generation, Docker commands, security, lifecycle, state, E2E workflows |
-| Performance | 6 scenarios | Config generation, filter params, LevelDB operations, config parsing scale, resolveArgs, naming helpers |
+| Unit | 1,084 | 37 files: config generation, Docker/module orchestration, database, credentials, bootstrap + signing, validator, telemetry, autoheal, discovery, go-live/skew guards, precheck, state, and CLI helpers |
+| Integration | 87 | Config pipeline, Docker commands, module lifecycle (LevelDB), status queries, hub/explorer config, database setup, network management, multi-module orchestration |
+| Smoke | 50 | Module imports, CLI registration, global options, constants/enums, config templates, config composition, Docker exports, parameter expansion, state init, Dockerfiles |
+| Boundary | 57 | Config file parsing edge cases (values with `=`, base64, empty, blank lines), resolveArgs boundaries, filterCommandParameters, LevelDB key format |
+| Security | 27 | Shell injection prevention (execFile), container ID validation, NODE_PREFIX validation, branch name validation, path traversal, database command safety, source code scanning |
+| E2E | 57 | Install lifecycle, multi-coin, config overrides, precheck, update flow, reset, error handling, exec/logs |
+| Fuzz | 95 | Port validation, resolveArgs, config parsing, command construction, env escaping, branch validation, filter params, container ID |
+| Chaos | 121 | Download resilience, LevelDB resilience, config resilience, Docker resilience, git clone resilience, process resilience, network resilience |
+| Regression | 58 | Three-tier suite: P0 critical (33), P1 high (18), P2 standard (7): argument parsing, config generation, Docker commands, security, lifecycle, state, E2E workflows |
+| Performance | 5 scenarios | Config generation, filter params, config parsing scale, resolveArgs, naming helpers |
 | Mutation | 2 configs | Full service and ConfigService-only pilot via Stryker Mutator |
-| **Total** | **1,148** | |
+| **Total** | **1,636+** | |
 
 ---
 
