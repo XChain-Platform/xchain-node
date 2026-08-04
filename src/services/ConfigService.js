@@ -28,6 +28,9 @@ const {
     EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT
 } = require('../config/constants')
 const { stringToCoin } = require('../utils/helpers')
+const {
+    preferredSecretEnvName, foldSecretEnvAliases, readSecretHostEnv, deprecatedSecretEnvNames
+} = require('../secret-env')
 const { getCoinConfigByFullName } = require('../coins')
 
 function getModuleDir(module) {
@@ -197,21 +200,50 @@ function upsertSidecarValues(localFilePath, values) {
             if (eqIndex > 0) merged[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
         }
     }
-    for (const k in values) merged[k] = values[k]
+    for (const k in values) {
+        // Respect the naming this sidecar already uses . A file the operator
+        // renamed to the redaction-safe `*_SECRET` form must not sprout the legacy
+        // twin again on the next rotation: two names for one credential is exactly
+        // the ambiguity foldSecretEnvAliases() refuses to guess through, so the
+        // rotation would leave the stack unable to start.
+        const alias = preferredSecretEnvName(k)
+        merged[alias && alias in merged ? alias : k] = values[k]
+    }
     persistSidecarCreds(localFilePath, merged, { overwrite: true })
 }
 
 // Read a single KEY=VALUE from a sidecar file, or undefined if the file or key is absent.
 // Uses the same createReadStream + readline path as the main config reader above.
+//
+// Secret-bearing keys are also accepted under their redaction-safe `*_SECRET` name
+// , which wins over the legacy name when both are present and non-empty. Keys
+// with no alias (XCHAIN_NODE_BLOCKS_DIR and friends) are unaffected.
 async function readSidecarValue(localFilePath, key) {
     if (!fs.existsSync(localFilePath)) return undefined
+    const alias = preferredSecretEnvName(key)
+    let legacyValue = undefined
+    let aliasValue  = undefined
     const stream = fs.createReadStream(localFilePath)
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
     for await (const line of rl) {
         const eqIndex = line.indexOf("=")
-        if (eqIndex > 0 && line.substring(0, eqIndex) === key) return line.substring(eqIndex + 1)
+        if (eqIndex <= 0) continue
+        const lineKey = line.substring(0, eqIndex)
+        if (lineKey === key) legacyValue = line.substring(eqIndex + 1)
+        else if (alias && lineKey === alias) aliasValue = line.substring(eqIndex + 1)
     }
-    return undefined
+    if (aliasValue !== undefined && aliasValue !== '') return aliasValue
+    return legacyValue
+}
+
+// Tell the operator, once per config load, which of their secret-bearing keys sit under a
+// name automatic redaction does not match . Better to hear it from your own node
+// than from a transcript that printed the value.
+function warnDeprecatedSecretNames(config, filePath) {
+    for (const { legacy, preferred } of deprecatedSecretEnvNames(config)) {
+        console.warn(`Warning: ${legacy} is a deprecated name that automatic secret redaction does not match; ` +
+            `rename it to ${preferred} in ${filePath} (its value prints in full whenever the file is read)`)
+    }
 }
 
 // Whether a per-install random DB password can actually be APPLIED to the live MariaDB
@@ -718,8 +750,12 @@ async function getDefaultConfig(module, coin, network) {
             "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED"
         ]
         for (const varName of hubPassthroughVars) {
-            if (process.env[varName] !== undefined && process.env[varName] !== "") {
-                defaultValues[varName] = process.env[varName]
+            // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
+            // accepted from the host env under their redaction-safe `*_SECRET` spelling
+            // ; everything else resolves to a plain process.env read.
+            const value = readSecretHostEnv(varName)
+            if (value !== undefined && value !== "") {
+                defaultValues[varName] = value
             }
         }
 
@@ -807,21 +843,40 @@ async function getDefaultConfig(module, coin, network) {
                         }
                     }
                     defaultConfig[key] = value
-                    if (key === "NODE_USER" || key === "NODE_PASSWORD") mainFileHasCreds = true
+                    // NODE_SECRET is the redaction-safe spelling of NODE_PASSWORD .
+                    // It arms the same migration: a credential in the MAIN config file gets
+                    // relocated to the sidecar whichever name it arrived under.
+                    if (key === "NODE_USER" || key === "NODE_PASSWORD" || key === "NODE_SECRET") mainFileHasCreds = true
                 }
             }
         }
 
+        // Accept every secret-bearing key under its redaction-safe `*_SECRET` name and
+        // fold it onto the canonical legacy name here, at the one place config enters
+        // the process, so nothing downstream (container env, DB provisioner, RPC
+        // connectors) has to learn a second spelling . Runs BEFORE the migration
+        // and generation steps below, which key off the canonical names.
+        //
+        // PER FILE, not on the merged result. Merging first would make a renamed key in
+        // the sidecar and the legacy key left behind in the main config file look like
+        // one file contradicting itself, and the "both names, different values" refusal
+        // would fire on what is really just the ordinary sidecar-wins precedence.
+        warnDeprecatedSecretNames(defaultConfig, configFilePath)
+        foldSecretEnvAliases(defaultConfig)
+
         // Credentials from the sidecar take precedence over anything in the main file.
         if (fs.existsSync(localFilePath)) {
+            const sidecarConfig = {}
             const localStream = fs.createReadStream(localFilePath)
             const rlLocal = readline.createInterface({ input: localStream, crlfDelay: Infinity })
             for await (const line of rlLocal) {
                 const eqIndex = line.indexOf("=")
                 if (eqIndex > 0) {
-                    defaultConfig[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
+                    sidecarConfig[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
                 }
             }
+            warnDeprecatedSecretNames(sidecarConfig, localFilePath)
+            Object.assign(defaultConfig, foldSecretEnvAliases(sidecarConfig))
         }
 
         // One-time migration for legacy installs: older versions appended NODE_USER /
