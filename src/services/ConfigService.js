@@ -693,7 +693,7 @@ async function getDefaultConfig(module, coin, network) {
             // outside the co-sign deviation band, so on a real network leave them unset
             // and move them only by a coordinated flag-day.
             "XCHAIN_PRICE_WINDOW_BLOCKS", "XCHAIN_PRICE_CONFIRMATION_BUFFER",
-            "XCHAIN_PRICE_BOOTSTRAP_USD",
+            "XCHAIN_PRICE_BOOTSTRAP_SATS",
             // D2 supersession threshold override. The shipped constant keeps
             // supersession disabled (bootstrap carry-forward only); regtest/e2e drills
             // set '0' so any realized volume supersedes, which is what lets a live
