@@ -229,7 +229,13 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 //               . Sync's /health is O(1) liveness (circuit-breaker +
 //               poll-error state, no table scans) and still 503s when the
 //               replicator is genuinely wedged, so the probe measures liveness
-//               rather than a full table census.
+//               rather than a full table census. The decoder sets it for the
+//               opposite reason: its /status is cheap but too NARROW to be a
+//               liveness probe (process-alive + DB-reachable only), so a block
+//               loop retrying one height forever kept answering 200 and autoheal,
+//               which reads nothing but Health.Status, never fired. Its /live
+//               route is /status plus the stall check.
+
 //   interval  - how often Docker reruns the check (--health-interval)
 //   timeout   - per-check timeout (--health-timeout)
 //   retries   - consecutive failures before marking unhealthy (--health-retries)
@@ -250,7 +256,7 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 //   startPeriod=  - varies: fast workers (encoder/miner) get 30s; DB-dependent services
 //                   (decoder, indexer, utxo-tracker) get 60s; hub/explorer/sync get 45s
 const SERVICE_HEALTHCHECK = {
-    [XChainService.XCHAIN_DECODER]:       { portKey: 'DECODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
+    [XChainService.XCHAIN_DECODER]:       { portKey: 'DECODER_API_PORT',       probe: 'http_get',     path: '/live', interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
     [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s', autoheal: true },
     [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
     [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },

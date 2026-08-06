@@ -564,7 +564,11 @@ describe('ModuleService', function () {
             expect(args[cmdIdx + 1]).to.include('3003')
         })
 
-        it('includes --health-cmd for decoder (http_get probe)', async function () {
+        it('includes --health-cmd for decoder (http_get probe on /live, not /status)', async function () {
+            // The decoder's /status is process-alive + DB-reachable only, so a block
+            // loop retrying one height forever answers 200 while lag grows without
+            // bound and autoheal (which reads nothing but Health.Status) never fires.
+            // /live is /status plus the stall check, so the probe measures liveness.
             const stubs = makeStubs()
             const getRunArgs = captureRunArgs(stubs)
             const ms = loadModuleService(stubs)
@@ -572,7 +576,8 @@ describe('ModuleService', function () {
             const args = getRunArgs()
             expect(args).to.include('--health-cmd')
             const cmdIdx = args.indexOf('--health-cmd')
-            expect(args[cmdIdx + 1]).to.include('/status')
+            expect(args[cmdIdx + 1]).to.include('/live')
+            expect(args[cmdIdx + 1]).to.not.include('/status')
             expect(args[cmdIdx + 1]).to.include('3002')
         })
 

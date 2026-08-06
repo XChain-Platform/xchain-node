@@ -140,11 +140,20 @@ describe('utils/helpers', function () {
             expect(result).to.be.undefined
         })
 
+        // Drives the delay on a fake clock; a wall-clock elapsed assertion flakes under CI jitter.
         it('resolves after the specified delay', async function () {
-            const start = Date.now()
-            await sleep(50)
-            const elapsed = Date.now() - start
-            expect(elapsed).to.be.at.least(40)
+            const clock = sinon.useFakeTimers()
+            try {
+                let resolved = false
+                const pending = sleep(50).then(() => { resolved = true })
+                await clock.tickAsync(49)
+                expect(resolved).to.equal(false)
+                await clock.tickAsync(1)
+                await pending
+                expect(resolved).to.equal(true)
+            } finally {
+                clock.restore()
+            }
         })
     })
 
