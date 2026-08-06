@@ -278,14 +278,24 @@ const SERVICE_HEALTHCHECK = {
 // restart mid-restore), but operators expecting a long restore can widen the
 // Docker grace window via XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE> (service
 // upper-cased, non-alnum -> underscore), e.g.
-// XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER=900s. Accepts a Docker
-// duration (bare seconds or a value with an s/m/h unit); anything else is ignored
-// and the descriptor default stands.
+// XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER=900s. Accepts a value with
+// an ms/s/m/h unit, or bare seconds (900), which is normalized to '900s' before
+// it reaches docker: --health-start-period is parsed by Go's time.ParseDuration,
+// which rejects a unitless number ("missing unit in duration") and fails the
+// whole `docker run`, so the documented bare-seconds form must never be passed
+// through verbatim. Anything else is ignored and the descriptor default stands.
 function resolveStartPeriod(module, fallback) {
     const key = 'XCHAIN_NODE_HEALTH_START_PERIOD_'
         + String(module).toUpperCase().replace(/[^A-Z0-9]+/g, '_')
     const raw = process.env[key]
-    if (raw && /^\d+(ms|s|m|h)?$/.test(raw.trim())) return raw.trim()
+    if (!raw) return fallback
+    const value = raw.trim()
+    if (/^\d+(ms|s|m|h)$/.test(value)) return value
+    if (/^\d+$/.test(value)) return value + 's'
+    // Malformed override: say so rather than silently standing on the default,
+    // mirroring the loud-drift guard in buildHealthcheckArgs below.
+    console.log("WARNING: ignoring " + key + "=" + value
+        + ": expected bare seconds (900) or a duration with an ms/s/m/h unit (900s)")
     return fallback
 }
 

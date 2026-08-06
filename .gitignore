@@ -30,6 +30,10 @@ config/*-testnet
 config/*-regtest
 # Runtime RPC credentials live in untracked .local sidecars (rpcuser/rpcpassword).
 config/*.local
+# Hand-made backups of the above (config/x-regtest.bak-xc708, x.local.bak-DATE).
+# The suffix defeats every pattern above, so the ones already on disk hold live
+# DECODER_DB_PASS/INDEXER_DB_PASS values while matching no ignore rule.
+config/*.bak*
 
 # Coverage output (c8/nyc) - generated, not source
 coverage/

@@ -692,6 +692,43 @@ describe('ModuleService', function () {
             }
         })
 
+        // The comment block documents `=900` (bare seconds) as a valid override, but
+        // docker parses --health-start-period with Go's time.ParseDuration, which
+        // rejects a unitless number and fails the whole `docker run`. Bare seconds
+        // must therefore reach docker with an 's' appended, never verbatim.
+        it('normalizes a bare-seconds start-period override to a docker duration', function () {
+            const stubs = makeStubs()
+            const ms = loadModuleService(stubs)
+            const saved = process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+            process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = '900'
+            try {
+                const args = ms.buildHealthcheckArgs('xchain-utxo-tracker', { UTXO_TRACKER_API_PORT: '3003' })
+                const i = args.indexOf('--health-start-period')
+                expect(args[i + 1]).to.equal('900s')
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+                else process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = saved
+            }
+        })
+
+        it('emits a docker-parsable duration for every start-period it returns', function () {
+            const stubs = makeStubs()
+            const ms = loadModuleService(stubs)
+            const saved = process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+            try {
+                for (const raw of ['900', '900s', '2m', '1h', '1500ms', 'not-a-duration', '']) {
+                    if (raw === '') delete process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+                    else process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = raw
+                    const args = ms.buildHealthcheckArgs('xchain-utxo-tracker', { UTXO_TRACKER_API_PORT: '3003' })
+                    const i = args.indexOf('--health-start-period')
+                    expect(args[i + 1], 'override ' + JSON.stringify(raw)).to.match(/^\d+(ms|s|m|h)$/)
+                }
+            } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
+                else process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = saved
+            }
+        })
+
         it('ignores a malformed start-period override and keeps the descriptor default', function () {
             const stubs = makeStubs()
             const ms = loadModuleService(stubs)

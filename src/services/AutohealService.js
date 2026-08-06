@@ -33,7 +33,11 @@
  *
  * Detection-to-restart latency is the timer interval plus the health
  * retry budget plus the grace window; this is deliberate, restarts
- * are a last resort, not a fast path.
+ * are a last resort, not a fast path. The grace window is timed from
+ * an onset persisted in the state file, NOT from Docker's Health.Log:
+ * that log keeps only 5 entries, so at the 15s probe interval it can
+ * never evidence an episode older than ~60-75s and any grace window
+ * past that would be permanently unreachable (XC #3470).
  ********************************************************************/
 
 const fs   = require('fs')
@@ -71,17 +75,24 @@ function parsePositiveIntEnv(name, fallback) {
 }
 
 function readState(stateFile) {
-    // { restarts: { <containerId>: <epoch ms of last autoheal restart> } }
+    // {
+    //   restarts:       { <containerId>: <epoch ms of last autoheal restart> },
+    //   unhealthySince: { <containerId>: <epoch ms this unhealthy episode began> }
+    // }
     try {
         const parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
         if (parsed && typeof parsed.restarts === 'object' && parsed.restarts !== null) {
+            // unhealthySince arrived after restarts; an older state file has none.
+            if (typeof parsed.unhealthySince !== 'object' || parsed.unhealthySince === null) {
+                parsed.unhealthySince = {}
+            }
             return parsed
         }
     } catch {
         // Missing or corrupt state file: start clean. Worst case a container
         // gets one extra restart after a state loss, which is acceptable.
     }
-    return { restarts: {} }
+    return { restarts: {}, unhealthySince: {} }
 }
 
 function writeState(stateFile, state) {
@@ -94,6 +105,13 @@ function writeState(stateFile, state) {
 // Start/End/ExitCode). Returns null when it cannot be established (no log,
 // or the newest entry passed), in which case the caller must NOT restart:
 // without evidence of a sustained wedge a restart is just noise.
+//
+// This is a LOWER BOUND on the episode, never its true start: Docker retains
+// only the last 5 Health.Log entries, so at the 15s probe interval every
+// descriptor uses, the oldest entry is at most ~60-75s old and the value
+// returned here slides forward with each new probe. Use it only to seed the
+// persisted onset in runAutoheal; timing the grace window off it directly
+// caps the measurable episode below any grace window over ~75s (XC #3470).
 function getUnhealthySinceMs(health) {
     const log = Array.isArray(health.Log) ? health.Log : []
     if (log.length === 0) return null
@@ -122,6 +140,10 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
     const state      = readState(stateFile)
 
     const result = { candidates: [], restarted: [], failed: [], skipped: [] }
+    // Set whenever an episode-onset entry is recorded or cleared, so the pass
+    // persists it even when nothing was restarted. Without this the onset never
+    // survives to the next pass and the grace window can never be crossed.
+    let onsetChanged = false
 
     // An unconfigured store yields zero rows, which autoheal would report as a
     // clean "nothing to heal" run while every unhealthy container stays down.
@@ -148,13 +170,35 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         }
 
         const health = status && status.State && status.State.Health
-        if (!health || health.Status !== 'unhealthy') continue
+        if (!health || health.Status !== 'unhealthy') {
+            // Episode over (or the healthcheck is gone): forget the onset so the
+            // next wedge starts its own clock instead of inheriting an old one.
+            if (state.unhealthySince[containerId] !== undefined) {
+                delete state.unhealthySince[containerId]
+                onsetChanged = true
+            }
+            continue
+        }
 
-        const since = getUnhealthySinceMs(health)
-        if (since === null) {
+        const derived = getUnhealthySinceMs(health)
+        if (derived === null) {
             result.skipped.push({ module, coin, network, containerId, reason: 'no failing probe log to time the episode' })
             continue
         }
+
+        // Anchor the episode to the FIRST pass that saw it unhealthy. Re-deriving
+        // from Health.Log every pass cannot work: the log holds 5 entries and the
+        // probes are 15s apart, so the derived onset never gets further than
+        // ~60-75s back and a 120s grace window is unreachable (XC #3470). Seed
+        // from the derived value so a container already wedged when autoheal first
+        // runs is credited the episode Docker can still see.
+        let since = state.unhealthySince[containerId]
+        if (typeof since !== 'number' || !Number.isFinite(since)) {
+            since = Math.min(now, derived)
+            state.unhealthySince[containerId] = since
+            onsetChanged = true
+        }
+
         if (now - since < graceMs) {
             result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
             console.log(`autoheal: ${label} is unhealthy but inside the ${graceMs}ms grace window, not restarting yet`)
@@ -185,12 +229,15 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         }
     }
 
-    if (!dryRun && result.restarted.length > 0) {
+    if (!dryRun && (onsetChanged || result.restarted.length > 0)) {
         // Drop state entries for containers no longer in the registry so the
         // file cannot grow without bound across reinstalls.
         const known = new Set(modules.map(m => m.container_id))
         for (const id of Object.keys(state.restarts)) {
             if (!known.has(id)) delete state.restarts[id]
+        }
+        for (const id of Object.keys(state.unhealthySince)) {
+            if (!known.has(id)) delete state.unhealthySince[id]
         }
         writeState(stateFile, state)
     }

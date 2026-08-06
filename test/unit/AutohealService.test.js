@@ -50,6 +50,23 @@ function unhealthyInsideGrace() {
     return inspectStatus('unhealthy', [logEntry(90000, 0), logEntry(30000, 1), logEntry(15000, 1)])
 }
 
+// What Docker ACTUALLY exposes for a long-wedged container: Health.Log is capped
+// at 5 entries and every descriptor probes at 15s, so a container wedged for an
+// hour still shows only the last ~60s, all failures, sliding forward with `at`.
+// The unhealthyPastGrace fixture above (entries 11 minutes apart) is a shape a
+// real 15s ring buffer can never produce, which is why it hid XC #3470.
+function unhealthyRingBuffer(at) {
+    return inspectStatus('unhealthy', [60000, 45000, 30000, 15000, 0].map(ms => {
+        const start = new Date(at - ms)
+        return {
+            Start: start.toISOString(),
+            End: new Date(start.getTime() + 1000).toISOString(),
+            ExitCode: 1,
+            Output: 'wget: server returned error'
+        }
+    }))
+}
+
 function makeStubs() {
     return {
         db: { getAllModuleContainers: sinon.stub().resolves([]), assertReady: sinon.stub() },
@@ -224,6 +241,78 @@ describe('AutohealService', () => {
 
         expect(result.skipped[0].reason).to.equal('inspect failed')
         expect(result.failed).to.have.length(0)
+    })
+
+    // XC #3470: Docker keeps 5 Health.Log entries, the probes are 15s apart, so
+    // the log-derived onset never gets more than ~60s back and slides forward
+    // with every pass. Timing the 120s grace off it made autoheal a permanent
+    // no-op in production. The onset must be persisted on first sighting.
+    it('restarts a container wedged past the grace window even though Health.Log only spans ~60s', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'ring')])
+
+        // First pass: the whole ring buffer is already failing, but only ~60s of
+        // it is visible, so the grace window is not crossed yet.
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW))
+        const first = await service.runAutoheal({ now: NOW })
+        expect(first.restarted).to.have.length(0)
+        expect(first.skipped[0].reason).to.equal('inside grace window')
+
+        // Three minutes later the container is still wedged. Docker's log still
+        // shows only the last ~60s; the persisted onset is what crosses the grace.
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW + 3 * 60000))
+        const second = await service.runAutoheal({ now: NOW + 3 * 60000 })
+        expect(second.restarted, 'a sustained wedge must eventually be restarted').to.have.length(1)
+        expect(stubs.restartContainer.calledOnceWith('ring')).to.equal(true)
+    })
+
+    it('clears the persisted onset when the container recovers, so the next episode restarts the clock', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'recov')])
+
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW))
+        await service.runAutoheal({ now: NOW })
+
+        // Recovered: onset must be forgotten.
+        stubs.getStatusFromContainer.resolves(inspectStatus('healthy', [logEntry(15000, 0)]))
+        await service.runAutoheal({ now: NOW + 60000 })
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.unhealthySince).to.not.have.property('recov')
+
+        // A fresh episode 10 minutes later must serve its own full grace window.
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW + 10 * 60000))
+        const fresh = await service.runAutoheal({ now: NOW + 10 * 60000 })
+        expect(fresh.restarted).to.have.length(0)
+        expect(fresh.skipped[0].reason).to.equal('inside grace window')
+    })
+
+    it('prunes persisted onsets for containers that left the registry', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'gone')])
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW))
+        await service.runAutoheal({ now: NOW })
+        expect(JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8')).unhealthySince)
+            .to.have.property('gone')
+
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'other')])
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW + 60000))
+        await service.runAutoheal({ now: NOW + 60000 })
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.unhealthySince).to.not.have.property('gone')
+        expect(state.unhealthySince).to.have.property('other')
+    })
+
+    it('reads a legacy state file that predates the unhealthySince map', async () => {
+        fs.writeFileSync(path.join(stateDir, 'autoheal-state.json'),
+            JSON.stringify({ restarts: { legacy: NOW - 60 * 60000 } }))
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'legacy')])
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW))
+
+        const result = await service.runAutoheal({ now: NOW })
+
+        expect(result.skipped[0].reason).to.equal('inside grace window')
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restarts).to.have.property('legacy')
+        expect(state.unhealthySince).to.have.property('legacy')
     })
 
     it('honors XCHAIN_NODE_AUTOHEAL_GRACE_MS override', async () => {
