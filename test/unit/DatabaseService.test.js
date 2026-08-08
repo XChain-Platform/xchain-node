@@ -480,6 +480,41 @@ describe('DatabaseService', function () {
             expect(runOpts.env.MYSQL_ROOT_PASSWORD).to.equal(ROOT_PW)
         })
 
+        // Container-health visibility (#3876). The DB container carried no
+        // --health-* flags at all, so a stalled-but-alive mariadbd read healthy to
+        // `docker ps` and to every tool that inspects container health, while
+        // --restart unless-stopped only ever fires on process exit.
+        it('gives the DB container a health probe so a stalled mariadbd is visible', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            const ds = loadDatabaseService(stubs)
+            await ds.buildDatabaseModule('bitcoin', 'mainnet')
+
+            const runArgs = findDockerRunArgs(stubs.execFileAsync)
+            expect(runArgs, 'docker run call not found').to.not.be.null
+            const cmdIdx = runArgs.indexOf('--health-cmd')
+            expect(cmdIdx, 'no --health-cmd on the DB container').to.be.greaterThan(-1)
+            // The image ships /usr/local/bin/healthcheck.sh (verified on mariadb:10.11).
+            expect(String(runArgs[cmdIdx + 1])).to.include('healthcheck.sh')
+            expect(runArgs).to.include('--health-interval')
+            expect(runArgs).to.include('--health-start-period')
+        })
+
+        // The probe is visibility ONLY. AutohealService restarts a container only
+        // when its module carries a SERVICE_HEALTHCHECK descriptor with
+        // autoheal:true, and MariaDB deliberately has no descriptor: a
+        // stale-connection restart loop on the DB is worse than the blindness.
+        it('does not enroll the DB in any restart path', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            const ds = loadDatabaseService(stubs)
+            await ds.buildDatabaseModule('bitcoin', 'mainnet')
+            const runArgs = findDockerRunArgs(stubs.execFileAsync)
+            expect(runArgs.some(a => /autoheal/i.test(String(a))), 'autoheal flag on the DB container').to.be.false
+        })
+
         it('appends MariaDB tuning args to docker run when env vars are set', async function () {
             const saved = {
                 XCHAIN_NODE_DB_BUFFER_POOL_SIZE:        process.env.XCHAIN_NODE_DB_BUFFER_POOL_SIZE,

@@ -871,6 +871,13 @@ async function buildDatabaseModule(coin, network) {
         // Cap json-file log growth so a long-running node cannot fill the
         // host disk; sized to keep --tail reads inside a single rotated file.
         const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb', '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3']
+        // Visibility-only probe (#3876). A stalled-but-alive mariadbd was invisible
+        // to `docker ps` and to anything reading container health, while
+        // --restart unless-stopped only ever fires on process EXIT. Deliberately
+        // not enrolled in autoheal: the DB has no SERVICE_HEALTHCHECK descriptor,
+        // so AutohealService's `hc.autoheal !== true` gate skips it outright.
+        runArgs.push('--health-cmd', 'healthcheck.sh --connect --innodb_initialized')
+        runArgs.push('--health-interval', '15s', '--health-timeout', '5s', '--health-retries', '5', '--health-start-period', '60s')
         runArgs.push('--network', getDockerNetwork(coin, network))
         const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
         // Every other docker run port in this file is validated before reaching
