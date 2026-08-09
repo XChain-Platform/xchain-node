@@ -27,7 +27,8 @@
  * the format's field list, so a scan there cannot see a tenth token and returns zero hits
  * on a chain that has one. The logic and that reasoning live in
  * src/services/GatedFileFieldScan.js and are unit tested there; this file is connection,
- * paging and exit codes.
+ * paging and exit codes. The paging loop and the corpus measurement are exported behind an
+ * entrypoint guard and covered by test/unit/scanNineFieldFiles.test.js .
  ********************************************************************/
 
 'use strict';
@@ -35,9 +36,47 @@
 const mariadb = require('mariadb');
 const scanner = require('../src/services/GatedFileFieldScan');
 
+function argFrom(argv, name, fallback) {
+    const i = argv.indexOf('--' + name);
+    return (i !== -1 && argv[i + 1] !== undefined) ? argv[i + 1] : fallback;
+}
+
 function arg(name, fallback) {
-    const i = process.argv.indexOf('--' + name);
-    return (i !== -1 && process.argv[i + 1] !== undefined) ? process.argv[i + 1] : fallback;
+    return argFrom(process.argv, name, fallback);
+}
+
+// Keyset paging over tx_index: a mainnet decoder holds millions of rows and the point of
+// the gate is to scan ALL of them, so it streams rather than materializing the set. The
+// cursor guard is the load-bearing part: a page whose last tx_index does not advance would
+// otherwise re-read the same rows forever and never reach a verdict.
+async function paginateScan(conn, scanner, limit) {
+    const total = { scanned: 0, hits: [] };
+    let after = -1;
+    for (;;) {
+        const rows = await conn.query(scanner.scanSql(limit), [after]);
+        if (!rows || rows.length === 0) break;
+        const res = scanner.scanRows(rows);
+        total.scanned += res.scanned;
+        total.hits = total.hits.concat(res.hits);
+        const next = Number(rows[rows.length - 1].tx_index);
+        if (!Number.isFinite(next) || next <= after) break;
+        after = next;
+    }
+    return total;
+}
+
+// A corpus that cannot be measured is reported as unknown, never as zero: the 2026-07-29
+// fleet run found nine of ten stores holding no payload rows at all, and a CLEAN over an
+// unknown corpus has to be distinguishable from a CLEAN over a scanned one.
+async function measureCorpus(conn, scanner) {
+    try {
+        const c = await conn.query(scanner.corpusSql());
+        return (c && c.length) ? Number(c[0].payload_rows) : null;
+    } catch (e) {
+        console.error('warning: could not measure the payload corpus (' +
+                      ((e && e.message) || e) + '); the report will say so.');
+        return null;
+    }
 }
 
 async function main() {
@@ -64,34 +103,11 @@ async function main() {
         connectTimeout: 10000
     });
 
-    // Keyset paging over tx_index: a mainnet decoder holds millions of rows and the point
-    // of the gate is to scan ALL of them, so it streams rather than materializing the set.
-    const total = { scanned: 0, hits: [] };
-    // Measured BEFORE the scan so the report can say which kind of clean this is. A store
-    // with zero payload rows yields a true but vacuous verdict, and the 2026-07-29 fleet
-    // run hit that on nine of ten stores; if the count cannot be read, say so rather than
-    // printing a confident CLEAN over an unknown corpus.
-    let corpus = null;
+    // Measured BEFORE the scan so the report can say which kind of clean this is.
+    const corpus = await measureCorpus(conn, scanner);
+    let total;
     try {
-        const c = await conn.query(scanner.corpusSql());
-        if (c && c.length) corpus = Number(c[0].payload_rows);
-    } catch (e) {
-        console.error('warning: could not measure the payload corpus (' +
-                      ((e && e.message) || e) + '); the report will say so.');
-    }
-    try {
-        let after = -1;
-        for (;;) {
-            const rows = await conn.query(scanner.scanSql(limit), [after]);
-            if (!rows || rows.length === 0) break;
-            const res = scanner.scanRows(rows);
-            total.scanned += res.scanned;
-            total.hits = total.hits.concat(res.hits);
-            const last = rows[rows.length - 1];
-            const next = Number(last.tx_index);
-            if (!Number.isFinite(next) || next <= after) break;   // never spin on a stuck cursor
-            after = next;
-        }
+        total = await paginateScan(conn, scanner, limit);
     } finally {
         try { await conn.end(); } catch (_e) { /* a read-only conn cannot change the verdict */ }
     }
@@ -100,7 +116,12 @@ async function main() {
     process.exit(total.hits.length === 0 ? 0 : 1);
 }
 
-main().catch((e) => {
-    console.error('nine-field FILE scan could not run: ' + ((e && e.message) || e));
-    process.exit(2);
-});
+module.exports = { argFrom, paginateScan, measureCorpus, main };
+
+// See the guard note in check-rebase-completeness.js for why the undefined arm is here.
+if (require.main === module || require.main === undefined) {
+    main().catch((e) => {
+        console.error('nine-field FILE scan could not run: ' + ((e && e.message) || e));
+        process.exit(2);
+    });
+}

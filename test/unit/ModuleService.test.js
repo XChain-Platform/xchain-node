@@ -531,6 +531,93 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
+    // buildAndUp: reuseImage
+    // -------------------------------------------------------------------
+
+    // : a container freezes its config env at `docker run`, so correcting a
+    // value it carries means recreating it. The normal path also re-clones the module
+    // and its bundled libraries from GitHub, which turns a credential repair into an
+    // unreviewed version change on a live venue.
+    describe('buildAndUp() reuseImage', function () {
+
+        // `docker image inspect` goes through promisify(execFile); a sinon stub carries
+        // no promisify.custom, so it is driven by the trailing callback like the rest.
+        function dockerStub(stubs, { imageExists = true } = {}) {
+            const seen = []
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                seen.push({ cmd, args })
+                if (args[0] === 'image') {
+                    if (imageExists) cb(null, 'sha256:abc\n')
+                    else cb(new Error('No such image'))
+                } else if (args[0] === 'build') {
+                    cb(null)
+                } else if (args[0] === 'run') {
+                    cb(null, 'e'.repeat(64) + '\n')
+                } else {
+                    cb(null, '')
+                }
+            })
+            return seen
+        }
+
+        it('creates the container without running docker build', async function () {
+            const stubs = makeStubs()
+            const seen = dockerStub(stubs)
+            const ms = loadModuleService(stubs)
+            const id = await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, false, null, { reuseImage: true })
+            expect(id).to.equal('e'.repeat(64))
+            expect(seen.some(c => c.cmd === 'docker' && c.args[0] === 'build')).to.be.false
+            const run = seen.find(c => c.args[0] === 'run')
+            expect(run.args).to.include('xchain-node-bitcoin-mainnet-xchain-encoder')
+        })
+
+        it('verifies the tag exists first, and says so when it does not', async function () {
+            const stubs = makeStubs()
+            const seen = dockerStub(stubs, { imageExists: false })
+            const ms = loadModuleService(stubs)
+            try {
+                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, false, null, { reuseImage: true })
+                expect.fail('a missing image must not fall through to docker run')
+            } catch (err) {
+                expect(err.message).to.match(/No local image tagged xchain-node-bitcoin-mainnet-xchain-encoder/)
+                expect(err.message).to.match(/update xchain-encoder bitcoin mainnet/)
+            }
+            expect(seen.some(c => c.args[0] === 'run')).to.be.false
+        })
+
+        it('does not re-clone the bundled libraries', async function () {
+            const stubs = makeStubs()
+            const seen = dockerStub(stubs)
+            const ms = loadModuleService(stubs)
+            // xchain-indexer bundles xchain-vm, which the build path re-clones every time.
+            await ms.buildAndUp('xchain-indexer', 'bitcoin', 'mainnet', null, false, null, { reuseImage: true })
+            expect(seen.some(c => c.cmd === 'git')).to.be.false
+            expect(stubs.fs.rmSync.called).to.be.false
+        })
+
+        it('still tears the old container down and registers the new id', async function () {
+            const stubs = makeStubs()
+            dockerStub(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', 'old-id-123', false, null, { reuseImage: true })
+            expect(stubs.killContainer.calledWith('old-id-123')).to.be.true
+            expect(stubs.removeContainer.calledWith('old-id-123')).to.be.true
+            expect(stubs.forceRemoveContainerByName.calledWith('xchain-node-bitcoin-mainnet-xchain-encoder')).to.be.true
+            expect(stubs.db.insertModuleContainer.calledWith('xchain-encoder', 'bitcoin', 'mainnet', 'e'.repeat(64))).to.be.true
+        })
+
+        it('leaves the default path building the image', async function () {
+            const stubs = makeStubs()
+            const seen = dockerStub(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(seen.some(c => c.args[0] === 'build')).to.be.true
+            expect(seen.some(c => c.args[0] === 'image')).to.be.false
+        })
+    })
+
+    // -------------------------------------------------------------------
     // buildAndUp: healthcheck args
     // -------------------------------------------------------------------
 

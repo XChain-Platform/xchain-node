@@ -100,6 +100,52 @@ async function updateModules(servicesList, branch = null) {
     return true
 }
 
+// Modules whose container is not created from the config map by buildAndUp: the
+// crypto node goes through buildCryptoNode and the database container through
+// buildDatabaseModule, so neither has config env for this verb to re-stamp.
+const RECREATE_UNSUPPORTED_MODULES = [NODE_MODULE_NAME, DB_MODULE_NAME]
+
+/**
+ * Re-stamp a service's container from the CURRENT config without touching its image.
+ *
+ * A container freezes its env at `docker run`, so a config value it got wrong (a DB
+ * password from another install's config store, ) cannot be corrected in place.
+ * `update` corrects it only by also re-cloning from GitHub and rebuilding, which turns
+ * a credential repair into an unreviewed version change on a live venue. This keeps the
+ * image byte-identical and changes only what the config map now says.
+ *
+ * @param {Object} servicesList
+ * @returns {Promise<boolean>}
+ */
+async function recreateModules(servicesList) {
+    const { buildAndUp } = require('../services/ModuleService')
+    const { setDatabaseParameters } = require('../services/DatabaseService')
+
+    let touchedDbModule = false
+    for (const nextCoin in servicesList) {
+        for (const nextNetwork in servicesList[nextCoin]) {
+            for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                if (RECREATE_UNSUPPORTED_MODULES.includes(nextModule)) {
+                    console.log("recreate does not apply to " + nextModule + "; use `update " + nextModule + "` instead")
+                    continue
+                }
+                const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+                await buildAndUp(nextModule, nextCoin, nextNetwork, moduleContainerId, false, null, { reuseImage: true })
+                if (nextModule === XChainService.XCHAIN_DECODER || nextModule === XChainService.XCHAIN_INDEXER) {
+                    touchedDbModule = true
+                }
+            }
+        }
+    }
+
+    // Provision AFTER every container is back on the config values, so the drift guard
+    // in setDatabaseParameters sees the state we just converged rather than the one
+    // that made the recreate necessary.
+    if (touchedDbModule) await setDatabaseParameters()
+    await statusChanged()
+    return true
+}
+
 async function uninstallModules(servicesList, includeShared = false) {
     const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
     for (const nextCoin in servicesList) {
@@ -550,6 +596,7 @@ async function resetModules(service, coin, network, force = false) {
 module.exports = {
     installModules,
     updateModules,
+    recreateModules,
     uninstallModules,
     logModules,
     monitorModules,

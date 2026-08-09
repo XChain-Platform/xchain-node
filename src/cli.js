@@ -23,6 +23,7 @@ const { filterCommandParameters, resolveArgs } = require('./services/ConfigServi
 const {
     installModules,
     updateModules,
+    recreateModules,
     uninstallModules,
     logModules,
     monitorModules,
@@ -77,7 +78,7 @@ async function parseCommand() {
     // invocation is refused with a clear message instead of interleaving.
     // `e2etest` is included: its action does its own docker build/run/rm, so it
     // must stay serialized against install/update the same way the others are.
-    const mutatingCommands = ['install', 'update', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest']
+    const mutatingCommands = ['install', 'update', 'recreate', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest']
     // How long a non-mutating command blocks for a lock-holding mutator before
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.
@@ -208,6 +209,26 @@ async function parseCommand() {
                 console.error('update failed: ' + (err && err.message ? err.message : err))
                 return process.exit(1)
             }
+            return process.exit(0)
+        })
+
+    program
+        .command('recreate')
+        .description('Recreate a service container from the current config, reusing its existing image (no rebuild, no re-clone)')
+        .argument('<service>', '(xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
+        .argument('[network]', '(mainnet, testnet, regtest, all)')
+        .action(async (service, chain, network) => {
+            const serviceList = filterCommandParameters(null, service, chain, network)
+            try {
+                await recreateModules(serviceList)
+            } catch (err) {
+                console.error('recreate failed: ' + (err && err.message ? err.message : err))
+                return process.exit(1)
+            }
+            // The operator's next move is always to check the container came back,
+            // so print the status here instead of making them ask for it.
+            await getStatus(null, null, true)
             return process.exit(0)
         })
 

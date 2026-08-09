@@ -400,10 +400,30 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
     return { portArgs, volumeArgs, ulimitArgs, singleton: !!docker.singleton }
 }
 
-async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null) {
+/**
+ * Build the module image and (re)create its container from the current config.
+ *
+ * `options.reuseImage` keeps the image that is already tagged for this container and
+ * skips both the bundled-library re-clone and `docker build`. A container freezes its
+ * env at `docker run`, so the ONLY way to correct a credential it carries is to
+ * recreate it; without this flag that correction also drags in whatever GitHub HEAD
+ * holds today, turning a credential repair into an unreviewed version bump .
+ *
+ * @param {string} module
+ * @param {string|null} coin
+ * @param {string|null} network
+ * @param {string|null} [overwriteContainerId]
+ * @param {boolean} [onlyExecution]
+ * @param {string[]|null} [dockerCmdArgs]
+ * @param {{reuseImage?: boolean}} [options]
+ * @returns {Promise<string>} the new container id
+ */
+async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null, options = {}) {
     if (!checkIfModuleExists(module)) {
         throw "module not found"
     }
+
+    const reuseImage = options.reuseImage === true
 
     const environmentVariables = await getDefaultConfig(module, coin, network)
     const dir = getModuleDir(module)
@@ -416,7 +436,10 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     // Stage any bundled library modules into this service's build context.
     // The service's Dockerfile COPYs them in and npm resolves the
     // "file:./<lib>" deps recursively at install.
-    const bundledLibs = LIBRARY_BUNDLES[module] || []
+    // Staging exists to feed `docker build`; with reuseImage there is no build, and
+    // re-cloning would silently move the module's source off the version the image
+    // (and therefore the running container) was made from.
+    const bundledLibs = reuseImage ? [] : (LIBRARY_BUNDLES[module] || [])
     for (const lib of bundledLibs) {
         // Always re-clone so bundled-library commits land on every `update`.
         // The previous "clone only if missing" check meant xchain-vm changes
@@ -480,6 +503,20 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     // the old container has been removed yet.
     await assertNoHostPortConflicts(portArgs, containerPrefix)
 
+    // With no build to make it, the tag has to already exist. Say so here rather
+    // than letting `docker run` fall through to a registry pull for an image name
+    // that was only ever local, which fails with an unrelated auth/not-found error.
+    if (reuseImage) {
+        try {
+            await execFileAsync('docker', ['image', 'inspect', '--format', '{{.Id}}', containerPrefix])
+        } catch {
+            throw new Error(
+                "No local image tagged " + containerPrefix + " to reuse; run `update " + module +
+                (coin && network ? " " + coin + " " + network : "") + "` to build one."
+            )
+        }
+    }
+
     return new Promise((resolve, reject) => {
         // Pass every container env var as a bare `--env NAME` (value supplied in
         // the execFile `env` option below), NOT `--env NAME=value` in argv. The
@@ -497,13 +534,10 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             dockerEnv[key] = String(environmentVariables[key])
         }
 
-        console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
-        execFile('docker', ['build', '.', '-t', containerPrefix], { cwd: dir }, async (error) => {
-            if (error) {
-                reject("Error creating Docker image: " + redactSecrets(error.message))
-                return
-            }
-
+        // Everything from here on is image-independent: tear down the old container
+        // and `docker run` the tag. reuseImage enters it directly; the normal path
+        // enters it from the build callback.
+        const createContainer = async () => {
             try {
                 if (overwriteContainerId) {
                     try {
@@ -583,6 +617,21 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             } catch (err) {
                 reject(err)
             }
+        }
+
+        if (reuseImage) {
+            console.log("Reusing the existing image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
+            createContainer()
+            return
+        }
+
+        console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
+        execFile('docker', ['build', '.', '-t', containerPrefix], { cwd: dir }, (error) => {
+            if (error) {
+                reject("Error creating Docker image: " + redactSecrets(error.message))
+                return
+            }
+            createContainer()
         })
     })
 }

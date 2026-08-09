@@ -43,6 +43,8 @@ function makeStubs() {
         getDatabaseContainerId: sinon.stub().resolves('mariadb-container-id'),
         cloneGit: sinon.stub().resolves(true),
         getModuleBranch: sinon.stub().resolves('master'),
+        buildAndUp: sinon.stub().resolves('b'.repeat(64)),
+        setDatabaseParameters: sinon.stub().resolves(true),
         installModule: sinon.stub().resolves('new-container-id'),
         uninstallModule: sinon.stub().resolves(true),
         statusChanged: sinon.stub().resolves(),
@@ -82,11 +84,13 @@ function loadOperations(stubs) {
             buildDatabaseModule: stubs.buildDatabaseModule,
             resetDatabases: stubs.resetDatabases,
             clearHubPriceIngestWatermark: stubs.clearHubPriceIngestWatermark,
-            getDatabaseContainerId: stubs.getDatabaseContainerId
+            getDatabaseContainerId: stubs.getDatabaseContainerId,
+            setDatabaseParameters: stubs.setDatabaseParameters
         },
         '../services/ModuleService': {
             cloneGit: stubs.cloneGit,
             getModuleBranch: stubs.getModuleBranch,
+            buildAndUp: stubs.buildAndUp,
             installModule: stubs.installModule,
             uninstallModule: stubs.uninstallModule
         },
@@ -206,6 +210,13 @@ describe('moduleOperations', function () {
             expect(installCall.args[4]).to.equal('container-id-123') // overwriteContainerId
         })
 
+        it('rebuilds the image, unlike recreate', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(stubs.buildAndUp.called).to.be.false
+        })
+
         it('tears down the existing node container by name before rebuilding', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
@@ -229,6 +240,82 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
             expect(stubs.installModule.called).to.be.false
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // recreateModules
+    // -------------------------------------------------------------------
+
+    // : a container freezes its env at `docker run`, so correcting a value it
+    // carries means recreating it. Doing that through `update` also re-clones from
+    // GitHub, which turns a credential repair into a version change on a live venue.
+    describe('recreateModules()', function () {
+
+        it('recreates from the current config while reusing the existing image', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const result = await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+            expect(result).to.be.true
+            expect(stubs.buildAndUp.calledOnce).to.be.true
+            const args = stubs.buildAndUp.firstCall.args
+            expect(args.slice(0, 3)).to.deep.equal(['xchain-indexer', 'dogecoin', 'regtest'])
+            expect(args[3]).to.equal('container-id-123')  // overwriteContainerId
+            expect(args[6]).to.deep.equal({ reuseImage: true })
+        })
+
+        it('never re-clones or rebuilds through installModule', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+            expect(stubs.installModule.called).to.be.false
+            expect(stubs.cloneGit.called).to.be.false
+        })
+
+        it('provisions the DB accounts only after every container is back on config values', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['xchain-decoder', 'xchain-indexer'] } })
+            expect(stubs.setDatabaseParameters.calledOnce).to.be.true
+            expect(stubs.buildAndUp.calledTwice).to.be.true
+            expect(stubs.buildAndUp.secondCall.calledBefore(stubs.setDatabaseParameters.firstCall)).to.be.true
+        })
+
+        it('skips DB provisioning for a service that owns no DB account', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['xchain-encoder'] } })
+            expect(stubs.buildAndUp.calledOnce).to.be.true
+            expect(stubs.setDatabaseParameters.called).to.be.false
+        })
+
+        it('recreates a container the registry has lost rather than skipping it', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+            expect(stubs.buildAndUp.calledOnce).to.be.true
+            expect(stubs.buildAndUp.firstCall.args[3]).to.equal(null)
+        })
+
+        it('refuses the modules whose containers are not built from the config map', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['node', 'database'] } })
+            expect(stubs.buildAndUp.called).to.be.false
+        })
+
+        it('propagates a failure instead of reporting success', async function () {
+            const stubs = makeStubs()
+            stubs.buildAndUp.rejects(new Error('No local image tagged x to reuse'))
+            const ops = loadOperations(stubs)
+            try {
+                await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+                expect.fail('a failed recreate must not resolve')
+            } catch (err) {
+                expect(err.message).to.match(/No local image tagged/)
+            }
+            expect(stubs.setDatabaseParameters.called).to.be.false
         })
     })
 

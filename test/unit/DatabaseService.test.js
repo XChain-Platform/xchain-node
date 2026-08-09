@@ -106,6 +106,7 @@ function makeStubs(overrides = {}) {
         getOsUserDbName: sinon.stub().returns('xchain_node_testuser'),
         generatePassword: sinon.stub().returns('test-generated-pass'),
         assertNoHostPortConflicts: sinon.stub().resolves(),
+        assertNoDbCredentialDrift: sinon.stub().resolves([]),
         ...overrides
     }
 }
@@ -177,6 +178,14 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}) {
         './StatusService': {
             statusChanged: stubs.statusChanged,
             getInstalledCoinsAndNetworks: stubs.getInstalledCoinsAndNetworks
+        },
+        // setDatabaseParameters refuses to rotate when a running container carries a
+        // different password . Stub it clean by default so the provisioning
+        // tests stay about provisioning; DbCredentialDrift.test.js owns the guard, and
+        // the drift-refusal case below overrides this stub.
+        './DbCredentialDrift': {
+            assertNoDbCredentialDrift: stubs.assertNoDbCredentialDrift,
+            isDbCredentialDriftError: (err) => !!err && err.code === 'DB_CREDENTIAL_DRIFT'
         },
         './CredentialsService': {
             XCHAIN_NODE_DB: 'xchain_node',
@@ -1697,6 +1706,64 @@ describe('DatabaseService', function () {
             } catch (err) {
                 expect(err.message).to.match(/provisioned no MariaDB account/)
                 expect(err.message).to.match(/bitcoin/)
+            }
+        })
+
+        // : two installs sharing one Docker daemon and one MariaDB pin
+        // different passwords for the same account, and whichever provisions last
+        // locks the other's container out for as long as nobody notices.
+        it('checks for credential drift with the config values, before any account write', async function () {
+            const stubs = makeStubs()
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '1\n' }
+                if (sql.startsWith('SHOW GRANTS')) {
+                    return { stdout: "GRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Decoder'.* TO 'xchain_decoder_bitcoin_mainnet'@'%'\nGRANT ALL PRIVILEGES ON 'XChain_BTC_Mainnet_Indexer'.* TO 'xchain_indexer_bitcoin_mainnet'@'%'\n" }
+                }
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs)
+            await ds.setDatabaseParameters()
+            expect(stubs.assertNoDbCredentialDrift.calledOnce).to.be.true
+            const [coin, network, intended] = stubs.assertNoDbCredentialDrift.firstCall.args
+            expect(coin).to.equal('bitcoin')
+            expect(network).to.equal('mainnet')
+            expect(intended).to.deep.equal({ decoder: 'test-pass', indexer: 'test-pass' })
+            // The guard has to land before the first ALTER USER, or a refusal
+            // arrives after the lockout it exists to prevent.
+            expect(stubs.assertNoDbCredentialDrift.calledBefore(stubs.spawn)).to.be.true
+        })
+
+        it('writes no account when the drift guard refuses', async function () {
+            const driftError = new Error('would be locked out')
+            driftError.code = 'DB_CREDENTIAL_DRIFT'
+            const stubs = makeStubs()
+            stubs.assertNoDbCredentialDrift.rejects(driftError)
+            const ds = loadDatabaseService(stubs)
+            try {
+                await ds.setDatabaseParameters()
+                expect.fail('a drift refusal must abort provisioning')
+            } catch (err) {
+                expect(err.code).to.equal('DB_CREDENTIAL_DRIFT')
+            }
+            expect(stubs.spawn.called).to.be.false
+        })
+
+        it('does not blame the docker network for a drift refusal', async function () {
+            const driftError = new Error('would be locked out')
+            driftError.code = 'DB_CREDENTIAL_DRIFT'
+            const stubs = makeStubs()
+            stubs.assertNoDbCredentialDrift.rejects(driftError)
+            const log = sinon.stub(console, 'log')
+            try {
+                const ds = loadDatabaseService(stubs)
+                await ds.setDatabaseParameters().then(
+                    () => expect.fail('should have thrown'),
+                    () => {}
+                )
+                const printed = log.getCalls().map(c => String(c.args[0])).join('\n')
+                expect(printed).to.not.match(/problem adding the database container to the docker network/)
+            } finally {
+                log.restore()
             }
         })
     })

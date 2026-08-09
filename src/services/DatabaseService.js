@@ -31,6 +31,7 @@ const { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../utils/sql
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort } = require('./ConfigService')
 const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName } = require('./DockerService')
+const { assertNoDbCredentialDrift, isDbCredentialDriftError } = require('./DbCredentialDrift')
 const { statusChanged }           = require('./StatusService')
 const {
     XCHAIN_NODE_DB, getOsUserDbName, generatePassword,
@@ -681,6 +682,16 @@ async function setDatabaseParameters() {
                 }
                 await statusChanged()
 
+                // Refuse before the FIRST ALTER USER when a running container was built
+                // from another install's config store and this rotation would lock it
+                // out. Placed ahead of every write, so a refusal leaves the stack in the
+                // state it was already in .
+                const driftCfg = await getDefaultConfig(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork)
+                await assertNoDbCredentialDrift(nextCoin, nextNetwork, {
+                    decoder: driftCfg["DECODER_DB_PASS"],
+                    indexer: driftCfg["INDEXER_DB_PASS"]
+                })
+
                 let containerId = await db.getModuleContainer(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork)
                 if (containerId) {
                     const cfg = await getDefaultConfig(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork)
@@ -697,7 +708,13 @@ async function setDatabaseParameters() {
                 }
             } catch (err) {
                 console.log(err)
-                console.log("There was a problem adding the database container to the docker network of " + nextCoin + " " + nextNetwork)
+                // Only claim a networking cause when the failure could plausibly be
+                // one. A credential-drift refusal already carries its own diagnosis
+                // and remediation, and appending a docker-network line to it sends
+                // the operator hunting the wrong layer .
+                if (!isDbCredentialDriftError(err)) {
+                    console.log("There was a problem adding the database container to the docker network of " + nextCoin + " " + nextNetwork)
+                }
                 throw err
             }
         }

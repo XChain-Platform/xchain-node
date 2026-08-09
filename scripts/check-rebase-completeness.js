@@ -23,7 +23,10 @@
  * longer clean.
  *
  * The logic lives in src/services/RebaseCompletenessSweep.js and is unit tested there;
- * this file is only credentials, connections and exit codes.
+ * this file is only credentials, connections and exit codes. Those are exported behind
+ * an entrypoint guard and covered by test/unit/checkRebaseCompleteness.test.js ,
+ * because a credential or store-lookup fault here decides a deploy just as hard as the
+ * sweep verdict does.
  *
  * CONFIG SHAPE. The bucket lists come from the section 3.1 state-reset inventory
  * (claude/reports/launch/2026-07-29_xc637-state-reset-inventory.md) and are supplied
@@ -62,40 +65,47 @@ const path    = require('path');
 const mariadb = require('mariadb');
 const sweeper = require('../src/services/RebaseCompletenessSweep');
 
+const EPOCH_MARKER_SQL = 'SELECT batch_tag FROM consensus_epoch ORDER BY id DESC LIMIT 1';
+
 function slug(label) {
     return String(label || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 }
 
-function passwordFor(store) {
-    const specific = process.env['XC637_DB_PASS_' + slug(store.label)];
+// Throws rather than falling back to an empty password: an anonymous connection that
+// happens to succeed would sweep the wrong grants' view of the tables, and a sweep that
+// cannot read a store has to fail loudly (exit 2), never quietly pass it.
+function passwordFor(store, env) {
+    const e = env || process.env;
+    const specific = e['XC637_DB_PASS_' + slug(store.label)];
     if (specific) return specific;
-    if (process.env.XC637_DB_PASS) return process.env.XC637_DB_PASS;
+    if (e.XC637_DB_PASS) return e.XC637_DB_PASS;
     throw new Error('no password in the environment for store "' + store.label
         + '" (set XC637_DB_PASS_' + slug(store.label) + ' or XC637_DB_PASS)');
 }
 
-async function main() {
-    const configPath = process.argv[2];
-    if (!configPath) {
-        console.error('usage: node scripts/check-rebase-completeness.js <config.json>');
-        process.exit(2);
-    }
-    const config = JSON.parse(fs.readFileSync(path.resolve(configPath), 'utf8'));
+function findStore(config, dbName) {
+    return ((config && config.stores) || []).find((s) => s.database === dbName) || null;
+}
 
-    // One short-lived connection per store, opened only for the information_schema read.
-    // Deliberately not pooled: this runs once, inside a maintenance window, against hosts
-    // whose services are halted, and a pool would outlive the check.
-    const queryCreateTimes = async (dbName, tables) => {
-        const store = (config.stores || []).find((s) => s.database === dbName);
+// One short-lived connection per store, opened only for the read. Deliberately not
+// pooled: this runs once, inside a maintenance window, against hosts whose services are
+// halted, and a pool would outlive the check.
+function connectionOptionsFor(store, database, env) {
+    return {
+        host: store.host || '127.0.0.1',
+        port: Number(store.port) || 3306,
+        user: store.user || 'root',
+        password: passwordFor(store, env),
+        database,
+        connectTimeout: 8000
+    };
+}
+
+function makeQueryCreateTimes(config, connect, env) {
+    return async (dbName, tables) => {
+        const store = findStore(config, dbName);
         if (!store) throw new Error('no store config for database ' + dbName);
-        const conn = await mariadb.createConnection({
-            host: store.host || '127.0.0.1',
-            port: Number(store.port) || 3306,
-            user: store.user || 'root',
-            password: passwordFor(store),
-            database: 'information_schema',
-            connectTimeout: 8000
-        });
+        const conn = await connect(connectionOptionsFor(store, 'information_schema', env));
         try {
             // Pin the session to UTC BEFORE the read: without it MariaDB returns a zone-less
             // DATETIME in the session zone, the driver reinterprets those digits in the client's
@@ -107,24 +117,19 @@ async function main() {
             try { await conn.end(); } catch (_e) { /* closing a read-only conn cannot fail the verdict */ }
         }
     };
+}
 
-    // Optional corroboration: a consensus_epoch marker where a service writes one. Absence
-    // is not a failure (services exposing a replay cursor instead are explicitly allowed),
-    // so every fault here degrades to "no marker" rather than to a verdict.
-    const queryEpochMarker = async (dbName) => {
-        const store = (config.stores || []).find((s) => s.database === dbName);
+// Optional corroboration: a consensus_epoch marker where a service writes one. Absence
+// is not a failure (services exposing a replay cursor instead are explicitly allowed),
+// so every fault here degrades to "no marker" rather than to a verdict.
+function makeQueryEpochMarker(config, connect, env) {
+    return async (dbName) => {
+        const store = findStore(config, dbName);
         if (!store) return null;
         let conn = null;
         try {
-            conn = await mariadb.createConnection({
-                host: store.host || '127.0.0.1',
-                port: Number(store.port) || 3306,
-                user: store.user || 'root',
-                password: passwordFor(store),
-                database: dbName,
-                connectTimeout: 8000
-            });
-            const rows = await conn.query('SELECT batch_tag FROM consensus_epoch ORDER BY id DESC LIMIT 1');
+            conn = await connect(connectionOptionsFor(store, dbName, env));
+            const rows = await conn.query(EPOCH_MARKER_SQL);
             return (rows && rows[0] && rows[0].batch_tag) ? String(rows[0].batch_tag) : null;
         } catch (_e) {
             return null;
@@ -132,18 +137,46 @@ async function main() {
             if (conn) { try { await conn.end(); } catch (_e) { /* ignore */ } }
         }
     };
+}
 
-    const result = await sweeper.sweepFleet(config, { queryCreateTimes, queryEpochMarker });
+function loadConfig(configPath) {
+    return JSON.parse(fs.readFileSync(path.resolve(configPath), 'utf8'));
+}
+
+async function main() {
+    const configPath = process.argv[2];
+    if (!configPath) {
+        console.error('usage: node scripts/check-rebase-completeness.js <config.json>');
+        process.exit(2);
+    }
+    const config = loadConfig(configPath);
+    const connect = (opts) => mariadb.createConnection(opts);
+
+    const result = await sweeper.sweepFleet(config, {
+        queryCreateTimes: makeQueryCreateTimes(config, connect),
+        queryEpochMarker: makeQueryEpochMarker(config, connect)
+    });
     console.log(sweeper.formatReport(result));
     if (process.env.XC637_SWEEP_JSON === '1')
         console.log('\n' + JSON.stringify(result, null, 2));
     process.exit(result.pass ? 0 : 1);
 }
 
-main().catch((e) => {
-    // A configuration fault is not a pass. Exit 2 so a runbook can tell "the fleet failed
-    // the check" (1) from "the check could not run" (2), because the second one means the
-    // window has no evidence either way.
-    console.error('rebase-completeness sweep could not run: ' + ((e && e.message) || e));
-    process.exit(2);
-});
+module.exports = {
+    EPOCH_MARKER_SQL, slug, passwordFor, findStore, connectionOptionsFor,
+    makeQueryCreateTimes, makeQueryEpochMarker, loadConfig, main
+};
+
+// Guarded so test/unit/checkRebaseCompleteness.test.js can require the helpers without
+// the CLI firing on import. The undefined arm covers `node -` (stdin), where require.main
+// is undefined rather than this module; it costs nothing here and keeps the three
+// scripts/ entrypoints on one guard that cannot be copied into a stdin-piped tool wrong.
+if (require.main === module || require.main === undefined) {
+    main().catch((e) => {
+        // A configuration fault is not a pass. Exit 2 so a runbook can tell "the fleet failed
+        // the check" (1) from "the check could not run" (2), because the second one means the
+        // window has no evidence either way.
+        console.error('rebase-completeness sweep could not run: ' + ((e && e.message) || e));
+        process.exit(2);
+    });
+}
