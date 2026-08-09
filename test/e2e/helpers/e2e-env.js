@@ -322,10 +322,23 @@ class E2EEnv extends TestEnv {
             return child
         }
 
+        // DbCredentialDrift runs `docker inspect` through its OWN require of
+        // child_process, so DatabaseService's stub map does not reach it and the
+        // guard reads whatever containers the HOST actually has. On a CI venue
+        // carrying a container from another config store that is a real refusal,
+        // which failed all five install-path E2E cases on test-host while passing on
+        // a laptop with no such container . Stubbed at the same seam, so
+        // the guard still runs, against this harness's containers.
+        const DbCredentialDrift = proxyquire(path.join(ROOT, 'src/services/DbCredentialDrift'), {
+            'child_process': { execFile: execFileStub },
+            'util': { promisify: () => execFileAsyncStub }
+        })
+
         // DatabaseService
         const DatabaseService = proxyquire(path.join(ROOT, 'src/services/DatabaseService'), {
             'child_process': { execFile: execFileStub, spawn: dbSpawnStub },
             'util': { promisify: () => execFileAsyncStub },
+            './DbCredentialDrift': DbCredentialDrift,
             '../config/constants': patchedConstants,
             './ConfigService': ConfigService,
             './DockerService': DockerService,
