@@ -267,7 +267,11 @@ const SERVICE_HEALTHCHECK = {
     [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
     [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     path: '/health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' }
     // xchain-e2e-test: one-shot execution container, never gets --restart, healthcheck not applicable
-    // coin nodes (node module): managed by NodeService / crypto_nodes; not built via buildAndUp
+    // coin nodes (node module): managed by NodeService / crypto_nodes; not built via buildAndUp,
+    //   so buildHealthcheckArgs never runs for them. Their probe is BAKED INTO THE IMAGE instead
+    //   (HEALTHCHECK in crypto_nodes/<coin>/Dockerfile, an RPC getblockchaininfo ping), which is
+    //   why there is no entry here. Deliberately no autoheal either, mirroring the utxo-tracker
+    //   line above: a wedged daemon usually means corrupt state a blind restart re-enters.
     // database (mariadb): managed by DatabaseService with its own health tooling
 }
 

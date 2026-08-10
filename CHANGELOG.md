@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Coin-node images bake an RPC healthcheck, so a wedged-but-alive daemon stops reading as cleanly running ().
 - MariaDB carries a Docker healthcheck for restart resilience ().
 - Command lock covers all provisioning commands, external-DB ports validated at every branch, reset validates inputs and fails loud, bootstrap-aware healthcheck start-period.
 
