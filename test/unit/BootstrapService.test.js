@@ -2007,4 +2007,59 @@ describe('BootstrapService', function () {
         })
     })
 
+    // -----------------------------------------------------------------------
+    // listServedBootstrapCombos - the publisher's --all plan (uuid:d0cfcba9)
+    // -----------------------------------------------------------------------
+    describe('listServedBootstrapCombos()', function () {
+
+        function loadWithRows(rows) {
+            const stubs = makeStubs()
+            stubs.db.getAllModuleContainers = sinon.stub().resolves(rows)
+            return { stubs, bs: loadBootstrapService(stubs) }
+        }
+
+        // The whole point of reading the registry: a stopped combo keeps its row,
+        // so it enters the plan and reaches the source-health gate instead of
+        // being dropped by a `docker ps` that only sees running containers.
+        it('lists a combo whose container is stopped', async function () {
+            const { stubs, bs } = loadWithRows([
+                { module: XChainService.XCHAIN_DECODER, coin: 'litecoin', network: 'mainnet', container_id: null },
+                { module: XChainService.XCHAIN_INDEXER, coin: 'litecoin', network: 'mainnet', container_id: 'x' }
+            ])
+            const combos = await bs.listServedBootstrapCombos()
+            expect(combos).to.deep.equal([
+                'xchain-decoder:litecoin:mainnet',
+                'xchain-indexer:litecoin:mainnet'
+            ])
+            sinon.assert.calledWith(stubs.db.getAllModuleContainers, null, null)
+        })
+
+        it('filters regtest and non-bootstrappable modules', async function () {
+            const { bs } = loadWithRows([
+                { module: XChainService.XCHAIN_DECODER, coin: 'bitcoin',  network: 'regtest', container_id: 'a' },
+                { module: 'xchain-hub',                 coin: '',         network: '',        container_id: 'b' },
+                { module: 'node',                       coin: 'bitcoin',  network: 'mainnet', container_id: 'c' },
+                { module: XChainService.XCHAIN_UTXO_TRACKER, coin: 'bitcoin', network: 'mainnet', container_id: 'd' }
+            ])
+            expect(await bs.listServedBootstrapCombos())
+                .to.deep.equal(['xchain-utxo-tracker:bitcoin:mainnet'])
+        })
+
+        it('de-duplicates and sorts', async function () {
+            const { bs } = loadWithRows([
+                { module: XChainService.XCHAIN_INDEXER, coin: 'litecoin', network: 'mainnet', container_id: 'a' },
+                { module: XChainService.XCHAIN_DECODER, coin: 'bitcoin',  network: 'mainnet', container_id: 'b' },
+                { module: XChainService.XCHAIN_INDEXER, coin: 'litecoin', network: 'mainnet', container_id: 'c' }
+            ])
+            expect(await bs.listServedBootstrapCombos()).to.deep.equal([
+                'xchain-decoder:bitcoin:mainnet',
+                'xchain-indexer:litecoin:mainnet'
+            ])
+        })
+
+        it('returns nothing for an empty or unconfigured store', async function () {
+            expect(await loadWithRows([]).bs.listServedBootstrapCombos()).to.deep.equal([])
+        })
+    })
+
 })

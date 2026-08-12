@@ -38,7 +38,7 @@ const {
 const { getStatus }            = require('./services/StatusService')
 const { scanAndRegisterModules } = require('./services/DiscoveryService')
 const { maybeReportTelemetry } = require('./services/TelemetryService')
-const { makeBootstrap }        = require('./services/BootstrapService')
+const { makeBootstrap, listServedBootstrapCombos } = require('./services/BootstrapService')
 const { initValidator, getValidatorSettings, isInitialized } = require('./services/ValidatorService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 const { acquireCommandLock } = require('./utils/commandLock')
@@ -71,7 +71,7 @@ async function parseCommand() {
     // updateconfig round-trip on multi-coin nodes. Any command NOT listed here
     // (install, update, start, stop, restart, uninstall, reset, sync, …) still
     // pushes; the default is to sync, so a new/unknown command stays safe.
-    const readOnlyCommands = ['ps', 'tail', 'logs', 'monitor', 'tailmonitor']
+    const readOnlyCommands = ['ps', 'tail', 'logs', 'monitor', 'tailmonitor', 'bootstrap-combos']
     // Commands that mutate stack state (containers, images, DBs, config
     // pushes). Two of these interleaving from concurrent shells can corrupt an
     // install mid-flight, so they serialize on a pidfile lock; a second
@@ -237,6 +237,20 @@ async function parseCommand() {
         .description('List installed XChain services and status')
         .action(async () => {
             await getStatus(null, null, true)
+            return process.exit(0)
+        })
+
+    program
+        .command('bootstrap-combos')
+        .description('List served <service>:<coin>:<network> combos, one per line (scriptable)')
+        .addHelpText('after', `
+Reads the module registry, not live containers, so a STOPPED or crash-looping
+combo is still listed. scripts/publish-bootstraps.sh --all builds its plan from
+this: detecting from \`docker ps\` dropped stopped combos before the source-health
+gate could report them, so the cron exited 0 while a consumer archive went stale.`)
+        .action(async () => {
+            const combos = await listServedBootstrapCombos()
+            for (const combo of combos) console.log(combo)
             return process.exit(0)
         })
 

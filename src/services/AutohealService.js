@@ -27,9 +27,20 @@
  * via `autoheal: true` in SERVICE_HEALTHCHECK, and restarts the ones
  * whose Docker health status is `unhealthy` AND which have been
  * continuously unhealthy past a grace window. An on-disk state file
- * (~/.xchain-node/autoheal-state.json) prevents restarting the same
- * container more than once per cooldown window, so a service whose
- * wedge a restart does NOT clear cannot be flapped indefinitely.
+ * (~/.xchain-node/autoheal-state.json) throttles restarts of the same
+ * container: the first retry waits the base cooldown, and each further
+ * restart of a container that never recovers DOUBLES the wait, up to a
+ * ceiling. So a wedge a restart does not clear costs one restart per
+ * cooldown, then per 2x, 4x, 8x... rather than one per cooldown forever.
+ * The counter resets the moment the container reports healthy, so a
+ * transient wedge always starts again from the base cooldown.
+ *
+ * Deliberately no attempt CAP and no terminal suppression: this is a
+ * watchdog on node containers, and a cap that stops retrying can leave a
+ * RECOVERABLE service down through an outage that would have self-cleared.
+ * Backing off ends the churn; giving up would trade it for an outage.
+ * Every skipped pass still logs an "investigate" line, which is the
+ * escalation path for a wedge that has stopped being transient.
  *
  * Detection-to-restart latency is the timer interval plus the health
  * retry budget plus the grace window; this is deliberate, restarts
@@ -51,8 +62,12 @@ const { SERVICE_HEALTHCHECK } = require('./ModuleService')
 // A container must be continuously unhealthy for at least this long before
 // a restart is considered (on top of Docker's own retries budget).
 const DEFAULT_GRACE_MS = 2 * 60 * 1000
-// Never restart the same container more than once per cooldown window.
+// Wait at least this long after a restart before restarting the same container
+// again. This is the FIRST retry's wait; see restartBackoffMs for the doubling.
 const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000
+// Upper bound on the doubled cooldown, so a long-wedged container settles at one
+// restart every six hours rather than growing to a wait no operator would outlive.
+const DEFAULT_COOLDOWN_CEILING_MS = 6 * 60 * 60 * 1000
 
 const STATE_DIR_NAME  = '.xchain-node'
 const STATE_FILE_NAME = 'autoheal-state.json'
@@ -74,10 +89,21 @@ function parsePositiveIntEnv(name, fallback) {
     return n
 }
 
+// How long to wait before the Nth restart of a container that has not recovered.
+// attempts is the number of restarts already performed in this unhealthy run, so
+// attempts<=1 yields the plain base cooldown and the first retry keeps its
+// documented timing; every further one doubles. A very large attempts count sends
+// the product to Infinity, which Math.min resolves to the ceiling, not to NaN.
+function restartBackoffMs(attempts, cooldownMs, ceilingMs) {
+    if (!(attempts > 1)) return cooldownMs
+    return Math.min(cooldownMs * Math.pow(2, attempts - 1), ceilingMs)
+}
+
 function readState(stateFile) {
     // {
     //   restarts:       { <containerId>: <epoch ms of last autoheal restart> },
-    //   unhealthySince: { <containerId>: <epoch ms this unhealthy episode began> }
+    //   unhealthySince: { <containerId>: <epoch ms this unhealthy episode began> },
+    //   restartCount:   { <containerId>: <restarts since this container last was healthy> }
     // }
     try {
         const parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
@@ -86,13 +112,19 @@ function readState(stateFile) {
             if (typeof parsed.unhealthySince !== 'object' || parsed.unhealthySince === null) {
                 parsed.unhealthySince = {}
             }
+            // restartCount arrived after both. An older file reads as zero attempts,
+            // which costs a wedge one un-backed-off retry after an upgrade, never a
+            // missed restart.
+            if (typeof parsed.restartCount !== 'object' || parsed.restartCount === null) {
+                parsed.restartCount = {}
+            }
             return parsed
         }
     } catch {
         // Missing or corrupt state file: start clean. Worst case a container
         // gets one extra restart after a state loss, which is acceptable.
     }
-    return { restarts: {}, unhealthySince: {} }
+    return { restarts: {}, unhealthySince: {}, restartCount: {} }
 }
 
 function writeState(stateFile, state) {
@@ -136,13 +168,15 @@ function getUnhealthySinceMs(health) {
 async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
     const graceMs    = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_GRACE_MS', DEFAULT_GRACE_MS)
     const cooldownMs = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS', DEFAULT_COOLDOWN_MS)
+    const ceilingMs  = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS', DEFAULT_COOLDOWN_CEILING_MS)
     const stateFile  = getStateFilePath()
     const state      = readState(stateFile)
 
     const result = { candidates: [], restarted: [], failed: [], skipped: [] }
-    // Set whenever an episode-onset entry is recorded or cleared, so the pass
-    // persists it even when nothing was restarted. Without this the onset never
-    // survives to the next pass and the grace window can never be crossed.
+    // Set whenever an episode-onset or attempt-count entry is recorded or cleared,
+    // so the pass persists it even when nothing was restarted. Without this the
+    // onset never survives to the next pass and the grace window can never be
+    // crossed, and a recovery never clears the backoff it earned.
     let onsetChanged = false
 
     // An unconfigured store yields zero rows, which autoheal would report as a
@@ -177,6 +211,13 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
                 delete state.unhealthySince[containerId]
                 onsetChanged = true
             }
+            // Drop the attempt count too, so a container that DID recover starts its
+            // next episode at the base cooldown. Backing off is a response to a wedge
+            // restarts are not clearing; a recovery is the evidence they cleared it.
+            if (state.restartCount[containerId] !== undefined) {
+                delete state.restartCount[containerId]
+                onsetChanged = true
+            }
             continue
         }
 
@@ -205,10 +246,16 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
             continue
         }
 
-        const lastRestart = state.restarts[containerId]
-        if (typeof lastRestart === 'number' && now - lastRestart < cooldownMs) {
+        // Each restart this container has already survived without recovering widens
+        // its next wait, so a deterministic wedge (a bad block, a persistent host
+        // fault) costs one restart per cooldown, then per 2x, 4x... to the ceiling,
+        // instead of one per cooldown forever.
+        const attempts        = state.restartCount[containerId] || 0
+        const effectiveCooldownMs = restartBackoffMs(attempts, cooldownMs, ceilingMs)
+        const lastRestart     = state.restarts[containerId]
+        if (typeof lastRestart === 'number' && now - lastRestart < effectiveCooldownMs) {
             result.skipped.push({ module, coin, network, containerId, reason: 'inside restart cooldown' })
-            console.log(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (cooldown ${cooldownMs}ms), a restart is not clearing this wedge; investigate`)
+            console.log(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
             continue
         }
 
@@ -220,9 +267,10 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
 
         try {
             await restartContainer(containerId)
-            state.restarts[containerId] = now
+            state.restarts[containerId]     = now
+            state.restartCount[containerId] = attempts + 1
             result.restarted.push({ module, coin, network, containerId })
-            console.log(`autoheal: restarted ${label} (unhealthy for ${now - since}ms)`)
+            console.log(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
         } catch (err) {
             result.failed.push({ module, coin, network, containerId, reason: String(err) })
             console.log(`autoheal: FAILED to restart ${label}: ${err}`)
@@ -239,6 +287,9 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         for (const id of Object.keys(state.unhealthySince)) {
             if (!known.has(id)) delete state.unhealthySince[id]
         }
+        for (const id of Object.keys(state.restartCount)) {
+            if (!known.has(id)) delete state.restartCount[id]
+        }
         writeState(stateFile, state)
     }
 
@@ -252,6 +303,8 @@ module.exports = {
     runAutoheal,
     getUnhealthySinceMs,
     getStateFilePath,
+    restartBackoffMs,
     DEFAULT_GRACE_MS,
-    DEFAULT_COOLDOWN_MS
+    DEFAULT_COOLDOWN_MS,
+    DEFAULT_COOLDOWN_CEILING_MS
 }

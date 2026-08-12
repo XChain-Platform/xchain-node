@@ -351,10 +351,18 @@ describe('Integration: Multi-Module Orchestration', function () {
                 'bitcoin': { 'mainnet': ['xchain-encoder', 'xchain-decoder', 'xchain-indexer'] }
             }
 
-            const result = await moduleOps.uninstallModules(serviceList)
+            // Batch completion and success are separate properties (): the loop still
+            // visits every module, but a Docker failure now propagates instead of returning true.
+            let thrown = null
+            try {
+                await moduleOps.uninstallModules(serviceList)
+            } catch (err) {
+                thrown = err
+            }
 
-            // Should continue past the failure
-            expect(result).to.be.true
+            expect(thrown, 'a failed uninstall must reject, not report success').to.not.equal(null)
+            expect(thrown.message).to.match(/uninstall failed for 1 module/)
+            // Should still continue past the failure
             expect(uninstalled).to.deep.equal(['xchain-encoder', 'xchain-indexer'])
             expect(failCount).to.equal(1)
         })

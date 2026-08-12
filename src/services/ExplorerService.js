@@ -19,7 +19,7 @@ const {
     EXPLORER_MODULE_NAME
 } = require('../config/constants')
 const { db, getLastStatus, isStatusUpdated } = require('../state')
-const { sleep }                              = require('../utils/helpers')
+const { sleep, redactSecrets }               = require('../utils/helpers')
 const { getDefaultConfig, getDockerNetwork } = require('./ConfigService')
 const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./StatusService')
 const { addContainerToNetwork, killContainer, removeContainer } = require('./DockerService')
@@ -36,16 +36,46 @@ async function updateExplorer() {
     const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
     const explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
 
+    // Record the networks the explorer stays off instead of discarding the
+    // error: a topology change that reported success while the container never
+    // joined the new network left those explorer endpoints dead until an
+    // unrelated later mutation happened to retry. addContainerToNetwork is
+    // idempotent (DockerService no-ops when the container already holds the
+    // network), so the single retry only costs time on a real failure and
+    // absorbs the docker race that causes most of them. Same treatment as
+    // HubService.attachSharedContainer, kept local so the two services keep
+    // their independent dependency graphs ().
+    const failures = []
+
     if (explorerContainerId) {
         for (const nextCoin in installedCoinsAndNetworks) {
             for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
+                const network = getDockerNetwork(nextCoin, nextNetwork)
                 try {
-                    await addContainerToNetwork(explorerContainerId, getDockerNetwork(nextCoin, nextNetwork))
-                } catch {
-                    console.log("There was an error trying to connect the xchain-explorer to the " + nextCoin + "/" + nextNetwork + " network")
+                    await addContainerToNetwork(explorerContainerId, network)
+                } catch (firstErr) {
+                    console.log("There was an error trying to connect the xchain-explorer to the " +
+                        nextCoin + "/" + nextNetwork + " network (" + redactSecrets(firstErr) + "). Trying again in 3 seconds...")
+                    await sleep(3000)
+                    try {
+                        await addContainerToNetwork(explorerContainerId, network)
+                    } catch (retryErr) {
+                        failures.push({
+                            label: "xchain-explorer -> " + nextCoin + "/" + nextNetwork,
+                            error: retryErr
+                        })
+                    }
                 }
             }
         }
+    }
+
+    if (failures.length > 0) {
+        throw new Error(
+            "Couldn't attach the xchain-explorer to " + failures.length + " network(s): " +
+                failures.map((f) => f.label + " (" + redactSecrets(f.error) + ")").join('; '),
+            { cause: failures[0].error }
+        )
     }
 
     return true

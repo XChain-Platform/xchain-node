@@ -169,7 +169,12 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                             // healthcheck (see ModuleService.buildHealthcheckArgs)
                             // is failing, doesn't print a reassuring plain
                             // "running" indistinguishable from a clean uptime.
-                            const restartCount = containerStatus["State"]["RestartCount"] || 0
+                            // RestartCount is TOP-LEVEL in `docker inspect` output, a sibling
+                            // of State, not a field inside it: State carries only Status,
+                            // Running, Restarting, StartedAt, Health and friends. Read from
+                            // State it was always undefined, so the churn branch below never
+                            // fired and a cycling container printed a clean green "running".
+                            const restartCount = containerStatus["RestartCount"] || 0
                             const healthStatus = containerStatus["State"]["Health"] && containerStatus["State"]["Health"]["Status"]
                             let state = containerStatus["State"]["Status"]
                             let isChurning = false

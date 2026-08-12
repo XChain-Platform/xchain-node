@@ -420,8 +420,12 @@ describe('StatusService: getStatus() with installed modules', function () {
             }
         })
 
+        // Real `docker inspect` shape: RestartCount is a TOP-LEVEL sibling of State,
+        // never a field inside it. The fixture used to nest it, which made this test
+        // pass against a shape docker cannot emit and hid the production read bug.
         const containerStatus = {
-            State: { Status: 'running', RestartCount: 3, Health: { Status: 'unhealthy' } },
+            State: { Status: 'running', Health: { Status: 'unhealthy' } },
+            RestartCount: 3,
             NetworkSettings: { Ports: {} }
         }
         const ss = loadStatusService(state, {
@@ -453,7 +457,8 @@ describe('StatusService: getStatus() with installed modules', function () {
         })
 
         const containerStatus = {
-            State: { Status: 'running', RestartCount: 0, Health: { Status: 'healthy' } },
+            State: { Status: 'running', Health: { Status: 'healthy' } },
+            RestartCount: 0,
             NetworkSettings: { Ports: {} }
         }
         const ss = loadStatusService(state, {

@@ -55,8 +55,10 @@
 #   scripts/publish-bootstraps.sh --dry-run --all        # show what would run
 #
 # Combos are <service>:<coin>:<network>. Services: xchain-decoder, xchain-indexer,
-# xchain-utxo-tracker. --all auto-detects served combos from running containers
-# (regtest is skipped). Explicit combos override --all.
+# xchain-utxo-tracker. --all auto-detects served combos from the module registry
+# via `xchain-node bootstrap-combos`, so a STOPPED or crash-looping combo is still
+# planned and reaches the source-health gate (regtest is skipped). Explicit combos
+# override --all.
 #
 # Cron examples (origin box crontab; redirect output to a log):
 #   # nightly, no downtime (decoder + indexer only):
@@ -118,28 +120,26 @@ fi
 mkdir -p "$STAGE_DIR" "$TMP_DIR" 2>/dev/null || die "cannot create STAGE_DIR/TMP_DIR (need writable $STAGE_DIR and $TMP_DIR)"
 
 # ── Resolve combos ────────────────────────────────────────────────────────
-# Auto-detect served combos from running containers (names: xchain-node-<coin>-<network>-<service>).
+# Auto-detect served combos from the module REGISTRY, not from live containers.
+# This used to run `docker ps`, which lists only RUNNING containers, so a stopped
+# or crash-looping combo was dropped from the plan before the  source-health
+# gate could report it: the cron then exited 0 while that consumer's archive went
+# missing or increasingly stale, the exact outcome the gate exists to prevent
+# (uuid:d0cfcba9). `bootstrap-combos` reads the modules table, whose rows survive
+# a stop, so every installed combo enters the plan and an unhealthy one is refused
+# loudly instead of vanishing. regtest is skipped there, not here.
 detect_combos() {
-  docker ps --format '{{.Names}}' 2>/dev/null \
-    | grep -E "^xchain-node-.*-(xchain-decoder|xchain-indexer|xchain-utxo-tracker)$" \
-    | while read -r n; do
-        rest="${n#xchain-node-}"
-        for svc in "${ALL_SERVICES[@]}"; do
-          case "$rest" in
-            *-"$svc")
-              cn="${rest%-"$svc"}"            # <coin>-<network>
-              coin="${cn%%-*}"; net="${cn#*-}"
-              [ "$net" = "regtest" ] && break # skip regtest
-              echo "$svc:$coin:$net"; break ;;
-          esac
-        done
-      done | sort -u
+  local svc_pattern
+  svc_pattern="$(IFS='|'; echo "${ALL_SERVICES[*]}")"
+  "$XCHAIN_NODE_BIN" bootstrap-combos 2>/dev/null \
+    | grep -E "^($svc_pattern):[^:]+:[^:]+$" \
+    | sort -u
 }
 
 if [ "${#COMBOS[@]}" -eq 0 ]; then
   [ "$USE_ALL" = 1 ] || die "no combos given. Pass <service>:<coin>:<network> args or --all."
   mapfile -t COMBOS < <(detect_combos)
-  [ "${#COMBOS[@]}" -gt 0 ] || die "--all detected no served combos from running containers."
+  [ "${#COMBOS[@]}" -gt 0 ] || die "--all detected no served combos. Check that the MariaDB container is up and that '$XCHAIN_NODE_BIN bootstrap-combos' runs (it needs an xchain-node carrying that subcommand)."
 fi
 
 # Apply tracker policy.

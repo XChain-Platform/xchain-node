@@ -1061,10 +1061,41 @@ async function ensureBootstrapMariaDb(coin, network, module) {
     }
 }
 
+// The services a bootstrap archive can be built from, in the order the
+// publisher lists them.
+const BOOTSTRAPPABLE_SERVICES = [
+    XChainService.XCHAIN_DECODER,
+    XChainService.XCHAIN_INDEXER,
+    XChainService.XCHAIN_UTXO_TRACKER
+]
+
+// Every served <service>:<coin>:<network> combo, read from the module REGISTRY
+// rather than from live containers. publish-bootstraps.sh --all used to build
+// its plan from `docker ps`, so a stopped or crash-looping combo was dropped
+// before the  source-health gate could report it and the cron exited 0
+// while that consumer archive went stale (uuid:d0cfcba9). The registry keeps a
+// row for a stopped container (DiscoveryService prunes against `docker ps -a`,
+// not `docker ps`), so reading it puts every installed combo into the plan and
+// lets the health gate refuse the unhealthy ones loudly.
+//
+// regtest is skipped: it is a throwaway local chain with no consumer archive.
+async function listServedBootstrapCombos() {
+    const rows = await db.getAllModuleContainers(null, null)
+    const combos = new Set()
+    for (const row of rows || []) {
+        if (!BOOTSTRAPPABLE_SERVICES.includes(row.module)) continue
+        if (!row.coin || !row.network) continue
+        if (row.network === 'regtest') continue
+        combos.add(`${row.module}:${row.coin}:${row.network}`)
+    }
+    return Array.from(combos).sort()
+}
+
 // ─── Exports ──────────────────────────────────────────────────────
 
 module.exports = {
     BootstrapIntegrityError,
+    listServedBootstrapCombos,
     getBootstrapFilesList,
     makeBootstrap,
     restoreBootstrap,

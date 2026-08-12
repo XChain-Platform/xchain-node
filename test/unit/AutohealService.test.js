@@ -192,6 +192,73 @@ describe('AutohealService', () => {
         expect(later.restarted).to.have.length(1)
     })
 
+    // A container a restart never fixes used to be restarted once per fixed
+    // cooldown forever: pure churn, and the file's own header claimed it could not
+    // be flapped indefinitely. Each restart that does not clear the wedge now
+    // doubles the next wait.
+    it('doubles the cooldown for each restart that does not clear the wedge', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'bo1')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2, base cooldown
+        expect(stubs.restartContainer.callCount).to.equal(2)
+
+        // 11 minutes after restart #2 clears the BASE cooldown but not the doubled
+        // one, so the old fixed-window behavior would have restarted here.
+        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+
+        // 21 minutes after restart #2 clears the doubled window.
+        const resumed = await service.runAutoheal({ now: NOW + 32 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(3)
+        expect(resumed.restarted).to.have.length(1)
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.bo1).to.equal(3)
+    })
+
+    it('resets the backoff when the container recovers, so the next episode starts at the base cooldown', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'bo2')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2 -> next wait doubles
+        expect(stubs.restartContainer.callCount).to.equal(2)
+
+        // Container comes back healthy: the earned backoff is not a debt it carries
+        // into a later, unrelated wedge.
+        stubs.getStatusFromContainer.resolves(inspectStatus('healthy', [logEntry(30000, 0)]))
+        await service.runAutoheal({ now: NOW + 12 * 60000 })
+        const cleared = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(cleared.restartCount).to.not.have.property('bo2')
+
+        // Wedged again 11 minutes after the last restart. With the counter reset the
+        // BASE cooldown applies and it restarts; had the count survived, the doubled
+        // 20-minute window would still be blocking.
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        const again = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(3)
+        expect(again.restarted).to.have.length(1)
+    })
+
+    it('caps the doubled cooldown at the ceiling instead of growing without bound', () => {
+        const base = service.DEFAULT_COOLDOWN_MS
+        const ceiling = service.DEFAULT_COOLDOWN_CEILING_MS
+
+        // Attempts 0 and 1 both keep the documented base cooldown, so the first
+        // retry of a fresh wedge times exactly as it always has.
+        expect(service.restartBackoffMs(0, base, ceiling)).to.equal(base)
+        expect(service.restartBackoffMs(1, base, ceiling)).to.equal(base)
+        expect(service.restartBackoffMs(2, base, ceiling)).to.equal(base * 2)
+        expect(service.restartBackoffMs(3, base, ceiling)).to.equal(base * 4)
+        expect(service.restartBackoffMs(99, base, ceiling)).to.equal(ceiling)
+        // 2**(attempts-1) overflows to Infinity long before this; the cap must
+        // still resolve to a finite wait rather than never retrying again.
+        expect(service.restartBackoffMs(5000, base, ceiling)).to.equal(ceiling)
+    })
+
     it('--dry-run reports candidates without restarting or arming the cooldown', async () => {
         stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'ggg')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())

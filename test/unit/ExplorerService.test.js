@@ -61,7 +61,8 @@ function loadExplorerService(stubs) {
             isStatusUpdated: stubs.isStatusUpdated
         },
         '../utils/helpers': {
-            sleep: stubs.sleep
+            sleep:         stubs.sleep,
+            redactSecrets: (err) => String(err && err.message ? err.message : err)
         },
         './ConfigService': {
             getDefaultConfig: stubs.getDefaultConfig,
@@ -145,7 +146,38 @@ describe('ExplorerService: updateExplorer()', function () {
         expect(stubs.addContainerToNetwork.callCount).to.equal(3)
     })
 
-    it('swallows addContainerToNetwork errors and returns true', async function () {
+    it('retries a failed attach once and returns true when the retry succeeds', async function () {
+        const lastStatus = {
+            '': {
+                '': {
+                    'xchain-explorer': {
+                        status: { State: { Status: 'running' } }
+                    }
+                }
+            }
+        }
+        const addContainerToNetwork = sinon.stub()
+        addContainerToNetwork.onCall(0).rejects(new Error('docker race'))
+        addContainerToNetwork.onCall(1).resolves()
+        const stubs = makeExplorerServiceStubs({
+            getLastStatus: sinon.stub().returns(lastStatus),
+            dbGetModuleContainer: sinon.stub().resolves('explorer-cid'),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({
+                bitcoin: ['mainnet']
+            }),
+            addContainerToNetwork
+        })
+        const es = loadExplorerService(stubs)
+        const result = await es.updateExplorer()
+        expect(result).to.be.true
+        expect(addContainerToNetwork.callCount).to.equal(2)
+        expect(stubs.sleep.called).to.be.true
+    })
+
+    // Contract change (): a persistently unreachable network used to be
+    // logged and swallowed, so a topology change reported success while the
+    // explorer sat disconnected. It now rejects, naming every network it failed.
+    it('rejects naming the unreachable networks when the attach keeps failing', async function () {
         const lastStatus = {
             '': {
                 '': {
@@ -159,13 +191,26 @@ describe('ExplorerService: updateExplorer()', function () {
             getLastStatus: sinon.stub().returns(lastStatus),
             dbGetModuleContainer: sinon.stub().resolves('explorer-cid'),
             getInstalledCoinsAndNetworks: sinon.stub().resolves({
-                bitcoin: ['mainnet']
+                bitcoin:  ['mainnet'],
+                dogecoin: ['testnet']
             }),
             addContainerToNetwork: sinon.stub().rejects(new Error('network error'))
         })
         const es = loadExplorerService(stubs)
-        const result = await es.updateExplorer()
-        expect(result).to.be.true  // error is caught, not rethrown
+
+        let threw = null
+        try {
+            await es.updateExplorer()
+        } catch (err) {
+            threw = err
+        }
+
+        expect(threw).to.be.an('error')
+        expect(threw.message).to.include('xchain-explorer -> bitcoin/mainnet')
+        expect(threw.message).to.include('xchain-explorer -> dogecoin/testnet')
+        expect(threw.cause).to.be.an('error')
+        // Every network is attempted before the throw: 2 networks x (try + retry)
+        expect(stubs.addContainerToNetwork.callCount).to.equal(4)
     })
 
     it('skips network connection when no explorerContainerId found in DB', async function () {
@@ -358,7 +403,10 @@ describe('ExplorerService: installExplorerModule() updateExplorer error in loop'
                 getLastStatus: stubs.getLastStatus,
                 isStatusUpdated: stubs.isStatusUpdated
             },
-            '../utils/helpers': { sleep: stubs.sleep },
+            '../utils/helpers': {
+                sleep:         stubs.sleep,
+                redactSecrets: (err) => String(err && err.message ? err.message : err)
+            },
             './ConfigService': {
                 getDefaultConfig: stubs.getDefaultConfig,
                 getDockerNetwork: stubs.getDockerNetwork
@@ -388,6 +436,50 @@ describe('ExplorerService: installExplorerModule() updateExplorer error in loop'
         // (which calls getInstalledCoinsAndNetworks) succeeds on the second pass.
         const result = await es.installExplorerModule(true)
         expect(result).to.be.true
+    })
+})
+
+// ---------------------------------------------------------------------------
+// installExplorerModule(): fresh install that succeeds on first ping
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// installExplorerModule(): a persistently unreachable network fails the install
+// ---------------------------------------------------------------------------
+
+describe('ExplorerService: installExplorerModule() persistent attach failure', function () {
+
+    // The design call proposal A of  makes explicitly ("a genuinely
+    // broken network now fails the install (intended)"): the ping loop's
+    // existing catch absorbs a transient updateExplorer failure, and a
+    // persistent one exhausts the tries rather than reporting a success the
+    // explorer cannot deliver.
+    it('exhausts the ping retries and throws instead of returning success', async function () {
+        let pingCount = 0
+        const lastStatus = {
+            '': { '': { 'xchain-explorer': { status: { State: { Status: 'running' } } } } }
+        }
+        const stubs = makeExplorerServiceStubs({
+            explorerPing: sinon.stub().callsFake(() => {
+                pingCount++
+                return Promise.resolve(pingCount >= 2)
+            }),
+            getLastStatus: sinon.stub().returns(lastStatus),
+            dbGetModuleContainer: sinon.stub().resolves('explorer-cid'),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['mainnet'] }),
+            addContainerToNetwork: sinon.stub().rejects(new Error('network error'))
+        })
+        const es = loadExplorerService(stubs)
+
+        let threw = null
+        try {
+            await es.installExplorerModule(false)
+        } catch (err) {
+            threw = err
+        }
+
+        expect(threw).to.include("Couldn't install the explorer module")
+        expect(stubs.addContainerToNetwork.called).to.be.true
     })
 })
 

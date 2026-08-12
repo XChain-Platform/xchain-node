@@ -223,6 +223,23 @@ describe('BootstrapHealthGate ', function () {
             const err = await refusal(callGate(gate, { runner: makeRunner({ inspectThrows: new Error('no such object') }) }))
             expect(err.message).to.match(/could not inspect/)
         })
+
+        // Every test above mocks the runner, so none of them can see a template that
+        // docker itself rejects. `{{.State.RestartCount}}` is such a template: State
+        // exposes Status/Running/Restarting/StartedAt/Health, and RestartCount is a
+        // TOP-LEVEL sibling, so docker exits 1 with "map has no entry for key" and the
+        // gate lands in the catch above, refusing publication from a healthy source.
+        // Asserting the format string is the only way a mocked suite catches that.
+        it('reads RestartCount from the top level, not from .State (docker rejects the latter)', async function () {
+            const gate = loadGate()
+            const runner = makeRunner()
+            await callGate(gate, { runner })
+
+            const inspectCall = runner.getCalls().find(c => (c.args[1] || [])[0] === 'inspect')
+            const format = inspectCall.args[1][inspectCall.args[1].indexOf('--format') + 1]
+            expect(format).to.contain('{{.RestartCount}}')
+            expect(format).to.not.contain('.State.RestartCount')
+        })
     })
 
     // -----------------------------------------------------------------------

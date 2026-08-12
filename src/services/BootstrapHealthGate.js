@@ -141,7 +141,11 @@ function evaluateContainerState(raw, { now = Date.now() } = {}) {
 }
 
 async function inspectContainer(containerId, runner) {
-    const format = '{{.State.Status}}|{{.State.Restarting}}|{{.State.RestartCount}}|{{.State.StartedAt}}|' +
+    // RestartCount is top-level, NOT under .State. `{{.State.RestartCount}}` is not a
+    // field that reads empty, it is a template-execution ERROR ("map has no entry for
+    // key"), so docker exits 1, this rejects, and the caller records "could not inspect
+    // the container" and refuses to publish: the gate failed closed on healthy sources.
+    const format = '{{.State.Status}}|{{.State.Restarting}}|{{.RestartCount}}|{{.State.StartedAt}}|' +
         '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
     const { stdout } = await runner('docker', ['inspect', '--format', format, containerId])
     return String(stdout || '')
