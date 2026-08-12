@@ -14,10 +14,6 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function loadHubConnector(axiosStub) {
     return proxyquire('../../src/HubConnector', {
         'axios': axiosStub
@@ -35,10 +31,6 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
     afterEach(function () {
         sinon.restore()
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 15: Hub registration failures (NET-04)
-    // -------------------------------------------------------------------
 
     describe('Experiment 15: Hub connector resilience', function () {
 
@@ -160,10 +152,6 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment 15b: Explorer registration failures (NET-05)
-    // -------------------------------------------------------------------
-
     describe('Experiment 15b: Explorer connector resilience', function () {
 
         it('returns false when explorer is unreachable', async function () {
@@ -238,10 +226,6 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment: DNS resolution failure
-    // -------------------------------------------------------------------
-
     describe('Experiment: DNS resolution failure for service endpoints', function () {
 
         it('hub returns false on DNS failure', async function () {
@@ -266,10 +250,6 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             expect(result).to.be.false
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment: Malformed JSON-RPC responses
-    // -------------------------------------------------------------------
 
     describe('Experiment: Malformed JSON-RPC responses', function () {
 

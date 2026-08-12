@@ -201,7 +201,7 @@ function upsertSidecarValues(localFilePath, values) {
         }
     }
     for (const k in values) {
-        // Respect the naming this sidecar already uses . A file the operator
+        // Respect the naming this sidecar already uses. A file the operator
         // renamed to the redaction-safe `*_SECRET` form must not sprout the legacy
         // twin again on the next rotation: two names for one credential is exactly
         // the ambiguity foldSecretEnvAliases() refuses to guess through, so the
@@ -215,8 +215,8 @@ function upsertSidecarValues(localFilePath, values) {
 // Read a single KEY=VALUE from a sidecar file, or undefined if the file or key is absent.
 // Uses the same createReadStream + readline path as the main config reader above.
 //
-// Secret-bearing keys are also accepted under their redaction-safe `*_SECRET` name
-// , which wins over the legacy name when both are present and non-empty. Keys
+// Secret-bearing keys are also accepted under their redaction-safe `*_SECRET` name,
+// which wins over the legacy name when both are present and non-empty. Keys
 // with no alias (XCHAIN_NODE_BLOCKS_DIR and friends) are unaffected.
 async function readSidecarValue(localFilePath, key) {
     if (!fs.existsSync(localFilePath)) return undefined
@@ -237,7 +237,7 @@ async function readSidecarValue(localFilePath, key) {
 }
 
 // Tell the operator, once per config load, which of their secret-bearing keys sit under a
-// name automatic redaction does not match . Better to hear it from your own node
+// name automatic redaction does not match. Better to hear it from your own node
 // than from a transcript that printed the value.
 function warnDeprecatedSecretNames(config, filePath) {
     for (const { legacy, preferred } of deprecatedSecretEnvNames(config)) {
@@ -336,7 +336,7 @@ async function getDefaultConfig(module, coin, network) {
             // every installed stack and no push ever left the indexer: chain tips,
             // config, and in particular the PRICE v1 oracle_price pushes that a FIAT
             // dispenser later prices against. Prod sets HUB_API_URL by hand in the
-            // per-coin config file, which is why this went unnoticed .
+            // per-coin config file, which is why this went unnoticed.
             //
             // Composed from the same container name + port as HUB_API_HOST/HUB_PORT, so
             // it resolves on the docker network exactly as the sibling *_API_HOST vars
@@ -377,7 +377,7 @@ async function getDefaultConfig(module, coin, network) {
             // order/swap blocks). Production-safe defaults stay at 60; we
             // raise it for regtest where load is by-design bursty.
             defaultValues["ENCODER_RATE_LIMIT_RPM"] = 99999
-            // : the browser wallet calls the encoder cross-origin (create_tx,
+            // The browser wallet calls the encoder cross-origin (create_tx,
             // ping). The encoder disables CORS unless CORS_ORIGIN is set, so a fresh
             // regtest stack blocks every browser request and the wallet reports the
             // chain "degraded". regtest is a local single-operator dev venue (same
@@ -448,7 +448,7 @@ async function getDefaultConfig(module, coin, network) {
         // in-container files; override them only when a custom CSV/dump is volume-mounted.
         if (module === XChainService.XCHAIN_INDEXER) {
             // The GENESIS_AIRDROP_* members carry the XCP/XDP airdrop leg. The indexer honors
-            // them on regtest ONLY : off regtest the armed bucket set comes from the
+            // them on regtest ONLY: off regtest the armed bucket set comes from the
             // pinned coin bundle, so passing them through cannot arm anything on a mainnet or
             // testnet stack, only on the regtest dry-run this passthrough exists for.
             const genesisPassthroughVars = [
@@ -508,7 +508,7 @@ async function getDefaultConfig(module, coin, network) {
             // every freshly mined block defers forever. Observed live: block 1479 deferred on
             // a 60s timeout, repeatedly, until this was reverted.
             //
-            // To enable it on regtest deliberately (the  mirror-leg test venue), the
+            // To enable it on regtest deliberately (the mirror-leg test venue), the
             // operator must ALSO set HUB_SYNC_PRICE_GRACE_S=0 and HUB_SYNC_ORACLE_GRACE_S=0,
             // which hub_db_sync honours on regtest only, precisely for this. Do not "fix" the
             // wedge by widening those off regtest: a per-node grace forks settlement.
@@ -578,7 +578,7 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
         }
 
-        // : the browser wallet calls the hub cross-origin (ping, config reads).
+        // The browser wallet calls the hub cross-origin (ping, config reads).
         // The hub disables CORS unless CORS_ORIGIN is set, so a browser wallet is
         // blocked and reports the chain "degraded". The hub is a shared, network-
         // agnostic service (it may front mainnet), so unlike the per-network encoder
@@ -588,7 +588,7 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues.CORS_ORIGIN = process.env.CORS_ORIGIN
         }
 
-        // : the explorer resolves each coin's utxo-tracker and decoder from
+        // The explorer resolves each coin's utxo-tracker and decoder from
         // UTXO_TRACKER_URL_<CODE> (e.g. UTXO_TRACKER_URL_RBTC) and
         // DECODER_API_URL_<COIN>_<NETWORK> (e.g. DECODER_API_URL_BTC_REGTEST).
         // The explorer is a shared service with no per-venue config file, so these
@@ -607,7 +607,7 @@ async function getDefaultConfig(module, coin, network) {
                     defaultValues["DECODER_API_URL_" + tick + "_" + net.toUpperCase()] =
                         "http://" + getDockerContainerImageName(XChainService.XCHAIN_DECODER, coinName, net) + ":3002"
 
-                    // : same omission, one service later. The explorer's
+                    // Same omission, one service later. The explorer's
                     // quote/pre-flight proxies (/api/preflight, /api/feequote,
                     // /api/oraclefeequote) resolve their upstream from
                     // INDEXER_API_URL_<COIN>_<NETWORK>, which was never emitted
@@ -619,7 +619,7 @@ async function getDefaultConfig(module, coin, network) {
                     // Unlike the two above, this one yields to the host env. The
                     // explorer is also run natively (systemd) on hosts where the
                     // indexers live on OTHER boxes, and those set this var by
-                    // hand to a remote address ; a container-local
+                    // hand to a remote address; a container-local
                     // default that overrode it would point a working production
                     // explorer at a hostname that does not resolve.
                     const indexerVar = "INDEXER_API_URL_" + tick + "_" + net.toUpperCase()
@@ -713,7 +713,7 @@ async function getDefaultConfig(module, coin, network) {
             // closed and the chain stalls. Raise for prod fleets. Passed through so the
             // host env survives a hub container regenerate.
             "HUB_RATE_LIMIT_RPM",
-            // XCHAIN derived-price source . XCHAIN is listed on no exchange, so
+            // XCHAIN derived-price source. XCHAIN is listed on no exchange, so
             // a validator computes XCHAIN/USD from realized fills in its OWN BTC indexer
             // database instead of fetching it. Every native-coin fee decision on LTC and
             // DOGE needs that pair, and without it those chains cannot price a fee at all.
@@ -757,15 +757,15 @@ async function getDefaultConfig(module, coin, network) {
         ]
         for (const varName of hubPassthroughVars) {
             // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
-            // accepted from the host env under their redaction-safe `*_SECRET` spelling
-            // ; everything else resolves to a plain process.env read.
+            // accepted from the host env under their redaction-safe `*_SECRET` spelling;
+            // everything else resolves to a plain process.env read.
             const value = readSecretHostEnv(varName)
             if (value !== undefined && value !== "") {
                 defaultValues[varName] = value
             }
         }
 
-        // : the hub now REFUSES to boot when HUB_API_KEY is unset unless
+        // The hub now REFUSES to boot when HUB_API_KEY is unset unless
         // keyless operation is declared with HUB_ALLOW_UNAUTHENTICATED. A managed
         // deploy with no key in the host env is a legitimate posture (single-host
         // regtest, a hub reachable only on a private network), so make the
@@ -849,7 +849,7 @@ async function getDefaultConfig(module, coin, network) {
                         }
                     }
                     defaultConfig[key] = value
-                    // NODE_SECRET is the redaction-safe spelling of NODE_PASSWORD .
+                    // NODE_SECRET is the redaction-safe spelling of NODE_PASSWORD.
                     // It arms the same migration: a credential in the MAIN config file gets
                     // relocated to the sidecar whichever name it arrived under.
                     if (key === "NODE_USER" || key === "NODE_PASSWORD" || key === "NODE_SECRET") mainFileHasCreds = true
@@ -860,7 +860,7 @@ async function getDefaultConfig(module, coin, network) {
         // Accept every secret-bearing key under its redaction-safe `*_SECRET` name and
         // fold it onto the canonical legacy name here, at the one place config enters
         // the process, so nothing downstream (container env, DB provisioner, RPC
-        // connectors) has to learn a second spelling . Runs BEFORE the migration
+        // connectors) has to learn a second spelling. Runs BEFORE the migration
         // and generation steps below, which key off the canonical names.
         //
         // PER FILE, not on the merged result. Merging first would make a renamed key in

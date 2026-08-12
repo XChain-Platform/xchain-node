@@ -37,16 +37,9 @@ describe('Integration: Hub/Explorer Config Update', function () {
         await env.teardown()
     })
 
-    /**
-     * Create HubService with stubbed dependencies:
-     * - DockerService (network ops)
-     * - Axios via HubConnector/ExplorerConnector
-     * - Real ConfigService, real LevelDB (via env)
-     */
     function makeHubService(options = {}) {
         const axiosStub = httpCapture.createAxiosStub()
 
-        // Hub connector using our HTTP capture
         const HubConnector = proxyquire('../../src/HubConnector', {
             'axios': axiosStub
         })
@@ -55,7 +48,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
             'axios': axiosStub
         })
 
-        // Status service that returns data from our LevelDB
         const statusState = require('../../src/state')
 
         const HubService = proxyquire('../../src/services/HubService', {
@@ -73,23 +65,18 @@ describe('Integration: Hub/Explorer Config Update', function () {
                 buildAndUp: async () => TestEnv.fakeContainerId('h')
             },
             '../utils/helpers': {
-                sleep: async () => {} // Skip real delays in tests
+                sleep: async () => {}
             }
         })
 
         return { HubService, HubConnector, ExplorerConnector }
     }
 
-    // ---------------------------------------------------------------
-    // Hub config update payload construction
-    // ---------------------------------------------------------------
-
     describe('updateHubOrExplorer payload for hub', function () {
 
         it('builds JSON config with module connection details from installed modules', async function () {
             const state = require('../../src/state')
 
-            // Insert modules into LevelDB
             const encId = TestEnv.fakeContainerId('e')
             const decId = TestEnv.fakeContainerId('d')
             const hubId = TestEnv.fakeContainerId('h')
@@ -98,7 +85,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', decId)
             await env.insertModule('xchain-hub', '', '', hubId)
 
-            // Set up status so updateHubOrExplorer can read it
             env.writeConfigFile('bitcoin-mainnet', '')
             state.setStatusUpdated(true)
             state.setLastStatus({
@@ -127,12 +113,10 @@ describe('Integration: Hub/Explorer Config Update', function () {
             expect(config).to.have.property('bitcoin')
             expect(config['bitcoin']).to.have.property('mainnet')
 
-            // Encoder config present
             const encoderConfig = config['bitcoin']['mainnet']['xchain-encoder']
             expect(encoderConfig).to.exist
             expect(encoderConfig.port).to.equal(3003)
 
-            // Decoder config present with DB details
             const decoderConfig = config['bitcoin']['mainnet']['xchain-decoder']
             expect(decoderConfig).to.exist
             expect(decoderConfig.port).to.equal(3002)
@@ -216,10 +200,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // Hub update retry logic
-    // ---------------------------------------------------------------
-
     describe('hub update retry logic', function () {
 
         it('retries on failure and succeeds when hub responds', async function () {
@@ -240,7 +220,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
                 }
             })
 
-            // Fail first 2 calls, succeed on 3rd
             httpCapture.when('127.0.0.1:10000').failsThenSucceeds(
                 2,
                 new Error('Connection refused'),
@@ -250,7 +229,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
             const { HubService } = makeHubService()
             await HubService.updateHubOrExplorer('xchain-hub')
 
-            // Should have been called 3 times (2 failures + 1 success)
             expect(httpCapture.callCount('127.0.0.1:10000')).to.equal(3)
         })
 
@@ -263,7 +241,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
             state.setStatusUpdated(true)
             state.setLastStatus({})
 
-            // Always fail
             httpCapture.when('127.0.0.1:10000').rejects(new Error('Connection refused'))
 
             const { HubService } = makeHubService()
@@ -275,14 +252,9 @@ describe('Integration: Hub/Explorer Config Update', function () {
                 expect(err).to.include('problem trying to update')
             }
 
-            // Should have tried 10 times
             expect(httpCapture.callCount('127.0.0.1:10000')).to.equal(10)
         })
     })
-
-    // ---------------------------------------------------------------
-    // Explorer config update
-    // ---------------------------------------------------------------
 
     describe('updateHubOrExplorer for explorer', function () {
 
@@ -341,10 +313,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // updateHub connects hub to all coin/network networks
-    // ---------------------------------------------------------------
-
     describe('updateHub network connectivity', function () {
 
         it('connects hub container to all installed coin/network Docker networks', async function () {
@@ -361,7 +329,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
             env.writeConfigFile('bitcoin-mainnet', '')
             env.writeConfigFile('dogecoin-testnet', '')
 
-            // Set up status
             state.setStatusUpdated(true)
             state.setLastStatus({
                 'bitcoin': { 'mainnet': { 'xchain-encoder': { container_id: encId, status: { State: { Status: 'running' } } } } },
@@ -398,7 +365,6 @@ describe('Integration: Hub/Explorer Config Update', function () {
 
             await HubService.updateHub()
 
-            // Hub should be connected to both coin/network networks
             const hubConnections = networkConnections.filter(c => c.containerId === hubId)
             const networks = hubConnections.map(c => c.network)
             expect(networks).to.include('xchain-node-bitcoin-mainnet')

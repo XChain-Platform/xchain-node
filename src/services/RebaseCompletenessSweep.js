@@ -11,9 +11,9 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * XChain Node - rebase-completeness sweep ( spec section 6.1)
+ * XChain Node - rebase-completeness sweep (spec section 6.1)
  *
- * The one invariant that makes the  batch safe ungated is that the rebase is
+ * The one invariant that makes this batch safe ungated is that the rebase is
  * universal: after it, NO service keeps pre-batch derived state. An ungated consensus
  * change applied from a long-running node's current tip diverges from the same change
  * applied by a node replaying from genesis, so a single survivor forks the fleet.
@@ -58,10 +58,9 @@
  * price rounds from live feeds, hub-side governance) may legitimately sit empty and
  * untouched long after the window, and a KEPT table (configs, keys, peer registry) is
  * SUPPOSED to predate it. Asserting over those produces false failures that teach an
- * operator to ignore the tool. The bucket lists come from the section 3.1 inventory
- * (claude/reports/launch/2026-07-29_xc637-state-reset-inventory.md), which is why this
- * module takes them as input rather than discovering tables itself: discovering them
- * would silently re-classify whatever the inventory decided.
+ * operator to ignore the tool. The bucket lists come from the section 3.1 state-reset
+ * inventory, which is why this module takes them as input rather than discovering
+ * tables itself: discovering them would silently re-classify whatever the inventory decided.
  *
  * FAIL-CLOSED. An unreadable store, a missing table, an absent CREATE_TIME and an
  * unparseable one are all failures, not skips. The question being answered is "did every
@@ -70,7 +69,7 @@
 
 'use strict';
 
-const BATCH_TAG = '';
+const BATCH_TAG = 'XC-637';
 
 // Verdict codes, kept stable so the deploy report can cite them.
 const OK                = 'ok';
@@ -255,7 +254,7 @@ const SESSION_UTC_SQL = "SET SESSION time_zone = '+00:00'";
 /** Human-readable report body; the CLI prints this and the deploy report can paste it. */
 function formatReport(sweep) {
     const lines = [];
-    lines.push(' rebase-completeness sweep (' + sweep.batchTag + ')');
+    lines.push('Rebase-completeness sweep (' + sweep.batchTag + ')');
     lines.push('window opened: ' + sweep.windowOpen);
     lines.push('');
     for (const s of sweep.stores) {

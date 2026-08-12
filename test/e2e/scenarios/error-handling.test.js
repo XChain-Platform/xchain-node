@@ -39,10 +39,6 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
         await env.teardown()
     })
 
-    // -------------------------------------------------------------------
-    // E2E-060: Docker unreachable
-    // -------------------------------------------------------------------
-
     describe('E2E-060: Docker unreachable during precheck', function () {
 
         it('throws descriptive error when docker --version fails', async function () {
@@ -94,17 +90,12 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // E2E-061: Docker build failure
-    // -------------------------------------------------------------------
-
     describe('E2E-061: Docker run failure leaves no LevelDB entry', function () {
 
         it('no container ID stored when docker run fails', async function () {
             env.setupDefaultRoutes()
             env.setupFullStack('bitcoin', 'regtest')
 
-            // Override: docker run fails (after build succeeds)
             env.capture._routes = env.capture._routes.filter(r => {
                 if (r.pattern instanceof RegExp) return !r.pattern.test('docker run -d')
                 return true
@@ -124,15 +115,10 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
                 // Expected to fail
             }
 
-            // No container ID should be in LevelDB for the encoder
             const encoderEntry = await env.getModule('xchain-encoder', 'bitcoin', 'regtest')
             expect(encoderEntry).to.be.null
         })
     })
-
-    // -------------------------------------------------------------------
-    // E2E-062: Missing module directory
-    // -------------------------------------------------------------------
 
     describe('E2E-062: Missing module directory', function () {
 
@@ -152,17 +138,12 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // E2E-063: Git clone failure
-    // -------------------------------------------------------------------
-
     describe('E2E-063: Git clone failure propagates error', function () {
 
         it('cloneGit propagates git clone error', async function () {
             env.setupDefaultRoutes()
             env.writeConfigFile('bitcoin-regtest', '')
 
-            // Override git clone to fail
             env.capture._routes = env.capture._routes.filter(r => {
                 if (r.pattern instanceof RegExp) return !r.pattern.test('git clone')
                 return true
@@ -183,10 +164,6 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // E2E-064: Start with no installed modules
-    // -------------------------------------------------------------------
-
     describe('E2E-064: Start with empty LevelDB', function () {
 
         it('startModules succeeds gracefully with no installed modules', async function () {
@@ -197,15 +174,10 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
             const result = await cli.moduleOps.startModules(serviceList)
             expect(result).to.be.true
 
-            // No docker start commands should have been issued
             const startCmds = env.capture.findCommands(/docker start/)
             expect(startCmds).to.have.lengthOf(0)
         })
     })
-
-    // -------------------------------------------------------------------
-    // E2E-065: Stop with no installed modules
-    // -------------------------------------------------------------------
 
     describe('E2E-065: Stop with empty LevelDB', function () {
 

@@ -15,10 +15,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { EventEmitter } = require('events')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const VALID_CONTAINER_ID = 'a'.repeat(64)
 
 // Fake `spawn` for executeDockerMariaDbCommand, which now pipes SQL to the
@@ -180,7 +176,7 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}) {
             getInstalledCoinsAndNetworks: stubs.getInstalledCoinsAndNetworks
         },
         // setDatabaseParameters refuses to rotate when a running container carries a
-        // different password . Stub it clean by default so the provisioning
+        // different password. Stub it clean by default so the provisioning
         // tests stay about provisioning; DbCredentialDrift.test.js owns the guard, and
         // the drift-refusal case below overrides this stub.
         './DbCredentialDrift': {
@@ -204,10 +200,6 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}) {
 }
 
 describe('DatabaseService', function () {
-
-    // -------------------------------------------------------------------
-    // checkIfDatabaseModuleExists
-    // -------------------------------------------------------------------
 
     describe('checkIfDatabaseModuleExists()', function () {
 
@@ -247,10 +239,6 @@ describe('DatabaseService', function () {
             expect(result).to.be.null
         })
     })
-
-    // -------------------------------------------------------------------
-    // executeDockerMariaDbCommand
-    // -------------------------------------------------------------------
 
     describe('executeDockerMariaDbCommand()', function () {
 
@@ -325,10 +313,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // executeNativeMariaDbCommand (external-DB path)
-    // -------------------------------------------------------------------
-
     describe('executeNativeMariaDbCommand()', function () {
 
         // Security: the mariadb driver embeds the failing SQL in its error
@@ -355,10 +339,6 @@ describe('DatabaseService', function () {
             expect(stubs.mariadb._fakeConn.end.called).to.be.true
         })
     })
-
-    // -------------------------------------------------------------------
-    // buildDatabaseModule
-    // -------------------------------------------------------------------
 
     describe('buildDatabaseModule()', function () {
 
@@ -399,7 +379,6 @@ describe('DatabaseService', function () {
             stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
             const ds = loadDatabaseService(stubs)
             const result = await ds.buildDatabaseModule('bitcoin', 'mainnet')
-            // Should call execFileAsync for docker pull, tag, and run
             expect(stubs.execFileAsync.called).to.be.true
         })
 
@@ -609,10 +588,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // checkIfDatabaseIsReady
-    // -------------------------------------------------------------------
-
     describe('checkIfDatabaseIsReady()', function () {
 
         it('returns true when database responds', async function () {
@@ -656,10 +631,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getDatabaseHostPort
-    // -------------------------------------------------------------------
-
     describe('getDatabaseHostPort()', function () {
 
         it('parses port from docker port output', async function () {
@@ -687,10 +658,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getDatabaseContainerId
-    // -------------------------------------------------------------------
-
     describe('getDatabaseContainerId()', function () {
 
         it('returns container ID when inspect returns valid 64-char hex', async function () {
@@ -717,10 +684,6 @@ describe('DatabaseService', function () {
             expect(result).to.be.null
         })
     })
-
-    // -------------------------------------------------------------------
-    // getExternalDbConfig
-    // -------------------------------------------------------------------
 
     describe('getExternalDbConfig()', function () {
 
@@ -788,7 +751,6 @@ describe('DatabaseService', function () {
 
             const ds = loadDatabaseService(stubs)
             const result = await ds.getExternalDbConfig()
-            // Should have called saveExternalDbConfig after successful prompt
             expect(stubs.saveExternalDbConfig.calledOnce).to.be.true
             expect(result).to.be.an('object')
         })
@@ -822,10 +784,6 @@ describe('DatabaseService', function () {
             expect(threw.message).to.match(/Invalid external-DB port/)
         })
     })
-
-    // -------------------------------------------------------------------
-    // executeNativeMariaDbCommand
-    // -------------------------------------------------------------------
 
     describe('executeNativeMariaDbCommand()', function () {
 
@@ -892,10 +850,6 @@ describe('DatabaseService', function () {
             expect(stubs.mariadb._fakeConn.end.calledOnce).to.be.true
         })
     })
-
-    // -------------------------------------------------------------------
-    // askMariadbRootPassword
-    // -------------------------------------------------------------------
 
     describe('askMariadbRootPassword()', function () {
 
@@ -1151,10 +1105,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // addUserPasswordToDatabase
-    // -------------------------------------------------------------------
-
     describe('addUserPasswordToDatabase()', function () {
 
         it('creates database and user via docker when db does not exist', async function () {
@@ -1218,7 +1168,7 @@ describe('DatabaseService', function () {
             // run a second indexer against it. Without this grant the drill is BTC-only
             // by accident: the BTC account happens to hold ALL PRIVILEGES on Drill
             // schemas left by the flag-day drill, every other chain's account does not,
-            // and node B's CREATE DATABASE is simply refused .
+            // and node B's CREATE DATABASE is simply refused.
             const stubs = makeStubs();
             const executedCommands = [];
             stubs.spawn.callsFake(fakeSpawn((sql) => {
@@ -1382,10 +1332,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // addUserPasswordToDatabase: EXTERNAL_DB path
-    // -------------------------------------------------------------------
-
     describe('addUserPasswordToDatabase(): EXTERNAL_DB path', function () {
 
         function setExtEnv() {
@@ -1497,10 +1443,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // resetDatabases
-    // -------------------------------------------------------------------
-
     describe('resetDatabases()', function () {
 
         it('drops and recreates each database module', async function () {
@@ -1518,13 +1460,9 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // clearHubPriceIngestWatermark 
-    //
     // A wiped indexer DB restarts push_generations at 0, which the hub's price
     // ingest fence reads as a stale replay and drops, taking that chain's price
     // rail down. The reset clears the fence row so the rail comes back.
-    // -------------------------------------------------------------------
 
     describe('clearHubPriceIngestWatermark()', function () {
 
@@ -1565,7 +1503,7 @@ describe('DatabaseService', function () {
             expect(result).to.be.false
             expect(executed.some(s => /^DELETE FROM/.test(s))).to.be.false
             expect(lines).to.contain("DELETE FROM price_ingest_watermarks WHERE source_chain = 'BTC';")
-            expect(lines).to.contain('')
+            expect(lines).to.contain('before the indexer resumes pushing:')
         })
 
         it('warns instead of throwing when the hub config carries no HUB_DB_NAME', async function () {
@@ -1632,10 +1570,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // setDatabaseParameters
-    // -------------------------------------------------------------------
-
     describe('setDatabaseParameters()', function () {
 
         it('iterates installed coins+networks and adds DB users', async function () {
@@ -1666,7 +1600,7 @@ describe('DatabaseService', function () {
             }
         })
 
-        // : this is the ONLY step that writes the freshly-minted decoder /
+        // This is the ONLY step that writes the freshly-minted decoder /
         // indexer password into MariaDB, and both callers run it right after a
         // buildAndUp. An empty iteration used to return true, so the caller's
         // throw-on-error guard never fired and the install reported success
@@ -1709,7 +1643,7 @@ describe('DatabaseService', function () {
             }
         })
 
-        // : two installs sharing one Docker daemon and one MariaDB pin
+        // Two installs sharing one Docker daemon and one MariaDB pin
         // different passwords for the same account, and whichever provisions last
         // locks the other's container out for as long as nobody notices.
         it('checks for credential drift with the config values, before any account write', async function () {
@@ -1767,10 +1701,6 @@ describe('DatabaseService', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // buildDatabaseModule: EXTERNAL_DB path
-    // -------------------------------------------------------------------
 
     describe('buildDatabaseModule(): EXTERNAL_DB path', function () {
 
@@ -1830,10 +1760,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // buildDatabaseModule: existing container, no coin/network
-    // -------------------------------------------------------------------
-
     describe('buildDatabaseModule(): no coin/network', function () {
 
         it('returns true without network join when coin+network are empty', async function () {
@@ -1883,10 +1809,6 @@ describe('DatabaseService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // ensureDatabasePool
-    // -------------------------------------------------------------------
-
     describe('ensureDatabasePool()', function () {
 
         it('is a no-op when db is already ready', async function () {
@@ -1914,10 +1836,6 @@ describe('DatabaseService', function () {
             expect(stubs.db.createDatabase.calledOnce).to.be.true
         })
     })
-
-    // -------------------------------------------------------------------
-    // ensureXchainNodeAccess: EXTERNAL_DB path
-    // -------------------------------------------------------------------
 
     describe('ensureXchainNodeAccess(): EXTERNAL_DB path', function () {
 
@@ -2009,10 +1927,6 @@ describe('DatabaseService', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // ensureXchainNodeAccess: docker path
-    // -------------------------------------------------------------------
 
     describe('ensureXchainNodeAccess()', function () {
 

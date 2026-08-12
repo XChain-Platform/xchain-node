@@ -101,8 +101,8 @@ function tryAcquireOnce(lockFile, payload, pid) {
 //
 // waitMs > 0 makes a LIVE-held lock block-and-poll (every pollMs) up to waitMs
 // before giving up, so a short/read-only command pauses for a lock-holding
-// mutator instead of failing outright (#3142). The default waitMs=0 preserves
-// the original refuse-immediately behavior for mutating commands.
+// mutator instead of failing outright. The default waitMs=0 preserves the
+// original refuse-immediately behavior for mutating commands.
 function acquireCommandLock({ pid = process.pid, command = '', waitMs = 0, pollMs = 200 } = {}) {
     const lockFile = getLockFilePath()
     fs.mkdirSync(path.dirname(lockFile), { recursive: true })

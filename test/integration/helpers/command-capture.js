@@ -33,10 +33,6 @@ class CommandCapture {
         this._defaultResponse = { stdout: '', stderr: '' }
     }
 
-    /**
-     * Register a pattern-based response route.
-     * Returns a builder with .returns({ stdout, stderr, error })
-     */
     when(pattern) {
         const route = { pattern, response: { stdout: '', stderr: '' }, dynamic: null }
         this._routes.push(route)
@@ -45,9 +41,8 @@ class CommandCapture {
                 route.response = response
                 return this
             },
-            /**
-             * Dynamic response: fn(command) => { stdout, stderr, error }
-             */
+            // respondsWith takes fn(command) => { stdout, stderr, error } for
+            // responses that depend on the matched command.
             respondsWith: (fn) => {
                 route.dynamic = fn
                 return this
@@ -55,17 +50,11 @@ class CommandCapture {
         }
     }
 
-    /**
-     * Set the default response for unmatched commands.
-     */
     setDefault(response) {
         this._defaultResponse = response
         return this
     }
 
-    /**
-     * Find the matching route for a command string.
-     */
     _matchRoute(command) {
         for (const route of this._routes) {
             let matches = false
@@ -82,12 +71,8 @@ class CommandCapture {
         return this._defaultResponse
     }
 
-    /**
-     * Create a stub for child_process.execFile (callback style).
-     * Compatible with: execFile(command, args, [options], callback)
-     * Records the full command string (command + args.join(' ')) for backward
-     * compatibility with findCommands() and assertCalled().
-     */
+    // execFile(command, args, [options], callback) callback-style stub.
+    // Joins command + args into one string for findCommands()/assertCalled().
     createExecFileStub() {
         const self = this
         return function execFileStub(command, args, ...rest) {
@@ -115,14 +100,10 @@ class CommandCapture {
                 })
             }
 
-            // Return a minimal ChildProcess-like object
             return { kill: () => {}, on: () => {} }
         }
     }
 
-    /**
-     * Create a stub for promisified execFile (util.promisify(execFile)).
-     */
     createExecFileAsyncStub() {
         const self = this
         return async function execFileAsyncStub(command, args, options) {
@@ -151,10 +132,6 @@ class CommandCapture {
         return this.createExecFileAsyncStub()
     }
 
-    /**
-     * Create a stub for child_process.spawn.
-     * Returns a minimal object with stdout/stderr event emitters.
-     */
     createSpawnStub() {
         const self = this
         return function spawnStub(command, args, options) {
@@ -172,9 +149,6 @@ class CommandCapture {
         }
     }
 
-    /**
-     * Create a stub for child_process.spawnSync.
-     */
     createSpawnSyncStub() {
         const self = this
         return function spawnSyncStub(command, args, options) {
@@ -183,8 +157,6 @@ class CommandCapture {
             return { status: 0, stdout: '', stderr: '' }
         }
     }
-
-    // --- Query methods ---
 
     history() {
         return this._history
@@ -219,9 +191,6 @@ class CommandCapture {
         }
     }
 
-    /**
-     * Assert a command was called and its string contains all specified flags/fragments.
-     */
     assertCommandContains(pattern, fragments) {
         const matches = this.assertCalled(pattern)
         const cmd = matches[0].command

@@ -5,17 +5,16 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Go-live pre-flight gate (GO-LIVE-CHECKLIST.md, finding A1 of the 2026-06-24
-// launch-readiness review). Every safe launch setting used to be an individual
-// thing-someone-must-remember; this gate asserts them together at the one
-// chokepoint every service deploy passes through (buildAndUp), so a mainnet
-// write surface cannot boot with un-armed settings once the operator flips
-// XCHAIN_NODE_GO_LIVE=1.
+// Go-live pre-flight gate, from a launch-readiness review finding. Every safe
+// launch setting used to be an individual thing-someone-must-remember; this
+// gate asserts them together at the one chokepoint every service deploy
+// passes through (buildAndUp), so a mainnet write surface cannot boot with
+// un-armed settings once the operator flips XCHAIN_NODE_GO_LIVE=1.
 //
 // Modes:
 //   - XCHAIN_NODE_GO_LIVE unset (pre-launch, today's fleet): violations are
 //     WARNINGS only. Routine mainnet installs/updates keep working while the
-//     flag-day placeholders are still intentionally un-armed ( pending).
+//     flag-day placeholders are still intentionally un-armed (pending).
 //   - XCHAIN_NODE_GO_LIVE=1 (set fleet-wide at the launch flip, per the
 //     checklist): violations REFUSE the install/update of a mainnet write
 //     surface.
@@ -33,8 +32,8 @@ const {
 
 // The 5 un-decided flag-days share this placeholder activation timestamp
 // (2026-12-31T22:00:00Z). Its presence in a service's consensus sources means
-//  has not been armed yet: shipping that to a live mainnet silently
-// leaves the gated behavior off until 2027.
+// the flag-day has not been armed yet: shipping that to a live mainnet
+// silently leaves the gated behavior off until 2027.
 const FLAG_DAY_PLACEHOLDER = '1798761600'
 
 // Services whose mainnet deployment accepts writes or feeds consensus, and
@@ -102,7 +101,7 @@ function collectViolations(module, environmentVariables, moduleDir) {
         if (!keySet('HUB_API_KEY')) violations.push('HUB_API_KEY is not set (hub consensus-affecting write methods run OPEN)')
     }
     if (module === XChainService.XCHAIN_ENCODER) {
-        if (!keySet('API_KEY') && !keySet('ENCODER_API_KEY')) violations.push('API_KEY is not set (encoder API, including broadcast_tx, runs OPEN; )')
+        if (!keySet('API_KEY') && !keySet('ENCODER_API_KEY')) violations.push('API_KEY is not set (encoder API, including broadcast_tx, runs OPEN)')
     }
     if (module === SYNC_MODULE_NAME) {
         if (!keySet('SYNC_API_KEY')) violations.push('SYNC_API_KEY is not set (sync REST/WS API runs UNAUTHENTICATED and /halt/clear is disabled)')
@@ -115,7 +114,7 @@ function collectViolations(module, environmentVariables, moduleDir) {
     if (moduleDir) {
         const placeholders = findFlagDayPlaceholders(moduleDir)
         if (placeholders.length > 0) {
-            violations.push('flag-day placeholder timestamp ' + FLAG_DAY_PLACEHOLDER + ' ( un-armed) present in: ' + placeholders.join(', '))
+            violations.push('flag-day placeholder timestamp ' + FLAG_DAY_PLACEHOLDER + ' (un-armed) present in: ' + placeholders.join(', '))
         }
     }
 
@@ -148,7 +147,7 @@ function assertGoLiveReady(module, coin, network, environmentVariables, moduleDi
     if (armed) {
         throw new Error(header + ' REFUSING to deploy a mainnet write surface with un-armed settings (XCHAIN_NODE_GO_LIVE is set).\n'
             + lines.join('\n')
-            + '\nSee claude/reports/launch/GO-LIVE-CHECKLIST.md. To bypass once (not for launch): XCHAIN_NODE_SKIP_GO_LIVE_GATE=1')
+            + '\nSee the go-live checklist. To bypass once (not for launch): XCHAIN_NODE_SKIP_GO_LIVE_GATE=1')
     }
     console.warn('WARNING: ' + header + ' un-armed launch settings detected (deploy proceeds; will REFUSE once XCHAIN_NODE_GO_LIVE=1):\n' + lines.join('\n'))
 }

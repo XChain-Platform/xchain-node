@@ -60,7 +60,7 @@ function defaultCapabilityConfig(capabilities) {
     const enabled = new Set(capabilities)
     const allCaps = ['price', 'cross_chain', 'oracle_publish', 'attestation']
     return {
-        // : these MUST equal src/coins/BTC.js STAKING.CAPABILITIES MIN_STAKE
+        // These MUST equal src/coins/BTC.js STAKING.CAPABILITIES MIN_STAKE
         // (the federation-uniform floors every hub sends the indexer as the
         // qualifying threshold). The hub asserts this at startup and refuses to
         // boot on mainnet/testnet if they diverge; cross_chain was 1000 here vs

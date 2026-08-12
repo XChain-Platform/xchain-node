@@ -30,7 +30,6 @@ module.exports = {
 
         metrics.start()
 
-        // --- Standard order: service, chain, network ---
         {
             const label = 'standard-order'
             const args = ['xchain-decoder', 'bitcoin', 'regtest']
@@ -54,7 +53,6 @@ module.exports = {
             }
         }
 
-        // --- Reversed order: network, chain, service ---
         {
             const label = 'reversed-order'
             const args = ['regtest', 'bitcoin', 'xchain-decoder']
@@ -77,7 +75,6 @@ module.exports = {
             }
         }
 
-        // --- With branch (expectBranch=true) ---
         {
             const label = 'with-branch'
             const args = ['master', 'xchain-decoder', 'bitcoin', 'regtest']
@@ -100,7 +97,6 @@ module.exports = {
             }
         }
 
-        // --- All defaults (empty args) ---
         {
             const label = 'empty-args'
             const args = []
@@ -123,7 +119,6 @@ module.exports = {
             }
         }
 
-        // --- All "all" values ---
         {
             const label = 'all-values'
             const args = ['all', 'all', 'all']

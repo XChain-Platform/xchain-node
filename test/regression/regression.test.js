@@ -28,10 +28,6 @@ const E2EEnv       = require('../e2e/helpers/e2e-env')
 
 const { filterCommandParameters } = require('../../src/services/ConfigService')
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
 function streamFromString(str) {
     const s = new Readable()
     s.push(str)
@@ -114,23 +110,11 @@ function loadModuleService(stubs, configOverrides) {
     })
 }
 
-// ============================================================================
-// REGRESSION SUITE
-// ============================================================================
-
 describe('Regression Suite', function () {
 
     afterEach(function () {
         sinon.restore()
     })
-
-    // ========================================================================
-    // P0: CRITICAL
-    // ========================================================================
-
-    // --------------------------------------------------------------------
-    // R-ARG: Argument Parsing & Validation
-    // --------------------------------------------------------------------
 
     describe('[regression:p0] Argument Parsing & Validation', function () {
         const ConfigService = require('../../src/services/ConfigService')
@@ -205,17 +189,12 @@ describe('Regression Suite', function () {
             expect(validatePort('3000; rm -rf /')).to.be.false
             expect(validatePort(NaN)).to.be.false
             expect(validatePort(Infinity)).to.be.false
-            // Valid
             expect(validatePort(1)).to.be.true
             expect(validatePort(80)).to.be.true
             expect(validatePort(65535)).to.be.true
             expect(validatePort('8332')).to.be.true
         })
     })
-
-    // --------------------------------------------------------------------
-    // R-CFG: Configuration Generation
-    // --------------------------------------------------------------------
 
     describe('[regression:p0] Configuration Generation', function () {
 
@@ -328,10 +307,6 @@ describe('Regression Suite', function () {
         })
     })
 
-    // --------------------------------------------------------------------
-    // R-DCK: Docker Command Construction
-    // --------------------------------------------------------------------
-
     describe('[regression:p0] Docker Command Construction', function () {
 
         it('R-DCK-001: buildAndUp constructs docker run with env vars and returns 64-char container ID', async function () {
@@ -422,10 +397,6 @@ describe('Regression Suite', function () {
             }
         })
     })
-
-    // --------------------------------------------------------------------
-    // R-SEC: Security
-    // --------------------------------------------------------------------
 
     describe('[regression:p0] Security', function () {
 
@@ -541,14 +512,6 @@ describe('Regression Suite', function () {
             expect(constants.NODE_PREFIX).to.match(/^[a-z0-9][a-z0-9._-]*$/)
         })
     })
-
-    // ========================================================================
-    // P1: HIGH
-    // ========================================================================
-
-    // --------------------------------------------------------------------
-    // R-LIF: Service Lifecycle
-    // --------------------------------------------------------------------
 
     describe('[regression:p1] Service Lifecycle', function () {
         this.timeout(15000)
@@ -721,10 +684,6 @@ describe('Regression Suite', function () {
         })
     })
 
-    // --------------------------------------------------------------------
-    // R-STA: State & Data Integrity
-    // --------------------------------------------------------------------
-
     describe('[regression:p1] State & Data Integrity', function () {
 
         // Store-level regressions (R-STA-001..003b) live in test/unit/MariaDbStore.test.js
@@ -772,10 +731,6 @@ describe('Regression Suite', function () {
         // coin/network combos) are now covered in test/unit/MariaDbStore.test.js.
     })
 
-    // --------------------------------------------------------------------
-    // R-E2E: E2E Lifecycle Workflows
-    // --------------------------------------------------------------------
-
     describe('[regression:p1] E2E Lifecycle Workflows', function () {
         this.timeout(30000)
 
@@ -799,23 +754,19 @@ describe('Regression Suite', function () {
 
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
 
-            // Install
             const installResult = await cli.moduleOps.installModules(serviceList, 'master')
             expect(installResult).to.be.true
 
             const modulesAfterInstall = await env.getAllModules()
             expect(modulesAfterInstall.length).to.be.greaterThanOrEqual(5)
 
-            // All stored container IDs are 64 chars
             for (const mod of modulesAfterInstall) {
                 expect(mod.container_id).to.have.lengthOf(64)
             }
 
-            // Stop
             const stopResult = await cli.moduleOps.stopModules(serviceList)
             expect(stopResult).to.be.true
 
-            // Start
             const startResult = await cli.moduleOps.startModules(serviceList)
             expect(startResult).to.be.true
 
@@ -830,7 +781,6 @@ describe('Regression Suite', function () {
                 expect(after.container_id).to.equal(mod.container_id)
             }
 
-            // Uninstall
             const uninstallResult = await cli.moduleOps.uninstallModules(serviceList)
             expect(uninstallResult).to.be.true
         })
@@ -899,10 +849,6 @@ describe('Regression Suite', function () {
         })
     })
 
-    // --------------------------------------------------------------------
-    // R-BND: Config Parsing Boundaries
-    // --------------------------------------------------------------------
-
     describe('[regression:p1] Config Parsing Boundaries', function () {
 
         it('R-BND-001: config values containing "=" are preserved fully', async function () {
@@ -950,14 +896,6 @@ describe('Regression Suite', function () {
         })
     })
 
-    // ========================================================================
-    // P2: MEDIUM
-    // ========================================================================
-
-    // --------------------------------------------------------------------
-    // R-PRE: Precheck & Error Handling
-    // --------------------------------------------------------------------
-
     describe('[regression:p2] Precheck & Error Handling', function () {
         this.timeout(15000)
 
@@ -995,7 +933,6 @@ describe('Regression Suite', function () {
                 })
 
                 const serviceList = { 'bitcoin': { 'mainnet': ['xchain-encoder'] } }
-                // Should not throw
                 const result = await moduleOps.startModules(serviceList)
                 expect(result).to.be.true
             } finally {
@@ -1018,10 +955,6 @@ describe('Regression Suite', function () {
             }
         })
     })
-
-    // --------------------------------------------------------------------
-    // R-HLP: Utility Function Regression
-    // --------------------------------------------------------------------
 
     describe('[regression:p2] Utility Functions', function () {
 

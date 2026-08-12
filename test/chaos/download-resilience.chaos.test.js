@@ -15,10 +15,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const crypto     = require('crypto')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const validHash = 'a'.repeat(64)
 const validHashesData = {
     'owner/repo': { 'v1.0.0': validHash }
@@ -65,10 +61,6 @@ describe('Chaos: Download Resilience', function () {
     afterEach(function () {
         sinon.restore()
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 8: GitHub API errors (NET-01)
-    // -------------------------------------------------------------------
 
     describe('Experiment 8: GitHub API unreachable', function () {
 
@@ -125,10 +117,6 @@ describe('Chaos: Download Resilience', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment 8b: GitHub rate limiting (NET-02)
-    // -------------------------------------------------------------------
-
     describe('Experiment 8b: GitHub rate limiting', function () {
 
         it('throws descriptive error on HTTP 403 (rate limit)', async function () {
@@ -183,10 +171,6 @@ describe('Chaos: Download Resilience', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment 8c: Hash mismatch (NET-03)
-    // -------------------------------------------------------------------
-
     describe('Experiment 8c: SHA-256 hash mismatch', function () {
 
         it('throws with expected vs actual hash on mismatch', async function () {
@@ -234,14 +218,9 @@ describe('Chaos: Download Resilience', function () {
             const { GitHubDownloader } = loadDownloader({ fs: fsStub })
             const dl = new GitHubDownloader('/test/hashes.json')
 
-            // Should not throw
             await dl.verifyRepositoryHash('owner/repo', 'v1.0.0', '/path/to/download')
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 8d: No compatible version found
-    // -------------------------------------------------------------------
 
     describe('Experiment 8d: No compatible version available', function () {
 
@@ -282,10 +261,6 @@ describe('Chaos: Download Resilience', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment 8e: getReleaseByTag failure
-    // -------------------------------------------------------------------
-
     describe('Experiment 8e: Release tag not found', function () {
 
         it('throws when specific tag does not exist', async function () {
@@ -305,10 +280,6 @@ describe('Chaos: Download Resilience', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 8f: Hashes file corruption
-    // -------------------------------------------------------------------
 
     describe('Experiment 8f: Hashes file corruption', function () {
 
@@ -363,10 +334,6 @@ describe('Chaos: Download Resilience', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment 8g: tar extraction failure (CMD-09)
-    // -------------------------------------------------------------------
-
     describe('Experiment 8g: Archive extraction failure', function () {
 
         it('throws when tar exits with non-zero code', function () {
@@ -374,19 +341,13 @@ describe('Chaos: Download Resilience', function () {
             const { GitHubDownloader } = loadDownloader({ spawnSync: spawnSyncStub })
             const dl = new GitHubDownloader('/test/hashes.json')
 
-            // Directly test the extraction path by calling downloadReleaseAsset
-            // with a mocked release that has a .tar.gz asset
-            // Since downloadReleaseAsset is async and complex, test via downloadRepoVersion
-
-            // For a simpler test, verify spawnSync behavior:
+            // Exercises spawnSync in isolation rather than downloadReleaseAsset,
+            // since that path is async and mocking a full release/asset chain
+            // would add complexity for marginal benefit here.
             const result = spawnSyncStub('tar', ['-xzf', '/path/to/file.tar.gz', '-C', '/output'])
             expect(result.status).to.equal(2)
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment: Repository not found (404)
-    // -------------------------------------------------------------------
 
     describe('Experiment: Repository not found', function () {
 
@@ -408,10 +369,6 @@ describe('Chaos: Download Resilience', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment: downloadRepoVersion cleanup on failure
-    // -------------------------------------------------------------------
 
     describe('Experiment: Download cleanup on failure', function () {
 

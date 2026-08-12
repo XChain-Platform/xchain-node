@@ -16,10 +16,6 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const { Coin, XChainService, EXPLORER_MODULE_NAME, NODE_VERSION_FILE_NAME, projectFolders } = require('../../src/config/constants')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeStubs() {
     return {
         fs: {
@@ -59,10 +55,6 @@ function loadVersionService(stubs) {
 
 describe('VersionService', function () {
 
-    // -------------------------------------------------------------------
-    // getGithubProjectVersion
-    // -------------------------------------------------------------------
-
     describe('getGithubProjectVersion()', function () {
 
         it('calls GitHub API with correct URL', async function () {
@@ -100,10 +92,6 @@ describe('VersionService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // checkRemoteNodeVersion
-    // -------------------------------------------------------------------
-
     describe('checkRemoteNodeVersion()', function () {
 
         it('calls gitHubDownloader for bitcoin with correct owner/repo', async function () {
@@ -139,10 +127,6 @@ describe('VersionService', function () {
             expect(stubs.setRemoteModuleVersion.calledWith('node-bitcoin', release)).to.be.true
         })
     })
-
-    // -------------------------------------------------------------------
-    // getLocalNodeVersion
-    // -------------------------------------------------------------------
 
     describe('getLocalNodeVersion()', function () {
 
@@ -181,10 +165,6 @@ describe('VersionService', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // getLocalModuleVersion
-    // -------------------------------------------------------------------
 
     describe('getLocalModuleVersion()', function () {
 
@@ -240,10 +220,6 @@ describe('VersionService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getContainerNodeVersion
-    // -------------------------------------------------------------------
-
     describe('getContainerNodeVersion()', function () {
 
         it('reads version file from container via docker cp', async function () {
@@ -267,10 +243,6 @@ describe('VersionService', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // getContainerModuleVersion
-    // -------------------------------------------------------------------
 
     describe('getContainerModuleVersion()', function () {
 
@@ -298,10 +270,6 @@ describe('VersionService', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // checkAllRemoteVersions
-    // -------------------------------------------------------------------
 
     describe('checkAllRemoteVersions()', function () {
 

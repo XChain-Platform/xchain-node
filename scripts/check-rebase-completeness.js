@@ -12,36 +12,35 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- *  section 6.1 rebase-completeness sweep, CLI.
+ * Rebase-completeness sweep, CLI.
  *
  *   node scripts/check-rebase-completeness.js <config.json>
  *
  * Exit 0 = every inventoried store rebased. Non-zero = at least one store carries
- * pre-batch derived state (or could not be read, which counts the same). Run it from
- * section 8 step 7, BEFORE publishing the baseline anchors: publication is the window's
- * first irreversible act, and a survivor found afterwards costs an abort that is no
+ * pre-batch derived state (or could not be read, which counts the same). Run this
+ * BEFORE publishing the baseline anchors: publication is the window's first
+ * irreversible act, and a survivor found afterwards costs an abort that is no
  * longer clean.
  *
  * The logic lives in src/services/RebaseCompletenessSweep.js and is unit tested there;
  * this file is only credentials, connections and exit codes. Those are exported behind
- * an entrypoint guard and covered by test/unit/checkRebaseCompleteness.test.js ,
+ * an entrypoint guard and covered by test/unit/checkRebaseCompleteness.test.js,
  * because a credential or store-lookup fault here decides a deploy just as hard as the
  * sweep verdict does.
  *
- * CONFIG SHAPE. The bucket lists come from the section 3.1 state-reset inventory
- * (claude/reports/launch/2026-07-29_xc637-state-reset-inventory.md) and are supplied
- * rather than discovered, because discovering tables would silently re-classify whatever
- * the inventory decided. Only REPLAYED tables may be asserted: a REGENERATED table may
- * legitimately sit empty long after the window, and a KEPT table is supposed to predate
- * it, so asserting over either produces false failures that teach an operator to ignore
- * this tool.
+ * CONFIG SHAPE. The bucket lists come from the batch's state-reset inventory and are
+ * supplied rather than discovered, because discovering tables would silently
+ * re-classify whatever the inventory decided. Only REPLAYED tables may be asserted:
+ * a REGENERATED table may legitimately sit empty long after the window, and a KEPT
+ * table is supposed to predate it, so asserting over either produces false failures
+ * that teach an operator to ignore this tool.
  *
  *   {
  *     "window_open": "2026-08-01 00:00:00",        // UTC, from the deploy report
- *     "batch_tag":   "",
+ *     "batch_tag":   "REBASE-BATCH-1",
  *     "stores": [
  *       {
- *         "label":    "BTC mainnet indexer (node-host-a)",
+ *         "label":    "BTC mainnet indexer",
  *         "host":     "127.0.0.1",
  *         "port":     3306,
  *         "database": "XChain_BTC_Indexer",

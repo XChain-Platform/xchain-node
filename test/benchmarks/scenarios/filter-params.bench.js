@@ -31,7 +31,6 @@ module.exports = {
 
         metrics.start()
 
-        // --- all/all/all (worst case: full expansion) ---
         {
             const label = 'all-all-all'
 
@@ -59,7 +58,6 @@ module.exports = {
             }
         }
 
-        // --- Single coin/network/module ---
         {
             const label = 'single-target'
 
@@ -83,7 +81,6 @@ module.exports = {
             }
         }
 
-        // --- Explorer shortcut ---
         {
             const label = 'explorer'
 
@@ -107,7 +104,6 @@ module.exports = {
             }
         }
 
-        // --- Node shortcut ---
         {
             const label = 'node-all-all'
 

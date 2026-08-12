@@ -55,10 +55,6 @@ describe('Integration: Docker Network Management', function () {
         })
     }
 
-    // ---------------------------------------------------------------
-    // createDockerNetwork
-    // ---------------------------------------------------------------
-
     describe('createDockerNetwork', function () {
 
         it('creates network when it does not exist', async function () {
@@ -98,10 +94,6 @@ describe('Integration: Docker Network Management', function () {
             capture.assertCalled(/docker network create xchain-node/)
         })
     })
-
-    // ---------------------------------------------------------------
-    // addContainerToNetwork
-    // ---------------------------------------------------------------
 
     describe('addContainerToNetwork', function () {
 
@@ -149,10 +141,6 @@ describe('Integration: Docker Network Management', function () {
             capture.assertNotCalled(/docker network connect/)
         })
     })
-
-    // ---------------------------------------------------------------
-    // Container lifecycle commands
-    // ---------------------------------------------------------------
 
     describe('container lifecycle commands', function () {
 
@@ -226,10 +214,6 @@ describe('Integration: Docker Network Management', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // checkDockerInstalledAndReachable
-    // ---------------------------------------------------------------
-
     describe('checkDockerInstalledAndReachable', function () {
 
         it('resolves when docker --version and docker ps succeed', async function () {
@@ -266,10 +250,6 @@ describe('Integration: Docker Network Management', function () {
             }
         })
     })
-
-    // ---------------------------------------------------------------
-    // getStatusFromContainer
-    // ---------------------------------------------------------------
 
     describe('getStatusFromContainer', function () {
 

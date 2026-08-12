@@ -9,7 +9,7 @@
  * General Public License v3.0 or later; see LICENSE.md.
  *
  **********************************************************************
- * : coverage for scripts/check-rebase-completeness.js.
+ * Coverage for scripts/check-rebase-completeness.js.
  *
  * RebaseCompletenessSweep already proves the VERDICT logic. What was untested is the CLI
  * half that feeds it, and every fault available there produces a false PASS rather than a
@@ -33,9 +33,9 @@ const cli     = require('../../scripts/check-rebase-completeness');
 
 const CONFIG = {
     window_open: '2026-08-01 00:00:00',
-    batch_tag: '',
+    batch_tag: 'REBASE-BATCH-1',
     stores: [
-        { label: 'BTC mainnet indexer (node-host-a)', host: '10.0.0.5', port: '3307',
+        { label: 'BTC mainnet indexer (host1)', host: '203.0.113.5', port: '3307',
           user: 'xchain', database: 'XChain_BTC_Indexer', replayed: ['blocks', 'actions'] },
         { label: 'LTC', database: 'XChain_LTC_Indexer', replayed: ['blocks'] }
     ]
@@ -64,12 +64,12 @@ function fakeConnect(behaviour) {
     return { connect, log };
 }
 
-describe(' check-rebase-completeness CLI (deploy-informing script)', function () {
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('label slugs', function () {
 
         it('folds punctuation and spacing into single underscores', function () {
-            assert.strictEqual(cli.slug('BTC mainnet indexer (node-host-a)'), 'BTC_MAINNET_INDEXER_NODES01');
+            assert.strictEqual(cli.slug('BTC mainnet indexer (host1)'), 'BTC_MAINNET_INDEXER_HOST1');
         });
 
         it('strips leading and trailing underscores so the env var name is usable', function () {
@@ -122,7 +122,7 @@ describe(' check-rebase-completeness CLI (deploy-informing script)', function ()
         it('carries the store host, port and user, coercing the port to a number', function () {
             const opts = cli.connectionOptionsFor(CONFIG.stores[0], 'information_schema',
                                                   { XC637_DB_PASS: 'v' });
-            assert.strictEqual(opts.host, '10.0.0.5');
+            assert.strictEqual(opts.host, '203.0.113.5');
             assert.strictEqual(opts.port, 3307);
             assert.strictEqual(opts.user, 'xchain');
             assert.strictEqual(opts.database, 'information_schema');
@@ -182,7 +182,7 @@ describe(' check-rebase-completeness CLI (deploy-informing script)', function ()
             await cli.makeQueryCreateTimes(CONFIG, connect, { XC637_DB_PASS: 'v' })
                      ('XChain_BTC_Indexer', ['blocks']);
             assert.strictEqual(log.opts[0].database, 'information_schema');
-            assert.strictEqual(log.opts[0].host, '10.0.0.5');
+            assert.strictEqual(log.opts[0].host, '203.0.113.5');
         });
 
         it('binds the database name ahead of the table list', async function () {
@@ -239,10 +239,10 @@ describe(' check-rebase-completeness CLI (deploy-informing script)', function ()
     describe('the epoch-marker read', function () {
 
         it('reads the store database itself and returns the newest batch tag', async function () {
-            const { connect, log } = fakeConnect({ rows: [{ batch_tag: '' }] });
+            const { connect, log } = fakeConnect({ rows: [{ batch_tag: 'REBASE-BATCH-1' }] });
             const out = await cli.makeQueryEpochMarker(CONFIG, connect, { XC637_DB_PASS: 'v' })
                                  ('XChain_BTC_Indexer');
-            assert.strictEqual(out, '');
+            assert.strictEqual(out, 'REBASE-BATCH-1');
             assert.strictEqual(log.opts[0].database, 'XChain_BTC_Indexer');
             assert.strictEqual(log.queries[0].sql, cli.EPOCH_MARKER_SQL);
             assert.match(cli.EPOCH_MARKER_SQL, /ORDER BY id DESC LIMIT 1/);
@@ -271,14 +271,14 @@ describe(' check-rebase-completeness CLI (deploy-informing script)', function ()
         });
 
         it('returns null for an unknown database without opening a connection', async function () {
-            const { connect, log } = fakeConnect({ rows: [{ batch_tag: '' }] });
+            const { connect, log } = fakeConnect({ rows: [{ batch_tag: 'REBASE-BATCH-1' }] });
             assert.strictEqual(
                 await cli.makeQueryEpochMarker(CONFIG, connect, { XC637_DB_PASS: 'v' })('ghost'), null);
             assert.strictEqual(log.opts.length, 0);
         });
 
         it('swallows a missing password here, because a marker is only corroboration', async function () {
-            const { connect } = fakeConnect({ rows: [{ batch_tag: '' }] });
+            const { connect } = fakeConnect({ rows: [{ batch_tag: 'REBASE-BATCH-1' }] });
             assert.strictEqual(
                 await cli.makeQueryEpochMarker(CONFIG, connect, {})('XChain_BTC_Indexer'), null);
         });
@@ -294,7 +294,7 @@ describe(' check-rebase-completeness CLI (deploy-informing script)', function ()
     describe('the config file', function () {
 
         it('parses a config from disk and resolves a relative path', function () {
-            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xc1252-cfg-'));
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rebase-cfg-'));
             const p = path.join(dir, 'sweep.json');
             fs.writeFileSync(p, JSON.stringify(CONFIG));
             assert.deepStrictEqual(cli.loadConfig(p), CONFIG);
@@ -302,7 +302,7 @@ describe(' check-rebase-completeness CLI (deploy-informing script)', function ()
         });
 
         it('throws on malformed JSON so the run exits 2 rather than sweeping nothing', function () {
-            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xc1252-cfg-'));
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rebase-cfg-'));
             const p = path.join(dir, 'bad.json');
             fs.writeFileSync(p, '{ "stores": [ ');
             assert.throws(() => cli.loadConfig(p));
@@ -317,13 +317,13 @@ describe(' check-rebase-completeness CLI (deploy-informing script)', function ()
             // catch, so prove it survives the CLI wiring and not just the sweeper's own tests.
             const config = {
                 window_open: '2026-08-01 00:00:00',
-                batch_tag: '',
+                batch_tag: 'REBASE-BATCH-1',
                 stores: [{ label: 'LTC', database: 'db1', replayed: ['blocks'] }]
             };
             const connect = async () => ({
                 query: async (sql) => {
                     if (sql === sweeper.SESSION_UTC_SQL) return [];
-                    if (sql === cli.EPOCH_MARKER_SQL) return [{ batch_tag: '' }];
+                    if (sql === cli.EPOCH_MARKER_SQL) return [{ batch_tag: 'REBASE-BATCH-1' }];
                     return [{ TABLE_NAME: 'blocks', CREATE_TIME: '2026-07-20 09:00:00' }];
                 },
                 end: async () => {}
@@ -340,13 +340,13 @@ describe(' check-rebase-completeness CLI (deploy-informing script)', function ()
         it('passes a store whose tables were all rebuilt inside the window', async function () {
             const config = {
                 window_open: '2026-08-01 00:00:00',
-                batch_tag: '',
+                batch_tag: 'REBASE-BATCH-1',
                 stores: [{ label: 'LTC', database: 'db1', replayed: ['blocks'] }]
             };
             const connect = async () => ({
                 query: async (sql) => {
                     if (sql === sweeper.SESSION_UTC_SQL) return [];
-                    if (sql === cli.EPOCH_MARKER_SQL) return [{ batch_tag: '' }];
+                    if (sql === cli.EPOCH_MARKER_SQL) return [{ batch_tag: 'REBASE-BATCH-1' }];
                     return [{ TABLE_NAME: 'blocks', CREATE_TIME: '2026-08-01 02:30:00' }];
                 },
                 end: async () => {}

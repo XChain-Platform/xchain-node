@@ -16,10 +16,6 @@ const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const crypto     = require('crypto')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const validHash = 'a'.repeat(64)
 const validHashesData = {
     'owner/repo': { 'v1.0.0': validHash }
@@ -63,10 +59,6 @@ function loadDownloader(opts = {}) {
 
 describe('GitHubDownloader', function () {
 
-    // -------------------------------------------------------------------
-    // Constructor & loadHashesFile
-    // -------------------------------------------------------------------
-
     describe('constructor', function () {
 
         it('loads hashes file on construction', function () {
@@ -100,10 +92,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // hasHash
-    // -------------------------------------------------------------------
-
     describe('hasHash()', function () {
 
         it('returns true when hash exists for repo/version', function () {
@@ -124,10 +112,6 @@ describe('GitHubDownloader', function () {
             expect(dl.hasHash('unknown/repo', 'v1.0.0')).to.be.false
         })
     })
-
-    // -------------------------------------------------------------------
-    // getReleases
-    // -------------------------------------------------------------------
 
     describe('getReleases()', function () {
 
@@ -224,10 +208,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getLatestCompatibleVersion
-    // -------------------------------------------------------------------
-
     describe('getLatestCompatibleVersion()', function () {
 
         it('returns the latest release with a matching hash when verifyHash=true', async function () {
@@ -274,10 +254,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getReleaseByTag
-    // -------------------------------------------------------------------
-
     describe('getReleaseByTag()', function () {
 
         it('calls correct GitHub API URL with tag', async function () {
@@ -290,10 +266,6 @@ describe('GitHubDownloader', function () {
             expect(url).to.equal('https://api.github.com/repos/bitcoin/bitcoin/releases/tags/v27.0')
         })
     })
-
-    // -------------------------------------------------------------------
-    // getAllFiles
-    // -------------------------------------------------------------------
 
     describe('getAllFiles()', function () {
 
@@ -329,10 +301,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // calculateDirectoryHash
-    // -------------------------------------------------------------------
-
     describe('calculateDirectoryHash()', function () {
 
         it('computes SHA-256 hash from file contents', async function () {
@@ -356,10 +324,6 @@ describe('GitHubDownloader', function () {
             expect(hash).to.equal(expected)
         })
     })
-
-    // -------------------------------------------------------------------
-    // calculateFileHash / verifyFileHash (prebuilt-tarball verification)
-    // -------------------------------------------------------------------
 
     describe('verifyFileHash()', function () {
 
@@ -419,10 +383,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // _getHashForArch
-    // -------------------------------------------------------------------
-
     describe('_getHashForArch()', function () {
 
         it('returns string hash for legacy string entry (any arch)', function () {
@@ -474,10 +434,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // hasHash: arch-specific tests
-    // -------------------------------------------------------------------
-
     describe('hasHash(): arch-specific', function () {
 
         it('returns true for object entry with matching arch', function () {
@@ -514,10 +470,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getReleases: generic API error (non-404)
-    // -------------------------------------------------------------------
-
     describe('getReleases(): generic error', function () {
 
         it('throws with generic error message on non-404 errors', async function () {
@@ -535,10 +487,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getReleaseByTag: error
-    // -------------------------------------------------------------------
-
     describe('getReleaseByTag(): error', function () {
 
         it('throws with descriptive message on error', async function () {
@@ -554,10 +502,6 @@ describe('GitHubDownloader', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // downloadRepoVersion
-    // -------------------------------------------------------------------
 
     describe('downloadRepoVersion()', function () {
 
@@ -607,7 +551,6 @@ describe('GitHubDownloader', function () {
                 await dl.downloadRepoVersion('owner', 'repo', 'v1.0.0', { verifyHash: false })
                 expect.fail()
             } catch (e) {
-                // Should have tried to clean up
                 expect(fsStub.rmSync.called).to.be.true
             }
         })
@@ -639,15 +582,10 @@ describe('GitHubDownloader', function () {
             // Stub downloadReleaseAsset to succeed without real download
             dl.downloadReleaseAsset = sinon.stub().resolves()
             const result = await dl.downloadRepoVersion('owner', 'repo', 'v1.0.0', { verifyHash: false })
-            // Should have written version file
             expect(fsStub.writeFileSync.called).to.be.true
             expect(result).to.include('repo')
         })
     })
-
-    // -------------------------------------------------------------------
-    // downloadReleaseAsset
-    // -------------------------------------------------------------------
 
     describe('downloadReleaseAsset()', function () {
 
@@ -974,7 +912,6 @@ describe('GitHubDownloader', function () {
             }
 
             await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
-            // No spawnSync called (no extraction)
             expect(spawnSyncStub.called).to.be.false
         })
 
@@ -1076,10 +1013,6 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getAllFiles: directory traversal
-    // -------------------------------------------------------------------
-
     describe('getAllFiles(): directory traversal', function () {
 
         it('returns all files recursively from a directory', function () {
@@ -1116,10 +1049,6 @@ describe('GitHubDownloader', function () {
             expect(files).to.include('/dir/subdir/nested.txt')
         })
     })
-
-    // -------------------------------------------------------------------
-    // loadHashesFile: invalid hash for object entry
-    // -------------------------------------------------------------------
 
     describe('loadHashesFile(): invalid hash in object entry', function () {
 
@@ -1159,10 +1088,6 @@ describe('GitHubDownloader', function () {
             expect(() => new GitHubDownloader('/test/hashes.json')).to.throw('Invalid hash format')
         })
     })
-
-    // -------------------------------------------------------------------
-    // downloadReleaseAsset: verifyHash=true path
-    // -------------------------------------------------------------------
 
     describe('downloadReleaseAsset(): verifyHash=true', function () {
 
@@ -1208,10 +1133,6 @@ describe('GitHubDownloader', function () {
             expect(verifyStub.calledOnce).to.be.true
         })
     })
-
-    // -------------------------------------------------------------------
-    // verifyRepositoryHash
-    // -------------------------------------------------------------------
 
     describe('verifyRepositoryHash()', function () {
 

@@ -14,10 +14,6 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeStubs() {
     return {
         execFile: sinon.stub(),
@@ -87,10 +83,6 @@ describe('Chaos: Process Resilience', function () {
     afterEach(function () {
         sinon.restore()
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 11: Async error propagation (SIG-04)
-    // -------------------------------------------------------------------
 
     describe('Experiment 11: Async error propagation', function () {
 
@@ -222,10 +214,6 @@ describe('Chaos: Process Resilience', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment: Empty container ID propagation (LDB-03 → CMD)
-    // -------------------------------------------------------------------
-
     describe('Experiment: Empty container ID propagation', function () {
 
         it('rejects when docker run returns whitespace-only container ID', async function () {
@@ -299,17 +287,12 @@ describe('Chaos: Process Resilience', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment: cloneGit + buildAndUp error chain
-    // -------------------------------------------------------------------
-
     describe('Experiment: Multi-step operation error propagation', function () {
 
         it('cloneGit error prevents buildAndUp from running', async function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
 
-            // cloneGit will fail (module doesn't have URL)
             const ms = loadModuleService(stubs)
 
             try {
@@ -319,7 +302,6 @@ describe('Chaos: Process Resilience', function () {
                 expect(err).to.include("doesn't have an url")
             }
 
-            // No docker commands should have been called
             expect(stubs.execFile.called).to.be.false
         })
 
@@ -360,14 +342,9 @@ describe('Chaos: Process Resilience', function () {
                 expect(err).to.equal('module not found')
             }
 
-            // No docker commands should have been called
             expect(stubs.execFile.called).to.be.false
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment: uninstallModule error scenarios
-    // -------------------------------------------------------------------
 
     describe('Experiment: Uninstall resilience', function () {
 
@@ -391,10 +368,6 @@ describe('Chaos: Process Resilience', function () {
             expect(result).to.be.true
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment: Precheck failure cascade
-    // -------------------------------------------------------------------
 
     describe('Experiment: Precheck failure cascade', function () {
 
@@ -436,7 +409,6 @@ describe('Chaos: Process Resilience', function () {
                 expect(err.message).to.include('Docker is not installed')
             }
 
-            // No subsequent steps should have been called
             expect(createDb.called).to.be.false
             expect(createNetwork.called).to.be.false
         })

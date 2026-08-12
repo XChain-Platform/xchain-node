@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * XChain Node - Bootstrap source health gate 
+ * XChain Node - Bootstrap source health gate
  *
  * `bootstrap create` used to dump whatever state the service happened to be
  * in. That is not a neutral default: a bootstrap archive's entire value is
@@ -25,7 +25,7 @@
  * cut by the weekly cron from a litecoin/mainnet decoder that had already
  * aborted mid-rollback, so the newest published archive contains a live
  * REORG_HALT row: anyone restoring it gets a decoder that halts at its next
- * reorg .
+ * reorg.
  *
  * The gate refuses to create a bootstrap from a source that is:
  *   - missing, not running, restarting, or crash-looping
@@ -108,8 +108,6 @@ class BootstrapSourceUnhealthyError extends Error {
     }
 }
 
-// ─── Container state ──────────────────────────────────────────────
-
 // Parse the pipe-joined `docker inspect` format string below. Returns the list
 // of refusal reasons (empty = the container looks stable).
 function evaluateContainerState(raw, { now = Date.now() } = {}) {
@@ -151,12 +149,10 @@ async function inspectContainer(containerId, runner) {
     return String(stdout || '')
 }
 
-// ─── Service status probe ─────────────────────────────────────────
-
 // Interpret a decoder/indexer/utxo-tracker health payload. Pure, so the policy
 // is unit-testable without docker. Field names differ per service, which is why
 // every known spelling is checked rather than one canonical key:
-//   decoder  health: status, lag_blocks/blockLag, reorg_halted   
+//   decoder  health: status, lag_blocks/blockLag, reorg_halted
 //   indexer  health: status, lag, decoderReorgHalted, degraded
 //   tracker  health: lag, synced, halted
 //   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'unhealthy')
@@ -235,10 +231,9 @@ async function probeServiceStatus(containerId, port, runner) {
     throw lastErr || new Error('no status probe succeeded')
 }
 
-// ─── Durable halt markers in the module database ──────────────────
-
-// The authoritative check for the  case, and the one that does not depend
-// on the running image being new enough to report the marker on its health
+// The authoritative check for a decoder that is up and looks healthy but is
+// quietly carrying a stale halt marker, and the one that does not depend on
+// the running image being new enough to report the marker on its health
 // surface: read the marker rows straight out of the database being dumped.
 async function readHaltMarkers(coin, network, module, deps) {
     const {
@@ -291,8 +286,6 @@ async function readHaltMarkers(coin, network, module, deps) {
     }
     return markers
 }
-
-// ─── Public gate ──────────────────────────────────────────────────
 
 // Refuse unless `module` on coin/network is a known-good bootstrap source.
 // Resolves silently when the source passes; throws BootstrapSourceUnhealthyError
@@ -371,8 +364,8 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
 
     // 3. Durable halt markers in the database that is about to be dumped. This is
     // the check that catches a decoder which is up, healthy-looking, and quietly
-    // carrying a REORG_HALT row  - including on an older image whose
-    // health surface does not report it.
+    // carrying a REORG_HALT row, including on an older image whose health
+    // surface does not report it.
     if (MARIADB_MODULES.has(module)) {
         try {
             const markers = await readHaltMarkers(coin, network, module, dbDeps)

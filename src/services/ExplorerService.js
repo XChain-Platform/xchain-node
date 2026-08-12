@@ -44,7 +44,7 @@ async function updateExplorer() {
     // network), so the single retry only costs time on a real failure and
     // absorbs the docker race that causes most of them. Same treatment as
     // HubService.attachSharedContainer, kept local so the two services keep
-    // their independent dependency graphs ().
+    // their independent dependency graphs.
     const failures = []
 
     if (explorerContainerId) {

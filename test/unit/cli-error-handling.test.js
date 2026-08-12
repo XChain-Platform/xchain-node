@@ -15,7 +15,7 @@ const { expect } = require('chai')
 
 const { installUnhandledRejectionHandler } = require('../../src/cli')
 
-// : a failed `update` reached the operator as an ERR_UNHANDLED_REJECTION
+// A failed `update` used to reach the operator as an ERR_UNHANDLED_REJECTION
 // stack, because commander's parse() is synchronous and several services reject
 // with a plain string. The backstop must turn that into a readable line and a
 // non-zero exit.
@@ -41,11 +41,11 @@ describe('CLI unhandled-rejection backstop', function () {
     })
 
     it('prints a string reason readably and exits non-zero', function () {
-        installed[0]("Error cloning project: branch 'xc952-mainnet-hotfix' not found for module 'xchain-hub'")
+        installed[0]("Error cloning project: branch 'feature-mainnet-hotfix' not found for module 'xchain-hub'")
         expect(errorStub.calledOnce).to.be.true
         const line = errorStub.firstCall.args[0]
         expect(line).to.include('command failed')
-        expect(line).to.include("branch 'xc952-mainnet-hotfix' not found")
+        expect(line).to.include("branch 'feature-mainnet-hotfix' not found")
         expect(line).to.not.include('[object Object]')
         expect(exitStub.calledWith(1)).to.be.true
     })

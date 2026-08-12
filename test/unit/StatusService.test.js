@@ -14,10 +14,6 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeContainerStatus(state = 'running', ports = {}) {
     return {
         State: { Status: state },
@@ -83,10 +79,6 @@ function loadStatusService(state, overrides = {}) {
     })
 }
 
-// ---------------------------------------------------------------------------
-// statusChanged()
-// ---------------------------------------------------------------------------
-
 describe('StatusService: statusChanged()', function () {
 
     it('sets statusUpdated to false and calls updateHub + updateExplorer', async function () {
@@ -103,10 +95,6 @@ describe('StatusService: statusChanged()', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// getStatus(): cache hit
-// ---------------------------------------------------------------------------
-
 describe('StatusService: getStatus() cache hit', function () {
 
     it('returns cached status immediately when isStatusUpdated is true', async function () {
@@ -120,7 +108,6 @@ describe('StatusService: getStatus() cache hit', function () {
         const result = await ss.getStatus('bitcoin', 'mainnet', false)
 
         expect(result).to.equal(cachedStatus)
-        // DB should not have been queried
         expect(state.db.getAllModuleContainers.called).to.be.false
     })
 
@@ -142,10 +129,6 @@ describe('StatusService: getStatus() cache hit', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// getStatus(): DB not ready
-// ---------------------------------------------------------------------------
-
 describe('StatusService: getStatus() DB not ready', function () {
 
     it('returns empty object when db is not ready', async function () {
@@ -163,14 +146,9 @@ describe('StatusService: getStatus() DB not ready', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// getStatus(): fresh, with installed modules
-// ---------------------------------------------------------------------------
-
 describe('StatusService: getStatus() with installed modules', function () {
 
     it('builds status for a running container and returns installedModules', async function () {
-        // One installed module row in DB
         const installedModulesObj = {}
         const state = makeStateStub({
             isStatusUpdated:  sinon.stub().returns(false),
@@ -227,7 +205,6 @@ describe('StatusService: getStatus() with installed modules', function () {
         const ss = loadStatusService(state, { getStatusFromContainer })
         const result = await ss.getStatus('bitcoin', 'mainnet', false)
 
-        // Module should have been removed from the coin/network slot
         const coinNetModules = (result.bitcoin || {})[`mainnet`] || {}
         expect(coinNetModules['xchain-encoder']).to.be.undefined
         // ...and the persistent registry row reconciled, not only in-memory status.
@@ -256,7 +233,6 @@ describe('StatusService: getStatus() with installed modules', function () {
         const ss = loadStatusService(state, { getStatusFromContainer })
         const result = await ss.getStatus('bitcoin', 'mainnet', false)
 
-        // bitcoin key should be cleaned up
         expect(result.bitcoin).to.be.undefined
     })
 
@@ -524,10 +500,6 @@ describe('StatusService: getStatus() with installed modules', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// getInstalledCoinsAndNetworks()
-// ---------------------------------------------------------------------------
-
 describe('StatusService: getInstalledCoinsAndNetworks()', function () {
 
     it('returns coins and networks filtered by known Coin/Network values', async function () {
@@ -558,7 +530,6 @@ describe('StatusService: getInstalledCoinsAndNetworks()', function () {
         expect(result.bitcoin).to.include('mainnet')
         expect(result).to.have.property('dogecoin')
         expect(result.dogecoin).to.include('testnet')
-        // Unknown coins should be absent
         expect(result.ethereum).to.be.undefined
     })
 
@@ -602,10 +573,6 @@ describe('StatusService: getInstalledCoinsAndNetworks()', function () {
         expect(result).to.deep.equal({})
     })
 })
-
-// ---------------------------------------------------------------------------
-// loadInstalledModules()
-// ---------------------------------------------------------------------------
 
 describe('StatusService: loadInstalledModules()', function () {
 
@@ -662,10 +629,6 @@ describe('StatusService: loadInstalledModules()', function () {
         expect(installedModulesObj.bitcoin.mainnet['xchain-decoder']).to.exist
     })
 })
-
-// ---------------------------------------------------------------------------
-// getStatus(): non-master branch display
-// ---------------------------------------------------------------------------
 
 describe('StatusService: getStatus() branch column', function () {
 

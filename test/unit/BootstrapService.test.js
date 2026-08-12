@@ -10,19 +10,12 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { PassThrough, EventEmitter } = require('stream')
 
-// ---------------------------------------------------------------------------
-// Constants (real, no I/O side-effects)
-// ---------------------------------------------------------------------------
 const { XChainService, SEP, BOOTSTRAP_BASE_URL } = require('../../src/config/constants')
 
 const COIN    = 'bitcoin'
 const NETWORK = 'mainnet'
 const FAKE_CONTAINER_ID = 'a'.repeat(64)
 const FAKE_DB_CONTAINER = 'b'.repeat(64)
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /** Build a fake EventEmitter that looks like a child_process spawn() result */
 function makeSpawnProc() {
@@ -48,10 +41,6 @@ function makeAxiosStreamResponse(statusCode = 200, contentLength = '1024') {
     }
     return { response, dataStream }
 }
-
-// ---------------------------------------------------------------------------
-// Default stubs factory
-// ---------------------------------------------------------------------------
 
 function makeStubs(overrides = {}) {
     const fakeWriteStream = new PassThrough()
@@ -115,7 +104,7 @@ function makeStubs(overrides = {}) {
         askMariadbRootPassword:   sinon.stub().resolves('rootpass')
     }
 
-    //  source health gate. These suites exercise create MECHANICS, so the
+    // The source health gate. These suites exercise create MECHANICS, so the
     // gate is stubbed open here; the gate's own policy (and the fact that
     // makeBootstrap consults it at all) is covered in BootstrapHealthGate.test.js.
     const healthGateStub = {
@@ -180,10 +169,6 @@ function stubVerifiedInner(stubs, {
     return { expectedHash, declaredHash }
 }
 
-// ---------------------------------------------------------------------------
-// proxyquire loader
-// ---------------------------------------------------------------------------
-
 function loadBootstrapService(stubs) {
     // execFile promisify shim: the module does `promisify(execFile)` at load
     // time. We intercept 'child_process' and supply our own stub for execFile.
@@ -235,10 +220,6 @@ function loadBootstrapService(stubs) {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('BootstrapService', function () {
 
     // Signature ENFORCEMENT is fail-closed by default (see BootstrapSigning.test.js
@@ -255,16 +236,12 @@ describe('BootstrapService', function () {
         else process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP = _savedRequireSigned
     })
 
-    // -----------------------------------------------------------------------
-    // getBootstrapFilesList
-    // -----------------------------------------------------------------------
-
     describe('getBootstrapFilesList()', function () {
 
         it('returns file list for XCHAIN_UTXO_TRACKER', async function () {
             const stubs = makeStubs()
             stubs.fs.promises.readdir.resolves(['boot1.tar.gz', 'boot2.tar.gz'])
-            // : the list is NEWEST FIRST now, so give the stub real mtimes
+            // The list is NEWEST FIRST now, so give the stub real mtimes
             // rather than asserting whatever order readdir happened to return.
             stubs.fs.promises.stat
                 .onFirstCall().resolves({ isFile: () => true, mtimeMs: 1000 })
@@ -327,10 +304,6 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // makeBootstrap: dispatch
-    // -----------------------------------------------------------------------
-
     describe('makeBootstrap(): dispatch', function () {
 
         it('throws for unsupported module', async function () {
@@ -345,10 +318,6 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // restoreBootstrap: dispatch
-    // -----------------------------------------------------------------------
-
     describe('restoreBootstrap(): dispatch', function () {
 
         it('throws for unsupported module', async function () {
@@ -362,10 +331,6 @@ describe('BootstrapService', function () {
             }
         })
     })
-
-    // -----------------------------------------------------------------------
-    // utxoTrackerVolumeHasData
-    // -----------------------------------------------------------------------
 
     describe('utxoTrackerVolumeHasData()', function () {
 
@@ -416,10 +381,6 @@ describe('BootstrapService', function () {
             expect(result).to.be.false
         })
     })
-
-    // -----------------------------------------------------------------------
-    // downloadBootstrap
-    // -----------------------------------------------------------------------
 
     describe('downloadBootstrap()', function () {
 
@@ -645,10 +606,6 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // ensureBootstrapUtxoTracker
-    // -----------------------------------------------------------------------
-
     describe('ensureBootstrapUtxoTracker()', function () {
 
         afterEach(function () {
@@ -739,10 +696,6 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // ensureBootstrapMariaDb
-    // -----------------------------------------------------------------------
-
     describe('ensureBootstrapMariaDb()', function () {
 
         afterEach(function () {
@@ -825,10 +778,6 @@ describe('BootstrapService', function () {
             expect(result).to.be.true
         })
     })
-
-    // -----------------------------------------------------------------------
-    // mariaDbModuleHasData
-    // -----------------------------------------------------------------------
 
     describe('mariaDbModuleHasData()', function () {
 
@@ -913,10 +862,6 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // restoreBootstrapUtxoTracker: archive not found
-    // -----------------------------------------------------------------------
-
     describe('restoreBootstrapUtxoTracker(): file not found', function () {
 
         it('throws when archive file does not exist', async function () {
@@ -931,10 +876,6 @@ describe('BootstrapService', function () {
             }
         })
     })
-
-    // -----------------------------------------------------------------------
-    // restoreBootstrapUtxoTracker: resumable extraction skip path
-    // -----------------------------------------------------------------------
 
     describe('restoreBootstrapUtxoTracker(): resumable reuse (inner archive already matches verified checksum)', function () {
 
@@ -996,10 +937,6 @@ describe('BootstrapService', function () {
             expect(stubs.dockerService.stopContainer.called).to.be.false
         })
     })
-
-    // -----------------------------------------------------------------------
-    // restoreBootstrapUtxoTracker: fresh extract path (no prior run)
-    // -----------------------------------------------------------------------
 
     describe('restoreBootstrapUtxoTracker(): fresh extract', function () {
 
@@ -1174,10 +1111,6 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // restoreBootstrapMariaDb: file not found
-    // -----------------------------------------------------------------------
-
     describe('restoreBootstrapMariaDb(): file not found', function () {
 
         it('throws when archive file does not exist', async function () {
@@ -1204,10 +1137,6 @@ describe('BootstrapService', function () {
             }
         })
     })
-
-    // -----------------------------------------------------------------------
-    // restoreBootstrapMariaDb: full happy path
-    // -----------------------------------------------------------------------
 
     describe('restoreBootstrapMariaDb(): happy path', function () {
 
@@ -1377,22 +1306,13 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // : integrity refusals are classified, and land BEFORE the DROP.
-    //
-    // The destructive restore was first exercised end-to-end on test-host against
-    // a throwaway MariaDB. Two properties matter and both were only implicit:
-    //
-    //   1. A refused archive must not have cost the operator their database.
-    //      The refusal is raised before DROP DATABASE, so a tampered archive
-    //      leaves the existing data intact and the operator can retry with a
-    //      good one. Nothing pinned that ordering, so a future edit that moved
-    //      the gate below the DROP would still pass every other test here.
-    //   2. The refusal must be distinguishable from a crash. Uncaught, it
-    //      printed a Node stack trace, which reads as "the tool broke, retry"
-    //      when it means "this archive is not trustworthy". The named class is
-    //      what lets cli.js/menu.js print the reason and exit 1 instead.
-    // -----------------------------------------------------------------------
+    // Integrity refusals must be classified, and must land BEFORE the DROP.
+    // The destructive restore was first exercised end-to-end against a
+    // throwaway database, which surfaced two properties that had been
+    // implicit: a refused archive must not cost the operator their existing
+    // data (the refusal is raised before DROP DATABASE), and the refusal must
+    // read as a refusal rather than a crash, which is why it carries a named
+    // error class that cli.js/menu.js switch on to print the reason and exit 1.
 
     describe('restoreBootstrapMariaDb(): integrity refusal is fail-closed and classified', function () {
 
@@ -1491,10 +1411,6 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // ensureDirWritable: Docker fallback path (directory exists but not writable)
-    // -----------------------------------------------------------------------
-
     describe('ensureDirWritable(): Docker fallback (dir exists, not writable)', function () {
 
         it('invokes docker mkdir/chown/chmod when outputDir exists but accessSync throws', async function () {
@@ -1552,10 +1468,6 @@ describe('BootstrapService', function () {
             expect(chmodCall).to.exist
         })
     })
-
-    // -----------------------------------------------------------------------
-    // makeBootstrap: XCHAIN_UTXO_TRACKER happy path
-    // -----------------------------------------------------------------------
 
     describe('makeBootstrapUtxoTracker(): happy path', function () {
 
@@ -1721,10 +1633,6 @@ describe('BootstrapService', function () {
             expect(stubs.dockerService.startContainer.called).to.be.true
         })
     })
-
-    // -----------------------------------------------------------------------
-    // makeBootstrapMariaDb: dispatch
-    // -----------------------------------------------------------------------
 
     describe('makeBootstrapMariaDb(): happy path', function () {
 
@@ -1900,11 +1808,7 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // : the three defects that came out of the  rotation session
-    // -----------------------------------------------------------------------
-
-    describe('bootstrap listing and staging safety ', function () {
+    describe('bootstrap listing and staging safety', function () {
 
         it('lists archives NEWEST first, so "the latest" is the head of the list', async function () {
             // The list came back in raw readdir order, so a driver taking [0]
@@ -1943,7 +1847,7 @@ describe('BootstrapService', function () {
         })
 
         it('refuses to stage a bootstrap the work-dir filesystem cannot hold', async function () {
-            // Staging 30G under <repo>/tmp filled node-host-b's root filesystem.
+            // Staging 30G under <repo>/tmp filled the host's root filesystem.
             const stubs = makeStubs()
             stubs.execFile.resolves({ stdout: '32212254720\t/data' })   // 30G volume
             stubs.fs.statfsSync = sinon.stub().returns({ bavail: 1000, bsize: 4096 })  // ~4MB free
@@ -2007,9 +1911,6 @@ describe('BootstrapService', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // listServedBootstrapCombos - the publisher's --all plan (uuid:d0cfcba9)
-    // -----------------------------------------------------------------------
     describe('listServedBootstrapCombos()', function () {
 
         function loadWithRows(rows) {

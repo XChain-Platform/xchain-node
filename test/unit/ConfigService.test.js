@@ -23,10 +23,6 @@ const {
     moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir
 } = require('../../src/config/constants')
 
-// ---------------------------------------------------------------------------
-// Load ConfigService with stubbed fs (for getDefaultConfig's file reading)
-// ---------------------------------------------------------------------------
-
 function makeConfigService(fsStub) {
     return proxyquire('../../src/services/ConfigService', {
         'fs': fsStub || require('fs')
@@ -42,10 +38,6 @@ function streamFromString(str) {
 }
 
 describe('ConfigService', function () {
-
-    // -------------------------------------------------------------------
-    // Path helpers
-    // -------------------------------------------------------------------
 
     describe('getModuleDir()', function () {
         const { getModuleDir } = require('../../src/services/ConfigService')
@@ -145,10 +137,6 @@ describe('ConfigService', function () {
             expect(cs.checkIfCryptoNodeSourceExists('bitcoin')).to.be.false
         })
     })
-
-    // -------------------------------------------------------------------
-    // Naming helpers
-    // -------------------------------------------------------------------
 
     describe('getDockerContainerImageName()', function () {
         const { getDockerContainerImageName } = require('../../src/services/ConfigService')
@@ -262,11 +250,6 @@ describe('ConfigService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // persistSidecarCreds (#2406: append must not glue onto an
-    // unterminated existing file)
-    // -------------------------------------------------------------------
-
     describe('persistSidecarCreds()', function () {
         const fs = require('fs')
         const os = require('os')
@@ -299,10 +282,6 @@ describe('ConfigService', function () {
             expect(fs.readFileSync(tmpFile, 'utf8')).to.equal('NEW=2\n')
         })
     })
-
-    // -------------------------------------------------------------------
-    // getDefaultConfig
-    // -------------------------------------------------------------------
 
     describe('getDefaultConfig()', function () {
 
@@ -658,7 +637,7 @@ describe('ConfigService', function () {
                     expect(config['XCHAIN_GENESIS_DUMP_HASH']).to.equal('cafef00d')
                 })
 
-                it('passes the airdrop set through to the indexer (regtest dry-run seam, )', async function () {
+                it('passes the airdrop set through to the indexer (regtest dry-run seam)', async function () {
                     process.env.GENESIS_AIRDROP_PATHS    = '/XChainIndexer/data/genesis/xcp.csv'
                     process.env.GENESIS_AIRDROP_HASHES   = 'aa'
                     process.env.GENESIS_AIRDROP_AMOUNTS  = '30000000.00000000'
@@ -703,7 +682,7 @@ describe('ConfigService', function () {
                 expect(config['HUB_PORT']).to.equal(10000)
             })
 
-            // : the indexer's hub client is enabled purely by HUB_API_URL
+            // The indexer's hub client is enabled purely by HUB_API_URL
             // (hub_client.js `this.enabled = !!this.hubUrl`). HUB_API_HOST is set here
             // but read by nothing in xchain-indexer, so while HUB_API_URL was unset the
             // client stayed disabled on every installed stack and no push ever left the
@@ -799,7 +778,7 @@ describe('ConfigService', function () {
                 expect(config['EXPLORER_PORT_HTTP']).to.equal(18080)
             })
 
-            // . The explorer's quote/pre-flight proxies resolve their
+            // The explorer's quote/pre-flight proxies resolve their
             // upstream from these, and their absence fails SOFT: the routes
             // answer INDEXER_NOT_CONFIGURED and the wallet quietly drops to
             // its client-side pre-flight tier rather than erroring. Nothing
@@ -819,15 +798,15 @@ describe('ConfigService', function () {
 
             // The container-local default must never win over an operator's
             // value: an explorer whose indexers live on other boxes sets this
-            // by hand , and overriding it would point a working
+            // by hand, and overriding it would point a working
             // production explorer at a hostname that does not resolve.
             it('yields INDEXER_API_URL_<COIN>_<NETWORK> to the host env', async function () {
                 const prev = process.env.INDEXER_API_URL_BTC_MAINNET
-                process.env.INDEXER_API_URL_BTC_MAINNET = 'http://10.0.0.5:3004'
+                process.env.INDEXER_API_URL_BTC_MAINNET = 'http://203.0.113.5:3004'
                 try {
                     const cs = makeServiceWithConfig('')
                     const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
-                    expect(config['INDEXER_API_URL_BTC_MAINNET']).to.equal('http://10.0.0.5:3004')
+                    expect(config['INDEXER_API_URL_BTC_MAINNET']).to.equal('http://203.0.113.5:3004')
                     // Unrelated coins keep the container-local default.
                     expect(config['INDEXER_API_URL_LTC_MAINNET'])
                         .to.equal('http://xchain-node-litecoin-mainnet-xchain-indexer:3004')
@@ -870,12 +849,12 @@ describe('ConfigService', function () {
                 }
             })
 
-            // : the hub refuses to boot on an UNDECLARED unauthenticated
+            // The hub refuses to boot on an UNDECLARED unauthenticated
             // write surface. A managed keyless deploy is still legitimate, so the
             // deployer makes the declaration; without it the container would
             // crash-loop the way over-tightening the indexer (771880c) and the
             // encoder (e2bf7c4) did pre-launch.
-            describe('hub keyless declaration ', function () {
+            describe('hub keyless declaration', function () {
 
                 async function hubConfigWith(env) {
                     const saved = {}
@@ -971,10 +950,6 @@ describe('ConfigService', function () {
             })
         })
     })
-
-    // -------------------------------------------------------------------
-    // filterCommandParameters
-    // -------------------------------------------------------------------
 
     describe('filterCommandParameters()', function () {
         const { filterCommandParameters } = require('../../src/services/ConfigService')

@@ -18,10 +18,6 @@ const fs         = require('fs')
 
 const ROOT = path.join(__dirname, '..', '..')
 
-// ---------------------------------------------------------------------------
-// S-SMOKE-001: Module Import Chain
-// ---------------------------------------------------------------------------
-
 describe('S-SMOKE-001 – Module Import Chain', function () {
 
     // Modules that can be required with zero side-effects
@@ -207,10 +203,6 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// S-SMOKE-002: Commander CLI Registration
-// ---------------------------------------------------------------------------
-
 describe('S-SMOKE-002 – Commander CLI Registration', function () {
 
     let program
@@ -257,7 +249,6 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
             }
         })
 
-        // Invoke parseCommand to trigger all program.command() registrations
         mod.parseCommand()
 
         program = capturedProgram
@@ -283,7 +274,6 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
         }
     })
 
-    // Argument counts per command
     const expectedArgs = {
         'install':     { required: 2, optional: 2 },
         'uninstall':   { required: 1, optional: 2 },
@@ -318,10 +308,6 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
         })
     }
 })
-
-// ---------------------------------------------------------------------------
-// S-SMOKE-003: Global Options Registration
-// ---------------------------------------------------------------------------
 
 describe('S-SMOKE-003 – Global Options Registration', function () {
 
@@ -391,10 +377,6 @@ describe('S-SMOKE-003 – Global Options Registration', function () {
         }
     }
 })
-
-// ---------------------------------------------------------------------------
-// S-SMOKE-004: Constants and Enum Integrity
-// ---------------------------------------------------------------------------
 
 describe('S-SMOKE-004 – Constants and Enum Integrity', function () {
 
@@ -510,10 +492,6 @@ describe('S-SMOKE-004 – Constants and Enum Integrity', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// S-SMOKE-005: Config Template File Integrity
-// ---------------------------------------------------------------------------
-
 describe('S-SMOKE-005 – Config Template File Integrity', function () {
 
     const configDir = path.join(ROOT, 'config')
@@ -564,10 +542,6 @@ describe('S-SMOKE-005 – Config Template File Integrity', function () {
     }
 })
 
-// ---------------------------------------------------------------------------
-// S-SMOKE-006: Config Composition (getDefaultConfig)
-// ---------------------------------------------------------------------------
-
 describe('S-SMOKE-006 – Config Composition', function () {
 
     const ConfigService = require(path.join(ROOT, 'src/services/ConfigService'))
@@ -612,10 +586,6 @@ describe('S-SMOKE-006 – Config Composition', function () {
         expect(config).to.have.property('SYNC_MODE')
     })
 })
-
-// ---------------------------------------------------------------------------
-// S-SMOKE-007: Docker Command Construction
-// ---------------------------------------------------------------------------
 
 describe('S-SMOKE-007 – Docker Command Construction', function () {
 
@@ -662,10 +632,6 @@ describe('S-SMOKE-007 – Docker Command Construction', function () {
         }
     })
 })
-
-// ---------------------------------------------------------------------------
-// S-SMOKE-008: Parameter Expansion (filterCommandParameters)
-// ---------------------------------------------------------------------------
 
 describe('S-SMOKE-008 – Parameter Expansion', function () {
 
@@ -714,7 +680,6 @@ describe('S-SMOKE-008 – Parameter Expansion', function () {
             expect(result[coin].testnet).to.not.include('xchain-regtest-miner')
             expect(result[coin].mainnet).to.not.include('xchain-e2e-test')
             expect(result[coin].testnet).to.not.include('xchain-e2e-test')
-            // regtest should have it
             expect(result[coin].regtest).to.include('xchain-regtest-miner')
         }
     })
@@ -727,10 +692,6 @@ describe('S-SMOKE-008 – Parameter Expansion', function () {
         expect(result['']['']).to.include('xchain-explorer')
     })
 })
-
-// ---------------------------------------------------------------------------
-// S-SMOKE-009: State Module Initialization
-// ---------------------------------------------------------------------------
 
 describe('S-SMOKE-009 – State Module Initialization', function () {
 
@@ -791,10 +752,6 @@ describe('S-SMOKE-009 – State Module Initialization', function () {
         }
     })
 })
-
-// ---------------------------------------------------------------------------
-// S-SMOKE-010: Crypto Node Dockerfile Existence
-// ---------------------------------------------------------------------------
 
 describe('S-SMOKE-010 – Crypto Node Dockerfile Existence', function () {
 

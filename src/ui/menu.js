@@ -36,7 +36,7 @@ const { scanAndRegisterModules } = require('../services/DiscoveryService')
 async function restoreBootstrapInterface(coin, network, module, options = {}) {
     const bootstrapFiles = await getBootstrapFilesList(coin, network, module)
 
-    // : `bootstrap restore` used to route unconditionally into the Select
+    // `bootstrap restore` used to route unconditionally into the Select
     // below. Driven from a script (or any non-TTY), enquirer renders a menu
     // nobody can answer and the command simply blocks - while HOLDING the
     // mutating-command pidfile lock, which is how one restore sat wedged for
@@ -276,9 +276,9 @@ async function modulesSelectionInterface(coin, network) {
                 try {
                     await makeBootstrap(coin, network, selectedValue)
                 } catch (err) {
-                    // A source-health refusal  is an expected outcome here,
-                    // so print the reasons and stay in the menu rather than tearing
-                    // the TUI down with a stack trace.
+                    // A source-health refusal is an expected outcome here, so
+                    // print the reasons and stay in the menu rather than
+                    // tearing the TUI down with a stack trace.
                     if (err && err.name === 'BootstrapSourceUnhealthyError') console.log(err.message)
                     else console.log(err)
                 }

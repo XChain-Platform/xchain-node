@@ -13,7 +13,7 @@
  **********************************************************************
  * XChain Node - Skew Guard Service
  *
- * Version-skew / deploy-ordering guard for `update` . The hub is
+ * Version-skew / deploy-ordering guard for `update`. The hub is
  * the platform's config oracle: downstream services (indexer first) must
  * never be updated past the hub they talk to. DEPLOY-ORDER.md documents
  * hub-before-indexer as prose; this makes it a code-level refusal.

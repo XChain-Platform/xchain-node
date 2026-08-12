@@ -158,21 +158,14 @@ const LIBRARY_BUNDLES = {
     // optionalDependency; staging it makes the feature available in built
     // images. Builds still succeed without it (endpoint 503s).
     "xchain-explorer": ["xchain-vm"],
-    // xchain-e2e-test's multiValidatorHubHelper boots in-process XChainHub
-    // instances against the regtest stack (multiHubAttestation,
-    // llmAttestation). xchain-hub needs to ride into the build context so
-    // those tests can `require` its source from inside the dockerized image.
-    // xchain-sdk rides along the same way for the test:sdk suites
-    // (test/sdk/sdkHelper.js loadSDK resolves the file: dep first).
-    // xchain-contracts carries the contract-template source the template
-    // suites load via XCHAIN_CONTRACTS_DIR (see ConfigService); without it
-    // those suites skip (they no longer abort the run).
-    // xchain-indexer is staged so the e2e suites that share the indexer's
-    // consensus-critical primitives can `require('../../../xchain-indexer/src/...')`
-    // from inside the dockerized image (those relative paths resolve to the
-    // monorepo root locally, but to the image root /xchain-indexer here, where
-    // the Dockerfile COPYs it). Without it attestationHelper (and the
-    // integration/parity/regression suites) die with MODULE_NOT_FOUND at load.
+    // Each entry rides along because the e2e suites `require` its source
+    // directly from inside the dockerized image: xchain-hub for in-process
+    // XChainHub instances (multiHubAttestation, llmAttestation), xchain-sdk
+    // for the test:sdk suites, xchain-contracts for the template suites
+    // (XCHAIN_CONTRACTS_DIR; they skip without it), and xchain-indexer so
+    // attestationHelper and the integration/parity/regression suites can
+    // resolve its consensus-critical primitives instead of dying with
+    // MODULE_NOT_FOUND at load.
     "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts", "xchain-indexer"]
 }
 
@@ -181,8 +174,8 @@ const LIBRARY_BUNDLES = {
 // blocks that used to live in ModuleService.buildAndUp() and
 // HubService.updateHubOrExplorer(): adding or renaming a service now means
 // editing exactly one table entry, and a forgotten service surfaces as a
-// missing key here rather than as a silently omitted install branch (H1 /
-// ). The table is pure data; the two dispatch sites interpret it
+// missing key here rather than as a silently omitted install branch. The
+// table is pure data; the two dispatch sites interpret it
 // (ModuleService owns the docker-arg builder, HubService owns the config
 // builder) so constants.js stays free of service-layer requires.
 //
@@ -320,8 +313,8 @@ const tmpDir             = process.env.XCHAIN_NODE_TMP_DIR          || path.join
 const srcDir             = path.join(__dirname, "..")
 const cryptoNodesDir     = process.env.XCHAIN_NODE_CRYPTO_NODES_DIR || path.join(__dirname, "..", "..", "crypto_nodes")
 const dataDir            = process.env.XCHAIN_NODE_DATA_DIR         || path.join(__dirname, "..", "..", "data")
-// : published bootstraps get their own root, defaulting to dataDir so
-// nothing moves unless asked. They are the one artifact whose size is unbounded
+// Published bootstraps get their own root, defaulting to dataDir so nothing
+// moves unless asked. They are the one artifact whose size is unbounded
 // by the install (a mainnet tracker archive is tens of GB, and LTC mainnet alone
 // is 45G of source data), so an operator needs to land them on the big volume
 // WITHOUT relocating live module data, which is what moving XCHAIN_NODE_DATA_DIR

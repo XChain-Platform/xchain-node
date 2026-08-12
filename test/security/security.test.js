@@ -15,10 +15,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeExecFileStub() {
     return sinon.stub()
 }
@@ -127,15 +123,7 @@ function loadDatabaseService(stubs) {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Security Tests
-// ---------------------------------------------------------------------------
-
 describe('Security', function () {
-
-    // -------------------------------------------------------------------
-    // SEC-001: execFile prevents shell injection
-    // -------------------------------------------------------------------
 
     describe('Shell injection prevention via execFile', function () {
 
@@ -166,7 +154,6 @@ describe('Security', function () {
             const [cmd, args] = stubs.execFile.firstCall.args
             expect(cmd).to.equal('docker')
             expect(args).to.deep.equal(['exec', '-i', 'abc123', 'echo', '$(whoami)'])
-            // The $(whoami) is a literal string, not interpreted by shell
         })
 
         it('shell metacharacters in container IDs are passed literally to execFile', async function () {
@@ -184,7 +171,6 @@ describe('Security', function () {
             const [, args] = stubs.execFile.firstCall.args
             expect(args[0]).to.equal('stop')
             expect(args[1]).to.equal(maliciousId)
-            // With execFile, this is safe; no shell interprets the semicolon
         })
 
         it('buildAndUp passes env vars via the child env (bare --env NAME), never as values in argv', async function () {
@@ -230,10 +216,6 @@ describe('Security', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // SEC-014: Container ID validation
-    // -------------------------------------------------------------------
-
     describe('Container ID validation', function () {
 
         it('ModuleService buildAndUp validates container ID as 64-char hex', async function () {
@@ -251,7 +233,7 @@ describe('Security', function () {
 
         it('rejects non-hex container IDs', async function () {
             const stubs = { execFile: makeExecFileStub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
-            const invalidId = 'g'.repeat(64) // g is not hex
+            const invalidId = 'g'.repeat(64)
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 if (args[0] === 'build') cb(null, '')
@@ -300,10 +282,6 @@ describe('Security', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // SEC-021: NODE_PREFIX validation
-    // -------------------------------------------------------------------
-
     describe('NODE_PREFIX validation', function () {
 
         it('accepts valid lowercase alphanumeric prefix', function () {
@@ -317,7 +295,6 @@ describe('Security', function () {
             const origEnv = process.env.NODE_PREFIX
             process.env.NODE_PREFIX = malicious
             try {
-                // Clear require cache to re-evaluate constants.js
                 delete require.cache[require.resolve('../../src/config/constants')]
                 expect(() => {
                     require('../../src/config/constants')
@@ -359,10 +336,6 @@ describe('Security', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // SEC-020: Branch name validation
-    // -------------------------------------------------------------------
 
     describe('Branch name validation', function () {
 
@@ -427,19 +400,14 @@ describe('Security', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // SEC-019: Path traversal prevention
-    // -------------------------------------------------------------------
-
     describe('Config path traversal prevention', function () {
 
         it('getDefaultConfig rejects a path-traversal coin parameter', async function () {
             const ConfigService = require('../../src/services/ConfigService')
             // A traversal string in `coin` must be refused. The guard is a known-coin
-            // allowlist (coin-name resolution rejects an unknown coin before it can reach
-            // any path join), so '../../../etc' is refused as an unknown coin; an explicit
-            // 'Config path traversal detected' guard also exists on other paths. Either way
-            // the malicious input must be rejected, not silently accepted.
+            // allowlist that rejects unknown coins before any path join (a dedicated
+            // traversal-detection guard also exists on other code paths), so the
+            // malicious input must never be silently accepted.
             let threw = null
             try {
                 await ConfigService.getDefaultConfig('xchain-encoder', '../../../etc', 'passwd')
@@ -450,10 +418,6 @@ describe('Security', function () {
             expect(threw.message).to.match(/traversal|unknown coin|invalid/i)
         })
     })
-
-    // -------------------------------------------------------------------
-    // SEC-002: Database command safety
-    // -------------------------------------------------------------------
 
     describe('Database command safety', function () {
 
@@ -490,10 +454,6 @@ describe('Security', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // SEC-005: GitHubDownloader uses spawnSync
-    // -------------------------------------------------------------------
-
     describe('GitHubDownloader archive extraction safety', function () {
 
         it('uses spawnSync instead of execSync for tar extraction', function () {
@@ -509,14 +469,9 @@ describe('Security', function () {
                 path.join(__dirname, '../../src/GitHubDownloader.js'), 'utf8'
             )
             expect(source).to.include('fs.unlinkSync')
-            // Should not have shell rm in commands
             expect(source).to.not.match(/&& rm /)
         })
     })
-
-    // -------------------------------------------------------------------
-    // SEC-006: helpers.js uses execFile
-    // -------------------------------------------------------------------
 
     describe('helpers.js decompressTarGz safety', function () {
 
@@ -529,27 +484,18 @@ describe('Security', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // SEC-022: stringToDockerContainerFile uses spawn
-    // -------------------------------------------------------------------
-
     describe('stringToDockerContainerFile safety', function () {
 
         it('uses spawn with tee instead of exec with shell interpolation', function () {
             const source = require('fs').readFileSync(
                 path.join(__dirname, '../../src/services/DockerService.js'), 'utf8'
             )
-            // Should not have the broken template literal
+            // Guards against a regression to the earlier broken template literal.
             expect(source).to.not.include("docker exec -i ${containerId}")
-            // Should use spawn with tee
             expect(source).to.include("spawn('docker'")
             expect(source).to.include("'tee'")
         })
     })
-
-    // -------------------------------------------------------------------
-    // SEC-027: chmod 755 instead of 777
-    // -------------------------------------------------------------------
 
     describe('Bootstrap directory permissions', function () {
 
@@ -561,10 +507,6 @@ describe('Security', function () {
             expect(source).to.include("'755'")
         })
     })
-
-    // -------------------------------------------------------------------
-    // Verify no remaining exec() calls in source
-    // -------------------------------------------------------------------
 
     describe('No remaining exec() calls in source files', function () {
         const fs = require('fs')
@@ -586,18 +528,16 @@ describe('Security', function () {
             const relPath = path.relative(srcDir, file)
             it(`${relPath} does not use child_process.exec()`, function () {
                 const source = fs.readFileSync(file, 'utf8')
-                // Match exec( but not execFile( or execFileAsync(
-                // Also allow require('child_process') lines and comments
+                // Flags a bare exec( (imported child_process.exec), skipping comment
+                // and require('child_process') lines and excluding execFile/execFileAsync.
                 const lines = source.split('\n')
                 for (let i = 0; i < lines.length; i++) {
                     const line = lines[i].trim()
                     if (line.startsWith('//') || line.startsWith('*')) continue
                     if (line.includes("require('child_process')")) continue
-                    // Check for a BARE exec( (the imported child_process.exec), but not a
-                    // method call like RegExp.prototype.exec (`re.exec(...)`) or execFile(.
-                    // Requiring the char before `exec` to be start-of-line or a non-dot,
-                    // non-word char excludes `x.exec(` method calls (the false positive that
-                    // flagged a regex `.exec()`), while still catching a bare imported exec(.
+                    // Requires the char before `exec` to be start-of-line or non-word/non-dot,
+                    // which excludes `x.exec(` method calls (RegExp.prototype.exec was a false
+                    // positive here) while still catching a bare imported exec(.
                     if (/(^|[^.\w])exec\s*\(/.test(line) && !/\bexecFile/.test(line)) {
                         // Allow promisify references and variable names
                         if (/promisify/.test(line)) continue
@@ -608,7 +548,6 @@ describe('Security', function () {
                     if (/\b(child_?[pP]rocess|cp)\s*\.\s*exec\s*\(/.test(line)) {
                         expect.fail(`${relPath}:${i + 1} contains child_process.exec() call: ${line}`)
                     }
-                    // Check for execSync
                     if (/\bexecSync\s*\(/.test(line)) {
                         expect.fail(`${relPath}:${i + 1} contains execSync() call: ${line}`)
                     }

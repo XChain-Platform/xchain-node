@@ -198,7 +198,7 @@ describe('Bootstrap signing', function () {
         })
     })
 
-    // : the first real destructive restore (test-host, throwaway MariaDB)
+    // The first real destructive restore, against a throwaway MariaDB,
     // showed the gate refusing a tampered archive correctly but reporting it as
     // an uncaught exception: `throw` source line, stack, "Node.js v22.x" banner.
     // An operator reads that as a broken tool and retries; the archive is in

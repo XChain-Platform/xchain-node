@@ -10,9 +10,9 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-//  regression: `xchain-node update <service> <chain> <network> <branch>`
+// Regression guard: `xchain-node update <service> <chain> <network> <branch>`
 // used to delete the module's deploy checkout as its first step and, when the
-// clone then failed, put nothing back. On origin-host that erased
+// clone then failed, put nothing back. In production that erased
 // modules/xchain-hub (and a local-only hotfix branch with it) while the running
 // container stayed healthy, so nothing surfaced the loss.
 //
@@ -78,13 +78,13 @@ function loadModuleService(modulesDir, tmpDir, remote) {
     })
 }
 
-describe('[regression:p0] Deploy-checkout rollback safety ', function () {
+describe('[regression:p0] Deploy-checkout rollback safety', function () {
     this.timeout(30000)
 
     let root, modulesDir, tmpDir, remote, checkout, ms
 
     beforeEach(async function () {
-        root       = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-xc971-'))
+        root       = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-clone-rollback-'))
         modulesDir = path.join(root, 'modules')
         tmpDir     = path.join(root, 'tmp')
         remote     = path.join(root, 'remote-' + MODULE)

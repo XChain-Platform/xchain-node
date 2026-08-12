@@ -114,7 +114,6 @@ class TestEnv {
     }
 
     async setup() {
-        // Create temp directory structure
         this.tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-test-'))
         this.configDir = path.join(this.tmpDir, 'config')
         this.dataDir = path.join(this.tmpDir, 'data')
@@ -163,16 +162,10 @@ class TestEnv {
         state.setVerbose(false)
     }
 
-    /**
-     * Write a config file fixture (e.g., 'bitcoin-mainnet' with key=value content).
-     */
     writeConfigFile(coinNetwork, content) {
         fs.writeFileSync(path.join(this.configDir, coinNetwork), content)
     }
 
-    /**
-     * Create a fake module directory with minimal structure (Dockerfile, src, package.json).
-     */
     createFakeModule(moduleName, packageVersion) {
         this.writeFakeModuleAt(path.join(this.moduleDir, moduleName), moduleName, packageVersion)
     }
@@ -193,31 +186,20 @@ class TestEnv {
         }))
     }
 
-    /**
-     * Insert a module container ID directly into the test store.
-     */
     async insertModule(module, coin, network, containerId) {
         return this._store.insertModuleContainer(module, coin, network, containerId)
     }
 
-    /**
-     * Get a module container ID from the test store.
-     */
     async getModule(module, coin, network) {
         return this._store.getModuleContainer(module, coin, network)
     }
 
-    /**
-     * Get all module containers from the test store.
-     */
     async getAllModules() {
         return this._store.getAllModuleContainers(null, null)
     }
 
-    /**
-     * Overrides constants paths for config/module/data dirs to use temp dirs.
-     * Returns a restore function.
-     */
+    // Overrides the config/module/data dir constants to point at temp dirs;
+    // restoreConstants() undoes it.
     patchConstants() {
         const constants = require('../../../src/config/constants')
         this._origConstants = {
@@ -235,7 +217,6 @@ class TestEnv {
         constants.tmpDir = path.join(this.tmpDir, 'tmp')
         constants.containersFilesDir = path.join(this.tmpDir, 'tmp', 'containers_files')
 
-        // Create dirs
         fs.mkdirSync(constants.tmpDir, { recursive: true })
         fs.mkdirSync(constants.containersFilesDir, { recursive: true })
 
@@ -256,7 +237,6 @@ class TestEnv {
             Object.assign(constants, this._origConstants)
             this._origConstants = {}
         }
-        // Restore cached modules that we evicted from require.cache
         if (this._cachedModules) {
             for (const { key, module } of this._cachedModules) {
                 require.cache[key] = module
@@ -266,7 +246,6 @@ class TestEnv {
     }
 
     async teardown() {
-        // Restore the original db methods on the singleton
         if (this._origDbMethods) {
             const state = require('../../../src/state')
             for (const [name, fn] of Object.entries(this._origDbMethods)) {
@@ -283,18 +262,13 @@ class TestEnv {
             this._store = null
         }
 
-        // Remove temp directory
         if (this.tmpDir && fs.existsSync(this.tmpDir)) {
             fs.rmSync(this.tmpDir, { recursive: true, force: true })
         }
 
-        // Restore sinon stubs
         sinon.restore()
     }
 
-    /**
-     * Generate a fake 64-char container ID.
-     */
     static fakeContainerId(seed) {
         const base = (seed || 'a').repeat(64)
         return base.substring(0, 64)

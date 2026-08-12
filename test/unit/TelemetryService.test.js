@@ -9,9 +9,6 @@
  * General Public License v3.0 or later; see LICENSE.md. A commercial
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
- *
- **********************************************************************
- * XChain Node - Telemetry Service unit tests
  ********************************************************************/
 
 const { expect } = require('chai')

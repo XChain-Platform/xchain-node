@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// : hub version-skew guard on the update path. The guard must refuse
+// Hub version-skew guard on the update path. The guard must refuse
 // updating a hub-dependent service whose declared minimum hub version is
 // ahead of the installed hub, and stay inert everywhere else.
 

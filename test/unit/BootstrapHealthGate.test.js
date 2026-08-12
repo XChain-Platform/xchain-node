@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//  leg 2: the bootstrap publisher must refuse an unhealthy source.
+// The bootstrap publisher must refuse an unhealthy source.
 //
 // The publisher dumped whatever state the service was in, and because a published
 // archive is the NEWEST file in the served directory it becomes the default choice
@@ -107,7 +107,7 @@ async function refusal(promise) {
     throw new Error('expected the gate to refuse, but it passed')
 }
 
-describe('BootstrapHealthGate ', function () {
+describe('BootstrapHealthGate', function () {
 
     let savedSkip, savedMaxLag
     beforeEach(function () {
@@ -123,13 +123,9 @@ describe('BootstrapHealthGate ', function () {
         else process.env.XCHAIN_NODE_BOOTSTRAP_MAX_LAG_BLOCKS = savedMaxLag
     })
 
-    // -----------------------------------------------------------------------
-    // The  case, end to end through the gate
-    // -----------------------------------------------------------------------
-
     describe('durable halt markers', function () {
 
-        it('REFUSES a decoder whose database carries a REORG_HALT row (the  archive)', async function () {
+        it('REFUSES a decoder whose database carries a REORG_HALT row', async function () {
             const gate = loadGate()
             const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHaltRows: '1' }) }))
             expect(err.name).to.equal('BootstrapSourceUnhealthyError')
@@ -173,10 +169,6 @@ describe('BootstrapHealthGate ', function () {
             expect(sqls.some(s => /FROM `[^`]+`\.events/.test(s))).to.equal(false)
         })
     })
-
-    // -----------------------------------------------------------------------
-    // Container state
-    // -----------------------------------------------------------------------
 
     describe('container state', function () {
 
@@ -241,10 +233,6 @@ describe('BootstrapHealthGate ', function () {
             expect(format).to.not.contain('.State.RestartCount')
         })
     })
-
-    // -----------------------------------------------------------------------
-    // Service health surface
-    // -----------------------------------------------------------------------
 
     describe('service health probe', function () {
 
@@ -322,10 +310,6 @@ describe('BootstrapHealthGate ', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
-    // Escape hatch
-    // -----------------------------------------------------------------------
-
     it('XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE=1 bypasses the gate (loudly)', async function () {
         process.env.XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE = '1'
         const gate = loadGate()
@@ -338,10 +322,6 @@ describe('BootstrapHealthGate ', function () {
             warn.restore()
         }
     })
-
-    // -----------------------------------------------------------------------
-    // Pure policy helpers
-    // -----------------------------------------------------------------------
 
     describe('evaluateStatusPayload()', function () {
 
@@ -384,12 +364,10 @@ describe('BootstrapHealthGate ', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
 // The gate has to actually be wired into `bootstrap create`, or none of the
 // above matters. Loaded with the gate REAL and everything else stubbed, so a
 // future refactor that drops the call fails here.
-// ---------------------------------------------------------------------------
-describe('makeBootstrap() consults the source health gate ', function () {
+describe('makeBootstrap() consults the source health gate', function () {
 
     function loadServiceWithGate(gateStub) {
         return proxyquire('../../src/services/BootstrapService', {

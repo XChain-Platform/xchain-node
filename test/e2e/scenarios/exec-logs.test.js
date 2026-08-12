@@ -34,17 +34,12 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
         await env.teardown()
     })
 
-    // -------------------------------------------------------------------
-    // E2E-070: execModules reads container ID and calls docker exec
-    // -------------------------------------------------------------------
-
     describe('E2E-070: Exec command', function () {
 
         it('executes command on the correct container from LevelDB', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
 
-            // Install decoder
             const serviceList = filterCommandParameters(null, 'xchain-decoder', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
@@ -53,7 +48,6 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
 
             env.capture.reset()
 
-            // Set up exec to return output
             env.capture.when(/docker exec/).returns({ stdout: '/app\nnode_modules\nsrc\npackage.json\n' })
 
             await cli.moduleOps.execModules(serviceList, 'ls /app')
@@ -61,11 +55,9 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
             const execCmds = env.capture.findCommands(/docker exec/)
             expect(execCmds.length).to.be.greaterThanOrEqual(1)
 
-            // Verify the exec uses the correct container ID
             const hasDecoderId = execCmds.some(c => c.command.includes(decoderId))
             expect(hasDecoderId, 'exec references decoder container ID').to.be.true
 
-            // Verify the command is passed through
             const hasCommand = execCmds.some(c => c.command.includes('ls /app'))
             expect(hasCommand, 'exec includes the user command').to.be.true
         })
@@ -74,7 +66,6 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
             env.setupDefaultRoutes()
             cli = env.createCLI()
 
-            // No modules installed
             const serviceList = filterCommandParameters(null, 'xchain-decoder', 'bitcoin', 'regtest')
             const result = await cli.moduleOps.execModules(serviceList, 'ls /app')
             expect(result).to.be.true
@@ -84,17 +75,12 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // E2E-071: logModules reads container ID and calls docker logs
-    // -------------------------------------------------------------------
-
     describe('E2E-071: Logs command', function () {
 
         it('calls docker logs with the correct container ID', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
 
-            // Install decoder
             const serviceList = filterCommandParameters(null, 'xchain-decoder', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
@@ -102,14 +88,13 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
 
             env.capture.reset()
 
-            // logModules with follow=false to avoid hanging
+            // follow=false avoids the call hanging on a live log stream
             await cli.moduleOps.logModules(serviceList, false)
 
-            // docker logs should be called via spawn
+            // docker logs is invoked via spawn, not execFile like other docker commands
             const logCmds = env.capture.findCommands(/docker logs/)
             expect(logCmds.length).to.be.greaterThanOrEqual(1)
 
-            // The spawned command should include the container ID
             const hasDecoderId = logCmds.some(c => c.command.includes(decoderId))
             expect(hasDecoderId, 'logs references decoder container ID').to.be.true
         })
@@ -118,16 +103,11 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
             env.setupDefaultRoutes()
             cli = env.createCLI()
 
-            // No modules installed; logModules should handle gracefully
             const serviceList = filterCommandParameters(null, 'xchain-decoder', 'bitcoin', 'regtest')
             const result = await cli.moduleOps.logModules(serviceList, false)
             expect(result).to.be.true
         })
     })
-
-    // -------------------------------------------------------------------
-    // E2E-072: Restart calls docker restart for each module
-    // -------------------------------------------------------------------
 
     describe('E2E-072: Restart command', function () {
 

@@ -9,7 +9,7 @@
  * General Public License v3.0 or later; see LICENSE.md.
  *
  **********************************************************************
- * : coverage for scripts/scan-nine-field-files.js.
+ * Coverage for scripts/scan-nine-field-files.js.
  *
  * GatedFileFieldScan proves what counts as a hit. Untested until now was the paging that
  * decides HOW MUCH of the corpus a verdict covers, and that is where a false CLEAN comes
@@ -53,7 +53,7 @@ function fakeConn(pages, opts) {
     };
 }
 
-describe(' scan-nine-field-files CLI', function () {
+describe('scan-nine-field-files CLI', function () {
 
     describe('argument reading', function () {
 

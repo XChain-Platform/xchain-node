@@ -86,11 +86,8 @@ function setupExec(stubs, dockerRunOutput) {
 
 describe('Fuzz: Container ID Validation', function () {
 
-    // --- Valid container IDs ---
-
     it('accepts a valid 64-char lowercase hex container ID', async function () {
         const validId = 'a1b2c3d4e5f6'.repeat(5) + 'a1b2c3d4'
-        // Ensure it's exactly 64 hex chars
         const id = 'abcdef0123456789'.repeat(4)
         expect(id).to.have.length(64)
 
@@ -118,8 +115,6 @@ describe('Fuzz: Container ID Validation', function () {
         const result = await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         expect(result).to.equal(id)
     })
-
-    // --- Invalid container IDs that must be rejected ---
 
     const invalidIds = [
         ['63 chars (too short)',      'a'.repeat(63)],
@@ -152,8 +147,6 @@ describe('Fuzz: Container ID Validation', function () {
             }
         })
     }
-
-    // --- Whitespace handling ---
 
     it('trims leading/trailing whitespace from container ID', async function () {
         const id = 'a'.repeat(64)

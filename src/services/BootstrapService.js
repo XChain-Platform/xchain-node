@@ -77,7 +77,7 @@ const DEFAULT_BOOTSTRAP_PUBKEY_PATH = path.join(__dirname, '..', 'config', 'boot
 // line, a stack, and the "Node.js v22.x" banner: indistinguishable from a
 // crash, and the natural read is "the restore tool is broken, retry it" when
 // the correct read is "this archive is not trustworthy, do not restore it".
-//  saw exactly that on test-host against a tampered archive. Naming the
+// This was seen firsthand against a tampered archive in testing. Naming the
 // class lets the CLI/TUI print the reason and exit 1 cleanly, mirroring how
 // BootstrapSourceUnhealthyError is already classified on the create path.
 class BootstrapIntegrityError extends Error {
@@ -277,11 +277,11 @@ function getWorkDir(coin, network, module) {
     return path.join(tmpDir, `bootstrap-work-${coin}-${network}-${module}`)
 }
 
-// . Staging a bootstrap writes the whole dataset into the work dir, and
-// tmpDir defaults to <repo>/tmp, which on a normal install is the ROOT
-// filesystem. A 30G tracker archive staged there filled node-host-b's / to 100%
-// and took the host down; the recovery was to point XCHAIN_NODE_TMP_DIR at the
-// big volume, which works but only if you already know to do it.
+// Staging a bootstrap writes the whole dataset into the work dir, and tmpDir
+// defaults to <repo>/tmp, which on a normal install is the ROOT filesystem.
+// A 30G tracker archive staged there once filled a host's / to 100% and took
+// it down; the recovery was to point XCHAIN_NODE_TMP_DIR at the big volume,
+// which works but only if you already know to do it.
 //
 // So refuse up front instead of discovering it at 100%. Deliberately checked
 // BEFORE the service container is stopped: failing after the stop would take
@@ -367,8 +367,6 @@ async function ensureDirWritable(dirPath) {
     await execFileAsync('docker', ['run', '--rm', '-v', `${parent}:/parent`, 'alpine', 'chmod', '755', `/parent/${dirName}`])
 }
 
-// ─── Public: getBootstrapFilesList ───────────────────────────────
-
 async function getBootstrapFilesList(coin, network, module) {
     const defaultConfig = await getDefaultConfig(module, coin, network)
     const fileList = []
@@ -393,13 +391,13 @@ async function getBootstrapFilesList(coin, network, module) {
         for (const fileName of entries) {
             const filePath = path.join(directory, fileName)
             const stats    = await fs.promises.stat(filePath)
-            // : only real archives are restorable. The directory also holds
+            // Only real archives are restorable. The directory also holds
             // the detached .sig (and older .sha256) sidecars, and listing those as
             // choices invites restoring a signature file.
             if (stats.isFile() && isBootstrapArchiveName(fileName))
                 fileList.push({ name: fileName, mtimeMs: Number(stats.mtimeMs) || 0 })
         }
-        // : NEWEST FIRST. This came back in raw readdir order, which is
+        // NEWEST FIRST. This came back in raw readdir order, which is
         // effectively arbitrary and in practice oldest-first, so every caller
         // that reached for "the latest" by taking the head of the list restored
         // the OLDEST archive instead. Sorting here fixes the interactive menu
@@ -418,8 +416,6 @@ function isBootstrapArchiveName(fileName) {
     return /\.(tar\.gz|tgz)$/.test(fileName)
 }
 
-// ─── Public: makeBootstrap ────────────────────────────────────────
-
 async function makeBootstrap(coin, network, module) {
     switch (module) {
         case XChainService.XCHAIN_UTXO_TRACKER:
@@ -430,7 +426,7 @@ async function makeBootstrap(coin, network, module) {
             throw new Error(`Unsupported module for bootstrap create: ${module}`)
     }
 
-    // : refuse to snapshot a source that is not known-good, BEFORE any work
+    // Refuse to snapshot a source that is not known-good, BEFORE any work
     // (and, for the utxo-tracker, before the container is stopped, so a refusal
     // costs no downtime). A published archive becomes the newest file in the served
     // directory and so the default choice for every restore path, including
@@ -460,7 +456,6 @@ async function makeBootstrapUtxoTracker(coin, network) {
     const checksumFile  = path.join(workDir, 'data.sha256')
     const finalOutput   = path.join(outputDir, archiveName)
 
-    // Step 1: Estimate volume size
     let totalBytes = 0
     try {
         const { stdout } = await execFileAsync(
@@ -471,11 +466,10 @@ async function makeBootstrapUtxoTracker(coin, network) {
         console.log('Could not estimate volume size, progress will show as ?%')
     }
 
-    // Step 1b: refuse now if either filesystem cannot hold it . Before
-    // the stop below, so a capacity failure never costs the tracker any downtime.
+    // Refuse now if either filesystem cannot hold it. Checked before the stop
+    // below, so a capacity failure never costs the tracker any downtime.
     assertBootstrapCapacity(workDir, outputDir, totalBytes, `${coin}/${network} utxo-tracker`)
 
-    // Step 2: Get container ID and stop service
     const containerId = await db.getModuleContainer(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     if (!containerId) throw new Error(`utxo-tracker container not found for ${coin}/${network}`)
 
@@ -483,12 +477,10 @@ async function makeBootstrapUtxoTracker(coin, network) {
     await stopContainer(containerId)
 
     try {
-        // Prepare directories
         if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
         ensureDir(workDir)
         await ensureDirWritable(outputDir)
 
-        // Step 3: Stream LevelDB volume through gzip → data.tar.gz
         const progress = startProgress('Compressing LevelDB data...', totalBytes)
         await new Promise((resolve, reject) => {
             const tarProc     = spawn('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'tar', 'cf', '-', '-C', '/data', '.'])
@@ -511,25 +503,20 @@ async function makeBootstrapUtxoTracker(coin, network) {
         const innerStats = await fs.promises.stat(innerArchive)
         progress.stop(`LevelDB compressed: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB`)
 
-        // Step 4: Compute SHA256 and write checksum file
         process.stdout.write('Computing checksum... ')
         const checksum = await computeSha256(innerArchive)
         await fs.promises.writeFile(checksumFile, `${checksum}  data.tar.gz\n`)
         console.log(checksum)
 
-        // Step 5: Create outer wrapper archive
         console.log(`Wrapping into ${archiveName}...`)
         await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, 'data.tar.gz', 'data.sha256'])
 
-        // Step 5b: Sign the archive (publish the .sig next to it)
         await maybeSignBootstrap(finalOutput)
 
-        // Cleanup work dir
         fs.rmSync(workDir, { recursive: true })
         console.log(`Bootstrap created: ${finalOutput}`)
 
     } finally {
-        // Step 6: Always restart the container
         console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
         await startContainer(containerId)
     }
@@ -551,7 +538,6 @@ async function makeBootstrapMariaDb(coin, network, module) {
     const checksumFile  = path.join(workDir, 'dump.sha256')
     const finalOutput   = path.join(outputDir, archiveName)
 
-    // Step 1: Get DB credentials (and container ID when not using external DB).
     // In external-DB mode there is no local container; talk to the DB over the
     // native connection (mirrors restoreBootstrapMariaDb's EXTERNAL_DB branch)
     // so bootstrap publishing works from an external-DB host too.
@@ -566,7 +552,6 @@ async function makeBootstrapMariaDb(coin, network, module) {
         rootPassword = await askMariadbRootPassword(coin, network)
     }
 
-    // Step 2: Estimate DB size
     let totalBytes = 0
     try {
         const sizeQuery = `SELECT SUM(DATA_LENGTH + INDEX_LENGTH) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}'`
@@ -585,12 +570,10 @@ async function makeBootstrapMariaDb(coin, network, module) {
         console.log('Could not estimate DB size, progress will show as ?%')
     }
 
-    // Prepare directories
     if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
     ensureDir(workDir)
     await ensureDirWritable(outputDir)
 
-    // Step 3: Stream mysqldump → gzip → dump.sql.gz
     const progress = startProgress(`Dumping ${dbName}...`, totalBytes)
     await new Promise((resolve, reject) => {
         const dumpProc    = EXTERNAL_DB
@@ -618,27 +601,21 @@ async function makeBootstrapMariaDb(coin, network, module) {
     const innerStats = await fs.promises.stat(innerArchive)
     progress.stop(`${dbName} dumped: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB compressed`)
 
-    // Step 4: Compute SHA256 and write checksum file
     process.stdout.write('Computing checksum... ')
     const checksum = await computeSha256(innerArchive)
     await fs.promises.writeFile(checksumFile, `${checksum}  dump.sql.gz\n`)
     console.log(checksum)
 
-    // Step 5: Create outer wrapper archive
     console.log(`Wrapping into ${archiveName}...`)
     await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, 'dump.sql.gz', 'dump.sha256'])
 
-    // Step 5b: Sign the archive (publish the .sig next to it)
     await maybeSignBootstrap(finalOutput)
 
-    // Cleanup work dir
     fs.rmSync(workDir, { recursive: true })
     console.log(`Bootstrap created: ${finalOutput}`)
 
     return true
 }
-
-// ─── Public: restoreBootstrap ─────────────────────────────────────
 
 async function restoreBootstrap(coin, network, module, fileName) {
     switch (module) {
@@ -669,12 +646,11 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
 
-    // Steps 1-2: extract + verify the inner archive against the checksum that
-    // shipped inside the signature-verified outer archive (resumable, but the
-    // reused bytes are always re-bound to the verified archive; see the helper).
+    // Extract + verify the inner archive against the checksum that shipped
+    // inside the signature-verified outer archive (resumable, but the reused
+    // bytes are always re-bound to the verified archive; see the helper).
     const innerArchive = await ensureVerifiedInnerArchive(archivePath, workDir, 'data.tar.gz', 'data.sha256')
 
-    // Step 3: Get container ID and stop service
     // Make sure the DB pool is open first; when this routine is invoked outside
     // the CLI precheck the pool is null, and getModuleContainer would silently
     // return null, masquerading as a missing container.
@@ -691,11 +667,9 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     await stopContainer(containerId)
 
     try {
-        // Step 4: Clear volume
         console.log('Clearing LevelDB volume...')
         await execFileAsync('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
 
-        // Step 5: Restore data.tar.gz into volume with progress
         const stats      = await fs.promises.stat(innerArchive)
         const totalBytes = stats.size
         const progress   = startProgress('Restoring LevelDB data...', totalBytes)
@@ -719,12 +693,10 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         })
         progress.stop('LevelDB data restored')
 
-        // Cleanup
         fs.rmSync(workDir, { recursive: true })
         console.log('Bootstrap restore complete')
 
     } finally {
-        // Step 6: Always restart container
         console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
         await startContainer(containerId)
     }
@@ -750,12 +722,11 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
 
-    // Steps 1-2: extract + verify the inner archive against the checksum that
-    // shipped inside the signature-verified outer archive (resumable, but the
-    // reused bytes are always re-bound to the verified archive; see the helper).
+    // Extract + verify the inner archive against the checksum that shipped
+    // inside the signature-verified outer archive (resumable, but the reused
+    // bytes are always re-bound to the verified archive; see the helper).
     const innerArchive = await ensureVerifiedInnerArchive(archivePath, workDir, 'dump.sql.gz', 'dump.sha256')
 
-    // Step 3: Get DB credentials (and container ID when not using external DB)
     let dbContainerId = null
     let rootPassword  = null
     let externalCfg   = null
@@ -784,7 +755,6 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     }
 
     try {
-        // Step 4: Drop and recreate database
         console.log(`Recreating database ${dbName}...`)
         if (EXTERNAL_DB) {
             // Driver-based path: DROP and CREATE as separate statements (the
@@ -798,7 +768,6 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
             )
         }
 
-        // Step 5: Pipe decompressed SQL into mariadb with progress
         const stats      = await fs.promises.stat(innerArchive)
         const totalBytes = stats.size
         const progress   = startProgress(`Restoring ${dbName}...`, totalBytes)
@@ -834,7 +803,6 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
         })
         progress.stop(`${dbName} restored`)
 
-        // Cleanup
         fs.rmSync(workDir, { recursive: true })
         console.log('Bootstrap restore complete')
 
@@ -847,8 +815,6 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
         }
     }
 }
-
-// ─── Public: auto-download + restore on fresh install ─────────────
 
 // Whether the utxo-tracker LevelDB volume already holds data. Used as a
 // race-free freshness gate: it must be checked BEFORE the container starts,
@@ -1072,7 +1038,7 @@ const BOOTSTRAPPABLE_SERVICES = [
 // Every served <service>:<coin>:<network> combo, read from the module REGISTRY
 // rather than from live containers. publish-bootstraps.sh --all used to build
 // its plan from `docker ps`, so a stopped or crash-looping combo was dropped
-// before the  source-health gate could report it and the cron exited 0
+// before the source-health gate could report it and the cron exited 0
 // while that consumer archive went stale (uuid:d0cfcba9). The registry keeps a
 // row for a stopped container (DiscoveryService prunes against `docker ps -a`,
 // not `docker ps`), so reading it puts every installed combo into the plan and
@@ -1090,8 +1056,6 @@ async function listServedBootstrapCombos() {
     }
     return Array.from(combos).sort()
 }
-
-// ─── Exports ──────────────────────────────────────────────────────
 
 module.exports = {
     BootstrapIntegrityError,

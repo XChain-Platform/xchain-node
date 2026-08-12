@@ -9,10 +9,10 @@
  * General Public License v3.0 or later; see LICENSE.md.
  *
  **********************************************************************
- * : coverage for scripts/identify-deployed-ref.js.
+ * Coverage for scripts/identify-deployed-ref.js.
  *
- * This tool answers "which commit is the RUNNING artifact", and  section 8 step 1
- * takes that answer as the abort target for a mainnet batch. A wrong answer therefore
+ * This tool answers "which commit is the RUNNING artifact", and a mainnet rebase runbook
+ * takes that answer as the abort target for its batch. A wrong answer therefore
  * misdirects a release rather than merely failing, so the tests are built around the two
  * ways it can be wrong: naming a commit the artifact is not, and reporting NO MATCH for
  * a commit it is.
@@ -48,7 +48,7 @@ function git(repo, args) {
 // A throwaway repository with a src/ tree, committed. Nothing here touches a chain or a
 // network; it exists only so the object store has a tree to compare the file walk against.
 function makeRepo() {
-    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'xc1252-'));
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'idr-'));
     execFileSync('git', ['-c', 'init.defaultBranch=main', 'init', '-q', repo]);
     fs.mkdirSync(path.join(repo, 'src', 'services'), { recursive: true });
     fs.writeFileSync(path.join(repo, 'src', 'index.js'), "'use strict';\nmodule.exports = 1;\n");
@@ -63,13 +63,13 @@ function makeRepo() {
     return repo;
 }
 
-describe(' identify-deployed-ref (deploy-informing script)', function () {
+describe('identify-deployed-ref (deploy-informing script)', function () {
 
     describe('blob identity', function () {
 
         it('reproduces git hash-object exactly, including empty and binary content', function () {
             if (!hasGit()) return this.skip();
-            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xc1252-blob-'));
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'idr-blob-'));
             const cases = {
                 'empty':   Buffer.alloc(0),
                 'ascii':   Buffer.from("'use strict';\nmodule.exports = 1;\n"),
@@ -174,7 +174,7 @@ describe(' identify-deployed-ref (deploy-informing script)', function () {
         });
 
         it('yields an empty manifest when src/ is absent instead of throwing', function () {
-            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xc1252-nosrc-'));
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'idr-nosrc-'));
             assert.deepStrictEqual(idr.manifestLines(dir), []);
             fs.rmSync(dir, { recursive: true, force: true });
         });

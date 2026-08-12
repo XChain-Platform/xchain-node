@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Guards the table-driven SERVICE_REGISTRY  that replaced the
+// Guards the table-driven SERVICE_REGISTRY that replaced the
 // hand-maintained per-service switch/case blocks in ModuleService.buildAndUp()
 // and HubService.updateHubOrExplorer(). The point of the table is that a
 // forgotten service surfaces as a missing entry HERE (a failing test) instead
@@ -26,12 +26,9 @@ const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME
 } = require('../../src/config/constants')
 
-// buildHubModuleConfig is not exported; exercise it through the public
-// buildModuleDockerArgs for docker, and re-derive the hub descriptor by
-// loading HubService with a captured config. Simpler: test the docker builder
-// via ModuleService's export, and the hub descriptor via SERVICE_REGISTRY
-// data + a tiny local re-implementation mirror is NOT used; instead we assert
-// the registry shape directly plus drive the real docker builder.
+// buildHubModuleConfig is not exported, so it is exercised indirectly: the
+// docker builder via ModuleService's public buildModuleDockerArgs, and the
+// hub descriptor by asserting the SERVICE_REGISTRY shape directly.
 function loadModuleService() {
     return proxyquire('../../src/services/ModuleService', {
         // ModuleService only pulls ValidatorService in lazily (hub caps), and
@@ -61,7 +58,7 @@ function loadModuleService() {
     })
 }
 
-describe('SERVICE_REGISTRY ', function () {
+describe('SERVICE_REGISTRY', function () {
 
     describe('coverage parity with canonical service enums', function () {
 

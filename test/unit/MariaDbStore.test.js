@@ -352,7 +352,7 @@ describe('MariaDbStore', function () {
         })
     })
 
-    // : the empty array above is why a probe against an uninitialized
+    // The empty array above is why a probe against an uninitialized
     // singleton read as "the node lost track of its whole stack". Reads can live
     // with it; callers that ACT on the row set need a distinguishable signal.
     describe('assertReady()', function () {

@@ -44,11 +44,9 @@ module.exports = {
 
         metrics.start()
 
-        // Benchmark each coin-network combination
         for (const { coin, network } of COIN_NETWORKS) {
             const label = `${coin}-${network}`
 
-            // Warm up (5 iterations)
             for (let i = 0; i < 5; i++) {
                 await getDefaultConfig('xchain-decoder', coin, network)
             }

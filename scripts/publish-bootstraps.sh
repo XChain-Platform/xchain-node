@@ -24,8 +24,8 @@
 #
 #   - Signs each archive inline (XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY) so consumers
 #     can verify provenance against the pinned public key.
-#   - Refuses an unhealthy source. `bootstrap create` runs a source health gate
-#     : a service that is stopped, crash-looping, reporting unhealthy,
+#   - Refuses an unhealthy source. `bootstrap create` runs a source health gate:
+#     a service that is stopped, crash-looping, reporting unhealthy,
 #     materially behind its tip, or carrying a durable halt marker (a decoder
 #     REORG_HALT row, an uncleared sync_halt) is NOT snapshotted. Such a combo is
 #     summarised as SOURCE-UNHEALTHY and the run exits non-zero, leaving the last
@@ -122,7 +122,7 @@ mkdir -p "$STAGE_DIR" "$TMP_DIR" 2>/dev/null || die "cannot create STAGE_DIR/TMP
 # ── Resolve combos ────────────────────────────────────────────────────────
 # Auto-detect served combos from the module REGISTRY, not from live containers.
 # This used to run `docker ps`, which lists only RUNNING containers, so a stopped
-# or crash-looping combo was dropped from the plan before the  source-health
+# or crash-looping combo was dropped from the plan before the source-health
 # gate could report it: the cron then exited 0 while that consumer's archive went
 # missing or increasingly stale, the exact outcome the gate exists to prevent
 # (uuid:d0cfcba9). `bootstrap-combos` reads the modules table, whose rows survive
@@ -170,8 +170,8 @@ for c in "${SELECTED[@]}"; do
   out_dir="$STAGE_DIR/$coin/$net/$svc/bootstrap"
   log "=== $svc $coin $net ==="
 
-  # Capture the create output so a source-health REFUSAL  is reported as
-  # its own outcome rather than being flattened into a generic CREATE-FAIL. The
+  # Capture the create output so a source-health REFUSAL is reported as its own
+  # outcome rather than being flattened into a generic CREATE-FAIL. The
   # two need different operator responses: a refusal means the SERVICE is broken
   # (and the last good archive correctly stays newest), a create-fail means the
   # publish machinery is broken.

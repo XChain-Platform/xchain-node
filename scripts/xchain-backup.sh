@@ -8,8 +8,8 @@
 #
 # This is a DR backup, distinct from `xchain-node bootstrap create` (which
 # exists to distribute signed auto-restore bootstraps to fresh installs).
-# See claude/reports/launch/BACKUP-DR-RUNBOOK.md for the full procedure,
-# cron lines, and the restore drill.
+# See the operator's backup/DR runbook for the full procedure, cron lines,
+# and the restore drill.
 set -euo pipefail
 
 # --- config (override via env) ---

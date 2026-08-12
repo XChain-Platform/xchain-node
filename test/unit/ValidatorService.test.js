@@ -16,10 +16,6 @@ const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const crypto     = require('crypto')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 // Fake config dir (never touches the real filesystem)
 const FAKE_CONFIG_DIR = '/tmp/test-xchain-config'
 const FAKE_VALIDATOR_DIR = path.join(FAKE_CONFIG_DIR, 'validator')
@@ -32,7 +28,6 @@ function makeSeedHex() {
     return crypto.randomBytes(32).toString('hex')
 }
 
-// Build a ValidatorService with stubbed fs
 function loadValidatorService(fsStub) {
     return proxyquire('../../src/services/ValidatorService', {
         'fs': fsStub,
@@ -42,7 +37,6 @@ function loadValidatorService(fsStub) {
     })
 }
 
-// Default fs stub with all operations as no-ops
 function makeFs(overrides = {}) {
     return {
         existsSync:    sinon.stub().returns(false),
@@ -68,15 +62,7 @@ function makeSettings(pubkey = 'a'.repeat(64), opts = {}) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('ValidatorService', function () {
-
-    // -------------------------------------------------------------------
-    // pubkeyFromSeedHex
-    // -------------------------------------------------------------------
 
     describe('pubkeyFromSeedHex()', function () {
 
@@ -101,10 +87,6 @@ describe('ValidatorService', function () {
             expect(pubkey1).to.not.equal(pubkey2)
         })
     })
-
-    // -------------------------------------------------------------------
-    // isInitialized
-    // -------------------------------------------------------------------
 
     describe('isInitialized()', function () {
 
@@ -139,10 +121,6 @@ describe('ValidatorService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // initValidator
-    // -------------------------------------------------------------------
-
     describe('initValidator()', function () {
 
         it('writes key, settings, and capabilities files on first run', async function () {
@@ -150,16 +128,13 @@ describe('ValidatorService', function () {
             const vs = loadValidatorService(fs)
             const result = await vs.initValidator()
 
-            // Should have written KEY_FILE, SETTINGS_FILE, CAPS_FILE
             const writeCalls = fs.writeFileSync.getCalls().map(c => c.args[0])
             expect(writeCalls).to.include(FAKE_KEY_FILE)
             expect(writeCalls).to.include(FAKE_SETTINGS_FILE)
             expect(writeCalls).to.include(FAKE_CAPS_FILE)
 
-            // Should have created the validator dir
             expect(fs.mkdirSync.calledWith(FAKE_VALIDATOR_DIR, { recursive: true })).to.be.true
 
-            // Result should have pubkey, enabled flag, and capabilities
             expect(result.enabled).to.be.true
             expect(result.pubkey).to.be.a('string').with.length(64)
             expect(result.capabilities).to.deep.equal(['price', 'cross_chain', 'oracle_publish', 'attestation'])
@@ -190,7 +165,6 @@ describe('ValidatorService', function () {
             })
             const vs = loadValidatorService(fs)
             const result = await vs.initValidator({ force: true })
-            // Should have written new files
             expect(fs.writeFileSync.called).to.be.true
             expect(result.pubkey).to.not.be.null
         })
@@ -262,7 +236,6 @@ describe('ValidatorService', function () {
             const vs = loadValidatorService(fs)
             await vs.initValidator()
             const capsWriteCalls = fs.writeFileSync.getCalls().filter(c => c.args[0] === FAKE_CAPS_FILE)
-            // caps file already exists → no write
             expect(capsWriteCalls.length).to.equal(0)
         })
 
@@ -281,14 +254,9 @@ describe('ValidatorService', function () {
             })
             const vs = loadValidatorService(fs)
             await vs.initValidator()
-            // mkdirSync should NOT be called since dir exists
             expect(fs.mkdirSync.called).to.be.false
         })
     })
-
-    // -------------------------------------------------------------------
-    // getValidatorSettings
-    // -------------------------------------------------------------------
 
     describe('getValidatorSettings()', function () {
 
@@ -339,10 +307,6 @@ describe('ValidatorService', function () {
             expect(vs.getValidatorSettings()).to.be.null
         })
     })
-
-    // -------------------------------------------------------------------
-    // getValidatorEnv
-    // -------------------------------------------------------------------
 
     describe('getValidatorEnv()', function () {
 
@@ -440,10 +404,6 @@ describe('ValidatorService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getCapabilityConfigHostPath
-    // -------------------------------------------------------------------
-
     describe('getCapabilityConfigHostPath()', function () {
 
         it('returns null when not initialized', function () {
@@ -475,10 +435,6 @@ describe('ValidatorService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // CAPS_CONTAINER_PATH constant
-    // -------------------------------------------------------------------
-
     describe('CAPS_CONTAINER_PATH', function () {
 
         it('equals "/validator/capabilities.json"', function () {
@@ -486,10 +442,6 @@ describe('ValidatorService', function () {
             expect(vs.CAPS_CONTAINER_PATH).to.equal('/validator/capabilities.json')
         })
     })
-
-    // -------------------------------------------------------------------
-    // VALIDATOR_DIR constant
-    // -------------------------------------------------------------------
 
     describe('VALIDATOR_DIR', function () {
 

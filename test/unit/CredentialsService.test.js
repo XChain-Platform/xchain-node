@@ -16,10 +16,6 @@ const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const os         = require('os')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 // Homedir used by tests (never the real home)
 const FAKE_HOME = '/tmp/test-xchain-home'
 const CREDS_DIR  = path.join(FAKE_HOME, '.xchain-node')
@@ -45,15 +41,7 @@ function makeFs(overrides = {}) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('CredentialsService', function () {
-
-    // -------------------------------------------------------------------
-    // Path helpers
-    // -------------------------------------------------------------------
 
     describe('getCredentialsDir()', function () {
 
@@ -70,10 +58,6 @@ describe('CredentialsService', function () {
             expect(cs.getCredentialsPath()).to.equal(CREDS_FILE)
         })
     })
-
-    // -------------------------------------------------------------------
-    // sanitizeForMariaDb
-    // -------------------------------------------------------------------
 
     describe('sanitizeForMariaDb()', function () {
 
@@ -105,10 +89,6 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // getOsUserDbName
-    // -------------------------------------------------------------------
-
     describe('getOsUserDbName()', function () {
 
         it('returns xchain_node_<sanitized-username>', function () {
@@ -136,10 +116,6 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // generatePassword
-    // -------------------------------------------------------------------
-
     describe('generatePassword()', function () {
 
         it('returns a non-empty base64url string', function () {
@@ -163,10 +139,6 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // hasCredentials
-    // -------------------------------------------------------------------
-
     describe('hasCredentials()', function () {
 
         it('returns true when credentials file exists', function () {
@@ -189,10 +161,6 @@ describe('CredentialsService', function () {
             expect(cs.hasCredentials()).to.be.false
         })
     })
-
-    // -------------------------------------------------------------------
-    // loadCredentials
-    // -------------------------------------------------------------------
 
     describe('loadCredentials()', function () {
 
@@ -246,10 +214,6 @@ describe('CredentialsService', function () {
             expect(cs.loadCredentials()).to.be.null
         })
     })
-
-    // -------------------------------------------------------------------
-    // saveCredentials
-    // -------------------------------------------------------------------
 
     describe('saveCredentials()', function () {
 
@@ -332,10 +296,6 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // loadDbRootPassword / saveDbRootPassword
-    // -------------------------------------------------------------------
-
     describe('loadDbRootPassword() / saveDbRootPassword()', function () {
 
         it('loadDbRootPassword returns null when the file or key is absent', function () {
@@ -398,10 +358,6 @@ describe('CredentialsService', function () {
             expect(fs.mkdirSync.firstCall.args[1]).to.deep.equal({ recursive: true, mode: 0o700 })
         })
     })
-
-    // -------------------------------------------------------------------
-    // hasExternalDbConfig
-    // -------------------------------------------------------------------
 
     describe('hasExternalDbConfig()', function () {
 
@@ -476,10 +432,6 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // loadExternalDbConfig
-    // -------------------------------------------------------------------
-
     describe('loadExternalDbConfig()', function () {
 
         it('returns the externalDb block when present', function () {
@@ -507,10 +459,6 @@ describe('CredentialsService', function () {
             expect(cs.loadExternalDbConfig()).to.be.null
         })
     })
-
-    // -------------------------------------------------------------------
-    // saveExternalDbConfig
-    // -------------------------------------------------------------------
 
     describe('saveExternalDbConfig()', function () {
 
@@ -581,10 +529,6 @@ describe('CredentialsService', function () {
             })).to.not.throw()
         })
     })
-
-    // -------------------------------------------------------------------
-    // XCHAIN_NODE_DB constant
-    // -------------------------------------------------------------------
 
     describe('XCHAIN_NODE_DB', function () {
 

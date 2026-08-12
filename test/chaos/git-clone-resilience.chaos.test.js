@@ -16,10 +16,6 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const { modulesUrls } = require('../../src/config/constants')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeStubs() {
     return {
         execFile: sinon.stub(),
@@ -27,7 +23,7 @@ function makeStubs() {
             existsSync: sinon.stub().returns(true),
             rmSync: sinon.stub(),
             mkdirSync: sinon.stub(),
-            // cloneGit's rewrite path stages the clone and swaps it in 
+            // cloneGit's rewrite path stages the clone and swaps it in before removing the old one.
             renameSync: sinon.stub()
         }
     }
@@ -77,10 +73,6 @@ describe('Chaos: Git Clone Resilience', function () {
     afterEach(function () {
         sinon.restore()
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 7: Git clone failures (CMD-08)
-    // -------------------------------------------------------------------
 
     describe('Experiment 7: Network failure during git clone', function () {
 
@@ -140,7 +132,7 @@ describe('Chaos: Git Clone Resilience', function () {
                 expect.fail('should have rejected')
             } catch (err) {
                 expect(err).to.include('not found')
-                expect(cloneAttempts).to.equal(1) // no fallback clone attempt
+                expect(cloneAttempts).to.equal(1)
             }
         })
 
@@ -160,7 +152,7 @@ describe('Chaos: Git Clone Resilience', function () {
                 expect.fail('should have rejected')
             } catch (err) {
                 expect(err).to.include('Error cloning')
-                expect(cloneAttempts).to.equal(1) // No fallback attempt
+                expect(cloneAttempts).to.equal(1)
             }
         })
     })
@@ -246,7 +238,7 @@ describe('Chaos: Git Clone Resilience', function () {
             await ms.cloneGit('xchain-encoder', true, false)
             expect(stubs.execFile.calledOnce).to.be.true
             // The replacement is a swap of the staged clone, not a delete-then-clone:
-            // the old directory only goes away after git has succeeded .
+            // the old directory only goes away after git has succeeded.
             expect(stubs.fs.renameSync.callCount).to.equal(2)
         })
     })
@@ -289,8 +281,6 @@ describe('Chaos: Git Clone Resilience', function () {
             const ms = loadModuleService(stubs)
 
             await ms.cloneGit('xchain-encoder', false, true)
-            // removeModuleTmpDir and createModuleTmpDir should be called
-            // (stubbed in loadModuleService via ConfigService)
         })
     })
 })

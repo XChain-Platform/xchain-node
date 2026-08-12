@@ -45,7 +45,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
         throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
     }
 
-    // : warn (never block) when Docker's data-root was relocated off the
+    // Warn (never block) when Docker's data-root was relocated off the
     // root filesystem but containerd's store was left behind on `/`, where it
     // silently fills the root disk. Guarded + best-effort: a stubbed/older
     // DockerService without this probe, or any failure, degrades to a no-op.
@@ -165,8 +165,8 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
         // Preserve the cause. A bare `catch {}` here discarded the ONLY description
         // of what actually went wrong and replaced it with a message that names no
         // reason, so every hub install failure looked identical and was undebuggable
-        // without editing this file first ( lost two cycles to exactly that).
-        // Secrets are redacted because installHubModule handles DB credentials.
+        // without editing this file first. Secrets are redacted because
+        // installHubModule handles DB credentials.
         throw new Error("There was an error trying to install the hub module: " + redactSecrets(err), { cause: err })
     }
 

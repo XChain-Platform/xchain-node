@@ -34,17 +34,12 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
         await env.teardown()
     })
 
-    // -------------------------------------------------------------------
-    // E2E-040: Update kills old container and creates new one
-    // -------------------------------------------------------------------
-
     describe('E2E-040: Update replaces container', function () {
 
         it('kills old container, removes it, builds new image, and runs new container', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
 
-            // Install first
             const serviceList = filterCommandParameters(null, 'xchain-encoder', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
@@ -53,30 +48,21 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
 
             env.capture.reset()
 
-            // Update
             await cli.moduleOps.updateModules(serviceList)
 
-            // Should have killed the old container
             const killCmds = env.capture.findCommands(/docker kill/)
             expect(killCmds.length).to.be.greaterThanOrEqual(1)
             const killHasOldId = killCmds.some(c => c.command.includes(oldContainerId))
             expect(killHasOldId, 'kill references old container').to.be.true
 
-            // Should have removed the old container
             const rmCmds = env.capture.findCommands(/docker rm/)
             expect(rmCmds.length).to.be.greaterThanOrEqual(1)
 
-            // Should have built a new image
             env.capture.assertCalled(/docker build/)
 
-            // Should have run a new container
             env.capture.assertCalled(/docker run/)
         })
     })
-
-    // -------------------------------------------------------------------
-    // E2E-041: New container ID replaces old in LevelDB
-    // -------------------------------------------------------------------
 
     describe('E2E-041: LevelDB updated with new container ID', function () {
 
@@ -98,10 +84,6 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // E2E-042: Update with branch argument
-    // -------------------------------------------------------------------
-
     describe('E2E-042: Update with specific branch', function () {
 
         it('git clone uses the specified branch', async function () {
@@ -122,10 +104,6 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // E2E-043: Update multiple modules in sequence
-    // -------------------------------------------------------------------
-
     describe('E2E-043: Update multiple modules', function () {
 
         it('updates each module independently', async function () {
@@ -143,7 +121,6 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             const newEncoderId = await env.getModule('xchain-encoder', 'bitcoin', 'regtest')
             const newDecoderId = await env.getModule('xchain-decoder', 'bitcoin', 'regtest')
 
-            // Both should have new IDs
             expect(newEncoderId).to.not.equal(oldEncoderId)
             expect(newDecoderId).to.not.equal(oldDecoderId)
         })

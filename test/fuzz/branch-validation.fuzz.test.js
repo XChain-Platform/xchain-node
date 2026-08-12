@@ -72,8 +72,6 @@ function makeStubs() {
 
 describe('Fuzz: Branch Name Validation', function () {
 
-    // --- Valid branch names that must be accepted ---
-
     const validBranches = [
         'master',
         'develop',
@@ -102,8 +100,6 @@ describe('Fuzz: Branch Name Validation', function () {
             expect(clonedCmd).to.include(`-b ${branch}`)
         })
     }
-
-    // --- Invalid branch names that must be rejected ---
 
     const invalidBranches = [
         // Shell injection attempts
@@ -165,17 +161,14 @@ describe('Fuzz: Branch Name Validation', function () {
         })
     }
 
-    // --- Branch names that pass the regex but look like git flags ---
-
     const regexPassButDangerous = [
-        // These match ^[a-zA-Z0-9._\-\/]+$ but start with -
-        // The regex allows hyphens, so "--upload-pack" could pass if it starts with valid chars
-        // Actually: --upload-pack contains only [a-zA-Z-] so it DOES match the regex
-        // This is a known concern; we verify the git command includes -b flag properly
+        // "--upload-pack" and similar strings pass the branch-name regex (it
+        // allows hyphens) but are safe: execFile passes args as an array, so
+        // "-b" always consumes the following element as the branch name and
+        // never as a separate flag.
     ]
 
     it('branch name starting with -- is rejected by regex (hyphen allowed but double-dash prefix is safe because -b flag precedes it)', async function () {
-        // "--upload-pack" matches [a-zA-Z0-9._\-\/]+; let's verify behavior
         const branch = '--upload-pack'
         const stubs = makeStubs()
         let clonedCmd = null
@@ -185,19 +178,12 @@ describe('Fuzz: Branch Name Validation', function () {
             cb(null)
         })
         const ms = loadModuleService(stubs)
-        // The regex DOES allow this (all chars are in [a-zA-Z0-9._\-\/])
-        // But with execFile, args are passed as array elements, not a shell string.
-        // git clone -b --upload-pack treats it as a branch name argument to -b, not a separate flag
-        // This is safe because -b consumes the next argument
         await ms.cloneGit('xchain-encoder', false, false, branch)
         expect(clonedCmd).to.include('-b --upload-pack')
-        // Verify the structure: -b <branch> <url> <dest> with no unattached flags
         const parts = clonedCmd.split(' ')
         const bIndex = parts.indexOf('-b')
         expect(parts[bIndex + 1]).to.equal('--upload-pack')
     })
-
-    // --- Null branch (no branch specified) ---
 
     it('treats empty string branch same as null (no -b flag)', async function () {
         const stubs = makeStubs()
@@ -225,8 +211,6 @@ describe('Fuzz: Branch Name Validation', function () {
         expect(clonedCmd).to.not.include('-b')
     })
 
-    // --- Extremely long branch name ---
-
     it('accepts a very long but valid branch name', async function () {
         const longBranch = 'a'.repeat(500)
         const stubs = makeStubs()
@@ -237,8 +221,6 @@ describe('Fuzz: Branch Name Validation', function () {
         const ms = loadModuleService(stubs)
         await ms.cloneGit('xchain-encoder', false, false, longBranch)
     })
-
-    // --- Branch with only slashes ---
 
     it('accepts branch with slashes: feature/sub/deep', async function () {
         const stubs = makeStubs()

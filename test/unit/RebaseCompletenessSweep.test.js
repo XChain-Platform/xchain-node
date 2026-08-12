@@ -9,7 +9,7 @@
  * General Public License v3.0 or later; see LICENSE.md.
  *
  **********************************************************************
- *  section 6.1: the rebase-completeness sweep.
+ * The rebase-completeness sweep.
  *
  * What this guards is the batch's load-bearing invariant: after the rebase NO service
  * keeps pre-batch derived state, because one survivor forks the fleet against every
@@ -43,7 +43,7 @@ function makeQuery(times, opts) {
 const store = (over) => Object.assign({ label: 'btc-mainnet indexer', database: 'XChain_BTC_Indexer',
     replayed: ['blocks', 'actions', 'balances'], skipped: ['capability_snapshots'] }, over || {});
 
-describe(' rebase-completeness sweep (spec section 6.1)', function () {
+describe('rebase-completeness sweep', function () {
 
     describe('the sweep says yes only when every replayed table postdates the window', function () {
 
@@ -88,9 +88,9 @@ describe(' rebase-completeness sweep (spec section 6.1)', function () {
             const r = await sweep.sweepStore(store(), {
                 windowOpenMs: WINDOW_MS,
                 queryCreateTimes: makeQuery({ actions: BEFORE }),
-                queryEpochMarker: async () => ''
+                queryEpochMarker: async () => 'rebase-2026-08'
             });
-            assert.strictEqual(r.markerTag, '', 'the marker was read');
+            assert.strictEqual(r.markerTag, 'rebase-2026-08', 'the marker was read');
             assert.strictEqual(r.pass, false, 'and it did not rescue the store');
             assert.strictEqual(r.failures[0].code, sweep.STALE_TABLE);
         });
@@ -169,7 +169,7 @@ describe(' rebase-completeness sweep (spec section 6.1)', function () {
     });
 
     describe('fleet sweep', function () {
-        const cfg = (stores) => ({ window_open: WINDOW_OPEN, batch_tag: '', stores });
+        const cfg = (stores) => ({ window_open: WINDOW_OPEN, batch_tag: 'rebase-2026-08', stores });
 
         it('fails the fleet when any single store fails, and keeps sweeping the rest', async function () {
             const stores = [

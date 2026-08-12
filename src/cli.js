@@ -47,7 +47,7 @@ const { acquireCommandLock } = require('./utils/commandLock')
 // anything an action rejects with escapes as an unhandled rejection, which Node
 // prints as an ERR_UNHANDLED_REJECTION stack. Several services reject with a
 // plain string (cloneGit, buildAndUp), and a string reason turns that stack into
-// noise with the actual message buried in it . Register one backstop
+// noise with the actual message buried in it. Register one backstop
 // that prints the reason readably and exits non-zero, keeping the stack when the
 // reason is a real Error so genuine bugs stay debuggable.
 function installUnhandledRejectionHandler() {
@@ -98,7 +98,7 @@ async function parseCommand() {
         // EVERY non-validator command, not just the mutating ones. Running that
         // provisioning unlocked lets a concurrent `ps`/`e2etest`/`exec` tear down
         // and rebuild the hub out from under a lock-holding `update` mid docker
-        // build (#3142). So acquire the lock around preCheck for every command.
+        // build. So acquire the lock around preCheck for every command.
         //
         // A mutating command keeps the lock through its whole action (released on
         // process exit, since actions terminate via process.exit()) and refuses
@@ -200,9 +200,9 @@ async function parseCommand() {
             const resolved = resolveArgs([service, chain, network, branch], { expectBranch: true, defaultBranch: null })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
             // Report a failed update as an error and exit non-zero instead of
-            // letting it escape as an unhandled rejection . The deploy
-            // checkout is left intact by cloneGit, so the message is the whole
-            // outcome: nothing to roll back by hand.
+            // letting it escape as an unhandled rejection. The deploy checkout
+            // is left intact by cloneGit, so the message is the whole outcome:
+            // nothing to roll back by hand.
             try {
                 await updateModules(serviceList, resolved.branch)
             } catch (err) {
@@ -453,9 +453,9 @@ Notes:
                 try {
                     await makeBootstrap(chain, network, service)
                 } catch (err) {
-                    // A source-health refusal  is an expected, actionable
-                    // outcome, not a crash: print the reasons and exit non-zero so
-                    // the cron publisher can classify it, with no stack trace to
+                    // A source-health refusal is an expected, actionable outcome,
+                    // not a crash: print the reasons and exit non-zero so the
+                    // cron publisher can classify it, with no stack trace to
                     // read past. Anything else keeps its stack.
                     if (err && err.name === 'BootstrapSourceUnhealthyError') {
                         console.error(err.message)
@@ -475,7 +475,7 @@ Notes:
                     // mismatch) is the supply-chain gate doing its job, so print
                     // the reason and exit non-zero. Leaving it uncaught printed a
                     // stack trace that reads as a tool crash and invites a retry
-                    // of a restore that must never succeed .
+                    // of a restore that must never succeed.
                     if (err && err.name === 'BootstrapIntegrityError') {
                         console.error(err.message)
                         return process.exit(1)

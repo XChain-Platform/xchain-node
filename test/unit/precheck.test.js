@@ -78,10 +78,10 @@ describe('preCheck(): xchain_node pool host/port resolution @regression', functi
     it('EXTERNAL_DB → never falls back to the 127.0.0.1 load-time default', async function () {
         const { precheck, stubs } = loadPrecheck({
             externalDb: true,
-            getExternalDbConfig: sinon.stub().resolves({ host: '10.0.0.9', port: 3306 })
+            getExternalDbConfig: sinon.stub().resolves({ host: '203.0.113.9', port: 3306 })
         })
         await precheck.preCheck(false, false)
-        expect(stubs.createDatabase.firstCall.args[0].host).to.equal('10.0.0.9')
+        expect(stubs.createDatabase.firstCall.args[0].host).to.equal('203.0.113.9')
     })
 
     it('docker mode → 127.0.0.1 with the live container port-forward', async function () {
@@ -140,7 +140,7 @@ describe('preCheck(): remote version check degrades gracefully @regression', fun
     })
 })
 
-describe('preCheck(): containerd data-root relocation warning  @regression', function () {
+describe('preCheck(): containerd data-root relocation warning @regression', function () {
 
     it('prints a warning when Docker data-root moved off / but containerd is still on /', async function () {
         const { precheck } = loadPrecheck({

@@ -41,8 +41,6 @@ const SCENARIO_FILES = [
     'naming-helpers'
 ]
 
-// --- Config file contents for mocking ---
-
 const CONFIG_FILES = {
     'bitcoin-mainnet':   'NETWORK=bitcoin-mainnet\nNODE_EXPOSED_PORT=3000\nDUST_AMOUNT=546\n',
     'bitcoin-testnet':   'NETWORK=bitcoin-testnet\nNODE_EXPOSED_PORT=3010\nDUST_AMOUNT=546\n',
@@ -120,7 +118,6 @@ function createMockedConfigService() {
 
     const fsStub = {
         existsSync: (filePath) => {
-            // Check if it's a config file path we know about
             const basename = path.basename(filePath)
             if (CONFIG_FILES[basename]) return true
             return realFs.existsSync(filePath)
@@ -140,9 +137,6 @@ function createMockedConfigService() {
     return proxyquire('../../src/services/ConfigService', { fs: fsStub })
 }
 
-/**
- * Create the benchmark context: mocked ConfigService + constants.
- */
 async function createContext() {
     const ConfigService = createMockedConfigService()
     const constants = require('../../src/config/constants')
@@ -317,7 +311,6 @@ async function main() {
         console.log(`\nBaseline saved to ${BASELINE_PATH}`)
     }
 
-    // Print baseline comparison if available
     if (baseline && !config.json) {
         console.log('\n--- Baseline Comparison ---')
         for (const [scenarioName, result] of Object.entries(allResults.scenarios)) {

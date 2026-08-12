@@ -1,5 +1,4 @@
-//  doctrine test-coverage program: unit coverage for the ui component
-// (src/ui/menu.js). The interactive menu functions are the operator entry
+// The interactive menu functions (src/ui/menu.js) are the operator entry
 // points; they must load without side effects and expose the expected
 // callable surface. The prompts themselves are interactive, so this pins the
 // module contract (exports present and callable) rather than driving a TTY.
@@ -25,14 +24,14 @@ describe('ui/menu', function () {
     });
 });
 
-// : `bootstrap restore` used to route unconditionally into an enquirer
-// Select. Driven from a script, or on any non-TTY, that renders a menu nobody
-// can answer and the command blocks WHILE HOLDING the mutating-command pidfile
+// `bootstrap restore` used to route unconditionally into an enquirer Select.
+// Driven from a script, or on any non-TTY, that renders a menu nobody can
+// answer and the command blocks WHILE HOLDING the mutating-command pidfile
 // lock - one restore sat wedged that way for 2.5h and locked out every other
 // xchain-node command on the box. These drive the non-interactive resolution
 // paths, which is the whole point of the fix; the Select branch stays untested
 // here because it needs a TTY.
-describe('ui/menu restoreBootstrapInterface non-interactive resolution ', function () {
+describe('ui/menu restoreBootstrapInterface non-interactive resolution', function () {
     const proxyquire = require('proxyquire').noCallThru();
 
     function load({ files = [], restored = true } = {}) {

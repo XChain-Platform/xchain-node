@@ -96,7 +96,7 @@ describe('commandLock', () => {
         assert.doesNotThrow(() => release())
     })
 
-    // #3142: waitMs makes a non-mutating command block-and-poll for a live
+    // waitMs makes a non-mutating command block-and-poll for a live
     // holder up to the bound, then error, instead of failing immediately.
     it('waitMs blocks for roughly waitMs against a live holder, then throws', () => {
         const release = acquireCommandLock({ command: 'update' })

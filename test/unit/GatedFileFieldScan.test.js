@@ -9,7 +9,7 @@
  * General Public License v3.0 or later; see LICENSE.md.
  *
  **********************************************************************
- *  section 7 pre-window gate: the nine-field FILE scan.
+ * Pre-window gate: the nine-field FILE scan.
  *
  * PC-29 validates GATE_MIN_AMOUNT STRICT, so a hand-crafted nine-field FILE anywhere in
  * history can flip from valid to invalid and move ledger state during the rebase. This
@@ -27,7 +27,7 @@ const HASH = 'a'.repeat(64);
 const eight = ['0', 'f.txt', 'text/plain', 'Title', 'memo', 'GATED', '1', HASH];
 const fileWith = (fields) => 'FILE|' + fields.join('|');
 
-describe(' nine-field FILE scan (spec section 7)', function () {
+describe('nine-field FILE scan (pre-window gate)', function () {
 
     describe('what is a hit', function () {
 

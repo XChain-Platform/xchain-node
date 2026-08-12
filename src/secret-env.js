@@ -14,42 +14,34 @@
  *
  * XChain Node - Redaction-safe names for secret-bearing config keys
  *
- * Automatic secret redaction, in terminals, CI logs and assistant transcripts,
- * keys on the variable NAME and matches the `_SECRET` / `_KEY` / `_TOKEN`
- * forms. `NODE_PASSWORD`, `DECODER_DB_PASS` and `INDEXER_DB_PASS` match none of
- * them, so every read of a `config/<coin>-<network>.local` sidecar prints the
- * credential in full. On 2026-07-23 that is exactly how a regtest hub DB
- * password reached a transcript: nobody echoed it, the name simply did not trip
- * the filter .
+ * Automatic secret redaction (terminals, CI logs, assistant transcripts) keys
+ * on the variable NAME and matches the `_SECRET` / `_KEY` / `_TOKEN` forms.
+ * `NODE_PASSWORD`, `DECODER_DB_PASS` and `INDEXER_DB_PASS` match none of them,
+ * so a read of a `config/<coin>-<network>.local` sidecar prints the credential
+ * in full; that is how a regtest hub DB password once reached a transcript
+ * with nobody echoing it. xchain-hub solved its own half of this in
+ * `xchain-hub/src/secret-env.js`; this is the xchain-node half, covering the
+ * sidecar keys the node itself owns and composes into every container env.
  *
- * xchain-hub solved its own half in `xchain-hub/src/secret-env.js`. This is the
- * xchain-node half: the sidecar keys the node itself owns and composes into
- * every container env. Until this existed, renaming a key on a venue broke the
- * stack, so the rename could not be rolled out at all.
- *
- * What this module does: lets every secret-bearing config key be supplied under
- * a redaction-safe `_SECRET` name, keeping the historical name as a deprecated
- * fallback so no existing install breaks on upgrade.
+ * This module lets every secret-bearing config key be supplied under a
+ * redaction-safe `_SECRET` name, keeping the historical name as a deprecated
+ * fallback so no existing install breaks on upgrade:
  *
  *   NODE_SECRET        (preferred)  ->  NODE_PASSWORD     (legacy, honoured)
  *   DECODER_DB_SECRET  (preferred)  ->  DECODER_DB_PASS   (legacy, honoured)
  *   INDEXER_DB_SECRET  (preferred)  ->  INDEXER_DB_PASS   (legacy, honoured)
  *
- * What it deliberately does NOT do: rewrite anyone's file. A sidecar keeps the
- * names the operator wrote. Renaming is an operator step (KEY-ROTATION-RUNBOOK
- * §6.1) because on a shared venue it has to land together with the credential
- * rotation and a consumer restart, and because a sidecar silently rewritten to
- * a name an older xchain-node build cannot read turns a downgrade into an
- * outage.
- *
- * Both names set to DIFFERENT values is a hard error rather than a silent
- * precedence rule: that shape is a half-finished rename, and guessing which one
- * the operator meant is how a stack ends up authenticating with the very
- * credential it was supposed to have rotated away from.
- *
- * Renaming the variable does not un-leak anything by itself. A name the filter
- * catches only stops the NEXT read from leaking; a credential that already
- * appeared in a transcript still has to be rotated.
+ * It deliberately does NOT rewrite anyone's file; a sidecar keeps the names
+ * the operator wrote. Renaming is an operator step, done together with the
+ * credential rotation and a consumer restart, because a sidecar silently
+ * rewritten to a name an older xchain-node build cannot read turns a
+ * downgrade into an outage. Both names set to DIFFERENT values is a hard
+ * error rather than a silent precedence rule, since that shape is a
+ * half-finished rename and guessing which one the operator meant risks
+ * authenticating with the credential that was supposed to be rotated away
+ * from. Renaming the variable does not un-leak anything by itself: it only
+ * stops the NEXT read from leaking, so a credential that already appeared in
+ * a transcript still has to be rotated.
  *
  ********************************************************************/
 
@@ -61,8 +53,7 @@
 // SIGNING_PRIVKEY_HEX) are here as well as in xchain-hub's own table because
 // xchain-node is what READS them out of `config/hub.local` and the validator env
 // and composes the hub container's environment. Both tables must agree on the
-// preferred name; `test/unit/secret-env.test.js` pins them together, and
-// `claude/bin/env-secret-name-audit.js` pins its rename suggestions to both.
+// preferred name; `test/unit/secret-env.test.js` pins them together.
 const SECRET_ENV_ALIASES = Object.freeze({
     NODE_PASSWORD:                'NODE_SECRET',
     DECODER_DB_PASS:              'DECODER_DB_SECRET',
@@ -78,13 +69,8 @@ const LEGACY_BY_ALIAS = Object.freeze(Object.fromEntries(
     Object.entries(SECRET_ENV_ALIASES).map(([legacy, alias]) => [alias, legacy])
 ))
 
-/**
- * The redaction-safe name a secret-bearing key should be supplied under, or
- * undefined when the key is not one this module governs.
- *
- * @param {string} key
- * @returns {string|undefined}
- */
+// The redaction-safe name a secret-bearing key should be supplied under, or
+// undefined when the key is not one this module governs.
 function preferredSecretEnvName(key) {
     return SECRET_ENV_ALIASES[key]
 }

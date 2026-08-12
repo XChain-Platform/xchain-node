@@ -65,7 +65,7 @@ jobs:
       XCHAIN_NODE_EXTERNAL_DB_ROOT_USER: 'root'
       # Root password is GENERATED per run by the "Start headless MariaDB" step
       # below and exported through GITHUB_ENV, so no credential-shaped literal is
-      # committed ( gate). The container is ephemeral and runner-local.
+      # committed. The container is ephemeral and runner-local.
       # GH runners are native ext4, so coin-node data is safe in the workspace
       # (the native-ext4 requirement only bites on the Parallels dev VM).
       XCHAIN_NODE_DATA_DIR: ${{ github.workspace }}/.xchain-data

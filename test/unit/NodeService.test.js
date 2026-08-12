@@ -15,10 +15,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { EventEmitter } = require('events')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeNodeServiceStubs(overrides = {}) {
     const execFileStub = sinon.stub()
     const fsStub = {
@@ -104,7 +100,7 @@ function loadNodeService(stubs) {
             getDockerNetwork:            stubs.getDockerNetwork,
             getDefaultConfig:            stubs.getDefaultConfig,
             validatePort:                () => true,
-            // resolveBlocksDir sidecar persistence . Defaults: nothing
+            // resolveBlocksDir sidecar persistence. Defaults: nothing
             // persisted, persistence is a no-op. Tests override to simulate a
             // config/node.local value.
             readSidecarValue:            stubs.readSidecarValue    || sinon.stub().resolves(undefined),
@@ -124,7 +120,7 @@ function loadNodeService(stubs) {
         './DockerService':   {
             createDockerNetwork: sinon.stub().resolves(),
             forceRemoveContainerByName: stubs.forceRemoveContainerByName || sinon.stub().resolves(true),
-            // Mount-drift guard . Default: no previous container.
+            // Mount-drift guard. Default: no previous container.
             getContainerBindMounts: stubs.getContainerBindMounts || sinon.stub().resolves([])
         },
         './DatabaseService': {
@@ -145,9 +141,6 @@ function loadNodeService(stubs) {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Helper: build a fake https.get that succeeds with pipe-able response
-// ---------------------------------------------------------------------------
 function makeFakeHttps(stubs, { decompressErr = null, statusCode = 200 } = {}) {
     const writableEmitter = new EventEmitter()
     writableEmitter.close = sinon.stub()
@@ -171,10 +164,6 @@ function makeFakeHttps(stubs, { decompressErr = null, statusCode = 200 } = {}) {
     })
     return { get: httpsGetStub }
 }
-
-// ---------------------------------------------------------------------------
-// getCryptoNode: bitcoin
-// ---------------------------------------------------------------------------
 
 describe('NodeService: getCryptoNode()', function () {
 
@@ -361,10 +350,6 @@ describe('NodeService: getCryptoNode()', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// buildCryptoNode
-// ---------------------------------------------------------------------------
-
 describe('NodeService: buildCryptoNode()', function () {
 
     it('runs docker build with correct image name and cwd', async function () {
@@ -514,7 +499,7 @@ describe('NodeService: buildCryptoNode()', function () {
         })
     })
 
-    describe(': blocks-dir persistence + mount-drift guard', function () {
+    describe('blocks-dir persistence + mount-drift guard', function () {
         // Run buildCryptoNode with the env var controlled and stubs injectable.
         async function build(stubs, { envBlocksDir = null, coin = 'bitcoin', network = 'mainnet' } = {}) {
             let runArgs = null
@@ -560,8 +545,8 @@ describe('NodeService: buildCryptoNode()', function () {
         })
 
         it('falls back to the persisted sidecar value when the env var is absent', async function () {
-            // The 2026-07-23 node-host-b failure mode: a profile-less invocation must
-            // still mount the relocated stores once the value has been persisted.
+            // A profile-less invocation must still mount the relocated stores
+            // once the value has been persisted.
             const stubs = makeNodeServiceStubs()
             stubs.readSidecarValue = sinon.stub().resolves('/bigdisk')
             const args = await build(stubs, { envBlocksDir: null })
@@ -780,10 +765,9 @@ describe('NodeService: buildCryptoNode()', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// installNode: exercises the orchestration (lazy-require branches)
-// ---------------------------------------------------------------------------
-
+// installNode() exercises orchestration branches that are required lazily, so
+// several tests below rebuild the proxyquire wiring in full rather than
+// reusing loadNodeService().
 describe('NodeService: installNode()', function () {
 
     it('succeeds when local node version already installed (skips getCryptoNode)', async function () {
@@ -828,7 +812,6 @@ describe('NodeService: installNode()', function () {
         const ns = loadNodeService(stubs)
         const result = await ns.installNode('dogecoin', 'mainnet')
         expect(result).to.be.true
-        // gitHubDownloader must have been called for the dogecoin binary
         expect(stubs.gitHubDownloader.downloadRepoVersion.calledOnce).to.be.true
     })
 
@@ -1008,9 +991,6 @@ describe('NodeService: installNode()', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// Node daemon version pin (XCHAIN_NODE_NODE_VERSION_<COIN>) - 
-// ---------------------------------------------------------------------------
 describe('NodeService: node version pin (XCHAIN_NODE_NODE_VERSION_<COIN>)', function () {
 
     afterEach(function () {

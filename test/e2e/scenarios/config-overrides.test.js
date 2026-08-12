@@ -33,10 +33,6 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
         await env.teardown()
     })
 
-    // -------------------------------------------------------------------
-    // E2E-020: Default config produces correct env vars
-    // -------------------------------------------------------------------
-
     describe('E2E-020: Default config env vars', function () {
 
         it('encoder on regtest gets NODE_PORT=18444 and ENCODER_API_PORT=3003', async function () {
@@ -77,10 +73,6 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             expect(runCmd).to.include('NODE_PORT=18332')
         })
     })
-
-    // -------------------------------------------------------------------
-    // E2E-021: Config file overrides flow through to docker run
-    // -------------------------------------------------------------------
 
     describe('E2E-021: Config file overrides', function () {
 
@@ -132,16 +124,10 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-encoder')).command
-            // NODE_USER overridden
             expect(runCmd).to.include('NODE_USER=customuser')
-            // NODE_PASSWORD uses default
             expect(runCmd).to.include('NODE_PASSWORD=rpc')
         })
     })
-
-    // -------------------------------------------------------------------
-    // E2E-022: Regtest-specific config
-    // -------------------------------------------------------------------
 
     describe('E2E-022: Regtest-specific config values', function () {
 
@@ -169,10 +155,6 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             expect(runCmd).to.not.include('REGTEST_MINER_URL')
         })
     })
-
-    // -------------------------------------------------------------------
-    // E2E-023: Database naming convention
-    // -------------------------------------------------------------------
 
     describe('E2E-023: Database naming follows convention', function () {
 

@@ -559,7 +559,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             // the BTC account happens to hold ALL PRIVILEGES on three "Drill" schemas
             // left behind by the flag-day drill, while every other chain's account holds
             // them on its own schema and nothing else, so node B's CREATE DATABASE is
-            // refused (found taking the BET family cross-chain, /).
+            // refused (found taking the BET family cross-chain).
             //
             // Escaped underscores, so the pattern matches nothing but a DrillB schema.
             // Gated to non-mainnet, which is stricter than the MVH grant beside it:
@@ -685,7 +685,7 @@ async function setDatabaseParameters() {
                 // Refuse before the FIRST ALTER USER when a running container was built
                 // from another install's config store and this rotation would lock it
                 // out. Placed ahead of every write, so a refusal leaves the stack in the
-                // state it was already in .
+                // state it was already in.
                 const driftCfg = await getDefaultConfig(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork)
                 await assertNoDbCredentialDrift(nextCoin, nextNetwork, {
                     decoder: driftCfg["DECODER_DB_PASS"],
@@ -711,7 +711,7 @@ async function setDatabaseParameters() {
                 // Only claim a networking cause when the failure could plausibly be
                 // one. A credential-drift refusal already carries its own diagnosis
                 // and remediation, and appending a docker-network line to it sends
-                // the operator hunting the wrong layer .
+                // the operator hunting the wrong layer.
                 if (!isDbCredentialDriftError(err)) {
                     console.log("There was a problem adding the database container to the docker network of " + nextCoin + " " + nextNetwork)
                 }
@@ -780,7 +780,7 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
 
 const PRICE_FENCE_TABLE = 'price_ingest_watermarks'
 
-// : clear the hub's price ingest fence row for one source chain.
+// Clear the hub's price ingest fence row for one source chain.
 //
 // `price_ingest_watermarks` holds, per source chain, the highest rollback
 // generation whose price retraction the hub has processed. PriceAggregator drops
@@ -853,7 +853,7 @@ function warnPriceFenceNotCleared(ticker, reason) {
     console.warn("  A reset indexer DB restarts its push_generations at 0, and the hub DROPS every")
     console.warn("  price push at or below its recorded retraction generation, taking that chain's price rail")
     console.warn("  and the native-fee / XCHAIN-USD path down with it. Run this on the hub's OWN database")
-    console.warn("  before the indexer resumes pushing :")
+    console.warn("  before the indexer resumes pushing:")
     console.warn("    DELETE FROM " + PRICE_FENCE_TABLE + " WHERE source_chain = '" + ticker + "';")
 }
 
@@ -929,8 +929,8 @@ async function buildDatabaseModule(coin, network) {
         // unlike a conf.d file written into a running container (its /etc isn't
         // a mounted volume, so a recreate drops it). Each is unset by default,
         // leaving image defaults unchanged. Size them to the host: a busy
-        // multi-replica box (e.g. origin-host serving xchain-sync replicas across
-        // 18 DBs) wants a large buffer pool + a higher connection ceiling and
+        // multi-replica box (e.g. a shared services host serving xchain-sync
+        // replicas across 18 DBs) wants a large buffer pool + a higher connection ceiling and
         // can relax durable-log flushing; a laptop or single-chain node should
         // leave them off. Args go after `containerPrefix` so Docker treats them
         // as the container command, not as `docker run` options.

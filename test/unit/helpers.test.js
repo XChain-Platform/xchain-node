@@ -18,10 +18,6 @@ const { Coin, Network, XChainService } = require('../../src/config/constants')
 
 describe('utils/helpers', function () {
 
-    // -------------------------------------------------------------------
-    // stringToCoin
-    // -------------------------------------------------------------------
-
     describe('stringToCoin()', function () {
         const { stringToCoin } = require('../../src/utils/helpers')
 
@@ -49,10 +45,6 @@ describe('utils/helpers', function () {
             expect(stringToCoin(null)).to.be.null
         })
     })
-
-    // -------------------------------------------------------------------
-    // stringToXChainService
-    // -------------------------------------------------------------------
 
     describe('stringToXChainService()', function () {
         const { stringToXChainService } = require('../../src/utils/helpers')
@@ -90,10 +82,6 @@ describe('utils/helpers', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // stringToNetwork
-    // -------------------------------------------------------------------
-
     describe('stringToNetwork()', function () {
         const { stringToNetwork } = require('../../src/utils/helpers')
 
@@ -128,10 +116,6 @@ describe('utils/helpers', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // sleep
-    // -------------------------------------------------------------------
-
     describe('sleep()', function () {
         const { sleep } = require('../../src/utils/helpers')
 
@@ -156,10 +140,6 @@ describe('utils/helpers', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // decompressTarGz
-    // -------------------------------------------------------------------
 
     describe('decompressTarGz()', function () {
         let execFileStub
@@ -248,10 +228,6 @@ describe('utils/helpers', function () {
             expect(extracted).to.be.false
         })
     })
-
-    // -------------------------------------------------------------------
-    // assertSafeArchiveMemberNames
-    // -------------------------------------------------------------------
 
     describe('assertSafeArchiveMemberNames()', function () {
         const { assertSafeArchiveMemberNames } = require('../../src/utils/helpers')

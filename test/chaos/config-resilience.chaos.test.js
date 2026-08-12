@@ -16,10 +16,6 @@ const proxyquire = require('proxyquire').noCallThru()
 const { Readable } = require('stream')
 const path       = require('path')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeConfigService(fsStub, readlineOverride) {
     const constants = require('../../src/config/constants')
     const stubs = {
@@ -41,10 +37,6 @@ describe('Chaos: Config Resilience', function () {
     afterEach(function () {
         sinon.restore()
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 1: Config file missing (FS-01)
-    // -------------------------------------------------------------------
 
     describe('Experiment 1: Config file missing', function () {
 
@@ -92,10 +84,6 @@ describe('Chaos: Config Resilience', function () {
         })
     })
 
-    // -------------------------------------------------------------------
-    // Experiment 1b: Config file unreadable (FS-02)
-    // -------------------------------------------------------------------
-
     describe('Experiment 1b: Config file unreadable (permission denied)', function () {
 
         it('propagates stream error when config file cannot be read', async function () {
@@ -118,10 +106,6 @@ describe('Chaos: Config Resilience', function () {
             }
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 2: Malformed config content (FS-03)
-    // -------------------------------------------------------------------
 
     describe('Experiment 2: Malformed config content', function () {
 
@@ -153,7 +137,6 @@ describe('Chaos: Config Resilience', function () {
             const cs = makeConfigService(fsStub)
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
 
-            // Should fall back to all defaults
             expect(config).to.have.property('NETWORK')
             expect(config).to.have.property('NODE_PORT', 8332)
         })
@@ -215,14 +198,9 @@ describe('Chaos: Config Resilience', function () {
             const cs = makeConfigService(fsStub)
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
 
-            // All defaults should still be present
             expect(config).to.have.property('NODE_PORT', 8332)
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment 12: Config path traversal (FS-09)
-    // -------------------------------------------------------------------
 
     describe('Experiment 12: Config path traversal', function () {
 
@@ -271,15 +249,10 @@ describe('Chaos: Config Resilience', function () {
             const cs = makeConfigService(fsStub)
             sinon.stub(console, 'warn')
 
-            // These should NOT throw path traversal
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
             expect(config).to.have.property('NETWORK')
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment: resolveArgs chaos (ARG-01 through ARG-06)
-    // -------------------------------------------------------------------
 
     describe('Experiment: Argument parsing resilience', function () {
 
@@ -346,15 +319,10 @@ describe('Chaos: Config Resilience', function () {
         it('handles extremely long argument strings without crashing', function () {
             const cs = makeConfigService()
             const longArg = 'a'.repeat(10000)
-            // Should not throw or hang; just treated as unknown arg
             const result = cs.resolveArgs([longArg])
             expect(result.service).to.equal('all')
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment: validatePort chaos
-    // -------------------------------------------------------------------
 
     describe('Experiment: Port validation under chaos', function () {
 
@@ -401,10 +369,6 @@ describe('Chaos: Config Resilience', function () {
             expect(cs.validatePort([])).to.be.false
         })
     })
-
-    // -------------------------------------------------------------------
-    // Experiment: getDefaultConfig with no coin/network (shared modules)
-    // -------------------------------------------------------------------
 
     describe('Experiment: Shared module config (no coin/network)', function () {
 

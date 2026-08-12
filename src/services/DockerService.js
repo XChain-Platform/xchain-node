@@ -47,7 +47,7 @@ async function checkDockerInstalledAndReachable() {
     })
 }
 
-// : When an operator relocates Docker's data-root off the root
+// When an operator relocates Docker's data-root off the root
 // filesystem (the common "move Docker to a big NVMe/HDD" recipe: set
 // `"data-root": "/misc/docker"` in /etc/docker/daemon.json), Docker's own
 // image + overlay2 store moves with it, but the containerd content and

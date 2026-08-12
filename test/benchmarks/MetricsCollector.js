@@ -29,9 +29,6 @@ class MetricsCollector {
         this._startTime = null
     }
 
-    /**
-     * Begin overall collection (CPU, event loop, wall time).
-     */
     start() {
         this._startTime = performance.now()
         this._startCpuUsage = process.cpuUsage()
@@ -39,27 +36,18 @@ class MetricsCollector {
         this._eventLoopHistogram.enable()
     }
 
-    /**
-     * End overall collection.
-     */
     stop() {
         if (this._eventLoopHistogram) {
             this._eventLoopHistogram.disable()
         }
     }
 
-    /**
-     * Start a named timer. Returns the timer key for endTimer().
-     */
     startTimer(name) {
         const key = `${name}_${Date.now()}_${Math.random()}`
         this._timers.set(key, performance.now())
         return key
     }
 
-    /**
-     * End a named timer and record the duration.
-     */
     endTimer(key, measurementName) {
         const start = this._timers.get(key)
         if (start == null) return 0
@@ -74,9 +62,6 @@ class MetricsCollector {
         return duration
     }
 
-    /**
-     * Record a duration directly (for externally timed operations).
-     */
     record(name, durationMs) {
         if (!this._measurements.has(name)) {
             this._measurements.set(name, [])
@@ -84,9 +69,6 @@ class MetricsCollector {
         this._measurements.get(name).push(durationMs)
     }
 
-    /**
-     * Take a resource snapshot (memory, CPU).
-     */
     takeSnapshot(label) {
         this._snapshots.push({
             label,
@@ -96,18 +78,12 @@ class MetricsCollector {
         })
     }
 
-    /**
-     * Calculate percentiles from a sorted array.
-     */
     _percentile(sorted, p) {
         if (sorted.length === 0) return 0
         const idx = Math.ceil(sorted.length * p / 100) - 1
         return sorted[Math.max(0, idx)]
     }
 
-    /**
-     * Get statistics for a named measurement.
-     */
     getStats(name) {
         const values = this._measurements.get(name)
         if (!values || values.length === 0) {
@@ -129,23 +105,14 @@ class MetricsCollector {
         }
     }
 
-    /**
-     * Get the overall wall time in ms.
-     */
     getWallTime() {
         return performance.now() - (this._startTime || 0)
     }
 
-    /**
-     * Get CPU usage since start() in microseconds.
-     */
     getCpuUsage() {
         return process.cpuUsage(this._startCpuUsage)
     }
 
-    /**
-     * Get event loop delay stats in ms.
-     */
     getEventLoopStats() {
         const h = this._eventLoopHistogram
         if (!h) return { p50: 0, p95: 0, p99: 0, mean: 0, max: 0 }
@@ -158,9 +125,6 @@ class MetricsCollector {
         }
     }
 
-    /**
-     * Get peak memory from snapshots (or current if no snapshots).
-     */
     getPeakMemory() {
         if (this._snapshots.length === 0) {
             const mem = process.memoryUsage()
@@ -174,23 +138,14 @@ class MetricsCollector {
         return { heapUsedMB: peakHeap / 1048576, rssMB: peakRss / 1048576 }
     }
 
-    /**
-     * Get all measurement names.
-     */
     getMeasurementNames() {
         return [...this._measurements.keys()]
     }
 
-    /**
-     * Get raw measurement values.
-     */
     getRawValues(name) {
         return this._measurements.get(name) || []
     }
 
-    /**
-     * Build a complete results object for JSON output.
-     */
     buildReport(metadata = {}) {
         const measurements = {}
         for (const name of this._measurements.keys()) {
@@ -208,9 +163,6 @@ class MetricsCollector {
         }
     }
 
-    /**
-     * Reset all collected data.
-     */
     reset() {
         this._timers.clear()
         this._measurements.clear()

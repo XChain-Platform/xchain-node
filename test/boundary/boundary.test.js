@@ -23,10 +23,6 @@ const {
     moduleDir, tmpDir, configDir
 } = require('../../src/config/constants')
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function streamFromString(str) {
     const s = new Readable()
     s.push(str)
@@ -108,10 +104,6 @@ describe('Boundary Tests', function () {
     afterEach(function () {
         sinon.restore()
     })
-
-    // ===================================================================
-    // 1. Config file parsing boundaries (Fix 1 & 2)
-    // ===================================================================
 
     describe('ConfigService: config file parsing', function () {
 
@@ -227,14 +219,12 @@ describe('Boundary Tests', function () {
                 const cs = makeConfigService(fsStub)
                 const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
 
-                // Should have defaults, not crash
                 expect(config['NODE_PORT']).to.equal(8332)
                 // NODE_USER is randomly generated when absent; must be a non-empty, non-default string
                 expect(config['NODE_USER']).to.be.a('string').with.length.greaterThan(0)
                 expect(config['NODE_USER']).to.not.equal('rpc')
                 expect(config['HUB_PORT']).to.equal(10000)
 
-                // createReadStream should NOT have been called
                 expect(fsStub.createReadStream.called).to.be.false
             })
 
@@ -282,10 +272,6 @@ describe('Boundary Tests', function () {
             })
         })
     })
-
-    // ===================================================================
-    // 2. resolveArgs boundaries
-    // ===================================================================
 
     describe('ConfigService: resolveArgs boundaries', function () {
         const { resolveArgs } = require('../../src/services/ConfigService')
@@ -343,7 +329,6 @@ describe('Boundary Tests', function () {
         it('only takes the first unrecognized arg as branch', function () {
             const result = resolveArgs(['mybranch', 'otherbranch', 'bitcoin'], { expectBranch: true })
             expect(result.branch).to.equal('mybranch')
-            // 'otherbranch' is silently ignored
         })
 
         it('handles empty args array', function () {
@@ -368,10 +353,6 @@ describe('Boundary Tests', function () {
             expect(result.service).to.equal('explorer')
         })
     })
-
-    // ===================================================================
-    // 3. filterCommandParameters boundaries
-    // ===================================================================
 
     describe('ConfigService: filterCommandParameters boundaries', function () {
         const { filterCommandParameters } = require('../../src/services/ConfigService')
@@ -424,17 +405,12 @@ describe('Boundary Tests', function () {
 
         it('explorer special case sets coins to empty', function () {
             const result = filterCommandParameters(null, 'explorer', 'bitcoin', 'mainnet')
-            // Should only have the shared '' key with explorer
             expect(result['']).to.exist
             expect(result['']['']).to.deep.equal(['xchain-explorer'])
             // Should NOT have bitcoin key since coins array was emptied
             expect(result['bitcoin']).to.be.undefined
         })
     })
-
-    // ===================================================================
-    // 4. Docker env var escaping (Fix 3)
-    // ===================================================================
 
     describe('ModuleService: Docker env var passing (execFile)', function () {
 
@@ -576,10 +552,6 @@ describe('Boundary Tests', function () {
             await ms.buildAndUp('xchain-decoder', 'bitcoin', 'mainnet')
         })
     })
-
-    // ===================================================================
-    // 5. Branch name validation (Fix 4)
-    // ===================================================================
 
     describe('ModuleService: branch name validation', function () {
 
@@ -725,10 +697,6 @@ describe('Boundary Tests', function () {
         })
     })
 
-    // ===================================================================
-    // 6. Grep/testName escaping (Fix 5)
-    // ===================================================================
-
     describe('moduleOperations: grep/testName handling', function () {
 
         function loadModuleOperations(stubs) {
@@ -866,14 +834,9 @@ describe('Boundary Tests', function () {
             const ops = loadModuleOperations(stubs)
             await ops.runE2ETest('bitcoin', 'regtest', null, 'some pattern')
 
-            // dockerCmdArgs is null when testName is null, so grep is not appended
             expect(capturedDockerCmdArgs).to.be.null
         })
     })
-
-    // ===================================================================
-    // 7. Docker naming boundaries
-    // ===================================================================
 
     describe('ConfigService: naming helper boundaries', function () {
         const {

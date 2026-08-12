@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Redaction-safe secret env names for the xchain-node sidecar keys .
+// Redaction-safe secret env names for the xchain-node sidecar keys.
 //
 // The load-bearing cases are not the table lookups. They are: a sidecar written
 // under the new names still yields a working config (otherwise renaming a venue
@@ -69,7 +69,7 @@ const CONTAINER_ID = 'a'.repeat(64)
 const coinSidecar = path.resolve(configDir, 'bitcoin-mainnet') + '.local'
 const coinMain    = path.resolve(configDir, 'bitcoin-mainnet')
 
-describe('secret-env ', function () {
+describe('secret-env', function () {
 
     describe('the alias table', function () {
 
@@ -102,8 +102,8 @@ describe('secret-env ', function () {
         })
 
         it('agrees with the rename the platform audit gate tells operators to make', function () {
-            // claude/bin/env-secret-name-audit.js prints "rename X to Y". Y has to
-            // be a name this module reads, or following the gate breaks the stack.
+            // The platform's env-secret-name audit tool prints "rename X to Y". Y has
+            // to be a name this module reads, or following the gate breaks the stack.
             const auditTool = path.resolve(__dirname, '..', '..', '..', 'claude', 'bin', 'env-secret-name-audit.js')
             if (!fs.existsSync(auditTool)) this.skip()     // platform repo not checked out
             const { preferredName } = require(auditTool)
@@ -191,9 +191,7 @@ describe('secret-env ', function () {
         })
     })
 
-    // ------------------------------------------------------------------
     // The thing that was actually blocked: renaming a key on a live venue.
-    // ------------------------------------------------------------------
     describe('ConfigService accepts the renamed sidecar keys', function () {
 
         it('a sidecar written entirely under the new names produces a working config', async function () {

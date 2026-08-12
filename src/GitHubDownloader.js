@@ -18,7 +18,6 @@
  * 
  ********************************************************************/
 
-// Load required libraries
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -104,9 +103,6 @@ class GitHubDownloader {
     }
   }
 
-  /**
-   * Gets all releases from a repository using github api
-   */
   async getReleases(owner, repoName) {
     try {
       const response = await axios.get(
@@ -122,20 +118,15 @@ class GitHubDownloader {
     }
   }
 
-  /**
-   * Gets the most recent version of a repository in GitHub. If verifyHash is true, then it will return the
-   * most recent version with an existing entry in the hashes file, in case verifyHash is false, 
-   * it will return the most recent
-   */
+  // Returns the most recent release. With verifyHash=true (default), skips releases that have
+  // no entry in the hashes file, since an unverified release cannot be installed safely.
   async getLatestCompatibleVersion(owner, repoName, verifyHash = true) {
     const releases = await this.getReleases(owner, repoName);
     const repoKey = `${owner}/${repoName}`;
 
-    // Reorders releases by date (most recent first)
     releases.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
 
     if (verifyHash) {
-      // Gets the most recent version with an entry in the hashes file
       for (const release of releases) {
         if (this.hasHash(repoKey, release.tag_name)) {
           return release;
@@ -144,13 +135,9 @@ class GitHubDownloader {
       throw new Error(`Couldn't find a version of ${repoKey} with an entry in the hashes file`);
     }
 
-    // If verifyHash is false, then just return the first one (most recent)
     return releases[0];
   }
 
-  /**
-   * Downloads a specific version of a repository from GitHub
-   */
   async downloadRepoVersion(owner, repoName, version, options = {}) {
     const {
       outputPath = './downloads',
@@ -161,7 +148,6 @@ class GitHubDownloader {
     const repoKey = `${owner}/${repoName}`;
     const fullOutputPath = path.join(outputPath, `${repoName}`);
 
-    // Gets the specific release info
     const release = await this.getReleaseByTag(owner, repoName, version);
     
     if (verifyHash && !this.hasHash(repoKey, version)) {
@@ -169,7 +155,6 @@ class GitHubDownloader {
     }
 
     try {
-      // Downloads the asset for linux
       await this.downloadReleaseAsset(release, fullOutputPath, repoKey, version, verifyHash);
 
 	  if (fs.existsSync(fullOutputPath)) {
@@ -185,9 +170,6 @@ class GitHubDownloader {
     }
   }
 
-  /**
-   * Gets a specific tag release
-   */
   async getReleaseByTag(owner, repoName, tag) {
     try {
       const response = await axios.get(
@@ -236,14 +218,10 @@ class GitHubDownloader {
 
       await pipeline(response.data, fs.createWriteStream(downloadPath));
 
-      // Verifies the download has the same hash as the entry in the hashes file
       if (verifyHash) {
         await this.verifyRepositoryHash(repoKey, version, downloadPath);
       }
 
-      
-
-      // Extracts files by extension
       if (fileExtension === 'gz' || fileExtension === 'tgz') {
         // Refuse archives whose member paths could escape outputPath (absolute
         // paths or '..' segments). Checked explicitly so safety doesn't depend
@@ -268,8 +246,7 @@ class GitHubDownloader {
         console.warn(`Unrecognized file extension: ${fileExtension}. Will not extract.`);
       }
 
-      // Handles directories structure after extracting the files
-      const extractedDirs = fs.readdirSync(outputPath).filter(f => 
+      const extractedDirs = fs.readdirSync(outputPath).filter(f =>
         fs.statSync(path.join(outputPath, f)).isDirectory()
       );
 
@@ -330,20 +307,13 @@ class GitHubDownloader {
     console.log(`✅ Hash verified for ${repoKey}@${version} (${resolvedArch})`);
   }
 
-  /**
-   * Verifies a downloaded FILE (e.g. a prebuilt release tarball) against the
-   * registered SHA-256, before it is decompressed or executed. This is the
-   * counterpart to verifyRepositoryHash (which hashes an extracted source
-   * directory) for binaries fetched as a single archive, notably the
-   * Bitcoin Core tarball from bitcoincore.org, whose registered hashes are
-   * the project's own published+GPG-signed SHA256SUMS values. Fails closed:
-   * throws when no hash is registered for the (repo, version, arch) tuple.
-   *
-   * @param {string} filePath  the downloaded archive on disk
-   * @param {string} repoKey   e.g. 'bitcoin/bitcoin'
-   * @param {string} version   e.g. 'v28.1'
-   * @param {string|null} arch defaults to the host arch
-   */
+  // Verifies a downloaded FILE (e.g. a prebuilt release tarball) against the
+  // registered SHA-256, before it is decompressed or executed. Counterpart to
+  // verifyRepositoryHash (which hashes an extracted source directory) for
+  // binaries fetched as a single archive, notably the Bitcoin Core tarball
+  // from bitcoincore.org, whose registered hashes are the project's own
+  // published+GPG-signed SHA256SUMS values. Fails closed: throws when no hash
+  // is registered for the (repo, version, arch) tuple.
   async verifyFileHash(filePath, repoKey, version, arch = null) {
     const resolvedArch = arch ?? getHostArch();
     const expectedHash = this._getHashForArch(repoKey, version, resolvedArch);
@@ -359,18 +329,12 @@ class GitHubDownloader {
     console.log(`✅ Tarball hash verified for ${repoKey}@${version} (${resolvedArch})`);
   }
 
-  /**
-   * Calculates the SHA-256 hash of a single file's bytes.
-   */
   async calculateFileHash(filePath) {
     const hash = crypto.createHash('sha256');
     hash.update(fs.readFileSync(filePath));
     return hash.digest('hex');
   }
 
-  /**
-   * Calculates SHA-256 hash for directory contents
-   */
   async calculateDirectoryHash(dirPath) {
     const hash = crypto.createHash('sha256');
     const files = this.getAllFiles(dirPath).sort();
@@ -383,36 +347,33 @@ class GitHubDownloader {
     return hash.digest('hex');
   }
 
-  /**
-   * Recursively gets all files in directory
-   */
+  // Recursively lists all files under dirPath (or [dirPath] itself when it is
+  // already a file). Non-file/non-directory entries (sockets, symlinks, etc.)
+  // are silently skipped.
   getAllFiles(dirPath) {
   try {
-    // Verify if dirPath is a file or a directory
     const stats = fs.statSync(dirPath);
     if (stats.isFile()) {
-      return [dirPath]; // Return the array with only that file
+      return [dirPath];
     }
-    
-    // If it's a directory then scans all files and returns them in an array
+
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
     const files = [];
 
     for (const entry of entries) {
       const fullPath = path.join(dirPath, entry.name);
-      
+
       if (entry.isDirectory()) {
-        files.push(...this.getAllFiles(fullPath)); // Llamada recursiva
+        files.push(...this.getAllFiles(fullPath));
       } else if (entry.isFile()) {
         files.push(fullPath);
       }
-      // Ignora sockets, enlaces simbólicos, etc.
     }
 
     return files;
   } catch (error) {
     console.error(`Error procesando ${dirPath}:`, error);
-    return []; // Devuelve array vacío en caso de error
+    return [];
   }
 }
 }

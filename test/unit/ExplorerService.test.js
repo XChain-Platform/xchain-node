@@ -14,10 +14,6 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const EXPLORER_MODULE_NAME = 'xchain-explorer'
 
 function makeExplorerServiceStubs(overrides = {}) {
@@ -86,10 +82,6 @@ function loadExplorerService(stubs) {
     })
 }
 
-// ---------------------------------------------------------------------------
-// updateExplorer()
-// ---------------------------------------------------------------------------
-
 describe('ExplorerService: updateExplorer()', function () {
 
     it('returns true immediately when explorer entry is absent from lastStatus', async function () {
@@ -142,7 +134,6 @@ describe('ExplorerService: updateExplorer()', function () {
         const es = loadExplorerService(stubs)
         const result = await es.updateExplorer()
         expect(result).to.be.true
-        // Should have tried to connect to 3 networks
         expect(stubs.addContainerToNetwork.callCount).to.equal(3)
     })
 
@@ -174,7 +165,7 @@ describe('ExplorerService: updateExplorer()', function () {
         expect(stubs.sleep.called).to.be.true
     })
 
-    // Contract change (): a persistently unreachable network used to be
+    // Contract change: a persistently unreachable network used to be
     // logged and swallowed, so a topology change reported success while the
     // explorer sat disconnected. It now rejects, naming every network it failed.
     it('rejects naming the unreachable networks when the attach keeps failing', async function () {
@@ -237,10 +228,6 @@ describe('ExplorerService: updateExplorer()', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// installExplorerModule(): already running
-// ---------------------------------------------------------------------------
-
 describe('ExplorerService: installExplorerModule() already running', function () {
 
     it('returns true immediately when ping succeeds and force=false', async function () {
@@ -272,10 +259,6 @@ describe('ExplorerService: installExplorerModule() already running', function ()
         expect(stubs.cloneGit.called).to.be.false
     })
 })
-
-// ---------------------------------------------------------------------------
-// installExplorerModule(): force mode
-// ---------------------------------------------------------------------------
 
 describe('ExplorerService: installExplorerModule() force=true', function () {
 
@@ -311,7 +294,6 @@ describe('ExplorerService: installExplorerModule() force=true', function () {
             })
         })
         const es = loadExplorerService(stubs)
-        // Should not throw even though kill/remove error
         const result = await es.installExplorerModule(true)
         expect(result).to.be.true
     })
@@ -332,10 +314,6 @@ describe('ExplorerService: installExplorerModule() force=true', function () {
     })
 })
 
-// ---------------------------------------------------------------------------
-// installExplorerModule(): fresh install (ping never succeeds → throw)
-// ---------------------------------------------------------------------------
-
 describe('ExplorerService: installExplorerModule() exhausts retries', function () {
 
     it('throws when explorer never responds after 10 tries', async function () {
@@ -355,10 +333,6 @@ describe('ExplorerService: installExplorerModule() exhausts retries', function (
         expect(stubs.sleep.callCount).to.be.greaterThan(0)
     })
 })
-
-// ---------------------------------------------------------------------------
-// installExplorerModule(): install + updateExplorer error in ping loop
-// ---------------------------------------------------------------------------
 
 describe('ExplorerService: installExplorerModule() updateExplorer error in loop', function () {
 
@@ -389,10 +363,6 @@ describe('ExplorerService: installExplorerModule() updateExplorer error in loop'
             getInstalledCoinsAndNetworks: sinon.stub().resolves({})
         })
 
-        // Override updateExplorer via the StatusService stub; we need to build
-        // a custom service instance here because updateExplorer is called lazily
-        // inside installExplorerModule via the same StatusService import.
-        // Build it with an overridden getStatus that uses our updateExplorer stub.
         const MockExplorerConnector = sinon.stub()
         MockExplorerConnector.prototype.ping = stubs.explorerPing
 
@@ -428,32 +398,22 @@ describe('ExplorerService: installExplorerModule() updateExplorer error in loop'
             '../ExplorerConnector.js': MockExplorerConnector
         })
 
-        // Manually inject updateExplorer by patching module; not possible with
-        // proxyquire since updateExplorer is self-referential inside the module.
-        // Instead, verify the retry mechanic by confirming that with the first
-        // updateExplorer failing and sleep being called, the function eventually
-        // succeeds when ping returns true and the internal updateExplorer
-        // (which calls getInstalledCoinsAndNetworks) succeeds on the second pass.
+        // updateExplorer is called internally and is self-referential within the
+        // module, so it cannot be stubbed directly through proxyquire; the retry
+        // path is instead verified indirectly, by checking that the install still
+        // resolves true once ping and the internal updateExplorer both succeed
+        // on the retry after the first updateExplorer call fails.
         const result = await es.installExplorerModule(true)
         expect(result).to.be.true
     })
 })
 
-// ---------------------------------------------------------------------------
-// installExplorerModule(): fresh install that succeeds on first ping
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// installExplorerModule(): a persistently unreachable network fails the install
-// ---------------------------------------------------------------------------
-
 describe('ExplorerService: installExplorerModule() persistent attach failure', function () {
 
-    // The design call proposal A of  makes explicitly ("a genuinely
-    // broken network now fails the install (intended)"): the ping loop's
-    // existing catch absorbs a transient updateExplorer failure, and a
-    // persistent one exhausts the tries rather than reporting a success the
-    // explorer cannot deliver.
+    // This is an explicit design choice ("a genuinely broken network now fails
+    // the install, intended"): the ping loop's existing catch absorbs a
+    // transient updateExplorer failure, while a persistent one exhausts the
+    // tries rather than reporting a success the explorer cannot deliver.
     it('exhausts the ping retries and throws instead of returning success', async function () {
         let pingCount = 0
         const lastStatus = {
@@ -483,10 +443,6 @@ describe('ExplorerService: installExplorerModule() persistent attach failure', f
     })
 })
 
-// ---------------------------------------------------------------------------
-// installExplorerModule(): fresh install that succeeds on first ping
-// ---------------------------------------------------------------------------
-
 describe('ExplorerService: installExplorerModule() full happy path', function () {
 
     it('clones, builds, then returns true when first ping succeeds', async function () {
@@ -501,9 +457,8 @@ describe('ExplorerService: installExplorerModule() full happy path', function ()
         })
         const es = loadExplorerService(stubs)
         const result = await es.installExplorerModule(false)
-        // ping fails on the "is it running?" check (count 0 → false handled by stub)
-        // Actually since ping returns true on count >= 1:
-        // First call (checking if running): pingCount=1 → true → return true immediately
+        // ping returns true from the first call, so the "is it running?" check
+        // short-circuits and the install returns true immediately.
         expect(result).to.be.true
     })
 

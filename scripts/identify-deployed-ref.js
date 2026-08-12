@@ -15,21 +15,21 @@
  *
  * Identify which commit a RUNNING service artifact is, by content.
  *
- *  §8 step 1 requires the deployed version of every service on every host,
- * "read from the running artifact, never from git", because mainnet indexers
- * deliberately do not run master  and that record is the §3.5 abort
- * target. The refs cannot simply be read: the images carry no labels, no `.git`
- * and no commit stamp, and package.json gives a version that spans dozens of
- * commits. So the tree is IDENTIFIED instead.
+ * Deploy verification requires the deployed version of every service on every
+ * host, read from the running artifact, never from git, because mainnet indexers
+ * deliberately do not run master and that record is the abort target. The refs
+ * cannot simply be read: the images carry no labels, no `.git` and no commit
+ * stamp, and package.json gives a version that spans dozens of commits. So the
+ * tree is IDENTIFIED instead.
  *
  * Method: compute each file's GIT BLOB id (sha1 of "blob <len>\0" + bytes) for
  * everything under src/, sort by path, hash the manifest. That is exactly what
  * `git ls-tree -r <commit> -- src` lists, so an exact match names the commit.
  *
  * The property that earns this tool its keep is the NEGATIVE one: no match means
- * the artifact is not any commit. That is how  went from an uptime-based
- * inference to a measurement (two devhost containers run files whose content
- * exists in no commit and in no worktree).
+ * the artifact is not any commit. That is how a prior uptime-based inference of
+ * deploy freshness became a real measurement: production containers were found
+ * running files whose content existed in no commit and in no worktree.
  *
  * USAGE
  *   # inside the container (no deps, no network, reads nothing but files):
@@ -43,9 +43,9 @@
  * on stdin and has no path of its own. Get the root from the container itself:
  * `docker inspect --format '{{.Config.WorkingDir}}' <container>`.
  *
- * The pure helpers below are exported for test/unit/identifyDeployedRef.test.js
- * . Nothing may be required in from outside this file: the probe form is
- * piped into a container that holds only the service's own tree, so a second file
+ * The pure helpers below are exported for test/unit/identifyDeployedRef.test.js.
+ * Nothing may be required in from outside this file: the probe form is piped
+ * into a container that holds only the service's own tree, so a second file
  * would be missing exactly where the tool is used.
  *
  ********************************************************************/
@@ -111,7 +111,7 @@ function formatProbeReport(root, version, fileCount, hash) {
     return ['ROOT=' + root, 'VERSION=' + version, 'FILES=' + fileCount, 'TREEHASH=' + hash].join('\n');
 }
 
-// ── probe: run this inside the container ─────────────────────────────────────
+// probe: run this inside the container
 function probe(root, wantManifest) {
     const lines = manifestLines(root);
     if (wantManifest) { console.log(lines.join('\n')); return 0; }
@@ -164,7 +164,7 @@ function formatMatchReport(found, wanted, walkLength) {
     return { text: out.join('\n'), unmatched };
 }
 
-// ── match: run this on the monorepo host ─────────────────────────────────────
+// match: run this on the monorepo host
 function match(repo, depth, wanted) {
     const { execFileSync } = require('child_process');
     const git = (...a) => execFileSync('git', ['-C', repo, ...a],

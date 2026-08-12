@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * XChain Node - nine-field FILE scan ( spec section 7, pre-window gate)
+ * XChain Node - nine-field FILE scan (spec section 7, pre-window gate)
  *
  * PC-29 adds an optional ninth field to FILE format 0 (GATE_MIN_AMOUNT) and validates it
  * STRICT: a present-but-invalid threshold makes the FILE invalid rather than being
@@ -166,7 +166,7 @@ function formatReport(scan, label, corpus) {
     const lines = [];
     const known = (corpus !== undefined && corpus !== null && Number.isFinite(Number(corpus)));
     const n     = known ? Number(corpus) : null;
-    lines.push(' nine-field FILE scan: ' + (label || 'store'));
+    lines.push('nine-field FILE scan: ' + (label || 'store'));
     lines.push('payload rows scanned: ' + scan.scanned +
                (known ? ' of ' + n + ' payload-bearing rows in the store' : '') +
                '  (raw decoder payloads, upstream of format truncation)');

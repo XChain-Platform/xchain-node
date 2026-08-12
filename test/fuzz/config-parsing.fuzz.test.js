@@ -48,13 +48,10 @@ function makeServiceWithConfig(configContent) {
 
 describe('Fuzz: Config File Parsing', function () {
 
-    // --- Structural fuzzing of KEY=VALUE format ---
-
     it('handles line with no equals sign (ignored)', async function () {
         const cs = makeServiceWithConfig('NO_EQUALS_HERE\n')
         const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
         expect(config).to.not.have.property('NO_EQUALS_HERE')
-        // Default values should still be present
         expect(config['NODE_PORT']).to.equal(8332)
     })
 
@@ -80,7 +77,6 @@ describe('Fuzz: Config File Parsing', function () {
     it('handles empty config file', async function () {
         const cs = makeServiceWithConfig('')
         const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
-        // All defaults should be present
         expect(config['NODE_PORT']).to.equal(8332)
         expect(config['ENCODER_API_PORT']).to.equal(3003)
     })
@@ -105,8 +101,6 @@ describe('Fuzz: Config File Parsing', function () {
         expect(config['KEY2']).to.exist
     })
 
-    // --- Value fuzzing: injection payloads in config values ---
-
     const dangerousValues = [
         ['shell metachar semicolon',  'EVIL=value; rm -rf /'],
         ['shell metachar backtick',   'EVIL=value`id`'],
@@ -123,13 +117,10 @@ describe('Fuzz: Config File Parsing', function () {
         it(`does not crash on config value: ${desc}`, async function () {
             const cs = makeServiceWithConfig(line + '\n')
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
-            // Should not crash; defaults should still be present
             expect(config).to.be.an('object')
             expect(config['NODE_PORT']).to.equal(8332)
         })
     }
-
-    // --- Port value fuzzing ---
 
     const fuzzedPorts = [
         ['negative port',        'ENCODER_PORT=-1',        '-1'],
@@ -152,8 +143,6 @@ describe('Fuzz: Config File Parsing', function () {
         })
     }
 
-    // --- Key fuzzing ---
-
     it('handles key with special characters', async function () {
         const cs = makeServiceWithConfig('KEY WITH SPACES=value\n')
         const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
@@ -169,14 +158,10 @@ describe('Fuzz: Config File Parsing', function () {
     it('config file values override defaults but do not remove unmentioned defaults', async function () {
         const cs = makeServiceWithConfig('NODE_PORT=9999\n')
         const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
-        // Overridden
         expect(config['NODE_PORT']).to.equal('9999')
-        // Other defaults still present
         expect(config['ENCODER_API_PORT']).to.equal(3003)
         expect(config['HUB_PORT']).to.equal(10000)
     })
-
-    // --- Large config file ---
 
     it('handles config file with 1000 lines', async function () {
         const lines = Array.from({ length: 1000 }, (_, i) => `KEY_${i}=value_${i}`).join('\n')
@@ -184,11 +169,8 @@ describe('Fuzz: Config File Parsing', function () {
         const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
         expect(config['KEY_0']).to.equal('value_0')
         expect(config['KEY_999']).to.equal('value_999')
-        // Defaults still present for unoverridden keys
         expect(config['NODE_PORT']).to.equal(8332)
     })
-
-    // --- Missing config file ---
 
     it('uses defaults when config file does not exist', async function () {
         const fsStub = {
@@ -203,8 +185,6 @@ describe('Fuzz: Config File Parsing', function () {
         expect(config['NODE_PORT']).to.equal(8332)
         expect(config['ENCODER_API_PORT']).to.equal(3003)
     })
-
-    // --- Shared service config (no coin/network) ---
 
     it('returns shared config when coin and network are null', async function () {
         const cs = makeServiceWithConfig('')

@@ -37,9 +37,6 @@ describe('Integration: Database Service Chain', function () {
         await env.teardown()
     })
 
-    /**
-     * Create DatabaseService with stubbed Docker and stubbed password prompt.
-     */
     function makeDatabaseService(options = {}) {
         const state = require('../../src/state')
         state.setDbRootPassword('testrootpw')
@@ -105,10 +102,6 @@ describe('Integration: Database Service Chain', function () {
         return { DatabaseService, dbContainerId }
     }
 
-    // ---------------------------------------------------------------
-    // buildDatabaseModule
-    // ---------------------------------------------------------------
-
     describe('buildDatabaseModule (first install)', function () {
 
         it('pulls mariadb, tags it, and runs container', async function () {
@@ -117,13 +110,9 @@ describe('Integration: Database Service Chain', function () {
 
             const result = await DatabaseService.buildDatabaseModule('bitcoin', 'mainnet')
 
-            // Docker pull
             capture.assertCalled(/docker pull mariadb:latest/)
-
-            // Docker tag
             capture.assertCalled(/docker tag mariadb:latest xchain-node-database/)
 
-            // Docker run with correct hostname and root password
             const runCmds = capture.findCommands(/docker run/)
             expect(runCmds).to.have.length(1)
             const runCmd = runCmds[0].command
@@ -131,7 +120,6 @@ describe('Integration: Database Service Chain', function () {
             expect(runCmd).to.include('MYSQL_ROOT_PASSWORD=testrootpw')
             expect(runCmd).to.include('xchain-node-database')
 
-            // Container ID stored in LevelDB
             const state = require('../../src/state')
             const storedId = await state.db.getModuleContainer(DB_MODULE_NAME, '', '')
             expect(storedId).to.equal(dbContainerId)
@@ -185,20 +173,14 @@ describe('Integration: Database Service Chain', function () {
 
             await DatabaseService.buildDatabaseModule('litecoin', 'mainnet')
 
-            // Should NOT pull/run new container
             capture.assertNotCalled(/docker pull/)
             capture.assertNotCalled(/docker run/)
 
-            // Should add existing container to new network
             expect(networkConnections).to.have.length(1)
             expect(networkConnections[0].id).to.equal(dbContainerId)
             expect(networkConnections[0].network).to.equal('xchain-node-litecoin-mainnet')
         })
     })
-
-    // ---------------------------------------------------------------
-    // Database user creation
-    // ---------------------------------------------------------------
 
     describe('addUserPasswordToDatabase', function () {
 
@@ -219,19 +201,14 @@ describe('Integration: Database Service Chain', function () {
                 'xchain-password'
             )
 
-            // Verify CREATE DATABASE
             capture.assertCalled(/CREATE DATABASE IF NOT EXISTS XChain_BTC_Mainnet_Decoder/)
 
-            // Verify CREATE USER with subnet mask
             const createUserCmds = capture.findCommands(/CREATE USER/)
             expect(createUserCmds).to.have.length(1)
             expect(createUserCmds[0].command).to.include('xchain_decoder_bitcoin_mainnet')
             expect(createUserCmds[0].command).to.include('172.18.0.0/255.255.0.0')
 
-            // Verify GRANT ALL
             capture.assertCalled(/GRANT ALL PRIVILEGES ON XChain_BTC_Mainnet_Decoder/)
-
-            // Verify FLUSH
             capture.assertCalled(/FLUSH PRIVILEGES/)
         })
 
@@ -242,7 +219,6 @@ describe('Integration: Database Service Chain', function () {
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', decoderId)
             env.writeConfigFile('bitcoin-mainnet', '')
 
-            // Override network inspect to return different gateway
             const DatabaseService = proxyquire('../../src/services/DatabaseService', {
                 'child_process': { execFile: capture.createExecFileStub() },
                 'util': { promisify: () => capture.createExecFileAsyncStub() },
@@ -272,15 +248,10 @@ describe('Integration: Database Service Chain', function () {
                 'xchain-password'
             )
 
-            // Subnet should use first two octets of gateway
             const createUserCmds = capture.findCommands(/CREATE USER/)
             expect(createUserCmds[0].command).to.include('172.20.0.0/255.255.0.0')
         })
     })
-
-    // ---------------------------------------------------------------
-    // setDatabaseParameters integration
-    // ---------------------------------------------------------------
 
     describe('setDatabaseParameters', function () {
 
@@ -302,23 +273,16 @@ describe('Integration: Database Service Chain', function () {
 
             await DatabaseService.setDatabaseParameters()
 
-            // Should create users for decoder AND indexer
             const createUserCmds = capture.findCommands(/CREATE USER/)
             const userNames = createUserCmds.map(c => c.command)
 
-            // Decoder user
             const hasDecoderUser = userNames.some(cmd => cmd.includes('xchain_decoder_bitcoin_mainnet'))
             expect(hasDecoderUser).to.be.true
 
-            // Indexer user
             const hasIndexerUser = userNames.some(cmd => cmd.includes('xchain_indexer_bitcoin_mainnet'))
             expect(hasIndexerUser).to.be.true
         })
     })
-
-    // ---------------------------------------------------------------
-    // checkIfDatabaseIsReady retry logic
-    // ---------------------------------------------------------------
 
     describe('checkIfDatabaseIsReady', function () {
 

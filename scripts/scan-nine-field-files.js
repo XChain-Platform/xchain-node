@@ -12,7 +12,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- *  section 7 pre-window gate: scan every network for a nine-field FILE.
+ * Pre-window gate: scan every network for a nine-field FILE.
  *
  *   XC637_DB_PASS=... node scripts/scan-nine-field-files.js \
  *       --host 127.0.0.1 --port 3306 --user xchain --database XChain_BTC_Decoder \
@@ -28,7 +28,7 @@
  * on a chain that has one. The logic and that reasoning live in
  * src/services/GatedFileFieldScan.js and are unit tested there; this file is connection,
  * paging and exit codes. The paging loop and the corpus measurement are exported behind an
- * entrypoint guard and covered by test/unit/scanNineFieldFiles.test.js .
+ * entrypoint guard and covered by test/unit/scanNineFieldFiles.test.js.
  ********************************************************************/
 
 'use strict';

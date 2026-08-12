@@ -29,7 +29,6 @@ describe('state', function () {
     } = require('../../src/state')
 
     afterEach(function () {
-        // Reset to defaults
         setDbRootPassword(null)
         resetInstalledModules()
         setStatusUpdated(false)

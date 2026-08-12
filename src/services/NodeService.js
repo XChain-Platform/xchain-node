@@ -143,8 +143,8 @@ function nodeNetworkSubdir(coin, network) {
 // Resolve the relocated-blocks root. The env var wins and, when present, is
 // persisted to the config/node.local sidecar so later invocations that lack it
 // (non-interactive SSH, cron: the profile is never sourced) inherit the same
-// value instead of silently building mount-less containers (, the
-// 2026-07-23 node-host-b crash-loop). With no env var the sidecar value applies.
+// value instead of silently building mount-less containers (this was found
+// via a real crash-loop). With no env var the sidecar value applies.
 // Returns null when neither source has a value (in-datadir layout).
 async function resolveBlocksDir() {
     const { configDir } = require('../config/constants')
@@ -167,11 +167,11 @@ async function resolveBlocksDir() {
     return persisted && persisted.trim() !== '' ? persisted.trim() : null
 }
 
-// mkdirSync-if-absent that tolerates an existing SYMLINK. The node-host-b live fix
-// left $BLOCKS_DIR/<coin>/<net>[-txindex] as symlinks to the real stores;
+// mkdirSync-if-absent that tolerates an existing SYMLINK. A live fix on one
+// host left $BLOCKS_DIR/<coin>/<net>[-txindex] as symlinks to the real stores;
 // mkdirSync({recursive}) lstat-fails through a symlink whose target the caller
-// cannot traverse and surfaced as a misleading EACCES "failed to create"
-// . Any existing entry (dir or symlink) counts as already provisioned.
+// cannot traverse and surfaced as a misleading EACCES "failed to create".
+// Any existing entry (dir or symlink) counts as already provisioned.
 function ensureHostDir(dirPath) {
     try {
         fs.lstatSync(dirPath)
@@ -193,7 +193,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
     const confFilePath = path.join(nodeDir, confFileName)
     if (fs.existsSync(confFilePath)) {
         // The bundled conf ships __XCHAIN_NODE_RPC_USER__/__XCHAIN_NODE_RPC_PASSWORD__
-        // placeholder tokens ; fail closed if the provisioned credentials are
+        // placeholder tokens; fail closed if the provisioned credentials are
         // missing rather than baking the placeholder (or "undefined") into the image.
         if (!defaultConfig['NODE_USER'] || !defaultConfig['NODE_PASSWORD']) {
             throw new Error(`Missing NODE_USER/NODE_PASSWORD for ${coin} ${network}; refusing to build node with placeholder RPC credentials`)
@@ -267,11 +267,11 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 volumeMounts.push({ spec: `${txindexHostPath}:${txindexDest}`, destination: txindexDest })
             }
 
-            // Mount-drift guard : if the container being replaced has
-            // bind mounts the new spec lacks, refuse BEFORE removing it. The
-            // 2026-07-23 node-host-b crash-loop came from exactly this: an env-less
-            // rebuild dropped the relocated blocks/txindex mounts, so the daemon
-            // restarted over an empty blocks store with a current chainstate.
+            // Mount-drift guard: if the container being replaced has bind mounts
+            // the new spec lacks, refuse BEFORE removing it. A real crash-loop
+            // came from exactly this: an env-less rebuild dropped the relocated
+            // blocks/txindex mounts, so the daemon restarted over an empty
+            // blocks store with a current chainstate.
             const { forceRemoveContainerByName, getContainerBindMounts } = require('./DockerService')
             let existingMounts = []
             try {
@@ -390,7 +390,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
 
 // Optional exact-version pin for a coin daemon, read from
 // XCHAIN_NODE_NODE_VERSION_<COIN> (e.g. XCHAIN_NODE_NODE_VERSION_LITECOIN=v0.21.4).
-// Test harnesses (notably the multi-chain parity sweep, ) set this so the
+// Test harnesses (notably the multi-chain parity sweep) set this so the
 // installed daemon matches the DEPLOYED fleet image instead of drifting to the
 // latest upstream release. Returns null when no pin is set.
 function resolveNodeVersionPin(coin) {

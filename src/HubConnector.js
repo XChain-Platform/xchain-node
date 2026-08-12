@@ -99,7 +99,7 @@ class HubConnector {
             method: 'updateconfig',
             params: { config: newConfigJson },
             id: 1
-        }, 60000);  // config pushes on multi-coin nodes can exceed a 10s ceiling (prod-validated on origin-host)
+        }, 60000);  // config pushes on multi-coin nodes can exceed a 10s ceiling (prod-validated)
         return result !== null;
     }
 }

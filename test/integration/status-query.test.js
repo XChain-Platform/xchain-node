@@ -39,10 +39,6 @@ describe('Integration: Status Query Chain', function () {
         }])
     }
 
-    /**
-     * Create a StatusService with stubbed DockerService (docker inspect)
-     * and stubbed VersionService, but real LevelDB interaction.
-     */
     function makeStatusService(inspectResponses) {
         return proxyquire('../../src/services/StatusService', {
             './DockerService': {
@@ -62,10 +58,6 @@ describe('Integration: Status Query Chain', function () {
             }
         })
     }
-
-    // ---------------------------------------------------------------
-    // Status for installed running modules
-    // ---------------------------------------------------------------
 
     describe('getStatus with installed modules', function () {
 
@@ -133,10 +125,6 @@ describe('Integration: Status Query Chain', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // Status with no modules
-    // ---------------------------------------------------------------
-
     describe('getStatus with empty LevelDB', function () {
 
         it('returns empty object and does not throw', async function () {
@@ -145,10 +133,6 @@ describe('Integration: Status Query Chain', function () {
             expect(result).to.deep.equal({})
         })
     })
-
-    // ---------------------------------------------------------------
-    // Status when Docker inspect fails
-    // ---------------------------------------------------------------
 
     describe('getStatus when Docker inspect fails', function () {
 
@@ -161,12 +145,11 @@ describe('Integration: Status Query Chain', function () {
 
             const inspectResponses = {}
             inspectResponses[goodId] = { State: { Status: 'running' }, NetworkSettings: { Ports: {} } }
-            // badId will throw (not in inspectResponses)
+            // badId is intentionally left out of inspectResponses so its inspect call throws.
 
             const StatusService = makeStatusService(inspectResponses)
             const result = await StatusService.getStatus(null, null, false)
 
-            // Good module present, bad module removed
             expect(result['bitcoin']['mainnet']).to.have.property('xchain-encoder')
             expect(result['bitcoin']['mainnet']).to.not.have.property('xchain-decoder')
         })
@@ -178,16 +161,11 @@ describe('Integration: Status Query Chain', function () {
             const StatusService = makeStatusService({})
             const result = await StatusService.getStatus(null, null, false)
 
-            // Entire litecoin/testnet should be cleaned up
             if (result['litecoin']) {
                 expect(result['litecoin']).to.not.have.property('testnet')
             }
         })
     })
-
-    // ---------------------------------------------------------------
-    // Status caching
-    // ---------------------------------------------------------------
 
     describe('status caching', function () {
 
@@ -212,19 +190,13 @@ describe('Integration: Status Query Chain', function () {
                 }
             })
 
-            // First call queries Docker
             await StatusService.getStatus(null, null, false)
             const firstCount = inspectCount
 
-            // Second call uses cache
             await StatusService.getStatus(null, null, false)
             expect(inspectCount).to.equal(firstCount)
         })
     })
-
-    // ---------------------------------------------------------------
-    // getInstalledCoinsAndNetworks
-    // ---------------------------------------------------------------
 
     describe('getInstalledCoinsAndNetworks', function () {
 
@@ -241,7 +213,6 @@ describe('Integration: Status Query Chain', function () {
 
             const StatusService = makeStatusService(inspectResponses)
 
-            // getStatus first to populate state
             await StatusService.getStatus(null, null, false)
 
             const result = await StatusService.getInstalledCoinsAndNetworks()

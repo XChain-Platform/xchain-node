@@ -37,20 +37,13 @@ describe('Integration: Docker Command Construction', function () {
         await env.teardown()
     })
 
-    /**
-     * Creates a ModuleService with:
-     * - Patched ConfigService (using env temp dirs for configDir/moduleDir)
-     * - Stubbed child_process (via capture)
-     * - Stubbed StatusService and DatabaseService
-     * - Real config generation logic
-     */
     function makeBuildAndUp() {
         const containerId = TestEnv.fakeContainerId('c')
 
         capture.when(/docker build/).returns({ stdout: '' })
         capture.when(/docker run/).returns({ stdout: containerId + '\n' })
-        // Echo back the container ID from the command for kill/rm
-        // so DockerService's stdout === containerId check passes
+        // kill/rm echo the container ID back from the command so DockerService's
+        // stdout === containerId check passes.
         const extractId = (cmd) => {
             const parts = cmd.trim().split(/\s+/)
             return { stdout: parts[parts.length - 1] }
@@ -105,10 +98,6 @@ describe('Integration: Docker Command Construction', function () {
         return { ModuleService, containerId }
     }
 
-    // ---------------------------------------------------------------
-    // Encoder Docker command
-    // ---------------------------------------------------------------
-
     describe('xchain-encoder Docker run command', function () {
 
         it('includes correct hostname, network, port mapping, and env vars', async function () {
@@ -118,12 +107,10 @@ describe('Integration: Docker Command Construction', function () {
             const { ModuleService } = makeBuildAndUp()
             await ModuleService.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, true)
 
-            // Verify docker build
             const buildCmds = capture.findCommands(/docker build/)
             expect(buildCmds).to.have.length(1)
             expect(buildCmds[0].command).to.include('-t xchain-node-bitcoin-mainnet-xchain-encoder')
 
-            // Verify docker run
             const runCmds = capture.findCommands(/docker run/)
             expect(runCmds).to.have.length(1)
             const runCmd = runCmds[0].command
@@ -132,11 +119,8 @@ describe('Integration: Docker Command Construction', function () {
             expect(runCmd).to.include('--hostname xchain-node-bitcoin-mainnet-xchain-encoder')
             expect(runCmd).to.include('--network xchain-node-bitcoin-mainnet')
             expect(runCmd).to.include('-t xchain-node-bitcoin-mainnet-xchain-encoder')
-
-            // Port mapping
             expect(runCmd).to.include('-p 3003:3003')
 
-            // Environment variables
             expect(runCmd).to.include('NETWORK=mainnet')
             expect(runCmd).to.include('NODE_PORT=8332')
             expect(runCmd).to.include('ENCODER_API_PORT=3003')
@@ -168,10 +152,6 @@ describe('Integration: Docker Command Construction', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // Decoder Docker command
-    // ---------------------------------------------------------------
-
     describe('xchain-decoder Docker run command', function () {
 
         it('includes database env vars and bootstrap volume', async function () {
@@ -189,7 +169,6 @@ describe('Integration: Docker Command Construction', function () {
             expect(runCmd).to.include('DECODER_DB_PASS=xchain-password')
             expect(runCmd).to.include('-p 3002:3002')
 
-            // Bootstrap volume mount
             expect(runCmd).to.include('-v ')
             expect(runCmd).to.include(':/bootstrap/xchain-decoder')
         })
@@ -208,10 +187,6 @@ describe('Integration: Docker Command Construction', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // UTXO Tracker Docker command
-    // ---------------------------------------------------------------
-
     describe('xchain-utxo-tracker Docker run command', function () {
 
         it('includes data volume, bootstrap volume, and ulimit', async function () {
@@ -223,26 +198,13 @@ describe('Integration: Docker Command Construction', function () {
 
             const runCmd = capture.findCommands(/docker run/)[0].command
 
-            // Data volume
             expect(runCmd).to.include('-v xchain-utxo-tracker-bitcoin-mainnet-data:/data/xchain-utxo-tracker')
-
-            // Bootstrap volume
             expect(runCmd).to.include(':/bootstrap/xchain-utxo-tracker')
-
-            // Ulimit
             expect(runCmd).to.include('--ulimit nofile=2048:2048')
-
-            // Port
             expect(runCmd).to.include('-p 3001:3001')
-
-            // Network
             expect(runCmd).to.include('--network xchain-node-bitcoin-mainnet')
         })
     })
-
-    // ---------------------------------------------------------------
-    // Indexer Docker command
-    // ---------------------------------------------------------------
 
     describe('xchain-indexer Docker run command', function () {
 
@@ -264,10 +226,6 @@ describe('Integration: Docker Command Construction', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // Regtest miner Docker command
-    // ---------------------------------------------------------------
-
     describe('xchain-regtest-miner Docker run command', function () {
 
         it('includes regtest miner port on regtest network', async function () {
@@ -285,10 +243,6 @@ describe('Integration: Docker Command Construction', function () {
             expect(runCmd).to.include('--network xchain-node-bitcoin-regtest')
         })
     })
-
-    // ---------------------------------------------------------------
-    // Hub Docker command (shared service)
-    // ---------------------------------------------------------------
 
     describe('xchain-hub Docker run command', function () {
 
@@ -308,10 +262,6 @@ describe('Integration: Docker Command Construction', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // Explorer Docker command (shared service)
-    // ---------------------------------------------------------------
-
     describe('xchain-explorer Docker run command', function () {
 
         it('uses base network and both HTTP/HTTPS ports', async function () {
@@ -328,10 +278,6 @@ describe('Integration: Docker Command Construction', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // Overwrite (update) scenario
-    // ---------------------------------------------------------------
-
     describe('buildAndUp with overwriteContainerId', function () {
 
         it('kills and removes old container before creating new one', async function () {
@@ -343,7 +289,6 @@ describe('Integration: Docker Command Construction', function () {
 
             await ModuleService.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', oldContainerId, true)
 
-            // Should have killed and removed the old container
             const killCmds = capture.findCommands(/docker kill/)
             expect(killCmds).to.have.length(1)
             expect(killCmds[0].command).to.include(oldContainerId)
@@ -352,15 +297,10 @@ describe('Integration: Docker Command Construction', function () {
             expect(rmCmds).to.have.length(1)
             expect(rmCmds[0].command).to.include(oldContainerId)
 
-            // And created a new container
             const runCmds = capture.findCommands(/docker run/)
             expect(runCmds).to.have.length(1)
         })
     })
-
-    // ---------------------------------------------------------------
-    // Docker build uses correct cwd
-    // ---------------------------------------------------------------
 
     describe('docker build working directory', function () {
 
@@ -375,10 +315,6 @@ describe('Integration: Docker Command Construction', function () {
             expect(buildCmd.options.cwd).to.include('xchain-encoder')
         })
     })
-
-    // ---------------------------------------------------------------
-    // All coin/network combos produce valid Docker commands
-    // ---------------------------------------------------------------
 
     describe('every coin/network combo produces valid Docker run commands', function () {
         for (const coin of Object.values(Coin)) {

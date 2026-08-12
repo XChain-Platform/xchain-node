@@ -31,10 +31,6 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         await env.teardown()
     })
 
-    // ---------------------------------------------------------------
-    // Direct LevelDB operations via state.db
-    // ---------------------------------------------------------------
-
     describe('LevelDB key format and CRUD', function () {
         const state = require('../../src/state')
 
@@ -72,12 +68,10 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             await state.db.insertModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', id2)
             await state.db.insertModuleContainer('xchain-encoder', 'litecoin', 'mainnet', id3)
 
-            // Filter by bitcoin/mainnet
             const btcModules = await state.db.getAllModuleContainers('bitcoin', 'mainnet')
             expect(btcModules).to.have.length(2)
             expect(btcModules.map(m => m.module)).to.include.members(['xchain-encoder', 'xchain-decoder'])
 
-            // Get all (null/null)
             const allModules = await state.db.getAllModuleContainers(null, null)
             expect(allModules).to.have.length(3)
         })
@@ -89,7 +83,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             await state.db.insertModuleContainer('xchain-hub', '', '', hubId)
             await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', encoderId)
 
-            // When filtering by bitcoin/mainnet, shared services (empty coin/network) are also returned
+            // Shared services (empty coin/network) are always included in a filtered query.
             const modules = await state.db.getAllModuleContainers('bitcoin', 'mainnet')
             const moduleNames = modules.map(m => m.module)
             expect(moduleNames).to.include('xchain-hub')
@@ -108,10 +102,6 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // Multiple modules maintain separate state
-    // ---------------------------------------------------------------
-
     describe('multi-module state isolation', function () {
         const state = require('../../src/state')
 
@@ -124,15 +114,12 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             await state.db.insertModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', decId)
             await state.db.insertModuleContainer('xchain-indexer', 'bitcoin', 'mainnet', idxId)
 
-            // Verify each
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(encId)
             expect(await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')).to.equal(decId)
             expect(await state.db.getModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')).to.equal(idxId)
 
-            // Remove one
             await state.db.removeModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
 
-            // Others still intact
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(encId)
             expect(await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')).to.be.null
             expect(await state.db.getModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')).to.equal(idxId)
@@ -153,10 +140,6 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // moduleOperations -> LevelDB interaction (start/stop/restart)
-    // ---------------------------------------------------------------
-
     describe('moduleOperations uses LevelDB for container lookups', function () {
 
         it('startModules reads container IDs from LevelDB and calls docker start', async function () {
@@ -166,7 +149,6 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const containerId = TestEnv.fakeContainerId('a')
             await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', containerId)
 
-            // Use proxyquire to inject our stubs into the operation chain
             const moduleOps = proxyquire('../../src/operations/moduleOperations', {
                 '../services/DockerService': {
                     startContainer: async (id) => {
@@ -263,7 +245,6 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
 
         it('startModules gracefully handles missing LevelDB entry', async function () {
-            // No modules inserted; LevelDB is empty
             const moduleOps = proxyquire('../../src/operations/moduleOperations', {
                 '../services/DockerService': {
                     startContainer: sinon.stub().resolves(true),
@@ -280,7 +261,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             })
 
             const serviceList = { 'bitcoin': { 'mainnet': ['xchain-encoder'] } }
-            // Should not throw; the operation catches errors and logs them
+            // A missing container ID must not throw: the operation catches and logs it.
             const result = await moduleOps.startModules(serviceList)
             expect(result).to.be.true
         })

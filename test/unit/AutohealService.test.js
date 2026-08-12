@@ -54,7 +54,7 @@ function unhealthyInsideGrace() {
 // at 5 entries and every descriptor probes at 15s, so a container wedged for an
 // hour still shows only the last ~60s, all failures, sliding forward with `at`.
 // The unhealthyPastGrace fixture above (entries 11 minutes apart) is a shape a
-// real 15s ring buffer can never produce, which is why it hid XC #3470.
+// real 15s ring buffer can never produce, which is why it hid this bug.
 function unhealthyRingBuffer(at) {
     return inspectStatus('unhealthy', [60000, 45000, 30000, 15000, 0].map(ms => {
         const start = new Date(at - ms)
@@ -110,7 +110,7 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // : an unconfigured store answers [] rather than erroring, so autoheal
+    // An unconfigured store answers [] rather than erroring, so autoheal
     // would sweep zero candidates and report a clean run while every unhealthy
     // container stayed down. A watchdog that cannot read its registry must say so.
     it('refuses to run against an unconfigured module registry', async () => {
@@ -310,7 +310,7 @@ describe('AutohealService', () => {
         expect(result.failed).to.have.length(0)
     })
 
-    // XC #3470: Docker keeps 5 Health.Log entries, the probes are 15s apart, so
+    // Docker keeps 5 Health.Log entries, the probes are 15s apart, so
     // the log-derived onset never gets more than ~60s back and slides forward
     // with every pass. Timing the 120s grace off it made autoheal a permanent
     // no-op in production. The onset must be persisted on first sighting.

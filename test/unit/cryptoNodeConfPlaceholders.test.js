@@ -1,7 +1,7 @@
-// Guards : the bundled crypto-node conf files must ship placeholder
-// credential tokens, never a literal weak default ('rpc') or a real generated
-// credential accidentally written back into the repo by buildCryptoNode's
-// in-place substitution (NodeService injects the provisioned creds at build).
+// The bundled crypto-node conf files must ship placeholder credential tokens,
+// never a literal weak default ('rpc') or a real generated credential
+// accidentally written back into the repo by buildCryptoNode's in-place
+// substitution (NodeService injects the provisioned creds at build).
 const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
@@ -20,7 +20,7 @@ function listConfFiles() {
     return files
 }
 
-describe('bundled crypto-node conf files ', function () {
+describe('bundled crypto-node conf files', function () {
     it('finds conf files for every coin/network combo', function () {
         assert.ok(listConfFiles().length >= 9, 'expected at least 9 bundled conf files')
     })
