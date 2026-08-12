@@ -632,7 +632,9 @@ describe('ConfigService', function () {
                 const GENESIS_VARS = [
                     'XCHAIN_GENESIS_BLOCK', 'XCHAIN_GENESIS_LEDGER_HASH', 'XCHAIN_GENESIS_DUMP_HASH',
                     'GENESIS_LEDGER_PATH', 'GENESIS_DUMP_PATH',
-                    'GENESIS_BLOCK_TIMEOUT_MS', 'GENESIS_DUMP_TIMEOUT_MS'
+                    'GENESIS_BLOCK_TIMEOUT_MS', 'GENESIS_DUMP_TIMEOUT_MS',
+                    'GENESIS_AIRDROP_PATHS', 'GENESIS_AIRDROP_HASHES', 'GENESIS_AIRDROP_AMOUNTS',
+                    'GENESIS_AIRDROP_SNAPSHOT_BLOCK', 'GENESIS_AIRDROP_SET_HASH'
                 ]
                 let saved
                 beforeEach(function () {
@@ -654,6 +656,19 @@ describe('ConfigService', function () {
                     expect(config['XCHAIN_GENESIS_BLOCK']).to.equal('105')
                     expect(config['XCHAIN_GENESIS_LEDGER_HASH']).to.equal('deadbeef')
                     expect(config['XCHAIN_GENESIS_DUMP_HASH']).to.equal('cafef00d')
+                })
+
+                it('passes the airdrop set through to the indexer (regtest dry-run seam, )', async function () {
+                    process.env.GENESIS_AIRDROP_PATHS    = '/XChainIndexer/data/genesis/xcp.csv'
+                    process.env.GENESIS_AIRDROP_HASHES   = 'aa'
+                    process.env.GENESIS_AIRDROP_AMOUNTS  = '30000000.00000000'
+                    process.env.GENESIS_AIRDROP_SET_HASH = 'd'.repeat(64)
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['GENESIS_AIRDROP_PATHS']).to.equal('/XChainIndexer/data/genesis/xcp.csv')
+                    expect(config['GENESIS_AIRDROP_HASHES']).to.equal('aa')
+                    expect(config['GENESIS_AIRDROP_AMOUNTS']).to.equal('30000000.00000000')
+                    expect(config['GENESIS_AIRDROP_SET_HASH']).to.equal('d'.repeat(64))
                 })
 
                 it('does NOT inject genesis vars into a non-indexer module (decoder)', async function () {

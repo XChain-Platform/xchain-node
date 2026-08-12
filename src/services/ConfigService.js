@@ -447,10 +447,16 @@ async function getDefaultConfig(module, coin, network) {
         // leaves GENESIS_BLOCK at its 0/default and genesis stays off. The path vars point at
         // in-container files; override them only when a custom CSV/dump is volume-mounted.
         if (module === XChainService.XCHAIN_INDEXER) {
+            // The GENESIS_AIRDROP_* members carry the XCP/XDP airdrop leg. The indexer honors
+            // them on regtest ONLY : off regtest the armed bucket set comes from the
+            // pinned coin bundle, so passing them through cannot arm anything on a mainnet or
+            // testnet stack, only on the regtest dry-run this passthrough exists for.
             const genesisPassthroughVars = [
                 "XCHAIN_GENESIS_BLOCK", "XCHAIN_GENESIS_LEDGER_HASH", "XCHAIN_GENESIS_DUMP_HASH",
                 "GENESIS_LEDGER_PATH", "GENESIS_DUMP_PATH",
-                "GENESIS_BLOCK_TIMEOUT_MS", "GENESIS_DUMP_TIMEOUT_MS"
+                "GENESIS_BLOCK_TIMEOUT_MS", "GENESIS_DUMP_TIMEOUT_MS",
+                "GENESIS_AIRDROP_PATHS", "GENESIS_AIRDROP_HASHES", "GENESIS_AIRDROP_AMOUNTS",
+                "GENESIS_AIRDROP_SNAPSHOT_BLOCK", "GENESIS_AIRDROP_SET_HASH"
             ]
             for (const varName of genesisPassthroughVars) {
                 if (process.env[varName] !== undefined && process.env[varName] !== "") {
