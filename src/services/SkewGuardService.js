@@ -132,10 +132,18 @@ async function assertHubNotBehind(module, branch = null, deps = {}) {
     try {
         hubVersion = await getHubVersion(hubContainerId)
     } catch (err) {
+        // Say which of the two situations this is. The old text told the
+        // operator to "update xchain-hub first", which asserts the hub is
+        // BEHIND - a claim this branch cannot make, since the version is
+        // exactly what could not be read. On the live stack the hub was
+        // 2.2.17 against a required 2.2.0, so the advice sent operators to
+        // redeploy a hub that was already ahead.
         throw new Error(
-            `update refused: ${module} requires hub >= ${requiredHub} but the installed hub's version could not be read ` +
-            `(${err && err.message ? err.message : err}). Update ${HUB_MODULE_NAME} first (see DEPLOY-ORDER.md), ` +
-            `or set ${SKIP_ENV}=1 to override.`
+            `update refused: ${module} requires hub >= ${requiredHub}, and the installed hub's version could NOT be ` +
+            `determined, so this is an unknown-version refusal, not a known-too-old hub ` +
+            `(${err && err.message ? err.message : err}). Check the hub container is up and readable ` +
+            `(\`docker exec <hub> cat /XChainHub/package.json\`); if you already know the hub satisfies ` +
+            `>= ${requiredHub}, set ${SKIP_ENV}=1 to override. See DEPLOY-ORDER.md for the hub-first ordering.`
         )
     }
 

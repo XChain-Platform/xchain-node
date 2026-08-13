@@ -24,6 +24,10 @@ function makeStubs() {
         },
         axiosGet: sinon.stub(),
         getDockerContainerFileData: sinon.stub(),
+        // Defaults to failing so the pre-existing `docker cp` expectations below
+        // still exercise the fallback path; tests of the preferred exec read
+        // override it.
+        getDockerContainerFileCat: sinon.stub().rejects(new Error('exec unavailable')),
         gitHubDownloader: {
             getLatestCompatibleVersion: sinon.stub()
         },
@@ -48,7 +52,8 @@ function loadVersionService(stubs) {
             getCryptoNodeDir: (coin) => '/crypto_nodes/' + coin
         },
         './DockerService': {
-            getDockerContainerFileData: stubs.getDockerContainerFileData
+            getDockerContainerFileData: stubs.getDockerContainerFileData,
+            getDockerContainerFileCat: stubs.getDockerContainerFileCat
         }
     })
 }
@@ -267,6 +272,57 @@ describe('VersionService', function () {
                 expect.fail()
             } catch (err) {
                 expect(err).to.include('error trying to get package.json')
+            }
+        })
+
+        // The live hub's `docker cp` fails on EVERY attempt with a daemon-side
+        // "mkdirat ...: file exists", which made the hub version permanently
+        // unreadable and turned every indexer update into a skew-guard refusal.
+        // `docker exec cat` reads the same file with no host filesystem involved.
+        it('reads the version with docker exec even when docker cp is permanently broken', async function () {
+            const stubs = makeStubs()
+            stubs.getDockerContainerFileCat.resolves(JSON.stringify({ version: '2.2.17' }))
+            stubs.getDockerContainerFileData.rejects(
+                new Error('Error response from daemon: mkdirat validator/capabilities.json: file exists')
+            )
+            const vs = loadVersionService(stubs)
+            const version = await vs.getContainerModuleVersion('xchain-hub', '', '', 'hub-id')
+            expect(version).to.equal('2.2.17')
+            expect(stubs.getDockerContainerFileData.called).to.be.false
+        })
+
+        it('prefers the exec read over the host copy', async function () {
+            const stubs = makeStubs()
+            stubs.getDockerContainerFileCat.resolves(JSON.stringify({ version: '9.9.9' }))
+            stubs.getDockerContainerFileData.resolves(JSON.stringify({ version: '0.0.1' }))
+            const vs = loadVersionService(stubs)
+            expect(await vs.getContainerModuleVersion('xchain-encoder', 'bitcoin', 'mainnet', 'c')).to.equal('9.9.9')
+        })
+    })
+
+    describe('readContainerFile()', function () {
+
+        // A stopped container cannot be exec'd into, but `ps` still wants its
+        // version, so the host copy stays as the fallback.
+        it('falls back to docker cp when the container cannot be exec\'d', async function () {
+            const stubs = makeStubs()
+            stubs.getDockerContainerFileCat.rejects(new Error('is not running'))
+            stubs.getDockerContainerFileData.resolves('file-body')
+            const vs = loadVersionService(stubs)
+            expect(await vs.readContainerFile('c', '/a/b.json')).to.equal('file-body')
+        })
+
+        it('names BOTH failures when neither read works', async function () {
+            const stubs = makeStubs()
+            stubs.getDockerContainerFileCat.rejects(new Error('is not running'))
+            stubs.getDockerContainerFileData.rejects(new Error('mkdirat: file exists'))
+            const vs = loadVersionService(stubs)
+            try {
+                await vs.readContainerFile('c', '/a/b.json')
+                expect.fail()
+            } catch (err) {
+                expect(err.message).to.match(/is not running/)
+                expect(err.message).to.match(/mkdirat: file exists/)
             }
         })
     })

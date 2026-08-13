@@ -238,8 +238,46 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             stubs.db.getModuleContainer.resolves(null)
             const ops = loadOperations(stubs)
-            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            const warn = sinon.stub(console, 'warn')
+            try {
+                await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            } finally { warn.restore() }
             expect(stubs.installModule.called).to.be.false
+        })
+
+        // A run that changed nothing must be distinguishable from a run that
+        // rebuilt containers: the caller turns an empty `updated` list into a
+        // non-zero exit, which is the whole defence against a silent no-op
+        // redeploy reading as success.
+        it('reports what it updated so a no-op run is not indistinguishable from success', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const outcome = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(outcome.updated).to.deep.equal([{ module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet' }])
+            expect(outcome.skipped).to.deep.equal([])
+        })
+
+        it('reports an uninstalled module as SKIPPED (empty updated list), and warns about it', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            let outcome
+            try {
+                outcome = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            } finally { warn.restore() }
+            expect(outcome.updated).to.deep.equal([])
+            expect(outcome.skipped).to.deep.equal([
+                { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', reason: 'not-installed' }
+            ])
+            expect(warn.calledWithMatch(/no registered container/)).to.be.true
+        })
+
+        it('counts a rebuilt node as updated', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const outcome = await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
+            expect(outcome.updated).to.deep.equal([{ module: 'node', coin: 'bitcoin', network: 'mainnet' }])
         })
     })
 
@@ -518,8 +556,12 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             stubs.db.getModuleContainer.resolves(null)
             const ops = loadOperations(stubs)
-            const result = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            const warn = sinon.stub(console, 'warn')
+            let result
+            try {
+                result = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            } finally { warn.restore() }
+            expect(result.updated).to.deep.equal([])
             expect(stubs.installModule.called).to.be.false
         })
 
@@ -551,7 +593,7 @@ describe('moduleOperations', function () {
             stubs.getModuleBranch.rejects(new Error('not a git repo'))
             const ops = loadOperations(stubs)
             const result = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            expect(result.updated).to.have.lengthOf(1)
             expect(stubs.installModule.calledWith(
                 'xchain-encoder', 'bitcoin', 'mainnet', true, 'container-id-123', false, null
             )).to.be.true

@@ -106,6 +106,10 @@ describe('SkewGuardService', () => {
             expect(res).to.deep.include({ checked: true, ok: true, requiredHub: '2.2.0', hubVersion: '2.2.17' })
         })
 
+        // Fail-closed stays, but the message must not assert a fact the guard
+        // does not have: an unreadable version is NOT evidence of an old hub,
+        // and telling the operator to update a hub that was already ahead sent
+        // a real deploy chasing the wrong repair.
         it('REFUSES (fail-closed) when the hub is installed but its version is unreadable', async () => {
             const deps = makeDeps({ pkg: { xchainRequiresHub: '2.2.0' }, hubVersionErr: new Error('no such container') })
             try {
@@ -113,7 +117,12 @@ describe('SkewGuardService', () => {
                 throw new Error('expected refusal')
             } catch (err) {
                 expect(err.message).to.match(/update refused/)
-                expect(err.message).to.match(/could not be read/)
+                expect(err.message).to.match(/could NOT be determined/)
+                expect(err.message).to.match(/unknown-version refusal, not a known-too-old hub/)
+                expect(err.message).to.match(/no such container/)
+                expect(err.message).to.match(new RegExp(SKIP_ENV))
+                // It must NOT read as the too-old case.
+                expect(err.message).to.not.match(/installed hub is /)
             }
         })
 

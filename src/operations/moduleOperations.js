@@ -93,7 +93,18 @@ async function updateModules(servicesList, ref = null) {
     return withInstallTarget(ref, async () => updateModulesOnBranch(servicesList, null))
 }
 
+/**
+ * Runs the update over every requested module and REPORTS what it did.
+ *
+ * The report exists because the old `return true` made "updated three
+ * containers" and "matched nothing at all" indistinguishable to the caller, so
+ * a run that changed nothing still exited 0 and read as a landed deploy. The
+ * caller (cli `update`) turns an empty `updated` list into a non-zero exit.
+ *
+ * @returns {Promise<{updated: Array, skipped: Array}>}
+ */
 async function updateModulesOnBranch(servicesList, branch = null) {
+    const outcome = { updated: [], skipped: [] }
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
@@ -116,8 +127,18 @@ async function updateModulesOnBranch(servicesList, branch = null) {
                     // been removed; only `install master node` could bring it back.
                     // installModule's remoteUpdate path rebuilds it from local source.
                     await installModule(nextModule, nextCoin, nextNetwork, true, null)
+                    outcome.updated.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
                 } else {
-                    if (!moduleContainerId) continue
+                    if (!moduleContainerId) {
+                        // Skipping is still right for `update all` on a partly
+                        // installed stack, but skipping SILENTLY is what let a
+                        // targeted `update <svc> <chain> <net>` print nothing,
+                        // change nothing and exit 0. Say it, and record it so
+                        // the caller can fail a run that updated nothing.
+                        console.warn(`update: ${nextModule} (${nextCoin} ${nextNetwork}) has no registered container; nothing to update. Install it first.`)
+                        outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-installed' })
+                        continue
+                    }
                     let moduleBranch = branch
                     if (!moduleBranch) {
                         try { moduleBranch = await getModuleBranch(nextModule) } catch { /* use default */ }
@@ -147,11 +168,12 @@ async function updateModulesOnBranch(servicesList, branch = null) {
                     // <branch>` silently deploying master). installModule does the clone, so
                     // no separate cloneGit is needed here.
                     await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId, false, moduleBranch)
+                    outcome.updated.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
                 }
             }
         }
     }
-    return true
+    return outcome
 }
 
 // Modules whose container is not created from the config map by buildAndUp: the

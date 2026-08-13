@@ -25,7 +25,41 @@ const {
 const { gitHubDownloader, getRemoteModuleVersions, setRemoteModuleVersion } = require('../state')
 const { githubApiHeaders, githubRateLimitError }                             = require('../GitHubDownloader')
 const { getModuleDir, getModuleTmpDir, getCryptoNodeDir }                   = require('./ConfigService')
-const { getDockerContainerFileData }                                         = require('./DockerService')
+const { getDockerContainerFileData, getDockerContainerFileCat }              = require('./DockerService')
+
+/**
+ * Reads one file out of a container, exec-first.
+ *
+ * `docker cp` was the only probe here, and it materializes the path on the
+ * HOST, so it inherits host-side failure modes that have nothing to do with the
+ * file being read: on the live hub the daemon refuses every copy with
+ * "mkdirat validator/capabilities.json: file exists", including a copy to a
+ * freshly emptied destination. That made the hub's version permanently
+ * unreadable and, through the skew guard, made every indexer update refuse.
+ * `docker exec cat` needs no host filesystem at all and reads the same bytes.
+ *
+ * The copy is kept as the fallback rather than deleted: `docker cp` works on a
+ * STOPPED container, which `docker exec` cannot enter, and the version of a
+ * stopped module is exactly what `ps` wants to show.
+ */
+async function readContainerFile(containerId, filePath) {
+    let execErr
+    try {
+        return await getDockerContainerFileCat(containerId, filePath)
+    } catch (err) {
+        execErr = err
+    }
+    try {
+        return await getDockerContainerFileData(containerId, filePath)
+    } catch (copyErr) {
+        // Report BOTH attempts: a caller that sees only the second failure
+        // cannot tell "container is gone" from "host copy is broken".
+        throw new Error(
+            'docker exec read failed (' + (execErr && execErr.message ? execErr.message : execErr) + ')' +
+            '; docker cp fallback also failed (' + (copyErr && copyErr.message ? copyErr.message : copyErr) + ')'
+        )
+    }
+}
 
 async function getGithubProjectVersion(owner, repoName) {
     const url = "https://api.github.com/repos/" + owner + "/" + repoName + "/releases/latest"
@@ -118,7 +152,7 @@ async function getLocalNodeVersion(coin, network) {
 async function getContainerNodeVersion(coin, network, containerId) {
     const versionFilePath = "/" + coin + "/" + NODE_VERSION_FILE_NAME
     try {
-        return await getDockerContainerFileData(containerId, versionFilePath)
+        return await readContainerFile(containerId, versionFilePath)
     } catch (err) {
         throw "There was an error trying to get the version file for the node " + coin + ":" + err
     }
@@ -153,7 +187,7 @@ async function getLocalModuleVersion(module) {
 async function getContainerModuleVersion(module, coin, network, containerId) {
     const packageJsonFilePath = "/" + projectFolders[module] + "/package.json"
     try {
-        const containerVersion = await getDockerContainerFileData(containerId, packageJsonFilePath)
+        const containerVersion = await readContainerFile(containerId, packageJsonFilePath)
         const json = JSON.parse(containerVersion)
         return json["version"]
     } catch (err) {
@@ -162,6 +196,7 @@ async function getContainerModuleVersion(module, coin, network, containerId) {
 }
 
 module.exports = {
+    readContainerFile,
     getGithubProjectVersion,
     checkRemoteNodeVersion,
     getRemoteModuleVersion,

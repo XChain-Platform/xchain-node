@@ -212,10 +212,22 @@ async function parseCommand() {
             // letting it escape as an unhandled rejection. The deploy checkout
             // is left intact by cloneGit, so the message is the whole outcome:
             // nothing to roll back by hand.
+            let outcome
             try {
-                await updateModules(serviceList, resolved.branch)
+                outcome = await updateModules(serviceList, resolved.branch)
             } catch (err) {
                 console.error('update failed: ' + (err && err.message ? err.message : err))
+                return process.exit(1)
+            }
+            // An update that touched nothing is a FAILED deploy, not a
+            // successful one: the operator asked for new code to be running and
+            // the old code still is. Exiting 0 here is what let scripts and
+            // `&& echo ok` treat a no-op as a landed redeploy.
+            if (outcome && Array.isArray(outcome.updated) && outcome.updated.length === 0) {
+                const why = (outcome.skipped || [])
+                    .map(s => `${s.module} (${s.coin} ${s.network}): ${s.reason}`)
+                    .join('; ')
+                console.error('update failed: nothing was updated' + (why ? ' - ' + why : ' (no requested service matched an installed container)'))
                 return process.exit(1)
             }
             return process.exit(0)
