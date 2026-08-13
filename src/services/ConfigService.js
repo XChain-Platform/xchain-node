@@ -1097,7 +1097,13 @@ function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = 
         throw new Error("Invalid branch name: " + branch + " (branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes)")
     }
 
-    return { service, chain, network, branch }
+    // Classify the ref slot by shape rather than adding a second CLI field
+    // (operator-confirmed 2026-08-13, release-management spec section 11). The
+    // caller decides what to do with it; resolveArgs only reports the shape, so
+    // this stays a pure function with no network in it.
+    const { isReleaseRef } = require('./ReleaseManifestService')
+
+    return { service, chain, network, branch, isRelease: isReleaseRef(branch) }
 }
 
 module.exports = {

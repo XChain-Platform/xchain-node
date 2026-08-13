@@ -13,11 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The command lock now covers all provisioning commands, external DB ports are validated on every branch, reset validates its inputs and fails loud, and the healthcheck start-period is bootstrap-aware.
 
 ### Added
+- `install` and `update` now accept a version like `v0.9.0` in the existing ref slot, installing that release's exact pinned component set.
+- `install` with no ref now resolves the latest published release instead of requiring a branch name.
+- A release manifest (`src/release-manifest.json`) records each release's component tags and commits, and every clone is verified against the pinned commit.
 - Keyless hub deploys now declare `HUB_ALLOW_UNAUTHENTICATED=true` (never on mainnet), which the hub requires before it will boot with an unauthenticated write surface.
 - `HUB_API_KEY` now passes through from the host env to shared-service configs (sync, explorer) so their hub clients can authenticate against the keyed sensitive-read tier.
 - Accepted MariaDB root passwords now persist to a local credentials file and are read back, ping-verified, as a non-interactive fallback when the DB container carries no root password env var.
 
 ### Fixed
+- Bundled libraries are no longer staged from the remote's default branch; they follow the release manifest, or inherit the ref of the service they are compiled into.
 - Non-interactive runs now fail fast with an actionable error instead of hanging forever on the root-password prompt when stdin is not a TTY.
 - The regtest miner's Docker healthcheck now probes over JSON-RPC instead of HTTP GET, since the miner has no GET status route and every probe used to fail.
 

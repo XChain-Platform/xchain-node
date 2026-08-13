@@ -23,7 +23,7 @@ const fs        = require('fs')
 const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, SERVICE_REGISTRY
+    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, SERVICE_REGISTRY, DEFAULT_MODULE_BRANCH
 } = require('../config/constants')
 const { db }                = require('../state')
 const {
@@ -84,6 +84,39 @@ function runGitClone(module, branch, destination) {
     })
 }
 
+// Clone-integrity check for a pinned install (release-management spec section 11).
+//
+// The manifest records each component's tag AND the commit that tag pointed at
+// when the train was cut, because a tag is mutable by whoever owns the repo: it
+// can be deleted and re-pushed at different content, and a clone of `-b v0.9.0`
+// would follow it without complaint. Verifying the checked-out commit is what
+// turns "we asked for v0.9.0" into "we are running the reviewed v0.9.0", and it
+// extends the SHA-256 discipline github_hashes.json already applies to
+// downloaded coin-daemon binaries to the git-cloned half of the stack.
+//
+// Throws on mismatch; the caller owns cleanup and must not leave the mismatched
+// tree in place.
+async function assertCheckoutCommit(module, dir, expectedCommit) {
+    if (!expectedCommit) return
+
+    let head
+    try {
+        const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', 'HEAD'])
+        head = stdout.trim()
+    } catch (err) {
+        throw new Error(`Could not read the cloned commit for '${module}': ${redactSecrets(String(err && err.message ? err.message : err))}`)
+    }
+
+    if (head !== expectedCommit) {
+        throw new Error(
+            `Clone integrity check FAILED for '${module}': the release manifest pins`
+            + ` ${expectedCommit} but the clone checked out ${head}.`
+            + ` The tag has moved since the release was cut, or the remote is not the`
+            + ` repository the manifest was written against. Nothing has been installed.`
+        )
+    }
+}
+
 // Clone a module's source into its deploy checkout.
 //
 // A clone that would replace an EXISTING checkout is staged in a sibling
@@ -97,8 +130,10 @@ function runGitClone(module, branch, destination) {
 // name also moved ahead of every filesystem mutation for the same reason.
 //
 // Failure semantics: on any error the pre-existing checkout is still in place
-// and unmodified, and the error is thrown (never an unhandled rejection).
-async function cloneGit(module, rewrite = false, useTmp = false, branch = null) {
+// and unmodified, and the error is thrown (never an unhandled rejection). That
+// includes a failed `expectedCommit` check: it runs against the STAGING tree,
+// before the swap, so a moved tag cannot replace a good checkout with a bad one.
+async function cloneGit(module, rewrite = false, useTmp = false, branch = null, expectedCommit = null) {
     if (!(module in modulesUrls)) {
         throw "module doesn't have an url"
     }
@@ -113,13 +148,30 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
     if (useTmp) {
         removeModuleTmpDir(module)
         createModuleTmpDir(module)
-        return await runGitClone(module, branch, getModuleTmpDir(module))
+        const tmpDir = getModuleTmpDir(module)
+        const cloned = await runGitClone(module, branch, tmpDir)
+        try {
+            await assertCheckoutCommit(module, tmpDir, expectedCommit)
+        } catch (err) {
+            removeModuleTmpDir(module)
+            throw err
+        }
+        return cloned
     }
 
     const destination = getModuleDir(module)
 
     if (!moduleDirExists(module)) {
-        return await runGitClone(module, branch, destination)
+        const cloned = await runGitClone(module, branch, destination)
+        try {
+            await assertCheckoutCommit(module, destination, expectedCommit)
+        } catch (err) {
+            // Nothing pre-existed here, so removing the bad tree restores the
+            // starting state exactly.
+            fs.rmSync(destination, { recursive: true, force: true })
+            throw err
+        }
+        return cloned
     }
 
     if (!rewrite) {
@@ -134,6 +186,7 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null) 
 
     try {
         await runGitClone(module, branch, staging)
+        await assertCheckoutCommit(module, staging, expectedCommit)
     } catch (err) {
         fs.rmSync(staging, { recursive: true, force: true })
         throw err
@@ -168,6 +221,59 @@ async function getModuleBranch(module) {
     const dir = getModuleDir(module)
     const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])
     return stdout.trim()
+}
+
+// The exact commit a module checkout sits on. Unlike getModuleBranch this is
+// meaningful on a detached HEAD, which is what a pinned (tag) install produces.
+async function getModuleCommit(module) {
+    try {
+        const { stdout } = await execFileAsync('git', ['-C', getModuleDir(module), 'rev-parse', 'HEAD'])
+        return stdout.trim()
+    } catch {
+        return null
+    }
+}
+
+/**
+ * Decide which ref a bundled library is staged at for `module`'s build context.
+ *
+ * Precedence, and the reason for it:
+ *   1. The active release manifest's pin. A pinned install pins EVERYTHING it
+ *      stages, or it is not a pinned install.
+ *   2. The ref the parent module is checked out at. Staging a library from a
+ *      different branch than the service it is being compiled into is a
+ *      version-skew bug wearing a build step's clothing, so the library
+ *      inherits rather than floats. This is what makes `install develop
+ *      xchain-indexer` stage develop's xchain-vm and `install master ...`
+ *      stage master's, with no manifest involved.
+ *   3. The platform default branch, only when the parent is on a detached HEAD
+ *      with no manifest to consult (a hand-checked-out tag, mid-ceremony
+ *      testing). Announced, because it is the one path that can still stage a
+ *      library the operator did not name.
+ *
+ * @returns {Promise<{ref:string, commit:string|null, pinned:boolean, reason:string}>}
+ */
+async function resolveBundledLibRef(module, lib) {
+    const { resolveComponentRef } = require('./ReleaseManifestService')
+
+    const pinned = resolveComponentRef(lib, null)
+    if (pinned.pinned) {
+        return { ref: pinned.ref, commit: pinned.commit, pinned: true, reason: 'release manifest' }
+    }
+
+    let parentRef = null
+    try {
+        parentRef = await getModuleBranch(module)
+    } catch { /* module not checked out yet; fall through */ }
+
+    if (parentRef && parentRef !== 'HEAD') {
+        return { ref: parentRef, commit: null, pinned: false, reason: `inherited from ${module}` }
+    }
+
+    console.warn(`Bundled library ${lib}: ${module} is on a detached HEAD and no release`
+        + ` manifest is active, so the library cannot inherit a ref.`
+        + ` Falling back to '${DEFAULT_MODULE_BRANCH}'.`)
+    return { ref: DEFAULT_MODULE_BRANCH, commit: null, pinned: false, reason: 'default branch fallback' }
 }
 
 // Fail fast on host-port collisions before `docker run`. On a single-stack
@@ -477,8 +583,21 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         // got silently ignored on `update xchain-indexer` because the cached
         // modules/xchain-vm dir from a prior run was reused verbatim.
         // cloneGit(rewrite=true) removes any existing dir before cloning.
-        console.log("Cloning bundled library " + lib + " for " + module)
-        await cloneGit(lib, true, false, null)
+        //
+        // The ref is RESOLVED, never null. Passing null here meant "clone the
+        // remote's default branch", which made a bundled library the one part
+        // of a pinned install that floated: `install v0.9.0 xchain-indexer`
+        // pinned the indexer and then staged whatever xchain-vm's default
+        // branch happened to hold, into the consensus-critical VM, inside the
+        // image the indexer actually runs. The indexer repo gitignores the
+        // staged copy, so no tag pinned it and nothing surfaced the drift.
+        // That is a fork vector today and a sharper one once the default
+        // branch becomes develop, which is why this lands BEFORE the flip
+        // (release-management spec sections 8 and 11).
+        const libRef = await resolveBundledLibRef(module, lib)
+        console.log(`Cloning bundled library ${lib} for ${module} at ${libRef.ref}`
+            + (libRef.pinned ? ` (manifest-pinned ${libRef.commit.slice(0, 12)})` : ` (${libRef.reason})`))
+        await cloneGit(lib, true, false, libRef.ref, libRef.commit)
         const libSrc  = getModuleDir(lib)
         const libDest = path.join(dir, lib)
         console.log("Staging " + lib + " into " + module + " build context")
@@ -785,14 +904,30 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                 }, { excludeModules: [module] })
             }
 
+            // Under a pinned install the manifest, not the operator's branch
+            // argument, decides this module's ref: `install v0.9.0` means the
+            // v0.9.0 component set, and the pinned commit is verified after the
+            // clone. Outside a release install `pin.ref` is just `branch` and
+            // `pin.commit` is null, so the branch behaviour below is unchanged.
+            const { resolveComponentRef } = require('./ReleaseManifestService')
+            const pin = resolveComponentRef(module, branch)
+            const cloneRef = pin.ref
+
             try {
                 if (remoteUpdate || localModuleVersion == null) {
-                    await cloneGit(module, true, false, branch)
-                } else if (branch && moduleDirExists(module)) {
+                    await cloneGit(module, true, false, cloneRef, pin.commit)
+                } else if (cloneRef && moduleDirExists(module)) {
                     const currentBranch = await getModuleBranch(module)
-                    if (currentBranch !== branch) {
-                        console.log(`Module '${module}' is on branch '${currentBranch}', switching to '${branch}'...`)
-                        await cloneGit(module, true, false, branch)
+                    // A pinned install re-clones whenever the checkout is not
+                    // already the pinned commit; a detached checkout reports
+                    // "HEAD" as its branch, which would never equal a tag name
+                    // and so would re-clone every run without this check.
+                    const alreadyThere = pin.pinned
+                        ? (await getModuleCommit(module)) === pin.commit
+                        : currentBranch === cloneRef
+                    if (!alreadyThere) {
+                        console.log(`Module '${module}' is on '${currentBranch}', switching to '${cloneRef}'...`)
+                        await cloneGit(module, true, false, cloneRef, pin.commit)
                     }
                 }
                 // Fresh-install detection must happen BEFORE buildAndUp starts the
@@ -891,6 +1026,8 @@ module.exports = {
     SERVICE_HEALTHCHECK,
     cloneGit,
     getModuleBranch,
+    getModuleCommit,
+    resolveBundledLibRef,
     buildAndUp,
     buildHealthcheckArgs,
     buildModuleDockerArgs,

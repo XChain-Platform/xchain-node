@@ -147,6 +147,17 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
     }
 }
 
+// The branch an install falls back to when the operator named no ref and no
+// release could be resolved, and the branch a bundled library is staged from
+// when it has nothing to inherit.
+//
+// ONE knob. The release-management adoption (spec section 8) flips the org's
+// default branch to `develop`, and the point of naming this is that the flip
+// does not mean hunting string literals through clone paths: day-to-day
+// development moves to develop while the platform's shipped default stays the
+// release branch, so these two values are deliberately allowed to differ.
+const DEFAULT_MODULE_BRANCH = "master"
+
 // Maps a service to the library modules that must be staged into its build
 // context before docker build. Used by ModuleService.buildAndUp to clone +
 // copy each library into the service's modules/ subdir; the service's
@@ -351,6 +362,7 @@ module.exports = {
     XChainService,
     REGTEST_MODULES,
     LIBRARY_BUNDLES,
+    DEFAULT_MODULE_BRANCH,
     SERVICE_REGISTRY,
     Coin,
     Network,

@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Release manifest: the pinned component set for one platform release train.",
+    "Written at release-ceremony step 6 (claude/specs/living/release-management.md",
+    "section 6) AFTER every sibling repo has merged and tagged, because the pins",
+    "record each tag's master merge-commit SHA and those commits do not exist",
+    "until the merges do.",
+    "",
+    "xchain-node is the only dense-tagged train member: checking out",
+    "xchain-node vX.Y.Z self-contains the full pinned set, so `install vX.Y.Z`",
+    "reproduces an exact release and `install` with no ref resolves the latest",
+    "xchain-node release and installs that release's manifest.",
+    "",
+    "Sparse lockstep: a component appears here at EVERY train, pinned to its",
+    "highest tag <= this train's version. A component that did not change this",
+    "train keeps its previous tag; that is the resolution rule, not a gap.",
+    "",
+    "`components` is EMPTY until the first train (0.9.0) is cut. While it is",
+    "empty every install resolves by branch exactly as it did before this file",
+    "existed, so nothing here changes behaviour pre-adoption."
+  ],
+  "platform_version": null,
+  "released": null,
+  "components": {}
+}

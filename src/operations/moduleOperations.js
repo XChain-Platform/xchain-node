@@ -21,7 +21,7 @@ const readline  = require('readline')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
-const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir, EXTERNAL_DB, Coin, CoinTickerSymbol, Network } = require('../config/constants')
+const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir, EXTERNAL_DB, Coin, CoinTickerSymbol, Network, DEFAULT_MODULE_BRANCH } = require('../config/constants')
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
@@ -31,22 +31,69 @@ const { getModuleBranch, installModule, uninstallModule } = require('../services
 const { assertHubNotBehind } = require('../services/SkewGuardService')
 const { statusChanged } = require('../services/StatusService')
 
-async function installModules(servicesList, branch = null) {
-    for (const nextCoin in servicesList) {
-        for (const nextNetwork in servicesList[nextCoin]) {
-            if (nextCoin && nextNetwork) {
-                await createDockerNetwork(getDockerNetwork(nextCoin, nextNetwork))
-                await buildDatabaseModule(nextCoin, nextNetwork)
-            }
-            for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                await installModule(nextModule, nextCoin, nextNetwork, false, null, false, branch)
-            }
-        }
+// Resolve the operator's single ref slot into an install target and publish it
+// for the duration of the run, so every module clone and every bundled-library
+// staging inside it resolves against ONE decision (release-management spec
+// section 11). Cleared in a finally, or a later branch install in the same
+// process would inherit a stale pin.
+async function withInstallTarget(ref, run) {
+    const {
+        resolveInstallTarget, setActiveTarget, clearActiveTarget
+    } = require('../services/ReleaseManifestService')
+
+    const target = await resolveInstallTarget(ref, { defaultBranch: DEFAULT_MODULE_BRANCH })
+
+    if (target.kind === 'release') {
+        console.log(`Installing XChain ${target.tag} (${target.resolvedFrom}); every component is manifest-pinned.`)
+    } else {
+        console.log(`Installing from branch '${target.ref}' (UNRELEASED: tracking install, no version pinning).`)
     }
-    return true
+
+    setActiveTarget(target)
+    try {
+        return await run(target)
+    } finally {
+        clearActiveTarget()
+    }
 }
 
-async function updateModules(servicesList, branch = null) {
+async function installModules(servicesList, ref = null) {
+    return withInstallTarget(ref, async (target) => {
+        // A release install passes no branch: resolveComponentRef inside
+        // installModule supplies the pinned ref per component. A branch install
+        // passes the branch, exactly as before.
+        const branch = target.kind === 'release' ? null : target.ref
+
+        for (const nextCoin in servicesList) {
+            for (const nextNetwork in servicesList[nextCoin]) {
+                if (nextCoin && nextNetwork) {
+                    await createDockerNetwork(getDockerNetwork(nextCoin, nextNetwork))
+                    await buildDatabaseModule(nextCoin, nextNetwork)
+                }
+                for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                    await installModule(nextModule, nextCoin, nextNetwork, false, null, false, branch)
+                }
+            }
+        }
+        return true
+    })
+}
+
+async function updateModules(servicesList, ref = null) {
+    const { isReleaseRef } = require('../services/ReleaseManifestService')
+
+    // `update` with no ref keeps its established meaning: same branch per
+    // module, newer commits. Only an explicitly named release ref switches this
+    // run to pinned mode. (Install differs deliberately: a no-ref INSTALL has
+    // no per-module branch to inherit, so it resolves the latest release.)
+    if (!isReleaseRef(ref)) {
+        return updateModulesOnBranch(servicesList, ref)
+    }
+
+    return withInstallTarget(ref, async () => updateModulesOnBranch(servicesList, null))
+}
+
+async function updateModulesOnBranch(servicesList, branch = null) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
@@ -85,7 +132,14 @@ async function updateModules(servicesList, branch = null) {
                     // REFUSED when the installed hub is behind that version, before
                     // anything is torn down. Throws out of updateModules so the
                     // update fails closed with nothing modified for this module.
-                    await assertHubNotBehind(nextModule, moduleBranch)
+                    // Under a pinned update the guard must read the PINNED
+                    // source's package.json, not the branch tip: it clones into
+                    // a tmp tree to find `xchainRequiresHub`, and reading that
+                    // from a different ref than the one about to be installed
+                    // is how a skew guard blesses a version it never saw.
+                    const { resolveComponentRef } = require('../services/ReleaseManifestService')
+                    const pin = resolveComponentRef(nextModule, moduleBranch)
+                    await assertHubNotBehind(nextModule, pin.ref)
                     // moduleBranch MUST be threaded through: installModule re-clones the
                     // module on the remoteUpdate path (cloneGit with this `branch`), so a
                     // null branch here re-clones the default branch and clobbers the branch

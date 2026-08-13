@@ -160,8 +160,14 @@ async function parseCommand() {
     program
         .command('install')
         .description('Installs XChain services')
-        .argument('<branch>',  '(master, develop)')
-        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        // ONE ref slot, order-independent, classified by shape (release-management
+        // spec section 11): a vX.Y.Z argument is a RELEASE and installs that
+        // train's exact manifest-pinned component set; anything else is a branch
+        // and installs a tracking (unreleased) checkout. Omitting it entirely
+        // resolves the latest published xchain-node release, which is why this is
+        // no longer a required argument.
+        .argument('[ref]',     '(a release like v0.9.0, or a branch like master/develop; omit for the latest release)')
+        .argument('[service]', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (branch, service, chain, network) => {
@@ -170,7 +176,10 @@ async function parseCommand() {
             // the install command's own opts would always see the default. Skips the
             // auto-download/restore and syncs from scratch.
             if (program.opts().bootstrap === false) process.env.XCHAIN_NODE_NO_BOOTSTRAP = '1'
-            const resolved = resolveArgs([branch, service, chain, network], { expectBranch: true })
+            // defaultBranch null: an absent ref must reach installModules as null
+            // so it resolves the latest release. Substituting 'master' here would
+            // make the documented default install a branch install forever.
+            const resolved = resolveArgs([branch, service, chain, network], { expectBranch: true, defaultBranch: null })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
             await installModules(serviceList, resolved.branch)
             return process.exit(0)
@@ -195,7 +204,7 @@ async function parseCommand() {
         .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .argument('[branch]',  '(master, develop, or any branch name; resolved on the module\'s remote, so push it first, or point the module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE)')
+        .argument('[ref]',     '(a release like v0.9.0 for a pinned update, or any branch name; a branch is resolved on the module\'s remote, so push it first, or point the module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE. Omit to keep each module on its current branch)')
         .action(async (service, chain, network, branch) => {
             const resolved = resolveArgs([service, chain, network, branch], { expectBranch: true, defaultBranch: null })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
