@@ -29,7 +29,9 @@ function loadPrecheck(overrides) {
         createDatabase:      sinon.stub().resolves(),
         checkAllRemoteVersions: sinon.stub().resolves(),
         getStatus:              sinon.stub().resolves(),
-        checkContainerdDataRootRelocation: sinon.stub().resolves(null)
+        checkContainerdDataRootRelocation: sinon.stub().resolves(null),
+        updateHub:              sinon.stub().resolves(),
+        updateExplorer:         sinon.stub().resolves()
     }, overrides)
 
     const precheck = proxyquire('../../src/precheck.js', {
@@ -48,8 +50,8 @@ function loadPrecheck(overrides) {
         './services/ConfigService':    { getDockerNetwork: () => 'xchain' },
         './services/VersionService':   { checkAllRemoteVersions: stubs.checkAllRemoteVersions },
         './services/StatusService':    { getStatus: stubs.getStatus },
-        './services/HubService':       { installHubModule: sinon.stub().resolves(), updateHub: sinon.stub().resolves() },
-        './services/ExplorerService':  { updateExplorer: sinon.stub().resolves() },
+        './services/HubService':       { installHubModule: sinon.stub().resolves(), updateHub: stubs.updateHub },
+        './services/ExplorerService':  { updateExplorer: stubs.updateExplorer },
         './services/DatabaseService': {
             buildDatabaseModule:   sinon.stub().resolves(),
             ensureXchainNodeAccess: sinon.stub().resolves({ user: 'u', password: 'p', database: 'xchain_node' }),
@@ -177,5 +179,44 @@ describe('preCheck(): containerd data-root relocation warning @regression', func
         // preCheck must still complete its normal flow despite the probe failing.
         await precheck.preCheck(false, false)
         expect(stubs.createDatabase.calledOnce).to.be.true
+    })
+})
+
+// updateHub() reports the coin networks a shared container could not be
+// attached to instead of swallowing the docker error and returning true. The
+// hub and explorer pushes are separate targets, so that rejection must not also
+// skip the explorer's: it would leave a second service on stale config for a
+// fault that is not its own.
+describe('preCheck(): hub/explorer config push @regression', function () {
+
+    it('still pushes explorer config when updateHub rejects, and fails the command', async function () {
+        const updateHub      = sinon.stub().rejects(new Error('xchain-hub -> bitcoin/mainnet unreachable'))
+        const updateExplorer = sinon.stub().resolves()
+        const { precheck }   = loadPrecheck({ updateHub, updateExplorer })
+
+        const log = sinon.stub(console, 'log')
+        let threw = null
+        try {
+            await precheck.preCheck(false, true)
+        } catch (err) {
+            threw = err
+        } finally {
+            log.restore()
+        }
+
+        expect(threw).to.be.an('error')
+        expect(threw.message).to.equal('There was an error trying to update the hub module')
+        expect(updateExplorer.calledOnce).to.be.true
+        expect(log.args.some(a => String(a[0]).includes('bitcoin/mainnet'))).to.be.true
+    })
+
+    it('pushes both and returns true when neither rejects', async function () {
+        const updateHub      = sinon.stub().resolves()
+        const updateExplorer = sinon.stub().resolves()
+        const { precheck }   = loadPrecheck({ updateHub, updateExplorer })
+
+        expect(await precheck.preCheck(false, true)).to.be.true
+        expect(updateHub.calledOnce).to.be.true
+        expect(updateExplorer.calledOnce).to.be.true
     })
 })

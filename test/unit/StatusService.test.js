@@ -93,6 +93,38 @@ describe('StatusService: statusChanged()', function () {
         expect(updateHub.calledOnce).to.be.true
         expect(updateExplorer.calledOnce).to.be.true
     })
+
+    // updateHub() rejects on an unreachable coin network now (it used to
+    // swallow the docker error and return true). These two pin that the
+    // rejection is reported without taking the unrelated explorer push down
+    // with it, which a plain sequential await would have done.
+    it('still pushes explorer config when updateHub rejects, then rethrows', async function () {
+        const state = makeStateStub()
+        const updateHub      = sinon.stub().rejects(new Error('xchain-hub -> bitcoin/mainnet'))
+        const updateExplorer = sinon.stub().resolves()
+
+        const ss = loadStatusService(state, { updateHub, updateExplorer })
+        let threw = null
+        try { await ss.statusChanged() } catch (err) { threw = err }
+
+        expect(threw).to.be.an('error')
+        expect(threw.message).to.equal('xchain-hub -> bitcoin/mainnet')
+        expect(updateExplorer.calledOnce).to.be.true
+    })
+
+    it('reports the hub failure first when both pushes reject', async function () {
+        const state = makeStateStub()
+        const updateHub      = sinon.stub().rejects(new Error('hub attach failed'))
+        const updateExplorer = sinon.stub().rejects(new Error('explorer push failed'))
+
+        const ss = loadStatusService(state, { updateHub, updateExplorer })
+        let threw = null
+        try { await ss.statusChanged() } catch (err) { threw = err }
+
+        expect(threw).to.be.an('error')
+        expect(threw.message).to.equal('hub attach failed')
+        expect(updateExplorer.calledOnce).to.be.true
+    })
 })
 
 describe('StatusService: getStatus() cache hit', function () {

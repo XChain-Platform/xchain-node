@@ -39,8 +39,9 @@ const { XChainService } = require('../config/constants')
 const { getDockerContainerImageName } = require('./ConfigService')
 
 // Escape hatch for the operator who knows the lagging container is about to be
-// recreated anyway (the `recreate`/`update` remediation itself does not need it,
-// because those rebuild the container BEFORE provisioning runs).
+// recreated anyway (the `recreate` remediation itself does not need it, because
+// it rebuilds EVERY named container before provisioning runs; a single-module
+// `update` converges only its own container and is refused up front instead).
 const DRIFT_OVERRIDE_ENV = 'XCHAIN_NODE_ALLOW_DB_CREDENTIAL_DRIFT'
 
 // Tags the refusal so callers can tell it apart from a docker/network failure.
@@ -97,14 +98,18 @@ function findDbCredentialDrift(intended, containers) {
  * @param {string} coin
  * @param {string} network
  * @param {Array<{container: string, module: string, envKey: string, account: string}>} drift
+ * @param {string[]} [alsoRecreate] Modules the caller skipped that must still be recreated with the rest.
  * @returns {string}
  */
-function formatDbCredentialDriftError(coin, network, drift) {
+function formatDbCredentialDriftError(coin, network, drift, alsoRecreate = []) {
     const lines = drift.map(d =>
         `  - ${d.container} carries a ${d.envKey} that differs from this install's config ` +
         `(${d.account} account)`
     )
-    const modules = [...new Set(drift.map(d => d.module))]
+    // A skipped module still belongs in the remediation: the accounts are shared,
+    // so recreating only the containers that happened to be inspected converges
+    // half the stack and leaves the other half locked out (uuid:cb0bd3be).
+    const modules = [...new Set([...drift.map(d => d.module), ...alsoRecreate])]
     return (
         `Refusing to rotate the ${coin} ${network} MariaDB accounts: a running container was built ` +
         `from a DIFFERENT config store and would be locked out (ER_ACCESS_DENIED) the moment the ` +
@@ -155,12 +160,17 @@ async function readContainerEnv(name, deps = {}) {
  * @param {string} coin
  * @param {string} network
  * @param {{decoder?: string, indexer?: string}} intended
- * @param {{execFileAsync?: Function, env?: Object}} [deps]
+ * @param {{execFileAsync?: Function, env?: Object, excludeModules?: string[]}} [deps]
  * @returns {Promise<Array>} the drift rows (empty when clean, or when overridden)
  */
 async function assertNoDbCredentialDrift(coin, network, intended, deps = {}) {
     const env = deps.env || process.env
+    // Skip the container a caller is about to replace from THIS install's config:
+    // its frozen password is about to stop existing, so counting it would refuse
+    // the very rebuild that clears the drift (uuid:cb0bd3be).
+    const excludeModules = Array.isArray(deps.excludeModules) ? deps.excludeModules : []
     const modules = [...new Set(ACCOUNT_CONSUMERS.map(c => c.module))]
+        .filter(m => !excludeModules.includes(m))
     const containers = []
     for (const module of modules) {
         const name = getDockerContainerImageName(module, coin, network)
@@ -172,11 +182,11 @@ async function assertNoDbCredentialDrift(coin, network, intended, deps = {}) {
     if (drift.length === 0) return drift
 
     if (env[DRIFT_OVERRIDE_ENV] === '1') {
-        console.log(formatDbCredentialDriftError(coin, network, drift))
+        console.log(formatDbCredentialDriftError(coin, network, drift, excludeModules))
         console.log(`${DRIFT_OVERRIDE_ENV}=1 is set; rotating anyway.`)
         return drift
     }
-    const error = new Error(formatDbCredentialDriftError(coin, network, drift))
+    const error = new Error(formatDbCredentialDriftError(coin, network, drift, excludeModules))
     error.code = DRIFT_ERROR_CODE
     error.drift = drift
     throw error

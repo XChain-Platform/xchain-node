@@ -680,7 +680,10 @@ describe('ModuleService', function () {
             expect(args[cmdIdx + 1]).to.include('3004')
         })
 
-        it('includes --health-cmd for hub (jsonrpc_ping probe)', async function () {
+        it('probes health (not ping) for hub (jsonrpc_health probe)', async function () {
+            // The hub's ping is a bare SELECT 1; its health method 503s on a tripped
+            // DB breaker, a stale oracle round, and consensus-input alerting. Probing
+            // ping let a hub that had stopped producing consensus data read healthy.
             const stubs = makeStubs()
             const getRunArgs = captureRunArgs(stubs)
             const ms = loadModuleService(stubs)
@@ -688,7 +691,8 @@ describe('ModuleService', function () {
             const args = getRunArgs()
             expect(args).to.include('--health-cmd')
             const cmdIdx = args.indexOf('--health-cmd')
-            expect(args[cmdIdx + 1]).to.include('ping')
+            expect(args[cmdIdx + 1]).to.include('"method":"health"')
+            expect(args[cmdIdx + 1]).to.not.include('"method":"ping"')
             expect(args[cmdIdx + 1]).to.include('10000')
         })
 
@@ -704,9 +708,11 @@ describe('ModuleService', function () {
             expect(args[cmdIdx + 1]).to.include('8080')
         })
 
-        it('includes --health-cmd for regtest-miner (jsonrpc_ping probe)', async function () {
+        it('probes health (not ping) for regtest-miner (jsonrpc_health probe)', async function () {
             // The miner's API is JSON-RPC only (no GET /status route); an http_get
-            // probe 500s forever and marks the container permanently unhealthy.
+            // probe 500s forever and marks the container permanently unhealthy. Its
+            // ping always answers 200 and reports wallet readiness in the body only,
+            // so a miner stalled on credential drift stayed healthy; health 503s.
             const stubs = makeStubs()
             const getRunArgs = captureRunArgs(stubs)
             const ms = loadModuleService(stubs)
@@ -714,7 +720,8 @@ describe('ModuleService', function () {
             const args = getRunArgs()
             expect(args).to.include('--health-cmd')
             const cmdIdx = args.indexOf('--health-cmd')
-            expect(args[cmdIdx + 1]).to.include('ping')
+            expect(args[cmdIdx + 1]).to.include('"method":"health"')
+            expect(args[cmdIdx + 1]).to.not.include('"method":"ping"')
             expect(args[cmdIdx + 1]).to.not.include('/status')
             expect(args[cmdIdx + 1]).to.include('3005')
         })
@@ -734,6 +741,24 @@ describe('ModuleService', function () {
             expect(args[cmdIdx + 1]).to.include('/health')
             expect(args[cmdIdx + 1]).to.not.include('/status')
             expect(args[cmdIdx + 1]).to.include('3006')
+        })
+
+        it('grants sync a start period covering the whole MAX_HUB_WAIT_MS hub wait', async function () {
+            // /health answers 503 'starting' until SyncService.start() returns, and
+            // start() waits on the hub for MAX_HUB_WAIT_MS (default 300000ms). At the
+            // former 45s start period plus 3 retries at 15s, a hub slower than ~90s
+            // marked a correctly-starting sync container UNHEALTHY. The window must
+            // cover the wait the probe now judges.
+            const stubs = makeStubs()
+            const getRunArgs = captureRunArgs(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-sync', null, null)
+            const args = getRunArgs()
+            const idx = args.indexOf('--health-start-period')
+            expect(idx).to.be.greaterThan(-1)
+            const seconds = parseInt(String(args[idx + 1]).replace(/s$/, ''), 10)
+            const retryWindow = 3 * 15
+            expect(seconds).to.be.at.least(300 - retryWindow)
         })
 
         it('warns and returns [] when the descriptor portKey is missing from the env', function () {
@@ -1833,6 +1858,10 @@ describe('ModuleService', function () {
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
                 './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
                 './DatabaseService': { setDatabaseParameters: setDatabaseParametersStub },
+                // Stubbed for the same reason DockerService.getPublishedHostPorts is
+                // : the real guard shells out to `docker inspect` and
+                // would read whatever containers the venue happens to be running.
+                './DbCredentialDrift': { assertNoDbCredentialDrift: sinon3.stub().resolves([]) },
                 './BootstrapService': {
                     utxoTrackerVolumeHasData: sinon3.stub().resolves(true),
                     ensureBootstrapUtxoTracker: sinon3.stub().resolves(),
@@ -1848,6 +1877,85 @@ describe('ModuleService', function () {
             expect(setDatabaseParametersStub.calledOnce).to.be.true
             expect(ensureBootstrapMariaDbStub.calledOnce).to.be.true
             expect(result).to.equal(containerId)
+        })
+
+        // uuid:cb0bd3be: the drift guard used to run only inside
+        // setDatabaseParameters, i.e. after buildAndUp had already killed and
+        // replaced the container, so a refusal left the working decoder destroyed
+        // and locked out of MariaDB. The refusal must now land before any teardown.
+        it('refuses a drifting decoder update before tearing the container down', async function () {
+            const sinon3 = require('sinon')
+            const driftError = new Error('Refusing to rotate the bitcoin mainnet MariaDB accounts')
+            driftError.code = 'DB_CREDENTIAL_DRIFT'
+            const assertNoDbCredentialDriftStub = sinon3.stub().rejects(driftError)
+            const setDatabaseParametersStub = sinon3.stub().resolves()
+            const killContainerStub = sinon3.stub().resolves(true)
+            const removeContainerStub = sinon3.stub().resolves(true)
+            const forceRemoveContainerByNameStub = sinon3.stub().resolves(true)
+            const cloneExecFileStub = sinon3.stub()
+            cloneExecFileStub.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(null, '')
+            })
+            const configStub = {
+                getModuleDir: (mod) => '/modules/' + mod,
+                getModuleTmpDir: (mod) => '/tmp/' + mod,
+                moduleDirExists: sinon3.stub().returns(false),
+                checkIfModuleExists: sinon3.stub().returns(true),
+                removeModuleDir: sinon3.stub(),
+                removeModuleTmpDir: sinon3.stub(),
+                createModuleTmpDir: sinon3.stub(),
+                getDockerContainerImageName: (mod, coin, net) => `${coin}-${net}-${mod}`,
+                getDockerNetwork: (coin, net) => `net-${coin}-${net}`,
+                validatePort: () => true,
+                getDefaultConfig: sinon3.stub().resolves({
+                    DECODER_PORT: 3002, DECODER_API_PORT: 3002,
+                    DECODER_DB_PASS: 'rotated-decoder-pass', INDEXER_DB_PASS: 'indexer-pass'
+                })
+            }
+            const ms = proxyquireCallThru('../../src/services/ModuleService', {
+                'child_process': { execFile: cloneExecFileStub },
+                'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
+                '../state': {
+                    db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
+                    getRemoteModuleVersions: () => ({}),
+                    getLastStatus: () => null
+                },
+                './ConfigService': configStub,
+                './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
+                './DockerService': { killContainer: killContainerStub, removeContainer: removeContainerStub, forceRemoveContainerByName: forceRemoveContainerByNameStub, getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
+                './DatabaseService': { setDatabaseParameters: setDatabaseParametersStub, setHubDatabaseParameters: sinon3.stub().resolves() },
+                './DbCredentialDrift': { assertNoDbCredentialDrift: assertNoDbCredentialDriftStub },
+                './BootstrapService': {
+                    utxoTrackerVolumeHasData: sinon3.stub().resolves(true),
+                    ensureBootstrapUtxoTracker: sinon3.stub().resolves(),
+                    mariaDbModuleHasData: sinon3.stub().resolves(true),
+                    ensureBootstrapMariaDb: sinon3.stub().resolves()
+                },
+                './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
+                './NodeService': { buildCryptoNode: sinon3.stub().resolves(true), getCryptoNode: sinon3.stub().resolves() },
+                './ExplorerService': { installExplorerModule: sinon3.stub().resolves(true) }
+            })
+
+            let thrown = null
+            try {
+                await ms.installModule('xchain-decoder', 'bitcoin', 'mainnet', true, 'old-container-id')
+            } catch (err) { thrown = err }
+
+            expect(thrown).to.not.equal(null)
+            expect(thrown.code).to.equal('DB_CREDENTIAL_DRIFT')
+            expect(assertNoDbCredentialDriftStub.calledOnce).to.be.true
+            // The container under rebuild is excluded, or the guard would refuse the
+            // very rebuild that clears its own stale password.
+            expect(assertNoDbCredentialDriftStub.firstCall.args[3])
+                .to.deep.equal({ excludeModules: ['xchain-decoder'] })
+            // Nothing was torn down, re-cloned, or provisioned: the refusal is
+            // worth having only if it leaves the working stack running.
+            expect(killContainerStub.called).to.be.false
+            expect(removeContainerStub.called).to.be.false
+            expect(forceRemoveContainerByNameStub.called).to.be.false
+            expect(setDatabaseParametersStub.called).to.be.false
+            expect(cloneExecFileStub.called).to.be.false
         })
     })
 

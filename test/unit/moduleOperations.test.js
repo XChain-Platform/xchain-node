@@ -723,6 +723,64 @@ describe('moduleOperations', function () {
 
         // : wiping the indexer DB restarts its push_generations at 0, which the
         // hub's price ingest fence silently drops. The reset owns clearing the fence.
+        // uuid:bb190060: the MariaDB probe used to run after the stop loop, so this
+        // abort reported "No data was touched" while every service it had already
+        // stopped stayed down (the restart pass sits past the early return).
+        it('aborts a missing-MariaDB reset without stopping anything', async function () {
+            const stubs = makeStubs()
+            stubs.getDatabaseContainerId.resolves(null)
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            const ops = loadOperations(stubs)
+            const result = await ops.resetModules('all', 'bitcoin', 'mainnet', true)
+            expect(result).to.be.false
+            expect(stubs.stopContainer.called).to.be.false
+            expect(stubs.resetDatabases.called).to.be.false
+            expect(stubs.startContainer.called).to.be.false
+        })
+
+        // uuid:9c88cfe6: the stop loop's bare catch swallowed a real docker stop
+        // failure as "not installed", so the wipes below ran while a live daemon
+        // still held the store. A real stop error must abort before any wipe and
+        // put back whatever was already stopped.
+        it('aborts before any wipe when a target fails to stop, and restarts what it stopped', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            // node stops, xchain-utxo-tracker refuses.
+            stubs.stopContainer.onCall(1).rejects(
+                new Error('Command failed: docker stop x\nError response from daemon: cannot stop container')
+            )
+            const ops = loadOperations(stubs)
+            const result = await ops.resetModules('all', 'bitcoin', 'mainnet', true)
+            expect(result).to.be.false
+            expect(stubs.resetDatabases.called).to.be.false
+            expect(stubs.execFile.called).to.be.false          // no wipe ran
+            expect(stubs.startContainer.calledOnce).to.be.true // node put back
+        })
+
+        it('still treats a "no such container" stop as a skip and completes the reset', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            stubs.stopContainer.rejects(
+                new Error('Command failed: docker stop x\nError response from daemon: No such container: x')
+            )
+            const ops = loadOperations(stubs)
+            const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
+            expect(result).to.be.true
+            expect(stubs.execFile.called).to.be.true // the volume wipe still ran
+        })
+
+        // stopContainer rejects a bare STRING when docker exits 0 without echoing
+        // the id back, which is a real failure carrying no .message to match.
+        it('aborts when stopContainer rejects a non-Error value', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            stubs.stopContainer.callsFake(() => Promise.reject('error trying to stop the docker container'))
+            const ops = loadOperations(stubs)
+            const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
+            expect(result).to.be.false
+            expect(stubs.execFile.called).to.be.false
+        })
+
         it('clears the hub price ingest fence when the indexer DB is reset', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
@@ -785,13 +843,18 @@ describe('moduleOperations', function () {
             expect(call.args[0]).to.equal('docker')
         })
 
-        it('continues when stopContainer throws', async function () {
+        // Was 'continues when stopContainer throws', asserting result===true
+        // "errors are caught/swallowed". That characterised the uuid:9c88cfe6
+        // defect rather than a contract: continuing past a failed stop is what
+        // let the wipes run under a live daemon. The contract is now abort.
+        it('does not continue past a failed stopContainer', async function () {
             const stubs = makeStubs()
             stubs.stopContainer.rejects(new Error('stop failed'))
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
             const ops = loadOperations(stubs)
             const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
-            expect(result).to.be.true // errors are caught/swallowed
+            expect(result).to.be.false
+            expect(stubs.execFile.called).to.be.false
         })
 
         // #3144: reset must fail loud on bad args rather than reporting success

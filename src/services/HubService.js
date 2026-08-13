@@ -163,35 +163,60 @@ async function updateHubOrExplorer(module) {
     return true
 }
 
-async function updateHub() {
-    const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
-    const hubContainerId = await db.getModuleContainer(HUB_MODULE_NAME, "", "")
-
-    if (hubContainerId) {
-        for (const nextCoin in installedCoinsAndNetworks) {
-            for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
+// Attach one shared container to every installed coin/network, recording the
+// ones that stay unreachable. addContainerToNetwork is idempotent (it no-ops
+// when the container already holds the network), so the single retry only
+// costs time on a real failure and absorbs the docker race that causes most
+// of them; the failures it collects are what updateHub reports at the end
+// instead of the discarded error that made a disconnected hub look installed.
+async function attachSharedContainer(moduleLabel, containerId, installedCoinsAndNetworks, failures) {
+    for (const nextCoin in installedCoinsAndNetworks) {
+        for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
+            try {
+                await addContainerToNetwork(containerId, getDockerNetwork(nextCoin, nextNetwork))
+            } catch (firstErr) {
+                console.log("There was an error trying to connect " + moduleLabel + " to the " +
+                    nextCoin + "/" + nextNetwork + " network (" + redactSecrets(firstErr) + "). Trying again in 3 seconds...")
+                await sleep(3000)
                 try {
-                    await addContainerToNetwork(hubContainerId, getDockerNetwork(nextCoin, nextNetwork))
-                } catch {
-                    console.log("There was an error trying to connect the xchain-hub to the " + nextCoin + "/" + nextNetwork + " network")
+                    await addContainerToNetwork(containerId, getDockerNetwork(nextCoin, nextNetwork))
+                } catch (retryErr) {
+                    failures.push({
+                        label: moduleLabel + " -> " + nextCoin + "/" + nextNetwork,
+                        error: retryErr
+                    })
                 }
             }
         }
+    }
+}
+
+async function updateHub() {
+    const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
+    const hubContainerId = await db.getModuleContainer(HUB_MODULE_NAME, "", "")
+    const failures = []
+
+    if (hubContainerId) {
+        await attachSharedContainer("xchain-hub", hubContainerId, installedCoinsAndNetworks, failures)
         await updateHubOrExplorer(HUB_MODULE_NAME)
     }
 
     // Connect xchain-sync container to all chain/network Docker networks (same pattern as hub)
     const syncContainerId = await db.getModuleContainer(SYNC_MODULE_NAME, "", "")
     if (syncContainerId) {
-        for (const nextCoin in installedCoinsAndNetworks) {
-            for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
-                try {
-                    await addContainerToNetwork(syncContainerId, getDockerNetwork(nextCoin, nextNetwork))
-                } catch {
-                    console.log("There was an error trying to connect xchain-sync to the " + nextCoin + "/" + nextNetwork + " network")
-                }
-            }
-        }
+        await attachSharedContainer("xchain-sync", syncContainerId, installedCoinsAndNetworks, failures)
+    }
+
+    // Report unreachable networks instead of returning success: a topology
+    // change that publishes module config while the shared container never
+    // joined the new network leaves those endpoints dead until an unrelated
+    // later mutation happens to retry the attach.
+    if (failures.length > 0) {
+        throw new Error(
+            "Couldn't attach shared containers to " + failures.length + " network(s): " +
+                failures.map((f) => f.label + " (" + redactSecrets(f.error) + ")").join('; '),
+            { cause: failures[0].error }
+        )
     }
 
     return true

@@ -370,6 +370,10 @@ class E2EEnv extends TestEnv {
             './DockerService': DockerService,
             './StatusService': StatusService,
             './DatabaseService': DatabaseService,
+            // Same seam as DatabaseService above: installModule now runs the drift
+            // guard ahead of buildAndUp too, so an unstubbed copy would read the
+            // HOST's containers and fail install cases on a venue .
+            './DbCredentialDrift': DbCredentialDrift,
             './VersionService': VersionService,
             './NodeService': {
                 buildCryptoNode: async () => true,

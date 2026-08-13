@@ -223,6 +223,47 @@ describe('DbCredentialDrift', () => {
                 { execFileAsync: inspectStub({}), env: {} })
             expect(drift).to.deep.equal([])
         })
+
+        // uuid:cb0bd3be: the pre-flight caller runs this guard BEFORE it replaces a
+        // container, so the container it is about to replace must not count as drift.
+        it('ignores the container the caller is about to replace', async () => {
+            const { assertNoDbCredentialDrift } = load()
+            const inspect = inspectStub({
+                'xchain-node-dogecoin-regtest-xchain-decoder': { DECODER_DB_PASS: 'dpass-stale' },
+                'xchain-node-dogecoin-regtest-xchain-indexer': { DECODER_DB_PASS: 'dpass', INDEXER_DB_PASS: 'ipass' }
+            })
+            const drift = await assertNoDbCredentialDrift('dogecoin', 'regtest',
+                { decoder: 'dpass', indexer: 'ipass' },
+                { execFileAsync: inspect, env: {}, excludeModules: [DECODER] })
+            expect(drift).to.deep.equal([])
+            // Not merely filtered out of the result: the excluded container is never inspected.
+            const inspected = inspect.getCalls().map(c => c.args[1][c.args[1].length - 1])
+            expect(inspected).to.not.contain('xchain-node-dogecoin-regtest-xchain-decoder')
+        })
+
+        it('still flags a sibling that would be locked out, and names the excluded module in the remedy', async () => {
+            const { assertNoDbCredentialDrift, DRIFT_ERROR_CODE } = load()
+            let thrown = null
+            try {
+                await assertNoDbCredentialDrift('dogecoin', 'regtest',
+                    { decoder: 'dpass', indexer: 'ipass' },
+                    {
+                        execFileAsync: inspectStub({
+                            'xchain-node-dogecoin-regtest-xchain-decoder': { DECODER_DB_PASS: 'dpass-stale' },
+                            'xchain-node-dogecoin-regtest-xchain-indexer': { DECODER_DB_PASS: 'dpass-stale', INDEXER_DB_PASS: 'ipass' }
+                        }),
+                        env: {},
+                        excludeModules: [DECODER]
+                    })
+            } catch (err) { thrown = err }
+            expect(thrown).to.be.an('error')
+            expect(thrown.code).to.equal(DRIFT_ERROR_CODE)
+            expect(thrown.drift).to.have.length(1)
+            expect(thrown.drift[0].module).to.equal(INDEXER)
+            // The excluded module shares the account, so recreating only the flagged
+            // one converges half the stack and leaves the other half locked out.
+            expect(thrown.message).to.contain(`recreate ${INDEXER} ${DECODER}`)
+        })
     })
 
     describe('isDbCredentialDriftError', () => {

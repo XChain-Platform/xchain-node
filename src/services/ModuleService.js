@@ -253,19 +253,40 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 //   interval=15s  - frequent enough to detect a stuck service quickly without hammering
 //   timeout=5s    - generous but short of the interval; covers a slow DB query
 //   retries=3     - three misses (~45s) before marking unhealthy; avoids flapping
-//   startPeriod=  - varies: fast workers (encoder/miner) get 30s; DB-dependent services
-//                   (decoder, indexer, utxo-tracker) get 60s; hub/explorer/sync get 45s
+//   startPeriod=  - varies: fast workers (encoder) get 30s; DB-dependent services
+//                   (decoder, indexer, utxo-tracker, miner) get 60s; hub/explorer get
+//                   45s; sync gets its own hub-wait window, see its line below. A
+//                   service whose probe judges a startup step must grant a window
+//                   at least as long as that step, or the probe reports the startup
+//                   itself as a failure.
 const SERVICE_HEALTHCHECK = {
     [XChainService.XCHAIN_DECODER]:       { portKey: 'DECODER_API_PORT',       probe: 'http_get',     path: '/live', interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
     [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s', autoheal: true },
     [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
     [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
     // The miner's API is JSON-RPC only (no GET /status route); an http_get probe 500s
-    // on every check and marks the container permanently unhealthy.
-    [XChainService.XCHAIN_REGTEST_MINER]: { portKey: 'REGTEST_MINER_API_PORT',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s' },
-    [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
+    // on every check and marks the container permanently unhealthy. It probes `health`
+    // rather than `ping` because ping always answers 200 and carries wallet readiness
+    // in its body only, so a miner stalled on credential drift or an unreachable coin
+    // node stayed healthy here (); startPeriod widened to cover wallet prep,
+    // which the probe now judges instead of ignoring.
+    [XChainService.XCHAIN_REGTEST_MINER]: { portKey: 'REGTEST_MINER_API_PORT',  probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
+    // The hub probes `health`, not `ping`: ping is a bare SELECT 1, while health 503s
+    // on a tripped DB breaker, a stale oracle round, and consensus-input alerting. A
+    // hub that had stopped producing usable consensus data read healthy through the
+    // narrow probe (). Deliberately no autoheal: oracle staleness is usually
+    // upstream, where a restart flaps the container and disrupts in-flight rounds.
+    [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
     [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
-    [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     path: '/health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' }
+    // sync's startPeriod covers MAX_HUB_WAIT_MS (xchain-sync/src/config.js, default
+    // 300000ms), not just process boot. /health now answers 503 'starting' for the
+    // whole hub wait instead of reporting healthy with zero pollers running (), and at 45s + 3x15s the container would have flipped UNHEALTHY at ~90s
+    // on any stack whose hub takes longer to come up. Docker ends the start period
+    // on the first passing check, so the wider window costs nothing once sync is up,
+    // and a hub that never arrives is not silently tolerated either: _waitForHub
+    // exits non-zero at MAX_HUB_WAIT_MS and the restart policy takes over. Widen
+    // both together if MAX_HUB_WAIT_MS is raised.
+    [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     path: '/health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '300s' }
     // xchain-e2e-test: one-shot execution container, never gets --restart, healthcheck not applicable
     // coin nodes (node module): managed by NodeService / crypto_nodes; not built via buildAndUp,
     //   so buildHealthcheckArgs never runs for them. Their probe is BAKED INTO THE IMAGE instead
@@ -325,9 +346,15 @@ function buildHealthcheckArgs(module, environmentVariables) {
     }
 
     let cmd
-    if (hc.probe === 'jsonrpc_ping') {
-        // JSON-RPC POST ping; hub, explorer, and the regtest miner all use this protocol
-        cmd = `wget -qO- --post-data='{"jsonrpc":"2.0","method":"ping","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
+    if (hc.probe === 'jsonrpc_ping' || hc.probe === 'jsonrpc_health') {
+        // JSON-RPC POST; hub, explorer, and the regtest miner all speak this protocol.
+        // `ping` is bare liveness (a SELECT 1, or "the port answers"); `health` is the
+        // richer verdict that 503s on a service that is up but no longer making
+        // progress, and wget -qO- exits non-zero on that 503 exactly as it does on a
+        // dead port. Pick per descriptor: a service whose ping already carries the
+        // real verdict (explorer) stays on ping.
+        const method = hc.probe === 'jsonrpc_health' ? 'health' : 'ping'
+        cmd = `wget -qO- --post-data='{"jsonrpc":"2.0","method":"${method}","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
     } else {
         // Default: plain HTTP GET on /status; descriptors override via `path`
         // where /status is too expensive to double as a liveness probe (sync).
@@ -738,6 +765,25 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
             try {
                 localModuleVersion = await getLocalModuleVersion(module)
             } catch { /* not installed yet */ }
+
+            // Refuse a rotation that would lock a sibling out BEFORE this run
+            // re-clones the checkout and buildAndUp tears the old container down.
+            // setDatabaseParameters runs the same guard after the rebuild, and by
+            // then the working container is already destroyed and restarted on a
+            // password the refusal declines to write, so the guard's own "nothing
+            // has been changed" promise is broken by the command that makes it
+            // (uuid:cb0bd3be). The module being rebuilt is excluded: it comes back
+            // on the intended password, so its frozen one is not a lockout.
+            // `recreate` does not route through here and stays the remediation,
+            // because it converges every named container before provisioning once.
+            if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
+                const { assertNoDbCredentialDrift } = require('./DbCredentialDrift')
+                const driftCfg = await getDefaultConfig(XChainService.XCHAIN_INDEXER, coin, network)
+                await assertNoDbCredentialDrift(coin, network, {
+                    decoder: driftCfg["DECODER_DB_PASS"],
+                    indexer: driftCfg["INDEXER_DB_PASS"]
+                }, { excludeModules: [module] })
+            }
 
             try {
                 if (remoteUpdate || localModuleVersion == null) {

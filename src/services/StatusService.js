@@ -43,12 +43,22 @@ function isContainerGoneError(err) {
     return /no such (object|container|image)/.test(text)
 }
 
+// The two config pushes are independent targets, so neither may cancel the
+// other. updateHub() now rejects when a shared container could not be attached
+// to a coin network (it used to swallow that and return true), and a plain
+// sequential await would have made that rejection ALSO skip the explorer push,
+// stranding the explorer on stale config on top of the unreachable network.
+// Run both, then report: the first error still propagates, so every caller
+// keeps failing loudly, but only the step that actually failed is lost.
 async function statusChanged() {
     setStatusUpdated(false)
     const { updateHub }      = require('./HubService')
     const { updateExplorer } = require('./ExplorerService')
-    await updateHub()
-    await updateExplorer()
+
+    let firstErr = null
+    try { await updateHub() }      catch (err) { firstErr = err }
+    try { await updateExplorer() } catch (err) { if (!firstErr) firstErr = err }
+    if (firstErr) throw firstErr
 }
 
 async function getInstalledCoinsAndNetworks() {

@@ -369,6 +369,32 @@ async function confirmDestructiveReset(coin, network, targets) {
     return answer.trim().toLowerCase() === 'yes'
 }
 
+// True when a docker error means the container is already gone. Matched the
+// same way DockerService.removeContainer matches it; execFile puts docker's
+// stderr into the error message, and stopContainer can also reject a plain
+// string, which is a real failure and must not be read as a miss here.
+function isNoSuchContainerError(err) {
+    if (!err || typeof err === 'string') return false
+    return /no such container/i.test(String(err.message || err.stderr || ''))
+}
+
+// Put back the services an aborted reset already stopped, so the abort leaves
+// the stack as it found it rather than half torn down. Returns the modules that
+// could not be restarted, for the operator message.
+async function restartStoppedModules(modules, coin, network) {
+    const failed = []
+    for (const module of modules) {
+        try {
+            const containerId = await db.getModuleContainer(module, coin, network)
+            if (!containerId) continue
+            await startContainer(containerId)
+        } catch {
+            failed.push(module)
+        }
+    }
+    return failed
+}
+
 // The service names `reset` can act on. `reset` is the only destructive CLI path
 // and the only one that bypasses resolveArgs/filterCommandParameters, so it must
 // validate its own raw args: without this an unrecognised service (a typo, or a
@@ -440,6 +466,23 @@ async function resetModules(service, coin, network, force = false) {
         }
     }
 
+    // Fail fast BEFORE any destructive wipe: in docker (non-external) mode a
+    // DB reset needs the MariaDB container, and resetDatabases would otherwise
+    // `docker exec null` and abort mid-reset with node/utxo data already wiped
+    // (the half-reset failure the EXTERNAL_DB branch already guards). Probe here
+    // so nothing is touched when the container is gone (uuid:6f6584dc). It sits
+    // ahead of the stop loop, not after it: this abort returns before the restart
+    // pass, so probing later left every already-stopped service DOWN while still
+    // reporting that no data was touched (uuid:bb190060).
+    const dbResetNeeded = resetDecoder || resetIndexer
+    if (dbResetNeeded && !EXTERNAL_DB) {
+        const dbContainerId = await getDatabaseContainerId()
+        if (!dbContainerId) {
+            console.log('Aborted: MariaDB container not found; install the database first. No data was touched.')
+            return false
+        }
+    }
+
     const modulesToStop = []
     if (resetNode)        modulesToStop.push(NODE_MODULE_NAME)
     if (resetUtxoTracker) modulesToStop.push(XChainService.XCHAIN_UTXO_TRACKER)
@@ -448,27 +491,38 @@ async function resetModules(service, coin, network, force = false) {
     if (resetAll)         modulesToStop.push(XChainService.XCHAIN_REGTEST_MINER)
 
     console.log(`Stopping ${coin} ${network} services...`)
+    // Abort before any wipe when a target will not stop, and put back whatever
+    // was already stopped. The bare catch this replaced swallowed EVERY
+    // stopContainer rejection as "not installed", so a daemon that failed to
+    // stop kept reading and writing the store while the wipes below deleted it
+    // (uuid:9c88cfe6). Only a "no such container" miss is still a legitimate
+    // skip; the registry miss is already handled by the null check.
+    const stoppedModules = []
     for (const module of modulesToStop) {
+        let containerId = null
         try {
-            const containerId = await db.getModuleContainer(module, coin, network)
-            // Latent today only because the catch below hides a null-arg
-            // failure; guard explicitly so a future narrower catch stays
-            // correct (uuid:fd7cc224 sibling site).
-            if (!containerId) continue
+            containerId = await db.getModuleContainer(module, coin, network)
+        } catch { continue /* not installed, skip */ }
+        // getModuleContainer returns null on a registry miss rather than
+        // throwing, so only this explicit check can skip "not installed";
+        // without it stopContainer(null) fails and now ABORTS the reset
+        // (uuid:fd7cc224 sibling site).
+        if (!containerId) continue
+        try {
             await stopContainer(containerId)
-        } catch { /* not installed, skip */ }
-    }
-
-    // Fail fast BEFORE any destructive wipe: in docker (non-external) mode a
-    // DB reset needs the MariaDB container, and resetDatabases would otherwise
-    // `docker exec null` and abort mid-reset with node/utxo data already wiped
-    // (the half-reset failure the EXTERNAL_DB branch already guards). Probe here
-    // so nothing is touched when the container is gone (uuid:6f6584dc).
-    const dbResetNeeded = resetDecoder || resetIndexer
-    if (dbResetNeeded && !EXTERNAL_DB) {
-        const dbContainerId = await getDatabaseContainerId()
-        if (!dbContainerId) {
-            console.log('Aborted: MariaDB container not found; install the database first. No data was touched.')
+            stoppedModules.push(module)
+        } catch (err) {
+            if (isNoSuchContainerError(err)) continue
+            const restartFailures = await restartStoppedModules(stoppedModules, coin, network)
+            const reason = (err && err.message) || String(err)
+            console.log(`Aborted: ${module} failed to stop (${reason}). No data was touched.`)
+            if (stoppedModules.length > 0) {
+                console.log(`  Restarted ${stoppedModules.length - restartFailures.length} of `
+                    + `${stoppedModules.length} already-stopped service(s).`)
+            }
+            if (restartFailures.length > 0) {
+                console.log(`  STILL DOWN, start by hand: ${restartFailures.join(', ')}`)
+            }
             return false
         }
     }

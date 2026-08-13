@@ -174,12 +174,17 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
     // Read-only commands (ps, tail, logs, …) pass syncHubConfig=false to skip
     // this step. The updateconfig round-trip can be slow on multi-coin nodes and
     // pushing it adds nothing when local service state hasn't changed.
+    // Attempt both pushes even when the first rejects: updateHub() reports
+    // shared containers it could not attach to a coin network, and letting that
+    // skip the explorer push would strand a second service on stale config for
+    // a fault that has nothing to do with it. The first error is still what the
+    // operator sees, and the command still fails.
     if (syncHubConfig) {
-        try {
-            await updateHub()
-            await updateExplorer()
-        } catch (err) {
-            console.log(redactSecrets(err))
+        let firstErr = null
+        try { await updateHub() }      catch (err) { firstErr = err }
+        try { await updateExplorer() } catch (err) { if (!firstErr) firstErr = err }
+        if (firstErr) {
+            console.log(redactSecrets(firstErr))
             throw new Error("There was an error trying to update the hub module")
         }
     }
