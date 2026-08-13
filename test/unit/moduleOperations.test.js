@@ -247,7 +247,7 @@ describe('moduleOperations', function () {
     // recreateModules
     // -------------------------------------------------------------------
 
-    // : a container freezes its env at `docker run`, so correcting a value it
+    // A container freezes its env at `docker run`, so correcting a value it
     // carries means recreating it. Doing that through `update` also re-clones from
     // GitHub, which turns a credential repair into a version change on a live venue.
     describe('recreateModules()', function () {
@@ -721,7 +721,7 @@ describe('moduleOperations', function () {
             expect(stubs.restartContainer.called).to.be.true // bounce
         })
 
-        // : wiping the indexer DB restarts its push_generations at 0, which the
+        // Wiping the indexer DB restarts its push_generations at 0, which the
         // hub's price ingest fence silently drops. The reset owns clearing the fence.
         // uuid:bb190060: the MariaDB probe used to run after the stop loop, so this
         // abort reported "No data was touched" while every service it had already

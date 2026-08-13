@@ -54,7 +54,7 @@ function logIfNotSilent(silent, message) {
 // still running steals the tag, docker then reports that container's image as
 // a bare ID, and an image-keyed scan goes blind to a live, healthy container.
 // Worse, the orphan purge below then DELETES its registry row, after which
-// update/start/stop silently no-op for it (node-host-b litecoin-mainnet
+// update/start/stop silently no-op for it (a litecoin-mainnet
 // xchain-indexer incident, 2026-06-11). The image name remains a fallback for
 // containers that were renamed externally.
 function classifyContainer(container) {

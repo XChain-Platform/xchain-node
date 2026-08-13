@@ -13,7 +13,7 @@
  **********************************************************************
  * DiscoveryService: container classification + registry reconciliation.
  *
- * Regression (node-host-b litecoin-mainnet xchain-indexer, 2026-06-11): the scan
+ * Regression (a litecoin-mainnet xchain-indexer, 2026-06-11): the scan
  * keyed on the container's IMAGE name. Rebuilding a module's image while the
  * old container kept running steals the tag; docker reports the container's
  * image as a bare ID, so the scan went blind to a live container, and the
@@ -205,7 +205,7 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
     })
 })
 
-// : the devhost regtest stack was reported "lost" because a probe read
+// A regtest stack was reported "lost" because a probe read
 // the registry through an unconfigured store, which answers [] instead of
 // erroring. The store's fail-open is what makes that indistinguishable from an
 // empty install, so every path that ACTS on the row set now asserts first.
