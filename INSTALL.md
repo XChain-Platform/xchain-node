@@ -71,7 +71,7 @@ to silence the check.
 
 ### Install xchain-node 
 ```
-git clone git@github.com:XChain-platform/xchain-node.git
+git clone git@github.com:XChain-Platform/xchain-node.git
 cd xchain-node
 npm install
 sudo ln -s ~/xchain-node/xchain-node.sh /usr/local/bin/xchain-node
