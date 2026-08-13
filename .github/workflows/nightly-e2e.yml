@@ -1,8 +1,8 @@
-name: Nightly E2E (regtest)
+name: E2E (regtest)
 
 # Cross-component integration gate. Boots the FULL XChain stack on regtest via
-# xchain-node - which clones every service repo at its master HEAD and runs them
-# as Docker containers - then runs the live xchain-e2e-test suites against it
+# xchain-node - which clones every service repo at the REF THIS RUN NAMES and
+# runs them as Docker containers - then runs the live xchain-e2e-test suites against it
 # (real transactions, real indexing, reorg convergence): the default ACTION suite,
 # the SECURITY suite (test/security), and the PERFORMANCE suite (test/perf), each
 # driven via `e2etest --script`. This is the only gate that exercises consensus /
@@ -34,6 +34,11 @@ on:
   # (anonymous HTTPS clones just work then, and no SUBREPO_CLONE_TOKEN is needed):
   #   schedule:
   #     - cron: '0 7 * * *'    # 07:00 UTC nightly
+  #
+  # NOTE for whoever re-enables the cron: a scheduled workflow runs from the
+  # DEFAULT branch's file, so once develop is the default the nightly boots
+  # whatever `ref` defaults to below. Set that default deliberately at the same
+  # time, or the nightly silently changes what it is testing.
   workflow_dispatch:
     inputs:
       coin:
@@ -41,6 +46,32 @@ on:
         type: choice
         options: [bitcoin, litecoin, dogecoin]
         default: bitcoin
+      ref:
+        # The release ceremony's freeze step needs a driven e2e run against the
+        # EXACT content a release is being cut from, not against a branch tip
+        # that agent lanes keep moving. That is what this input is for.
+        #
+        # Three shapes are useful, and they resolve differently on purpose:
+        #   master / develop     branch tip; the ordinary integration run
+        #   release/vX.Y.Z       the frozen release branches, for the ceremony's
+        #                        pre-PR gate (see the caveat below)
+        #   vX.Y.Z               a published release: xchain-node resolves its
+        #                        release manifest and installs the exact pinned,
+        #                        commit-verified component set. This is the only
+        #                        shape that reproduces a release byte for byte,
+        #                        and it is the right one for verifying a train
+        #                        after its tags are cut.
+        #
+        # CAVEAT for the release/vX.Y.Z shape: `install` clones EVERY train
+        # member at the one ref it is given, so a ceremony that cuts release
+        # branches only in the CHANGED repos (sparse lockstep) will fail at the
+        # first unchanged sibling that has no such branch. Either cut the
+        # release branch in every train member for the duration of the freeze,
+        # or run this against vX.Y.Z after tagging and treat the pre-PR e2e as
+        # covering the changed set only.
+        description: 'Ref to install the stack at (branch, release/vX.Y.Z, or a published vX.Y.Z)'
+        type: string
+        default: master
 
 permissions:
   contents: read
@@ -51,6 +82,11 @@ jobs:
     timeout-minutes: 120
     env:
       COIN: ${{ github.event.inputs.coin || 'bitcoin' }}
+      # Drives BOTH the xchain-node checkout below and the `install` boot
+      # argument, so the CLI running the install is the same version as the
+      # stack it installs. Splitting those two was how "we tested the release"
+      # could mean "we tested master's installer against the release".
+      STACK_REF: ${{ github.event.inputs.ref || 'master' }}
       # Headless DB: point xchain-node at an external MariaDB instead of its
       # bundled DB container, so the first install does NOT stop on the
       # interactive root-password prompt (see DatabaseService.getExternalDbConfig
@@ -72,6 +108,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'master' }}
 
       - uses: actions/setup-node@v4
         with:
@@ -132,7 +170,7 @@ jobs:
             git config --global url."https://github.com/".insteadOf "git@github.com:"
           fi
 
-      - name: Boot the regtest stack (clones every service at master HEAD)
+      - name: Boot the regtest stack (clones every service at ${{ github.event.inputs.ref || 'master' }})
         # First heavy step - repo clones + docker image builds + coin daemon.
         # Watch disk and image-build time here (the 120-min job timeout covers it).
         # Note: the external-DB connection for the install process itself is
@@ -141,7 +179,8 @@ jobs:
         # remaining thing to confirm once the stack boots.
         run: |
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
-          node src/index.js install master all "$COIN" regtest
+          echo "Installing the stack at ref: $STACK_REF"
+          node src/index.js install "$STACK_REF" all "$COIN" regtest
 
       - name: Run the e2e action suite
         # Now exits non-zero on failure (cli.js e2etest propagates the suite's
