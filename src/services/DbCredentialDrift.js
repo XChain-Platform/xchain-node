@@ -20,11 +20,9 @@
  * one Docker daemon and one MariaDB (a source checkout plus a scratch clone,
  * each with its own config/<coin>-<network>) therefore pin different passwords
  * for the SAME account, and whichever provisions last silently locks the other
- * install's container out. That is : the DOGE regtest indexer, built
- * from one install, crash-looped on ER_ACCESS_DENIED for two days after a
- * decoder rebuild from another install rotated the shared decoder account, and
- * a container in a restart loop loses its Docker DNS entry, so the outage
- * reached every caller as ENOTFOUND rather than as a credential fault.
+ * install's container out; a container stuck in a resulting restart loop also
+ * loses its Docker DNS entry, so the outage can surface as ENOTFOUND rather
+ * than as a credential fault.
  *
  * The check compares each RUNNING container's frozen env against the password
  * about to be written and fails closed BEFORE any ALTER USER runs, so a refusal
@@ -117,7 +115,7 @@ function formatDbCredentialDriftError(coin, network, drift, alsoRecreate = []) {
         lines.join('\n') + '\n' +
         `Nothing has been changed. Point both installs at one config/${coin}-${network}, then run ` +
         `\`xchain-node recreate ${modules.join(' ')} ${coin} ${network}\` from the install that owns ` +
-        `the stack. Set ${DRIFT_OVERRIDE_ENV}=1 to rotate anyway .`
+        `the stack. Set ${DRIFT_OVERRIDE_ENV}=1 to rotate anyway.`
     )
 }
 

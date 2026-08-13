@@ -65,11 +65,11 @@ function runGitClone(module, branch, destination) {
                     // scrolling console.warn is a silent-wrong-code hazard
                     // (uuid:4f649bd0). Fail the clone instead.
                     //
-                    // The hint matters because the mechanism is routinely misread
-                    // (, and the  note it corrects): install/update clone
-                    // from the module's REMOTE, so a branch that exists only in the
-                    // checkout on this box is invisible here. Push it, or point the
-                    // module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE.
+                    // The hint matters because the mechanism is routinely misread:
+                    // install/update clone from the module's REMOTE, so a branch that
+                    // exists only in the checkout on this box is invisible here. Push
+                    // it, or point the module at a local path with
+                    // XCHAIN_NODE_MODULES_URLS_OVERRIDE.
                     reject(`Error cloning project: branch '${branch}' not found for module '${module}'`
                         + ` (clones come from the module's remote, so a branch that exists only in the`
                         + ` local checkout is not visible: push it, or set`
@@ -87,14 +87,14 @@ function runGitClone(module, branch, destination) {
 // Clone a module's source into its deploy checkout.
 //
 // A clone that would replace an EXISTING checkout is staged in a sibling
-// directory and swapped in only once git has succeeded . The previous
+// directory and swapped in only once git has succeeded. The previous
 // implementation deleted the destination as its first step, so any clone
 // failure (a branch absent from the remote, a network drop, an auth refusal)
-// left the module directory simply gone: on origin-host an `update xchain-hub
-// ... <branch>` destroyed the deploy source including a local-only hotfix
-// branch, and because the running container was untouched nothing surfaced the
-// loss. Validation of the module URL and the branch name also moved ahead of
-// every filesystem mutation for the same reason.
+// left the module directory simply gone: on a live install, an `update
+// xchain-hub ... <branch>` destroyed the deploy source including a
+// local-only hotfix branch, and because the running container was untouched
+// nothing surfaced the loss. Validation of the module URL and the branch
+// name also moved ahead of every filesystem mutation for the same reason.
 //
 // Failure semantics: on any error the pre-existing checkout is still in place
 // and unmodified, and the error is thrown (never an unhandled rejection).
@@ -224,9 +224,9 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 //   path      - http_get only: route to probe. Defaults to /status. Set it for
 //               services whose /status is expensive: sync's /status runs a
 //               SELECT COUNT(*) census over every replicated table, which on a
-//               heavy multi-chain host (node-host-b, LTC+DOGE) takes longer than the
-//               5s timeout and marks a correctly-serving container UNHEALTHY
-//               . Sync's /health is O(1) liveness (circuit-breaker +
+//               heavy multi-chain host (LTC+DOGE) takes longer than the
+//               5s timeout and marks a correctly-serving container UNHEALTHY.
+//               Sync's /health is O(1) liveness (circuit-breaker +
 //               poll-error state, no table scans) and still 503s when the
 //               replicator is genuinely wedged, so the probe measures liveness
 //               rather than a full table census. The decoder sets it for the
@@ -268,24 +268,24 @@ const SERVICE_HEALTHCHECK = {
     // on every check and marks the container permanently unhealthy. It probes `health`
     // rather than `ping` because ping always answers 200 and carries wallet readiness
     // in its body only, so a miner stalled on credential drift or an unreachable coin
-    // node stayed healthy here (); startPeriod widened to cover wallet prep,
+    // node stayed healthy here; startPeriod widened to cover wallet prep,
     // which the probe now judges instead of ignoring.
     [XChainService.XCHAIN_REGTEST_MINER]: { portKey: 'REGTEST_MINER_API_PORT',  probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
     // The hub probes `health`, not `ping`: ping is a bare SELECT 1, while health 503s
     // on a tripped DB breaker, a stale oracle round, and consensus-input alerting. A
     // hub that had stopped producing usable consensus data read healthy through the
-    // narrow probe (). Deliberately no autoheal: oracle staleness is usually
+    // narrow probe. Deliberately no autoheal: oracle staleness is usually
     // upstream, where a restart flaps the container and disrupts in-flight rounds.
     [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
     [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
     // sync's startPeriod covers MAX_HUB_WAIT_MS (xchain-sync/src/config.js, default
-    // 300000ms), not just process boot. /health now answers 503 'starting' for the
-    // whole hub wait instead of reporting healthy with zero pollers running (), and at 45s + 3x15s the container would have flipped UNHEALTHY at ~90s
-    // on any stack whose hub takes longer to come up. Docker ends the start period
-    // on the first passing check, so the wider window costs nothing once sync is up,
-    // and a hub that never arrives is not silently tolerated either: _waitForHub
-    // exits non-zero at MAX_HUB_WAIT_MS and the restart policy takes over. Widen
-    // both together if MAX_HUB_WAIT_MS is raised.
+    // 300000ms), not just process boot: /health answers 503 'starting' for the
+    // whole hub wait instead of reporting healthy with zero pollers running, and
+    // at 45s + 3x15s the container would have flipped UNHEALTHY at ~90s on any
+    // stack whose hub takes longer to come up. Docker ends the start period on
+    // the first passing check, so the wider window costs nothing once sync is up;
+    // a hub that never arrives is still caught by _waitForHub exiting non-zero at
+    // MAX_HUB_WAIT_MS. Widen both together if MAX_HUB_WAIT_MS is raised.
     [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     path: '/health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '300s' }
     // xchain-e2e-test: one-shot execution container, never gets --restart, healthcheck not applicable
     // coin nodes (node module): managed by NodeService / crypto_nodes; not built via buildAndUp,
@@ -304,7 +304,7 @@ const SERVICE_HEALTHCHECK = {
 // and THEN restores its bootstrap archive -- installModule runs
 // ensureBootstrapUtxoTracker / ensureBootstrapMariaDb AFTER buildAndUp -- which
 // on a large chain takes many minutes, far past the default 60s startPeriod, so
-// the container is marked cosmetically unhealthy mid-restore (#3169). An install
+// the container is marked cosmetically unhealthy mid-restore. An install
 // holds the command lock, which already keeps `autoheal` from firing (no watchdog
 // restart mid-restore), but operators expecting a long restore can widen the
 // Docker grace window via XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE> (service
@@ -438,7 +438,7 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
  * skips both the bundled-library re-clone and `docker build`. A container freezes its
  * env at `docker run`, so the ONLY way to correct a credential it carries is to
  * recreate it; without this flag that correction also drags in whatever GitHub HEAD
- * holds today, turning a credential repair into an unreviewed version bump .
+ * holds today, turning a credential repair into an unreviewed version bump.
  *
  * @param {string} module
  * @param {string|null} coin
@@ -460,7 +460,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     const dir = getModuleDir(module)
 
     // Go-live pre-flight: warns pre-launch, refuses a mainnet write-surface
-    // deploy with un-armed settings once XCHAIN_NODE_GO_LIVE=1 (A1 / ).
+    // deploy with un-armed settings once XCHAIN_NODE_GO_LIVE=1.
     const { assertGoLiveReady } = require('./GoLiveGate')
     assertGoLiveReady(module, coin, network, environmentVariables, dir)
 
@@ -498,7 +498,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
 
     // Table-driven per-service run-args (SERVICE_REGISTRY in constants.js)
     // replaces the old per-service switch/case: a new service is one table
-    // entry, not four hand-edited dispatch sites (H1 / ). Singleton
+    // entry, not four hand-edited dispatch sites. Singleton
     // services (hub/explorer/sync) clear coin/network so the shared container
     // name and network resolve correctly below.
     const built = buildModuleDockerArgs(module, environmentVariables, coin, network)
@@ -528,7 +528,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
 
     // Pre-flight host-port collision check (multi-stack hosts), run BEFORE the
     // docker build so a collision fails fast instead of only surfacing after
-    // minutes of image build are wasted (#2594). Safe to run ahead of the
+    // minutes of image build are wasted. Safe to run ahead of the
     // overwrite/teardown below: assertNoHostPortConflicts excludes selfName
     // (containerPrefix) from conflicts by container name regardless of whether
     // the old container has been removed yet.

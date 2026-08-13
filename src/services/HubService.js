@@ -26,7 +26,7 @@ const {
 // themselves, e2e-test) so the caller skips them, matching the old
 // switch's default-no-op. The database descriptor is external-vs-dockerized
 // and resolved from `ctx`; every other descriptor is a straight field map
-// read from the coin/network default config (H1 / ).
+// read from the coin/network default config.
 function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
     const hubConfig = (SERVICE_REGISTRY[nextModule] || {}).hubConfig
     if (!hubConfig) return null
@@ -139,8 +139,8 @@ async function updateHubOrExplorer(module) {
         // API, so when the container is crash-looping every attempt fails with a
         // connection error and this loop reports only "there was a problem" - which
         // hides the fact that the CONFIG is fine and the SERVICE never came up. That
-        // misdirection cost  real time: the true cause was in the container's
-        // own log, not here.
+        // misdirection cost real debugging time: the true cause was in the
+        // container's own log, not here.
         let lastErr = null
         while (!hubUpdated) {
             try {

@@ -148,7 +148,7 @@ class E2EEnv extends TestEnv {
 
         // git clone succeeds AND creates its destination, the way real git does.
         // cloneGit stages a rewrite-clone in a sibling directory and swaps it in
-        // only once git reports success , so a route that produced no
+        // only once git reports success, so a route that produced no
         // directory would leave the swap with nothing to move into place.
         this.capture.when(/git clone/).respondsWith((cmd) => {
             const parts = cmd.trim().split(/\s+/)
@@ -326,8 +326,8 @@ class E2EEnv extends TestEnv {
         // child_process, so DatabaseService's stub map does not reach it and the
         // guard reads whatever containers the HOST actually has. On a CI venue
         // carrying a container from another config store that is a real refusal,
-        // which failed all five install-path E2E cases on test-host while passing on
-        // a laptop with no such container . Stubbed at the same seam, so
+        // which failed all five install-path E2E cases there while passing on
+        // a laptop with no such container. Stubbed at the same seam, so
         // the guard still runs, against this harness's containers.
         const DbCredentialDrift = proxyquire(path.join(ROOT, 'src/services/DbCredentialDrift'), {
             'child_process': { execFile: execFileStub },
@@ -372,7 +372,7 @@ class E2EEnv extends TestEnv {
             './DatabaseService': DatabaseService,
             // Same seam as DatabaseService above: installModule now runs the drift
             // guard ahead of buildAndUp too, so an unstubbed copy would read the
-            // HOST's containers and fail install cases on a venue .
+            // HOST's containers and fail install cases on a venue.
             './DbCredentialDrift': DbCredentialDrift,
             './VersionService': VersionService,
             './NodeService': {

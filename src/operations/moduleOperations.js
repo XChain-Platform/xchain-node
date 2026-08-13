@@ -80,7 +80,7 @@ async function updateModules(servicesList, branch = null) {
                     // remoteUpdate)` guard short-circuits for any already-installed
                     // service and `update` becomes a silent no-op.
                     //
-                    // Version-skew guard : a hub-dependent service whose new
+                    // Version-skew guard: a hub-dependent service whose new
                     // source declares `xchainRequiresHub` in its package.json is
                     // REFUSED when the installed hub is behind that version, before
                     // anything is torn down. Throws out of updateModules so the
@@ -109,7 +109,7 @@ const RECREATE_UNSUPPORTED_MODULES = [NODE_MODULE_NAME, DB_MODULE_NAME]
  * Re-stamp a service's container from the CURRENT config without touching its image.
  *
  * A container freezes its env at `docker run`, so a config value it got wrong (a DB
- * password from another install's config store, ) cannot be corrected in place.
+ * password from another install's config store) cannot be corrected in place.
  * `update` corrects it only by also re-cloning from GitHub and rebuilding, which turns
  * a credential repair into an unreviewed version change on a live venue. This keeps the
  * image byte-identical and changes only what the config map now says.
@@ -400,7 +400,7 @@ async function restartStoppedModules(modules, coin, network) {
 // validate its own raw args: without this an unrecognised service (a typo, or a
 // non-resettable module like xchain-encoder) leaves every reset flag false, so
 // `targets` is empty, no branch fires, and resetModules returns true - the CLI
-// exits 0 reporting success after resetting nothing (#3144). Fail loud instead,
+// exits 0 reporting success after resetting nothing. Fail loud instead,
 // matching resolveArgs/rollback and the "fail fast BEFORE any destructive wipe"
 // convention this file already follows.
 const RESETTABLE_SERVICES = [
@@ -434,7 +434,7 @@ async function resetModules(service, coin, network, force = false) {
     // live OUTSIDE the in-datadir path the node wipe clears, so they must be
     // wiped explicitly and named in the confirmation, else a reset restarts the
     // daemon over a stale blocks dir + stale txindex (uuid:90630038).
-    // Env-first with config/node.local fallback : a reset from a
+    // Env-first with config/node.local fallback: a reset from a
     // profile-less shell must still see the relocated stores, or it restarts
     // the daemon over stale out-of-datadir chain data.
     const { resolveBlocksDir } = require('../services/NodeService')
@@ -563,19 +563,19 @@ async function resetModules(service, coin, network, force = false) {
         await resetDatabases(coin, network, dbModulesToReset)
     }
 
-    // : a wiped indexer DB restarts push_generations at 0, which the hub's
-    // price ingest fence reads as a stale replay and DROPS, killing this chain's
-    // price rail (and the native-fee / XCHAIN-USD path) with no error. Clear the
-    // fence row here, while the indexer is still stopped, so the first push after
-    // the restart below lands. Never fatal: the wipe already happened, so a
-    // failure must not abort the restart pass and leave the stack down. It is
-    // reported loudly instead, with the statement to run by hand.
+    // A wiped indexer DB restarts push_generations at 0, which the hub's price
+    // ingest fence reads as a stale replay and DROPS, killing this chain's price
+    // rail (and the native-fee / XCHAIN-USD path) with no error. Clear the fence
+    // row here, while the indexer is still stopped, so the first push after the
+    // restart below lands. Never fatal: the wipe already happened, so a failure
+    // must not abort the restart pass and leave the stack down. It is reported
+    // loudly instead, with the statement to run by hand.
     if (resetIndexer) {
         try {
             await clearHubPriceIngestWatermark(coin, network)
         } catch (err) {
             console.warn('WARNING: clearing the hub price ingest fence failed: ' + (err && err.message ? err.message : err))
-            console.warn("  Run on the hub DB before the indexer catches up :")
+            console.warn("  Run on the hub DB before the indexer catches up:")
             console.warn("    DELETE FROM price_ingest_watermarks WHERE source_chain = '"
                 + (CoinTickerSymbol[coin] || coin) + "';")
         }

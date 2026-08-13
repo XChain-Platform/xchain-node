@@ -54,8 +54,8 @@ describe('DbCredentialDrift', () => {
             expect(drift).to.deep.equal([])
         })
 
-        //  exactly: the decoder was rebuilt from one install's config and the
-        // indexer still ran with another's, so rotating the shared decoder account
+        // The decoder was rebuilt from one install's config while the indexer
+        // still ran with another's, so rotating the shared decoder account
         // locked the indexer out of BOTH databases it opens.
         it('flags an indexer built from another install on both accounts', () => {
             const { findDbCredentialDrift } = load()

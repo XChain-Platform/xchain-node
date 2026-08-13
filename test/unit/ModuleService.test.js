@@ -145,7 +145,7 @@ function loadModuleService(stubs, constantsOverride) {
 // real exports for the rest). `proxyquire` is a process-wide SINGLETON, so calling
 // .callThru() on it leaves call-through ON for every later proxyquire in the whole
 // mocha run, including other test files. Scope the flip to the single load that
-// asked for it .
+// asked for it.
 function proxyquireCallThru(request, stubs) {
     const pq = require('proxyquire')
     pq.callThru()
@@ -158,11 +158,11 @@ function proxyquireCallThru(request, stubs) {
 
 describe('ModuleService', function () {
 
-    // Venue independence : under call-through, a DockerService stub that
-    // omits getPublishedHostPorts silently falls back to the REAL probe, which
-    // shells out to `docker ps` on the host running the suite. Such a test passes
-    // on a laptop with no docker and fails on a CI venue that happens to publish
-    // the port the test asks for (test-host held 3001 with a live utxo-tracker).
+    // Venue independence: under call-through, a DockerService stub that omits
+    // getPublishedHostPorts silently falls back to the REAL probe, which shells
+    // out to `docker ps` on the host running the suite. Such a test passes on a
+    // laptop with no docker and fails on a CI venue that happens to publish the
+    // port the test asks for (one venue held port 3001 with a live utxo-tracker).
     // Replace the real probe for the duration of this file so a missing stub fails
     // the same way everywhere instead of depending on what the host is running.
     const RealDockerService = require('../../src/services/DockerService')
@@ -534,7 +534,7 @@ describe('ModuleService', function () {
     // buildAndUp: reuseImage
     // -------------------------------------------------------------------
 
-    // : a container freezes its config env at `docker run`, so correcting a
+    // A container freezes its config env at `docker run`, so correcting a
     // value it carries means recreating it. The normal path also re-clones the module
     // and its bundled libraries from GitHub, which turns a credential repair into an
     // unreviewed version change on a live venue.
@@ -729,7 +729,7 @@ describe('ModuleService', function () {
         it('probes /health (not /status) for sync (http_get probe)', async function () {
             // Sync's /status runs a SELECT COUNT(*) census over every replicated
             // table; on a heavy multi-chain host that exceeds the 5s healthcheck
-            // timeout and marks a correctly-serving container UNHEALTHY .
+            // timeout and marks a correctly-serving container UNHEALTHY.
             // The probe must hit the O(1) /health liveness route instead.
             const stubs = makeStubs()
             const getRunArgs = captureRunArgs(stubs)
@@ -791,7 +791,7 @@ describe('ModuleService', function () {
             }
         })
 
-        // #3169: the healthcheck grace window is env-tunable per service so an
+        // The healthcheck grace window is env-tunable per service so an
         // operator can widen it for a long bootstrap restore.
         it('honors XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE> override', function () {
             const stubs = makeStubs()
@@ -1579,7 +1579,7 @@ describe('ModuleService', function () {
             }
         })
 
-        it('runs the host-port preflight BEFORE docker build so a conflict fails fast (#2594)', async function () {
+        it('runs the host-port preflight BEFORE docker build so a conflict fails fast', async function () {
             const stubs = makeStubs()
             // ENCODER_PORT/ENCODER_API_PORT both resolve to 3003 (see makeStubs'
             // getDefaultConfig); report that host port as already published by a
@@ -1785,7 +1785,7 @@ describe('ModuleService', function () {
             const ms = proxyquireCallThru('../../src/services/ModuleService', {
                 'child_process': { execFile: execFileStub },
                 // renameSync must be stubbed under a call-through load: cloneGit's
-                // rewrite path stages the clone and swaps it in , and a
+                // rewrite path stages the clone and swaps it in, and a
                 // call-through would rename real paths on the test host.
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
@@ -1846,7 +1846,7 @@ describe('ModuleService', function () {
             const ms = proxyquireCallThru('../../src/services/ModuleService', {
                 'child_process': { execFile: execFileStub },
                 // renameSync must be stubbed under a call-through load: cloneGit's
-                // rewrite path stages the clone and swaps it in , and a
+                // rewrite path stages the clone and swaps it in, and a
                 // call-through would rename real paths on the test host.
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
@@ -1858,9 +1858,9 @@ describe('ModuleService', function () {
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
                 './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
                 './DatabaseService': { setDatabaseParameters: setDatabaseParametersStub },
-                // Stubbed for the same reason DockerService.getPublishedHostPorts is
-                // : the real guard shells out to `docker inspect` and
-                // would read whatever containers the venue happens to be running.
+                // Stubbed for the same reason DockerService.getPublishedHostPorts is:
+                // the real guard shells out to `docker inspect` and would read
+                // whatever containers the venue happens to be running.
                 './DbCredentialDrift': { assertNoDbCredentialDrift: sinon3.stub().resolves([]) },
                 './BootstrapService': {
                     utxoTrackerVolumeHasData: sinon3.stub().resolves(true),
@@ -2173,7 +2173,7 @@ describe('ModuleService', function () {
                     promisify: () => async (...args) => currentBranchStub(...args)
                 },
                 // renameSync must be stubbed under a call-through load: cloneGit's
-                // rewrite path stages the clone and swaps it in , and a
+                // rewrite path stages the clone and swaps it in, and a
                 // call-through would rename real paths on the test host.
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
@@ -2538,7 +2538,7 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // Venue independence of the suite itself 
+    // Venue independence of the suite itself
     // -------------------------------------------------------------------
 
     describe('unit-suite venue independence', function () {
@@ -2584,7 +2584,7 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // cloneGit: non-destructive rewrite 
+    // cloneGit: non-destructive rewrite
     // -------------------------------------------------------------------
 
     describe('cloneGit() rewrite over an existing checkout', function () {
@@ -2649,7 +2649,7 @@ describe('ModuleService', function () {
         })
 
         it('leaves the checkout in place when the branch is missing from the remote', async function () {
-            // : `update <svc> <chain> <net> <branch>` used to delete the
+            // `update <svc> <chain> <net> <branch>` used to delete the
             // deploy checkout as its first step, so a branch that exists only on
             // the box took the whole module directory with it.
             const { ms, fs, removeModuleDir } = loadWithExistingCheckout((cmd, args, ...rest) => {
