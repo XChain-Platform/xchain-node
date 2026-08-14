@@ -31,7 +31,7 @@ const { db }                                          = require('../state')
 const { getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
 const { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('./DatabaseService')
-const { assertSafeArchiveMemberNames }                = require('../utils/helpers')
+const { assertSafeArchiveMemberNames, redactSecrets } = require('../utils/helpers')
 const { dockerMariadbArgs, mariadbEnv }               = require('../utils/dockerMariadb')
 const { assertBootstrapSourceHealthy }                = require('./BootstrapHealthGate')
 
@@ -147,7 +147,7 @@ async function checkBootstrapSignature(archivePath) {
     if (requireSigned) {
         throw new BootstrapIntegrityError(`Refusing unsigned bootstrap: ${missing}. Signed bootstraps are required by default; set XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 to override.`)
     }
-    console.log(`WARNING: restoring bootstrap WITHOUT signature verification (${missing}). Signature enforcement disabled via XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0; the embedded checksum only detects transport corruption, not tampering.`)
+    console.log(redactSecrets(`WARNING: restoring bootstrap WITHOUT signature verification (${missing}). Signature enforcement disabled via XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0; the embedded checksum only detects transport corruption, not tampering.`))
 }
 
 // Sign the just-created archive when a publisher signing key is configured.
@@ -160,7 +160,7 @@ async function maybeSignBootstrap(finalOutput) {
         return null
     }
     const sigPath = await signBootstrapArchive(finalOutput, keyPath)
-    console.log(`Bootstrap signed: ${sigPath}`)
+    console.log(redactSecrets(`Bootstrap signed: ${sigPath}`))
     return sigPath
 }
 
@@ -514,7 +514,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
         await maybeSignBootstrap(finalOutput)
 
         fs.rmSync(workDir, { recursive: true })
-        console.log(`Bootstrap created: ${finalOutput}`)
+        console.log(redactSecrets(`Bootstrap created: ${finalOutput}`))
 
     } finally {
         console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
@@ -612,7 +612,7 @@ async function makeBootstrapMariaDb(coin, network, module) {
     await maybeSignBootstrap(finalOutput)
 
     fs.rmSync(workDir, { recursive: true })
-    console.log(`Bootstrap created: ${finalOutput}`)
+    console.log(redactSecrets(`Bootstrap created: ${finalOutput}`))
 
     return true
 }
@@ -930,7 +930,7 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         console.log('Bootstrap installed; tracker will continue from the bootstrap height')
         return true
     } catch (err) {
-        console.log(`WARNING: bootstrap auto-restore failed (${err.message}): the tracker will sync from scratch`)
+        console.log(`WARNING: bootstrap auto-restore failed (${redactSecrets(err.message)}): the tracker will sync from scratch`)
         return false
     }
 }
@@ -1022,7 +1022,7 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         console.log('Bootstrap installed; the service will continue from the bootstrap height')
         return true
     } catch (err) {
-        console.log(`WARNING: bootstrap auto-restore failed (${err.message}): the service will sync from scratch`)
+        console.log(`WARNING: bootstrap auto-restore failed (${redactSecrets(err.message)}): the service will sync from scratch`)
         return false
     }
 }

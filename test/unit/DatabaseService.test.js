@@ -140,7 +140,12 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}) {
             getDbRootPassword: stubs.getDbRootPassword,
             setDbRootPassword: stubs.setDbRootPassword
         },
-        '../utils/helpers': { sleep: sinon.stub().resolves() },
+        // sleep is stubbed to keep the suite fast; redactSecrets is passed through
+        // real so what the assertions see is the text an operator would see.
+        '../utils/helpers': {
+            sleep: sinon.stub().resolves(),
+            redactSecrets: require('../../src/utils/helpers').redactSecrets
+        },
         '../config/constants': defaultConstants,
         './ConfigService': {
             getDefaultConfig: sinon.stub().resolves({

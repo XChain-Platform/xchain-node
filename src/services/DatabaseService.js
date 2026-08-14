@@ -26,7 +26,7 @@ const {
     EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER
 } = require('../config/constants')
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
-const { sleep }                   = require('../utils/helpers')
+const { sleep, redactSecrets }    = require('../utils/helpers')
 const { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../utils/sqlSafety')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort } = require('./ConfigService')
@@ -503,7 +503,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                     "CREATE DATABASE IF NOT EXISTS " + databaseName
                 )
-                console.log("Database " + databaseName + " created!")
+                console.log(redactSecrets("Database " + databaseName + " created!"))
             }
 
             // Ensure the account exists and force its password to the intended value on every
@@ -521,7 +521,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                 "ALTER USER " + mariadbUser + " IDENTIFIED BY " + escapeSqlStringLiteral(userPassword)
             )
-            console.log("User " + mariadbUser + " ensured (password set)!")
+            console.log(redactSecrets("User " + mariadbUser + " ensured (password set)!"))
 
             let userGrants = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                 "SHOW GRANTS FOR " + mariadbUser, "-B -N"
@@ -532,7 +532,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON " + databaseName + ".* TO " + mariadbUser
                 )
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
-                console.log("Permissions granted to " + mariadbUser + "!")
+                console.log(redactSecrets("Permissions granted to " + mariadbUser + "!"))
             }
 
             // The e2e federation suites (xchain-e2e-test test:federation /
@@ -547,7 +547,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_MVH\\_%`.* TO " + mariadbUser
                 )
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
-                console.log("MVH test-database permissions granted to " + mariadbUser + "!")
+                console.log(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
             }
 
             // Same shape as the MVH grant above, for the other suite that needs a
@@ -570,7 +570,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_DrillB\\_%`.* TO " + mariadbUser
                 )
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
-                console.log("DrillB parity-database permissions granted to " + mariadbUser + "!")
+                console.log(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
             }
 
             return true
@@ -592,7 +592,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 await executeNativeMariaDbCommand(externalCfg,
                     "CREATE DATABASE IF NOT EXISTS " + databaseName
                 )
-                console.log("Database " + databaseName + " created!")
+                console.log(redactSecrets("Database " + databaseName + " created!"))
             }
 
             // Force-set the password on every run (idempotent). See the docker branch above:
@@ -605,7 +605,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             await executeNativeMariaDbCommand(externalCfg,
                 "ALTER USER " + mariadbUser + " IDENTIFIED BY " + escapeSqlStringLiteral(userPassword)
             )
-            console.log("User " + mariadbUser + " ensured (password set)!")
+            console.log(redactSecrets("User " + mariadbUser + " ensured (password set)!"))
 
             let userGrants = await executeNativeMariaDbCommand(externalCfg,
                 "SHOW GRANTS FOR " + mariadbUser, "-B -N"
@@ -616,7 +616,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON " + databaseName + ".* TO " + mariadbUser
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
-                console.log("Permissions granted to " + mariadbUser + "!")
+                console.log(redactSecrets("Permissions granted to " + mariadbUser + "!"))
             }
 
             // See the docker branch above: grant the hub user CREATE/DROP on the
@@ -627,7 +627,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_MVH\\_%`.* TO " + mariadbUser
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
-                console.log("MVH test-database permissions granted to " + mariadbUser + "!")
+                console.log(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
             }
 
             // See the docker branch above: the same DrillB parity grant, since the
@@ -639,7 +639,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_DrillB\\_%`.* TO " + mariadbUser
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
-                console.log("DrillB parity-database permissions granted to " + mariadbUser + "!")
+                console.log(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
             }
             return true
         } catch (err) {
@@ -841,15 +841,15 @@ async function clearHubPriceIngestWatermark(coin, network) {
 
     await runner("DELETE FROM `" + hubDbName + "`." + PRICE_FENCE_TABLE
         + " WHERE source_chain = " + escapeSqlStringLiteral(ticker))
-    console.log("Cleared the hub price ingest fence for " + ticker + " ("
-        + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted")
+    console.log(redactSecrets("Cleared the hub price ingest fence for " + ticker + " ("
+        + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted"))
     return true
 }
 
 // One wording for every "could not clear it here" branch, so the operator always
 // gets the exact statement to run on whichever DB the hub actually uses.
 function warnPriceFenceNotCleared(ticker, reason) {
-    console.warn("WARNING: the hub price ingest fence for " + ticker + " was NOT cleared (" + reason + ").")
+    console.warn(redactSecrets("WARNING: the hub price ingest fence for " + ticker + " was NOT cleared (" + reason + ")."))
     console.warn("  A reset indexer DB restarts its push_generations at 0, and the hub DROPS every")
     console.warn("  price push at or below its recorded retraction generation, taking that chain's price rail")
     console.warn("  and the native-fee / XCHAIN-USD path down with it. Run this on the hub's OWN database")

@@ -20,6 +20,7 @@ const { version }  = require('../package.json')
 const { preCheck } = require('./precheck')
 const { setVerbose } = require('./state')
 const { filterCommandParameters, resolveArgs } = require('./services/ConfigService')
+const { redactSecrets } = require('./utils/helpers')
 const {
     installModules,
     updateModules,
@@ -216,7 +217,7 @@ async function parseCommand() {
             try {
                 outcome = await updateModules(serviceList, resolved.branch)
             } catch (err) {
-                console.error('update failed: ' + (err && err.message ? err.message : err))
+                console.error('update failed: ' + redactSecrets(err && err.message ? err.message : err))
                 return process.exit(1)
             }
             // An update that touched nothing is a FAILED deploy, not a
@@ -244,7 +245,7 @@ async function parseCommand() {
             try {
                 await recreateModules(serviceList)
             } catch (err) {
-                console.error('recreate failed: ' + (err && err.message ? err.message : err))
+                console.error('recreate failed: ' + redactSecrets(err && err.message ? err.message : err))
                 return process.exit(1)
             }
             // The operator's next move is always to check the container came back,
@@ -479,7 +480,7 @@ Notes:
                     // cron publisher can classify it, with no stack trace to
                     // read past. Anything else keeps its stack.
                     if (err && err.name === 'BootstrapSourceUnhealthyError') {
-                        console.error(err.message)
+                        console.error(redactSecrets(err.message))
                         return process.exit(1)
                     }
                     throw err
@@ -498,7 +499,7 @@ Notes:
                     // stack trace that reads as a tool crash and invites a retry
                     // of a restore that must never succeed.
                     if (err && err.name === 'BootstrapIntegrityError') {
-                        console.error(err.message)
+                        console.error(redactSecrets(err.message))
                         return process.exit(1)
                     }
                     throw err

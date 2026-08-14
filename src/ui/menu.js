@@ -23,6 +23,7 @@ const {
 } = require('../config/constants')
 const { db, getRemoteModuleVersions }   = require('../state')
 const { getStatus, statusChanged }       = require('../services/StatusService')
+const { redactSecrets }                  = require('../utils/helpers')
 const { cloneGit, installModule } = require('../services/ModuleService')
 const { installModules, uninstallModules, updateModules, restartModules, logModules, runE2ETest } = require('../operations/moduleOperations')
 const { installNode }                    = require('../services/NodeService')
@@ -165,7 +166,7 @@ async function modulesSelectionInterface(coin, network) {
         try {
             await uninstallModules({ [coin]: { [network]: modulesToUninstall } })
         } catch (err) {
-            console.log(err)
+            console.log(redactSecrets(err))
         }
         return { menuFunction: modulesSelectionInterface, parameters: [coin, network] }
     } else if (moduleAnswer === "Install the node") {
@@ -173,7 +174,7 @@ async function modulesSelectionInterface(coin, network) {
             await installNode(coin, network)
         } catch (err) {
             console.log("There was a problem installing the node")
-            console.log(err)
+            console.log(redactSecrets(err))
         }
         return { menuFunction: modulesSelectionInterface, parameters: [coin, network] }
     } else if (moduleAnswer === "Perform an E2E test") {
@@ -182,7 +183,7 @@ async function modulesSelectionInterface(coin, network) {
             console.log("E2E tests finished with exit code " + exitCode)
             console.log("Logs saved to: " + logFile)
         } catch (err) {
-            console.log(err)
+            console.log(redactSecrets(err))
         }
         return { menuFunction: modulesSelectionInterface, parameters: [coin, network] }
     } else if (moduleAnswer in actionModules) {
@@ -260,13 +261,13 @@ async function modulesSelectionInterface(coin, network) {
                 try {
                     await uninstallModules({ [coin]: { [network]: [selectedValue] } })
                 } catch (err) {
-                    console.log(err)
+                    console.log(redactSecrets(err))
                 }
             } else if (actionAnswer === "Restart") {
                 try {
                     await restartModules({ [coin]: { [network]: [selectedValue] } })
                 } catch (err) {
-                    console.log(err)
+                    console.log(redactSecrets(err))
                 }
             } else if (actionAnswer === "Update locale version") {
                 await cloneGit(selectedValue, true, false)
@@ -279,8 +280,8 @@ async function modulesSelectionInterface(coin, network) {
                     // A source-health refusal is an expected outcome here, so
                     // print the reasons and stay in the menu rather than
                     // tearing the TUI down with a stack trace.
-                    if (err && err.name === 'BootstrapSourceUnhealthyError') console.log(err.message)
-                    else console.log(err)
+                    if (err && err.name === 'BootstrapSourceUnhealthyError') console.log(redactSecrets(err.message))
+                    else console.log(redactSecrets(err))
                 }
             } else if (actionAnswer === "Restore Bootstrap") {
                 try {
@@ -289,7 +290,7 @@ async function modulesSelectionInterface(coin, network) {
                     // Same contract as "Make Bootstrap" above: an integrity
                     // refusal is an expected outcome, so report it and stay in
                     // the TUI instead of tearing it down with a stack trace.
-                    if (err && err.name === 'BootstrapIntegrityError') console.log(err.message)
+                    if (err && err.name === 'BootstrapIntegrityError') console.log(redactSecrets(err.message))
                     else throw err
                 }
             } else if (actionAnswer === "Reinstall from remote") {
@@ -317,7 +318,7 @@ async function modulesSelectionInterface(coin, network) {
                 try {
                     await installModules({ [coin]: { [network]: [selectedValue] } })
                 } catch (err) {
-                    console.log(err)
+                    console.log(redactSecrets(err))
                 }
             }
         }
@@ -358,7 +359,7 @@ async function mainMenu() {
             await scanAndRegisterModules()
             await statusChanged()
         } catch (err) {
-            console.log(err)
+            console.log(redactSecrets(err))
         }
         return { menuFunction: mainMenu, parameters: [] }
     } else {
