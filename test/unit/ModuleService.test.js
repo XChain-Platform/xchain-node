@@ -221,7 +221,10 @@ describe('ModuleService', function () {
             // moduleDirExists returns false by default, so rewrite path won't trigger rmSync
             // but the function should still succeed
             await ms.cloneGit('xchain-encoder', true)
-            expect(stubs.execFile.calledOnce).to.be.true
+            // Exactly one CLONE. Counting every execFile call instead would drift with
+            // the source-identity reads that follow a clone, which are not clones.
+            const clones = stubs.execFile.getCalls().filter(c => c.args[1][0] === 'clone')
+            expect(clones.length).to.equal(1)
         })
 
         it('rejects when directory exists and rewrite=false', async function () {
@@ -1045,7 +1048,8 @@ describe('ModuleService', function () {
             let cloneArgs = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cloneArgs = args
+                // Only the clone call; the identity reads that follow it are also git.
+                if (args[0] === 'clone') cloneArgs = args
                 cb(null)
             })
             const ms = loadModuleService(stubs)
@@ -2635,7 +2639,9 @@ describe('ModuleService', function () {
         it('clones into a staging dir, never over the live checkout', async function () {
             let destArg = null
             const { ms, fs } = loadWithExistingCheckout((cmd, args, ...rest) => {
-                destArg = args[args.length - 1]
+                // The clone's destination, not the last git call's last argument: the
+                // source-identity reads that follow a clone are git calls too.
+                if (args[0] === 'clone') destArg = args[args.length - 1]
                 callbackOf(rest)(null)
             })
             await ms.cloneGit(MODULE, true)

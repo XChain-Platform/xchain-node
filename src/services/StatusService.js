@@ -173,6 +173,25 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 try { branch = await getModuleBranch(nextModule) } catch { /* not available */ }
                             }
 
+                            // The commit THIS container's image was built from, stamped
+                            // as an image label by ModuleService.buildAndUp.
+                            //
+                            // Read from the container, never from the module checkout:
+                            // the checkout is a single shared directory that moves with
+                            // every update, so reporting its commit here would claim
+                            // today's code for a container built days ago. That is the
+                            // exact class of lie the version column already tells, since
+                            // a module's package.json version stays put across dozens of
+                            // commits. Blank when the image predates the label.
+                            let commit = "-"
+                            try {
+                                const labels = containerStatus["Config"]["Labels"] || {}
+                                const stamped = labels["xchain.source.commit"]
+                                if (typeof stamped === "string" && /^[a-f0-9]{40}$/.test(stamped)) {
+                                    commit = stamped.slice(0, 12)
+                                }
+                            } catch { /* no Config/Labels on this inspect payload */ }
+
                             // Fold restart churn and healthcheck status into the
                             // displayed state so a container being cycled by
                             // `--restart unless-stopped`, or one whose configured
@@ -211,6 +230,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 coin:    nextCoin    || "-",
                                 network: nextCoinNetwork || "-",
                                 branch,
+                                commit,
                                 state,
                                 isChurning,
                                 ports: portParts.length > 0 ? portParts.join(", ") : "-"
@@ -243,6 +263,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                     coin:    nextCoin        || "-",
                                     network: nextCoinNetwork || "-",
                                     branch:  "-",
+                                    commit:  "-",
                                     state:   "unknown",
                                     ports:   "-"
                                 })
@@ -275,16 +296,23 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
     }
 
     const showBranch = rows.some(r => r.branch !== 'master' && r.branch !== '-')
+    // Shown as soon as any container carries a source stamp. Two containers of the
+    // same service on different commits is the state this column exists to expose,
+    // and it is invisible in every other column: the versions match, the image tags
+    // match, and both report healthy.
+    const showCommit = rows.some(r => r.commit && r.commit !== '-')
     const COL_COIN    = Math.max("COIN".length,    ...rows.map(r => r.coin.length))    + 2
     const COL_NETWORK = Math.max("NETWORK".length, ...rows.map(r => r.network.length)) + 2
     const COL_NAME    = Math.max("SERVICE".length, ...rows.map(r => r.name.length))    + 2
     const COL_BRANCH  = showBranch ? Math.max("BRANCH".length, ...rows.map(r => r.branch.length)) + 2 : 0
+    const COL_COMMIT  = showCommit ? Math.max("COMMIT".length, ...rows.map(r => (r.commit || "-").length)) + 2 : 0
     const COL_STATUS  = Math.max("STATUS".length,  ...rows.map(r => r.state.length))   + 2
     let output = "\x1b[1m"
         + "COIN".padEnd(COL_COIN)
         + "NETWORK".padEnd(COL_NETWORK)
         + "SERVICE".padEnd(COL_NAME)
         + (showBranch ? "BRANCH".padEnd(COL_BRANCH) : "")
+        + (showCommit ? "COMMIT".padEnd(COL_COMMIT) : "")
         + "STATUS".padEnd(COL_STATUS)
         + "PORTS\x1b[0m\n"
     for (const row of rows) {
@@ -295,6 +323,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
             + row.network.padEnd(COL_NETWORK)
             + row.name.padEnd(COL_NAME)
             + (showBranch ? row.branch.padEnd(COL_BRANCH) : "")
+            + (showCommit ? (row.commit || "-").padEnd(COL_COMMIT) : "")
             + color + row.state.padEnd(COL_STATUS) + "\x1b[0m"
             + row.ports + "\n"
     }

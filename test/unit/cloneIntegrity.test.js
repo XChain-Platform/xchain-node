@@ -147,7 +147,13 @@ describe('clone integrity (manifest-pinned installs)', () => {
             const { ms } = loadWithGit({ revParse })
             const ok = await ms.cloneGit('xchain-vm', false, false, 'develop', null)
             expect(ok).to.equal(true)
-            expect(revParse.called).to.equal(false)
+            // The pin check IS the `rev-parse HEAD` call. An unpinned branch install
+            // now also asks git which commit it landed on and what the branch points
+            // at, so assert on which call was made rather than on whether git ran at
+            // all; the latter passes only while nothing else ever reads the clone.
+            const pinChecks = revParse.getCalls().filter(c =>
+                Array.isArray(c.args[1]) && c.args[1].includes('rev-parse') && c.args[1].includes('HEAD'))
+            expect(pinChecks.length).to.equal(0)
         })
 
         it('cleans the tmp tree when a probe clone fails verification', async () => {

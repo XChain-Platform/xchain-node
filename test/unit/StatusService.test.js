@@ -723,3 +723,87 @@ describe('StatusService: getStatus() branch column', function () {
         expect(capturedOutput).to.not.include('BRANCH')
     })
 })
+
+describe('StatusService: getStatus() commit column', function () {
+
+    // Two containers of the SAME service, built from different commits. Every other
+    // column agrees (same service, same state, same versions), which is exactly how a
+    // container running a stale tree passed for a fresh one: the deployed commit was
+    // the one fact nothing on this screen carried.
+    function stateWithTwoContainers() {
+        const installedModulesObj = {}
+        return makeStateStub({
+            isStatusUpdated: sinon.stub().returns(false),
+            getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+            resetInstalledModules: sinon.stub().callsFake(() => {
+                for (const k of Object.keys(installedModulesObj)) delete installedModulesObj[k]
+            }),
+            db: {
+                isReady: sinon.stub().returns(true),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-indexer', coin: 'bitcoin',  network: 'regtest', container_id: 'aaa' },
+                    { module: 'xchain-indexer', coin: 'dogecoin', network: 'regtest', container_id: 'bbb' }
+                ])
+            },
+            getLastPrintedStatus: sinon.stub().returns('')
+        })
+    }
+
+    function labelled(commit) {
+        return {
+            State: { Status: 'running' },
+            NetworkSettings: { Ports: {} },
+            Config: { Labels: commit ? { 'xchain.source.commit': commit } : {} }
+        }
+    }
+
+    it('prints the commit each container was built from, per container', async function () {
+        const fresh = '2'.repeat(40)
+        const stale = '9'.repeat(40)
+        const state = stateWithTwoContainers()
+        let capturedOutput = ''
+        state.setLastPrintedStatus = sinon.stub().callsFake(v => { capturedOutput = v })
+
+        const getStatusFromContainer = sinon.stub()
+        getStatusFromContainer.withArgs('aaa').resolves(labelled(fresh))
+        getStatusFromContainer.withArgs('bbb').resolves(labelled(stale))
+
+        const ss = loadStatusService(state, { getStatusFromContainer })
+        await ss.getStatus(null, null, false)
+
+        expect(capturedOutput).to.include('COMMIT')
+        expect(capturedOutput).to.include(fresh.slice(0, 12))
+        expect(capturedOutput).to.include(stale.slice(0, 12))
+    })
+
+    it('omits the commit column when no image carries a source stamp', async function () {
+        const state = stateWithTwoContainers()
+        let capturedOutput = ''
+        state.setLastPrintedStatus = sinon.stub().callsFake(v => { capturedOutput = v })
+
+        const ss = loadStatusService(state, {
+            getStatusFromContainer: sinon.stub().resolves(labelled(null))
+        })
+        await ss.getStatus(null, null, false)
+
+        expect(capturedOutput).to.not.include('COMMIT')
+    })
+
+    it('never shows the module checkout as a container commit', async function () {
+        // The checkout is one shared directory that moves with every update, so
+        // sourcing this column from it would claim today's code for a container built
+        // days ago: the same lie the version column already tells.
+        const state = stateWithTwoContainers()
+        let capturedOutput = ''
+        state.setLastPrintedStatus = sinon.stub().callsFake(v => { capturedOutput = v })
+
+        const checkoutCommit = '7'.repeat(40)
+        const ss = loadStatusService(state, {
+            getStatusFromContainer: sinon.stub().resolves(labelled(null)),
+            getModuleCommit: sinon.stub().resolves(checkoutCommit)
+        })
+        await ss.getStatus(null, null, false)
+
+        expect(capturedOutput).to.not.include(checkoutCommit.slice(0, 12))
+    })
+})

@@ -380,8 +380,11 @@ describe('Security', function () {
             })
             const ms = loadModuleService(stubs)
             await ms.cloneGit('xchain-encoder', false, false, 'feature/my-branch_v1.0')
-            expect(stubs.execFile.calledOnce).to.be.true
-            const [, args] = stubs.execFile.firstCall.args
+            // One CLONE. Counting every execFile call would drift with the
+            // source-identity reads that follow a clone, which are not clones.
+            const clones = stubs.execFile.getCalls().filter(c => c.args[1][0] === 'clone')
+            expect(clones.length).to.equal(1)
+            const [, args] = clones[0].args
             expect(args).to.include('-b')
             expect(args).to.include('feature/my-branch_v1.0')
         })

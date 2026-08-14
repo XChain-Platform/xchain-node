@@ -117,6 +117,175 @@ async function assertCheckoutCommit(module, dir, expectedCommit) {
     }
 }
 
+// Identity of a checkout: the commit an operator would have to name to
+// reproduce this exact tree, plus enough context to recognise an old one at a
+// glance. Returns nulls instead of throwing, because reporting which code is
+// being deployed must never be the thing that fails a deploy.
+async function readCheckoutIdentity(dir) {
+    const unknown = { commit: null, committedAt: null, subject: null }
+    try {
+        const { stdout } = await execFileAsync('git', ['-C', dir, 'log', '-1', '--format=%H%x1f%cI%x1f%s'])
+        const [commit, committedAt, subject] = String(stdout || '').trim().split('\x1f')
+        if (!/^[a-f0-9]{40}$/.test(commit || '')) return unknown
+        return { commit, committedAt: committedAt || null, subject: subject || null }
+    } catch {
+        return unknown
+    }
+}
+
+// The commit and branch a checkout is on, read straight off the git ref files.
+//
+// Deliberately NOT a `git` subprocess: this runs on the docker-build path, which
+// must not gain a new place to block, and the answer it needs (which commit, which
+// branch) is two small file reads. Returns nulls for anything it cannot read,
+// including a `.git` file (worktree pointer) or a packed-only ref it cannot find.
+function readCheckoutIdentityFromDisk(dir) {
+    const unknown = { commit: null, ref: null }
+    try {
+        const gitDir = path.join(dir, '.git')
+        const head = String(fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8') || '').trim()
+        if (/^[a-f0-9]{40}$/.test(head)) return { commit: head, ref: null }
+
+        const match = head.match(/^ref:\s*(\S+)$/)
+        if (!match) return unknown
+        const refName = match[1]
+        const shortRef = refName.replace(/^refs\/heads\//, '')
+
+        try {
+            const loose = String(fs.readFileSync(path.join(gitDir, refName), 'utf8') || '').trim()
+            if (/^[a-f0-9]{40}$/.test(loose)) return { commit: loose, ref: shortRef }
+        } catch { /* ref is packed, not loose; fall through */ }
+
+        const packed = String(fs.readFileSync(path.join(gitDir, 'packed-refs'), 'utf8') || '')
+        for (const line of packed.split('\n')) {
+            const parts = line.trim().split(/\s+/)
+            if (parts.length === 2 && parts[1] === refName && /^[a-f0-9]{40}$/.test(parts[0])) {
+                return { commit: parts[0], ref: shortRef }
+            }
+        }
+        return unknown
+    } catch {
+        return unknown
+    }
+}
+
+// The commit a source repository's BRANCH points at right now. `git ls-remote`
+// speaks the same protocol for an ssh/https remote and for a local path, which
+// is what lets one oracle cover both clone sources.
+//
+// Returns null when the ref is not a branch there (a tag, a pinned install) or
+// the query fails (offline, auth, no such remote): "could not verify" has to
+// degrade to a warning, never to a refused deploy.
+async function readSourceBranchTip(url, branch) {
+    try {
+        const { stdout } = await execFileAsync('git', ['ls-remote', url, 'refs/heads/' + branch])
+        const line = String(stdout || '').split('\n').find(l => l.trim().length > 0)
+        if (!line) return null
+        const sha = line.trim().split(/\s+/)[0]
+        return /^[a-f0-9]{40}$/.test(sha) ? sha : null
+    } catch {
+        return null
+    }
+}
+
+// A source that is a filesystem path rather than a remote URL. Matches the same
+// shapes runGitClone already treats as local (a leading '/'), plus explicit
+// relative prefixes; anything else is an ssh/https remote as far as this goes.
+// A false negative only costs the extra diagnosis below, never correctness.
+function isLocalPathSource(url) {
+    return typeof url === 'string' && (url.startsWith('/') || url.startsWith('./') || url.startsWith('../'))
+}
+
+// A local-path source (the XCHAIN_NODE_MODULES_URLS_OVERRIDE workflow) is cloned
+// through its OWN refs, so `-b master` deploys THAT checkout's master, not the
+// upstream's. When the checkout is behind its own origin the deploy is quietly
+// older than the branch the operator named, and nothing downstream can tell:
+// the container comes up healthy, and the module's package.json version is the
+// same string it was dozens of commits ago.
+//
+// Warn rather than refuse: deploying local work that is not upstream yet is the
+// entire point of the override, so being behind is legitimate, just never
+// something an operator should discover after measuring the wrong tree.
+async function warnIfSourceBranchIsBehind(module, url, branch) {
+    if (!isLocalPathSource(url)) return
+    try {
+        const revParse = async (ref) => {
+            const { stdout } = await execFileAsync('git', ['-C', url, 'rev-parse', '--verify', '--quiet', ref])
+            return String(stdout || '').trim()
+        }
+        const local    = await revParse('refs/heads/' + branch)
+        const upstream = await revParse('refs/remotes/origin/' + branch)
+        if (!local || !upstream || local === upstream) return
+        const { stdout } = await execFileAsync('git', ['-C', url, 'rev-list', '--count', local + '..' + upstream])
+        const behind = parseInt(String(stdout || '').trim(), 10)
+        if (!(behind > 0)) return
+        console.warn(`WARNING: '${module}' is being deployed from the local checkout ${url},`
+            + ` whose '${branch}' is ${behind} commit(s) BEHIND its own origin/${branch}`
+            + ` (${local.slice(0, 12)} vs ${upstream.slice(0, 12)}).`
+            + ` The deploy will contain the older tree; fetch that checkout if you meant the upstream branch.`)
+    } catch { /* best-effort diagnosis; never blocks a deploy */ }
+}
+
+// Prove a freshly cloned checkout is the code the operator asked for.
+//
+// assertCheckoutCommit answers "is this the reviewed commit" for a manifest pin.
+// This answers the question a NAMED BRANCH raises and nothing used to ask: is
+// this what that branch points at NOW. Every deploy signal the platform had
+// (package.json version, image tag, container uptime, `docker ps` health) is
+// satisfied by a stale tree, so a branch that resolves to an old commit ships
+// silently and an acceptance test then measures code that was never deployed.
+//
+// A disagreement is re-cloned ONCE (a push landing between the clone and the
+// check is a real race, not a bug) and refused after that, so any source that
+// resolves a branch to something other than its tip fails loudly instead.
+async function verifyDeploySource(module, branch, dir, expectedCommit) {
+    // A pinned install names a commit and assertCheckoutCommit already proved it;
+    // a tag is not a branch, so there is no tip to compare against either.
+    if (expectedCommit || !branch) return
+
+    const url = modulesUrls[module]
+    await warnIfSourceBranchIsBehind(module, url, branch)
+
+    const tip = await readSourceBranchTip(url, branch)
+    if (!tip) return
+
+    let head = (await readCheckoutIdentity(dir)).commit
+    if (!head || head === tip) return
+
+    console.warn(`WARNING: the clone of '${module}' landed on ${head.slice(0, 12)} but`
+        + ` '${branch}' points at ${tip.slice(0, 12)} in the source. Re-cloning once.`)
+    fs.rmSync(dir, { recursive: true, force: true })
+    await runGitClone(module, branch, dir)
+    head = (await readCheckoutIdentity(dir)).commit
+    if (head === tip) return
+
+    throw new Error(
+        `Stale source for '${module}': the clone resolved '${branch}' to ${head ? head.slice(0, 12) : 'an unreadable commit'}`
+        + ` twice, but '${branch}' points at ${tip.slice(0, 12)}. Nothing has been deployed.`
+        + ` Deploying this would have produced a container that reports the right version while running older code.`
+    )
+}
+
+// Say which commit a module is being deployed from, every time, unprompted.
+//
+// This is the line whose absence cost real evidence: a redeploy that shipped a
+// 13-hour-old commit looked identical to a correct one, because the only things
+// printed were the module name and a version string that had not changed in
+// weeks. The commit and its date make an old tree obvious at the moment it is
+// deployed rather than after a test has measured it.
+async function reportDeployedSource(module, dir, branch) {
+    const { commit, committedAt, subject } = await readCheckoutIdentity(dir)
+    const url = redactSecrets(String(modulesUrls[module] || 'unknown source'))
+    if (!commit) {
+        console.log(`Deploy source for '${module}': commit UNKNOWN (not a git checkout?) from ${url}`)
+        return
+    }
+    console.log(`Deploy source for '${module}': ${commit} (${branch || 'default branch'})`
+        + ` committed ${committedAt || 'at an unknown time'}`
+        + (subject ? ` "${subject}"` : '')
+        + ` from ${url}`)
+}
+
 // Clone a module's source into its deploy checkout.
 //
 // A clone that would replace an EXISTING checkout is staged in a sibling
@@ -165,12 +334,14 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null, 
         const cloned = await runGitClone(module, branch, destination)
         try {
             await assertCheckoutCommit(module, destination, expectedCommit)
+            await verifyDeploySource(module, branch, destination, expectedCommit)
         } catch (err) {
             // Nothing pre-existed here, so removing the bad tree restores the
             // starting state exactly.
             fs.rmSync(destination, { recursive: true, force: true })
             throw err
         }
+        await reportDeployedSource(module, destination, branch)
         return cloned
     }
 
@@ -187,6 +358,7 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null, 
     try {
         await runGitClone(module, branch, staging)
         await assertCheckoutCommit(module, staging, expectedCommit)
+        await verifyDeploySource(module, branch, staging, expectedCommit)
     } catch (err) {
         fs.rmSync(staging, { recursive: true, force: true })
         throw err
@@ -214,6 +386,7 @@ async function cloneGit(module, rewrite = false, useTmp = false, branch = null, 
     }
 
     fs.rmSync(previous, { recursive: true, force: true })
+    await reportDeployedSource(module, destination, branch)
     return true
 }
 
@@ -667,6 +840,23 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         }
     }
 
+    // Stamp the source commit onto the IMAGE, not just onto a log line that
+    // scrolls away. Neither of the two things an operator can read off a running
+    // container answers "which code is this": the image tag is a fixed name, and
+    // the module's package.json version is a release string that stays put across
+    // dozens of commits (xchain-indexer has reported 2.7.17 since 2026-07-17), so
+    // both said "correct" about a container running a 13-hour-old tree.
+    //
+    // A label is the right carrier: it is fixed at build time, inherited by every
+    // container created from the image, and left alone by a `recreate` (which
+    // reuses the image and must NOT re-stamp it with whatever the checkout holds
+    // today, or the stamp would drift into the same lie). Read it back with
+    //   docker inspect --format '{{index .Config.Labels "xchain.source.commit"}}' <container>
+    const sourceLabels = reuseImage ? { commit: null, ref: null } : readCheckoutIdentityFromDisk(dir)
+    const buildLabelArgs = []
+    if (sourceLabels.commit) buildLabelArgs.push('--label', 'xchain.source.commit=' + sourceLabels.commit)
+    if (sourceLabels.ref)    buildLabelArgs.push('--label', 'xchain.source.ref=' + sourceLabels.ref)
+
     return new Promise((resolve, reject) => {
         // Pass every container env var as a bare `--env NAME` (value supplied in
         // the execFile `env` option below), NOT `--env NAME=value` in argv. The
@@ -775,8 +965,9 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             return
         }
 
-        console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
-        execFile('docker', ['build', '.', '-t', containerPrefix], { cwd: dir }, (error) => {
+        console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
+            + (sourceLabels.commit ? " from " + sourceLabels.commit.slice(0, 12) + " (" + (sourceLabels.ref || 'detached') + ")" : ""))
+        execFile('docker', ['build', ...buildLabelArgs, '.', '-t', containerPrefix], { cwd: dir }, (error) => {
             if (error) {
                 reject("Error creating Docker image: " + redactSecrets(error.message))
                 return
@@ -1025,6 +1216,7 @@ async function uninstallModule(coin, network, module) {
 module.exports = {
     SERVICE_HEALTHCHECK,
     cloneGit,
+    readCheckoutIdentityFromDisk,
     getModuleBranch,
     getModuleCommit,
     resolveBundledLibRef,
