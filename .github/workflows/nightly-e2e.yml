@@ -71,7 +71,7 @@ on:
         # covering the changed set only.
         description: 'Ref to install the stack at (branch, release/vX.Y.Z, or a published vX.Y.Z)'
         type: string
-        default: master
+        default: develop
 
 permissions:
   contents: read
@@ -86,7 +86,7 @@ jobs:
       # argument, so the CLI running the install is the same version as the
       # stack it installs. Splitting those two was how "we tested the release"
       # could mean "we tested master's installer against the release".
-      STACK_REF: ${{ github.event.inputs.ref || 'master' }}
+      STACK_REF: ${{ github.event.inputs.ref || 'develop' }}
       # Headless DB: point xchain-node at an external MariaDB instead of its
       # bundled DB container, so the first install does NOT stop on the
       # interactive root-password prompt (see DatabaseService.getExternalDbConfig
@@ -109,7 +109,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref || 'master' }}
+          ref: ${{ github.event.inputs.ref || 'develop' }}
 
       - uses: actions/setup-node@v4
         with:
@@ -170,7 +170,7 @@ jobs:
             git config --global url."https://github.com/".insteadOf "git@github.com:"
           fi
 
-      - name: Boot the regtest stack (clones every service at ${{ github.event.inputs.ref || 'master' }})
+      - name: Boot the regtest stack (clones every service at ${{ github.event.inputs.ref || 'develop' }})
         # First heavy step - repo clones + docker image builds + coin daemon.
         # Watch disk and image-build time here (the 120-min job timeout covers it).
         # Note: the external-DB connection for the install process itself is
