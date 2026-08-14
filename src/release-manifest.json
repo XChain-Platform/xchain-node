@@ -1,25 +1,43 @@
 {
   "_comment": [
-    "Release manifest: the pinned component set for one platform release train.",
-    "Written at release-ceremony step 6 (claude/specs/living/release-management.md",
-    "section 6) AFTER every sibling repo has merged and tagged, because the pins",
-    "record each tag's master merge-commit SHA and those commits do not exist",
-    "until the merges do.",
-    "",
-    "xchain-node is the only dense-tagged train member: checking out",
-    "xchain-node vX.Y.Z self-contains the full pinned set, so `install vX.Y.Z`",
-    "reproduces an exact release and `install` with no ref resolves the latest",
-    "xchain-node release and installs that release's manifest.",
-    "",
-    "Sparse lockstep: a component appears here at EVERY train, pinned to its",
-    "highest tag <= this train's version. A component that did not change this",
-    "train keeps its previous tag; that is the resolution rule, not a gap.",
-    "",
-    "`components` is EMPTY until the first train (0.9.0) is cut. While it is",
-    "empty every install resolves by branch exactly as it did before this file",
-    "existed, so nothing here changes behaviour pre-adoption."
+    "Pinned component set for XChain Platform v0.9.0.",
+    "Written at ceremony step 6 from the ACTUAL tagged master merge commits.",
+    "xchain-node is the carrier and is not listed: checking out its tag IS this manifest."
   ],
-  "platform_version": null,
-  "released": null,
-  "components": {}
+  "platform_version": "0.9.0",
+  "released": "2026-08-14",
+  "components": {
+    "xchain-vm": {
+      "tag": "v0.9.0",
+      "commit": "d29fba335d98cd156c5ee927a89eccdda1aaaf01"
+    },
+    "xchain-decoder": {
+      "tag": "v0.9.0",
+      "commit": "622ce5ab616f605f990692771a6682cb730fb2f4"
+    },
+    "xchain-indexer": {
+      "tag": "v0.9.0",
+      "commit": "ea53a7f99255fa20f8bacb2aee5cbc9f0b3ad1dd"
+    },
+    "xchain-hub": {
+      "tag": "v0.9.0",
+      "commit": "3a9e1b5fd3ba115f12826ea88a0868a0d10f5b5a"
+    },
+    "xchain-sync": {
+      "tag": "v0.9.0",
+      "commit": "dc75649f3469a8fa32c4a1ea7749d05da4a319f7"
+    },
+    "xchain-encoder": {
+      "tag": "v0.9.0",
+      "commit": "ea785f6da4281ebc45912f7dea1e9e062a4e8f44"
+    },
+    "xchain-utxo-tracker": {
+      "tag": "v0.9.0",
+      "commit": "21fdfd80660bd86d09d91402e23b873f0cee8574"
+    },
+    "xchain-explorer": {
+      "tag": "v0.9.0",
+      "commit": "ffc73bf4d33716e9932a87d2405b5d42e69092ba"
+    }
+  }
 }
