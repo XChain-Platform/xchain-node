@@ -37,6 +37,51 @@ describe('Integration: Database Service Chain', function () {
         await env.teardown()
     })
 
+    // executeDockerMariaDbCommand (98e37a9, predates the argv/env fix under
+    // test) feeds provisioning SQL to `docker exec -i ... mariadb -u root`
+    // over the child's STDIN, never as an argv `-e <sql>` token, precisely so
+    // secret-bearing statements (CREATE USER ... IDENTIFIED BY) never land in
+    // argv or a docker error message. It reaches the container through raw
+    // `spawn(...)`, not `execFile`/`execFileAsync`, so CommandCapture's
+    // shared execFile-based stub never sees the SQL at all, and its generic
+    // spawn stub records argv but never delivers a response or fires 'close'.
+    // This local stub replicates spawn's real event contract (stdout/stderr/
+    // stdin, 'close') for that one call shape, folds the piped SQL into the
+    // recorded command string, and routes it through the SAME
+    // `capture.when()` patterns/history the execFile stub already uses, so
+    // the regex-based assertions below (targeting the actual SQL text, e.g.
+    // /CREATE USER/) keep working against the real post-fix argv+stdin split.
+    function makeMariadbSpawnStub(cmdCapture) {
+        const EventEmitter = require('events')
+        return function spawnStub(command, args) {
+            const child = new EventEmitter()
+            child.stdout = new EventEmitter()
+            child.stderr = new EventEmitter()
+            child.stdin  = new EventEmitter()
+            const argvCommand = command + ' ' + (args || []).join(' ')
+
+            child.stdin.end = (data) => {
+                const sql = String(data || '').replace(/;\n$/, '')
+                const fullCommand = (argvCommand + ' ' + sql).trim()
+                cmdCapture.history().push({
+                    command: fullCommand, args, options: {}, type: 'spawn', timestamp: Date.now()
+                })
+                const response = cmdCapture._matchRoute(fullCommand)
+                process.nextTick(() => {
+                    if (response.error) {
+                        child.stderr.emit('data', String(response.error.message || response.error))
+                        child.emit('close', 1)
+                    } else {
+                        if (response.stdout) child.stdout.emit('data', response.stdout)
+                        child.emit('close', 0)
+                    }
+                })
+            }
+
+            return child
+        }
+    }
+
     function makeDatabaseService(options = {}) {
         const state = require('../../src/state')
         state.setDbRootPassword('testrootpw')
@@ -59,6 +104,19 @@ describe('Integration: Database Service Chain', function () {
                 IPAM: { Config: [{ Gateway: '172.18.0.1' }] }
             }])
         })
+        // getDatabaseContainerId() runs `docker inspect --type container
+        // --format {{.Id}}`, which prints the bare 64-hex container id (not
+        // JSON) on success. This route has to be registered ahead of the
+        // generic `docker inspect` one below and match its exact shape, or
+        // checkIfDatabaseModuleExists()/getDatabaseContainerId() always read
+        // back a non-hex string and treat the database as never installed
+        // regardless of options.dbContainerId. options.containerExists
+        // toggles "database already installed" (used by the reuse/grant
+        // tests) vs "fresh install" (the default, used by the first-install
+        // test) semantics.
+        capture.when(/docker inspect --type container --format/).returns(
+            options.containerExists ? { stdout: dbContainerId + '\n' } : { stdout: '' }
+        )
         capture.when(/docker inspect/).returns({
             stdout: JSON.stringify([{
                 State: { Status: 'running' },
@@ -71,7 +129,8 @@ describe('Integration: Database Service Chain', function () {
 
         const DatabaseService = proxyquire('../../src/services/DatabaseService', {
             'child_process': {
-                execFile: execFileStub
+                execFile: execFileStub,
+                spawn: makeMariadbSpawnStub(capture)
             },
             'util': {
                 promisify: () => execFileAsyncStub
@@ -95,7 +154,15 @@ describe('Integration: Database Service Chain', function () {
                 addContainerToNetwork: async () => true
             },
             '../utils/helpers': {
-                sleep: async () => {}
+                sleep: async () => {},
+                // DatabaseService logs several provisioning steps through
+                // redactSecrets(); replacing the whole module without it
+                // throws "redactSecrets is not a function" the first time a
+                // test actually exercises those log lines (e.g. a successful
+                // CREATE DATABASE/CREATE USER). An identity passthrough is
+                // fine here: these tests assert on captured commands, not on
+                // console output.
+                redactSecrets: (s) => s
             }
         })
 
@@ -110,14 +177,24 @@ describe('Integration: Database Service Chain', function () {
 
             const result = await DatabaseService.buildDatabaseModule('bitcoin', 'mainnet')
 
-            capture.assertCalled(/docker pull mariadb:latest/)
-            capture.assertCalled(/docker tag mariadb:latest xchain-node-database/)
+            // Pin tracks src/services/DatabaseService.js's actual `docker pull`/
+            // `docker tag` target; the image tag itself is not a secret.
+            capture.assertCalled(/docker pull mariadb:10.11/)
+            capture.assertCalled(/docker tag mariadb:10.11 xchain-node-database/)
 
             const runCmds = capture.findCommands(/docker run/)
             expect(runCmds).to.have.length(1)
             const runCmd = runCmds[0].command
+            const runEnv = runCmds[0].options.env
             expect(runCmd).to.include('--hostname mariadb')
-            expect(runCmd).to.include('MYSQL_ROOT_PASSWORD=testrootpw')
+            // MYSQL_ROOT_PASSWORD is a live secret. It is passed by NAME on
+            // the docker run command line; its VALUE travels only through
+            // execFile's `env` option (3b0c5fa), so it must never appear in
+            // argv (a failed `docker run` would otherwise leak it via
+            // err.cmd/err.message into upstream logging).
+            expect(runCmd).to.include('--env MYSQL_ROOT_PASSWORD')
+            expect(runCmd).to.not.include('MYSQL_ROOT_PASSWORD=testrootpw')
+            expect(runEnv.MYSQL_ROOT_PASSWORD).to.equal('testrootpw')
             expect(runCmd).to.include('xchain-node-database')
 
             const state = require('../../src/state')
@@ -142,6 +219,15 @@ describe('Integration: Database Service Chain', function () {
             const dbContainerId = TestEnv.fakeContainerId('d')
             await env.insertModule(DB_MODULE_NAME, '', '', dbContainerId)
 
+            // getDatabaseContainerId() (checkIfDatabaseModuleExists's probe)
+            // resolves the running database container via a real `docker
+            // inspect --type container --format {{.Id}}` call, not the module
+            // registry env.insertModule() just populated; without this route
+            // it reads back empty stdout, checkIfDatabaseModuleExists()
+            // returns null, and buildDatabaseModule wrongly takes the
+            // fresh-install branch instead of the reuse branch under test.
+            capture.when(/docker inspect --type container --format/).returns({ stdout: dbContainerId + '\n' })
+
             const networkConnections = []
             const DatabaseService = proxyquire('../../src/services/DatabaseService', {
                 'child_process': { execFile: capture.createExecFileStub() },
@@ -165,7 +251,10 @@ describe('Integration: Database Service Chain', function () {
                         return true
                     }
                 },
-                '../utils/helpers': { sleep: async () => {} }
+                // See makeDatabaseService's identical comment above: DatabaseService
+                // logs through redactSecrets(), so a bare `{ sleep }` mock throws
+                // "redactSecrets is not a function" once code reaches a log line.
+                '../utils/helpers': { sleep: async () => {}, redactSecrets: (s) => s }
             })
 
             const state = require('../../src/state')
@@ -192,7 +281,11 @@ describe('Integration: Database Service Chain', function () {
 
             env.writeConfigFile('bitcoin-mainnet', '')
 
-            const { DatabaseService } = makeDatabaseService({ dbContainerId })
+            // containerExists: addUserPasswordToDatabase's preCheckContainerId
+            // guard (DatabaseService.js ~L489) requires getDatabaseContainerId()
+            // to resolve the already-installed database, unlike the fresh-install
+            // test above.
+            const { DatabaseService } = makeDatabaseService({ dbContainerId, containerExists: true })
 
             await DatabaseService.addUserPasswordToDatabase(
                 'xchain-decoder', 'bitcoin', 'mainnet',
@@ -206,21 +299,40 @@ describe('Integration: Database Service Chain', function () {
             const createUserCmds = capture.findCommands(/CREATE USER/)
             expect(createUserCmds).to.have.length(1)
             expect(createUserCmds[0].command).to.include('xchain_decoder_bitcoin_mainnet')
-            expect(createUserCmds[0].command).to.include('172.18.0.0/255.255.0.0')
+            // Host is unconditionally '%' (4cc107e, predates the argv fix under
+            // test), not a per-network gateway-derived subnet: a gateway-scoped
+            // host previously blocked shared services on a different docker
+            // network (e.g. the explorer) from reaching a per-coin DB.
+            expect(createUserCmds[0].command).to.include("'%'")
 
             capture.assertCalled(/GRANT ALL PRIVILEGES ON XChain_BTC_Mainnet_Decoder/)
             capture.assertCalled(/FLUSH PRIVILEGES/)
         })
 
-        it('uses correct gateway-derived subnet from Docker network', async function () {
+        // Renamed in spirit from its original "gateway-derived subnet" premise:
+        // 4cc107e replaced the per-network subnet host with a universal '%' so
+        // cross-network shared services could reach per-coin DBs, so a
+        // different-than-usual gateway (172.20.x here vs. 172.18.x above) now
+        // has to produce the SAME '%' host, not a different subnet. This is a
+        // regression guard against reintroducing gateway-derived hosts, not a
+        // test of gateway derivation (which no longer exists).
+        it('uses "%" as the grant host regardless of the Docker network gateway', async function () {
             const dbContainerId = TestEnv.fakeContainerId('d')
             const decoderId = TestEnv.fakeContainerId('e')
             await env.insertModule(DB_MODULE_NAME, '', '', dbContainerId)
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', decoderId)
             env.writeConfigFile('bitcoin-mainnet', '')
 
+            // Same preCheckContainerId requirement as the test above: resolve
+            // the already-installed database container via `docker inspect
+            // --type container --format {{.Id}}`.
+            capture.when(/docker inspect --type container --format/).returns({ stdout: dbContainerId + '\n' })
+
             const DatabaseService = proxyquire('../../src/services/DatabaseService', {
-                'child_process': { execFile: capture.createExecFileStub() },
+                'child_process': {
+                    execFile: capture.createExecFileStub(),
+                    spawn: makeMariadbSpawnStub(capture)
+                },
                 'util': { promisify: () => capture.createExecFileAsyncStub() },
                 'enquirer': { Password: class { async run() { return 'testrootpw' } } },
                 './StatusService': {
@@ -235,7 +347,10 @@ describe('Integration: Database Service Chain', function () {
                     }),
                     addContainerToNetwork: async () => true
                 },
-                '../utils/helpers': { sleep: async () => {} }
+                // See makeDatabaseService's identical comment above: DatabaseService
+                // logs through redactSecrets(), so a bare `{ sleep }` mock throws
+                // "redactSecrets is not a function" once code reaches a log line.
+                '../utils/helpers': { sleep: async () => {}, redactSecrets: (s) => s }
             })
 
             const state = require('../../src/state')
@@ -249,7 +364,7 @@ describe('Integration: Database Service Chain', function () {
             )
 
             const createUserCmds = capture.findCommands(/CREATE USER/)
-            expect(createUserCmds[0].command).to.include('172.20.0.0/255.255.0.0')
+            expect(createUserCmds[0].command).to.include("'%'")
         })
     })
 
@@ -266,9 +381,13 @@ describe('Integration: Database Service Chain', function () {
 
             env.writeConfigFile('bitcoin-mainnet', '')
 
+            // containerExists: setDatabaseParameters (DatabaseService.js
+            // ~L664) resolves the database container up front via
+            // getDatabaseContainerId() before provisioning any account.
             const { DatabaseService } = makeDatabaseService({
                 dbContainerId,
-                installedCoins: { bitcoin: ['mainnet'] }
+                installedCoins: { bitcoin: ['mainnet'] },
+                containerExists: true
             })
 
             await DatabaseService.setDatabaseParameters()
@@ -311,7 +430,10 @@ describe('Integration: Database Service Chain', function () {
                     getDockerNetworkInspect: async () => ({ IPAM: { Config: [{ Gateway: '172.18.0.1' }] } }),
                     addContainerToNetwork: async () => true
                 },
-                '../utils/helpers': { sleep: async () => {} }
+                // See makeDatabaseService's identical comment above: DatabaseService
+                // logs through redactSecrets(), so a bare `{ sleep }` mock throws
+                // "redactSecrets is not a function" once code reaches a log line.
+                '../utils/helpers': { sleep: async () => {}, redactSecrets: (s) => s }
             })
 
             const ready = await DatabaseService.checkIfDatabaseIsReady('root', 'testrootpw')
