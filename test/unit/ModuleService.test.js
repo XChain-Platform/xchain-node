@@ -46,7 +46,7 @@ function makeStubs() {
     }
 }
 
-function loadModuleService(stubs, constantsOverride) {
+function loadModuleService(stubs, constantsOverride, extraProxies) {
     const configServiceStub = {
         getModuleDir: (mod) => '/modules/' + mod,
         getModuleTmpDir: (mod) => '/tmp/' + mod,
@@ -137,6 +137,9 @@ function loadModuleService(stubs, constantsOverride) {
     }
     if (constantsOverride) {
         proxies['../config/constants'] = Object.assign({}, require('../../src/config/constants'), constantsOverride)
+    }
+    if (extraProxies) {
+        Object.assign(proxies, extraProxies)
     }
     return proxyquire('../../src/services/ModuleService', proxies)
 }
@@ -2739,6 +2742,82 @@ describe('ModuleService', function () {
             expect(removeModuleDir.called).to.be.false
             expect(fs.rmSync.called).to.be.false
             expect(fs.renameSync.called).to.be.false
+        })
+    })
+
+    // buildAndUp: hub consensus-env drift guard wiring (row 58). The guard itself
+    // (drift detection, warn/refuse text) is pure-function tested in
+    // HubConsensusEnvGuard.test.js; this only proves buildAndUp actually calls it
+    // for the hub, passes it the generated env, propagates a refusal, and does
+    // NOT call it for an unrelated module.
+    describe('buildAndUp(): hub consensus-env drift guard wiring', function () {
+
+        it('calls assertNoHubConsensusEnvDrift with the generated hub env', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') cb(null)
+                else if (args[0] === 'run') cb(null, 'a'.repeat(64) + '\n')
+                else cb(null)
+            })
+            const assertNoHubConsensusEnvDrift = sinon.stub().resolves([])
+            const ms = loadModuleService(stubs, null, {
+                './HubConsensusEnvGuard': { assertNoHubConsensusEnvDrift }
+            })
+
+            await ms.buildAndUp('xchain-hub', null, null)
+
+            expect(assertNoHubConsensusEnvDrift.calledOnce).to.equal(true)
+            expect(assertNoHubConsensusEnvDrift.firstCall.args[0]).to.deep.equal({
+                'NETWORK': 'bitcoin-mainnet', 'NODE_URL': 'node', 'NODE_PORT': 8332,
+                'DECODER_PORT': 3002, 'DECODER_API_PORT': 3002,
+                'DECODER_BOOTSTRAP_VOLUME': '/data/bitcoin/mainnet/xchain-decoder/bootstrap/',
+                'ENCODER_PORT': 3003, 'ENCODER_API_PORT': 3003,
+                'UTXO_TRACKER_PORT': 3001, 'UTXO_TRACKER_API_PORT': 3001,
+                'UTXO_TRACKER_BOOTSTRAP_VOLUME': '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/',
+                'INDEXER_PORT': 3004, 'INDEXER_API_PORT': 3004,
+                'REGTEST_MINER_PORT': 3005, 'REGTEST_MINER_API_PORT': 3005,
+                'HUB_PORT': 10000, 'EXPLORER_PORT_HTTP': 18080, 'EXPLORER_API_PORT_HTTP': 8080,
+                'EXPLORER_PORT_HTTPS': 18081, 'EXPLORER_API_PORT_HTTPS': 8081,
+                'SYNC_PORT': 3006, 'SYNC_API_PORT': 3006
+            })
+        })
+
+        it('propagates a refusal from the guard instead of building the hub', async function () {
+            const stubs = makeStubs()
+            const refusal = new Error('hub consensus env drift')
+            refusal.code = 'HUB_CONSENSUS_ENV_DRIFT'
+            const assertNoHubConsensusEnvDrift = sinon.stub().rejects(refusal)
+            const ms = loadModuleService(stubs, null, {
+                './HubConsensusEnvGuard': { assertNoHubConsensusEnvDrift }
+            })
+
+            let thrown = null
+            try {
+                await ms.buildAndUp('xchain-hub', null, null)
+            } catch (err) { thrown = err }
+
+            expect(thrown).to.equal(refusal)
+            // The refusal fires before any build/create work runs.
+            expect(stubs.execFile.called).to.equal(false)
+        })
+
+        it('does not call the hub guard for an unrelated module', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') cb(null)
+                else if (args[0] === 'run') cb(null, 'a'.repeat(64) + '\n')
+                else cb(null)
+            })
+            const assertNoHubConsensusEnvDrift = sinon.stub().resolves([])
+            const ms = loadModuleService(stubs, null, {
+                './HubConsensusEnvGuard': { assertNoHubConsensusEnvDrift }
+            })
+
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+
+            expect(assertNoHubConsensusEnvDrift.called).to.equal(false)
         })
     })
 })

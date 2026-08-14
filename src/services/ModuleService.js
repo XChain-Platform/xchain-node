@@ -752,6 +752,18 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     const { assertGoLiveReady } = require('./GoLiveGate')
     assertGoLiveReady(module, coin, network, environmentVariables, dir)
 
+    // Hub consensus-shaped settings (HUB_NETWORK, ORACLE_MIN_SUBMISSIONS,
+    // ORACLE_ROUND_INTERVAL/SUBMISSION_WINDOW, XCHAIN_PRICE_INDEXER_DB_*) are
+    // passed through from the INVOKING SHELL with no warning when absent, so a
+    // recreate/update run from a shell that lacks one quietly deploys a hub
+    // with different consensus behavior than the one just torn down. Refuses
+    // when a RUNNING hub would lose a value it already has; only warns (never
+    // blocks) when there is no running hub to lose anything from.
+    if (module === HUB_MODULE_NAME) {
+        const { assertNoHubConsensusEnvDrift } = require('./HubConsensusEnvGuard')
+        await assertNoHubConsensusEnvDrift(environmentVariables)
+    }
+
     // Stage any bundled library modules into this service's build context.
     // The service's Dockerfile COPYs them in and npm resolves the
     // "file:./<lib>" deps recursively at install.

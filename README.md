@@ -92,10 +92,12 @@ xchain-node validator init \
 ```
 
 It generates an Ed25519 signing key (saved `0600` under `config/validator/`),
-prints the **pubkey to stake XCHAIN to**, and writes a starter `capabilities.json`.
-Edit that file to set real `cross_chain` RPC endpoints and `oracle_publish` DOGE
-values, then install/start the hub. It will boot in validator mode with your key
-and capability config mounted automatically:
+prints the **pubkey to stake XCHAIN to**, and writes a starter `capabilities.json`
+under `config/validator/hub-caps/` (its own subdirectory, mounted read-only into
+the hub container; the signing key is never mounted). Edit that file to set real
+`cross_chain` RPC endpoints and `oracle_publish` DOGE values, then install/start
+the hub. It will boot in validator mode with your key and capability config
+mounted automatically:
 
 ```bash
 xchain-node install master xchain-hub
