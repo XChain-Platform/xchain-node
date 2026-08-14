@@ -275,15 +275,43 @@ describe('ReleaseManifestService', () => {
     })
 
     describe('the shipped manifest', () => {
-        it('is valid JSON with an empty component set until the first train', () => {
-            // Guards the pre-adoption promise: while `components` is empty every
-            // install resolves by branch exactly as it did before these rails existed.
-            const shipped = require('../../src/release-manifest.json')
-            const real    = proxyquire('../../src/services/ReleaseManifestService', {
-                '../GitHubDownloader': { githubApiHeaders: () => ({}), githubRateLimitError: () => null }
-            })
-            expect(real.manifestHasPins(shipped)).to.equal(false)
-            expect(real.getComponentPin(shipped, 'xchain-vm')).to.equal(null)
+        // Was "components is empty until the first train". That was the correct
+        // invariant right up to the moment 0.9.0 was cut, and it is now the wrong
+        // one: the shipped manifest carries real pins. What has to hold from here
+        // on is that every pin is USABLE, because a malformed one is the failure
+        // this whole file exists to prevent.
+        const shipped = require('../../src/release-manifest.json')
+        const real    = proxyquire('../../src/services/ReleaseManifestService', {
+            '../GitHubDownloader': { githubApiHeaders: () => ({}), githubRateLimitError: () => null }
+        })
+
+        it('declares a platform version and a release date', () => {
+            expect(shipped.platform_version).to.match(/^\d+\.\d+\.\d+$/)
+            expect(shipped.released).to.match(/^\d{4}-\d{2}-\d{2}$/)
+        })
+
+        it('pins every component to a tag and a full 40-hex commit', () => {
+            expect(real.manifestHasPins(shipped)).to.equal(true)
+            for (const name of Object.keys(shipped.components)) {
+                const pin = real.getComponentPin(shipped, name)
+                expect(pin, `${name} must resolve`).to.not.equal(null)
+                expect(pin.commit, `${name} commit`).to.match(/^[0-9a-f]{40}$/)
+                expect(pin.tag, `${name} tag`).to.match(/^v\d+\.\d+\.\d+$/)
+            }
+        })
+
+        it('pins every component at the platform version it ships in', () => {
+            // A component pinned at some other tag would mean the manifest and the
+            // release number disagree about what "XChain 0.9.0" contains.
+            for (const [name, pin] of Object.entries(shipped.components)) {
+                expect(pin.tag, `${name} tag matches the train`).to.equal('v' + shipped.platform_version)
+            }
+        })
+
+        it('does not pin xchain-node itself', () => {
+            // node is the carrier: checking out its tag IS this manifest, so listing
+            // it would be a self-reference that can never be written before the fact.
+            expect(shipped.components['xchain-node']).to.equal(undefined)
         })
     })
 })
