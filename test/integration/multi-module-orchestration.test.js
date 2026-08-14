@@ -210,7 +210,13 @@ describe('Integration: Multi-Module Orchestration', function () {
             const oldContainerId = TestEnv.fakeContainerId('o')
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', oldContainerId)
 
-            const clonedModules = []
+            // Since b1601d8 (2026-06-11), updateModulesOnBranch no longer calls
+            // ModuleService.cloneGit itself for the moduleContainerId-exists path;
+            // installModule does the clone internally (moduleOperations.js comment:
+            // "installModule does the clone, so no separate cloneGit is needed
+            // here"). Assert on the installModule call instead of a cloneGit spy
+            // that this path never invokes.
+            const installCalls = []
 
             const moduleOps = proxyquire('../../src/operations/moduleOperations', {
                 '../services/DockerService': {
@@ -226,8 +232,11 @@ describe('Integration: Multi-Module Orchestration', function () {
                     startDockerMonitor: async () => true
                 },
                 '../services/ModuleService': {
-                    installModule: async () => TestEnv.fakeContainerId('n'),
-                    cloneGit: async (module) => { clonedModules.push(module); return true }
+                    installModule: async (module, coin, network, remoteUpdate, overwriteId) => {
+                        installCalls.push({ module, coin, network, overwriteId })
+                        return TestEnv.fakeContainerId('n')
+                    },
+                    cloneGit: async () => true
                 },
                 '../services/DatabaseService': {
                     buildDatabaseModule: async () => true
@@ -237,7 +246,7 @@ describe('Integration: Multi-Module Orchestration', function () {
             const serviceList = { 'bitcoin': { 'mainnet': ['xchain-decoder'] } }
             await moduleOps.updateModules(serviceList)
 
-            expect(clonedModules).to.include('xchain-decoder')
+            expect(installCalls.map(c => c.module)).to.include('xchain-decoder')
         })
     })
 

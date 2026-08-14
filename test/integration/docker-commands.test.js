@@ -15,7 +15,7 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
 const {
-    XChainService, EXPLORER_MODULE_NAME, HUB_MODULE_NAME, INDEXER_SYNC_MODULE_NAME,
+    XChainService, EXPLORER_MODULE_NAME, HUB_MODULE_NAME, SYNC_MODULE_NAME,
     Coin, Network, CoinTickerSymbol
 } = require('../../src/config/constants')
 
@@ -293,9 +293,17 @@ describe('Integration: Docker Command Construction', function () {
             expect(killCmds).to.have.length(1)
             expect(killCmds[0].command).to.include(oldContainerId)
 
+            // Two `docker rm`s, not one: the explicit overwriteContainerId removal
+            // above is id-keyed, plus buildAndUp also runs a name-keyed
+            // forceRemoveContainerByName(containerPrefix) immediately before
+            // `docker run --name`, to catch a leftover carcass the registry never
+            // recorded (e.g. an interrupted prior run). Deliberate belt-and-suspenders
+            // cleanup, not a duplicate call; see ModuleService.js's
+            // "Name-keyed cleanup" comment (uuid:9533ee7a).
             const rmCmds = capture.findCommands(/docker rm/)
-            expect(rmCmds).to.have.length(1)
-            expect(rmCmds[0].command).to.include(oldContainerId)
+            expect(rmCmds).to.have.length(2)
+            expect(rmCmds.some(c => c.command.includes(oldContainerId))).to.be.true
+            expect(rmCmds.some(c => c.command.includes('xchain-node-bitcoin-mainnet-xchain-encoder'))).to.be.true
 
             const runCmds = capture.findCommands(/docker run/)
             expect(runCmds).to.have.length(1)

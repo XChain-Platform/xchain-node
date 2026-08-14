@@ -132,7 +132,13 @@ describe('Integration: Hub/Explorer Config Update', function () {
             await env.insertModule('node', 'bitcoin', 'mainnet', nodeId)
             await env.insertModule('xchain-hub', '', '', hubId)
 
-            env.writeConfigFile('bitcoin-mainnet', '')
+            // Since a2f1919 (2026-07-17), ConfigService generates a random
+            // NODE_USER/NODE_PASSWORD per install whenever the config file
+            // doesn't already carry them, rather than falling through to the
+            // static "rpc"/"rpc" default (a well-known credential left on a
+            // live stack). Seed both here so this test still asserts a known,
+            // fixed value instead of a per-run random one.
+            env.writeConfigFile('bitcoin-mainnet', 'NODE_USER=rpc\nNODE_PASSWORD=rpc\n')
             state.setStatusUpdated(true)
             state.setLastStatus({
                 'bitcoin': {

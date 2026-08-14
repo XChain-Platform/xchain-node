@@ -18,7 +18,7 @@ const { Readable } = require('stream')
 
 const {
     NODE_PREFIX, SEP, DB_SEP,
-    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, INDEXER_SYNC_MODULE_NAME,
+    NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     Coin, Network, XChainService, CoinTickerSymbol, REGTEST_MODULES,
     moduleDir, tmpDir, configDir
 } = require('../../src/config/constants')

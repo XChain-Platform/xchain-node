@@ -46,7 +46,15 @@ describe('Integration: Status Query Chain', function () {
                     if (containerId in inspectResponses) {
                         return inspectResponses[containerId]
                     }
-                    throw new Error('Container not found: ' + containerId)
+                    // Match `docker inspect`'s real error text (StatusService's
+                    // isContainerGoneError greps for "no such (object|container|
+                    // image)"). A message that doesn't match reads as a transient
+                    // inspect failure and is deliberately kept visible with an
+                    // "unknown" state instead of pruned (src/services/
+                    // StatusService.js, since d3cbc8a); only a confirmed-gone
+                    // error prunes the module, which is what these two tests mean
+                    // to exercise.
+                    throw new Error('No such object: ' + containerId)
                 }
             },
             './VersionService': {

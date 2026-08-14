@@ -258,7 +258,7 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
         'install', 'uninstall', 'update', 'ps',
         'start', 'stop', 'restart',
         'tail', 'logs', 'monitor', 'tailmonitor',
-        'exec', 'shell', 'e2etest', 'reset', 'rollback', 'bootstrap'
+        'exec', 'shell', 'e2etest', 'reset', 'rollback', 'bootstrap', 'validator'
     ]
 
     it('registers all expected commands', function () {
@@ -270,12 +270,19 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
 
     it('each command has an action handler', function () {
         for (const cmd of program.commands) {
+            // Command groups (e.g. `validator`, which only routes to `validator
+            // init`/`validator status`) intentionally have no action handler of
+            // their own; commander dispatches to their subcommands instead.
+            if (cmd.commands.length > 0) continue
             expect(cmd._actionHandler, `${cmd.name()} missing action handler`).to.be.a('function')
         }
     })
 
     const expectedArgs = {
-        'install':     { required: 2, optional: 2 },
+        // install's ref/service/chain/network all became optional (commit f9f5e67:
+        // an omitted ref resolves the latest published release), so 0/4 is the
+        // current contract, not the pre-f9f5e67 2/2.
+        'install':     { required: 0, optional: 4 },
         'uninstall':   { required: 1, optional: 2 },
         'update':      { required: 1, optional: 3 },
         'ps':          { required: 0, optional: 0 },
@@ -453,7 +460,7 @@ describe('S-SMOKE-004 – Constants and Enum Integrity', function () {
             ...Object.values(constants.XChainService),
             constants.HUB_MODULE_NAME,
             constants.EXPLORER_MODULE_NAME,
-            constants.INDEXER_SYNC_MODULE_NAME
+            constants.SYNC_MODULE_NAME
         ]
 
         for (const mod of allModules) {
@@ -468,7 +475,7 @@ describe('S-SMOKE-004 – Constants and Enum Integrity', function () {
             ...Object.values(constants.XChainService),
             constants.HUB_MODULE_NAME,
             constants.EXPLORER_MODULE_NAME,
-            constants.INDEXER_SYNC_MODULE_NAME
+            constants.SYNC_MODULE_NAME
         ]
 
         for (const mod of allModules) {
