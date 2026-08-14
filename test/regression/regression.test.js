@@ -754,8 +754,10 @@ describe('Regression Suite', function () {
 
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
 
+            // installModules reports what it built (it used to return a bare true,
+            // which made "installed the stack" and "installed nothing" identical).
             const installResult = await cli.moduleOps.installModules(serviceList, 'master')
-            expect(installResult).to.be.true
+            expect(installResult.installed.length).to.be.greaterThan(0)
 
             const modulesAfterInstall = await env.getAllModules()
             expect(modulesAfterInstall.length).to.be.greaterThanOrEqual(5)
@@ -781,8 +783,10 @@ describe('Regression Suite', function () {
                 expect(after.container_id).to.equal(mod.container_id)
             }
 
+            // Resolving at all is now the success signal: uninstallModules rejects
+            // when any module failed, instead of returning true regardless.
             const uninstallResult = await cli.moduleOps.uninstallModules(serviceList)
-            expect(uninstallResult).to.be.true
+            expect(uninstallResult.uninstalled.length).to.be.greaterThan(0)
         })
 
         it('R-E2E-002: install stores correct coin/network per module in LevelDB', async function () {

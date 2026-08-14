@@ -1471,9 +1471,9 @@ describe('ModuleService', function () {
             expect(capturedFilter('/path/to/src/index.js')).to.be.true
         })
 
-        it('mounts capability config volume when HUB_CAPABILITY_CONFIG is set', async function () {
+        it('mounts the capability config DIRECTORY when HUB_CAPABILITY_CONFIG is set', async function () {
             const stubs = makeStubs()
-            const capsHostPath = '/host/caps.json'
+            const capsHostDir = '/host/validator/hub-caps'
             let runArgs = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let opts = {}, cb
@@ -1522,17 +1522,19 @@ describe('ModuleService', function () {
                 },
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './ValidatorService': {
-                    getCapabilityConfigHostPath: () => capsHostPath,
-                    CAPS_CONTAINER_PATH: '/container/caps.json'
+                    getCapabilityConfigMountDir: () => capsHostDir,
+                    CAPS_CONTAINER_DIR: '/validator'
                 },
                 './VersionService': { getLocalNodeVersion: sinon.stub().resolves(null), getLocalModuleVersion: sinon.stub().resolves(null), checkRemoteNodeVersion: sinon.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon.stub().resolves(true), getCryptoNode: sinon.stub().resolves() },
                 './ExplorerService': { installExplorerModule: sinon.stub().resolves(true) }
             })
             await ms2.buildAndUp('xchain-hub', 'bitcoin', 'mainnet')
-            // Should have a volume mount for the capability config
+            // Should have a volume mount for the capability config, and it must be
+            // the containing DIRECTORY: a single-file bind mount permanently breaks
+            // `docker cp` against this container.
             expect(runArgs).to.include('-v')
-            expect(runArgs.some(a => typeof a === 'string' && a.includes(capsHostPath))).to.be.true
+            expect(runArgs).to.include(capsHostDir + ':/validator:ro')
         })
 
         it('rejects when port value is invalid (non-numeric)', async function () {

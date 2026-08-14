@@ -19,9 +19,9 @@ const { installUnhandledRejectionHandler } = require('../../src/cli')
 
 const CLI_PATH = path.join(__dirname, '..', '..', 'src', 'cli')
 
-// Builds the `update` command's action handler with moduleOperations stubbed,
-// so the exit code the CLI chooses can be observed without a live stack.
-function loadUpdateAction(updateModulesStub) {
+// Builds the CLI's command handlers with moduleOperations stubbed, so the exit
+// code the CLI chooses can be observed without a live stack.
+function loadCli(opsOverrides = {}) {
     const { Command } = require('commander')
     const captured = new Command()
     const cli = proxyquire(CLI_PATH, {
@@ -36,9 +36,9 @@ function loadUpdateAction(updateModulesStub) {
         },
         './operations/moduleOperations': {
             installModules: sinon.stub().resolves(),
-            updateModules: updateModulesStub,
-            uninstallModules: sinon.stub().resolves(),
-            recreateModules: sinon.stub().resolves(),
+            updateModules: sinon.stub().resolves({ updated: [{}], skipped: [] }),
+            uninstallModules: sinon.stub().resolves({ uninstalled: [{}], skipped: [] }),
+            recreateModules: sinon.stub().resolves({ recreated: [{}], skipped: [] }),
             logModules: sinon.stub().resolves(),
             monitorModules: sinon.stub().resolves(),
             restartModules: sinon.stub().resolves(),
@@ -48,12 +48,17 @@ function loadUpdateAction(updateModulesStub) {
             shellModule: sinon.stub().resolves(),
             runE2ETest: sinon.stub().resolves({ logFile: '', exitCode: 0 }),
             resetModules: sinon.stub().resolves(),
-            listServedBootstrapCombos: sinon.stub().resolves([])
+            listServedBootstrapCombos: sinon.stub().resolves([]),
+            ...opsOverrides
         },
         './services/StatusService': { getStatus: sinon.stub().resolves(), statusChanged: sinon.stub().resolves() }
     })
     cli.parseCommand()
     return captured
+}
+
+function loadUpdateAction(updateModulesStub) {
+    return loadCli({ updateModules: updateModulesStub })
 }
 
 // The row this covers: `update` printed a refusal / did nothing and still left
@@ -101,6 +106,93 @@ describe('CLI `update` exit code', function () {
             skipped: []
         }))
         await runUpdate(program)
+        expect(exitStub.calledWith(0)).to.be.true
+        expect(exitStub.calledWith(1)).to.be.false
+    })
+})
+
+// Same shape as the `update` no-op above: `recreate` printed "recreate does not
+// apply to <module>", recreated nothing, and exited 0.
+describe('CLI `recreate` exit code', function () {
+
+    let exitStub, errorStub
+
+    beforeEach(function () {
+        exitStub  = sinon.stub(process, 'exit')
+        errorStub = sinon.stub(console, 'error')
+    })
+
+    afterEach(function () { sinon.restore() })
+
+    async function runRecreate(program) {
+        await program.parseAsync(['recreate', 'node', 'bitcoin', 'regtest'], { from: 'user' })
+    }
+
+    it('exits NON-ZERO when every requested module was refused', async function () {
+        const program = loadCli({
+            recreateModules: sinon.stub().resolves({
+                recreated: [],
+                skipped: [{ module: 'node', coin: 'bitcoin', network: 'regtest', reason: 'not-recreatable' }]
+            })
+        })
+        await runRecreate(program)
+        expect(errorStub.calledWithMatch(/nothing was recreated/)).to.be.true
+        expect(errorStub.calledWithMatch(/not-recreatable/)).to.be.true
+        expect(exitStub.calledWith(1)).to.be.true
+        expect(exitStub.calledWith(0)).to.be.false
+    })
+
+    it('exits NON-ZERO when recreate throws', async function () {
+        const program = loadCli({ recreateModules: sinon.stub().rejects(new Error('No local image tagged x to reuse')) })
+        await runRecreate(program)
+        expect(errorStub.calledWithMatch(/recreate failed: No local image tagged/)).to.be.true
+        expect(exitStub.calledWith(1)).to.be.true
+    })
+
+    it('exits ZERO when a container was actually recreated', async function () {
+        const program = loadCli({
+            recreateModules: sinon.stub().resolves({
+                recreated: [{ module: 'xchain-indexer', coin: 'bitcoin', network: 'regtest' }],
+                skipped: []
+            })
+        })
+        await runRecreate(program)
+        expect(exitStub.calledWith(0)).to.be.true
+        expect(exitStub.calledWith(1)).to.be.false
+    })
+})
+
+// `uninstall` printed the per-module error and exited 0, so a teardown that left
+// containers running read as a clean one.
+describe('CLI `uninstall` exit code', function () {
+
+    let exitStub, errorStub
+
+    beforeEach(function () {
+        exitStub  = sinon.stub(process, 'exit')
+        errorStub = sinon.stub(console, 'error')
+    })
+
+    afterEach(function () { sinon.restore() })
+
+    async function runUninstall(program) {
+        await program.parseAsync(['uninstall', 'xchain-indexer', 'bitcoin', 'regtest'], { from: 'user' })
+    }
+
+    it('exits NON-ZERO when a module failed to uninstall', async function () {
+        const failure = new Error('uninstall failed for 1 module: xchain-indexer (bitcoin regtest): container kill failed')
+        const program = loadCli({ uninstallModules: sinon.stub().rejects(failure) })
+        await runUninstall(program)
+        expect(errorStub.calledWithMatch(/uninstall failed for 1 module/)).to.be.true
+        expect(exitStub.calledWith(1)).to.be.true
+        expect(exitStub.calledWith(0)).to.be.false
+    })
+
+    it('exits ZERO when every module came down', async function () {
+        const program = loadCli({
+            uninstallModules: sinon.stub().resolves({ uninstalled: [{ module: 'xchain-indexer' }], skipped: [] })
+        })
+        await runUninstall(program)
         expect(exitStub.calledWith(0)).to.be.true
         expect(exitStub.calledWith(1)).to.be.false
     })

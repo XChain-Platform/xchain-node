@@ -40,7 +40,7 @@ const { getStatus }            = require('./services/StatusService')
 const { scanAndRegisterModules } = require('./services/DiscoveryService')
 const { maybeReportTelemetry } = require('./services/TelemetryService')
 const { makeBootstrap, listServedBootstrapCombos } = require('./services/BootstrapService')
-const { initValidator, getValidatorSettings, isInitialized } = require('./services/ValidatorService')
+const { initValidator, getValidatorSettings, isInitialized, getCapabilityConfigHostPath } = require('./services/ValidatorService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 const { acquireCommandLock } = require('./utils/commandLock')
 
@@ -195,7 +195,16 @@ async function parseCommand() {
         .option('--include-shared', 'Also uninstall shared services (database, xchain-hub, xchain-explorer, xchain-sync)')
         .action(async (service, chain, network, options) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await uninstallModules(serviceList, options.includeShared)
+            // A module that failed to uninstall used to be printed and forgotten,
+            // leaving the command exiting 0 with containers still running. The
+            // remaining modules are still attempted (uninstallModules finishes the
+            // list first); only the exit status changes.
+            try {
+                await uninstallModules(serviceList, options.includeShared)
+            } catch (err) {
+                console.error('uninstall failed: ' + redactSecrets(err && err.message ? err.message : err))
+                return process.exit(1)
+            }
             return process.exit(0)
         })
 
@@ -242,10 +251,22 @@ async function parseCommand() {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
+            let outcome
             try {
-                await recreateModules(serviceList)
+                outcome = await recreateModules(serviceList)
             } catch (err) {
                 console.error('recreate failed: ' + redactSecrets(err && err.message ? err.message : err))
+                return process.exit(1)
+            }
+            // Same rule as `update`: a run that recreated NO container did not do
+            // what the operator asked, whatever it printed on the way. `recreate
+            // node` (unsupported) took this path and still exited 0.
+            if (!outcome || !Array.isArray(outcome.recreated) || outcome.recreated.length === 0) {
+                const why = ((outcome && outcome.skipped) || [])
+                    .map(s => `${s.module} (${s.coin} ${s.network}): ${s.reason}`)
+                    .join('; ')
+                console.error('recreate failed: nothing was recreated'
+                    + (why ? ' - ' + why : ' (no requested service can be recreated from the config map)'))
                 return process.exit(1)
             }
             // The operator's next move is always to check the container came back,
@@ -542,6 +563,10 @@ Notes:
                 console.log('  seed nodes   : ' + ((s.SEED_NODES || []).join(', ') || '(none)'))
                 console.log('  oracle epoch : ' + (s.ORACLE_EPOCH_START || '(unset, required before oracle runs)'))
                 console.log('  capabilities : ' + ((s.capabilities || []).join(', ') || '(none)'))
+                // Print the live path: it moved into its own directory (so the hub's
+                // bind mount cannot break `docker cp`), and this is where an operator
+                // coming from an older install finds it after the migration.
+                console.log('  caps config  : ' + (getCapabilityConfigHostPath() || '(missing; re-run validator init)'))
             }
             return process.exit(0)
         })

@@ -38,6 +38,14 @@ const { getDockerContainerFileData, getDockerContainerFileCat }              = r
  * unreadable and, through the skew guard, made every indexer update refuse.
  * `docker exec cat` needs no host filesystem at all and reads the same bytes.
  *
+ * That daemon refusal has since been fixed at its source: it came from the
+ * hub's capability config being a SINGLE-FILE bind mount, which docker's copy
+ * path collides with while recreating mount destinations as directories, and
+ * ValidatorService now mounts the containing directory instead. Exec-first
+ * stays regardless - it is the cheaper probe and needs no host filesystem, and
+ * any future single-file mount on any container would reintroduce the same
+ * class of copy failure.
+ *
  * The copy is kept as the fallback rather than deleted: `docker cp` works on a
  * STOPPED container, which `docker exec` cannot enter, and the version of a
  * stopped module is exactly what `ps` wants to show.

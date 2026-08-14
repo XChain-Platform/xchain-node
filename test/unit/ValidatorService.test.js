@@ -21,7 +21,12 @@ const FAKE_CONFIG_DIR = '/tmp/test-xchain-config'
 const FAKE_VALIDATOR_DIR = path.join(FAKE_CONFIG_DIR, 'validator')
 const FAKE_KEY_FILE      = path.join(FAKE_VALIDATOR_DIR, 'signing.key')
 const FAKE_SETTINGS_FILE = path.join(FAKE_VALIDATOR_DIR, 'validator.json')
-const FAKE_CAPS_FILE     = path.join(FAKE_VALIDATOR_DIR, 'capabilities.json')
+// The capability config lives in its OWN directory: that directory is what the
+// hub container bind-mounts, and a single-FILE bind mount breaks `docker cp`
+// against the container for every path. signing.key must stay outside it.
+const FAKE_CAPS_DIR      = path.join(FAKE_VALIDATOR_DIR, 'hub-caps')
+const FAKE_CAPS_FILE     = path.join(FAKE_CAPS_DIR, 'capabilities.json')
+const FAKE_LEGACY_CAPS   = path.join(FAKE_VALIDATOR_DIR, 'capabilities.json')
 
 // Generate a real 64-hex Ed25519 seed for tests that need valid crypto
 function makeSeedHex() {
@@ -37,6 +42,18 @@ function loadValidatorService(fsStub) {
     })
 }
 
+// Treat every path named here as a regular file for lstat purposes, so the
+// layout migration can tell a real config file from the DIRECTORY docker
+// auto-creates at a missing bind-mount source.
+function fileLstat(paths) {
+    return sinon.stub().callsFake(p => {
+        if (paths.includes(p)) return { isFile: () => true }
+        const err = new Error('ENOENT: ' + p)
+        err.code = 'ENOENT'
+        throw err
+    })
+}
+
 function makeFs(overrides = {}) {
     return {
         existsSync:    sinon.stub().returns(false),
@@ -44,6 +61,9 @@ function makeFs(overrides = {}) {
         writeFileSync: sinon.stub(),
         mkdirSync:     sinon.stub(),
         chmodSync:     sinon.stub(),
+        lstatSync:     fileLstat([]),
+        renameSync:    sinon.stub(),
+        readdirSync:   sinon.stub().returns(['capabilities.json']),
         ...overrides
     }
 }
@@ -230,7 +250,8 @@ describe('ValidatorService', function () {
         it('skips capabilities file write when it already exists and force is false', async function () {
             const existingSettings = makeSettings()
             const fs = makeFs({
-                existsSync: sinon.stub().callsFake(p => p === FAKE_CAPS_FILE)
+                existsSync: sinon.stub().callsFake(p => p === FAKE_CAPS_FILE),
+                lstatSync:  fileLstat([FAKE_CAPS_FILE])
                 // SETTINGS_FILE and KEY_FILE do NOT exist → triggers a fresh init
             })
             const vs = loadValidatorService(fs)
@@ -250,11 +271,24 @@ describe('ValidatorService', function () {
 
         it('skips validator dir creation if it already exists', async function () {
             const fs = makeFs({
-                existsSync: sinon.stub().callsFake(p => p === FAKE_VALIDATOR_DIR)
+                existsSync: sinon.stub().callsFake(p => p === FAKE_VALIDATOR_DIR || p === FAKE_CAPS_DIR)
             })
             const vs = loadValidatorService(fs)
             await vs.initValidator()
             expect(fs.mkdirSync.called).to.be.false
+        })
+
+        it('creates the capability-config directory and writes the config inside it', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            await vs.initValidator()
+            expect(fs.mkdirSync.calledWith(FAKE_CAPS_DIR, { recursive: true })).to.be.true
+            const writes = fs.writeFileSync.getCalls().map(c => c.args[0])
+            expect(writes).to.include(FAKE_CAPS_FILE)
+            // The signing key stays OUT of the mounted directory: everything in
+            // that directory is handed to the hub container.
+            expect(writes).to.include(FAKE_KEY_FILE)
+            expect(FAKE_KEY_FILE.startsWith(FAKE_CAPS_DIR + path.sep)).to.be.false
         })
     })
 
@@ -416,6 +450,7 @@ describe('ValidatorService', function () {
             const fs = makeFs({
                 existsSync: sinon.stub().callsFake(p =>
                     p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE || p === FAKE_CAPS_FILE),
+                lstatSync: fileLstat([FAKE_CAPS_FILE]),
                 readFileSync: sinon.stub().returns(JSON.stringify(settings))
             })
             const vs = loadValidatorService(fs)
@@ -435,11 +470,113 @@ describe('ValidatorService', function () {
         })
     })
 
-    describe('CAPS_CONTAINER_PATH', function () {
+    // The hub container's mount. A single-FILE bind mount makes `docker cp`
+    // against that container fail for EVERY path with "mkdirat
+    // validator/capabilities.json: file exists", because docker recreates each
+    // mount destination as a directory during a copy. The fix mounts the
+    // containing directory instead - which is only safe while that directory
+    // holds nothing but the capability config, since signing.key is the
+    // validator's private key.
+    describe('getCapabilityConfigMountDir()', function () {
 
-        it('equals "/validator/capabilities.json"', function () {
+        function initializedFs(extraFiles = []) {
+            return makeFs({
+                existsSync: sinon.stub().callsFake(p =>
+                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE || p === FAKE_CAPS_FILE || p === FAKE_CAPS_DIR),
+                lstatSync: fileLstat([FAKE_CAPS_FILE]),
+                readdirSync: sinon.stub().returns(['capabilities.json', ...extraFiles]),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+            })
+        }
+
+        it('returns the DIRECTORY holding the capability config, not the file', function () {
+            const vs = loadValidatorService(initializedFs())
+            expect(vs.getCapabilityConfigMountDir()).to.equal(FAKE_CAPS_DIR)
+            expect(vs.getCapabilityConfigMountDir()).to.not.equal(FAKE_CAPS_FILE)
+        })
+
+        it('returns null when this node is not a validator', function () {
+            const vs = loadValidatorService(makeFs())
+            expect(vs.getCapabilityConfigMountDir()).to.be.null
+        })
+
+        it('REFUSES to hand the hub a directory that also holds the signing key', function () {
+            const vs = loadValidatorService(initializedFs(['signing.key']))
+            expect(() => vs.getCapabilityConfigMountDir()).to.throw(/signing key MUST NOT be in this directory/)
+        })
+
+        it('refuses any other stray file in the mounted directory', function () {
+            const vs = loadValidatorService(initializedFs(['validator.json']))
+            expect(() => vs.getCapabilityConfigMountDir()).to.throw(/must contain only capabilities\.json.*validator\.json/s)
+        })
+    })
+
+    describe('capability-config layout migration', function () {
+
+        it('moves a pre-hub-caps capabilities.json into its own directory', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p =>
+                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE || p === FAKE_LEGACY_CAPS),
+                lstatSync: fileLstat([FAKE_LEGACY_CAPS]),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+            })
+            const vs = loadValidatorService(fs)
+            expect(vs.ensureCapabilityConfigLayout()).to.be.true
+            expect(fs.mkdirSync.calledWith(FAKE_CAPS_DIR, { recursive: true })).to.be.true
+            expect(fs.renameSync.calledWith(FAKE_LEGACY_CAPS, FAKE_CAPS_FILE)).to.be.true
+        })
+
+        it('MOVES rather than copies, so only one config can ever be edited', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_LEGACY_CAPS),
+                lstatSync: fileLstat([FAKE_LEGACY_CAPS])
+            })
+            const vs = loadValidatorService(fs)
+            vs.ensureCapabilityConfigLayout()
+            expect(fs.renameSync.calledWith(FAKE_LEGACY_CAPS, FAKE_CAPS_FILE), 'must move the file').to.be.true
+            // Copying would leave two configs: the operator edits one, the hub
+            // reads the other, and the drift is silent.
+            expect(fs.writeFileSync.called).to.be.false
+            expect(fs.copyFileSync).to.be.undefined
+        })
+
+        it('is a no-op once migrated', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_CAPS_FILE),
+                lstatSync: fileLstat([FAKE_CAPS_FILE])
+            })
+            const vs = loadValidatorService(fs)
+            expect(vs.ensureCapabilityConfigLayout()).to.be.false
+            expect(fs.renameSync.called).to.be.false
+        })
+
+        it('does not migrate the empty DIRECTORY docker leaves at a missing mount source', function () {
+            // docker auto-creates a missing bind-mount source as a directory, so
+            // the legacy path can exist while being no config file at all.
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_LEGACY_CAPS),
+                lstatSync: sinon.stub().callsFake(p => {
+                    if (p === FAKE_LEGACY_CAPS) return { isFile: () => false }
+                    throw new Error('ENOENT')
+                })
+            })
+            const vs = loadValidatorService(fs)
+            expect(vs.ensureCapabilityConfigLayout()).to.be.false
+            expect(fs.renameSync.called).to.be.false
+        })
+    })
+
+    describe('container mount points', function () {
+
+        it('keeps the hub-side file path unchanged, so the hub needs no change', function () {
             const vs = loadValidatorService(makeFs())
             expect(vs.CAPS_CONTAINER_PATH).to.equal('/validator/capabilities.json')
+        })
+
+        it('mounts the container DIRECTORY that path sits in', function () {
+            const vs = loadValidatorService(makeFs())
+            expect(vs.CAPS_CONTAINER_DIR).to.equal('/validator')
+            expect(vs.CAPS_CONTAINER_PATH.startsWith(vs.CAPS_CONTAINER_DIR + '/')).to.be.true
         })
     })
 

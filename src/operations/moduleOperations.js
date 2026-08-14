@@ -57,12 +57,26 @@ async function withInstallTarget(ref, run) {
     }
 }
 
+/**
+ * Install every requested module and REPORT what was actually built.
+ *
+ * installModule returns false for a module it decided not to touch (already
+ * installed, or a singleton container that a previous coin/network pass in this
+ * same run already created). That return used to be dropped on the floor, so
+ * "built six containers" and "built nothing" printed the same and exited the
+ * same. Unlike `update`, a no-op install is NOT a failure - the desired state
+ * already holds, and `install` is run idempotently by scripts and harnesses -
+ * so the report is printed rather than turned into a non-zero exit.
+ *
+ * @returns {Promise<{installed: Array, skipped: Array}>}
+ */
 async function installModules(servicesList, ref = null) {
     return withInstallTarget(ref, async (target) => {
         // A release install passes no branch: resolveComponentRef inside
         // installModule supplies the pinned ref per component. A branch install
         // passes the branch, exactly as before.
         const branch = target.kind === 'release' ? null : target.ref
+        const outcome = { installed: [], skipped: [] }
 
         for (const nextCoin in servicesList) {
             for (const nextNetwork in servicesList[nextCoin]) {
@@ -71,11 +85,22 @@ async function installModules(servicesList, ref = null) {
                     await buildDatabaseModule(nextCoin, nextNetwork)
                 }
                 for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                    await installModule(nextModule, nextCoin, nextNetwork, false, null, false, branch)
+                    const result = await installModule(nextModule, nextCoin, nextNetwork, false, null, false, branch)
+                    if (result === false) {
+                        outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'already-installed' })
+                    } else {
+                        outcome.installed.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
+                    }
                 }
             }
         }
-        return true
+
+        if (outcome.skipped.length > 0) {
+            console.log('install: nothing to do for ' + outcome.skipped
+                .map(s => `${s.module} (${s.coin} ${s.network})`).join(', ')
+                + ' - already installed. Use `update` to rebuild.')
+        }
+        return outcome
     })
 }
 
@@ -91,6 +116,24 @@ async function updateModules(servicesList, ref = null) {
     }
 
     return withInstallTarget(ref, async () => updateModulesOnBranch(servicesList, null))
+}
+
+/**
+ * Record ONE installModule call in an update outcome.
+ *
+ * installModule returns false when it declined to touch the module (its
+ * early-return paths) and a container id / true when it built one. Counting
+ * every call as "updated" regardless - which is what the loop used to do with
+ * that return value - is how a run that rebuilt nothing still reported a
+ * landed deploy and exited 0.
+ */
+function recordInstallOutcome(outcome, result, module, coin, network) {
+    if (result === false) {
+        console.warn(`update: ${module} (${coin} ${network}) was not rebuilt; nothing changed for it.`)
+        outcome.skipped.push({ module, coin, network, reason: 'no-op' })
+    } else {
+        outcome.updated.push({ module, coin, network })
+    }
 }
 
 /**
@@ -126,8 +169,8 @@ async function updateModulesOnBranch(servicesList, branch = null) {
                     // silent no-op (exit 0, nothing created) once the node had crashed or
                     // been removed; only `install master node` could bring it back.
                     // installModule's remoteUpdate path rebuilds it from local source.
-                    await installModule(nextModule, nextCoin, nextNetwork, true, null)
-                    outcome.updated.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
+                    const built = await installModule(nextModule, nextCoin, nextNetwork, true, null)
+                    recordInstallOutcome(outcome, built, nextModule, nextCoin, nextNetwork)
                 } else {
                     if (!moduleContainerId) {
                         // Skipping is still right for `update all` on a partly
@@ -167,8 +210,8 @@ async function updateModulesOnBranch(servicesList, branch = null) {
                     // the operator asked for (the cause of `update <svc> <chain> <net>
                     // <branch>` silently deploying master). installModule does the clone, so
                     // no separate cloneGit is needed here.
-                    await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId, false, moduleBranch)
-                    outcome.updated.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
+                    const rebuilt = await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId, false, moduleBranch)
+                    recordInstallOutcome(outcome, rebuilt, nextModule, nextCoin, nextNetwork)
                 }
             }
         }
@@ -190,23 +233,34 @@ const RECREATE_UNSUPPORTED_MODULES = [NODE_MODULE_NAME, DB_MODULE_NAME]
  * a credential repair into an unreviewed version change on a live venue. This keeps the
  * image byte-identical and changes only what the config map now says.
  *
+ * Reports what it recreated, for the same reason `update` does: an unsupported
+ * module (node, database) was logged and skipped while the command still
+ * exited 0, so `recreate node && echo ok` printed ok having recreated nothing.
+ *
  * @param {Object} servicesList
- * @returns {Promise<boolean>}
+ * @returns {Promise<{recreated: Array, skipped: Array}>}
  */
 async function recreateModules(servicesList) {
     const { buildAndUp } = require('../services/ModuleService')
     const { setDatabaseParameters } = require('../services/DatabaseService')
 
+    const outcome = { recreated: [], skipped: [] }
     let touchedDbModule = false
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
                 if (RECREATE_UNSUPPORTED_MODULES.includes(nextModule)) {
+                    // Still a continue: `recreate all` legitimately sweeps past the
+                    // node and the database. What changed is that the skip is now
+                    // recorded, so a run that recreated NOTHING can be reported as
+                    // the failed request it is instead of exiting 0.
                     console.log("recreate does not apply to " + nextModule + "; use `update " + nextModule + "` instead")
+                    outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-recreatable' })
                     continue
                 }
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 await buildAndUp(nextModule, nextCoin, nextNetwork, moduleContainerId, false, null, { reuseImage: true })
+                outcome.recreated.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
                 if (nextModule === XChainService.XCHAIN_DECODER || nextModule === XChainService.XCHAIN_INDEXER) {
                     touchedDbModule = true
                 }
@@ -219,26 +273,58 @@ async function recreateModules(servicesList) {
     // that made the recreate necessary.
     if (touchedDbModule) await setDatabaseParameters()
     await statusChanged()
-    return true
+    return outcome
 }
 
+/**
+ * Uninstall every requested module, then FAIL if any of them failed.
+ *
+ * Visiting the rest of the list after one module fails is deliberate and stays:
+ * an operator tearing down a stack wants the other containers gone. What was
+ * wrong is that the per-module `catch` swallowed the error and the function
+ * returned true regardless, so `uninstall all` reported a clean teardown while
+ * leaving containers running - the exact "did nothing, said success" shape the
+ * `update` no-op fix removed elsewhere.
+ *
+ * @returns {Promise<{uninstalled: Array, skipped: Array}>} on full success
+ * @throws {Error} listing every module that failed, after all were attempted
+ */
 async function uninstallModules(servicesList, includeShared = false) {
     const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
+    const outcome = { uninstalled: [], skipped: [] }
+    const failures = []
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                if (!includeShared && sharedModules.includes(nextModule)) continue
+                if (!includeShared && sharedModules.includes(nextModule)) {
+                    outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'shared' })
+                    continue
+                }
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                if (!moduleContainerId) continue
+                if (!moduleContainerId) {
+                    outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-installed' })
+                    continue
+                }
                 try {
                     await uninstallModule(nextCoin, nextNetwork, nextModule)
+                    outcome.uninstalled.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
                 } catch (err) {
-                    console.log(err)
+                    const why = (err && err.message) ? err.message : String(err)
+                    console.error(`uninstall: ${nextModule} (${nextCoin} ${nextNetwork}) FAILED: ${why}`)
+                    failures.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: why })
                 }
             }
         }
     }
-    return true
+
+    if (failures.length > 0) {
+        const detail = failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; ')
+        const err = new Error(`uninstall failed for ${failures.length} module${failures.length === 1 ? '' : 's'}: ${detail}`)
+        err.failures = failures
+        err.uninstalled = outcome.uninstalled
+        throw err
+    }
+    return outcome
 }
 
 async function logModules(servicesList, follow = true) {

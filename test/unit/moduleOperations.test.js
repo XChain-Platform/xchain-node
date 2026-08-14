@@ -167,11 +167,26 @@ describe('moduleOperations', function () {
             expect(stubs.installModule.calledOnce).to.be.true
         })
 
-        it('returns true on success', async function () {
+        it('reports what it installed on success', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             const result = await ops.installModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            expect(result.installed).to.deep.equal([{ module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet' }])
+            expect(result.skipped).to.deep.equal([])
+        })
+
+        // installModule returns false for a module it declined to touch. Counting
+        // that as installed is how "built nothing" and "built the stack" printed
+        // the same. A no-op install is still not a failure (install is idempotent).
+        it('reports a module installModule declined as skipped, not installed', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves(false)
+            const ops = loadOperations(stubs)
+            const result = await ops.installModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result.installed).to.deep.equal([])
+            expect(result.skipped).to.deep.equal([
+                { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', reason: 'already-installed' }
+            ])
         })
     })
 
@@ -200,6 +215,37 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
             expect(stubs.installModule.calledWith('node', 'bitcoin', 'mainnet', true)).to.be.true
+        })
+
+        // installModule returns false when it decided not to rebuild. The loop used
+        // to push every module onto `updated` regardless of that return value, so a
+        // run that rebuilt nothing reported a landed deploy and the CLI exited 0.
+        it('records a module installModule declined as a no-op, not as updated', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves(false)
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            let result
+            try {
+                result = await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            } finally { warn.restore() }
+            expect(result.updated).to.deep.equal([])
+            expect(result.skipped).to.deep.equal([
+                { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', reason: 'no-op' }
+            ])
+        })
+
+        it('records a declined NODE rebuild as a no-op too', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves(false)
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            let result
+            try {
+                result = await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
+            } finally { warn.restore() }
+            expect(result.updated).to.deep.equal([])
+            expect(result.skipped.map(s => s.reason)).to.deep.equal(['no-op'])
         })
 
         it('passes container ID to installModule for replacement', async function () {
@@ -294,7 +340,7 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             const result = await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
-            expect(result).to.be.true
+            expect(result.recreated).to.deep.equal([{ module: 'xchain-indexer', coin: 'dogecoin', network: 'regtest' }])
             expect(stubs.buildAndUp.calledOnce).to.be.true
             const args = stubs.buildAndUp.firstCall.args
             expect(args.slice(0, 3)).to.deep.equal(['xchain-indexer', 'dogecoin', 'regtest'])
@@ -339,8 +385,23 @@ describe('moduleOperations', function () {
         it('refuses the modules whose containers are not built from the config map', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
-            await ops.recreateModules({ dogecoin: { regtest: ['node', 'database'] } })
+            const result = await ops.recreateModules({ dogecoin: { regtest: ['node', 'database'] } })
             expect(stubs.buildAndUp.called).to.be.false
+            // Refusing every requested module must be REPORTED, not just printed:
+            // the CLI turns an empty `recreated` list into a non-zero exit. It used
+            // to log the refusal, return true and exit 0.
+            expect(result.recreated).to.deep.equal([])
+            expect(result.skipped.map(s => s.module)).to.deep.equal(['node', 'database'])
+            expect(result.skipped.every(s => s.reason === 'not-recreatable')).to.be.true
+        })
+
+        it('still recreates the supported modules when the request also names an unsupported one', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const result = await ops.recreateModules({ dogecoin: { regtest: ['node', 'xchain-indexer'] } })
+            expect(stubs.buildAndUp.calledOnce).to.be.true
+            expect(result.recreated.map(r => r.module)).to.deep.equal(['xchain-indexer'])
+            expect(result.skipped.map(s => s.module)).to.deep.equal(['node'])
         })
 
         it('propagates a failure instead of reporting success', async function () {
@@ -370,22 +431,44 @@ describe('moduleOperations', function () {
             expect(stubs.uninstallModule.callCount).to.equal(2)
         })
 
-        it('continues on error for individual modules', async function () {
+        // Continuing past a failed module is deliberate: an operator tearing a
+        // stack down wants the rest gone. Reporting SUCCESS afterwards is not:
+        // `uninstall all` printed a clean teardown with containers still running.
+        it('continues on error for individual modules, then fails the batch', async function () {
             const stubs = makeStubs()
             stubs.uninstallModule.onFirstCall().rejects(new Error('fail'))
             stubs.uninstallModule.onSecondCall().resolves(true)
             const ops = loadOperations(stubs)
-            const result = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } })
-            expect(result).to.be.true
+            let thrown = null
+            try {
+                await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } })
+            } catch (err) { thrown = err }
+            expect(thrown, 'a failed uninstall must not resolve').to.not.equal(null)
+            expect(thrown.message).to.match(/uninstall failed for 1 module: xchain-encoder/)
             expect(stubs.uninstallModule.callCount).to.equal(2)
+            expect(thrown.uninstalled.map(u => u.module)).to.deep.equal(['xchain-decoder'])
         })
 
-        it('returns true even when all modules fail', async function () {
+        it('rejects when all modules fail, naming every one of them', async function () {
             const stubs = makeStubs()
             stubs.uninstallModule.rejects(new Error('fail'))
             const ops = loadOperations(stubs)
+            let thrown = null
+            try {
+                await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } })
+            } catch (err) { thrown = err }
+            expect(thrown).to.not.equal(null)
+            expect(thrown.message).to.match(/uninstall failed for 2 modules/)
+            expect(thrown.message).to.include('xchain-encoder')
+            expect(thrown.message).to.include('xchain-decoder')
+            expect(thrown.failures).to.have.lengthOf(2)
+        })
+
+        it('reports what it removed when every module succeeds', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
             const result = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            expect(result.uninstalled).to.deep.equal([{ module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet' }])
         })
     })
 
@@ -644,7 +727,10 @@ describe('moduleOperations', function () {
             stubs.db.getModuleContainer.resolves(null)
             const ops = loadOperations(stubs)
             const result = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            expect(result.uninstalled).to.deep.equal([])
+            expect(result.skipped).to.deep.equal([
+                { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', reason: 'not-installed' }
+            ])
             expect(stubs.uninstallModule.called).to.be.false
         })
     })

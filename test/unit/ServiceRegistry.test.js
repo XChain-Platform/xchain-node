@@ -177,7 +177,10 @@ describe('SERVICE_REGISTRY', function () {
             expect(r.volumeArgs).to.deep.equal([])
         })
 
-        it('hub: mounts capability config (ro) when HUB_CAPABILITY_CONFIG is present', function () {
+        // The DIRECTORY holding capabilities.json is mounted, never the file:
+        // a single-file bind mount makes `docker cp` against this container fail
+        // for every path with "mkdirat validator/capabilities.json: file exists".
+        it('hub: mounts the capability config DIRECTORY (ro) when HUB_CAPABILITY_CONFIG is present', function () {
             const ms2 = proxyquire('../../src/services/ModuleService', {
                 './ConfigService': {
                     getUtxoTrackerVolumeName: () => 'v', getModuleDir: (m) => '/m/' + m,
@@ -186,16 +189,42 @@ describe('SERVICE_REGISTRY', function () {
                     getDefaultConfig: async () => ({}), validatePort: () => true
                 },
                 './ValidatorService': {
-                    getCapabilityConfigHostPath: () => '/host/caps.json',
-                    CAPS_CONTAINER_PATH: '/c/caps.json'
+                    getCapabilityConfigMountDir: () => '/host/validator/hub-caps',
+                    CAPS_CONTAINER_DIR: '/validator'
                 },
                 '../state': { db: {}, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
                 './StatusService': { statusChanged: async () => {}, getStatus: async () => ({}) },
                 './DockerService': { getPublishedHostPorts: async () => new Map() },
                 './DatabaseService': { setDatabaseParameters: async () => {}, setHubDatabaseParameters: async () => {} }
             })
-            const r = ms2.buildModuleDockerArgs(HUB_MODULE_NAME, { HUB_PORT: 10000, HUB_CAPABILITY_CONFIG: '/c/caps.json' }, '', '')
-            expect(r.volumeArgs).to.deep.equal(['-v', '/host/caps.json:/c/caps.json:ro'])
+            const r = ms2.buildModuleDockerArgs(HUB_MODULE_NAME, { HUB_PORT: 10000, HUB_CAPABILITY_CONFIG: '/validator/capabilities.json' }, '', '')
+            expect(r.volumeArgs).to.deep.equal(['-v', '/host/validator/hub-caps:/validator:ro'])
+            // No mount arg may end in a file name: that is the shape that breaks docker cp.
+            expect(r.volumeArgs.some(a => /capabilities\.json:/.test(a))).to.be.false
+        })
+
+        it('hub: a mount refusal from ValidatorService fails the build instead of silently dropping the config', function () {
+            const ms2 = proxyquire('../../src/services/ModuleService', {
+                './ConfigService': {
+                    getUtxoTrackerVolumeName: () => 'v', getModuleDir: (m) => '/m/' + m,
+                    checkIfModuleExists: () => true, moduleDirExists: () => false,
+                    getDockerContainerImageName: () => 'x', getDockerNetwork: () => 'n',
+                    getDefaultConfig: async () => ({}), validatePort: () => true
+                },
+                './ValidatorService': {
+                    getCapabilityConfigMountDir: () => {
+                        throw new Error('refusing to mount /host/validator/hub-caps into the hub container')
+                    },
+                    CAPS_CONTAINER_DIR: '/validator'
+                },
+                '../state': { db: {}, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
+                './StatusService': { statusChanged: async () => {}, getStatus: async () => ({}) },
+                './DockerService': { getPublishedHostPorts: async () => new Map() },
+                './DatabaseService': { setDatabaseParameters: async () => {}, setHubDatabaseParameters: async () => {} }
+            })
+            expect(() => ms2.buildModuleDockerArgs(
+                HUB_MODULE_NAME, { HUB_PORT: 10000, HUB_CAPABILITY_CONFIG: '/validator/capabilities.json' }, '', ''
+            )).to.throw(/refusing to mount/)
         })
 
         it('explorer: singleton with two unconditional port mappings', function () {

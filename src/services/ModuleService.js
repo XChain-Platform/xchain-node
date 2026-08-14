@@ -684,11 +684,20 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
             // Validator mode: mount the capability config (read-only) so the
             // hub's HUB_CAPABILITY_CONFIG path resolves inside the container.
             // No-op for a standalone hub (no validator configured).
+            //
+            // The DIRECTORY holding capabilities.json is what gets mounted, not
+            // the file. A single-file bind mount permanently breaks `docker cp`
+            // against this container - Docker recreates each mount destination
+            // as a directory during a copy, collides with the file and aborts
+            // with "mkdirat validator/capabilities.json: file exists" for EVERY
+            // path, not just the mounted one. ValidatorService keeps that
+            // directory holding nothing but the capability config, so the
+            // validator's signing.key never enters the container.
             if ('HUB_CAPABILITY_CONFIG' in environmentVariables) {
-                const { getCapabilityConfigHostPath, CAPS_CONTAINER_PATH } = require('./ValidatorService')
-                const capsHost = getCapabilityConfigHostPath()
-                if (capsHost) {
-                    volumeArgs.push('-v', `${capsHost}:${CAPS_CONTAINER_PATH}:ro`)
+                const { getCapabilityConfigMountDir, CAPS_CONTAINER_DIR } = require('./ValidatorService')
+                const capsHostDir = getCapabilityConfigMountDir()
+                if (capsHostDir) {
+                    volumeArgs.push('-v', `${capsHostDir}:${CAPS_CONTAINER_DIR}:ro`)
                 }
             }
         } else if (v.type === 'hubSignerDir') {
