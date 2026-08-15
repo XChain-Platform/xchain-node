@@ -20,7 +20,13 @@ const OTHER_SHA = 'b'.repeat(40)
 function makeStubs() {
     return {
         axiosGet: sinon.stub(),
-        readFileSync: sinon.stub().throws(new Error('ENOENT'))
+        readFileSync: sinon.stub().throws(new Error('ENOENT')),
+        // The provenance gate is exercised for real (gpg and all) in
+        // ReleaseSignatureService.test.js. Here it is stubbed so these cases stay
+        // about manifest RESOLUTION, and asserted on so the wiring cannot be
+        // removed silently: an unverified manifest is the defect this whole
+        // service was rebuilt to prevent.
+        verifyManifestForTag: sinon.stub().resolves({ verified: true, fingerprint: 'F'.repeat(40) })
     }
 }
 
@@ -31,6 +37,9 @@ function load(stubs) {
         '../GitHubDownloader': {
             githubApiHeaders:     () => ({}),
             githubRateLimitError: () => null
+        },
+        './ReleaseSignatureService': {
+            verifyManifestForTag: stubs.verifyManifestForTag
         }
     })
 }
@@ -271,6 +280,72 @@ describe('ReleaseManifestService', () => {
             const t = await local.resolveInstallTarget('v0.9.0')
             expect(t.manifest.components['xchain-vm'].commit).to.equal(OTHER_SHA)
             expect(stubs.axiosGet.called).to.equal(false)
+            // No signature check on this path, deliberately: the bytes came out
+            // of the running checkout, and verifying them here would only prove
+            // the checkout agrees with itself.
+            expect(stubs.verifyManifestForTag.called).to.equal(false)
+        })
+    })
+
+    describe('the provenance gate', () => {
+        // Section 12: clone integrity checks a clone against a manifest fetched
+        // from the same place the clone came from. Signing the manifest is what
+        // turns that from a consistency check into a provenance check, so a
+        // FETCHED manifest must never reach a caller unverified.
+        it('verifies the fetched manifest BEFORE parsing it', async () => {
+            const body = manifest({ 'xchain-vm': { tag: 'v0.9.0', commit: PIN_SHA } })
+            stubs.axiosGet.resolves(contentsResponse(body))
+            await svc.resolveInstallTarget('v0.9.0')
+
+            expect(stubs.verifyManifestForTag.calledOnce).to.equal(true)
+            const args = stubs.verifyManifestForTag.firstCall.args[0]
+            expect(args.tag).to.equal('v0.9.0')
+            // The EXACT bytes that were fetched, not a re-serialization of them:
+            // a digest is a statement about bytes.
+            expect(args.manifestBytes.toString('utf8')).to.equal(JSON.stringify(body))
+            expect(args.fetchAsset).to.be.a('function')
+        })
+
+        it('a refusal from the gate aborts the install', async () => {
+            stubs.axiosGet.resolves(contentsResponse(manifest()))
+            stubs.verifyManifestForTag.rejects(new Error('Release v0.9.0 publishes no SHA256SUMS.asc.'))
+            await svc.resolveInstallTarget('v0.9.0').then(
+                () => { throw new Error('should have rejected') },
+                e => expect(e.message).to.match(/publishes no SHA256SUMS\.asc/))
+        })
+
+        it('fetchReleaseAsset returns null when the release carries no such asset', async () => {
+            stubs.axiosGet.resolves({ data: { assets: [{ name: 'SHA256SUMS', url: 'https://api/asset/1' }] } })
+            expect(await svc.fetchReleaseAsset('v0.9.0', 'SHA256SUMS.asc')).to.equal(null)
+        })
+
+        it('fetchReleaseAsset returns null when the release itself is absent', async () => {
+            const err = new Error('Not Found'); err.response = { status: 404 }
+            stubs.axiosGet.rejects(err)
+            expect(await svc.fetchReleaseAsset('v9.9.9', 'SHA256SUMS')).to.equal(null)
+        })
+
+        it('fetchReleaseAsset downloads the asset bytes', async () => {
+            stubs.axiosGet.onFirstCall().resolves({ data: { assets: [{ name: 'SHA256SUMS', url: 'https://api/asset/1' }] } })
+            stubs.axiosGet.onSecondCall().resolves({ status: 200, data: Buffer.from('digests\n') })
+            const bytes = await svc.fetchReleaseAsset('v0.9.0', 'SHA256SUMS')
+            expect(bytes.toString('utf8')).to.equal('digests\n')
+            expect(stubs.axiosGet.secondCall.args[1].headers.Accept).to.equal('application/octet-stream')
+        })
+
+        it('fetchReleaseAsset follows the storage redirect WITHOUT the credentials', async () => {
+            // Signed object storage rejects a request that still carries our
+            // Authorization header, which is why the redirect is followed by
+            // hand rather than by axios.
+            stubs.axiosGet.onCall(0).resolves({ data: { assets: [{ name: 'SHA256SUMS', url: 'https://api/asset/1' }] } })
+            stubs.axiosGet.onCall(1).resolves({ status: 302, headers: { location: 'https://objects/blob' }, data: null })
+            stubs.axiosGet.onCall(2).resolves({ status: 200, data: Buffer.from('digests\n') })
+
+            const bytes = await svc.fetchReleaseAsset('v0.9.0', 'SHA256SUMS')
+            expect(bytes.toString('utf8')).to.equal('digests\n')
+            expect(stubs.axiosGet.thirdCall.args[0]).to.equal('https://objects/blob')
+            expect(stubs.axiosGet.thirdCall.args[1].headers).to.not.have.property('Authorization')
+            expect(stubs.axiosGet.thirdCall.args[1].headers).to.not.have.property('Accept')
         })
     })
 

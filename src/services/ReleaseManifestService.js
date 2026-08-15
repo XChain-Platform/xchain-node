@@ -31,6 +31,7 @@ const path  = require('path')
 const axios = require('axios')
 
 const { githubApiHeaders, githubRateLimitError } = require('../GitHubDownloader')
+const { verifyManifestForTag } = require('./ReleaseSignatureService')
 
 // The repo that carries the manifest. Pinned installs resolve their manifest
 // from a tag on THIS repo, never from a sibling.
@@ -98,6 +99,10 @@ async function fetchManifestAtTag(tag) {
     // The manifest is fetched from the tag itself rather than from the running
     // checkout: `install v0.9.0` is routinely driven by a node already running
     // some other version, and that node's own manifest describes ITS train.
+    // The one path that does not run the signature gate below, deliberately: this
+    // file came out of the running checkout, whose own provenance was decided
+    // when the operator installed it (signed tag, verified clone). Re-verifying
+    // it here would prove only that the checkout agrees with itself.
     const local = readLocalManifest()
     if (local && local.platform_version && `v${local.platform_version}` === tag) {
         return local
@@ -124,11 +129,72 @@ async function fetchManifestAtTag(tag) {
         throw new Error(`Release manifest for ${tag} came back empty`)
     }
 
+    const bytes = Buffer.from(body.content, body.encoding || 'base64')
+
+    // PROVENANCE GATE (spec section 12). Everything downstream of here treats
+    // the manifest as authoritative - it decides which commit every component
+    // is cloned at - and up to this line it is just a file the same server
+    // served. Verify the release key covered these exact bytes BEFORE parsing
+    // them, so a tampered manifest is refused rather than acted on.
+    await verifyManifestBytes(tag, bytes)
+
     try {
-        return JSON.parse(Buffer.from(body.content, body.encoding || 'base64').toString('utf8'))
+        return JSON.parse(bytes.toString('utf8'))
     } catch (err) {
         throw new Error(`Release manifest for ${tag} is not valid JSON: ${err.message}`)
     }
+}
+
+/**
+ * Fetch one published asset from a release, or null when the release does not
+ * carry it (which the caller reads as "this release publishes no signature").
+ */
+async function fetchReleaseAsset(tag, assetName) {
+    const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/releases/tags/${tag}`
+    let release
+    try {
+        release = await axios.get(url, { headers: githubApiHeaders() })
+    } catch (error) {
+        const rateLimited = githubRateLimitError(error)
+        if (rateLimited) throw rateLimited
+        if (error && error.response && error.response.status === 404) return null
+        throw error
+    }
+
+    const assets = (release.data && release.data.assets) || []
+    const asset  = assets.find(entry => entry && entry.name === assetName)
+    if (!asset || !asset.url) return null
+
+    // The asset endpoint answers a 302 to signed object storage, and that
+    // storage REJECTS a request still carrying our Authorization header (the
+    // same trap githubApiHeaders documents for coin-node downloads). So follow
+    // the redirect by hand and drop the credentials on the second hop.
+    const first = await axios.get(asset.url, {
+        headers: { ...githubApiHeaders(), Accept: 'application/octet-stream' },
+        responseType: 'arraybuffer',
+        maxRedirects: 0,
+        validateStatus: status => (status >= 200 && status < 300) || [301, 302, 307, 308].includes(status)
+    })
+
+    if (first.status >= 300) {
+        const location = first.headers && first.headers.location
+        if (!location) throw new Error(`Release asset ${assetName} redirected without a location header`)
+        const followed = await axios.get(location, {
+            responseType: 'arraybuffer',
+            headers: { 'User-Agent': 'GitHubDownloader' }
+        })
+        return Buffer.from(followed.data)
+    }
+
+    return Buffer.from(first.data)
+}
+
+async function verifyManifestBytes(tag, bytes) {
+    return verifyManifestForTag({
+        tag,
+        manifestBytes: bytes,
+        fetchAsset: assetName => fetchReleaseAsset(tag, assetName)
+    })
 }
 
 // The ONE latest-release semantic for the platform (spec section 5).
@@ -254,6 +320,7 @@ module.exports = {
     manifestHasPins,
     getComponentPin,
     fetchManifestAtTag,
+    fetchReleaseAsset,
     resolveLatestReleaseTag,
     resolveInstallTarget,
     resolveComponentRef,
