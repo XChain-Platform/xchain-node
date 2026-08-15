@@ -47,6 +47,8 @@ function makeStubs() {
         setDatabaseParameters: sinon.stub().resolves(true),
         installModule: sinon.stub().resolves('new-container-id'),
         uninstallModule: sinon.stub().resolves(true),
+        assertHubNotBehind: sinon.stub().resolves({ checked: false, reason: 'not-hub-dependent' }),
+        assertRequiredMigrationsApplied: sinon.stub().resolves({ checked: false, reason: 'no-migrations' }),
         statusChanged: sinon.stub().resolves(),
         execFile: sinon.stub(),
         fs: {
@@ -93,6 +95,12 @@ function loadOperations(stubs) {
             buildAndUp: stubs.buildAndUp,
             installModule: stubs.installModule,
             uninstallModule: stubs.uninstallModule
+        },
+        '../services/SkewGuardService': {
+            assertHubNotBehind: stubs.assertHubNotBehind
+        },
+        '../services/MigrationPreconditionService': {
+            assertRequiredMigrationsApplied: stubs.assertRequiredMigrationsApplied
         },
         '../services/StatusService': {
             statusChanged: stubs.statusChanged
@@ -195,6 +203,32 @@ describe('moduleOperations', function () {
     // -------------------------------------------------------------------
 
     describe('updateModules()', function () {
+
+        // XC-1335. A gated migration the target DB never applied is a startup
+        // crash-loop, and on 2026-08-09 the only thing that discovered it was three
+        // mainnet indexers going to Restarting(1). The refusal is worth nothing
+        // unless it lands BEFORE the working container is torn down.
+        it('checks the migration precondition BEFORE the container is rebuilt', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-indexer'] } })
+            expect(stubs.assertRequiredMigrationsApplied.calledBefore(stubs.installModule)).to.be.true
+            expect(stubs.assertRequiredMigrationsApplied.calledWith('xchain-indexer', 'bitcoin', 'mainnet')).to.be.true
+        })
+
+        it('aborts the update, leaving the running container untouched, when the guard refuses', async function () {
+            const stubs = makeStubs()
+            stubs.assertRequiredMigrationsApplied.rejects(
+                new Error('update refused: 2026-07-24-pubkeys-widen-uncompressed.sql has not been applied'))
+            const ops = loadOperations(stubs)
+            let err = null
+            try {
+                await ops.updateModules({ bitcoin: { mainnet: ['xchain-indexer'] } })
+            } catch (e) { err = e }
+            expect(err, 'the refusal must propagate out of updateModules').to.not.equal(null)
+            expect(err.message).to.contain('2026-07-24-pubkeys-widen-uncompressed.sql')
+            expect(stubs.installModule.called, 'nothing may be rebuilt after a refusal').to.be.false
+        })
 
         it('fetches existing container ID before updating', async function () {
             const stubs = makeStubs()
