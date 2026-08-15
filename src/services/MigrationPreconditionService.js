@@ -69,7 +69,12 @@ const SKIP_ENV     = 'XCHAIN_NODE_SKIP_MIGRATION_PRECONDITION'
 const LEDGER_TABLE = 'schema_migrations'
 
 function guardSkipped() {
-    const v = process.env[SKIP_ENV]
+    // Read BY NAME, not through SKIP_ENV, even though the constant is right
+    // there: the documentation coverage gate scans for literal `process.env.X`
+    // and a computed read is invisible to it, so a bracket read here is
+    // undocumentable configuration by construction. SKIP_ENV stays as the name
+    // used in messages.
+    const v = process.env.XCHAIN_NODE_SKIP_MIGRATION_PRECONDITION
     return v === '1' || v === 'true' || v === 'yes'
 }
 
