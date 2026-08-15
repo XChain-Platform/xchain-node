@@ -29,6 +29,7 @@ const { createDockerNetwork, killContainer, removeContainer, forceRemoveContaine
 const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
+const { assertRequiredMigrationsApplied } = require('../services/MigrationPreconditionService')
 const { statusChanged } = require('../services/StatusService')
 
 // Resolve the operator's single ref slot into an install target and publish it
@@ -204,6 +205,16 @@ async function updateModulesOnBranch(servicesList, branch = null) {
                     const { resolveComponentRef } = require('../services/ReleaseManifestService')
                     const pin = resolveComponentRef(nextModule, moduleBranch)
                     await assertHubNotBehind(nextModule, pin.ref)
+                    // Migration-precondition guard: a service whose new source asserts a
+                    // GATED (mode=manual) migration at startup is REFUSED when the database
+                    // it will use has not applied that migration, before anything is torn
+                    // down. Without it the only thing that discovers the requirement is the
+                    // recreated container crash-looping - which is exactly how a routine
+                    // indexer deploy took all three mainnet indexers down on 2026-08-09.
+                    // Reads the same PINNED ref as the skew guard above, for the same
+                    // reason: a precondition read from a different ref than the one being
+                    // installed is a check that blessed a version it never saw.
+                    await assertRequiredMigrationsApplied(nextModule, nextCoin, nextNetwork, pin.ref)
                     // moduleBranch MUST be threaded through: installModule re-clones the
                     // module on the remoteUpdate path (cloneGit with this `branch`), so a
                     // null branch here re-clones the default branch and clobbers the branch
