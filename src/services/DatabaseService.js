@@ -769,6 +769,17 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
     const mariadbRootPassword = await askMariadbRootPassword(coin, network)
     const mariadbContainerId  = await getDatabaseContainerId()
 
+    // Refuse a reset with no container, HERE rather than at the caller.
+    // getDatabaseContainerId() returns null when no MariaDB container exists,
+    // and the loop below would then exec `docker exec ... null mariadb` and
+    // abort with an opaque failure part-way through a wipe the caller has
+    // already stopped services for. resetModules prechecks this, but the
+    // function is exported, so the invariant belongs where the DROPs are
+    // issued. Same precheck as addUserPasswordToDatabase.
+    if (!mariadbContainerId) {
+        throw new Error("MariaDB container not found; install the database first")
+    }
+
     for (const module of modules) {
         const dbName = getModuleDatabaseName(module, coin, network)
         await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
