@@ -22,7 +22,11 @@ function makeStubs() {
     return {
         db: {
             getModuleContainer: sinon.stub().resolves('container-id-123'),
-            removeModuleContainer: sinon.stub().resolves(true)
+            removeModuleContainer: sinon.stub().resolves(true),
+            // Registry contents AFTER the per-coin uninstall pass. Empty by default =
+            // nothing left for a shared service to serve, which is the full-teardown
+            // case; tests that need a surviving coin override this.
+            getAllModuleContainers: sinon.stub().resolves([])
         },
         createDockerNetwork: sinon.stub().resolves(true),
         killContainer: sinon.stub().resolves(true),
@@ -754,6 +758,55 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-sync', 'xchain-encoder'] } }, true)
             expect(stubs.uninstallModule.callCount).to.equal(2)
+        })
+
+        // A shared service (explorer/hub/database/sync) is installed once and serves
+        // every coin/network on the box. `--include-shared` asked for it to come down
+        // with the coin being removed, which took the explorer away from every OTHER
+        // coin still installed.
+        it('keeps a shared module when another coin/network is still installed', async function () {
+            const stubs = makeStubs()
+            stubs.db.getAllModuleContainers.resolves([
+                { module: 'xchain-indexer', coin: 'dogecoin', network: 'mainnet', container_id: 'c1' },
+                { module: 'xchain-explorer', coin: '', network: '', container_id: 'c2' }
+            ])
+            const ops = loadOperations(stubs)
+            const result = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-explorer', 'xchain-encoder'] } }, true)
+
+            expect(stubs.uninstallModule.callCount).to.equal(1)
+            expect(stubs.uninstallModule.firstCall.args[2]).to.equal('xchain-encoder')
+            const kept = result.skipped.find(s => s.module === 'xchain-explorer')
+            expect(kept, 'the explorer must be reported as kept, not silently dropped').to.exist
+            expect(kept.reason).to.contain('dogecoin mainnet')
+        })
+
+        it('still removes shared modules once the last coin/network is gone', async function () {
+            const stubs = makeStubs()
+            // Only the shared services themselves remain registered (coin '').
+            stubs.db.getAllModuleContainers.resolves([
+                { module: 'xchain-explorer', coin: '', network: '', container_id: 'c2' }
+            ])
+            const ops = loadOperations(stubs)
+            await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-explorer', 'xchain-encoder'] } }, true)
+            expect(stubs.uninstallModule.callCount).to.equal(2)
+        })
+
+        it('orders the shared pass LAST, so a full teardown still reaches it', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-explorer', 'xchain-encoder'] } }, true)
+            expect(stubs.uninstallModule.callCount).to.equal(2)
+            expect(stubs.uninstallModule.firstCall.args[2]).to.equal('xchain-encoder')
+            expect(stubs.uninstallModule.secondCall.args[2]).to.equal('xchain-explorer')
+        })
+
+        it('refuses the shared removal rather than guessing when the registry is unreadable', async function () {
+            const stubs = makeStubs()
+            stubs.db.getAllModuleContainers.rejects(new Error('modules table gone'))
+            const ops = loadOperations(stubs)
+            const result = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-explorer'] } }, true)
+            expect(stubs.uninstallModule.callCount).to.equal(0)
+            expect(result.skipped[0].reason).to.contain('modules table gone')
         })
 
         it('skips module when container ID is null', async function () {

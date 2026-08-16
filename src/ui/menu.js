@@ -34,6 +34,16 @@ const {
 } = require('../services/VersionService')
 const { scanAndRegisterModules } = require('../services/DiscoveryService')
 
+// Per-module action labels. enquirer's Select resolves to a choice's NAME, so the
+// label the menu offers and the string the handler branches on must be the same
+// value - shared here rather than typed twice, because when they drifted apart the
+// menu entry simply did nothing and returned the operator to the module list.
+const ACTION_UPDATE_LOCAL              = "Update local version"
+const ACTION_REINSTALL_REMOTE          = "Reinstall from remote"
+const ACTION_UPDATE_CONTAINER          = "Update Container"
+const ACTION_REINSTALL_CONTAINER       = "Reinstall"
+const ACTION_INSTALL_LOCAL_IN_CONTAINER = "Install Local Version in Container"
+
 async function restoreBootstrapInterface(coin, network, module, options = {}) {
     const bootstrapFiles = await getBootstrapFilesList(coin, network, module)
 
@@ -217,25 +227,33 @@ async function modulesSelectionInterface(coin, network) {
 
             if (selectedStatus === "exited") moduleActions.push({ name: "Restart", value: "restart" })
 
+            // enquirer's Select resolves to a choice's NAME, so the handler below
+            // must branch on these exact strings. Three of them did not match any
+            // branch ("Update local version" vs a handler reading "Update locale
+            // version", "Update Container" vs "Update container version", and
+            // "Reinstall" with no branch at all), so picking them ran nothing and
+            // dropped straight back to the module list - the same silent no-op the
+            // main menu's scan option was reported for. Kept as shared constants so
+            // a rename cannot re-open that gap on one side only.
             if (semver.valid(localVersion)) {
                 if (semver.valid(remoteVersion)) {
                     if (semver.gt(remoteVersion, localVersion)) {
-                        moduleActions.push({ name: "Update local version", value: "update locale version" })
+                        moduleActions.push({ name: ACTION_UPDATE_LOCAL, value: "update local version" })
                     } else if (semver.eq(remoteVersion, localVersion)) {
-                        moduleActions.push({ name: "Reinstall from remote", value: "reinstall from remote" })
+                        moduleActions.push({ name: ACTION_REINSTALL_REMOTE, value: "reinstall from remote" })
                     }
                 }
                 if (semver.valid(containerVersion)) {
                     if (semver.gt(localVersion, containerVersion)) {
-                        moduleActions.push({ name: "Update Container", value: "update container" })
+                        moduleActions.push({ name: ACTION_UPDATE_CONTAINER, value: "update container" })
                     } else {
-                        moduleActions.push({ name: "Reinstall", value: "reinstall" })
+                        moduleActions.push({ name: ACTION_REINSTALL_CONTAINER, value: "reinstall container" })
                     }
                 } else {
-                    moduleActions.push({ name: "Install Local Version in Container", value: "install local version in container" })
+                    moduleActions.push({ name: ACTION_INSTALL_LOCAL_IN_CONTAINER, value: "install local version in container" })
                 }
             } else if (semver.valid(remoteVersion)) {
-                moduleActions.push({ name: "Update locale version", value: "update locale version" })
+                moduleActions.push({ name: ACTION_UPDATE_LOCAL, value: "update local version" })
             }
 
             const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
@@ -269,9 +287,14 @@ async function modulesSelectionInterface(coin, network) {
                 } catch (err) {
                     console.log(redactSecrets(err))
                 }
-            } else if (actionAnswer === "Update locale version") {
+            } else if (actionAnswer === ACTION_UPDATE_LOCAL) {
                 await cloneGit(selectedValue, true, false)
-            } else if (actionAnswer === "Update container version" || actionAnswer === "Install Local Version in Container") {
+            } else if (actionAnswer === ACTION_UPDATE_CONTAINER
+                    || actionAnswer === ACTION_INSTALL_LOCAL_IN_CONTAINER
+                    || actionAnswer === ACTION_REINSTALL_CONTAINER) {
+                // All three rebuild the container from the local checkout; they
+                // differ only in how the menu describes the version relationship
+                // that led the operator here.
                 await installModule(selectedValue, coin, network, false, selected["container_id"])
             } else if (actionAnswer === "Make Bootstrap") {
                 try {
@@ -293,7 +316,7 @@ async function modulesSelectionInterface(coin, network) {
                     if (err && err.name === 'BootstrapIntegrityError') console.log(redactSecrets(err.message))
                     else throw err
                 }
-            } else if (actionAnswer === "Reinstall from remote") {
+            } else if (actionAnswer === ACTION_REINSTALL_REMOTE) {
                 await updateModules({ [coin]: { [network]: [selectedValue] } })
             } else if (actionAnswer === "Tail logs") {
                 await logModules({ [coin]: { [network]: [selectedValue] } })
@@ -387,5 +410,13 @@ module.exports = {
     mainMenu,
     modulesSelectionInterface,
     restoreBootstrapInterface,
-    startInterface
+    startInterface,
+    // Exported so a test can assert every offered label has a handler branch.
+    MODULE_ACTION_LABELS: {
+        ACTION_UPDATE_LOCAL,
+        ACTION_REINSTALL_REMOTE,
+        ACTION_UPDATE_CONTAINER,
+        ACTION_REINSTALL_CONTAINER,
+        ACTION_INSTALL_LOCAL_IN_CONTAINER
+    }
 }
