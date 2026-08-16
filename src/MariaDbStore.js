@@ -15,12 +15,39 @@
  * XChain Node - MariaDbStore Class
  *
  * Drop-in replacement for LevelUpStore. Persists module→container ID
- * mappings in a shared MariaDB instance (xchain_node.modules table).
+ * mappings in a shared MariaDB instance (the xchain_node database, in the
+ * per-stack registry table MODULES_TABLE resolves below).
  *
  ********************************************************************/
 
 const mariadb = require('mariadb')
 const { sleep } = require('./utils/helpers')
+const { NODE_PREFIX, DEFAULT_NODE_PREFIX } = require('./config/constants')
+const { assertSafeDbIdentifier } = require('./utils/sqlSafety')
+
+/*
+ * Registry table, scoped to THIS stack.
+ *
+ * The row key is (module, coin, network) and carries no stack identity, while
+ * the database name is the fixed xchain_node. In bundled-DB mode each
+ * NODE_PREFIX gets its own MariaDB container, so the registries never met. In
+ * external-DB mode (XCHAIN_NODE_EXTERNAL_DB=1) two co-located stacks, a layout
+ * the host-port guard, the docker networks, the utxo volume and the explorer
+ * port override are all built for, point at ONE host-native MariaDB and share
+ * the table. Same coin and network on both stacks means the same key on both, so
+ * each stack's upsert overwrote the other's container_id, and DiscoveryService's
+ * orphan purge (which classifies containers by its OWN prefix and deletes every
+ * row it did not see) deleted the other stack's live rows outright.
+ *
+ * The default prefix keeps the bare `modules` name, so an existing install
+ * migrates nothing. A renamed prefix starts on an empty table, which is safe
+ * because the registry is DERIVED state: precheck runs scanAndRegisterModules
+ * against `docker ps -a` on every command, immediately after createDatabase, so
+ * the first command after the change repopulates it.
+ */
+const MODULES_TABLE = NODE_PREFIX === DEFAULT_NODE_PREFIX
+    ? 'modules'
+    : assertSafeDbIdentifier('modules_' + NODE_PREFIX.replace(/[^a-z0-9_]/g, '_').substring(0, 40), 'registry table name')
 
 class MariaDbStore {
     constructor(config = null) {
@@ -73,7 +100,7 @@ class MariaDbStore {
 
         try {
             await conn.query(
-                `CREATE TABLE IF NOT EXISTS modules (
+                `CREATE TABLE IF NOT EXISTS ${MODULES_TABLE} (
                     module       VARCHAR(64)  NOT NULL,
                     coin         VARCHAR(32)  NOT NULL DEFAULT '',
                     network      VARCHAR(32)  NOT NULL DEFAULT '',
@@ -123,11 +150,11 @@ class MariaDbStore {
         let rows
         if (coin == null && network == null) {
             rows = await this.pool.query(
-                'SELECT module, coin, network, container_id FROM modules'
+                `SELECT module, coin, network, container_id FROM ${MODULES_TABLE}`
             )
         } else {
             rows = await this.pool.query(
-                `SELECT module, coin, network, container_id FROM modules
+                `SELECT module, coin, network, container_id FROM ${MODULES_TABLE}
                  WHERE (coin = ? AND network = ?) OR (coin = '' AND network = '')`,
                 [coin || '', network || '']
             )
@@ -145,7 +172,7 @@ class MariaDbStore {
         if (!this.pool) return false
         try {
             await this.pool.query(
-                `INSERT INTO modules (module, coin, network, container_id)
+                `INSERT INTO ${MODULES_TABLE} (module, coin, network, container_id)
                  VALUES (?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE container_id = VALUES(container_id)`,
                 [module, coin || '', network || '', containerId]
@@ -160,7 +187,7 @@ class MariaDbStore {
         if (!this.pool) return null
         try {
             const rows = await this.pool.query(
-                `SELECT container_id FROM modules
+                `SELECT container_id FROM ${MODULES_TABLE}
                  WHERE module = ? AND coin = ? AND network = ?`,
                 [module, coin || '', network || '']
             )
@@ -175,12 +202,12 @@ class MariaDbStore {
         if (!this.pool) return false
         try {
             const rows = await this.pool.query(
-                `SELECT container_id FROM modules
+                `SELECT container_id FROM ${MODULES_TABLE}
                  WHERE module = ? AND coin = ? AND network = ?`,
                 [module, coin || '', network || '']
             )
             await this.pool.query(
-                `DELETE FROM modules
+                `DELETE FROM ${MODULES_TABLE}
                  WHERE module = ? AND coin = ? AND network = ?`,
                 [module, coin || '', network || '']
             )
@@ -196,7 +223,7 @@ class MariaDbStore {
 
     async countModules() {
         if (!this.pool) return 0
-        const rows = await this.pool.query('SELECT COUNT(*) AS cnt FROM modules')
+        const rows = await this.pool.query(`SELECT COUNT(*) AS cnt FROM ${MODULES_TABLE}`)
         return Number(rows[0].cnt)
     }
 }
