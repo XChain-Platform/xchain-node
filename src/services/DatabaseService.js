@@ -989,18 +989,10 @@ async function buildDatabaseModule(coin, network) {
         })
         const containerId = stdout.trim()
         if (/^[a-f0-9]{64}$/.test(containerId)) {
-            // No db.insertModuleContainer(DB_MODULE_NAME, ...) here, unlike
-            // ModuleService.buildAndUp / NodeService, and that is a property of
-            // the ordering, not an oversight (XC-1473). The `modules` registry
-            // table lives inside the container we just created: there is no
-            // xchain_node database, no open pool and no table to insert into
-            // until later in the install, so the DB module cannot register
-            // itself in its own registry. Nothing needs it to: every lookup of
-            // this container goes through getDatabaseContainerId(), which reads
-            // the id from `docker inspect` on the container NAME for exactly
-            // that reason, and DiscoveryService.discoverContainers() writes the
-            // row once a registry exists (DB_MODULE_NAME is in its
-            // SHARED_MODULES list), which is what puts the database line in `ps`.
+            // No db.insertModuleContainer() call: the `modules` table lives
+            // inside the container just created, so it doesn't exist yet.
+            // Lookups instead use getDatabaseContainerId() (docker inspect by
+            // name); DiscoveryService.discoverContainers() fills the row later.
             await statusChanged()
             return containerId
         }

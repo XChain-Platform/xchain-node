@@ -208,10 +208,9 @@ describe('moduleOperations', function () {
 
     describe('updateModules()', function () {
 
-        // XC-1335. A gated migration the target DB never applied is a startup
-        // crash-loop, and on 2026-08-09 the only thing that discovered it was three
-        // mainnet indexers going to Restarting(1). The refusal is worth nothing
-        // unless it lands BEFORE the working container is torn down.
+        // A gated migration the target DB never applied is a startup
+        // crash-loop. The refusal is worth nothing unless it lands BEFORE
+        // the working container is torn down.
         it('checks the migration precondition BEFORE the container is rebuilt', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)

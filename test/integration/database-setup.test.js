@@ -201,25 +201,10 @@ describe('Integration: Database Service Chain', function () {
             // every downstream provisioning step keys off that return value.
             expect(result).to.equal(dbContainerId)
 
-            // It does NOT write a `modules` registry row for the database
-            // module, and that absence is deliberate rather than a missing
-            // insert (XC-1473). This branch is what CREATES the MariaDB
-            // container, and the registry table lives INSIDE that very
-            // container: at this point there is no xchain_node database, no
-            // open pool, and no `modules` table to insert into, so registering
-            // the DB module in its own registry is circular. Nothing in src/
-            // reads such a row to find the DB either - every lookup goes
-            // through DatabaseService.getDatabaseContainerId(), which resolves
-            // the id with `docker inspect` on the container NAME, precisely
-            // because it has to work before the registry exists. The row does
-            // show up later, written by DiscoveryService.discoverContainers()
-            // (DB_MODULE_NAME is in its SHARED_MODULES list), which runs once
-            // there is a registry to write into and is what puts the database
-            // line into `ps`.
-            //
-            // Asserting the absence rather than dropping the check keeps the
-            // decision visible: a future change that starts writing here has to
-            // be deliberate about the ordering problem above.
+            // It does NOT write a `modules` registry row: that table lives
+            // inside the container this branch creates, so it doesn't exist
+            // yet. Lookups use DatabaseService.getDatabaseContainerId()
+            // (docker inspect by name) instead.
             const state = require('../../src/state')
             const storedId = await state.db.getModuleContainer(DB_MODULE_NAME, '', '')
             expect(storedId).to.equal(null)
