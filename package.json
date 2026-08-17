@@ -53,13 +53,13 @@
     "sinon": "^21.0.3"
   },
   "overrides": {
-    "brace-expansion": "^5.0.8",
+    "brace-expansion": "^5.0.9",
     "minimatch": "^10.2.5",
     "fast-uri": "^3.1.5",
     "qs": "^6.15.2",
     "serialize-javascript": "^7.0.5",
     "tmp": "^0.2.7",
-    "js-yaml": "^4.3.0",
+    "js-yaml": "^4.3.1",
     "form-data": "^4.0.6"
   },
   "bin": {
