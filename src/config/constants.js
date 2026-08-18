@@ -177,7 +177,13 @@ const LIBRARY_BUNDLES = {
     // attestationHelper and the integration/parity/regression suites can
     // resolve its consensus-critical primitives instead of dying with
     // MODULE_NOT_FOUND at load.
-    "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts", "xchain-indexer"]
+    // xchain-sync rides along for ONE suite that cannot be replaced by a unit
+    // golden: consensusHashConformance recomputes every indexed block's hashes with
+    // sync's BlockHasher and compares them to the indexer's committed values, which
+    // is the only place the two implementations meet over real stack data. Absent,
+    // it does not fail - it SKIPS, so the drift-lock reported green while never
+    // running (measured on the first hosted e2e run to reach the suites).
+    "xchain-e2e-test": ["xchain-hub", "xchain-sdk", "xchain-contracts", "xchain-indexer", "xchain-sync"]
 }
 
 // Single source of truth for the per-service Docker run-args and the
