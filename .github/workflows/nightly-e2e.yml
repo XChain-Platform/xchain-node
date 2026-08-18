@@ -196,6 +196,33 @@ jobs:
         # Live-stack per-service latency budgets (regression ceilings).
         run: node src/index.js e2etest "$COIN" --script test:perf:budget --ref "$STACK_REF"
 
+      # What the stack itself said, which is the one thing a failure here has never
+      # carried off the runner. The suite log records that a service answered
+      # wrong; only the service's own log and the network topology say why, and
+      # without them a remote diagnosis is guesswork - three wrong hypotheses in a
+      # row were paid for one 15-minute run at a time.
+      - name: Capture stack diagnostics
+        if: failure()
+        run: |
+          OUT="$XCHAIN_NODE_DATA_DIR/e2e-logs/diagnostics"
+          mkdir -p "$OUT"
+          # Never let a diagnostic failure mask the real one: this step is
+          # evidence-gathering, and the job is already failing.
+          docker ps -a                  > "$OUT/docker-ps.txt"        2>&1 || true
+          docker network ls             > "$OUT/docker-networks.txt"  2>&1 || true
+          for net in $(docker network ls --filter name=xchain --format '{{.Name}}'); do
+            echo "=== $net ==="        >> "$OUT/network-inspect.txt"
+            docker network inspect "$net" >> "$OUT/network-inspect.txt" 2>&1 || true
+          done
+          for c in $(docker ps -a --format '{{.Names}}'); do
+            echo "=== $c ==="          >> "$OUT/container-inspect.txt"
+            # Config.Env carries credentials; take only what identifies the
+            # container and how it is attached.
+            docker inspect "$c" --format '{{json .NetworkSettings.Networks}}' >> "$OUT/container-inspect.txt" 2>&1 || true
+            docker logs --tail 400 "$c" > "$OUT/log-$c.txt"           2>&1 || true
+          done
+          echo "captured $(ls -1 "$OUT" | wc -l) diagnostic files"
+
       - name: Upload e2e logs
         if: always()
         uses: actions/upload-artifact@v4
