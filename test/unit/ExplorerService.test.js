@@ -601,3 +601,46 @@ describe('ExplorerService: installExplorerModule() full happy path', function ()
         expect(stubs.buildAndUp.calledWith(EXPLORER_MODULE_NAME, null, null)).to.be.true
     })
 })
+
+// The wait exists because the explorer polls the hub for its coins, so a fresh
+// install returns while it is still answering 503. It must converge a service
+// that is talking, and must NOT burn its budget on a host where no explorer is
+// listening at all (a coin-only install), which is also what keeps it out of the
+// way of suites that run against a fully mocked stack.
+describe('ExplorerService: waitForExplorerReady()', function () {
+
+    it('returns true as soon as the explorer reports healthy', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: true, healthy: true })
+        })
+        const es = loadExplorerService(stubs)
+        expect(await es.waitForExplorerReady(10000)).to.be.true
+    })
+
+    it('keeps waiting through degraded replies, then succeeds when it converges', async function () {
+        const probe = sinon.stub()
+        probe.onCall(0).resolves({ answering: true, healthy: false })
+        probe.onCall(1).resolves({ answering: true, healthy: false })
+        probe.resolves({ answering: true, healthy: true })
+        const stubs = makeExplorerServiceStubs({ explorerProbe: probe })
+        const es = loadExplorerService(stubs)
+        expect(await es.waitForExplorerReady(10000)).to.be.true
+        expect(probe.callCount).to.be.greaterThan(2)
+    })
+
+    it('gives up early, reporting no problem, when nothing is listening at all', async function () {
+        // Silence is "no explorer on this host", not "an explorer converging".
+        // Grinding the full budget here would add minutes to every coin-only install.
+        const probe = sinon.stub().resolves({ answering: false, healthy: false })
+        const stubs = makeExplorerServiceStubs({ explorerProbe: probe, sleep: sinon.stub().resolves() })
+        const es = loadExplorerService(stubs)
+        expect(await es.waitForExplorerReady(150000, 0)).to.be.true
+    })
+
+    it('reports false when a talking explorer never converges inside the budget', async function () {
+        const probe = sinon.stub().resolves({ answering: true, healthy: false })
+        const stubs = makeExplorerServiceStubs({ explorerProbe: probe, sleep: sinon.stub().resolves() })
+        const es = loadExplorerService(stubs)
+        expect(await es.waitForExplorerReady(10)).to.be.false
+    })
+})

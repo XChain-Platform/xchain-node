@@ -101,6 +101,22 @@ async function installModules(servicesList, ref = null) {
                 .map(s => `${s.module} (${s.coin} ${s.network})`).join(', ')
                 + ' - already installed. Use `update` to rebuild.')
         }
+
+        // The explorer is installed in the shared bucket, which runs BEFORE the
+        // coin stacks, and it learns its coins by polling the hub. So a run that
+        // installed a coin leaves it serving 503 for up to a poll interval after
+        // this loop ends. Returning there hands every caller a stack that reports
+        // installed and answers nothing; the first one to be bitten was the e2e
+        // gate, whose suite starts the moment install returns.
+        const installedACoin = outcome.installed.some(i => i.coin && i.network)
+        if (installedACoin) {
+            const { waitForExplorerReady } = require('../services/ExplorerService')
+            if (!await waitForExplorerReady()) {
+                console.warn('install: the xchain-explorer is still not serving coin data.' +
+                    ' The stack is installed; the explorer either cannot reach the hub or the hub' +
+                    ' has no config for these coins yet. Check it before running anything that reads it.')
+            }
+        }
         return outcome
     })
 }

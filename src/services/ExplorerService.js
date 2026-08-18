@@ -170,7 +170,55 @@ async function installExplorerModule(force = false, branch = null) {
     throw "Couldn't install the explorer module"
 }
 
+// Block until the explorer is actually serving, or the budget runs out.
+//
+// The explorer learns its coins by POLLING the hub (UPDATE_CONFIG_INTERVAL,
+// one minute by default), so an explorer that booted before the coin stacks
+// existed keeps answering 503 for up to a poll after they arrive. That gap is
+// invisible and it is long: measured on a clean host, the coin stack finished
+// at 14:55:47 and a suite that started at 14:57:04 still got a degraded
+// explorer, because the tick that would have fixed it had not landed.
+//
+// An install that returns while a service it just installed serves nothing is
+// reporting the wrong thing, and everything downstream inherits the race. This
+// converges it instead of leaving each caller to discover it.
+//
+// Returns true when healthy, false when the budget expired: a slow explorer is
+// not a reason to fail an install that otherwise succeeded, and the caller says
+// so out loud rather than pretending the stack is ready.
+// It waits only on an explorer that is TALKING. A degraded reply is a service
+// mid-convergence and worth the budget; silence is a host with no explorer to
+// converge (a coin-only install, a stack that never installed one), and grinding
+// the full budget against it would add minutes to every such run for nothing.
+// Whether the explorer came up at all is installExplorerModule's question, asked
+// and answered before this is ever reached.
+async function waitForExplorerReady(timeoutMs = 150000, silenceGraceMs = 6000) {
+    const defaultConfig = await getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+    const explorerConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
+
+    const started = Date.now()
+    const deadline = started + timeoutMs
+    let announced = false
+    let everAnswered = false
+
+    while (Date.now() < deadline) {
+        const { answering, healthy } = await explorerConnector.probe()
+        if (healthy) return true
+        if (answering) everAnswered = true
+        if (!everAnswered && Date.now() - started >= silenceGraceMs) return true
+
+        if (answering && !announced) {
+            console.log("Waiting for the xchain-explorer to pick up the installed coins" +
+                " (it polls the hub for config, so this takes up to a poll interval)...")
+            announced = true
+        }
+        await sleep(2000)
+    }
+    return false
+}
+
 module.exports = {
     updateExplorer,
-    installExplorerModule
+    installExplorerModule,
+    waitForExplorerReady
 }

@@ -20,6 +20,10 @@ const proxyquire = require('proxyquire').noCallThru()
 
 function makeStubs() {
     return {
+        // Converges by default: the tests that care about the wait assert on it
+        // directly, and every other install case would otherwise sit through a
+        // real poll loop.
+        waitForExplorerReady: sinon.stub().resolves(true),
         db: {
             getModuleContainer: sinon.stub().resolves('container-id-123'),
             removeModuleContainer: sinon.stub().resolves(true),
@@ -100,6 +104,9 @@ function loadOperations(stubs) {
             installModule: stubs.installModule,
             uninstallModule: stubs.uninstallModule
         },
+        '../services/ExplorerService': {
+            waitForExplorerReady: stubs.waitForExplorerReady
+        },
         '../services/SkewGuardService': {
             assertHubNotBehind: stubs.assertHubNotBehind
         },
@@ -139,6 +146,42 @@ describe('moduleOperations', function () {
             const servicesList = { bitcoin: { mainnet: ['xchain-encoder'] } }
             await ops.installModules(servicesList)
             expect(stubs.createDockerNetwork.calledOnce).to.be.true
+        })
+
+        // The explorer is installed in the shared bucket, ahead of the coin stacks,
+        // and learns its coins by polling the hub. Returning the moment the loop ends
+        // therefore hands the caller a stack that says installed and serves 503 for up
+        // to a poll interval; the e2e gate, which starts testing the instant install
+        // returns, was the first thing it broke.
+        it('waits for the explorer to serve once a coin was installed', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.installModules({ bitcoin: { regtest: ['xchain-indexer'] } })
+            expect(stubs.waitForExplorerReady.calledOnce).to.be.true
+        })
+
+        it('does not wait when the run installed no coin stack', async function () {
+            // A shared-only install (the ""/"" bucket) has nothing for the explorer
+            // to serve, so waiting would just burn the whole budget on every run.
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.installModules({ '': { '': ['xchain-explorer'] } })
+            expect(stubs.waitForExplorerReady.called).to.be.false
+        })
+
+        it('warns but still succeeds when the explorer never converges', async function () {
+            const stubs = makeStubs()
+            stubs.waitForExplorerReady = sinon.stub().resolves(false)
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            let result
+            try {
+                result = await ops.installModules({ bitcoin: { regtest: ['xchain-indexer'] } })
+            } finally {
+                warn.restore()
+            }
+            expect(result.installed.length).to.equal(1)
+            expect(warn.args.some(a => /not serving coin data/.test(String(a[0])))).to.be.true
         })
 
         it('builds database before installing modules', async function () {
