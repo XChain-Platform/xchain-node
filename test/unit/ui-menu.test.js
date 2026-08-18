@@ -102,3 +102,53 @@ describe('ui/menu restoreBootstrapInterface non-interactive resolution', functio
             /restore failed/);
     });
 });
+
+// Every per-module action the menu OFFERS must have a handler branch that reads
+// the same string. enquirer's Select resolves to a choice's NAME, and three
+// labels had drifted from the strings the handler compared against ("Update
+// local version" vs "Update locale version", "Update Container" vs "Update
+// container version", and "Reinstall" with no branch at all). Selecting any of
+// them ran nothing and dropped the operator back to the module list - a silent
+// no-op with no error to report. The labels are now shared constants; this binds
+// the two sides so a rename cannot re-open the gap on one side only.
+describe('ui/menu per-module action labels are all handled', function () {
+    const fs   = require('fs');
+    const path = require('path');
+    const src  = fs.readFileSync(path.resolve(__dirname, '../../src/ui/menu.js'), 'utf8');
+
+    // The handler chain lives after the choice list; both reference the same
+    // constants, so each constant must appear in a comparison against actionAnswer.
+    const handlerChain = src.slice(src.indexOf('const actionAnswer'));
+
+    for (const [constName, label] of Object.entries(menu.MODULE_ACTION_LABELS)) {
+        it(`${constName} ("${label}") reaches a handler`, function () {
+            assert.ok(
+                new RegExp('actionAnswer === ' + constName + '\\b').test(handlerChain),
+                `${constName} is offered as a menu choice but no handler branches on it, so picking it does nothing`
+            );
+        });
+    }
+
+    // The same property stated over the labels themselves rather than the
+    // constants: everything the module-action menu offers must be reachable,
+    // whether it is written as a constant or as a plain literal.
+    it('every offered per-module action label has a handler branch', function () {
+        const choiceBlock = src.slice(src.indexOf('const moduleActions'), src.indexOf('const actionSelect'));
+
+        // "Return" is the go-back branch (and the ESC .catch() default), which is
+        // deliberately a no-op body rather than an action.
+        const offered = [...choiceBlock.matchAll(/name:\s*(?:"([^"]+)"|([A-Z_]+))/g)]
+            .map(m => (m[1] !== undefined ? m[1] : menu.MODULE_ACTION_LABELS[m[2]]))
+            .filter(label => label && label !== 'Return');
+
+        assert.ok(offered.length >= 5, 'expected several module actions on offer, found ' + offered.length);
+
+        const handled = new Set([
+            ...[...handlerChain.matchAll(/actionAnswer === "([^"]+)"/g)].map(m => m[1]),
+            ...[...handlerChain.matchAll(/actionAnswer === ([A-Z_]+)/g)].map(m => menu.MODULE_ACTION_LABELS[m[1]])
+        ].filter(Boolean));
+
+        const unhandled = offered.filter(label => !handled.has(label));
+        assert.deepStrictEqual(unhandled, [], 'these menu actions do nothing when selected: ' + unhandled.join(', '));
+    });
+});

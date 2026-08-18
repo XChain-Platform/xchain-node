@@ -1463,6 +1463,32 @@ describe('DatabaseService', function () {
             const dropCmds = executed.filter(c => c && c.includes('DROP DATABASE'))
             expect(dropCmds.length).to.be.greaterThan(0)
         })
+
+        // The guard lives inside resetDatabases, not only in resetModules: the
+        // function is exported, and a DROP aimed at a null container id aborts
+        // part-way through a wipe. Assert it refuses BEFORE issuing anything.
+        it('refuses to drop anything when no MariaDB container exists', async function () {
+            const stubs = makeStubs({
+                // No container: `docker inspect` finds nothing, so
+                // getDatabaseContainerId() returns null.
+                execFileAsync: sinon.stub().rejects(new Error('No such container'))
+            })
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs)
+            let err = null
+            try {
+                await ds.resetDatabases('bitcoin', 'mainnet')
+            } catch (e) {
+                err = e
+            }
+            expect(err).to.not.equal(null)
+            expect(String(err.message)).to.contain('MariaDB container not found')
+            expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
     })
 
     // A wiped indexer DB restarts push_generations at 0, which the hub's price

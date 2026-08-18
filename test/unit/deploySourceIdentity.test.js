@@ -224,7 +224,7 @@ describe('deploy source identity', function () {
             const { ms } = load({
                 heads: [OLD],
                 tip: OLD,
-                sourceUrl: '/home/jdog/Sites/XChain-Platform/xchain-indexer',
+                sourceUrl: '/srv/checkouts/xchain-indexer',
                 gitAsyncExtra: (args) => {
                     if (args.includes('rev-parse') && args.includes('refs/heads/master')) return OLD + '\n'
                     if (args.includes('rev-parse') && args.includes('refs/remotes/origin/master')) return TIP + '\n'
@@ -244,7 +244,7 @@ describe('deploy source identity', function () {
             const { ms } = load({
                 heads: [TIP],
                 tip: TIP,
-                sourceUrl: '/home/jdog/Sites/XChain-Platform/xchain-indexer',
+                sourceUrl: '/srv/checkouts/xchain-indexer',
                 gitAsyncExtra: (args) => {
                     if (args.includes('rev-parse')) return TIP + '\n'
                     if (args.includes('rev-list')) return '0\n'

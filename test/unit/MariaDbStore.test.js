@@ -391,3 +391,71 @@ describe('MariaDbStore', function () {
         })
     })
 })
+
+/*
+ * The registry is per STACK, not per host.
+ *
+ * In external-DB mode two co-located stacks (distinct NODE_PREFIX) point at one
+ * host-native MariaDB and share the xchain_node database. The row key
+ * (module, coin, network) is identical on both, so an unscoped table let each
+ * stack's upsert overwrite the other's container_id and let DiscoveryService's
+ * orphan purge - which classifies containers by its own prefix - delete the
+ * other stack's live rows. The table name carries the stack identity instead.
+ */
+describe('MariaDbStore registry scoping by NODE_PREFIX', function () {
+
+    function loadWithPrefix(prefix) {
+        const statements = []
+        const record = async (sql) => {
+            statements.push(String(sql).replace(/\s+/g, ' ').trim())
+            return [{ cnt: 0 }]
+        }
+        const pool = {
+            getConnection: async () => ({ query: record, release: () => {} }),
+            query: record,
+            end: async () => {}
+        }
+        const constants = require('../../src/config/constants')
+        const MariaDbStore = proxyquire('../../src/MariaDbStore', {
+            'mariadb': { createPool: () => pool },
+            './config/constants': Object.assign({}, constants, { NODE_PREFIX: prefix })
+        })
+        return { MariaDbStore, statements }
+    }
+
+    async function statementsFor(prefix) {
+        const { MariaDbStore, statements } = loadWithPrefix(prefix)
+        const store = new MariaDbStore()
+        await store.createDatabase({ host: '127.0.0.1', port: 3306, user: 'u', password: 'p', database: 'xchain_node' })
+        await store.insertModuleContainer('xchain-indexer', 'bitcoin', 'mainnet', 'aaa')
+        await store.getModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')
+        await store.getAllModuleContainers(null, null)
+        await store.getAllModuleContainers('bitcoin', 'mainnet')
+        await store.removeModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')
+        await store.countModules()
+        await store.close()
+        return statements
+    }
+
+    it('keeps the bare `modules` table on the default prefix, so an existing install migrates nothing', async function () {
+        const statements = await statementsFor('xchain-node')
+        expect(statements.length).to.be.greaterThan(5)
+        for (const sql of statements) expect(sql, sql).to.not.match(/\bmodules_/)
+        expect(statements[0]).to.match(/^CREATE TABLE IF NOT EXISTS modules \(/)
+    })
+
+    it('gives a second stack its own table, so neither upsert nor purge can reach the first', async function () {
+        const statements = await statementsFor('stack-b')
+        expect(statements.length).to.be.greaterThan(5)
+        // Every statement, DDL and DML alike: one missed site is a cross-stack write.
+        for (const sql of statements) {
+            expect(sql, sql).to.match(/\bmodules_stack_b\b/)
+            expect(sql.replace(/modules_stack_b/g, ''), sql).to.not.match(/\bmodules\b/)
+        }
+    })
+
+    it('sanitizes a prefix that is legal for docker but not for a MariaDB identifier', async function () {
+        const statements = await statementsFor('node.1-alt')
+        for (const sql of statements) expect(sql, sql).to.match(/\bmodules_node_1_alt\b/)
+    })
+})

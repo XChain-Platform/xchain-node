@@ -5,10 +5,10 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Deploy-time migration precondition guard (XC-1335). A service whose new
-// source asserts a gated migration at startup must be REFUSED when the target
-// database has not applied it, before the container is recreated - and must
-// stay inert everywhere else, or every routine deploy starts failing.
+// Deploy-time migration precondition guard: refuse the deploy when the
+// target database hasn't applied a gated migration a service's new source
+// asserts, before the container is recreated; stay inert everywhere else,
+// or every routine deploy starts failing.
 
 const fs         = require('fs')
 const os         = require('os')
