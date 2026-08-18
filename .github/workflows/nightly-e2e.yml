@@ -221,6 +221,49 @@ jobs:
             docker inspect "$c" --format '{{json .NetworkSettings.Networks}}' >> "$OUT/container-inspect.txt" 2>&1 || true
             docker logs --tail 400 "$c" > "$OUT/log-$c.txt"           2>&1 || true
           done
+
+          # The explorer answering 503 with zero DB pools is the failure this job
+          # keeps hitting, and the container log alone cannot say whether the hub
+          # ever served it coin config. Capture both sides of that exchange.
+          curl -s -m 10 -X POST -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"ping","params":{},"id":1}' \
+            http://127.0.0.1:18080/ > "$OUT/explorer-ping.json" 2>&1 || true
+
+          # getallconfigs is in the hub's sensitive-read tier: its response carries DB
+          # credentials. Record the KEY STRUCTURE only, never a value, and keep the raw
+          # body outside the uploaded directory so it cannot reach the artifact.
+          RAW="$RUNNER_TEMP/hub-config-raw.json"
+          curl -s -m 10 -X POST -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"getallconfigs","params":{"since_updated_at":0},"id":1}' \
+            http://127.0.0.1:10000/ > "$RAW" 2>&1 || true
+          RAW="$RAW" node -e '
+            const fs = require("fs");
+            let parsed;
+            try { parsed = JSON.parse(fs.readFileSync(process.env.RAW, "utf8")); }
+            catch (e) { console.log("hub response unparseable or empty"); process.exit(0); }
+            const result = (parsed && parsed.result) || {};
+            const tree   = result.configs || result;
+            const shape  = {};
+            for (const coin of Object.keys(tree || {})) {
+              shape[coin] = {};
+              for (const net of Object.keys(tree[coin] || {})) {
+                shape[coin][net] = {};
+                for (const mod of Object.keys(tree[coin][net] || {}))
+                  shape[coin][net][mod] = Object.keys(tree[coin][net][mod] || {});
+              }
+            }
+            console.log("seq=" + result.seq + " watermark=" + result.watermark);
+            console.log("coins served: " + (Object.keys(shape).join(", ") || "(none)"));
+            console.log(JSON.stringify(shape, null, 2));
+          ' > "$OUT/hub-config-shape.txt" 2>&1 || true
+          rm -f "$RAW"
+
+          # Allowlisted so no credential-bearing var can be swept in.
+          docker inspect xchain-node-xchain-explorer \
+            --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+            | grep -E '^(HUB_API_HOST|HUB_PORT|HUB_VALIDATORS|NO_HUB|UPDATE_CONFIG_INTERVAL)=' \
+            > "$OUT/explorer-hub-env.txt" 2>&1 || true
+
           echo "captured $(ls -1 "$OUT" | wc -l) diagnostic files"
 
       - name: Upload e2e logs
