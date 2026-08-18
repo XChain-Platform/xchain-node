@@ -21,7 +21,7 @@
  * WHY IT EXISTS
  * -------------
  * 2026-08-09: a routine indexer deploy put all three mainnet indexers (BTC on
- * nodes01, DOGE and LTC on nodes02) into Restarting(1) crash-loops with
+ * one host, DOGE and LTC on another) into Restarting(1) crash-loops with
  * `Fatal indexer error: pubkeys.pubkey holds 66 chars but VARCHAR(130) is
  * required`. The new code asserts that column width at startup; the migration
  * that widens it is mode=manual (a COPY table rebuild under a metadata lock, so
