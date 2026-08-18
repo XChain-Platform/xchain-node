@@ -37,7 +37,12 @@ function createDirectories() {
     if (!fs.existsSync(containersFilesDir))  fs.mkdirSync(containersFilesDir)
 }
 
-async function preCheck(checkVersions = false, syncHubConfig = true) {
+// `moduleRef` is the ref the command being prechecked named (`install <ref> ...`,
+// `update <ref> ...`), or null. It exists solely so the hub provisioned here is
+// staged at the ref the operator asked for: preCheck runs ahead of the action, so
+// without it the one module installed from this file is also the one module no
+// `install <ref>` could influence. See installHubModule.
+async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null) {
     try {
         if (isVerbose()) console.log("Checking if Docker is installed")
         await checkDockerInstalledAndReachable()
@@ -160,7 +165,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true) {
 
     try {
         if (isVerbose()) console.log("Checking/Installing hub module")
-        await installHubModule()
+        await installHubModule(moduleRef)
     } catch (err) {
         // Preserve the cause. A bare `catch {}` here discarded the ONLY description
         // of what actually went wrong and replaced it with a message that names no

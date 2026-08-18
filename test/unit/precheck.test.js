@@ -31,7 +31,8 @@ function loadPrecheck(overrides) {
         getStatus:              sinon.stub().resolves(),
         checkContainerdDataRootRelocation: sinon.stub().resolves(null),
         updateHub:              sinon.stub().resolves(),
-        updateExplorer:         sinon.stub().resolves()
+        updateExplorer:         sinon.stub().resolves(),
+        installHubModule:       sinon.stub().resolves()
     }, overrides)
 
     const precheck = proxyquire('../../src/precheck.js', {
@@ -50,7 +51,7 @@ function loadPrecheck(overrides) {
         './services/ConfigService':    { getDockerNetwork: () => 'xchain' },
         './services/VersionService':   { checkAllRemoteVersions: stubs.checkAllRemoteVersions },
         './services/StatusService':    { getStatus: stubs.getStatus },
-        './services/HubService':       { installHubModule: sinon.stub().resolves(), updateHub: stubs.updateHub },
+        './services/HubService':       { installHubModule: stubs.installHubModule, updateHub: stubs.updateHub },
         './services/ExplorerService':  { updateExplorer: stubs.updateExplorer },
         './services/DatabaseService': {
             buildDatabaseModule:   sinon.stub().resolves(),
@@ -218,5 +219,33 @@ describe('preCheck(): hub/explorer config push @regression', function () {
         expect(await precheck.preCheck(false, true)).to.be.true
         expect(updateHub.calledOnce).to.be.true
         expect(updateExplorer.calledOnce).to.be.true
+    })
+})
+
+// preCheck provisions the hub BEFORE commander parses the action's arguments, so
+// for its whole history the one module installed from this file was also the one
+// module no `install <ref>` could influence: it always took the default branch.
+// A frozen-ref release e2e therefore graded a release stack with a master hub,
+// and the hub is the config oracle every other service reads.
+describe('preCheck: the hub is staged at the ref the command named', function () {
+
+    it('passes the ref through to installHubModule', async function () {
+        const installHubModule = sinon.stub().resolves()
+        const { precheck } = loadPrecheck({ installHubModule })
+
+        await precheck.preCheck(false, true, 'release/v0.10.0')
+
+        expect(installHubModule.calledOnce).to.be.true
+        expect(installHubModule.firstCall.args[0]).to.equal('release/v0.10.0')
+    })
+
+    it('passes null when the command named no ref, preserving the old behaviour', async function () {
+        const installHubModule = sinon.stub().resolves()
+        const { precheck } = loadPrecheck({ installHubModule })
+
+        await precheck.preCheck(false, true)
+
+        expect(installHubModule.calledOnce).to.be.true
+        expect(installHubModule.firstCall.args[0]).to.equal(null)
     })
 })

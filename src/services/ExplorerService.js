@@ -81,7 +81,20 @@ async function updateExplorer() {
     return true
 }
 
-async function installExplorerModule(force = false) {
+// `branch` is the ref the invoking command named (`install <ref> ...`), or null
+// for the commands that name none. It exists because this function is one of the
+// two install paths that did not take one, and a clone with no ref takes the
+// module's DEFAULT branch: measured 2026-08-18, `install develop all bitcoin
+// regtest` built the explorer from master while every generic-path module built
+// from develop, and the bundled xchain-vm then INHERITED master from it. That is
+// not only a mixed stack, it is the failure mode the release ceremony's frozen-ref
+// e2e gate exists to rule out, since `install release/vX.Y.Z` would have tested
+// master's explorer and reported on the release.
+//
+// Resolved through resolveComponentRef for the same reason the generic path is: a
+// pinned release install must pin everything it stages, or it is not a pinned
+// install, and the explorer was staged unpinned.
+async function installExplorerModule(force = false, branch = null) {
     const defaultConfig = await getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
     console.log("Checking if xchain-explorer module is running")
     const explorerConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
@@ -109,7 +122,9 @@ async function installExplorerModule(force = false) {
     }
 
     console.log("Downloading xchain-explorer...")
-    await cloneGit(EXPLORER_MODULE_NAME, true)
+    const { resolveComponentRef } = require('./ReleaseManifestService')
+    const explorerPin = resolveComponentRef(EXPLORER_MODULE_NAME, branch)
+    await cloneGit(EXPLORER_MODULE_NAME, true, false, explorerPin.ref, explorerPin.commit)
     console.log("Installing xchain-explorer module...")
     await buildAndUp(EXPLORER_MODULE_NAME, null, null)
     await getStatus(null, null, false)

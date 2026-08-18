@@ -222,7 +222,18 @@ async function updateHub() {
     return true
 }
 
-async function installHubModule() {
+// `branch` is the ref the invoking command named, threaded down from preCheck,
+// or null for every command that names none (which is most of them, and their
+// behaviour is unchanged).
+//
+// The hub is the harder half of the ref-blind install pair: it is provisioned by
+// preCheck, which runs BEFORE commander parses the action's arguments, so for its
+// whole history it cloned whatever the default branch was regardless of the ref
+// the operator asked for. Measured 2026-08-18: `install develop all bitcoin
+// regtest` deployed the hub from master, and since the hub is the config oracle
+// every other service then read its answers. A frozen-ref release e2e would have
+// been a master hub grading a release stack.
+async function installHubModule(branch = null) {
     const defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
     if (isVerbose()) console.log("Checking if xchain-hub module is running")
     const hubConnector = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
@@ -257,7 +268,11 @@ async function installHubModule() {
     }
 
     console.log("Downloading xchain-hub...")
-    await cloneGit(HUB_MODULE_NAME, true)
+    // Pinned like the generic path: a release install must stage the manifest's
+    // hub, not the tip of whatever branch this checkout defaults to.
+    const { resolveComponentRef } = require('./ReleaseManifestService')
+    const hubPin = resolveComponentRef(HUB_MODULE_NAME, branch)
+    await cloneGit(HUB_MODULE_NAME, true, false, hubPin.ref, hubPin.commit)
 
     await addUserPasswordToDatabase(
         HUB_MODULE_NAME, "", "",

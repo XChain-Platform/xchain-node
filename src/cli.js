@@ -61,6 +61,23 @@ function installUnhandledRejectionHandler() {
     })
 }
 
+// Which ref, if any, the command about to run will install its modules at.
+//
+// Only `install` and `update` take one; every other command yields null and
+// leaves preCheck's hub provisioning exactly as it was. The classification is
+// delegated to resolveArgs (the same call the actions make) so the two can never
+// disagree about which positional is the ref, and it is wrapped because a refusal
+// here must not abort the command before its own action can report the same
+// problem with better context.
+function refForPreCheck(commandName, actionCommand) {
+    if (commandName !== 'install' && commandName !== 'update') return null
+    try {
+        return resolveArgs(actionCommand.args || [], { expectBranch: true, defaultBranch: null }).branch
+    } catch {
+        return null
+    }
+}
+
 async function parseCommand() {
     installUnhandledRejectionHandler()
     const program = new Command()
@@ -128,7 +145,15 @@ async function parseCommand() {
         try {
             await preCheck(
                 commandsNeedingVersions.includes(commandName),
-                !readOnlyCommands.includes(commandName)
+                !readOnlyCommands.includes(commandName),
+                // The ref the action is about to install at, so the hub preCheck
+                // provisions is staged from it too. Read with the SAME classifier
+                // the action uses rather than "the first positional", because the
+                // args are order-independent and only resolveArgs knows which one
+                // is a ref (`install regtest` names a network, not a branch). A
+                // command that names no ref, or an arg shape resolveArgs refuses,
+                // yields null and the previous default-branch behaviour.
+                refForPreCheck(commandName, actionCommand)
             )
         } finally {
             // Non-mutating commands hand the lock back as soon as provisioning is
@@ -576,7 +601,10 @@ Notes:
 
 // installUnhandledRejectionHandler is exported for its unit test only; the CLI
 // installs it itself at the top of parseCommand().
-module.exports = { parseCommand, installUnhandledRejectionHandler }
+// refForPreCheck is exported for its unit test: it decides which tree the hub is
+// built from, and the defect it fixes was invisible in every log until a deploy
+// line named the wrong branch.
+module.exports = { parseCommand, installUnhandledRejectionHandler, refForPreCheck }
 
 // Allow running this file directly (`node src/cli.js <cmd>`) as well as via the
 // bin entrypoint `src/index.js`. When cli.js is required as a module (index.js

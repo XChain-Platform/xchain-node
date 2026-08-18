@@ -38,7 +38,11 @@ function makeExplorerServiceStubs(overrides = {}) {
         removeContainer:  overrides.removeContainer  || sinon.stub().resolves(),
         cloneGit:         overrides.cloneGit         || sinon.stub().resolves(true),
         buildAndUp:       overrides.buildAndUp       || sinon.stub().resolves('c'.repeat(64)),
-        explorerPing:     overrides.explorerPing     || sinon.stub().resolves(false)
+        explorerPing:     overrides.explorerPing     || sinon.stub().resolves(false),
+        // Default is the no-active-release answer the real service gives: the
+        // caller's ref passes through unpinned.
+        resolveComponentRef: overrides.resolveComponentRef
+            || sinon.stub().callsFake((component, fallbackRef) => ({ ref: fallbackRef, commit: null, pinned: false }))
     }
 }
 
@@ -77,6 +81,9 @@ function loadExplorerService(stubs) {
         './ModuleService': {
             cloneGit:   stubs.cloneGit,
             buildAndUp: stubs.buildAndUp
+        },
+        './ReleaseManifestService': {
+            resolveComponentRef: stubs.resolveComponentRef
         },
         '../ExplorerConnector.js': MockExplorerConnector
     })
@@ -257,6 +264,53 @@ describe('ExplorerService: installExplorerModule() already running', function ()
         const result = await es.installExplorerModule(false)
         expect(result).to.be.true
         expect(stubs.cloneGit.called).to.be.false
+    })
+})
+
+// The explorer was one of two modules whose install ignored the ref the command
+// named, so `install develop ...` built it from the default branch (master) while
+// every generic-path module built from develop. These pin the ref reaching the
+// clone, because that argument is the whole defect: everything downstream of it
+// looked correct while testing the wrong tree.
+describe('ExplorerService: installExplorerModule() honours the install ref', function () {
+
+    it('clones at the branch the caller named', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerPing: sinon.stub().onFirstCall().resolves(false).resolves(true)
+        })
+        const es = loadExplorerService(stubs)
+        await es.installExplorerModule(false, 'develop')
+        expect(stubs.cloneGit.firstCall.args[0]).to.equal(EXPLORER_MODULE_NAME)
+        expect(stubs.cloneGit.firstCall.args[3]).to.equal('develop')
+    })
+
+    it('clones a release branch verbatim, so a frozen-ref e2e tests the frozen tree', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerPing: sinon.stub().onFirstCall().resolves(false).resolves(true)
+        })
+        const es = loadExplorerService(stubs)
+        await es.installExplorerModule(false, 'release/v0.10.0')
+        expect(stubs.cloneGit.firstCall.args[3]).to.equal('release/v0.10.0')
+    })
+
+    it('passes the manifest pin (ref AND commit) when a release install is active', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerPing: sinon.stub().onFirstCall().resolves(false).resolves(true),
+            resolveComponentRef: sinon.stub().returns({ ref: 'v0.9.0', commit: 'a'.repeat(40), pinned: true })
+        })
+        const es = loadExplorerService(stubs)
+        await es.installExplorerModule(false, null)
+        expect(stubs.cloneGit.firstCall.args[3]).to.equal('v0.9.0')
+        expect(stubs.cloneGit.firstCall.args[4]).to.equal('a'.repeat(40))
+    })
+
+    it('passes null when no ref was named, keeping the default-branch behaviour', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerPing: sinon.stub().onFirstCall().resolves(false).resolves(true)
+        })
+        const es = loadExplorerService(stubs)
+        await es.installExplorerModule(false)
+        expect(stubs.cloneGit.firstCall.args[3]).to.equal(null)
     })
 })
 
