@@ -464,8 +464,15 @@ gate could report them, so the cron exited 0 while a consumer archive went stale
         .argument('[testName]', 'optional test file name (e.g. "order", "issue"); runs only that suite')
         .option('--grep <pattern>', 'only run tests matching this pattern (passed to mocha --grep)')
         .option('--script <npmScript>', 'run a specific e2e npm script (e.g. test:security) instead of the default suite')
+        // The suite is CODE, cloned like any other module, and it defaulted to
+        // xchain-e2e-test's default branch no matter which ref the stack under it
+        // was installed at. For the release ceremony's freeze gate that means
+        // master's suites grading a release stack: a suite added or corrected on
+        // the release branch never runs, and one deleted there runs anyway.
+        // Omitted, the previous default-branch behaviour is unchanged.
+        .option('--ref <ref>', 'clone the e2e-test suite at this ref (match the ref the stack was installed at)')
         .action(async (chain, testName, options) => {
-            const { logFile, exitCode } = await runE2ETest(chain, 'regtest', testName, options.grep, options.script)
+            const { logFile, exitCode } = await runE2ETest(chain, 'regtest', testName, options.grep, options.script, options.ref || null)
             console.log("E2E tests finished with exit code " + exitCode)
             console.log("Logs saved to: " + logFile)
             // Propagate the suite's real exit code so CI (and run-multichain-e2e.sh)

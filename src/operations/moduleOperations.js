@@ -539,7 +539,10 @@ async function shellModule(servicesList) {
     return true
 }
 
-async function runE2ETest(coin, network, testName = null, grep = null, script = null) {
+// `ref` is the ref to clone the e2e-test suite at, normally the same one the
+// stack under test was installed at. Null keeps the default-branch behaviour
+// every caller had before the option existed.
+async function runE2ETest(coin, network, testName = null, grep = null, script = null, ref = null) {
     let dockerCmdArgs = null
     if (script) {
         // Run an arbitrary e2e npm script (e.g. test:security, test:perf:budget) so CI
@@ -552,7 +555,7 @@ async function runE2ETest(coin, network, testName = null, grep = null, script = 
             `test/actions/${testName}.test.js`]
         if (grep) dockerCmdArgs.push('--grep', grep)
     }
-    const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true, null, dockerCmdArgs)
+    const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true, ref, dockerCmdArgs)
 
     console.log("Running e2e tests, please wait...")
     const exitCode = await waitContainer(containerId)

@@ -185,16 +185,16 @@ jobs:
       - name: Run the e2e action suite
         # Now exits non-zero on failure (cli.js e2etest propagates the suite's
         # exit code), so this step natively gates the job.
-        run: node src/index.js e2etest "$COIN"
+        run: node src/index.js e2etest "$COIN" --ref "$STACK_REF"
 
       - name: Run the e2e Security suite (test/security)
         # Stack-dependent on-chain security suite (VM sandbox-escape / gas-bomb /
         # deploy-reject). Driven via the e2etest --script option.
-        run: node src/index.js e2etest "$COIN" --script test:security
+        run: node src/index.js e2etest "$COIN" --script test:security --ref "$STACK_REF"
 
       - name: Run the e2e Performance suite (test/perf)
         # Live-stack per-service latency budgets (regression ceilings).
-        run: node src/index.js e2etest "$COIN" --script test:perf:budget
+        run: node src/index.js e2etest "$COIN" --script test:perf:budget --ref "$STACK_REF"
 
       - name: Upload e2e logs
         if: always()

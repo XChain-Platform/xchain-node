@@ -879,6 +879,27 @@ describe('moduleOperations', function () {
             const dockerCmdArgs = stubs.installModule.firstCall.args[7]
             expect(dockerCmdArgs).to.be.null
         })
+
+        // The suite is code and is cloned like any other module, so it took
+        // xchain-e2e-test's default branch regardless of the ref the stack under
+        // it was installed at. On the ceremony's freeze gate that is master's
+        // suites grading a release stack: a suite corrected on the release branch
+        // never runs, and one deleted there runs anyway.
+        it('clones the suite at the ref it was given', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves('e2e-container-id')
+            const ops = loadOperations(stubs)
+            await ops.runE2ETest('bitcoin', 'regtest', null, null, 'test:security', 'release/v0.10.0')
+            expect(stubs.installModule.firstCall.args[6]).to.equal('release/v0.10.0')
+        })
+
+        it('passes null when no ref was given, keeping the default-branch behaviour', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves('e2e-container-id')
+            const ops = loadOperations(stubs)
+            await ops.runE2ETest('bitcoin', 'regtest')
+            expect(stubs.installModule.firstCall.args[6]).to.equal(null)
+        })
     })
 
     // -------------------------------------------------------------------
