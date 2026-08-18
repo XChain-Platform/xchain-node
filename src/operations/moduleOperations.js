@@ -126,10 +126,11 @@ async function installModules(servicesList, ref = null) {
 // against live docker, and installModules is also driven directly by suites whose
 // container registry is fixture data that such a reconcile would purge.
 //
-// Nothing here fails the command. The modules are installed either way, and the
-// next command's preCheck runs the same two calls.
+// Returns whether the stack is usable. The modules are installed either way, but
+// reporting success for a stack whose explorer serves 503 makes every later
+// failure land on the caller's first read instead of here.
 async function syncSharedServicesAfterInstall(outcome) {
-    if (!outcome || !outcome.installed.some(i => i.coin && i.network)) return
+    if (!outcome || !outcome.installed.some(i => i.coin && i.network)) return true
 
     const { updateHub } = require('../services/HubService')
     const { updateExplorer, waitForExplorerReady } = require('../services/ExplorerService')
@@ -137,11 +138,24 @@ async function syncSharedServicesAfterInstall(outcome) {
     try { await updateHub() }      catch (err) { console.warn('install: could not push config to the hub: ' + err) }
     try { await updateExplorer() } catch (err) { console.warn('install: could not attach the explorer to the new coin networks: ' + err) }
 
-    if (!await waitForExplorerReady()) {
-        console.warn('install: the xchain-explorer is still not serving coin data.' +
-            ' The stack is installed; the explorer either cannot reach the hub or the hub' +
-            ' has no config for these coins yet. Check it before running anything that reads it.')
+    if (await waitForExplorerReady()) return true
+
+    console.warn('install: the xchain-explorer is still not serving coin data.' +
+        ' The stack is installed; the explorer either cannot reach the hub or the hub' +
+        ' has no config for these coins yet. Check it before running anything that reads it.')
+
+    // Escape hatch for the install-then-fix flows: the modules ARE installed, so a
+    // caller that intends to repair the explorer by hand can still treat this as success.
+    if (allowDegradedExplorer()) {
+        console.warn('install: continuing anyway (XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER is set).')
+        return true
     }
+    return false
+}
+
+// Opt-out for callers that knowingly accept a stack whose explorer serves no coins.
+function allowDegradedExplorer() {
+    return ['1', 'true', 'yes'].includes(String(process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER || '').toLowerCase())
 }
 
 async function updateModules(servicesList, ref = null) {

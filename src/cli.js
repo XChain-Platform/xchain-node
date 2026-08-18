@@ -213,8 +213,10 @@ async function parseCommand() {
             // something tells them, and the thing that does runs in preCheck, ahead
             // of this action. Without it the command returns a stack whose explorer
             // serves 503 to everything.
-            await syncSharedServicesAfterInstall(installed)
-            return process.exit(0)
+            // Exit non-zero when the explorer never came up serving coins, so the
+            // caller stops here rather than at its first read of a 503 stack.
+            const usable = await syncSharedServicesAfterInstall(installed)
+            return process.exit(usable ? 0 : 1)
         })
 
     program

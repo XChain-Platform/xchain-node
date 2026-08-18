@@ -1333,6 +1333,48 @@ describe('moduleOperations: syncSharedServicesAfterInstall()', function () {
         }
         expect(warn.args.some(a => /not serving coin data/.test(String(a[0])))).to.be.true
     })
+
+    it('reports the stack usable when the explorer converges', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        expect(await ops.syncSharedServicesAfterInstall(coinInstalled)).to.be.true
+    })
+
+    it('reports the stack UNUSABLE when the explorer never converges', async function () {
+        // The caller exits non-zero on this, so a gate stops at the boot step
+        // instead of at its first read of a 503 explorer.
+        const stubs = makeStubs()
+        stubs.waitForExplorerReady = sinon.stub().resolves(false)
+        const ops = loadOperations(stubs)
+        const warn = sinon.stub(console, 'warn')
+        try {
+            expect(await ops.syncSharedServicesAfterInstall(coinInstalled)).to.be.false
+        } finally {
+            warn.restore()
+        }
+    })
+
+    it('honours XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER for install-then-fix flows', async function () {
+        const stubs = makeStubs()
+        stubs.waitForExplorerReady = sinon.stub().resolves(false)
+        const ops = loadOperations(stubs)
+        const warn = sinon.stub(console, 'warn')
+        const prior = process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER
+        process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER = '1'
+        try {
+            expect(await ops.syncSharedServicesAfterInstall(coinInstalled)).to.be.true
+        } finally {
+            warn.restore()
+            if (prior === undefined) delete process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER
+            else process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER = prior
+        }
+    })
+
+    it('reports usable when the run installed no coin stack', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        expect(await ops.syncSharedServicesAfterInstall(sharedOnly)).to.be.true
+    })
 })
 
 // The e2e image stages its siblings from LIBRARY_BUNDLES, and the suites reach
