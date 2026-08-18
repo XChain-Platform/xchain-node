@@ -108,17 +108,40 @@ async function installModules(servicesList, ref = null) {
         // this loop ends. Returning there hands every caller a stack that reports
         // installed and answers nothing; the first one to be bitten was the e2e
         // gate, whose suite starts the moment install returns.
-        const installedACoin = outcome.installed.some(i => i.coin && i.network)
-        if (installedACoin) {
-            const { waitForExplorerReady } = require('../services/ExplorerService')
-            if (!await waitForExplorerReady()) {
-                console.warn('install: the xchain-explorer is still not serving coin data.' +
-                    ' The stack is installed; the explorer either cannot reach the hub or the hub' +
-                    ' has no config for these coins yet. Check it before running anything that reads it.')
-            }
-        }
         return outcome
     })
+}
+
+// Make the coins this run installed usable before the command returns.
+//
+// updateHub and updateExplorer push coin config to the hub and JOIN the hub and
+// explorer containers to each coin's docker network. They run in preCheck, which
+// fires BEFORE the action, so an install that creates brand-new coin stacks ends
+// without either shared service having heard about them: the explorer sits on no
+// network from which the hub is reachable, never populates a DB pool, and answers
+// 503 until some later command's preCheck happens to fix it. Measured on a clean
+// host, it stayed degraded through a full 150-second readiness wait.
+//
+// This is a COMMAND-level step, not part of the install primitive: it reconciles
+// against live docker, and installModules is also driven directly by suites whose
+// container registry is fixture data that such a reconcile would purge.
+//
+// Nothing here fails the command. The modules are installed either way, and the
+// next command's preCheck runs the same two calls.
+async function syncSharedServicesAfterInstall(outcome) {
+    if (!outcome || !outcome.installed.some(i => i.coin && i.network)) return
+
+    const { updateHub } = require('../services/HubService')
+    const { updateExplorer, waitForExplorerReady } = require('../services/ExplorerService')
+
+    try { await updateHub() }      catch (err) { console.warn('install: could not push config to the hub: ' + err) }
+    try { await updateExplorer() } catch (err) { console.warn('install: could not attach the explorer to the new coin networks: ' + err) }
+
+    if (!await waitForExplorerReady()) {
+        console.warn('install: the xchain-explorer is still not serving coin data.' +
+            ' The stack is installed; the explorer either cannot reach the hub or the hub' +
+            ' has no config for these coins yet. Check it before running anything that reads it.')
+    }
 }
 
 async function updateModules(servicesList, ref = null) {
@@ -888,6 +911,7 @@ async function resetModules(service, coin, network, force = false) {
 
 module.exports = {
     installModules,
+    syncSharedServicesAfterInstall,
     updateModules,
     recreateModules,
     uninstallModules,

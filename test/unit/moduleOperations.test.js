@@ -24,6 +24,8 @@ function makeStubs() {
         // directly, and every other install case would otherwise sit through a
         // real poll loop.
         waitForExplorerReady: sinon.stub().resolves(true),
+        updateExplorer: sinon.stub().resolves(true),
+        updateHub: sinon.stub().resolves(true),
         db: {
             getModuleContainer: sinon.stub().resolves('container-id-123'),
             removeModuleContainer: sinon.stub().resolves(true),
@@ -105,7 +107,11 @@ function loadOperations(stubs) {
             uninstallModule: stubs.uninstallModule
         },
         '../services/ExplorerService': {
-            waitForExplorerReady: stubs.waitForExplorerReady
+            waitForExplorerReady: stubs.waitForExplorerReady,
+            updateExplorer: stubs.updateExplorer
+        },
+        '../services/HubService': {
+            updateHub: stubs.updateHub
         },
         '../services/SkewGuardService': {
             assertHubNotBehind: stubs.assertHubNotBehind
@@ -146,42 +152,6 @@ describe('moduleOperations', function () {
             const servicesList = { bitcoin: { mainnet: ['xchain-encoder'] } }
             await ops.installModules(servicesList)
             expect(stubs.createDockerNetwork.calledOnce).to.be.true
-        })
-
-        // The explorer is installed in the shared bucket, ahead of the coin stacks,
-        // and learns its coins by polling the hub. Returning the moment the loop ends
-        // therefore hands the caller a stack that says installed and serves 503 for up
-        // to a poll interval; the e2e gate, which starts testing the instant install
-        // returns, was the first thing it broke.
-        it('waits for the explorer to serve once a coin was installed', async function () {
-            const stubs = makeStubs()
-            const ops = loadOperations(stubs)
-            await ops.installModules({ bitcoin: { regtest: ['xchain-indexer'] } })
-            expect(stubs.waitForExplorerReady.calledOnce).to.be.true
-        })
-
-        it('does not wait when the run installed no coin stack', async function () {
-            // A shared-only install (the ""/"" bucket) has nothing for the explorer
-            // to serve, so waiting would just burn the whole budget on every run.
-            const stubs = makeStubs()
-            const ops = loadOperations(stubs)
-            await ops.installModules({ '': { '': ['xchain-explorer'] } })
-            expect(stubs.waitForExplorerReady.called).to.be.false
-        })
-
-        it('warns but still succeeds when the explorer never converges', async function () {
-            const stubs = makeStubs()
-            stubs.waitForExplorerReady = sinon.stub().resolves(false)
-            const ops = loadOperations(stubs)
-            const warn = sinon.stub(console, 'warn')
-            let result
-            try {
-                result = await ops.installModules({ bitcoin: { regtest: ['xchain-indexer'] } })
-            } finally {
-                warn.restore()
-            }
-            expect(result.installed.length).to.equal(1)
-            expect(warn.args.some(a => /not serving coin data/.test(String(a[0])))).to.be.true
         })
 
         it('builds database before installing modules', async function () {
@@ -1295,5 +1265,72 @@ describe('moduleOperations', function () {
             expect(result).to.be.true
             expect(stubs.execContainer.called).to.be.false
         })
+    })
+})
+
+// A coin installed by THIS run is unknown to the hub and explorer until something
+// tells them, and the thing that does (preCheck) fires BEFORE the action. Left
+// unsynced, the explorer sits on no network from which the hub is reachable,
+// populates no DB pool, and answers 503 to everything: measured on a clean host it
+// stayed degraded through a full 150-second readiness wait, which is what ruled out
+// the poll-interval race this was first mistaken for.
+//
+// It lives beside installModules rather than inside it because it reconciles
+// against LIVE docker, and installModules is driven directly by suites whose
+// container registry is fixture data that such a reconcile purges.
+describe('moduleOperations: syncSharedServicesAfterInstall()', function () {
+
+    const coinInstalled = { installed: [{ module: 'xchain-indexer', coin: 'bitcoin', network: 'regtest' }], skipped: [] }
+    const sharedOnly    = { installed: [{ module: 'xchain-explorer', coin: '', network: '' }], skipped: [] }
+
+    it('pushes hub config, attaches the explorer, then waits for it to serve', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        await ops.syncSharedServicesAfterInstall(coinInstalled)
+        expect(stubs.updateHub.calledOnce).to.be.true
+        expect(stubs.updateExplorer.calledOnce).to.be.true
+        expect(stubs.updateExplorer.calledBefore(stubs.waitForExplorerReady)).to.be.true
+    })
+
+    it('does nothing when the run installed no coin stack', async function () {
+        // A shared-only install has no new network to join and nothing to serve.
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        await ops.syncSharedServicesAfterInstall(sharedOnly)
+        expect(stubs.updateHub.called).to.be.false
+        expect(stubs.waitForExplorerReady.called).to.be.false
+    })
+
+    it('tolerates a missing outcome rather than throwing at the end of an install', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        await ops.syncSharedServicesAfterInstall(undefined)
+        expect(stubs.updateHub.called).to.be.false
+    })
+
+    it('still waits when the hub push fails, and never fails the command', async function () {
+        const stubs = makeStubs()
+        stubs.updateHub = sinon.stub().rejects(new Error('hub unreachable'))
+        const ops = loadOperations(stubs)
+        const warn = sinon.stub(console, 'warn')
+        try {
+            await ops.syncSharedServicesAfterInstall(coinInstalled)
+        } finally {
+            warn.restore()
+        }
+        expect(stubs.waitForExplorerReady.calledOnce).to.be.true
+    })
+
+    it('warns, without throwing, when the explorer never converges', async function () {
+        const stubs = makeStubs()
+        stubs.waitForExplorerReady = sinon.stub().resolves(false)
+        const ops = loadOperations(stubs)
+        const warn = sinon.stub(console, 'warn')
+        try {
+            await ops.syncSharedServicesAfterInstall(coinInstalled)
+        } finally {
+            warn.restore()
+        }
+        expect(warn.args.some(a => /not serving coin data/.test(String(a[0])))).to.be.true
     })
 })
