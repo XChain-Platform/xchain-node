@@ -39,6 +39,7 @@ function makeExplorerServiceStubs(overrides = {}) {
         cloneGit:         overrides.cloneGit         || sinon.stub().resolves(true),
         buildAndUp:       overrides.buildAndUp       || sinon.stub().resolves('c'.repeat(64)),
         explorerPing:     overrides.explorerPing     || sinon.stub().resolves(false),
+        explorerProbe:    overrides.explorerProbe    || null,
         // Default is the no-active-release answer the real service gives: the
         // caller's ref passes through unpinned.
         resolveComponentRef: overrides.resolveComponentRef
@@ -50,6 +51,15 @@ function loadExplorerService(stubs) {
     // Build a mock ExplorerConnector class so we can control ping()
     const MockExplorerConnector = sinon.stub()
     MockExplorerConnector.prototype.ping = stubs.explorerPing
+    // probe() is what the install path reads. Default it to the real class's own
+    // relationship between the two (a healthy explorer answers; an unhealthy one
+    // is assumed silent) so every pre-existing case keeps its meaning, and let a
+    // test override it to express the third state: answering but degraded.
+    MockExplorerConnector.prototype.probe = stubs.explorerProbe
+        || (async function () {
+            const healthy = await stubs.explorerPing()
+            return { answering: healthy, healthy }
+        })
 
     return proxyquire('../../src/services/ExplorerService', {
         '../config/constants': {
@@ -314,6 +324,58 @@ describe('ExplorerService: installExplorerModule() honours the install ref', fun
     })
 })
 
+// The explorer only reports healthy once it holds a DB pool, and its pools come
+// from the coin stacks. `install <ref> all` installs it in the shared bucket,
+// BEFORE any coin exists, so requiring health there made a first install
+// unsatisfiable: measured on a clean hosted runner, the explorer answered 503
+// degraded for ten seconds and the whole stack install failed. It never showed on
+// a dev box or CI venue, both of which already carry coin DBs.
+describe('ExplorerService: installExplorerModule() on a stack with no coins yet', function () {
+
+    it('accepts an answering-but-degraded explorer when no coin is installed', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: true, healthy: false }),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({})
+        })
+        const es = loadExplorerService(stubs)
+        expect(await es.installExplorerModule(false)).to.be.true
+        expect(stubs.buildAndUp.called).to.be.true
+    })
+
+    it('still REFUSES an answering-but-degraded explorer once a coin is installed', async function () {
+        // With a coin present the explorer should hold a pool for it, so degraded
+        // is a real fault and must not be waved through by the carve-out above.
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: true, healthy: false }),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['regtest'] })
+        })
+        const es = loadExplorerService(stubs)
+        let threw = null
+        try { await es.installExplorerModule(false) } catch (err) { threw = err }
+        expect(threw).to.match(/Couldn't install the explorer module/)
+    })
+
+    it('refuses a container that never answers at all, coins or not', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: false, healthy: false }),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({})
+        })
+        const es = loadExplorerService(stubs)
+        let threw = null
+        try { await es.installExplorerModule(false) } catch (err) { threw = err }
+        expect(threw).to.match(/Couldn't install the explorer module/)
+    })
+
+    it('a healthy explorer is accepted whether or not a coin is installed', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: true, healthy: true }),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['regtest'] })
+        })
+        const es = loadExplorerService(stubs)
+        expect(await es.installExplorerModule(false)).to.be.true
+    })
+})
+
 describe('ExplorerService: installExplorerModule() force=true', function () {
 
     it('kills and removes existing container when force=true and container exists', async function () {
@@ -419,6 +481,10 @@ describe('ExplorerService: installExplorerModule() updateExplorer error in loop'
 
         const MockExplorerConnector = sinon.stub()
         MockExplorerConnector.prototype.ping = stubs.explorerPing
+        MockExplorerConnector.prototype.probe = async () => {
+            const healthy = await stubs.explorerPing()
+            return { answering: healthy, healthy }
+        }
 
         const es = proxyquire('../../src/services/ExplorerService', {
             '../config/constants': { EXPLORER_MODULE_NAME: 'xchain-explorer' },

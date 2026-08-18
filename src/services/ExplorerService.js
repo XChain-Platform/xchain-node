@@ -130,16 +130,35 @@ async function installExplorerModule(force = false, branch = null) {
     await getStatus(null, null, false)
     console.log("Waiting for the xchain-explorer to respond")
 
+    // A healthy explorer is one holding at least one DB pool, and its pools come
+    // from the COIN stacks. So on a host with no coin installed yet there is no
+    // reply that can satisfy a health check, and demanding one made the first
+    // install of a stack unsatisfiable by construction: `install <ref> all` puts
+    // the explorer in the shared ("",  "") bucket, which runs BEFORE any coin
+    // exists, so the explorer answered 503 degraded for ten seconds and the whole
+    // install failed. Measured on a clean hosted runner 2026-08-18; it never
+    // surfaced on a dev box or a CI venue because both already carry coin DBs
+    // from an earlier install.
+    //
+    // So the bar is "answering" when there is no coin to serve, and stays the
+    // full health check the moment there is one: with a coin installed, an
+    // explorer holding no pools is a real fault and must still fail the install.
+    const coinsPresent = Object.keys(await getInstalledCoinsAndNetworks()).length > 0
+
     let tries = 10
     while (tries > 0) {
-        const ping = await explorerConnector.ping()
-        if (ping) {
+        const { answering, healthy } = await explorerConnector.probe()
+        if (healthy || (answering && !coinsPresent)) {
             try {
                 await updateExplorer()
             } catch {
                 tries--
                 await sleep(1000)
                 continue
+            }
+            if (!healthy) {
+                console.log("xchain-explorer is up with no coin data to serve yet;" +
+                    " it starts serving as each coin stack is installed.")
             }
             return true
         } else {
