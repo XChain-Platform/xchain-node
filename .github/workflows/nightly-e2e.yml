@@ -46,6 +46,16 @@ on:
         type: choice
         options: [bitcoin, litecoin, dogecoin]
         default: bitcoin
+      suite:
+        # ONE suite instead of the whole action set, so fixing a defect costs a boot
+        # plus that suite rather than a two-hour full pass. Takes the file-name stem
+        # e2etest already accepts (e.g. "attestation", "order"). Empty runs everything,
+        # which is what a release gate must do; a subset proves a fix, never the train.
+        # The security and performance suites are skipped while a subset is running,
+        # because they grade the whole stack and a partial action pass does not earn them.
+        description: 'Single action suite to run (file stem, e.g. attestation). Empty = full suite.'
+        type: string
+        default: ''
       ref:
         # The release ceremony's freeze step needs a driven e2e run against the
         # EXACT content a release is being cut from, not against a branch tip
@@ -87,6 +97,7 @@ jobs:
       # stack it installs. Splitting those two was how "we tested the release"
       # could mean "we tested master's installer against the release".
       STACK_REF: ${{ github.event.inputs.ref || 'develop' }}
+      SUITE: ${{ github.event.inputs.suite || '' }}
       # Headless DB: point xchain-node at an external MariaDB instead of its
       # bundled DB container, so the first install does NOT stop on the
       # interactive root-password prompt (see DatabaseService.getExternalDbConfig
@@ -185,14 +196,16 @@ jobs:
       - name: Run the e2e action suite
         # Now exits non-zero on failure (cli.js e2etest propagates the suite's
         # exit code), so this step natively gates the job.
-        run: node src/index.js e2etest "$COIN" --ref "$STACK_REF"
+        run: node src/index.js e2etest "$COIN" $SUITE --ref "$STACK_REF"
 
       - name: Run the e2e Security suite (test/security)
+        if: env.SUITE == ''
         # Stack-dependent on-chain security suite (VM sandbox-escape / gas-bomb /
         # deploy-reject). Driven via the e2etest --script option.
         run: node src/index.js e2etest "$COIN" --script test:security --ref "$STACK_REF"
 
       - name: Run the e2e Performance suite (test/perf)
+        if: env.SUITE == ''
         # Live-stack per-service latency budgets (regression ceilings).
         run: node src/index.js e2etest "$COIN" --script test:perf:budget --ref "$STACK_REF"
 
