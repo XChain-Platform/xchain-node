@@ -107,7 +107,24 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # A BTC full action suite alone runs ~1h50m of wall clock, and the security
+    # and performance suites are sequenced AFTER it, so at 120 the two of them
+    # shared whatever minutes the action suite happened to leave - usually none.
+    # They had never once executed, and no amount of fixing the action suite
+    # could have changed that: the budget, not the tests, was the binding
+    # constraint.
+    #
+    # 360 is the platform ceiling for a hosted job, i.e. this sets no limit the
+    # runner would not impose anyway. That is deliberate: the two suites behind
+    # the action pass have never run, so there is no measured duration to size
+    # headroom against, and guessing low would re-create the same invisible
+    # truncation one tier further along. The cost is that a WEDGED run (a hung
+    # container, a stalled indexer poll) now takes the full 6 hours to report
+    # instead of failing earlier - so if that starts happening, add a
+    # `timeout-minutes` to the individual suite steps rather than clawing this
+    # number back down; a per-step bound catches a hang without also capping a
+    # legitimately long pass.
+    timeout-minutes: 360
     env:
       COIN: ${{ github.event.inputs.coin || 'bitcoin' }}
       # Drives BOTH the xchain-node checkout below and the `install` boot
