@@ -219,7 +219,10 @@ jobs:
             # Config.Env carries credentials; take only what identifies the
             # container and how it is attached.
             docker inspect "$c" --format '{{json .NetworkSettings.Networks}}' >> "$OUT/container-inspect.txt" 2>&1 || true
-            docker logs --tail 400 "$c" > "$OUT/log-$c.txt"           2>&1 || true
+            # 400 lines covers a boot failure but not a 2-hour suite: a defect in an
+            # EARLY suite has already scrolled away by the time the job fails, which is
+            # what made the attestation execution-row failure undiagnosable off-runner.
+            docker logs --tail 20000 "$c" > "$OUT/log-$c.txt"         2>&1 || true
           done
 
           # The explorer answering 503 with zero DB pools is the failure this job
