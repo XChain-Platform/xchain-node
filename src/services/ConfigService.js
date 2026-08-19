@@ -435,6 +435,26 @@ async function getDefaultConfig(module, coin, network) {
         if (module === XChainService.XCHAIN_E2E_TEST) {
             defaultValues["COIN"] = coin
             defaultValues["XCHAIN_CONTRACTS_DIR"] = "/XChainE2ETest/xchain-contracts"
+
+            // The validator-onboarding suite STAKEs the hub's own signing pubkey and
+            // asserts the indexer then admits it to each capability set, so it needs
+            // to know which key the hub actually runs as. It read VALIDATOR_PUBKEY
+            // from the env and skipped when unset, which meant the only way to run it
+            // was for an operator to hand-copy the hex out of `validator status` into
+            // the coin config - so it skipped everywhere nobody had, including CI.
+            // Derive it from the same settings file the hub's own env comes from
+            // (getValidatorEnv above), so the two can never name different keys.
+            //
+            // PUBLIC half only. The seed stays in signing.key / SIGNING_PRIVKEY_HEX
+            // and goes to the hub alone; the test needs the pubkey and nothing else.
+            //
+            // A standalone node has no validator, so this is absent and the suite
+            // still skips - correctly, because there is no identity to onboard.
+            const { getValidatorSettings } = require('./ValidatorService')
+            const validatorSettings = getValidatorSettings()
+            if (validatorSettings && validatorSettings.pubkey) {
+                defaultValues["VALIDATOR_PUBKEY"] = validatorSettings.pubkey
+            }
         }
 
         // Genesis-ledger bootstrap env (xchain-indexer only). The indexer binds its
