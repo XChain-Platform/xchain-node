@@ -202,7 +202,10 @@ jobs:
       # without them a remote diagnosis is guesswork - three wrong hypotheses in a
       # row were paid for one 15-minute run at a time.
       - name: Capture stack diagnostics
-        if: failure()
+        # Runs on every outcome, not just failure. A passing run is the baseline a
+        # later failure is read against, and there is no second chance to collect it:
+        # the runner is destroyed with the job.
+        if: always()
         run: |
           OUT="$XCHAIN_NODE_DATA_DIR/e2e-logs/diagnostics"
           mkdir -p "$OUT"
@@ -219,10 +222,11 @@ jobs:
             # Config.Env carries credentials; take only what identifies the
             # container and how it is attached.
             docker inspect "$c" --format '{{json .NetworkSettings.Networks}}' >> "$OUT/container-inspect.txt" 2>&1 || true
-            # 400 lines covers a boot failure but not a 2-hour suite: a defect in an
-            # EARLY suite has already scrolled away by the time the job fails, which is
-            # what made the attestation execution-row failure undiagnosable off-runner.
-            docker logs --tail 20000 "$c" > "$OUT/log-$c.txt"         2>&1 || true
+            # NO --tail. Any cap is a bet on where the next defect lands, and the
+            # previous 400 lost an early-suite failure in a 2-hour run. The whole suite
+            # log for such a run is under a megabyte, so completeness is affordable and
+            # the artifact is per-run, so nothing here overwrites a prior run's evidence.
+            docker logs "$c"              > "$OUT/log-$c.txt"         2>&1 || true
           done
 
           # The explorer answering 503 with zero DB pools is the failure this job
