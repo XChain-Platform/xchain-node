@@ -56,6 +56,24 @@ on:
         description: 'Single action suite to run (file stem, e.g. attestation). Empty = full suite.'
         type: string
         default: ''
+      validator:
+        # Boot the stack's hub as a full VALIDATOR rather than the standalone
+        # config oracle it runs as by default.
+        #
+        # Opt-in, and default false on purpose. Validator mode is not a superset
+        # of standalone: peerManager exists, so startOracle() proceeds and the hub
+        # begins finalizing its own price rounds. Several action suites branch on
+        # exactly that (the fee fixtures compute an output size FROM a pair they
+        # seed, and skip when the venue publishes its own XCHAIN/USD), so flipping
+        # this for the whole matrix would silently change what the gate measures.
+        #
+        # Turn it on for the validator-onboarding suite, which STAKEs the hub's
+        # signing pubkey and asserts the indexer admits it - the one suite that
+        # cannot run against a hub with no identity, and which skips itself when
+        # VALIDATOR_PUBKEY is absent.
+        description: 'Run the hub as a validator (needed by the onboardValidator suite; changes the price regime)'
+        type: boolean
+        default: false
       ref:
         # The release ceremony's freeze step needs a driven e2e run against the
         # EXACT content a release is being cut from, not against a branch tip
@@ -180,6 +198,38 @@ jobs:
             echo "::warning::This only works once the XChain-Platform sub-repos are public; private repos will fail at clone."
             git config --global url."https://github.com/".insteadOf "git@github.com:"
           fi
+
+      - name: Initialize the validator identity (opt-in; must precede install)
+        if: github.event.inputs.validator == 'true'
+        # MUST run before install: ConfigService reads the settings this writes
+        # when it generates the hub's container env (getValidatorEnv) and the
+        # e2e container's VALIDATOR_PUBKEY. Initializing afterwards would leave
+        # both already rendered from a standalone config.
+        #
+        # The hub fails loud in validator mode on two vars the standalone path
+        # never needs, and both are host-env passthroughs rather than anything
+        # `validator init` writes, so they are exported here for every later step:
+        #   HUB_NETWORK           consensus gating (STAKE_WEIGHTED_QUORUM height
+        #                         is per network); hub exits 1 when blank/invalid
+        #   ORACLE_MIN_SUBMISSIONS  a lone validator can never reach the default
+        #                         2-hub diversity floor, so no round would ever
+        #                         finalize and every indexer's price-sync barrier
+        #                         would stall
+        # ORACLE_EPOCH_START is also required, but `validator init` persists it
+        # into validator.json and getValidatorEnv injects it, so it is passed as
+        # a flag rather than exported. Its value only has to be shared across a
+        # federation; this venue is a single hub, so the run's own clock is fine.
+        run: |
+          node src/index.js validator init \
+            --oracle-epoch-start "$(date -u +%s)000" \
+            --capabilities price,cross_chain,oracle_publish,attestation
+          {
+            echo "HUB_NETWORK=regtest"
+            echo "ORACLE_MIN_SUBMISSIONS=1"
+          } >> "$GITHUB_ENV"
+          # Prints the pubkey and never the seed (validator status reads the
+          # settings file; the 0600 signing.key is not echoed).
+          node src/index.js validator status
 
       - name: Boot the regtest stack (clones every service at ${{ github.event.inputs.ref || 'develop' }})
         # First heavy step - repo clones + docker image builds + coin daemon.
