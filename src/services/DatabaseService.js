@@ -573,6 +573,26 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 console.log(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
             }
 
+            // Same shape again, for row 39's self-synced checkpoint mirror (#4138
+            // decoupling): HubService.buildCheckpointConfig names the schema
+            // `<INDEXER_DB_NAME>_HubMirror`, and the explorer's own
+            // HubMirrorSyncManager/HubMirrorPool.ensureDatabase() runs `CREATE
+            // DATABASE IF NOT EXISTS` on it under THIS SAME indexer account
+            // (db.js's _checkpointSource only honours a checkpoint entry whose
+            // host/port/user/pass exactly match the indexer DB, so the mirror
+            // writer has no separate credential to hold a separate grant).
+            // Escaped underscores, so the pattern matches nothing but a
+            // `_HubMirror` schema; gated to non-mainnet like DrillB, since
+            // self-sync is currently an opt-in for deployments with no
+            // externally-maintained hub schema colocated with the explorer.
+            if (module === XChainService.XCHAIN_INDEXER && network && network !== "mainnet") {
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                    "GRANT ALL PRIVILEGES ON `XChain\\_%\\_HubMirror`.* TO " + mariadbUser
+                )
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
+                console.log(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
+            }
+
             return true
         } catch (err) {
             console.log(err)
@@ -640,6 +660,16 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
                 console.log(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
+            }
+
+            // See the docker branch above: the same row-39 checkpoint hub-mirror
+            // grant, since the native-DB venues can self-sync too.
+            if (module === XChainService.XCHAIN_INDEXER && network && network !== "mainnet") {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "GRANT ALL PRIVILEGES ON `XChain\\_%\\_HubMirror`.* TO " + mariadbUser
+                )
+                await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
+                console.log(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
             }
             return true
         } catch (err) {

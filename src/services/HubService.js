@@ -17,7 +17,7 @@
 
 const {
     HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    EXTERNAL_DB, SERVICE_REGISTRY
+    EXTERNAL_DB, SERVICE_REGISTRY, XChainService
 } = require('../config/constants')
 
 // Build the hub/explorer per-module config descriptor from the table-driven
@@ -44,6 +44,39 @@ function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
         config[outKey] = defaultConfigCoinNetwork[envKey]
     }
     return config
+}
+
+// Row 39 (#4138 decoupling): the explorer's checkpoint/proof/cross-chain routes
+// read state_checkpoints / capability_snapshots / cross_chain_matches from a
+// LOCAL schema (config database.checkpoint), because xchain-sync deliberately
+// never replicates those hub-mirrored tables. A deployment with no externally-
+// maintained hub schema colocated with the explorer needs one the explorer's
+// own HubMirrorSyncManager self-provisions and keeps live over the hub's
+// /hub-db feed instead (self_sync: true). Wired in below behind the
+// EXPLORER_CHECKPOINT_SELF_SYNC opt-in (paired with the HUB_API_URL
+// passthrough in ConfigService, which the mirror writer needs to reach the
+// hub); a deployment that already points database.checkpoint at a real hub
+// schema by hand, or wants the routes to just 500 (ALLOW_NO_COLOCATED_HUB_DB),
+// leaves this env unset and is unaffected.
+//
+// db.js's _checkpointSource only honours an entry whose host/port/user/pass
+// EXACTLY match the indexer DB (db.js:481), so this reads the SAME
+// defaultConfigCoinNetwork fields buildHubModuleConfig('xchain-indexer', ...)
+// reads above, rather than re-deriving them, to guarantee byte-identical
+// values instead of two independent paths that could drift apart.
+function buildCheckpointConfig(defaultConfigCoinNetwork) {
+    return {
+        db_host:   defaultConfigCoinNetwork.INDEXER_DB_HOST,
+        db_port:   defaultConfigCoinNetwork.INDEXER_DB_PORT,
+        user:      defaultConfigCoinNetwork.INDEXER_DB_USER,
+        pass:      defaultConfigCoinNetwork.INDEXER_DB_PASS,
+        // A dedicated schema beside the indexer DB, never the indexer schema
+        // itself: HubMirrorPool.ensureDatabase() runs CREATE DATABASE IF NOT
+        // EXISTS on this name under the same indexer DB user, which must
+        // therefore be able to create it (or it must already exist, pre-granted).
+        name:      defaultConfigCoinNetwork.INDEXER_DB_NAME + '_HubMirror',
+        self_sync: true
+    }
 }
 const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
 const { sleep, redactSecrets }                 = require('../utils/helpers')
@@ -111,6 +144,22 @@ async function updateHubOrExplorer(module) {
                         if (!(nextNetwork in jsonConfig[nextCoin])) jsonConfig[nextCoin][nextNetwork] = {}
                         jsonConfig[nextCoin][nextNetwork][nextModule] = config
                     }
+                }
+            }
+
+            // Row 39: advertise a self-synced checkpoint schema for this coin/
+            // network once an indexer is actually installed for it (the
+            // checkpoint config needs the indexer's own DB host/port/user/pass)
+            // and the operator opted in. See buildCheckpointConfig above.
+            if (process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== "" &&
+                XChainService.XCHAIN_INDEXER in lastStatus[nextCoin][nextNetwork]) {
+                const checkpointConfig = buildCheckpointConfig(defaultConfigCoinNetwork)
+                if (module === "xchain-explorer") {
+                    nextConfigObject.checkpoint = checkpointConfig
+                } else {
+                    if (!(nextCoin in jsonConfig)) jsonConfig[nextCoin] = {}
+                    if (!(nextNetwork in jsonConfig[nextCoin])) jsonConfig[nextCoin][nextNetwork] = {}
+                    jsonConfig[nextCoin][nextNetwork].checkpoint = checkpointConfig
                 }
             }
         }

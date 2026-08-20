@@ -608,6 +608,34 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues.CORS_ORIGIN = process.env.CORS_ORIGIN
         }
 
+        if (module === EXPLORER_MODULE_NAME) {
+            // Self-synced hub-mirror checkpoint schema (row 39, #4138 decoupling):
+            // HubMirrorSyncManager needs the hub's own REST base URL to pull
+            // state_checkpoints / capability_snapshots / cross_chain_matches, which
+            // is a DIFFERENT thing from HUB_API_HOST/HUB_PORT above (those feed the
+            // explorer's ordinary getallconfigs config poll, not the mirror writer).
+            // Opt-in via host env EXPLORER_CHECKPOINT_SELF_SYNC, read directly by
+            // HubService.buildHubModuleConfig's checkpoint injection (see there for
+            // why this stays a second knob instead of piggybacking
+            // ALLOW_NO_COLOCATED_HUB_DB: that flag only downgrades the fatal
+            // startup assertion to a warning and says nothing about whether a
+            // local mirror should be provisioned). Emitted only when opted in, so
+            // a deployment that never uses self-sync carries no unused hub URL.
+            if (process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== "") {
+                defaultValues.HUB_API_URL = process.env.HUB_API_URL ||
+                    ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" + defaultValues.HUB_PORT)
+            }
+
+            // Read Contract simulation (contract.html #contract-read-card) is
+            // default-off; the readers test for the exact STRING 'true', not any
+            // truthy value, so pass the host env through verbatim rather than
+            // coercing it. Sourced from host env so it persists across `update`/
+            // `recreate`, mirroring the other explorer passthroughs here.
+            if (process.env.EXPLORER_VM_QUERY_ENABLED !== undefined && process.env.EXPLORER_VM_QUERY_ENABLED !== "") {
+                defaultValues.EXPLORER_VM_QUERY_ENABLED = process.env.EXPLORER_VM_QUERY_ENABLED
+            }
+        }
+
         // The explorer resolves each coin's utxo-tracker and decoder from
         // UTXO_TRACKER_URL_<CODE> (e.g. UTXO_TRACKER_URL_RBTC) and
         // DECODER_API_URL_<COIN>_<NETWORK> (e.g. DECODER_API_URL_BTC_REGTEST).
