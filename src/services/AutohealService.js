@@ -203,6 +203,33 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
             continue
         }
 
+        // Heal only what is actually RUNNING. Docker freezes State.Health.Status
+        // at its last value the moment a container stops (the probe goroutine
+        // runs only while the container is up), so a container that happened to
+        // be unhealthy when an operator stopped it keeps reporting `unhealthy`
+        // while State.Status is `exited` - and `docker restart` on a stopped
+        // container STARTS it, silently undoing the stop. Frozen health from a
+        // container that is no longer probing is not evidence of a wedge. This
+        // costs no healing either: autoheal exists for the ALIVE-but-stalled
+        // case (see the file header), because `--restart unless-stopped` already
+        // covers a service whose PID exits, and declines to fire exactly when
+        // the operator was the one who stopped it. Same guard the bootstrap gate
+        // applies at BootstrapHealthGate.evaluateContainerState.
+        const runState = status && status.State && status.State.Status
+        if (runState !== 'running') {
+            result.skipped.push({ module, coin, network, containerId, reason: `not running (state: ${runState || 'unknown'})` })
+            // Forget the onset: a container that comes back up gets a fresh grace
+            // window instead of inheriting a clock that has been stopped all along.
+            // The attempt count is deliberately NOT dropped here - it is cleared on
+            // an observed RECOVERY (below), and a pass that catches a container
+            // mid-restart must not reset the backoff a real wedge has earned.
+            if (state.unhealthySince[containerId] !== undefined) {
+                delete state.unhealthySince[containerId]
+                onsetChanged = true
+            }
+            continue
+        }
+
         const health = status && status.State && status.State.Health
         if (!health || health.Status !== 'unhealthy') {
             // Episode over (or the healthcheck is gone): forget the onset so the
