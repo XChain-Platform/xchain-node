@@ -173,20 +173,32 @@ function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}
     if (payload.decoderReorgHalted === true)
         reasons.push('the upstream decoder carries a durable REORG_HALT marker, so this database is frozen behind it')
     if (payload.block_fetch_desync)
-        reasons.push(`the service reports a block-fetch desync: ${payload.block_fetch_desync}`)
+        reasons.push(`the service reports a block-fetch desync (${formatBlockFetchDesync(payload.block_fetch_desync)})`)
     if (payload.node_height_stale === true)
         reasons.push('the service cannot see the node tip (stale node height), so its lag is unknown')
 
-    // First lag field the service actually publishes. `null` is a real answer
-    // here and means "position unknown", which cannot be certified as caught-up.
+    // First lag field the service actually publishes, bounded on BOTH sides. `null`
+    // is a real answer and means "position unknown"; NO lag field at all means the
+    // same thing (a /status body from an image that publishes none), and neither
+    // can be certified as caught-up. A NEGATIVE lag is not "ahead": the service's
+    // committed tip sits above its node's (the node-reset/reindex regression), so
+    // the rows it would export reference blocks the node no longer recognizes. The
+    // tracker floors its own synced verdict the same way; the ceiling stays local
+    // because consumers own their own lag budget.
     const lagKeys = ['lag_blocks', 'blockLag', 'lag']
     const reported = lagKeys.find(k => Object.prototype.hasOwnProperty.call(payload, k))
-    if (reported !== undefined) {
+    if (reported === undefined) {
+        reasons.push('the service did not report how far behind it is (no lag field in its status payload), ' +
+            'so its position could not be verified')
+    } else {
         const lag = payload[reported]
         if (lag === null || lag === undefined)
             reasons.push(`the service cannot report how far behind it is (${reported} is null)`)
         else if (!Number.isFinite(Number(lag)))
             reasons.push(`the service reported an unreadable ${reported} (${lag})`)
+        else if (Number(lag) < 0)
+            reasons.push(`the service reported a negative ${reported} (${Number(lag)}): its committed tip sits above ` +
+                'its upstream node\'s, so the data it would export may reference blocks the node no longer recognizes')
         else if (Number(lag) > maxLag)
             reasons.push(`the service is ${Number(lag)} blocks behind its upstream tip (limit ${maxLag}; ` +
                 'override with XCHAIN_NODE_BOOTSTRAP_MAX_LAG_BLOCKS)')
@@ -195,9 +207,22 @@ function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}
     return reasons
 }
 
+// The tracker publishes block_fetch_desync as {height, failures, lastError,
+// detectedAt}, not a string; interpolated raw it renders "[object Object]" and
+// loses the height/lastError that says the node is pruned past the cursor.
+function formatBlockFetchDesync(desync) {
+    if (!desync || typeof desync !== 'object') return String(desync)
+    const parts = []
+    if (desync.height !== undefined && desync.height !== null) parts.push(`height ${desync.height}`)
+    if (desync.failures !== undefined && desync.failures !== null) parts.push(`${desync.failures} consecutive failed fetches`)
+    if (desync.lastError) parts.push(`last error: ${desync.lastError}`)
+    return parts.length ? parts.join(', ') : JSON.stringify(desync)
+}
+
 // Ask the service itself. JSON-RPC `health` first because it is the richest
-// surface (lag + halt markers); GET /status is the fallback for an older image,
-// and is exactly what the Docker healthcheck runs.
+// surface (lag + halt markers); GET /status is the fallback for an older image
+// or a shed health POST, and is exactly what the Docker healthcheck runs. A
+// fallback body that carries no lag field still refuses in evaluateStatusPayload.
 async function probeServiceStatus(containerId, port, runner) {
     const rpcBody = JSON.stringify({ jsonrpc: '2.0', method: 'health', id: 1 })
     const attempts = [

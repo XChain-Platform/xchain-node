@@ -343,9 +343,40 @@ describe('BootstrapHealthGate', function () {
             expect(reasons.join(' ')).to.match(/cannot see the node tip/)
         })
 
-        it('passes a healthy, caught-up payload with no lag field at all', function () {
+        it('passes a healthy payload whose lag is zero', function () {
             const gate = loadGate()
-            expect(gate.evaluateStatusPayload({ status: 'ok', db: true })).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({ status: 'ok', db: true, lag: 0 })).to.deep.equal([])
+        })
+
+        it('REFUSES a payload with no lag field at all: position unverifiable is not caught-up', function () {
+            const gate = loadGate()
+            const reasons = gate.evaluateStatusPayload({ status: 'ok', db: true })
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/did not report how far behind it is/)
+        })
+
+        it('REFUSES a negative lag: the committed tip sits above the node tip (orphaned view)', function () {
+            const gate = loadGate()
+            const reasons = gate.evaluateStatusPayload({ status: 'healthy', lag: -100, synced: false })
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/negative lag \(-100\)/)
+            expect(reasons[0]).to.not.match(/blocks behind/)
+            expect(gate.evaluateStatusPayload({ status: 'healthy', lag_blocks: -1 }).join(' ')).to.match(/negative lag_blocks/)
+        })
+
+        it('formats a block-fetch desync object instead of printing [object Object]', function () {
+            const gate = loadGate()
+            const reasons = gate.evaluateStatusPayload({
+                status: 'healthy', lag: 0,
+                block_fetch_desync: { height: 5342110, failures: 20, lastError: 'Block not found', detectedAt: Date.now() }
+            })
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/height 5342110/)
+            expect(reasons[0]).to.match(/20 consecutive failed fetches/)
+            expect(reasons[0]).to.match(/last error: Block not found/)
+            expect(reasons[0]).to.not.match(/\[object Object\]/)
+            expect(gate.evaluateStatusPayload({ lag: 0, block_fetch_desync: 'node pruned' }).join(' ')).to.match(/desync \(node pruned\)/)
+            expect(gate.evaluateStatusPayload({ lag: 0, block_fetch_desync: { other: 1 } }).join(' ')).to.match(/\{"other":1\}/)
         })
     })
 
