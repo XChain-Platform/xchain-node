@@ -238,10 +238,21 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
                 delete state.unhealthySince[containerId]
                 onsetChanged = true
             }
-            // Drop the attempt count too, so a container that DID recover starts its
-            // next episode at the base cooldown. Backing off is a response to a wedge
-            // restarts are not clearing; a recovery is the evidence they cleared it.
-            if (state.restartCount[containerId] !== undefined) {
+            // Drop the attempt count only on an OBSERVED `healthy`, so a container
+            // that DID recover starts its next episode at the base cooldown. Backing
+            // off is a response to a wedge restarts are not clearing; a recovery is
+            // the evidence they cleared it, and `!== 'unhealthy'` is not that
+            // evidence: `docker restart` puts the container into `starting` for the
+            // descriptor's start period plus its retry budget (60s + 3x15s for the
+            // decoder/indexer, and an operator can widen it to minutes via
+            // XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>), so a pass landing in that
+            // window would wipe the counter the restart it had just issued earned.
+            // A wedge no restart clears then stayed at the BASE cooldown forever,
+            // which is the churn the doubling exists to end. Same principle the
+            // not-running guard above states: mid-restart is not recovery. `starting`
+            // is its health-probation form. A container with no healthcheck keeps its
+            // count too, and inertly: it can never reach the restart path below.
+            if (health && health.Status === 'healthy' && state.restartCount[containerId] !== undefined) {
                 delete state.restartCount[containerId]
                 onsetChanged = true
             }

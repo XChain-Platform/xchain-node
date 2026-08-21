@@ -205,6 +205,19 @@ async function updateModulesOnBranch(servicesList, branch = null) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                if (nextModule === DB_MODULE_NAME) {
+                    // `update` cannot rebuild the database. Its container is created by
+                    // buildDatabaseModule from a pinned mariadb image, not from module
+                    // source, and the existing-container branch there does nothing at
+                    // all - yet the DB branch of installModule answered a hard `true`,
+                    // which recordInstallOutcome counts as an updated module. So
+                    // `update database` exited 0 reporting a landed upgrade over an
+                    // untouched container. Refuse it here, where the update contract
+                    // lives, and state the remediation uninstallModule already names.
+                    console.warn(`update: ${nextModule} (${nextCoin} ${nextNetwork}) is not rebuilt by update; the database container must be removed manually and reinstalled.`)
+                    outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-updatable' })
+                    continue
+                }
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 if (nextModule === NODE_MODULE_NAME) {
                     // Tear down the existing node container before rebuilding. The node
@@ -306,10 +319,11 @@ const RECREATE_UNSUPPORTED_MODULES = [NODE_MODULE_NAME, DB_MODULE_NAME]
  */
 async function recreateModules(servicesList) {
     const { buildAndUp } = require('../services/ModuleService')
-    const { setDatabaseParameters } = require('../services/DatabaseService')
+    const { setDatabaseParameters, setHubDatabaseParameters } = require('../services/DatabaseService')
 
     const outcome = { recreated: [], skipped: [] }
     let touchedDbModule = false
+    let touchedHubModule = false
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
@@ -318,7 +332,13 @@ async function recreateModules(servicesList) {
                     // node and the database. What changed is that the skip is now
                     // recorded, so a run that recreated NOTHING can be reported as
                     // the failed request it is instead of exiting 0.
-                    console.log("recreate does not apply to " + nextModule + "; use `update " + nextModule + "` instead")
+                    // The database has no `update` to redirect to either: that verb
+                    // refuses it for the same reason (no container built from the
+                    // config map, no in-place image upgrade). Say the real remedy.
+                    const remedy = nextModule === DB_MODULE_NAME
+                        ? "; the database container must be removed manually and reinstalled"
+                        : "; use `update " + nextModule + "` instead"
+                    console.log("recreate does not apply to " + nextModule + remedy)
                     outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-recreatable' })
                     continue
                 }
@@ -328,6 +348,9 @@ async function recreateModules(servicesList) {
                 if (nextModule === XChainService.XCHAIN_DECODER || nextModule === XChainService.XCHAIN_INDEXER) {
                     touchedDbModule = true
                 }
+                if (nextModule === HUB_MODULE_NAME) {
+                    touchedHubModule = true
+                }
             }
         }
     }
@@ -336,6 +359,12 @@ async function recreateModules(servicesList) {
     // in setDatabaseParameters sees the state we just converged rather than the one
     // that made the recreate necessary.
     if (touchedDbModule) await setDatabaseParameters()
+    // Same rule for the SHARED hub account, and it matters most on this verb: the
+    // recreated hub starts on the config store's HUB_DB_PASS, so without rotating
+    // the live 'xchain_hub'@'%' account to match, `recreate xchain-hub` hands the
+    // hub a password MariaDB never received and it crash-loops on ER_ACCESS_DENIED.
+    // The `update` path rotates here for the same reason (ModuleService installModule).
+    if (touchedHubModule) await setHubDatabaseParameters()
     await statusChanged()
     return outcome
 }

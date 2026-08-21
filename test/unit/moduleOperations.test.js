@@ -55,6 +55,7 @@ function makeStubs() {
         getModuleBranch: sinon.stub().resolves('master'),
         buildAndUp: sinon.stub().resolves('b'.repeat(64)),
         setDatabaseParameters: sinon.stub().resolves(true),
+        setHubDatabaseParameters: sinon.stub().resolves(true),
         installModule: sinon.stub().resolves('new-container-id'),
         uninstallModule: sinon.stub().resolves(true),
         assertHubNotBehind: sinon.stub().resolves({ checked: false, reason: 'not-hub-dependent' }),
@@ -97,7 +98,8 @@ function loadOperations(stubs) {
             resetDatabases: stubs.resetDatabases,
             clearHubPriceIngestWatermark: stubs.clearHubPriceIngestWatermark,
             getDatabaseContainerId: stubs.getDatabaseContainerId,
-            setDatabaseParameters: stubs.setDatabaseParameters
+            setDatabaseParameters: stubs.setDatabaseParameters,
+            setHubDatabaseParameters: stubs.setHubDatabaseParameters
         },
         '../services/ModuleService': {
             cloneGit: stubs.cloneGit,
@@ -375,6 +377,39 @@ describe('moduleOperations', function () {
             const outcome = await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
             expect(outcome.updated).to.deep.equal([{ module: 'node', coin: 'bitcoin', network: 'mainnet' }])
         })
+
+        // The database container is built from a pinned image, not from module
+        // source, and its existing-container path changes nothing. Counting it as
+        // updated is how `update database` exited 0 over an untouched container.
+        it('refuses the database instead of reporting an untouched container as updated', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            let outcome
+            try {
+                outcome = await ops.updateModules({ '': { '': ['database'] } })
+            } finally { warn.restore() }
+            expect(outcome.updated).to.deep.equal([])
+            expect(outcome.skipped).to.deep.equal([
+                { module: 'database', coin: '', network: '', reason: 'not-updatable' }
+            ])
+            // Refused BEFORE any rebuild machinery runs, so nothing is torn down.
+            expect(stubs.installModule.called).to.be.false
+            expect(stubs.db.getModuleContainer.called).to.be.false
+            expect(warn.calledWithMatch(/removed manually and reinstalled/)).to.be.true
+        })
+
+        it('still updates the other requested modules when the request also names the database', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            let outcome
+            try {
+                outcome = await ops.updateModules({ bitcoin: { mainnet: ['database', 'xchain-encoder'] } })
+            } finally { warn.restore() }
+            expect(outcome.updated).to.deep.equal([{ module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet' }])
+            expect(outcome.skipped.map(s => s.module)).to.deep.equal(['database'])
+        })
     })
 
     // -------------------------------------------------------------------
@@ -421,6 +456,29 @@ describe('moduleOperations', function () {
             await ops.recreateModules({ dogecoin: { regtest: ['xchain-encoder'] } })
             expect(stubs.buildAndUp.calledOnce).to.be.true
             expect(stubs.setDatabaseParameters.called).to.be.false
+            expect(stubs.setHubDatabaseParameters.called).to.be.false
+        })
+
+        // The recreated hub starts on the config store's HUB_DB_PASS. Without
+        // rotating the live shared hub account to match, the verb that exists to
+        // REPAIR credentials is the one that locks the hub out (ER_ACCESS_DENIED).
+        it('rotates the shared hub DB account after recreating the hub', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const result = await ops.recreateModules({ '': { '': ['xchain-hub'] } })
+            expect(result.recreated).to.deep.equal([{ module: 'xchain-hub', coin: '', network: '' }])
+            expect(stubs.setHubDatabaseParameters.calledOnce).to.be.true
+            expect(stubs.buildAndUp.firstCall.calledBefore(stubs.setHubDatabaseParameters.firstCall)).to.be.true
+            // The per-coin decoder/indexer provisioning is a different account set
+            // and must not be dragged in by a hub-only recreate.
+            expect(stubs.setDatabaseParameters.called).to.be.false
+        })
+
+        it('does not rotate the hub account when the hub was not recreated', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+            expect(stubs.setHubDatabaseParameters.called).to.be.false
         })
 
         it('recreates a container the registry has lost rather than skipping it', async function () {

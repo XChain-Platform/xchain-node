@@ -299,6 +299,54 @@ describe('AutohealService', () => {
         expect(again.restarted).to.have.length(1)
     })
 
+    // `docker restart` puts the container into Docker's `starting` probation for the
+    // descriptor's start period plus its retry budget, so a pass landing in that
+    // window sees a status that is not 'unhealthy' and would read it as recovery,
+    // wiping the very counter the restart it had just issued earned. A wedge no
+    // restart clears then sat at the BASE cooldown forever.
+    it('keeps the earned backoff when a restarted container is still in Docker starting probation', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'bo3')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2 -> next wait doubles
+        expect(stubs.restartContainer.callCount).to.equal(2)
+
+        // A minute after restart #2: Docker still reports `starting`.
+        stubs.getStatusFromContainer.resolves(inspectStatus('starting', [logEntry(15000, 1)]))
+        await service.runAutoheal({ now: NOW + 12 * 60000 })
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.bo3, 'probation is not recovery; the backoff must survive it').to.equal(2)
+        expect(state.unhealthySince, 'a restarted container still earns a fresh grace window').to.not.have.property('bo3')
+
+        // Wedge returns 11 minutes after restart #2. The doubled 20-minute window is
+        // still open, so nothing restarts; with the counter wiped it would have.
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+    })
+
+    // The not-running guard's documented asymmetry (drop the onset, keep the count)
+    // had no test of its own, so a regression flipping it would have passed green.
+    it('keeps the earned backoff when a pass catches the container not running', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'st1')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2
+        expect(stubs.restartContainer.callCount).to.equal(2)
+
+        stubs.getStatusFromContainer.resolves(stoppedWithFrozenUnhealthy())
+        const skipped = await service.runAutoheal({ now: NOW + 12 * 60000 })
+        expect(skipped.skipped[0].reason).to.match(/not running/)
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.st1, 'mid-restart is not recovery').to.equal(2)
+        expect(state.unhealthySince).to.not.have.property('st1')
+    })
+
     it('caps the doubled cooldown at the ceiling instead of growing without bound', () => {
         const base = service.DEFAULT_COOLDOWN_MS
         const ceiling = service.DEFAULT_COOLDOWN_CEILING_MS

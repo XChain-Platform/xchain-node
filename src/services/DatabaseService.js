@@ -189,6 +189,24 @@ async function getExternalDbConfig() {
         }
     }
 
+    // Non-interactive run (cron, ssh BatchMode, CI): the prompt loop below would
+    // block forever on a stdin that never answers, and this resolver is reached
+    // from preCheck and ensureDatabasePool INSIDE the CLI command lock, so the
+    // hang wedges every later xchain-node command on the host rather than just
+    // this one. Same fail-fast the bundled-DB path already does in
+    // askMariadbRootPassword. Placed AFTER the env and saved-credential branches
+    // so both headless success paths keep working untouched.
+    if (!process.stdin.isTTY) {
+        throw new Error(
+            'External-DB connection details are needed but there is no TTY to prompt on. ' +
+            'Set ALL FOUR of XCHAIN_NODE_EXTERNAL_DB_HOST, XCHAIN_NODE_EXTERNAL_DB_PORT, ' +
+            'XCHAIN_NODE_EXTERNAL_DB_ROOT_USER and XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD ' +
+            '(a partial set does not qualify for the headless path), or run any xchain-node ' +
+            'command once interactively so the verified details are saved to ' +
+            '~/.xchain-node/credentials.json for later runs.'
+        )
+    }
+
     // Interactive prompt
     console.log("\nExternal MariaDB configuration (XCHAIN_NODE_EXTERNAL_DB=1)")
     console.log("Provide the connection details for the host-native MariaDB this node should use.\n")
