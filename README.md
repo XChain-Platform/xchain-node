@@ -14,15 +14,15 @@
   <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20smoke%20%7C%20boundary%20%7C%20security%20%7C%20fuzz%20%7C%20chaos%20%7C%20regression%20%7C%20performance%20%7C%20mutation-brightgreen" alt="Coverage">
 </p>
 
-CLI management and orchestration tool for the XChain Platform. Installs, configures, and manages all XChain services and coin nodes (bitcoind, litecoind, dogecoind) as Docker containers. Generates per-service environment variables from a two-layer configuration system, manages LevelDB state, provisions MariaDB databases, and provides multi-pane log monitoring.
+CLI management and orchestration tool for the XChain Platform. Installs, configures, and manages all XChain services and coin nodes (bitcoind, litecoind, and dogecoind today; any Bitcoin-RPC-compatible UTXO chain can be added by configuration) as Docker containers. Generates per-service environment variables from a two-layer configuration system, manages LevelDB state, provisions MariaDB databases, and provides multi-pane log monitoring.
 
 ## Features
 
-- **Multi-chain orchestration**: manages Bitcoin, Litecoin, and Dogecoin across mainnet, testnet, and regtest; each chain/network gets its own Docker network and container set
+- **Multi-chain orchestration**: manages Bitcoin, Litecoin, and Dogecoin today across mainnet, testnet, and regtest; each chain/network gets its own Docker network and container set
 - **Order-independent argument parsing**: CLI arguments auto-classified as service, coin, network, or branch name regardless of position
 - **Docker container lifecycle**: install, start, stop, restart, update, uninstall, and reset services with single commands
 - **Configuration generation**: two-layer system (hardcoded defaults + config file overrides) producing 40+ environment variables per service
-- **Crypto node management**: downloads Bitcoin Core, Litecoin, and Dogecoin binaries from official sources with SHA-256 verification; includes per-chain regtest tuning applied automatically
+- **Crypto node management**: downloads the Bitcoin Core, Litecoin, and Dogecoin binaries (the chains supported today) from official sources with SHA-256 verification; includes per-chain regtest tuning applied automatically
 - **Database orchestration**: provisions shared MariaDB, creates per-service databases and users with subnet-based permissions
 - **Bootstrap snapshots**: create and restore gzipped snapshots of UTXO tracker, decoder, and indexer data; integrity is double-verified with SHA-256 checksums and a detached Ed25519 signature pinned to a bundled public key
 - **Validator mode**: `validator init` generates an Ed25519 signing key and capabilities config; the hub boots in PBFT validator mode when a key is present
