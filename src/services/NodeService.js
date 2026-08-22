@@ -42,6 +42,10 @@ async function getCryptoNode(coin, network, version) {
         const destination = cryptoNodesDir + "/bitcoin"
         const filePath = destination + "/bitcoin" + version + ".tar.gz"
 
+        // The default crypto_nodes/bitcoin ships in the repo, but a custom
+        // XCHAIN_NODE_CRYPTO_NODES_DIR (the documented big-volume setup)
+        // starts empty, and createWriteStream does not create directories.
+        fs.mkdirSync(destination, { recursive: true })
         const bitcoinNodeFile = fs.createWriteStream(filePath)
         // Pick the right prebuilt tarball for the host architecture.
         // bitcoincore.org publishes x86_64-linux-gnu and aarch64-linux-gnu builds.

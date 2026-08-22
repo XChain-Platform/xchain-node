@@ -845,7 +845,10 @@ async function utxoTrackerVolumeHasData(coin, network) {
 async function downloadBootstrap(coin, network, module, destDir) {
     const url      = `${BOOTSTRAP_BASE_URL}/${module}/${coin}/${network}/latest.tgz`
     const destPath = path.join(destDir, 'latest.tgz')
-    ensureDir(destDir)
+    // destDir is the bind-mounted bootstrap volume, which a service container
+    // may already have created root-owned; the writable variant chowns it back
+    // (same failure ensureDirWritable was written for on the create path).
+    await ensureDirWritable(destDir)
 
     const response = await axios({
         method: 'get',

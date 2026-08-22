@@ -145,7 +145,12 @@ async function installExplorerModule(force = false, branch = null) {
     // explorer holding no pools is a real fault and must still fail the install.
     const coinsPresent = Object.keys(await getInstalledCoinsAndNetworks()).length > 0
 
-    let tries = 10
+    // 60 tries x 2s = a ~2 minute budget. A freshly built container can spend
+    // a minute-plus warming (DB pools, first hub poll) while answering 503, and
+    // the old 10x1s loop gave up mid-warmup on slow hosts, reporting a hard
+    // failure for a container that went healthy moments later (a rerun then
+    // succeeded immediately via the ping short-circuit above).
+    let tries = 60
     while (tries > 0) {
         const { answering, healthy } = await explorerConnector.probe()
         if (healthy || (answering && !coinsPresent)) {
@@ -153,7 +158,7 @@ async function installExplorerModule(force = false, branch = null) {
                 await updateExplorer()
             } catch {
                 tries--
-                await sleep(1000)
+                await sleep(2000)
                 continue
             }
             if (!healthy) {
@@ -162,7 +167,7 @@ async function installExplorerModule(force = false, branch = null) {
             }
             return true
         } else {
-            await sleep(1000)
+            await sleep(2000)
         }
         tries--
     }

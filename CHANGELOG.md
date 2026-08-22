@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Module clones now use public HTTPS URLs, so installs work without a GitHub SSH key.
+- Downloading a coin node now creates the crypto-nodes directory first, fixing installs pointed at a fresh custom volume.
+- Bootstrap auto-restore downloads now recover a root-owned destination directory instead of failing with a permission error.
+- The explorer install health wait now allows about two minutes of container warm-up instead of ten seconds.
+
 ## [0.10.0] - 2026-08-22
 
 ### Added
