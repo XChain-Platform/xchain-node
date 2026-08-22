@@ -30,11 +30,14 @@ function logEntry(agoMs, exitCode) {
     }
 }
 
-// docker-inspect shape for a container in a given health state.
-function inspectStatus(healthStatus, log) {
+// docker-inspect shape for a container in a given health state. `runState` is
+// State.Status and defaults to 'running'; pass 'exited' to model what Docker
+// reports for a STOPPED container, whose Health.Status stays frozen at whatever
+// it read the moment the container went down.
+function inspectStatus(healthStatus, log, runState) {
     return {
         State: {
-            Status: 'running',
+            Status: runState || 'running',
             Health: { Status: healthStatus, FailingStreak: healthStatus === 'unhealthy' ? 5 : 0, Log: log }
         }
     }
@@ -43,6 +46,13 @@ function inspectStatus(healthStatus, log) {
 // Continuously unhealthy for ~10 minutes (well past the 2min default grace).
 function unhealthyPastGrace() {
     return inspectStatus('unhealthy', [logEntry(11 * 60000, 0), logEntry(10 * 60000, 1), logEntry(5 * 60000, 1), logEntry(60000, 1)])
+}
+
+// An operator stopped this container while it was unhealthy: State.Status is
+// 'exited' and Health.Status is frozen at the last value the probe read, well
+// past the grace window. Docker keeps answering `docker inspect` for it.
+function stoppedWithFrozenUnhealthy() {
+    return inspectStatus('unhealthy', [logEntry(11 * 60000, 0), logEntry(10 * 60000, 1), logEntry(5 * 60000, 1), logEntry(60000, 1)], 'exited')
 }
 
 // Unhealthy, but the failing run only started 30s ago.
@@ -165,6 +175,52 @@ describe('AutohealService', () => {
         expect(result.candidates).to.have.length(0)
     })
 
+    // Docker freezes Health.Status when a container stops, so a container an
+    // operator deliberately stopped while it was unhealthy still reads
+    // `unhealthy` forever. Restarting on that reading STARTS the container the
+    // operator just pulled out of rotation.
+    it('does NOT restart a container an operator stopped, whose health is frozen at unhealthy', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'stp')])
+        stubs.getStatusFromContainer.resolves(stoppedWithFrozenUnhealthy())
+
+        const result = await service.runAutoheal({ now: NOW })
+
+        expect(stubs.restartContainer.called).to.equal(false)
+        expect(result.candidates).to.have.length(0)
+        expect(result.skipped[0].reason).to.equal('not running (state: exited)')
+    })
+
+    // The grace clock must not keep running while the container is down: a
+    // container started again after an operator stop gets a full grace window to
+    // come back, not an instant restart off a clock from before the stop.
+    it('drops the episode onset while a container is stopped, so a restarted one gets a fresh grace window', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'stp2')])
+
+        // Pass 1: unhealthy and running, inside grace - the onset gets recorded.
+        stubs.getStatusFromContainer.resolves(unhealthyInsideGrace())
+        await service.runAutoheal({ now: NOW })
+
+        // Pass 2: the operator has stopped it; health stays frozen at unhealthy.
+        stubs.getStatusFromContainer.resolves(stoppedWithFrozenUnhealthy())
+        await service.runAutoheal({ now: NOW + 60000 })
+
+        // Pass 3, an hour later: running again, and unhealthy from a probe that
+        // only started failing 30s ago. With the pre-stop onset still on file
+        // this reads as an hour-long episode and restarts immediately.
+        const at = NOW + 60 * 60000
+        const freshFailure = {
+            Start: new Date(at - 30000).toISOString(),
+            End: new Date(at - 29000).toISOString(),
+            ExitCode: 1,
+            Output: 'wget: server returned error'
+        }
+        stubs.getStatusFromContainer.resolves(inspectStatus('unhealthy', [freshFailure]))
+        const third = await service.runAutoheal({ now: at })
+
+        expect(stubs.restartContainer.called).to.equal(false)
+        expect(third.skipped[0].reason).to.equal('inside grace window')
+    })
+
     it('does NOT restart the same container twice within the cooldown window', async () => {
         stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'eee')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
@@ -241,6 +297,54 @@ describe('AutohealService', () => {
         const again = await service.runAutoheal({ now: NOW + 22 * 60000 })
         expect(stubs.restartContainer.callCount).to.equal(3)
         expect(again.restarted).to.have.length(1)
+    })
+
+    // `docker restart` puts the container into Docker's `starting` probation for the
+    // descriptor's start period plus its retry budget, so a pass landing in that
+    // window sees a status that is not 'unhealthy' and would read it as recovery,
+    // wiping the very counter the restart it had just issued earned. A wedge no
+    // restart clears then sat at the BASE cooldown forever.
+    it('keeps the earned backoff when a restarted container is still in Docker starting probation', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'bo3')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2 -> next wait doubles
+        expect(stubs.restartContainer.callCount).to.equal(2)
+
+        // A minute after restart #2: Docker still reports `starting`.
+        stubs.getStatusFromContainer.resolves(inspectStatus('starting', [logEntry(15000, 1)]))
+        await service.runAutoheal({ now: NOW + 12 * 60000 })
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.bo3, 'probation is not recovery; the backoff must survive it').to.equal(2)
+        expect(state.unhealthySince, 'a restarted container still earns a fresh grace window').to.not.have.property('bo3')
+
+        // Wedge returns 11 minutes after restart #2. The doubled 20-minute window is
+        // still open, so nothing restarts; with the counter wiped it would have.
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+    })
+
+    // The not-running guard's documented asymmetry (drop the onset, keep the count)
+    // had no test of its own, so a regression flipping it would have passed green.
+    it('keeps the earned backoff when a pass catches the container not running', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'st1')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2
+        expect(stubs.restartContainer.callCount).to.equal(2)
+
+        stubs.getStatusFromContainer.resolves(stoppedWithFrozenUnhealthy())
+        const skipped = await service.runAutoheal({ now: NOW + 12 * 60000 })
+        expect(skipped.skipped[0].reason).to.match(/not running/)
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.st1, 'mid-restart is not recovery').to.equal(2)
+        expect(state.unhealthySince).to.not.have.property('st1')
     })
 
     it('caps the doubled cooldown at the ceiling instead of growing without bound', () => {

@@ -46,6 +46,34 @@ on:
         type: choice
         options: [bitcoin, litecoin, dogecoin]
         default: bitcoin
+      suite:
+        # ONE suite instead of the whole action set, so fixing a defect costs a boot
+        # plus that suite rather than a two-hour full pass. Takes the file-name stem
+        # e2etest already accepts (e.g. "attestation", "order"). Empty runs everything,
+        # which is what a release gate must do; a subset proves a fix, never the train.
+        # The security and performance suites are skipped while a subset is running,
+        # because they grade the whole stack and a partial action pass does not earn them.
+        description: 'Single action suite to run (file stem, e.g. attestation). Empty = full suite.'
+        type: string
+        default: ''
+      validator:
+        # Boot the stack's hub as a full VALIDATOR rather than the standalone
+        # config oracle it runs as by default.
+        #
+        # Opt-in, and default false on purpose. Validator mode is not a superset
+        # of standalone: peerManager exists, so startOracle() proceeds and the hub
+        # begins finalizing its own price rounds. Several action suites branch on
+        # exactly that (the fee fixtures compute an output size FROM a pair they
+        # seed, and skip when the venue publishes its own XCHAIN/USD), so flipping
+        # this for the whole matrix would silently change what the gate measures.
+        #
+        # Turn it on for the validator-onboarding suite, which STAKEs the hub's
+        # signing pubkey and asserts the indexer admits it - the one suite that
+        # cannot run against a hub with no identity, and which skips itself when
+        # VALIDATOR_PUBKEY is absent.
+        description: 'Run the hub as a validator (needed by the onboardValidator suite; changes the price regime)'
+        type: boolean
+        default: false
       ref:
         # The release ceremony's freeze step needs a driven e2e run against the
         # EXACT content a release is being cut from, not against a branch tip
@@ -79,7 +107,24 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # A BTC full action suite alone runs ~1h50m of wall clock, and the security
+    # and performance suites are sequenced AFTER it, so at 120 the two of them
+    # shared whatever minutes the action suite happened to leave - usually none.
+    # They had never once executed, and no amount of fixing the action suite
+    # could have changed that: the budget, not the tests, was the binding
+    # constraint.
+    #
+    # 360 is the platform ceiling for a hosted job, i.e. this sets no limit the
+    # runner would not impose anyway. That is deliberate: the two suites behind
+    # the action pass have never run, so there is no measured duration to size
+    # headroom against, and guessing low would re-create the same invisible
+    # truncation one tier further along. The cost is that a WEDGED run (a hung
+    # container, a stalled indexer poll) now takes the full 6 hours to report
+    # instead of failing earlier - so if that starts happening, add a
+    # `timeout-minutes` to the individual suite steps rather than clawing this
+    # number back down; a per-step bound catches a hang without also capping a
+    # legitimately long pass.
+    timeout-minutes: 360
     env:
       COIN: ${{ github.event.inputs.coin || 'bitcoin' }}
       # Drives BOTH the xchain-node checkout below and the `install` boot
@@ -87,6 +132,7 @@ jobs:
       # stack it installs. Splitting those two was how "we tested the release"
       # could mean "we tested master's installer against the release".
       STACK_REF: ${{ github.event.inputs.ref || 'develop' }}
+      SUITE: ${{ github.event.inputs.suite || '' }}
       # Headless DB: point xchain-node at an external MariaDB instead of its
       # bundled DB container, so the first install does NOT stop on the
       # interactive root-password prompt (see DatabaseService.getExternalDbConfig
@@ -170,6 +216,38 @@ jobs:
             git config --global url."https://github.com/".insteadOf "git@github.com:"
           fi
 
+      - name: Initialize the validator identity (opt-in; must precede install)
+        if: github.event.inputs.validator == 'true'
+        # MUST run before install: ConfigService reads the settings this writes
+        # when it generates the hub's container env (getValidatorEnv) and the
+        # e2e container's VALIDATOR_PUBKEY. Initializing afterwards would leave
+        # both already rendered from a standalone config.
+        #
+        # The hub fails loud in validator mode on two vars the standalone path
+        # never needs, and both are host-env passthroughs rather than anything
+        # `validator init` writes, so they are exported here for every later step:
+        #   HUB_NETWORK           consensus gating (STAKE_WEIGHTED_QUORUM height
+        #                         is per network); hub exits 1 when blank/invalid
+        #   ORACLE_MIN_SUBMISSIONS  a lone validator can never reach the default
+        #                         2-hub diversity floor, so no round would ever
+        #                         finalize and every indexer's price-sync barrier
+        #                         would stall
+        # ORACLE_EPOCH_START is also required, but `validator init` persists it
+        # into validator.json and getValidatorEnv injects it, so it is passed as
+        # a flag rather than exported. Its value only has to be shared across a
+        # federation; this venue is a single hub, so the run's own clock is fine.
+        run: |
+          node src/index.js validator init \
+            --oracle-epoch-start "$(date -u +%s)000" \
+            --capabilities price,cross_chain,oracle_publish,attestation
+          {
+            echo "HUB_NETWORK=regtest"
+            echo "ORACLE_MIN_SUBMISSIONS=1"
+          } >> "$GITHUB_ENV"
+          # Prints the pubkey and never the seed (validator status reads the
+          # settings file; the 0600 signing.key is not echoed).
+          node src/index.js validator status
+
       - name: Boot the regtest stack (clones every service at ${{ github.event.inputs.ref || 'develop' }})
         # First heavy step - repo clones + docker image builds + coin daemon.
         # Watch disk and image-build time here (the 120-min job timeout covers it).
@@ -185,16 +263,95 @@ jobs:
       - name: Run the e2e action suite
         # Now exits non-zero on failure (cli.js e2etest propagates the suite's
         # exit code), so this step natively gates the job.
-        run: node src/index.js e2etest "$COIN" --ref "$STACK_REF"
+        run: node src/index.js e2etest "$COIN" $SUITE --ref "$STACK_REF"
 
       - name: Run the e2e Security suite (test/security)
+        if: env.SUITE == ''
         # Stack-dependent on-chain security suite (VM sandbox-escape / gas-bomb /
         # deploy-reject). Driven via the e2etest --script option.
         run: node src/index.js e2etest "$COIN" --script test:security --ref "$STACK_REF"
 
       - name: Run the e2e Performance suite (test/perf)
+        if: env.SUITE == ''
         # Live-stack per-service latency budgets (regression ceilings).
         run: node src/index.js e2etest "$COIN" --script test:perf:budget --ref "$STACK_REF"
+
+      # What the stack itself said, which is the one thing a failure here has never
+      # carried off the runner. The suite log records that a service answered
+      # wrong; only the service's own log and the network topology say why, and
+      # without them a remote diagnosis is guesswork - three wrong hypotheses in a
+      # row were paid for one 15-minute run at a time.
+      - name: Capture stack diagnostics
+        # Runs on every outcome, not just failure. A passing run is the baseline a
+        # later failure is read against, and there is no second chance to collect it:
+        # the runner is destroyed with the job.
+        if: always()
+        run: |
+          OUT="$XCHAIN_NODE_DATA_DIR/e2e-logs/diagnostics"
+          mkdir -p "$OUT"
+          # Never let a diagnostic failure mask the real one: this step is
+          # evidence-gathering, and the job is already failing.
+          docker ps -a                  > "$OUT/docker-ps.txt"        2>&1 || true
+          docker network ls             > "$OUT/docker-networks.txt"  2>&1 || true
+          for net in $(docker network ls --filter name=xchain --format '{{.Name}}'); do
+            echo "=== $net ==="        >> "$OUT/network-inspect.txt"
+            docker network inspect "$net" >> "$OUT/network-inspect.txt" 2>&1 || true
+          done
+          for c in $(docker ps -a --format '{{.Names}}'); do
+            echo "=== $c ==="          >> "$OUT/container-inspect.txt"
+            # Config.Env carries credentials; take only what identifies the
+            # container and how it is attached.
+            docker inspect "$c" --format '{{json .NetworkSettings.Networks}}' >> "$OUT/container-inspect.txt" 2>&1 || true
+            # NO --tail. Any cap is a bet on where the next defect lands, and the
+            # previous 400 lost an early-suite failure in a 2-hour run. The whole suite
+            # log for such a run is under a megabyte, so completeness is affordable and
+            # the artifact is per-run, so nothing here overwrites a prior run's evidence.
+            docker logs "$c"              > "$OUT/log-$c.txt"         2>&1 || true
+          done
+
+          # The explorer answering 503 with zero DB pools is the failure this job
+          # keeps hitting, and the container log alone cannot say whether the hub
+          # ever served it coin config. Capture both sides of that exchange.
+          curl -s -m 10 -X POST -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"ping","params":{},"id":1}' \
+            http://127.0.0.1:18080/ > "$OUT/explorer-ping.json" 2>&1 || true
+
+          # getallconfigs is in the hub's sensitive-read tier: its response carries DB
+          # credentials. Record the KEY STRUCTURE only, never a value, and keep the raw
+          # body outside the uploaded directory so it cannot reach the artifact.
+          RAW="$RUNNER_TEMP/hub-config-raw.json"
+          curl -s -m 10 -X POST -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","method":"getallconfigs","params":{"since_updated_at":0},"id":1}' \
+            http://127.0.0.1:10000/ > "$RAW" 2>&1 || true
+          RAW="$RAW" node -e '
+            const fs = require("fs");
+            let parsed;
+            try { parsed = JSON.parse(fs.readFileSync(process.env.RAW, "utf8")); }
+            catch (e) { console.log("hub response unparseable or empty"); process.exit(0); }
+            const result = (parsed && parsed.result) || {};
+            const tree   = result.configs || result;
+            const shape  = {};
+            for (const coin of Object.keys(tree || {})) {
+              shape[coin] = {};
+              for (const net of Object.keys(tree[coin] || {})) {
+                shape[coin][net] = {};
+                for (const mod of Object.keys(tree[coin][net] || {}))
+                  shape[coin][net][mod] = Object.keys(tree[coin][net][mod] || {});
+              }
+            }
+            console.log("seq=" + result.seq + " watermark=" + result.watermark);
+            console.log("coins served: " + (Object.keys(shape).join(", ") || "(none)"));
+            console.log(JSON.stringify(shape, null, 2));
+          ' > "$OUT/hub-config-shape.txt" 2>&1 || true
+          rm -f "$RAW"
+
+          # Allowlisted so no credential-bearing var can be swept in.
+          docker inspect xchain-node-xchain-explorer \
+            --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+            | grep -E '^(HUB_API_HOST|HUB_PORT|HUB_VALIDATORS|NO_HUB|UPDATE_CONFIG_INTERVAL)=' \
+            > "$OUT/explorer-hub-env.txt" 2>&1 || true
+
+          echo "captured $(ls -1 "$OUT" | wc -l) diagnostic files"
 
       - name: Upload e2e logs
         if: always()

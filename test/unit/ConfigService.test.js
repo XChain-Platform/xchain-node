@@ -336,6 +336,48 @@ describe('ConfigService', function () {
                 expect(config['NODE_PASSWORD']).to.not.equal('rpc')
             })
 
+            // The e2e-test container learns which key the hub runs as from the same
+            // settings ValidatorService hands the hub, rather than from a hex string an
+            // operator remembered to paste into the coin config.
+            function makeServiceWithValidator(validatorSettings) {
+                const fsStub = {
+                    createReadStream: sinon.stub().callsFake(() => streamFromString('')),
+                    existsSync: sinon.stub().returns(true),
+                    readFileSync: sinon.stub().returns(''),
+                    appendFileSync: sinon.stub(),
+                    writeFileSync: sinon.stub(),
+                    rmSync: sinon.stub(),
+                    mkdirSync: sinon.stub()
+                }
+                return proxyquire('../../src/services/ConfigService', {
+                    'fs': fsStub,
+                    './ValidatorService': {
+                        getValidatorSettings: () => validatorSettings,
+                        getValidatorEnv: () => ({})
+                    }
+                })
+            }
+
+            it('passes the validator pubkey to the e2e-test container when one is configured', async function () {
+                const pubkey = 'ab'.repeat(32)
+                const cs = makeServiceWithValidator({ enabled: true, pubkey })
+                const config = await cs.getDefaultConfig(XChainService.XCHAIN_E2E_TEST, 'bitcoin', 'regtest')
+                expect(config['VALIDATOR_PUBKEY']).to.equal(pubkey)
+            })
+
+            it('never hands the e2e-test container the signing seed, only the public half', async function () {
+                const cs = makeServiceWithValidator({ enabled: true, pubkey: 'ab'.repeat(32), seedHex: 'cd'.repeat(32) })
+                const config = await cs.getDefaultConfig(XChainService.XCHAIN_E2E_TEST, 'bitcoin', 'regtest')
+                expect(config).to.not.have.property('SIGNING_PRIVKEY_HEX')
+                expect(JSON.stringify(config)).to.not.include('cd'.repeat(32))
+            })
+
+            it('omits VALIDATOR_PUBKEY on a standalone node, so the onboarding suite skips rather than staking a key nothing runs as', async function () {
+                const cs = makeServiceWithValidator(null)
+                const config = await cs.getDefaultConfig(XChainService.XCHAIN_E2E_TEST, 'bitcoin', 'regtest')
+                expect(config).to.not.have.property('VALIDATOR_PUBKEY')
+            })
+
             // A memory-backed fs so generate -> persist -> read-back is observable across
             // calls (the default makeServiceWithConfig stub no-ops writes). Keyed by the
             // exact paths ConfigService resolves: config/<coin>-<network>, its .local

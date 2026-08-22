@@ -36,7 +36,9 @@
 #     XCHAIN_NODE_DATA_DIR / XCHAIN_NODE_TMP_DIR - the defaults live under the
 #     repo on the small root fs and WILL fill it mid-create otherwise.
 #   - Transfers each archive + its .sig to the sync host (scp, origin->sync).
-#   - Prunes old archives locally and on the sync host (keep newest $KEEP).
+#   - Prunes old archives locally and on the sync host, keeping the newest $KEEP
+#     by filename plus the newest $KEEP that are SIGNED (see PRUNE_SCRIPT), so a
+#     prune can never evict the archive the sync host advertises as latest.
 #   - flock guard so overlapping cron runs cannot collide.
 #
 # ┌─ DOWNTIME WARNING ──────────────────────────────────────────────────────┐
@@ -110,6 +112,70 @@ done
 
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 die() { log "FATAL: $*"; exit 1; }
+
+# ── Retention policy ──────────────────────────────────────────────────────
+# One policy body, piped to `sh -s` for BOTH the sync host (over ssh) and the
+# local stage, so the two sides cannot drift the way the producer and the server
+# already did.
+#
+# Serving resolves "latest" as the newest archive that HAS a paired .sig,
+# ordered by the UTC timestamp in the FILENAME (sync host latest.php). A prune
+# keyed on mtime that lets unsigned archives occupy retention slots therefore
+# deletes the exact file the server advertises: with KEEP=2, two unsigned
+# strays (an --allow-unsigned run, an operator drop) fill both slots and the
+# newest SIGNED archive goes, leaving consumers a 404 and a forced full resync
+# while a perfectly good archive existed a moment earlier. mtime is the wrong
+# key besides, because a backfilled or re-uploaded archive carries upload time,
+# not its name's timestamp.
+#
+# So retain the union of the newest KEEP by filename and the newest KEEP that
+# are signed. The union is never smaller than the by-name set alone, so this
+# deletes no more than a name-keyed prune, it cannot evict the serve target, and
+# it still bounds a directory at 2*KEEP archives. That bias matters because
+# deletions here fan out to the public web tier by a downstream rsync
+# --delete-after.
+#
+# Never candidates: latest.tgz / latest.tar.gz (the hand-placed manual-publish
+# aliases, which the server lets win on their own route) and *.part uploads in
+# flight. An empty retention set aborts the directory rather than deleting
+# everything in it.
+PRUNE_SCRIPT=$(cat <<'PRUNE_EOF'
+dir="$1"; keep="$2"
+[ -n "$dir" ] && [ -d "$dir" ] || exit 0
+case "$keep" in ''|*[!0-9]*) exit 0 ;; esac
+[ "$keep" -ge 1 ] || exit 0
+cd "$dir" || exit 0
+
+all=$(ls -1 ./*.tar.gz 2>/dev/null | sed 's#^\./##' | grep -v '^latest\.tar\.gz$' | LC_ALL=C sort -r)
+[ -n "$all" ] || exit 0
+
+signed=$(printf '%s\n' "$all" | while IFS= read -r f; do
+           [ -f "$f.sig" ] && printf '%s\n' "$f"
+         done)
+retain=$({ printf '%s\n' "$all" | head -n "$keep"
+           [ -n "$signed" ] && printf '%s\n' "$signed" | head -n "$keep"
+         } | sed '/^$/d' | LC_ALL=C sort -u)
+
+# With candidates present, an empty retention set can only mean the selection
+# above failed, and "retain nothing" here means "delete every archive".
+[ -n "$retain" ] || { echo "  PRUNE ABORTED in $dir: empty retention set, nothing deleted"; exit 0; }
+
+printf '%s\n' "$all" | while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  printf '%s\n' "$retain" | grep -q -x -F -- "$f" && continue
+  rm -f -- "$f" "$f.sig" "$f.sha256"
+done
+
+left=$(printf '%s\n' "$retain" | while IFS= read -r f; do
+         [ -n "$f" ] && [ -f "$f.sig" ] && printf '%s\n' "$f"
+       done | wc -l | tr -d ' ')
+if [ "$left" -gt 0 ]; then
+  echo "  prune: $left signed archive(s) retained in $dir"
+else
+  echo "  PRUNE WARNING: no signed archive remains in $dir; the latest endpoint 404s there"
+fi
+PRUNE_EOF
+)
 
 # ── Preconditions ─────────────────────────────────────────────────────────
 command -v "$XCHAIN_NODE_BIN" >/dev/null || die "xchain-node CLI not found ($XCHAIN_NODE_BIN)"
@@ -249,16 +315,16 @@ for c in "${SELECTED[@]}"; do
     if ssh -o BatchMode=yes "$SYNC_HOST" "$mv_cmd"; then
       log "  published $a_base (+sig) to $SYNC_HOST:$dest"
       SUMMARY+=("$c: PUBLISHED")
-      # Prune remote: keep newest $KEEP archives + their sidecars.
-      ssh -o BatchMode=yes "$SYNC_HOST" "cd '$dest' && ls -t *.tar.gz 2>/dev/null | tail -n +$((KEEP+1)) | while read -r f; do rm -f \"\$f\" \"\$f.sig\" \"\$f.sha256\"; done" || log "  (remote prune warning)"
+      # Prune remote under the shared retention policy (see PRUNE_SCRIPT).
+      printf '%s\n' "$PRUNE_SCRIPT" | ssh -o BatchMode=yes "$SYNC_HOST" "sh -s -- '$dest' '$KEEP'" || log "  (remote prune warning)"
     else
       cleanup_parts
       log "  publish rename FAILED"; SUMMARY+=("$c: PUBLISH-FAIL"); fail=1; continue
     fi
   fi
 
-  # Prune local stage: keep newest $KEEP archives + sidecars to bound disk use.
-  ( cd "$out_dir" && ls -t ./*.tar.gz 2>/dev/null | tail -n +$((KEEP+1)) | while read -r f; do rm -f "$f" "$f.sig" "$f.sha256"; done ) || true
+  # Prune the local stage under the SAME policy, to bound disk use.
+  printf '%s\n' "$PRUNE_SCRIPT" | sh -s -- "$out_dir" "$KEEP" || true
 done
 
 log "── summary ──"

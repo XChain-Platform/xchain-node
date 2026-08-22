@@ -435,6 +435,26 @@ async function getDefaultConfig(module, coin, network) {
         if (module === XChainService.XCHAIN_E2E_TEST) {
             defaultValues["COIN"] = coin
             defaultValues["XCHAIN_CONTRACTS_DIR"] = "/XChainE2ETest/xchain-contracts"
+
+            // The validator-onboarding suite STAKEs the hub's own signing pubkey and
+            // asserts the indexer then admits it to each capability set, so it needs
+            // to know which key the hub actually runs as. It read VALIDATOR_PUBKEY
+            // from the env and skipped when unset, which meant the only way to run it
+            // was for an operator to hand-copy the hex out of `validator status` into
+            // the coin config - so it skipped everywhere nobody had, including CI.
+            // Derive it from the same settings file the hub's own env comes from
+            // (getValidatorEnv above), so the two can never name different keys.
+            //
+            // PUBLIC half only. The seed stays in signing.key / SIGNING_PRIVKEY_HEX
+            // and goes to the hub alone; the test needs the pubkey and nothing else.
+            //
+            // A standalone node has no validator, so this is absent and the suite
+            // still skips - correctly, because there is no identity to onboard.
+            const { getValidatorSettings } = require('./ValidatorService')
+            const validatorSettings = getValidatorSettings()
+            if (validatorSettings && validatorSettings.pubkey) {
+                defaultValues["VALIDATOR_PUBKEY"] = validatorSettings.pubkey
+            }
         }
 
         // Genesis-ledger bootstrap env (xchain-indexer only). The indexer binds its
@@ -586,6 +606,34 @@ async function getDefaultConfig(module, coin, network) {
         // On a local regtest dev box set CORS_ORIGIN=* when installing the hub.
         if (process.env.CORS_ORIGIN !== undefined && process.env.CORS_ORIGIN !== "") {
             defaultValues.CORS_ORIGIN = process.env.CORS_ORIGIN
+        }
+
+        if (module === EXPLORER_MODULE_NAME) {
+            // Self-synced hub-mirror checkpoint schema (row 39, #4138 decoupling):
+            // HubMirrorSyncManager needs the hub's own REST base URL to pull
+            // state_checkpoints / capability_snapshots / cross_chain_matches, which
+            // is a DIFFERENT thing from HUB_API_HOST/HUB_PORT above (those feed the
+            // explorer's ordinary getallconfigs config poll, not the mirror writer).
+            // Opt-in via host env EXPLORER_CHECKPOINT_SELF_SYNC, read directly by
+            // HubService.buildHubModuleConfig's checkpoint injection (see there for
+            // why this stays a second knob instead of piggybacking
+            // ALLOW_NO_COLOCATED_HUB_DB: that flag only downgrades the fatal
+            // startup assertion to a warning and says nothing about whether a
+            // local mirror should be provisioned). Emitted only when opted in, so
+            // a deployment that never uses self-sync carries no unused hub URL.
+            if (process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== "") {
+                defaultValues.HUB_API_URL = process.env.HUB_API_URL ||
+                    ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" + defaultValues.HUB_PORT)
+            }
+
+            // Read Contract simulation (contract.html #contract-read-card) is
+            // default-off; the readers test for the exact STRING 'true', not any
+            // truthy value, so pass the host env through verbatim rather than
+            // coercing it. Sourced from host env so it persists across `update`/
+            // `recreate`, mirroring the other explorer passthroughs here.
+            if (process.env.EXPLORER_VM_QUERY_ENABLED !== undefined && process.env.EXPLORER_VM_QUERY_ENABLED !== "") {
+                defaultValues.EXPLORER_VM_QUERY_ENABLED = process.env.EXPLORER_VM_QUERY_ENABLED
+            }
         }
 
         // The explorer resolves each coin's utxo-tracker and decoder from

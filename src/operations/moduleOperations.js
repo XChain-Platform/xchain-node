@@ -101,8 +101,61 @@ async function installModules(servicesList, ref = null) {
                 .map(s => `${s.module} (${s.coin} ${s.network})`).join(', ')
                 + ' - already installed. Use `update` to rebuild.')
         }
+
+        // The explorer is installed in the shared bucket, which runs BEFORE the
+        // coin stacks, and it learns its coins by polling the hub. So a run that
+        // installed a coin leaves it serving 503 for up to a poll interval after
+        // this loop ends. Returning there hands every caller a stack that reports
+        // installed and answers nothing; the first one to be bitten was the e2e
+        // gate, whose suite starts the moment install returns.
         return outcome
     })
+}
+
+// Make the coins this run installed usable before the command returns.
+//
+// updateHub and updateExplorer push coin config to the hub and JOIN the hub and
+// explorer containers to each coin's docker network. They run in preCheck, which
+// fires BEFORE the action, so an install that creates brand-new coin stacks ends
+// without either shared service having heard about them: the explorer sits on no
+// network from which the hub is reachable, never populates a DB pool, and answers
+// 503 until some later command's preCheck happens to fix it. Measured on a clean
+// host, it stayed degraded through a full 150-second readiness wait.
+//
+// This is a COMMAND-level step, not part of the install primitive: it reconciles
+// against live docker, and installModules is also driven directly by suites whose
+// container registry is fixture data that such a reconcile would purge.
+//
+// Returns whether the stack is usable. The modules are installed either way, but
+// reporting success for a stack whose explorer serves 503 makes every later
+// failure land on the caller's first read instead of here.
+async function syncSharedServicesAfterInstall(outcome) {
+    if (!outcome || !outcome.installed.some(i => i.coin && i.network)) return true
+
+    const { updateHub } = require('../services/HubService')
+    const { updateExplorer, waitForExplorerReady } = require('../services/ExplorerService')
+
+    try { await updateHub() }      catch (err) { console.warn('install: could not push config to the hub: ' + err) }
+    try { await updateExplorer() } catch (err) { console.warn('install: could not attach the explorer to the new coin networks: ' + err) }
+
+    if (await waitForExplorerReady()) return true
+
+    console.warn('install: the xchain-explorer is still not serving coin data.' +
+        ' The stack is installed; the explorer either cannot reach the hub or the hub' +
+        ' has no config for these coins yet. Check it before running anything that reads it.')
+
+    // Escape hatch for the install-then-fix flows: the modules ARE installed, so a
+    // caller that intends to repair the explorer by hand can still treat this as success.
+    if (allowDegradedExplorer()) {
+        console.warn('install: continuing anyway (XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER is set).')
+        return true
+    }
+    return false
+}
+
+// Opt-out for callers that knowingly accept a stack whose explorer serves no coins.
+function allowDegradedExplorer() {
+    return ['1', 'true', 'yes'].includes(String(process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER || '').toLowerCase())
 }
 
 async function updateModules(servicesList, ref = null) {
@@ -152,6 +205,19 @@ async function updateModulesOnBranch(servicesList, branch = null) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                if (nextModule === DB_MODULE_NAME) {
+                    // `update` cannot rebuild the database. Its container is created by
+                    // buildDatabaseModule from a pinned mariadb image, not from module
+                    // source, and the existing-container branch there does nothing at
+                    // all - yet the DB branch of installModule answered a hard `true`,
+                    // which recordInstallOutcome counts as an updated module. So
+                    // `update database` exited 0 reporting a landed upgrade over an
+                    // untouched container. Refuse it here, where the update contract
+                    // lives, and state the remediation uninstallModule already names.
+                    console.warn(`update: ${nextModule} (${nextCoin} ${nextNetwork}) is not rebuilt by update; the database container must be removed manually and reinstalled.`)
+                    outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-updatable' })
+                    continue
+                }
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 if (nextModule === NODE_MODULE_NAME) {
                     // Tear down the existing node container before rebuilding. The node
@@ -253,10 +319,11 @@ const RECREATE_UNSUPPORTED_MODULES = [NODE_MODULE_NAME, DB_MODULE_NAME]
  */
 async function recreateModules(servicesList) {
     const { buildAndUp } = require('../services/ModuleService')
-    const { setDatabaseParameters } = require('../services/DatabaseService')
+    const { setDatabaseParameters, setHubDatabaseParameters } = require('../services/DatabaseService')
 
     const outcome = { recreated: [], skipped: [] }
     let touchedDbModule = false
+    let touchedHubModule = false
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
@@ -265,7 +332,13 @@ async function recreateModules(servicesList) {
                     // node and the database. What changed is that the skip is now
                     // recorded, so a run that recreated NOTHING can be reported as
                     // the failed request it is instead of exiting 0.
-                    console.log("recreate does not apply to " + nextModule + "; use `update " + nextModule + "` instead")
+                    // The database has no `update` to redirect to either: that verb
+                    // refuses it for the same reason (no container built from the
+                    // config map, no in-place image upgrade). Say the real remedy.
+                    const remedy = nextModule === DB_MODULE_NAME
+                        ? "; the database container must be removed manually and reinstalled"
+                        : "; use `update " + nextModule + "` instead"
+                    console.log("recreate does not apply to " + nextModule + remedy)
                     outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-recreatable' })
                     continue
                 }
@@ -275,6 +348,9 @@ async function recreateModules(servicesList) {
                 if (nextModule === XChainService.XCHAIN_DECODER || nextModule === XChainService.XCHAIN_INDEXER) {
                     touchedDbModule = true
                 }
+                if (nextModule === HUB_MODULE_NAME) {
+                    touchedHubModule = true
+                }
             }
         }
     }
@@ -283,6 +359,12 @@ async function recreateModules(servicesList) {
     // in setDatabaseParameters sees the state we just converged rather than the one
     // that made the recreate necessary.
     if (touchedDbModule) await setDatabaseParameters()
+    // Same rule for the SHARED hub account, and it matters most on this verb: the
+    // recreated hub starts on the config store's HUB_DB_PASS, so without rotating
+    // the live 'xchain_hub'@'%' account to match, `recreate xchain-hub` hands the
+    // hub a password MariaDB never received and it crash-loops on ER_ACCESS_DENIED.
+    // The `update` path rotates here for the same reason (ModuleService installModule).
+    if (touchedHubModule) await setHubDatabaseParameters()
     await statusChanged()
     return outcome
 }
@@ -872,6 +954,7 @@ async function resetModules(service, coin, network, force = false) {
 
 module.exports = {
     installModules,
+    syncSharedServicesAfterInstall,
     updateModules,
     recreateModules,
     uninstallModules,

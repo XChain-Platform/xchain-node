@@ -203,6 +203,33 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
             continue
         }
 
+        // Heal only what is actually RUNNING. Docker freezes State.Health.Status
+        // at its last value the moment a container stops (the probe goroutine
+        // runs only while the container is up), so a container that happened to
+        // be unhealthy when an operator stopped it keeps reporting `unhealthy`
+        // while State.Status is `exited` - and `docker restart` on a stopped
+        // container STARTS it, silently undoing the stop. Frozen health from a
+        // container that is no longer probing is not evidence of a wedge. This
+        // costs no healing either: autoheal exists for the ALIVE-but-stalled
+        // case (see the file header), because `--restart unless-stopped` already
+        // covers a service whose PID exits, and declines to fire exactly when
+        // the operator was the one who stopped it. Same guard the bootstrap gate
+        // applies at BootstrapHealthGate.evaluateContainerState.
+        const runState = status && status.State && status.State.Status
+        if (runState !== 'running') {
+            result.skipped.push({ module, coin, network, containerId, reason: `not running (state: ${runState || 'unknown'})` })
+            // Forget the onset: a container that comes back up gets a fresh grace
+            // window instead of inheriting a clock that has been stopped all along.
+            // The attempt count is deliberately NOT dropped here - it is cleared on
+            // an observed RECOVERY (below), and a pass that catches a container
+            // mid-restart must not reset the backoff a real wedge has earned.
+            if (state.unhealthySince[containerId] !== undefined) {
+                delete state.unhealthySince[containerId]
+                onsetChanged = true
+            }
+            continue
+        }
+
         const health = status && status.State && status.State.Health
         if (!health || health.Status !== 'unhealthy') {
             // Episode over (or the healthcheck is gone): forget the onset so the
@@ -211,10 +238,21 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
                 delete state.unhealthySince[containerId]
                 onsetChanged = true
             }
-            // Drop the attempt count too, so a container that DID recover starts its
-            // next episode at the base cooldown. Backing off is a response to a wedge
-            // restarts are not clearing; a recovery is the evidence they cleared it.
-            if (state.restartCount[containerId] !== undefined) {
+            // Drop the attempt count only on an OBSERVED `healthy`, so a container
+            // that DID recover starts its next episode at the base cooldown. Backing
+            // off is a response to a wedge restarts are not clearing; a recovery is
+            // the evidence they cleared it, and `!== 'unhealthy'` is not that
+            // evidence: `docker restart` puts the container into `starting` for the
+            // descriptor's start period plus its retry budget (60s + 3x15s for the
+            // decoder/indexer, and an operator can widen it to minutes via
+            // XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>), so a pass landing in that
+            // window would wipe the counter the restart it had just issued earned.
+            // A wedge no restart clears then stayed at the BASE cooldown forever,
+            // which is the churn the doubling exists to end. Same principle the
+            // not-running guard above states: mid-restart is not recovery. `starting`
+            // is its health-probation form. A container with no healthcheck keeps its
+            // count too, and inertly: it can never reach the restart path below.
+            if (health && health.Status === 'healthy' && state.restartCount[containerId] !== undefined) {
                 delete state.restartCount[containerId]
                 onsetChanged = true
             }

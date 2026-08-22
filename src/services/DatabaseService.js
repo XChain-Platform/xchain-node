@@ -189,6 +189,24 @@ async function getExternalDbConfig() {
         }
     }
 
+    // Non-interactive run (cron, ssh BatchMode, CI): the prompt loop below would
+    // block forever on a stdin that never answers, and this resolver is reached
+    // from preCheck and ensureDatabasePool INSIDE the CLI command lock, so the
+    // hang wedges every later xchain-node command on the host rather than just
+    // this one. Same fail-fast the bundled-DB path already does in
+    // askMariadbRootPassword. Placed AFTER the env and saved-credential branches
+    // so both headless success paths keep working untouched.
+    if (!process.stdin.isTTY) {
+        throw new Error(
+            'External-DB connection details are needed but there is no TTY to prompt on. ' +
+            'Set ALL FOUR of XCHAIN_NODE_EXTERNAL_DB_HOST, XCHAIN_NODE_EXTERNAL_DB_PORT, ' +
+            'XCHAIN_NODE_EXTERNAL_DB_ROOT_USER and XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD ' +
+            '(a partial set does not qualify for the headless path), or run any xchain-node ' +
+            'command once interactively so the verified details are saved to ' +
+            '~/.xchain-node/credentials.json for later runs.'
+        )
+    }
+
     // Interactive prompt
     console.log("\nExternal MariaDB configuration (XCHAIN_NODE_EXTERNAL_DB=1)")
     console.log("Provide the connection details for the host-native MariaDB this node should use.\n")
@@ -573,6 +591,26 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 console.log(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
             }
 
+            // Same shape again, for row 39's self-synced checkpoint mirror (#4138
+            // decoupling): HubService.buildCheckpointConfig names the schema
+            // `<INDEXER_DB_NAME>_HubMirror`, and the explorer's own
+            // HubMirrorSyncManager/HubMirrorPool.ensureDatabase() runs `CREATE
+            // DATABASE IF NOT EXISTS` on it under THIS SAME indexer account
+            // (db.js's _checkpointSource only honours a checkpoint entry whose
+            // host/port/user/pass exactly match the indexer DB, so the mirror
+            // writer has no separate credential to hold a separate grant).
+            // Escaped underscores, so the pattern matches nothing but a
+            // `_HubMirror` schema; gated to non-mainnet like DrillB, since
+            // self-sync is currently an opt-in for deployments with no
+            // externally-maintained hub schema colocated with the explorer.
+            if (module === XChainService.XCHAIN_INDEXER && network && network !== "mainnet") {
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                    "GRANT ALL PRIVILEGES ON `XChain\\_%\\_HubMirror`.* TO " + mariadbUser
+                )
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
+                console.log(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
+            }
+
             return true
         } catch (err) {
             console.log(err)
@@ -640,6 +678,16 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
                 console.log(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
+            }
+
+            // See the docker branch above: the same row-39 checkpoint hub-mirror
+            // grant, since the native-DB venues can self-sync too.
+            if (module === XChainService.XCHAIN_INDEXER && network && network !== "mainnet") {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "GRANT ALL PRIVILEGES ON `XChain\\_%\\_HubMirror`.* TO " + mariadbUser
+                )
+                await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
+                console.log(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
             }
             return true
         } catch (err) {

@@ -20,6 +20,12 @@ const proxyquire = require('proxyquire').noCallThru()
 
 function makeStubs() {
     return {
+        // Converges by default: the tests that care about the wait assert on it
+        // directly, and every other install case would otherwise sit through a
+        // real poll loop.
+        waitForExplorerReady: sinon.stub().resolves(true),
+        updateExplorer: sinon.stub().resolves(true),
+        updateHub: sinon.stub().resolves(true),
         db: {
             getModuleContainer: sinon.stub().resolves('container-id-123'),
             removeModuleContainer: sinon.stub().resolves(true),
@@ -49,6 +55,7 @@ function makeStubs() {
         getModuleBranch: sinon.stub().resolves('master'),
         buildAndUp: sinon.stub().resolves('b'.repeat(64)),
         setDatabaseParameters: sinon.stub().resolves(true),
+        setHubDatabaseParameters: sinon.stub().resolves(true),
         installModule: sinon.stub().resolves('new-container-id'),
         uninstallModule: sinon.stub().resolves(true),
         assertHubNotBehind: sinon.stub().resolves({ checked: false, reason: 'not-hub-dependent' }),
@@ -91,7 +98,8 @@ function loadOperations(stubs) {
             resetDatabases: stubs.resetDatabases,
             clearHubPriceIngestWatermark: stubs.clearHubPriceIngestWatermark,
             getDatabaseContainerId: stubs.getDatabaseContainerId,
-            setDatabaseParameters: stubs.setDatabaseParameters
+            setDatabaseParameters: stubs.setDatabaseParameters,
+            setHubDatabaseParameters: stubs.setHubDatabaseParameters
         },
         '../services/ModuleService': {
             cloneGit: stubs.cloneGit,
@@ -99,6 +107,13 @@ function loadOperations(stubs) {
             buildAndUp: stubs.buildAndUp,
             installModule: stubs.installModule,
             uninstallModule: stubs.uninstallModule
+        },
+        '../services/ExplorerService': {
+            waitForExplorerReady: stubs.waitForExplorerReady,
+            updateExplorer: stubs.updateExplorer
+        },
+        '../services/HubService': {
+            updateHub: stubs.updateHub
         },
         '../services/SkewGuardService': {
             assertHubNotBehind: stubs.assertHubNotBehind
@@ -362,6 +377,39 @@ describe('moduleOperations', function () {
             const outcome = await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
             expect(outcome.updated).to.deep.equal([{ module: 'node', coin: 'bitcoin', network: 'mainnet' }])
         })
+
+        // The database container is built from a pinned image, not from module
+        // source, and its existing-container path changes nothing. Counting it as
+        // updated is how `update database` exited 0 over an untouched container.
+        it('refuses the database instead of reporting an untouched container as updated', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            let outcome
+            try {
+                outcome = await ops.updateModules({ '': { '': ['database'] } })
+            } finally { warn.restore() }
+            expect(outcome.updated).to.deep.equal([])
+            expect(outcome.skipped).to.deep.equal([
+                { module: 'database', coin: '', network: '', reason: 'not-updatable' }
+            ])
+            // Refused BEFORE any rebuild machinery runs, so nothing is torn down.
+            expect(stubs.installModule.called).to.be.false
+            expect(stubs.db.getModuleContainer.called).to.be.false
+            expect(warn.calledWithMatch(/removed manually and reinstalled/)).to.be.true
+        })
+
+        it('still updates the other requested modules when the request also names the database', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            let outcome
+            try {
+                outcome = await ops.updateModules({ bitcoin: { mainnet: ['database', 'xchain-encoder'] } })
+            } finally { warn.restore() }
+            expect(outcome.updated).to.deep.equal([{ module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet' }])
+            expect(outcome.skipped.map(s => s.module)).to.deep.equal(['database'])
+        })
     })
 
     // -------------------------------------------------------------------
@@ -408,6 +456,29 @@ describe('moduleOperations', function () {
             await ops.recreateModules({ dogecoin: { regtest: ['xchain-encoder'] } })
             expect(stubs.buildAndUp.calledOnce).to.be.true
             expect(stubs.setDatabaseParameters.called).to.be.false
+            expect(stubs.setHubDatabaseParameters.called).to.be.false
+        })
+
+        // The recreated hub starts on the config store's HUB_DB_PASS. Without
+        // rotating the live shared hub account to match, the verb that exists to
+        // REPAIR credentials is the one that locks the hub out (ER_ACCESS_DENIED).
+        it('rotates the shared hub DB account after recreating the hub', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const result = await ops.recreateModules({ '': { '': ['xchain-hub'] } })
+            expect(result.recreated).to.deep.equal([{ module: 'xchain-hub', coin: '', network: '' }])
+            expect(stubs.setHubDatabaseParameters.calledOnce).to.be.true
+            expect(stubs.buildAndUp.firstCall.calledBefore(stubs.setHubDatabaseParameters.firstCall)).to.be.true
+            // The per-coin decoder/indexer provisioning is a different account set
+            // and must not be dragged in by a hub-only recreate.
+            expect(stubs.setDatabaseParameters.called).to.be.false
+        })
+
+        it('does not rotate the hub account when the hub was not recreated', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+            expect(stubs.setHubDatabaseParameters.called).to.be.false
         })
 
         it('recreates a container the registry has lost rather than skipping it', async function () {
@@ -1252,5 +1323,135 @@ describe('moduleOperations', function () {
             expect(result).to.be.true
             expect(stubs.execContainer.called).to.be.false
         })
+    })
+})
+
+// A coin installed by THIS run is unknown to the hub and explorer until something
+// tells them, and the thing that does (preCheck) fires BEFORE the action. Left
+// unsynced, the explorer sits on no network from which the hub is reachable,
+// populates no DB pool, and answers 503 to everything: measured on a clean host it
+// stayed degraded through a full 150-second readiness wait, which is what ruled out
+// the poll-interval race this was first mistaken for.
+//
+// It lives beside installModules rather than inside it because it reconciles
+// against LIVE docker, and installModules is driven directly by suites whose
+// container registry is fixture data that such a reconcile purges.
+describe('moduleOperations: syncSharedServicesAfterInstall()', function () {
+
+    const coinInstalled = { installed: [{ module: 'xchain-indexer', coin: 'bitcoin', network: 'regtest' }], skipped: [] }
+    const sharedOnly    = { installed: [{ module: 'xchain-explorer', coin: '', network: '' }], skipped: [] }
+
+    it('pushes hub config, attaches the explorer, then waits for it to serve', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        await ops.syncSharedServicesAfterInstall(coinInstalled)
+        expect(stubs.updateHub.calledOnce).to.be.true
+        expect(stubs.updateExplorer.calledOnce).to.be.true
+        expect(stubs.updateExplorer.calledBefore(stubs.waitForExplorerReady)).to.be.true
+    })
+
+    it('does nothing when the run installed no coin stack', async function () {
+        // A shared-only install has no new network to join and nothing to serve.
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        await ops.syncSharedServicesAfterInstall(sharedOnly)
+        expect(stubs.updateHub.called).to.be.false
+        expect(stubs.waitForExplorerReady.called).to.be.false
+    })
+
+    it('tolerates a missing outcome rather than throwing at the end of an install', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        await ops.syncSharedServicesAfterInstall(undefined)
+        expect(stubs.updateHub.called).to.be.false
+    })
+
+    it('still waits when the hub push fails, and never fails the command', async function () {
+        const stubs = makeStubs()
+        stubs.updateHub = sinon.stub().rejects(new Error('hub unreachable'))
+        const ops = loadOperations(stubs)
+        const warn = sinon.stub(console, 'warn')
+        try {
+            await ops.syncSharedServicesAfterInstall(coinInstalled)
+        } finally {
+            warn.restore()
+        }
+        expect(stubs.waitForExplorerReady.calledOnce).to.be.true
+    })
+
+    it('warns, without throwing, when the explorer never converges', async function () {
+        const stubs = makeStubs()
+        stubs.waitForExplorerReady = sinon.stub().resolves(false)
+        const ops = loadOperations(stubs)
+        const warn = sinon.stub(console, 'warn')
+        try {
+            await ops.syncSharedServicesAfterInstall(coinInstalled)
+        } finally {
+            warn.restore()
+        }
+        expect(warn.args.some(a => /not serving coin data/.test(String(a[0])))).to.be.true
+    })
+
+    it('reports the stack usable when the explorer converges', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        expect(await ops.syncSharedServicesAfterInstall(coinInstalled)).to.be.true
+    })
+
+    it('reports the stack UNUSABLE when the explorer never converges', async function () {
+        // The caller exits non-zero on this, so a gate stops at the boot step
+        // instead of at its first read of a 503 explorer.
+        const stubs = makeStubs()
+        stubs.waitForExplorerReady = sinon.stub().resolves(false)
+        const ops = loadOperations(stubs)
+        const warn = sinon.stub(console, 'warn')
+        try {
+            expect(await ops.syncSharedServicesAfterInstall(coinInstalled)).to.be.false
+        } finally {
+            warn.restore()
+        }
+    })
+
+    it('honours XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER for install-then-fix flows', async function () {
+        const stubs = makeStubs()
+        stubs.waitForExplorerReady = sinon.stub().resolves(false)
+        const ops = loadOperations(stubs)
+        const warn = sinon.stub(console, 'warn')
+        const prior = process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER
+        process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER = '1'
+        try {
+            expect(await ops.syncSharedServicesAfterInstall(coinInstalled)).to.be.true
+        } finally {
+            warn.restore()
+            if (prior === undefined) delete process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER
+            else process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER = prior
+        }
+    })
+
+    it('reports usable when the run installed no coin stack', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        expect(await ops.syncSharedServicesAfterInstall(sharedOnly)).to.be.true
+    })
+})
+
+// The e2e image stages its siblings from LIBRARY_BUNDLES, and the suites reach
+// them at ../../../xchain-<name>. A sibling that is required but not staged does
+// not redden: the suite that needs it SKIPS, which is indistinguishable from
+// green in the tally. consensusHashConformance is the one that matters most,
+// being the only place sync's BlockHasher meets the indexer's committed hashes
+// over real stack data, and it skipped silently until sync was added here.
+describe('constants: the e2e image stages every sibling its suites require', function () {
+
+    const { LIBRARY_BUNDLES } = require('../../src/config/constants')
+
+    it('bundles sync, so the consensus hash drift-lock can run instead of skipping', function () {
+        expect(LIBRARY_BUNDLES['xchain-e2e-test']).to.include('xchain-sync')
+    })
+
+    it('keeps the siblings the other suites resolve directly', function () {
+        for (const lib of ['xchain-hub', 'xchain-sdk', 'xchain-contracts', 'xchain-indexer']) {
+            expect(LIBRARY_BUNDLES['xchain-e2e-test']).to.include(lib)
+        }
     })
 })

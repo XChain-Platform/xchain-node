@@ -23,6 +23,7 @@ const { filterCommandParameters, resolveArgs } = require('./services/ConfigServi
 const { redactSecrets } = require('./utils/helpers')
 const {
     installModules,
+    syncSharedServicesAfterInstall,
     updateModules,
     recreateModules,
     uninstallModules,
@@ -207,8 +208,15 @@ async function parseCommand() {
             // make the documented default install a branch install forever.
             const resolved = resolveArgs([branch, service, chain, network], { expectBranch: true, defaultBranch: null })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
-            await installModules(serviceList, resolved.branch)
-            return process.exit(0)
+            const installed = await installModules(serviceList, resolved.branch)
+            // A coin installed by THIS run is unknown to the hub and explorer until
+            // something tells them, and the thing that does runs in preCheck, ahead
+            // of this action. Without it the command returns a stack whose explorer
+            // serves 503 to everything.
+            // Exit non-zero when the explorer never came up serving coins, so the
+            // caller stops here rather than at its first read of a 503 stack.
+            const usable = await syncSharedServicesAfterInstall(installed)
+            return process.exit(usable ? 0 : 1)
         })
 
     program

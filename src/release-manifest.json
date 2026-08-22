@@ -1,43 +1,63 @@
 {
   "_comment": [
-    "Pinned component set for XChain Platform v0.9.0.",
+    "Pinned component set for XChain Platform v0.10.0.",
     "Written at ceremony step 6 from the ACTUAL tagged master merge commits.",
-    "xchain-node is the carrier and is not listed: checking out its tag IS this manifest."
+    "xchain-node is the carrier and is not listed: checking out its tag IS this manifest.",
+    "Every module in constants.js modulesUrls is pinned here. The v0.9.0 manifest",
+    "carried only 8 of the 12, so a pinned install of that train still cloned",
+    "xchain-sdk, xchain-e2e-test, xchain-contracts and xchain-regtest-miner at their",
+    "default branch, which is not reproducible. All 12 are pinned from this train on."
   ],
-  "platform_version": "0.9.0",
-  "released": "2026-08-14",
+  "platform_version": "0.10.0",
+  "released": "2026-08-22",
   "components": {
     "xchain-vm": {
-      "tag": "v0.9.0",
-      "commit": "d29fba335d98cd156c5ee927a89eccdda1aaaf01"
+      "tag": "v0.10.0",
+      "commit": "4db160dd6ebcb1a7c8e8309b45ce00ffb5f7793c"
     },
     "xchain-decoder": {
-      "tag": "v0.9.0",
-      "commit": "622ce5ab616f605f990692771a6682cb730fb2f4"
+      "tag": "v0.10.0",
+      "commit": "09170e9a32c67484ece203a6cfc6f149f530f0a7"
     },
     "xchain-indexer": {
-      "tag": "v0.9.0",
-      "commit": "ea53a7f99255fa20f8bacb2aee5cbc9f0b3ad1dd"
+      "tag": "v0.10.0",
+      "commit": "698be256cb062ba3f05bd5a4e69d9d2f1cb206e7"
     },
     "xchain-hub": {
-      "tag": "v0.9.0",
-      "commit": "3a9e1b5fd3ba115f12826ea88a0868a0d10f5b5a"
+      "tag": "v0.10.0",
+      "commit": "cbb97b97e1b670a8b28b40d4abe9f664d8eb284e"
     },
     "xchain-sync": {
-      "tag": "v0.9.0",
-      "commit": "dc75649f3469a8fa32c4a1ea7749d05da4a319f7"
+      "tag": "v0.10.0",
+      "commit": "70a58033ff3b8468c26053afdfa4b8614e502bc8"
     },
     "xchain-encoder": {
-      "tag": "v0.9.0",
-      "commit": "ea785f6da4281ebc45912f7dea1e9e062a4e8f44"
+      "tag": "v0.10.0",
+      "commit": "27a2a87f892aed2b9602361ceb78f24a639050bb"
     },
     "xchain-utxo-tracker": {
-      "tag": "v0.9.0",
-      "commit": "21fdfd80660bd86d09d91402e23b873f0cee8574"
+      "tag": "v0.10.0",
+      "commit": "c48b87be04a7115f78b2ec7d3031d25104be1706"
     },
     "xchain-explorer": {
-      "tag": "v0.9.0",
-      "commit": "ffc73bf4d33716e9932a87d2405b5d42e69092ba"
+      "tag": "v0.10.0",
+      "commit": "e4ca98a6af0f153d4ec928576e1f24568c3dfa8b"
+    },
+    "xchain-sdk": {
+      "tag": "v0.10.0",
+      "commit": "7bcefac0c28544f7fcb742629fc553e3d6e2c49e"
+    },
+    "xchain-e2e-test": {
+      "tag": "v0.10.0",
+      "commit": "5db34052213ac847218844eef3c1fd2690f2c2b4"
+    },
+    "xchain-contracts": {
+      "tag": "v0.10.0",
+      "commit": "da194411bdaa43add28fb1af1d345f92c89c0d2e"
+    },
+    "xchain-regtest-miner": {
+      "tag": "v0.10.0",
+      "commit": "ba73838eeaab95c942ef3cbbae9f6efccb9726bb"
     }
   }
 }

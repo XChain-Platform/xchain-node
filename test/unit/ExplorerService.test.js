@@ -39,6 +39,7 @@ function makeExplorerServiceStubs(overrides = {}) {
         cloneGit:         overrides.cloneGit         || sinon.stub().resolves(true),
         buildAndUp:       overrides.buildAndUp       || sinon.stub().resolves('c'.repeat(64)),
         explorerPing:     overrides.explorerPing     || sinon.stub().resolves(false),
+        explorerProbe:    overrides.explorerProbe    || null,
         // Default is the no-active-release answer the real service gives: the
         // caller's ref passes through unpinned.
         resolveComponentRef: overrides.resolveComponentRef
@@ -50,6 +51,15 @@ function loadExplorerService(stubs) {
     // Build a mock ExplorerConnector class so we can control ping()
     const MockExplorerConnector = sinon.stub()
     MockExplorerConnector.prototype.ping = stubs.explorerPing
+    // probe() is what the install path reads. Default it to the real class's own
+    // relationship between the two (a healthy explorer answers; an unhealthy one
+    // is assumed silent) so every pre-existing case keeps its meaning, and let a
+    // test override it to express the third state: answering but degraded.
+    MockExplorerConnector.prototype.probe = stubs.explorerProbe
+        || (async function () {
+            const healthy = await stubs.explorerPing()
+            return { answering: healthy, healthy }
+        })
 
     return proxyquire('../../src/services/ExplorerService', {
         '../config/constants': {
@@ -314,6 +324,58 @@ describe('ExplorerService: installExplorerModule() honours the install ref', fun
     })
 })
 
+// The explorer only reports healthy once it holds a DB pool, and its pools come
+// from the coin stacks. `install <ref> all` installs it in the shared bucket,
+// BEFORE any coin exists, so requiring health there made a first install
+// unsatisfiable: measured on a clean hosted runner, the explorer answered 503
+// degraded for ten seconds and the whole stack install failed. It never showed on
+// a dev box or CI venue, both of which already carry coin DBs.
+describe('ExplorerService: installExplorerModule() on a stack with no coins yet', function () {
+
+    it('accepts an answering-but-degraded explorer when no coin is installed', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: true, healthy: false }),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({})
+        })
+        const es = loadExplorerService(stubs)
+        expect(await es.installExplorerModule(false)).to.be.true
+        expect(stubs.buildAndUp.called).to.be.true
+    })
+
+    it('still REFUSES an answering-but-degraded explorer once a coin is installed', async function () {
+        // With a coin present the explorer should hold a pool for it, so degraded
+        // is a real fault and must not be waved through by the carve-out above.
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: true, healthy: false }),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['regtest'] })
+        })
+        const es = loadExplorerService(stubs)
+        let threw = null
+        try { await es.installExplorerModule(false) } catch (err) { threw = err }
+        expect(threw).to.match(/Couldn't install the explorer module/)
+    })
+
+    it('refuses a container that never answers at all, coins or not', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: false, healthy: false }),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({})
+        })
+        const es = loadExplorerService(stubs)
+        let threw = null
+        try { await es.installExplorerModule(false) } catch (err) { threw = err }
+        expect(threw).to.match(/Couldn't install the explorer module/)
+    })
+
+    it('a healthy explorer is accepted whether or not a coin is installed', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: true, healthy: true }),
+            getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['regtest'] })
+        })
+        const es = loadExplorerService(stubs)
+        expect(await es.installExplorerModule(false)).to.be.true
+    })
+})
+
 describe('ExplorerService: installExplorerModule() force=true', function () {
 
     it('kills and removes existing container when force=true and container exists', async function () {
@@ -419,6 +481,10 @@ describe('ExplorerService: installExplorerModule() updateExplorer error in loop'
 
         const MockExplorerConnector = sinon.stub()
         MockExplorerConnector.prototype.ping = stubs.explorerPing
+        MockExplorerConnector.prototype.probe = async () => {
+            const healthy = await stubs.explorerPing()
+            return { answering: healthy, healthy }
+        }
 
         const es = proxyquire('../../src/services/ExplorerService', {
             '../config/constants': { EXPLORER_MODULE_NAME: 'xchain-explorer' },
@@ -533,5 +599,48 @@ describe('ExplorerService: installExplorerModule() full happy path', function ()
         expect(result).to.be.true
         expect(stubs.cloneGit.calledWith(EXPLORER_MODULE_NAME, true)).to.be.true
         expect(stubs.buildAndUp.calledWith(EXPLORER_MODULE_NAME, null, null)).to.be.true
+    })
+})
+
+// The wait exists because the explorer polls the hub for its coins, so a fresh
+// install returns while it is still answering 503. It must converge a service
+// that is talking, and must NOT burn its budget on a host where no explorer is
+// listening at all (a coin-only install), which is also what keeps it out of the
+// way of suites that run against a fully mocked stack.
+describe('ExplorerService: waitForExplorerReady()', function () {
+
+    it('returns true as soon as the explorer reports healthy', async function () {
+        const stubs = makeExplorerServiceStubs({
+            explorerProbe: sinon.stub().resolves({ answering: true, healthy: true })
+        })
+        const es = loadExplorerService(stubs)
+        expect(await es.waitForExplorerReady(10000)).to.be.true
+    })
+
+    it('keeps waiting through degraded replies, then succeeds when it converges', async function () {
+        const probe = sinon.stub()
+        probe.onCall(0).resolves({ answering: true, healthy: false })
+        probe.onCall(1).resolves({ answering: true, healthy: false })
+        probe.resolves({ answering: true, healthy: true })
+        const stubs = makeExplorerServiceStubs({ explorerProbe: probe })
+        const es = loadExplorerService(stubs)
+        expect(await es.waitForExplorerReady(10000)).to.be.true
+        expect(probe.callCount).to.be.greaterThan(2)
+    })
+
+    it('gives up early, reporting no problem, when nothing is listening at all', async function () {
+        // Silence is "no explorer on this host", not "an explorer converging".
+        // Grinding the full budget here would add minutes to every coin-only install.
+        const probe = sinon.stub().resolves({ answering: false, healthy: false })
+        const stubs = makeExplorerServiceStubs({ explorerProbe: probe, sleep: sinon.stub().resolves() })
+        const es = loadExplorerService(stubs)
+        expect(await es.waitForExplorerReady(150000, 0)).to.be.true
+    })
+
+    it('reports false when a talking explorer never converges inside the budget', async function () {
+        const probe = sinon.stub().resolves({ answering: true, healthy: false })
+        const stubs = makeExplorerServiceStubs({ explorerProbe: probe, sleep: sinon.stub().resolves() })
+        const es = loadExplorerService(stubs)
+        expect(await es.waitForExplorerReady(10)).to.be.false
     })
 })
