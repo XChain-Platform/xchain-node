@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-22
+
+### Added
+- Pinned installs verify downloaded release artifacts against the pinned signing key.
+- The explorer can run a self-synced checkpoint mirror, with the database grants it needs, so a deployment with no colocated hub schema can still serve the checkpoint, proof and cross-chain routes.
+- A module update is refused when its source asserts a gated migration that has not been applied.
+
+### Changed
+- The release manifest pins every module the installer clones. The 0.10.0 set is twelve; the 0.9.0 manifest carried eight, so a pinned install of that train still cloned four modules at their default branch.
+
+### Fixed
+- A bootstrap source that reports no lag, or a negative lag, is refused with a reason instead of being read as healthy.
+- Autoheal no longer restarts a container an operator deliberately stopped.
+- The hub database account is rotated when the hub is recreated, and the headless config prompt is guarded.
+- Uninstall keeps a shared service that is still serving another coin.
+- Install returns only once the explorer is actually serving the new coins, and fails when the explorer never starts serving them.
+- Install tells the shared services about coins the same run just created.
+- The explorer installs on a stack that has no coins yet.
+- The hub and explorer are staged at the ref the command named.
+- A migration precondition reads its skip flag by name.
+- The block-fetch desync record renders field by field instead of as an object placeholder.
+
+### Security
+- Raised the brace-expansion and js-yaml dependency floors and the advisory guards that pin them.
+
 ## [0.9.0] - 2026-08-14
 
 First release of the XChain Platform release train. Every component in the train
