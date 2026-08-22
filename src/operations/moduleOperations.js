@@ -78,6 +78,9 @@ async function installModules(servicesList, ref = null) {
         // passes the branch, exactly as before.
         const branch = target.kind === 'release' ? null : target.ref
         const outcome = { installed: [], skipped: [] }
+        // Per-run, so a second install in the same process reports its own
+        // restores rather than replaying the first one's.
+        require('../services/BootstrapService').resetBootstrapOutcomes()
 
         for (const nextCoin in servicesList) {
             for (const nextNetwork in servicesList[nextCoin]) {
@@ -101,6 +104,10 @@ async function installModules(servicesList, ref = null) {
                 .map(s => `${s.module} (${s.coin} ${s.network})`).join(', ')
                 + ' - already installed. Use `update` to rebuild.')
         }
+
+        // A bootstrap that did not restore costs hours of resync, and its only
+        // trace was one warning far up a long install log.
+        require('../services/BootstrapService').reportBootstrapOutcomes()
 
         // The explorer is installed in the shared bucket, which runs BEFORE the
         // coin stacks, and it learns its coins by polling the hub. So a run that

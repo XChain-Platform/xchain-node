@@ -1146,16 +1146,16 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                 // tracker (a fresh tracker creates an empty LevelDB immediately).
                 let utxoWasFresh = false
                 if (module === XChainService.XCHAIN_UTXO_TRACKER && !onlyExecution) {
-                    const { utxoTrackerVolumeHasData } = require('./BootstrapService')
-                    utxoWasFresh = !(await utxoTrackerVolumeHasData(coin, network))
+                    const { utxoTrackerVolumeHasData, forceBootstrapRequested } = require('./BootstrapService')
+                    utxoWasFresh = !(await utxoTrackerVolumeHasData(coin, network)) || forceBootstrapRequested()
                 }
                 // Decoder/indexer freshness must also be sampled BEFORE buildAndUp;
                 // once the service starts it fills its `blocks` table, which would
                 // make a fresh install look populated.
                 let mariaWasFresh = false
                 if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
-                    const { mariaDbModuleHasData } = require('./BootstrapService')
-                    mariaWasFresh = !(await mariaDbModuleHasData(coin, network, module))
+                    const { mariaDbModuleHasData, forceBootstrapRequested } = require('./BootstrapService')
+                    mariaWasFresh = !(await mariaDbModuleHasData(coin, network, module)) || forceBootstrapRequested()
                 }
                 const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {

@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Install and update end with a bootstrap restore summary, so a restore that did not happen is stated rather than left as one warning mid-log.
+- `XCHAIN_NODE_FORCE_BOOTSTRAP=1` restores a published bootstrap over an already-populated service, for when the install that would have taken it failed.
+
 ### Fixed
+- A failed bitcoind download now retries against the site's other mirror addresses, so one mirror serving a broken certificate chain no longer blocks the install.
+- Download failures name the URL, the mirror and the cause instead of a generic message.
 - Module clones now use public HTTPS URLs, so installs work without a GitHub SSH key.
 - Downloading a coin node now creates the crypto-nodes directory first, fixing installs pointed at a fresh custom volume.
 - Bootstrap auto-restore downloads now recover a root-owned destination directory instead of failing with a permission error.

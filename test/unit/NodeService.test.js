@@ -68,6 +68,10 @@ function loadNodeService(stubs) {
     return proxyquire('../../src/services/NodeService', {
         'child_process': { execFile: stubs.execFile },
         'follow-redirects': { https: stubs.https || { get: sinon.stub() } },
+        // Stubbed so no test resolves a real hostname: the mirror failover only
+        // enumerates addresses after a transport failure, and a unit suite must
+        // not depend on what DNS answers that day.
+        'dns': stubs.dns || { promises: { lookup: async () => [] } },
         'fs': stubs.fs,
         'semver': require('semver'),
         '../state': {
@@ -136,7 +140,8 @@ function loadNodeService(stubs) {
         },
         './BootstrapService': {
             utxoTrackerVolumeHasData:    sinon.stub().resolves(true),
-            ensureBootstrapUtxoTracker:  sinon.stub().resolves()
+            ensureBootstrapUtxoTracker:  sinon.stub().resolves(),
+            forceBootstrapRequested:     () => false
         }
     })
 }
@@ -144,6 +149,9 @@ function loadNodeService(stubs) {
 function makeFakeHttps(stubs, { decompressErr = null, statusCode = 200 } = {}) {
     const writableEmitter = new EventEmitter()
     writableEmitter.close = sinon.stub()
+    // A real fs WriteStream has destroy(); the download path calls it to release
+    // the handle on a failed attempt before the partial file is removed.
+    writableEmitter.destroy = sinon.stub()
     stubs.fs.createWriteStream.returns(writableEmitter)
 
     // On decompressTarGz resolution/rejection, control the finish event
@@ -302,6 +310,112 @@ describe('NodeService: getCryptoNode()', function () {
         } finally {
             Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
         }
+    })
+
+    // One name, several mirrors, not equivalent: a leaf-only certificate chain
+    // is fatal to Node where curl recovers via AIA, and a plain retry keeps
+    // landing on the same address.
+    describe('a broken mirror is not the whole install', function () {
+
+        // Fails the unpinned attempt the way a bad TLS chain does, then serves
+        // 200 to any attempt pinned to a specific address.
+        function makeFailoverHttps(stubs, { failures = 1 } = {}) {
+            const writableEmitter = new EventEmitter()
+            writableEmitter.close = sinon.stub()
+            writableEmitter.destroy = sinon.stub()
+            stubs.fs.createWriteStream.returns(writableEmitter)
+
+            let seen = 0
+            const get = sinon.stub().callsFake((url, optionsOrCb, maybeCb) => {
+                const cb = typeof optionsOrCb === 'function' ? optionsOrCb : maybeCb
+                const request = new EventEmitter()
+                seen++
+                if (seen <= failures) {
+                    setImmediate(() => request.emit('error', new Error('unable to verify the first certificate')))
+                    return request
+                }
+                const response = new EventEmitter()
+                response.pipe = sinon.stub()
+                response.resume = sinon.stub()
+                response.statusCode = 200
+                cb(response)
+                setImmediate(() => writableEmitter.emit('finish'))
+                return request
+            })
+            return { get }
+        }
+
+        let origArch
+        beforeEach(function () {
+            origArch = process.arch
+            Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
+        })
+        afterEach(function () {
+            Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
+        })
+
+        it('retries on another mirror address after a TLS failure and succeeds', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFailoverHttps(stubs, { failures: 1 })
+            stubs.dns = { promises: { lookup: async () => [{ address: '198.251.83.116', family: 4 }] } }
+            stubs.fs.existsSync.returns(false)
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            expect(stubs.https.get.callCount).to.equal(2)
+            // The retry must pin the address while still requesting the same URL,
+            // so the certificate is still checked against the hostname.
+            const retryArgs = stubs.https.get.secondCall.args
+            expect(retryArgs[0]).to.contain('https://bitcoincore.org/')
+            expect(retryArgs[1]).to.have.property('lookup').that.is.a('function')
+            // The download still has to clear the pinned hash before it is used.
+            expect(stubs.gitHubDownloader.verifyFileHash.called).to.be.true
+        })
+
+        it('does not try other mirrors for an HTTP status, where every mirror agrees', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs, { statusCode: 404 })
+            stubs.dns = { promises: { lookup: async () => [{ address: '198.251.83.116', family: 4 }] } }
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try { await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1') } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            expect(stubs.https.get.callCount).to.equal(1)
+        })
+
+        it('names the URL, the cause and a way forward when every mirror fails', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFailoverHttps(stubs, { failures: 99 })
+            stubs.dns = { promises: { lookup: async () => [{ address: '194.204.0.12', family: 4 }] } }
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try { await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1') } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            // The old message named neither the URL nor the cause, so a broken
+            // mirror was indistinguishable from a broken installer.
+            expect(threw.message).to.contain('bitcoincore.org')
+            expect(threw.message).to.contain('unable to verify the first certificate')
+            expect(threw.message).to.contain('curl --resolve')
+            expect(stubs.gitHubDownloader.verifyFileHash.called).to.be.false
+        })
+
+        it('still makes one attempt when the name cannot be resolved at all', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFailoverHttps(stubs, { failures: 99 })
+            stubs.dns = { promises: { lookup: async () => { throw new Error('EAI_AGAIN') } } }
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try { await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1') } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            expect(stubs.https.get.callCount).to.equal(1)
+        })
     })
 
     it('downloads dogecoin node via gitHubDownloader', async function () {
@@ -902,7 +1016,8 @@ describe('NodeService: installNode()', function () {
             },
             './BootstrapService': {
                 utxoTrackerVolumeHasData:   sinon.stub().resolves(true),
-                ensureBootstrapUtxoTracker: sinon.stub().resolves()
+                ensureBootstrapUtxoTracker: sinon.stub().resolves(),
+                forceBootstrapRequested:     () => false
             }
         })
 
@@ -943,7 +1058,7 @@ describe('NodeService: installNode()', function () {
             './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
             './ModuleService': { cloneGit: cloneGitStub, buildAndUp: buildAndUpStub, assertNoHostPortConflicts: sinon.stub().resolves() },
-            './BootstrapService': { utxoTrackerVolumeHasData: sinon.stub().resolves(true), ensureBootstrapUtxoTracker: sinon.stub().resolves() }
+            './BootstrapService': { utxoTrackerVolumeHasData: sinon.stub().resolves(true), ensureBootstrapUtxoTracker: sinon.stub().resolves(), forceBootstrapRequested:     () => false }
         })
 
         const result = await ns.installNode('bitcoin', 'mainnet')

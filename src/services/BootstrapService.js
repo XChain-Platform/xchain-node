@@ -911,12 +911,57 @@ async function downloadBootstrap(coin, network, module, destDir) {
     return 'latest.tgz'
 }
 
+// What each service's bootstrap attempt did, for the end-of-install summary:
+// a skipped restore is the difference between a published height and hours of
+// rescanning, too costly to leave as one warning mid-log. Reset per run.
+const bootstrapOutcomes = []
+
+function recordBootstrapOutcome(module, status, detail) {
+    bootstrapOutcomes.push({ module, status, detail })
+}
+
+function resetBootstrapOutcomes() {
+    bootstrapOutcomes.length = 0
+}
+
+// Printed at the end of install/update. Says nothing when no bootstrap was
+// attempted, so ordinary runs stay quiet.
+function reportBootstrapOutcomes() {
+    if (bootstrapOutcomes.length === 0) return
+    const failed = bootstrapOutcomes.filter((o) => o.status === 'failed')
+    console.log('\nBootstrap restore summary:')
+    for (const o of bootstrapOutcomes) {
+        const line = o.status === 'restored' ? 'restored'
+            : o.status === 'none-published' ? 'none published, syncing from scratch'
+            : o.status === 'disabled' ? 'disabled by XCHAIN_NODE_NO_BOOTSTRAP'
+            : `NOT restored: ${o.detail}`
+        console.log(`  ${o.module}: ${line}`)
+    }
+    if (failed.length > 0) {
+        console.log(
+            '\nThose services are now syncing from block 0, which takes hours to days\n' +
+            'rather than minutes. Fix the cause above, then re-run install with\n' +
+            'XCHAIN_NODE_FORCE_BOOTSTRAP=1 to take the restore again: without it a\n' +
+            'service that has already started syncing is left alone.\n'
+        )
+    }
+}
+
+// Opt-in restore over an already-populated service. Off by default because the
+// restore wipes the data directory; needed because a failed restore leaves a
+// service scratch-syncing, which reads as populated to every later run.
+function forceBootstrapRequested() {
+    const v = process.env.XCHAIN_NODE_FORCE_BOOTSTRAP
+    return v !== undefined && v !== '' && v !== '0'
+}
+
 // On a FRESH utxo-tracker install, download the published bootstrap and restore
 // it. Best-effort: any failure (no bootstrap published, download/restore error)
 // logs a warning and returns so the install proceeds with a normal sync.
 async function ensureBootstrapUtxoTracker(coin, network) {
     if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
         console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
+        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'disabled')
         return false
     }
     try {
@@ -927,13 +972,17 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         const fileName = await downloadBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, bootstrapDir)
         if (!fileName) {
             console.log('No bootstrap available; the tracker will sync from scratch')
+            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'none-published')
             return false
         }
         await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
         console.log('Bootstrap installed; tracker will continue from the bootstrap height')
+        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'restored')
         return true
     } catch (err) {
-        console.log(`WARNING: bootstrap auto-restore failed (${redactSecrets(err.message)}): the tracker will sync from scratch`)
+        const reason = redactSecrets(err.message)
+        console.log(`WARNING: bootstrap auto-restore failed (${reason}): the tracker will sync from scratch`)
+        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'failed', reason)
         return false
     }
 }
@@ -1007,6 +1056,7 @@ async function mariaDbModuleHasData(coin, network, module) {
 async function ensureBootstrapMariaDb(coin, network, module) {
     if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
         console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
+        recordBootstrapOutcome(module, 'disabled')
         return false
     }
     try {
@@ -1019,13 +1069,17 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         const fileName = await downloadBootstrap(coin, network, module, bootstrapDir)
         if (!fileName) {
             console.log('No bootstrap available; the service will sync from scratch')
+            recordBootstrapOutcome(module, 'none-published')
             return false
         }
         await restoreBootstrap(coin, network, module, fileName)
         console.log('Bootstrap installed; the service will continue from the bootstrap height')
+        recordBootstrapOutcome(module, 'restored')
         return true
     } catch (err) {
-        console.log(`WARNING: bootstrap auto-restore failed (${redactSecrets(err.message)}): the service will sync from scratch`)
+        const reason = redactSecrets(err.message)
+        console.log(`WARNING: bootstrap auto-restore failed (${reason}): the service will sync from scratch`)
+        recordBootstrapOutcome(module, 'failed', reason)
         return false
     }
 }
@@ -1071,6 +1125,9 @@ module.exports = {
     ensureBootstrapUtxoTracker,
     mariaDbModuleHasData,
     ensureBootstrapMariaDb,
+    forceBootstrapRequested,
+    reportBootstrapOutcomes,
+    resetBootstrapOutcomes,
     // Bootstrap signing (supply-chain integrity)
     signBootstrapArchive,
     verifyBootstrapSignature,
