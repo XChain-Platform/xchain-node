@@ -839,6 +839,24 @@ async function utxoTrackerVolumeHasData(coin, network) {
     }
 }
 
+// Age in whole days of the resolved archive, from the UTC <YYYYMMDD_HHMMSS>
+// stamp in its name (the field latest.php orders by). Null when the name
+// carries none, as a hand-placed latest.tgz does.
+function bootstrapArchiveAgeDays(archiveUrl, now = Date.now()) {
+    const stamp = /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(path.basename(archiveUrl || ''))
+    if (!stamp) return null
+    const [, y, mo, d, h, mi, s] = stamp
+    const published = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s))
+    if (!Number.isFinite(published)) return null
+    const days = Math.floor((now - published) / 86400000)
+    return days >= 0 ? days : null
+}
+
+// Days before a published archive is called out at restore time. Warn, never
+// refuse: a stale archive still beats the days of scratch sync refusing costs.
+// Above the weekly publish cadence, so only a publisher that missed runs trips it.
+const BOOTSTRAP_STALE_AFTER_DAYS = 10
+
 // Stream <BOOTSTRAP_BASE_URL>/<module>/<coin>/<network>/latest.tgz into destDir
 // as latest.tgz. Returns the filename on success, null when none is published
 // (404). Follows the http→https redirect. Throws on other network errors.
@@ -893,6 +911,24 @@ async function downloadBootstrap(coin, network, module, destDir) {
     // latest.tgz is served directly and its .sig sits beside it).
     const finalUrl = response.request && response.request.res && response.request.res.responseUrl
         ? response.request.res.responseUrl : url
+
+    // Report the age during the install, not after a halt traced back to it.
+    // Only the tracker can be left unable to walk forward, so only it is warned
+    // about that; the others just resync from the archive height.
+    const ageDays = bootstrapArchiveAgeDays(finalUrl)
+    if (ageDays !== null && ageDays >= BOOTSTRAP_STALE_AFTER_DAYS) {
+        const consequence = module === XChainService.XCHAIN_UTXO_TRACKER
+            ? '  A snapshot whose tip has drifted past the chain it is restored onto can leave the tracker\n' +
+              '  unable to walk forward, which halts it until it is reset and rebuilt. If that happens, the\n' +
+              '  archive is the cause, not your host.'
+            : '  It still restores; the service resyncs forward from the archive height, which just takes longer\n' +
+              '  the older the archive is.'
+        console.log(
+            `WARNING: the published ${module} bootstrap for ${coin}/${network} is ${ageDays} days old ` +
+            `(${path.basename(finalUrl)}).\n` + consequence
+        )
+    }
+
     const sigPath = destPath + BOOTSTRAP_SIG_SUFFIX
     const sigResponse = await axios({
         method: 'get',
@@ -1128,6 +1164,8 @@ module.exports = {
     forceBootstrapRequested,
     reportBootstrapOutcomes,
     resetBootstrapOutcomes,
+    bootstrapArchiveAgeDays,
+    BOOTSTRAP_STALE_AFTER_DAYS,
     // Bootstrap signing (supply-chain integrity)
     signBootstrapArchive,
     verifyBootstrapSignature,

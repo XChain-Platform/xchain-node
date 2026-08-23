@@ -64,6 +64,10 @@ function makeStubs() {
         execFile: sinon.stub(),
         fs: {
             existsSync: sinon.stub().returns(false)
+        },
+        bootstrapService: {
+            resetBootstrapOutcomes:  sinon.stub(),
+            reportBootstrapOutcomes: sinon.stub()
         }
     }
 }
@@ -124,6 +128,7 @@ function loadOperations(stubs) {
         '../services/StatusService': {
             statusChanged: stubs.statusChanged
         },
+        '../services/BootstrapService': stubs.bootstrapService,
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs,
         'util': {
@@ -214,6 +219,34 @@ describe('moduleOperations', function () {
             expect(result.skipped).to.deep.equal([
                 { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', reason: 'already-installed' }
             ])
+        })
+
+        // A failed install is exactly where the summary earns its place: it
+        // leaves some services restored and some facing days of resync, and
+        // the error alone does not say which.
+        it('reports the bootstrap outcomes even when the install throws', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.rejects(new Error("Couldn't download the bitcoin node"))
+            const ops = loadOperations(stubs)
+
+            let threw = null
+            try {
+                await ops.installModules({ bitcoin: { mainnet: ['node'] } })
+            } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            expect(stubs.bootstrapService.reportBootstrapOutcomes.calledOnce).to.be.true
+            // The failure still surfaces: the summary is added to it, not
+            // substituted for it.
+            expect(threw.message).to.contain("Couldn't download the bitcoin node")
+        })
+
+        it('still reports the bootstrap outcomes on a clean install', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.installModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(stubs.bootstrapService.resetBootstrapOutcomes.calledOnce).to.be.true
+            expect(stubs.bootstrapService.reportBootstrapOutcomes.calledOnce).to.be.true
         })
     })
 

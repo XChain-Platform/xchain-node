@@ -400,7 +400,10 @@ describe('NodeService: getCryptoNode()', function () {
             // mirror was indistinguishable from a broken installer.
             expect(threw.message).to.contain('bitcoincore.org')
             expect(threw.message).to.contain('unable to verify the first certificate')
-            expect(threw.message).to.contain('curl --resolve')
+            expect(threw.message).to.contain('curl')
+            // The remediation names a path, so it has to name the path the
+            // installer will actually read a placed tarball back from.
+            expect(threw.message).to.contain('/crypto_nodes/bitcoin/bitcoin28.1.tar.gz')
             expect(stubs.gitHubDownloader.verifyFileHash.called).to.be.false
         })
 
@@ -415,6 +418,116 @@ describe('NodeService: getCryptoNode()', function () {
 
             expect(threw).to.be.an('error')
             expect(stubs.https.get.callCount).to.equal(1)
+        })
+
+        // Asserting the lookup exists proves nothing: under autoSelectFamily
+        // net.connect calls it with { all: true } and an answer in the
+        // single-address form fails the connect before a socket is opened.
+        it('answers the all:true form Node actually calls it with', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFailoverHttps(stubs, { failures: 1 })
+            stubs.dns = { promises: { lookup: async () => [{ address: '198.251.83.116', family: 4 }] } }
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            const { lookup } = stubs.https.get.secondCall.args[1]
+
+            // What Node passes under autoSelectFamily: an array of records, or
+            // the connect attempt throws before it dials.
+            const all = await new Promise((resolve, reject) =>
+                lookup('bitcoincore.org', { family: 0, hints: 32, all: true },
+                    (err, res) => err ? reject(err) : resolve(res)))
+            expect(all).to.be.an('array').with.lengthOf(1)
+            expect(all[0]).to.include({ address: '198.251.83.116', family: 4 })
+
+            // The legacy shape still has to work: options without `all` take the
+            // (err, address, family) callback instead.
+            const single = await new Promise((resolve, reject) =>
+                lookup('bitcoincore.org', { family: 0 },
+                    (err, address, family) => err ? reject(err) : resolve({ address, family })))
+            expect(single).to.deep.equal({ address: '198.251.83.116', family: 4 })
+        })
+    })
+
+    // The failure message tells an operator to place the tarball and re-run,
+    // the only escape when every resolved address serves the same broken
+    // certificate chain. These hold that instruction to being true.
+    describe('a tarball the operator placed by hand is used, not destroyed', function () {
+
+        let origArch
+        beforeEach(function () {
+            origArch = process.arch
+            Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
+        })
+        afterEach(function () {
+            Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
+        })
+
+        function existingTarballFs(stubs) {
+            // Only the tarball is present; the extracted directory is not, so
+            // the post-verify rename path runs as it does after a download.
+            stubs.fs.existsSync.callsFake(p => String(p).endsWith('.tar.gz'))
+        }
+
+        it('skips the download entirely when the tarball is already at the path', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs)
+            existingTarballFs(stubs)
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            expect(stubs.https.get.called).to.be.false
+            expect(stubs.fs.createWriteStream.called).to.be.false
+        })
+
+        it('still verifies the placed tarball against the pinned hash before using it', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs)
+            existingTarballFs(stubs)
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            // Once to decide the placed file is trustworthy at all, and once at
+            // the gate every path goes through before decompression. The gate is
+            // deliberately not conditional on how the bytes arrived.
+            expect(stubs.gitHubDownloader.verifyFileHash.callCount).to.equal(2)
+            expect(stubs.decompressTarGz.calledOnce).to.be.true
+        })
+
+        // Trusting a placed file must not cost the self-heal a half-written
+        // leftover depends on: bytes that are not the pinned ones get discarded
+        // and re-downloaded, never handed to the install.
+        it('discards a file that fails the pinned hash and downloads instead', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs)
+            existingTarballFs(stubs)
+            stubs.gitHubDownloader.verifyFileHash
+                .onFirstCall().rejects(new Error('SHA-256 mismatch'))
+                .onSecondCall().resolves()
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            expect(stubs.fs.rmSync.called).to.be.true
+            expect(stubs.https.get.calledOnce).to.be.true
+            expect(stubs.decompressTarGz.calledOnce).to.be.true
+        })
+
+        it('never decompresses bytes that fail the pinned hash', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs)
+            existingTarballFs(stubs)
+            stubs.gitHubDownloader.verifyFileHash.rejects(new Error('SHA-256 mismatch'))
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try { await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1') } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            expect(stubs.decompressTarGz.called).to.be.false
         })
     })
 

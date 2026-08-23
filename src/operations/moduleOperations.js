@@ -82,32 +82,35 @@ async function installModules(servicesList, ref = null) {
         // restores rather than replaying the first one's.
         require('../services/BootstrapService').resetBootstrapOutcomes()
 
-        for (const nextCoin in servicesList) {
-            for (const nextNetwork in servicesList[nextCoin]) {
-                if (nextCoin && nextNetwork) {
-                    await createDockerNetwork(getDockerNetwork(nextCoin, nextNetwork))
-                    await buildDatabaseModule(nextCoin, nextNetwork)
-                }
-                for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                    const result = await installModule(nextModule, nextCoin, nextNetwork, false, null, false, branch)
-                    if (result === false) {
-                        outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'already-installed' })
-                    } else {
-                        outcome.installed.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
+        try {
+            for (const nextCoin in servicesList) {
+                for (const nextNetwork in servicesList[nextCoin]) {
+                    if (nextCoin && nextNetwork) {
+                        await createDockerNetwork(getDockerNetwork(nextCoin, nextNetwork))
+                        await buildDatabaseModule(nextCoin, nextNetwork)
+                    }
+                    for (const nextModule of servicesList[nextCoin][nextNetwork]) {
+                        const result = await installModule(nextModule, nextCoin, nextNetwork, false, null, false, branch)
+                        if (result === false) {
+                            outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'already-installed' })
+                        } else {
+                            outcome.installed.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
+                        }
                     }
                 }
             }
-        }
 
-        if (outcome.skipped.length > 0) {
-            console.log('install: nothing to do for ' + outcome.skipped
-                .map(s => `${s.module} (${s.coin} ${s.network})`).join(', ')
-                + ' - already installed. Use `update` to rebuild.')
+            if (outcome.skipped.length > 0) {
+                console.log('install: nothing to do for ' + outcome.skipped
+                    .map(s => `${s.module} (${s.coin} ${s.network})`).join(', ')
+                    + ' - already installed. Use `update` to rebuild.')
+            }
+        } finally {
+            // In a finally because a run that throws is the one whose summary
+            // matters most: it leaves some services restored and some facing
+            // hours of resync, and the error alone does not say which.
+            require('../services/BootstrapService').reportBootstrapOutcomes()
         }
-
-        // A bootstrap that did not restore costs hours of resync, and its only
-        // trace was one warning far up a long install log.
-        require('../services/BootstrapService').reportBootstrapOutcomes()
 
         // The explorer is installed in the shared bucket, which runs BEFORE the
         // coin stacks, and it learns its coins by polling the hub. So a run that

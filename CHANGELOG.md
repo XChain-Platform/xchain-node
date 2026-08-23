@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `XCHAIN_NODE_FORCE_BOOTSTRAP=1` restores a published bootstrap over an already-populated service, for when the install that would have taken it failed.
 
 ### Fixed
+- The bitcoind mirror retry now answers the address-list form Node asks for, so the retry actually dials instead of failing immediately on every supported Node version.
+- A bitcoind tarball already present at the download path is used and verified against the pinned hash rather than overwritten, so the manual workaround the failure message describes now works.
+- The bootstrap restore summary is printed even when the install fails partway, which is when it matters most.
+- A published bootstrap older than a week is called out during the download, since a snapshot that has aged past the chain can leave a service unable to continue from it.
 - A failed bitcoind download now retries against the site's other mirror addresses, so one mirror serving a broken certificate chain no longer blocks the install.
 - Download failures name the URL, the mirror and the cause instead of a generic message.
 - Module clones now use public HTTPS URLs, so installs work without a GitHub SSH key.
