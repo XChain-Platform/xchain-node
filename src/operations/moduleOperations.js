@@ -726,7 +726,7 @@ const RESETTABLE_SERVICES = [
     XChainService.XCHAIN_INDEXER
 ]
 
-async function resetModules(service, coin, network, force = false) {
+async function resetModules(service, coin, network, force = false, withIndexer = false) {
     if (!RESETTABLE_SERVICES.includes(service)) {
         throw new Error("reset: unknown service '" + service + "'; expected one of "
             + RESETTABLE_SERVICES.join(', '))
@@ -743,7 +743,30 @@ async function resetModules(service, coin, network, force = false) {
     const resetNode        = resetAll || service === NODE_MODULE_NAME
     const resetUtxoTracker = resetAll || service === XChainService.XCHAIN_UTXO_TRACKER
     const resetDecoder     = resetAll || service === XChainService.XCHAIN_DECODER
-    const resetIndexer     = resetAll || service === XChainService.XCHAIN_INDEXER
+    const resetIndexer     = resetAll || service === XChainService.XCHAIN_INDEXER || (withIndexer && resetDecoder)
+
+    // The indexer's rollback cursor IS a decoder `events` id, and the decoder
+    // never deletes those rows, so wiping the decoder alone restarts the ids
+    // under a cursor that now points past them: the indexer fails RE-1 and stops
+    // committing. The pair only has a coherent state when both move together.
+    // Asymmetric on purpose - resetting the indexer alone re-derives it from an
+    // intact decoder, which is an ordinary reindex and stays allowed.
+    if (resetDecoder && !resetIndexer) {
+        let indexerInstalled = null
+        try {
+            indexerInstalled = await db.getModuleContainer(XChainService.XCHAIN_INDEXER, coin, network)
+        } catch { /* registry unreadable: fall through, nothing to strand that we can prove */ }
+        if (indexerInstalled) {
+            console.log(`Aborted: resetting ${XChainService.XCHAIN_DECODER} alone would leave `
+                + `${XChainService.XCHAIN_INDEXER} incoherent. No data was touched.`)
+            console.log("  The indexer tracks reorgs by a decoder event id. Wiping the decoder restarts")
+            console.log("  those ids, so the indexer would abort with a reorg-cursor error (RE-1) and stop")
+            console.log("  committing blocks until both are rebuilt together.")
+            console.log(`  Reset the pair:   xchain-node reset ${XChainService.XCHAIN_DECODER} ${coin} ${network} --with-indexer`)
+            console.log(`  Or the whole stack (also re-syncs the chain):   xchain-node reset all ${coin} ${network}`)
+            return false
+        }
+    }
 
     // Relocated blocks/txindex host paths (XCHAIN_NODE_BLOCKS_DIR mode): these
     // live OUTSIDE the in-datadir path the node wipe clears, so they must be

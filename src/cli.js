@@ -495,8 +495,10 @@ gate could report them, so the cron exited 0 while a consumer archive went stale
         .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet, testnet, regtest)')
         .option('--yes', 'Skip the destructive-reset confirmation prompt (for CI/scripted resets)')
+        .option('--with-indexer', 'Reset xchain-indexer alongside xchain-decoder; the pair is only coherent when both move together')
         .action(async (service, chain, network, options) => {
-            const confirmed = await resetModules(service, chain, network, !!(options && options.yes))
+            const confirmed = await resetModules(service, chain, network,
+                !!(options && options.yes), !!(options && options.withIndexer))
             return process.exit(confirmed ? 0 : 1)
         })
 

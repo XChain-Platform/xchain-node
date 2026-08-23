@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `XCHAIN_NODE_FORCE_BOOTSTRAP=1` restores a published bootstrap over an already-populated service, for when the install that would have taken it failed.
 
 ### Fixed
+- `reset xchain-decoder` now refuses while an indexer is installed and names the `--with-indexer` joint form, because resetting one half of the pair leaves the other unable to commit blocks.
 - The bitcoind mirror retry now answers the address-list form Node asks for, so the retry actually dials instead of failing immediately on every supported Node version.
 - A bitcoind tarball already present at the download path is used and verified against the pinned hash rather than overwritten, so the manual workaround the failure message describes now works.
 - The bootstrap restore summary is printed even when the install fails partway, which is when it matters most.
