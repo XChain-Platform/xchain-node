@@ -696,10 +696,28 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         fs.rmSync(workDir, { recursive: true })
         console.log('Bootstrap restore complete')
 
-    } finally {
-        console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
-        await startContainer(containerId)
+    } catch (err) {
+        // Post-wipe regime (uuid:7edc76f3). Every statement in the try above runs
+        // at or after `find /data -mindepth 1 -delete`, so a failure here leaves
+        // the LevelDB store partially wiped. Restarting the container over it (the
+        // old unconditional `finally`) boots a fresh XChainUtxoTracker with
+        // halted=false, so get_sync_status / GET /status report a normal non-503
+        // status and BootstrapHealthGate has nothing to refuse on: an emptied
+        // store reads as caught up. Mirrors the tracker's own contract in
+        // xchain-utxo-tracker/src/bootstrap-recovery.js `handleRestoreFailure`,
+        // where a post-wipe abort fails loud instead of resuming.
+        err.postWipe = true
+        console.log(
+            `[fatal] ${XChainService.XCHAIN_UTXO_TRACKER} bootstrap restore failed AFTER the LevelDB\n` +
+            `volume was wiped; the store is incomplete and the container has been left STOPPED so it\n` +
+            `cannot report a wiped store as caught up. Re-run the restore with\n` +
+            `XCHAIN_NODE_FORCE_BOOTSTRAP=1, or clear the volume and resync from scratch.`
+        )
+        throw err
     }
+
+    console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
+    await startContainer(containerId)
 
     return true
 }
@@ -965,13 +983,26 @@ function resetBootstrapOutcomes() {
 function reportBootstrapOutcomes() {
     if (bootstrapOutcomes.length === 0) return
     const failed = bootstrapOutcomes.filter((o) => o.status === 'failed')
+    // Wiped-then-failed is NOT part of `failed`: those services are down, not
+    // syncing from block 0, so the paragraph below would misdescribe them.
+    const wipedDown = bootstrapOutcomes.filter((o) => o.status === 'wiped-left-down')
     console.log('\nBootstrap restore summary:')
     for (const o of bootstrapOutcomes) {
         const line = o.status === 'restored' ? 'restored'
             : o.status === 'none-published' ? 'none published, syncing from scratch'
             : o.status === 'disabled' ? 'disabled by XCHAIN_NODE_NO_BOOTSTRAP'
+            : o.status === 'wiped-left-down' ? `NOT restored, DATA WIPED, container left stopped: ${o.detail}`
             : `NOT restored: ${o.detail}`
         console.log(`  ${o.module}: ${line}`)
+    }
+    if (wipedDown.length > 0) {
+        console.log(
+            '\nThose services had their data directory wiped by a restore that then failed, so\n' +
+            'their containers were deliberately left STOPPED rather than restarted over an\n' +
+            'incomplete store that would report itself caught up. Re-run install with\n' +
+            'XCHAIN_NODE_FORCE_BOOTSTRAP=1 to take the restore again, or clear the volume and\n' +
+            'start the service to resync from block 0.\n'
+        )
     }
     if (failed.length > 0) {
         console.log(
@@ -1017,6 +1048,17 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         return true
     } catch (err) {
         const reason = redactSecrets(err.message)
+        // A post-wipe abort did NOT leave a scratch-syncing tracker: the store was
+        // emptied and the container was left stopped (uuid:7edc76f3), so the old
+        // "will sync from scratch" wording described a state that is not on disk.
+        if (err.postWipe) {
+            console.log(
+                `WARNING: bootstrap auto-restore failed (${reason}) AFTER the LevelDB volume was wiped: ` +
+                `the tracker store is incomplete and its container was left stopped, not syncing.`
+            )
+            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'wiped-left-down', reason)
+            return false
+        }
         console.log(`WARNING: bootstrap auto-restore failed (${reason}): the tracker will sync from scratch`)
         recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'failed', reason)
         return false
