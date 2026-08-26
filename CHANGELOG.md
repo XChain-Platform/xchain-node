@@ -5,11 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.0] - 2026-08-26
 
 ### Added
 - Install and update end with a bootstrap restore summary, so a restore that did not happen is stated rather than left as one warning mid-log.
 - `XCHAIN_NODE_FORCE_BOOTSTRAP=1` restores a published bootstrap over an already-populated service, for when the install that would have taken it failed.
+
+### Changed
+- The release manifest pins the v0.11.0 component set.
 
 ### Fixed
 - The migration precondition refusal only prints a scoped migrate command when the running build is confirmed to support one, and otherwise names every migration an unscoped run would apply.
