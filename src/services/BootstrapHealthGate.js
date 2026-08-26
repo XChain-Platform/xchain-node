@@ -32,7 +32,9 @@
  *   - reporting an unhealthy/halted status on its own health surface
  *   - carrying a durable halt marker in its database: a decoder REORG_HALT row
  *     (events.code = 'REORG_HALT') or an uncleared xchain-sync divergence halt
- *     (sync_halt with cleared_at IS NULL)
+ *     (sync_halt with cleared_at IS NULL). For an indexer source that means the
+ *     PAIRED DECODER's database, which is the only place either marker is written;
+ *     an indexer's own events table only ever carries code='REORG'.
  *   - materially behind its node's tip
  *
  * FAIL CLOSED throughout. A probe that cannot be run, cannot be parsed, or
@@ -152,8 +154,8 @@ async function inspectContainer(containerId, runner) {
 // Interpret a decoder/indexer/utxo-tracker health payload. Pure, so the policy
 // is unit-testable without docker. Field names differ per service, which is why
 // every known spelling is checked rather than one canonical key:
-//   decoder  health: status, lag_blocks/blockLag, reorg_halted
-//   indexer  health: status, lag, decoderReorgHalted, degraded
+//   decoder  health: status, lag_blocks/blockLag, reorg_halted, reorg_halt_checked_at
+//   indexer  health: status, lag, decoderReorgHalted, stallClass
 //   tracker  health: lag, synced, halted
 //   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'unhealthy')
 function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}) {
@@ -170,8 +172,33 @@ function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}
     if (payload.reorg_halted === true)
         reasons.push('the decoder carries a durable REORG_HALT marker' +
             (payload.reorg_halt_reason ? `: ${payload.reorg_halt_reason}` : ''))
+    // "not halted" is only an answer if something actually looked. The decoder's
+    // marker probe is fail-soft on purpose (a DB blip keeps the last known state),
+    // and that state starts at false with checked_at null, so a decoder that has
+    // NEVER completed a probe publishes exactly what a clean one publishes. Keyed on
+    // OWNING reorg_halted: the boolean and its timestamp shipped in the same decoder
+    // commit, so a payload carrying one always carries the other, and an image
+    // publishing neither is unaffected. The indexer's decoderReorgHalted has no
+    // companion timestamp yet; extend this to it when the indexer publishes one.
+    if (Object.prototype.hasOwnProperty.call(payload, 'reorg_halted')
+        && (payload.reorg_halt_checked_at === null || payload.reorg_halt_checked_at === undefined))
+        reasons.push('the decoder has never completed a REORG_HALT marker probe (reorg_halt_checked_at is ' +
+            'null), so its "not halted" report is an untested default rather than a reading')
     if (payload.decoderReorgHalted === true)
         reasons.push('the upstream decoder carries a durable REORG_HALT marker, so this database is frozen behind it')
+    // The indexer's own single-field verdict on its block counter:
+    // 'none' | 'future_block_wait' | 'barrier_defer' | 'wedged'. Only 'wedged' is a
+    // refusal, and it needs its own leg: the indexer reports status "healthy"
+    // whenever its process is up and its DB circuit is closed, so a freshly-wedged
+    // indexer whose lag is still inside the ceiling passes every other check here.
+    // NOT keyed on `degraded`, which stays true throughout the healthy
+    // future-stamped-block wait (the permanent testnet4 steady state) and would
+    // refuse forever; stallClassOf resolves that wait to 'future_block_wait' before
+    // it can ever reach 'wedged'. Strict equality, so an older image publishing no
+    // stallClass keeps today's behavior exactly.
+    if (payload.stallClass === 'wedged')
+        reasons.push('the service reports its block counter WEDGED (stallClass "wedged": no commit for longer ' +
+            'than its stall grace window)' + (payload.stallReason ? `: ${payload.stallReason}` : ''))
     if (payload.block_fetch_desync)
         reasons.push(`the service reports a block-fetch desync (${formatBlockFetchDesync(payload.block_fetch_desync)})`)
     if (payload.node_height_stale === true)
@@ -259,7 +286,8 @@ async function probeServiceStatus(containerId, port, runner) {
 // The authoritative check for a decoder that is up and looks healthy but is
 // quietly carrying a stale halt marker, and the one that does not depend on
 // the running image being new enough to report the marker on its health
-// surface: read the marker rows straight out of the database being dumped.
+// surface: read the marker rows straight out of the database being dumped - and,
+// for an indexer source, out of the paired decoder database that owns them.
 async function readHaltMarkers(coin, network, module, deps) {
     const {
         runner,
@@ -269,18 +297,14 @@ async function readHaltMarkers(coin, network, module, deps) {
         executeNativeMariaDbCommand
     } = deps
 
-    const dbName = getModuleDatabaseName(module, coin, network)
-    // The name is derived from coin/network internally, never operator input, but
-    // it is interpolated into SQL below; assert the shape rather than trust it.
-    if (!/^[A-Za-z0-9_]+$/.test(String(dbName)))
-        throw new Error(`refusing to probe an unexpected database name: ${dbName}`)
-
-    // One round trip: which marker tables exist, and how many live rows each has.
-    // COALESCE keeps a missing table from turning into a NULL that reads as 0.
-    const query =
-        `SELECT ` +
-        `(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${dbName}' AND TABLE_NAME='events'), ` +
-        `(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${dbName}' AND TABLE_NAME='sync_halt');`
+    // The names are derived from coin/network internally, never operator input, but
+    // they are interpolated into SQL below; assert the shape rather than trust it.
+    const assertDbName = (name) => {
+        if (!/^[A-Za-z0-9_]+$/.test(String(name)))
+            throw new Error(`refusing to probe an unexpected database name: ${name}`)
+        return String(name)
+    }
+    const dbName = assertDbName(getModuleDatabaseName(module, coin, network))
 
     const run = async (sql) => {
         if (EXTERNAL_DB) {
@@ -298,16 +322,82 @@ async function readHaltMarkers(coin, network, module, deps) {
         return String(stdout || '')
     }
 
-    const [hasEvents, hasSyncHalt] = String(await run(query)).trim().split(/\s+/).map(n => parseInt(n, 10))
-
-    const markers = { reorgHalt: 0, syncHalt: 0 }
-    if (hasEvents > 0) {
-        const out = await run(`SELECT COUNT(*) FROM \`${dbName}\`.events WHERE code='REORG_HALT';`)
-        markers.reorgHalt = parseInt(String(out).trim(), 10) || 0
+    // Read one count, refusing on anything that is not a number. Output the probe
+    // could not produce (an empty string from a mis-parsed client option, a driver
+    // that returned nothing, a permission error rendered on stdout) parsed to NaN
+    // here, and NaN loses every `> 0` comparison below, so "we could not tell"
+    // arrived at the caller as "no halt markers" - the one collapse the file
+    // header forbids.
+    const readCount = async (sql, what) => {
+        const raw = String(await run(sql)).trim()
+        const value = parseInt(raw, 10)
+        if (!Number.isFinite(value))
+            throw new Error(`the ${what} probe returned unreadable output: ${JSON.stringify(raw)}`)
+        return value
     }
-    if (hasSyncHalt > 0) {
-        const out = await run(`SELECT COUNT(*) FROM \`${dbName}\`.sync_halt WHERE cleared_at IS NULL;`)
-        markers.syncHalt = parseInt(String(out).trim(), 10) || 0
+
+    // Probe ONE database for both durable markers. Every failure shape throws, and
+    // the caller turns a throw into a refusal reason: that is the whole contract.
+    const probeDatabase = async (name) => {
+        // One round trip: which marker tables exist, and how many live rows each has.
+        // Counting information_schema rows (rather than querying the table directly)
+        // keeps an absent table answerable as a 0 instead of an error; deciding what
+        // that 0 means is this function's job below, and it is not always "clean".
+        const query =
+            `SELECT ` +
+            `(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${name}' AND TABLE_NAME='events'), ` +
+            `(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${name}' AND TABLE_NAME='sync_halt');`
+
+        const rawTables = String(await run(query)).trim()
+        const tableCounts = rawTables.split(/\s+/).map(n => parseInt(n, 10))
+        if (tableCounts.length !== 2 || !tableCounts.every(Number.isFinite))
+            throw new Error(`the marker-table probe for ${name} returned unreadable output: ${JSON.stringify(rawTables)}`)
+        const [hasEvents, hasSyncHalt] = tableCounts
+
+        // `events` is not optional on a decoder/indexer database: both provision it
+        // unconditionally at startup (each repo's verifyTables creates every
+        // src/sql/*.sql table), and it is the only durable home of the REORG_HALT
+        // marker. Its absence therefore means the probe did not read the database
+        // it was aimed at - a name drift, a wrong host - which is a refusal, not a
+        // clean bill of health.
+        if (hasEvents === 0)
+            throw new Error(`${name} reports no events table, so the REORG_HALT marker could not be read`)
+
+        const found = { reorgHalt: 0, syncHalt: 0 }
+        found.reorgHalt = await readCount(
+            `SELECT COUNT(*) FROM \`${name}\`.events WHERE code='REORG_HALT';`, 'REORG_HALT marker')
+        // sync_halt IS optional: xchain-sync provisions it only where it runs, so an
+        // absent table here is a genuine "no such marker", not an unread database.
+        if (hasSyncHalt > 0)
+            found.syncHalt = await readCount(
+                `SELECT COUNT(*) FROM \`${name}\`.sync_halt WHERE cleared_at IS NULL;`, 'sync_halt marker')
+        return found
+    }
+
+    const markers = await probeDatabase(dbName)
+
+    // An xchain-indexer database structurally CANNOT carry the REORG_HALT marker, so
+    // the probe above is a guaranteed zero for an indexer source and this backstop had
+    // no reach there at all: the indexer only ever writes code='REORG' into its own
+    // events table and reads the halt marker out of the DECODER's connection, while
+    // the marker row is written solely into the decoder database. Nothing else in the
+    // gate covers the gap either - the indexer's decoderReorgHalted mirror defaults
+    // false and keeps its last value on any probe fault, and its published lag is
+    // measured against the halted decoder's own frozen height, so it reads 0. Probe
+    // the paired decoder database as well, fail-closed: probeDatabase throws on an
+    // absent database, an absent events table and an unreadable count alike, and every
+    // one of those means we could not tell.
+    if (module === XChainService.XCHAIN_INDEXER) {
+        const decoderDbName = assertDbName(getModuleDatabaseName(XChainService.XCHAIN_DECODER, coin, network))
+        let upstream
+        try {
+            upstream = await probeDatabase(decoderDbName)
+        } catch (err) {
+            // Name the database that actually failed: the caller's wrapper names the
+            // GATED module, which would otherwise blame the indexer for the decoder.
+            throw new Error(`the paired decoder database ${decoderDbName} could not be probed: ${err && err.message}`)
+        }
+        markers.upstream = { dbName: decoderDbName, ...upstream }
     }
     return markers
 }
@@ -387,9 +477,10 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
         }
     }
 
-    // 3. Durable halt markers in the database that is about to be dumped. This is
-    // the check that catches a decoder which is up, healthy-looking, and quietly
-    // carrying a REORG_HALT row, including on an older image whose health
+    // 3. Durable halt markers in the database that is about to be dumped, plus (for
+    // an indexer) the paired decoder database that actually owns the REORG_HALT row.
+    // This is the check that catches a decoder which is up, healthy-looking, and
+    // quietly carrying a REORG_HALT row, including on an older image whose health
     // surface does not report it.
     if (MARIADB_MODULES.has(module)) {
         try {
@@ -401,6 +492,18 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
             if (markers.syncHalt > 0)
                 reasons.push('the database carries an uncleared xchain-sync divergence halt ' +
                     '(sync_halt with cleared_at IS NULL): its contents are known to diverge from the source of truth.')
+            // An indexer's own database cannot hold these rows; the paired decoder's can,
+            // and an indexer frozen behind a halted decoder is exactly as unfit to publish.
+            if (markers.upstream && markers.upstream.reorgHalt > 0)
+                reasons.push(`the paired decoder database ${markers.upstream.dbName} carries a durable REORG_HALT ` +
+                    "marker (events.code='REORG_HALT'), so this indexer is frozen behind a decoder that aborted " +
+                    'mid-rollback. Its own health surface reports lag 0 only because that lag is measured against ' +
+                    'the frozen decoder height. Recovery is a full resync of the decoder and this indexer from a ' +
+                    'known-good snapshot.')
+            if (markers.upstream && markers.upstream.syncHalt > 0)
+                reasons.push(`the paired decoder database ${markers.upstream.dbName} carries an uncleared ` +
+                    'xchain-sync divergence halt (sync_halt with cleared_at IS NULL), so the rows this indexer ' +
+                    'derived from it are known to diverge from the source of truth.')
         } catch (err) {
             reasons.push(`could not read the halt markers from the ${module} database: ${err && err.message}`)
         }

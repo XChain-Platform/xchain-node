@@ -151,7 +151,12 @@ describe('Integration: Database Service Chain', function () {
                 getDockerNetworkInspect: async () => ({
                     IPAM: { Config: [{ Gateway: '172.18.0.1' }] }
                 }),
-                addContainerToNetwork: async () => true
+                addContainerToNetwork: async () => true,
+                // Fresh install: docker positively reports the DB container gone,
+                // which is what the install branch now requires before it may
+                // force-remove anything (uuid:8a3e5182).
+                probeContainerPresenceByName: async () => 'gone',
+                forceRemoveContainerByName: async () => false
             },
             '../utils/helpers': {
                 sleep: async () => {},
@@ -257,7 +262,10 @@ describe('Integration: Database Service Chain', function () {
                     addContainerToNetwork: async (id, network) => {
                         networkConnections.push({ id, network })
                         return true
-                    }
+                    },
+                    // Fresh install: see the identical note in makeDatabaseService.
+                    probeContainerPresenceByName: async () => 'gone',
+                    forceRemoveContainerByName: async () => false
                 },
                 // See makeDatabaseService's identical comment above: DatabaseService
                 // logs through redactSecrets(), so a bare `{ sleep }` mock throws

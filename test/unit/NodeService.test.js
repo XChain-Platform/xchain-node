@@ -68,6 +68,10 @@ function loadNodeService(stubs) {
     return proxyquire('../../src/services/NodeService', {
         'child_process': { execFile: stubs.execFile },
         'follow-redirects': { https: stubs.https || { get: sinon.stub() } },
+        // Stubbed so no test resolves a real hostname: the mirror failover only
+        // enumerates addresses after a transport failure, and a unit suite must
+        // not depend on what DNS answers that day.
+        'dns': stubs.dns || { promises: { lookup: async () => [] } },
         'fs': stubs.fs,
         'semver': require('semver'),
         '../state': {
@@ -136,7 +140,8 @@ function loadNodeService(stubs) {
         },
         './BootstrapService': {
             utxoTrackerVolumeHasData:    sinon.stub().resolves(true),
-            ensureBootstrapUtxoTracker:  sinon.stub().resolves()
+            ensureBootstrapUtxoTracker:  sinon.stub().resolves(),
+            forceBootstrapRequested:     () => false
         }
     })
 }
@@ -144,6 +149,9 @@ function loadNodeService(stubs) {
 function makeFakeHttps(stubs, { decompressErr = null, statusCode = 200 } = {}) {
     const writableEmitter = new EventEmitter()
     writableEmitter.close = sinon.stub()
+    // A real fs WriteStream has destroy(); the download path calls it to release
+    // the handle on a failed attempt before the partial file is removed.
+    writableEmitter.destroy = sinon.stub()
     stubs.fs.createWriteStream.returns(writableEmitter)
 
     // On decompressTarGz resolution/rejection, control the finish event
@@ -302,6 +310,225 @@ describe('NodeService: getCryptoNode()', function () {
         } finally {
             Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
         }
+    })
+
+    // One name, several mirrors, not equivalent: a leaf-only certificate chain
+    // is fatal to Node where curl recovers via AIA, and a plain retry keeps
+    // landing on the same address.
+    describe('a broken mirror is not the whole install', function () {
+
+        // Fails the unpinned attempt the way a bad TLS chain does, then serves
+        // 200 to any attempt pinned to a specific address.
+        function makeFailoverHttps(stubs, { failures = 1 } = {}) {
+            const writableEmitter = new EventEmitter()
+            writableEmitter.close = sinon.stub()
+            writableEmitter.destroy = sinon.stub()
+            stubs.fs.createWriteStream.returns(writableEmitter)
+
+            let seen = 0
+            const get = sinon.stub().callsFake((url, optionsOrCb, maybeCb) => {
+                const cb = typeof optionsOrCb === 'function' ? optionsOrCb : maybeCb
+                const request = new EventEmitter()
+                seen++
+                if (seen <= failures) {
+                    setImmediate(() => request.emit('error', new Error('unable to verify the first certificate')))
+                    return request
+                }
+                const response = new EventEmitter()
+                response.pipe = sinon.stub()
+                response.resume = sinon.stub()
+                response.statusCode = 200
+                cb(response)
+                setImmediate(() => writableEmitter.emit('finish'))
+                return request
+            })
+            return { get }
+        }
+
+        let origArch
+        beforeEach(function () {
+            origArch = process.arch
+            Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
+        })
+        afterEach(function () {
+            Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
+        })
+
+        it('retries on another mirror address after a TLS failure and succeeds', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFailoverHttps(stubs, { failures: 1 })
+            stubs.dns = { promises: { lookup: async () => [{ address: '198.251.83.116', family: 4 }] } }
+            stubs.fs.existsSync.returns(false)
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            expect(stubs.https.get.callCount).to.equal(2)
+            // The retry must pin the address while still requesting the same URL,
+            // so the certificate is still checked against the hostname.
+            const retryArgs = stubs.https.get.secondCall.args
+            expect(retryArgs[0]).to.contain('https://bitcoincore.org/')
+            expect(retryArgs[1]).to.have.property('lookup').that.is.a('function')
+            // The download still has to clear the pinned hash before it is used.
+            expect(stubs.gitHubDownloader.verifyFileHash.called).to.be.true
+        })
+
+        it('does not try other mirrors for an HTTP status, where every mirror agrees', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs, { statusCode: 404 })
+            stubs.dns = { promises: { lookup: async () => [{ address: '198.251.83.116', family: 4 }] } }
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try { await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1') } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            expect(stubs.https.get.callCount).to.equal(1)
+        })
+
+        it('names the URL, the cause and a way forward when every mirror fails', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFailoverHttps(stubs, { failures: 99 })
+            stubs.dns = { promises: { lookup: async () => [{ address: '194.204.0.12', family: 4 }] } }
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try { await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1') } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            // The old message named neither the URL nor the cause, so a broken
+            // mirror was indistinguishable from a broken installer.
+            expect(threw.message).to.contain('bitcoincore.org')
+            expect(threw.message).to.contain('unable to verify the first certificate')
+            expect(threw.message).to.contain('curl')
+            // The remediation names a path, so it has to name the path the
+            // installer will actually read a placed tarball back from.
+            expect(threw.message).to.contain('/crypto_nodes/bitcoin/bitcoin28.1.tar.gz')
+            expect(stubs.gitHubDownloader.verifyFileHash.called).to.be.false
+        })
+
+        it('still makes one attempt when the name cannot be resolved at all', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFailoverHttps(stubs, { failures: 99 })
+            stubs.dns = { promises: { lookup: async () => { throw new Error('EAI_AGAIN') } } }
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try { await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1') } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            expect(stubs.https.get.callCount).to.equal(1)
+        })
+
+        // Asserting the lookup exists proves nothing: under autoSelectFamily
+        // net.connect calls it with { all: true } and an answer in the
+        // single-address form fails the connect before a socket is opened.
+        it('answers the all:true form Node actually calls it with', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFailoverHttps(stubs, { failures: 1 })
+            stubs.dns = { promises: { lookup: async () => [{ address: '198.251.83.116', family: 4 }] } }
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            const { lookup } = stubs.https.get.secondCall.args[1]
+
+            // What Node passes under autoSelectFamily: an array of records, or
+            // the connect attempt throws before it dials.
+            const all = await new Promise((resolve, reject) =>
+                lookup('bitcoincore.org', { family: 0, hints: 32, all: true },
+                    (err, res) => err ? reject(err) : resolve(res)))
+            expect(all).to.be.an('array').with.lengthOf(1)
+            expect(all[0]).to.include({ address: '198.251.83.116', family: 4 })
+
+            // The legacy shape still has to work: options without `all` take the
+            // (err, address, family) callback instead.
+            const single = await new Promise((resolve, reject) =>
+                lookup('bitcoincore.org', { family: 0 },
+                    (err, address, family) => err ? reject(err) : resolve({ address, family })))
+            expect(single).to.deep.equal({ address: '198.251.83.116', family: 4 })
+        })
+    })
+
+    // The failure message tells an operator to place the tarball and re-run,
+    // the only escape when every resolved address serves the same broken
+    // certificate chain. These hold that instruction to being true.
+    describe('a tarball the operator placed by hand is used, not destroyed', function () {
+
+        let origArch
+        beforeEach(function () {
+            origArch = process.arch
+            Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
+        })
+        afterEach(function () {
+            Object.defineProperty(process, 'arch', { value: origArch, configurable: true })
+        })
+
+        function existingTarballFs(stubs) {
+            // Only the tarball is present; the extracted directory is not, so
+            // the post-verify rename path runs as it does after a download.
+            stubs.fs.existsSync.callsFake(p => String(p).endsWith('.tar.gz'))
+        }
+
+        it('skips the download entirely when the tarball is already at the path', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs)
+            existingTarballFs(stubs)
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            expect(stubs.https.get.called).to.be.false
+            expect(stubs.fs.createWriteStream.called).to.be.false
+        })
+
+        it('still verifies the placed tarball against the pinned hash before using it', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs)
+            existingTarballFs(stubs)
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            // Once to decide the placed file is trustworthy at all, and once at
+            // the gate every path goes through before decompression. The gate is
+            // deliberately not conditional on how the bytes arrived.
+            expect(stubs.gitHubDownloader.verifyFileHash.callCount).to.equal(2)
+            expect(stubs.decompressTarGz.calledOnce).to.be.true
+        })
+
+        // Trusting a placed file must not cost the self-heal a half-written
+        // leftover depends on: bytes that are not the pinned ones get discarded
+        // and re-downloaded, never handed to the install.
+        it('discards a file that fails the pinned hash and downloads instead', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs)
+            existingTarballFs(stubs)
+            stubs.gitHubDownloader.verifyFileHash
+                .onFirstCall().rejects(new Error('SHA-256 mismatch'))
+                .onSecondCall().resolves()
+
+            const ns = loadNodeService(stubs)
+            await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1')
+
+            expect(stubs.fs.rmSync.called).to.be.true
+            expect(stubs.https.get.calledOnce).to.be.true
+            expect(stubs.decompressTarGz.calledOnce).to.be.true
+        })
+
+        it('never decompresses bytes that fail the pinned hash', async function () {
+            const stubs = makeNodeServiceStubs()
+            stubs.https = makeFakeHttps(stubs)
+            existingTarballFs(stubs)
+            stubs.gitHubDownloader.verifyFileHash.rejects(new Error('SHA-256 mismatch'))
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try { await ns.getCryptoNode('bitcoin', 'mainnet', 'v28.1') } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            expect(stubs.decompressTarGz.called).to.be.false
+        })
     })
 
     it('downloads dogecoin node via gitHubDownloader', async function () {
@@ -902,7 +1129,8 @@ describe('NodeService: installNode()', function () {
             },
             './BootstrapService': {
                 utxoTrackerVolumeHasData:   sinon.stub().resolves(true),
-                ensureBootstrapUtxoTracker: sinon.stub().resolves()
+                ensureBootstrapUtxoTracker: sinon.stub().resolves(),
+                forceBootstrapRequested:     () => false
             }
         })
 
@@ -943,7 +1171,7 @@ describe('NodeService: installNode()', function () {
             './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
             './ModuleService': { cloneGit: cloneGitStub, buildAndUp: buildAndUpStub, assertNoHostPortConflicts: sinon.stub().resolves() },
-            './BootstrapService': { utxoTrackerVolumeHasData: sinon.stub().resolves(true), ensureBootstrapUtxoTracker: sinon.stub().resolves() }
+            './BootstrapService': { utxoTrackerVolumeHasData: sinon.stub().resolves(true), ensureBootstrapUtxoTracker: sinon.stub().resolves(), forceBootstrapRequested:     () => false }
         })
 
         const result = await ns.installNode('bitcoin', 'mainnet')

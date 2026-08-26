@@ -64,6 +64,10 @@ function makeStubs() {
         execFile: sinon.stub(),
         fs: {
             existsSync: sinon.stub().returns(false)
+        },
+        bootstrapService: {
+            resetBootstrapOutcomes:  sinon.stub(),
+            reportBootstrapOutcomes: sinon.stub()
         }
     }
 }
@@ -124,6 +128,7 @@ function loadOperations(stubs) {
         '../services/StatusService': {
             statusChanged: stubs.statusChanged
         },
+        '../services/BootstrapService': stubs.bootstrapService,
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs,
         'util': {
@@ -214,6 +219,34 @@ describe('moduleOperations', function () {
             expect(result.skipped).to.deep.equal([
                 { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', reason: 'already-installed' }
             ])
+        })
+
+        // A failed install is exactly where the summary earns its place: it
+        // leaves some services restored and some facing days of resync, and
+        // the error alone does not say which.
+        it('reports the bootstrap outcomes even when the install throws', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.rejects(new Error("Couldn't download the bitcoin node"))
+            const ops = loadOperations(stubs)
+
+            let threw = null
+            try {
+                await ops.installModules({ bitcoin: { mainnet: ['node'] } })
+            } catch (err) { threw = err }
+
+            expect(threw).to.be.an('error')
+            expect(stubs.bootstrapService.reportBootstrapOutcomes.calledOnce).to.be.true
+            // The failure still surfaces: the summary is added to it, not
+            // substituted for it.
+            expect(threw.message).to.contain("Couldn't download the bitcoin node")
+        })
+
+        it('still reports the bootstrap outcomes on a clean install', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.installModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(stubs.bootstrapService.resetBootstrapOutcomes.calledOnce).to.be.true
+            expect(stubs.bootstrapService.reportBootstrapOutcomes.calledOnce).to.be.true
         })
     })
 
@@ -1018,7 +1051,7 @@ describe('moduleOperations', function () {
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
             const ops = loadOperations(stubs)
             const clock = sinon.useFakeTimers()
-            const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true)
+            const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true, true)
             await clock.tickAsync(6000)
             clock.restore()
             const result = await promise
@@ -1103,9 +1136,14 @@ describe('moduleOperations', function () {
             expect(stubs.clearHubPriceIngestWatermark.calledBefore(stubs.startContainer)).to.be.true
         })
 
+        // A decoder-only reset is reachable only where no indexer is installed to
+        // strand; with one present the pair guard refuses. The fence belongs to the
+        // indexer's push generations, so an untouched indexer keeps its fence.
         it('leaves the fence alone on a decoder-only reset (that chain keeps pushing prices)', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            stubs.db.getModuleContainer.callsFake(async (module) =>
+                module === 'xchain-indexer' ? null : 'container-id-123')
             const ops = loadOperations(stubs)
             const clock = sinon.useFakeTimers()
             const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true)
@@ -1113,6 +1151,103 @@ describe('moduleOperations', function () {
             clock.restore()
             expect(await promise).to.be.true
             expect(stubs.clearHubPriceIngestWatermark.called).to.be.false
+        })
+
+        // The indexer tracks reorgs by a decoder event id, and the decoder never
+        // deletes those rows, so wiping the decoder alone restarts the ids under a
+        // cursor pointing past them and the indexer aborts RE-1. The pair is only
+        // coherent when both move together, so a one-sided reset is refused.
+        describe('the coupled decoder/indexer pair', function () {
+
+            it('refuses a decoder-only reset while an indexer is installed', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+
+                const result = await ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true)
+
+                expect(result).to.be.false
+                // Refused BEFORE anything destructive, not partway through.
+                expect(stubs.resetDatabases.called).to.be.false
+                expect(stubs.stopContainer.called).to.be.false
+            })
+
+            it('names the joint form in the refusal, so the remedy is runnable', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const logged = []
+                const log = sinon.stub(console, 'log').callsFake((...a) => logged.push(a.join(' ')))
+                try {
+                    const ops = loadOperations(stubs)
+                    await ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true)
+                } finally {
+                    log.restore()
+                }
+                const text = logged.join('\n')
+                expect(text).to.contain('--with-indexer')
+                expect(text).to.contain('bitcoin mainnet')
+                expect(text).to.contain('No data was touched')
+            })
+
+            it('resets both halves together when the joint form is used', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const clock = sinon.useFakeTimers()
+                const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true, true)
+                await clock.tickAsync(6000)
+                clock.restore()
+
+                expect(await promise).to.be.true
+                const modules = stubs.resetDatabases.firstCall.args[2]
+                expect(modules).to.have.members(['xchain-decoder', 'xchain-indexer'])
+                // A wiped indexer restarts its push generations, so the hub fence has
+                // to be cleared on this path or the chain's price rail dies silently.
+                expect(stubs.clearHubPriceIngestWatermark.called).to.be.true
+            })
+
+            it('allows a decoder-only reset when no indexer is installed to strand', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                stubs.db.getModuleContainer.callsFake(async (module) =>
+                    module === 'xchain-indexer' ? null : 'container-id-123')
+                const ops = loadOperations(stubs)
+                const clock = sinon.useFakeTimers()
+                const promise = ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true)
+                await clock.tickAsync(6000)
+                clock.restore()
+
+                expect(await promise).to.be.true
+                expect(stubs.resetDatabases.firstCall.args[2]).to.deep.equal(['xchain-decoder'])
+            })
+
+            // Asymmetric by design: the indexer re-derives from an intact decoder,
+            // which is an ordinary reindex and must stay available.
+            it('still allows an indexer-only reset', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const clock = sinon.useFakeTimers()
+                const promise = ops.resetModules('xchain-indexer', 'bitcoin', 'mainnet', true)
+                await clock.tickAsync(6000)
+                clock.restore()
+
+                expect(await promise).to.be.true
+                expect(stubs.resetDatabases.firstCall.args[2]).to.deep.equal(['xchain-indexer'])
+            })
+
+            it('leaves `reset all` alone, which already moves both', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const clock = sinon.useFakeTimers()
+                const promise = ops.resetModules('all', 'bitcoin', 'mainnet', true)
+                await clock.tickAsync(6000)
+                clock.restore()
+
+                expect(await promise).to.be.true
+                expect(stubs.resetDatabases.firstCall.args[2]).to.have.members(['xchain-decoder', 'xchain-indexer'])
+            })
         })
 
         it('reports a fence-clear failure without aborting the restart pass', async function () {

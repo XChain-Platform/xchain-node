@@ -21,7 +21,9 @@ const {
     MIGRATION_BEARING_MODULES,
     SKIP_ENV,
     migrationDeclaresDeployPrecondition,
+    migrationMode,
     listDeployPreconditionMigrations,
+    pendingManualMigrations,
     readAppliedMigrations,
     assertRequiredMigrationsApplied
 } = require('../../src/services/MigrationPreconditionService')
@@ -31,12 +33,18 @@ const GATED = '2026-07-24-pubkeys-widen-uncompressed.sql'
 const TAGGED   = '-- xchain:migration mode=manual deploy-precondition=required\nALTER TABLE pubkeys MODIFY pubkey VARCHAR(130) NOT NULL;\n'
 const UNTAGGED = '-- xchain:migration mode=manual\nALTER TABLE pubkeys MODIFY pubkey VARCHAR(130) NOT NULL;\n'
 
-function makeDeps({ required = [GATED], applied = [GATED], state = 'ledger', reason = 'connection refused', cloneErr = null } = {}) {
+function makeDeps({ required = [GATED], applied = [GATED], state = 'ledger', reason = 'connection refused', cloneErr = null,
+                    supportsPerFile = true, pendingManual = null } = {}) {
     return {
         cloneGit: cloneErr ? sinon.stub().rejects(cloneErr) : sinon.stub().resolves(),
         listDeployPreconditionMigrations: sinon.stub().returns(required),
         readAppliedMigrations: sinon.stub().resolves(
-            state === 'ledger' ? { state: 'ledger', applied: new Set(applied) } : { state, reason })
+            state === 'ledger' ? { state: 'ledger', applied: new Set(applied) } : { state, reason }),
+        // The remedy the refusal prints runs on the build inside the container,
+        // not the one being deployed, so what that build can do is an input to
+        // the message and therefore stubbed here.
+        runningBuildSupportsPerFileMigrations: sinon.stub().resolves(supportsPerFile),
+        pendingManualMigrations: sinon.stub().returns(pendingManual === null ? [GATED] : pendingManual)
     }
 }
 
@@ -71,6 +79,48 @@ describe('MigrationPreconditionService', () => {
         it('sees the tag through a long license banner', () => {
             const banner = Array(30).fill('-- license line').join('\n')
             expect(migrationDeclaresDeployPrecondition(banner + '\n\n' + TAGGED)).to.equal(true)
+        })
+    })
+
+    describe('migrationMode', () => {
+
+        it('reads the mode a header declares', () => {
+            expect(migrationMode(TAGGED)).to.equal('manual')
+            expect(migrationMode('-- xchain:migration mode=auto\nSELECT 1;\n')).to.equal('auto')
+        })
+
+        it('returns null when no mode is declared', () => {
+            expect(migrationMode('-- just a comment\nSELECT 1;\n')).to.equal(null)
+        })
+
+        it('ignores a mode token that appears after the prologue', () => {
+            // Body prose and data literals must not be able to answer for the file.
+            const body = '-- header\nSELECT 1;\n-- xchain:migration mode=auto\n'
+            expect(migrationMode(body)).to.equal(null)
+        })
+    })
+
+    describe('pendingManualMigrations', () => {
+
+        let dir
+        beforeEach(() => {
+            dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xc-pending-'))
+            fs.writeFileSync(path.join(dir, 'a-manual.sql'), TAGGED)
+            fs.writeFileSync(path.join(dir, 'b-auto.sql'), '-- xchain:migration mode=auto\nSELECT 1;\n')
+            fs.writeFileSync(path.join(dir, 'c-manual.sql'), '-- xchain:migration mode=manual\nSELECT 1;\n')
+        })
+        afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
+
+        it('lists only manual migrations the ledger has not recorded', () => {
+            expect(pendingManualMigrations(dir, new Set())).to.deep.equal(['a-manual.sql', 'c-manual.sql'])
+        })
+
+        it('excludes what the ledger already carries', () => {
+            expect(pendingManualMigrations(dir, new Set(['a-manual.sql']))).to.deep.equal(['c-manual.sql'])
+        })
+
+        it('yields nothing for a missing directory rather than throwing', () => {
+            expect(pendingManualMigrations(path.join(dir, 'nope'), new Set())).to.deep.equal([])
         })
     })
 
@@ -194,7 +244,56 @@ describe('MigrationPreconditionService', () => {
             expect(err, 'the deploy must be refused').to.not.equal(null)
             expect(err.message).to.contain(GATED)
             expect(err.message).to.contain('XChain_BTC_Mainnet_Indexer')
+            // Only safe to print because this build was confirmed to honour --file.
             expect(err.message).to.contain('--file ' + GATED)
+        })
+
+        it('does NOT print a scoped command the running build would ignore', async () => {
+            // A build without per-file targeting does not reject --file, it ignores
+            // it and applies every pending manual migration, so printing the command
+            // hands the operator a wider action than the one it describes.
+            const deps = makeDeps({
+                applied: [],
+                supportsPerFile: false,
+                pendingManual: [GATED, '2026-08-10-action-data-utf8mb4.sql', '2026-06-13-dispensers-expiration-bigint.sql']
+            })
+            let err = null
+            try {
+                await assertRequiredMigrationsApplied(XChainService.XCHAIN_INDEXER, 'bitcoin', 'mainnet', 'master', deps)
+            } catch (e) { err = e }
+            expect(err, 'the deploy must be refused').to.not.equal(null)
+            expect(err.message).to.not.contain('docker exec')
+            expect(err.message).to.contain('DO NOT run')
+            // The whole blast radius is named, not just the file that is needed.
+            expect(err.message).to.contain('3 file(s)')
+            expect(err.message).to.contain('2026-08-10-action-data-utf8mb4.sql')
+            expect(err.message).to.contain('2026-06-13-dispensers-expiration-bigint.sql')
+            expect(err.message).to.contain('(the one you need)')
+        })
+
+        it('treats an unreadable container as lacking the capability', async () => {
+            // An unverified capability is not a capability: the cost of guessing
+            // wrong is an unauthorised migration on a live database.
+            const deps = makeDeps({ applied: [], supportsPerFile: null })
+            let err = null
+            try {
+                await assertRequiredMigrationsApplied(XChainService.XCHAIN_INDEXER, 'bitcoin', 'mainnet', 'master', deps)
+            } catch (e) { err = e }
+            expect(err, 'the deploy must be refused').to.not.equal(null)
+            expect(err.message).to.not.contain('docker exec')
+            expect(err.message).to.contain('could not be read')
+        })
+
+        it('still refuses when the capability probe itself throws', async () => {
+            const deps = makeDeps({ applied: [] })
+            deps.runningBuildSupportsPerFileMigrations = sinon.stub().rejects(new Error('docker unreachable'))
+            let err = null
+            try {
+                await assertRequiredMigrationsApplied(XChainService.XCHAIN_INDEXER, 'bitcoin', 'mainnet', 'master', deps)
+            } catch (e) { err = e }
+            expect(err, 'the deploy must still be refused').to.not.equal(null)
+            expect(err.message).to.contain('update refused')
+            expect(err.message).to.not.contain('docker exec')
         })
 
         it('reads the source tree about to be deployed, at the pinned ref', async () => {

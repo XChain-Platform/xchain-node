@@ -87,6 +87,9 @@ function makeStubs(overrides = {}) {
         statusChanged: sinon.stub().resolves(),
         getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } }),
         forceRemoveContainerByName: sinon.stub().resolves(true),
+        // Default 'gone': docker positively reports the DB container absent, the
+        // only state the install branch is allowed to force-remove from.
+        probeContainerPresenceByName: sinon.stub().resolves('gone'),
         addContainerToNetwork: sinon.stub().resolves(true),
         getDockerNetworkInspect: sinon.stub().resolves({
             IPAM: { Config: [{ Gateway: '172.18.0.1' }] }
@@ -168,7 +171,8 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}) {
             getStatusFromContainer: stubs.getStatusFromContainer,
             getDockerNetworkInspect: stubs.getDockerNetworkInspect,
             addContainerToNetwork: stubs.addContainerToNetwork,
-            forceRemoveContainerByName: stubs.forceRemoveContainerByName
+            forceRemoveContainerByName: stubs.forceRemoveContainerByName,
+            probeContainerPresenceByName: stubs.probeContainerPresenceByName
         },
         // buildDatabaseModule lazy-requires this for the multi-stack host-port
         // pre-flight; stub it so the install branch doesn't load the real
@@ -385,6 +389,45 @@ describe('DatabaseService', function () {
             const ds = loadDatabaseService(stubs)
             const result = await ds.buildDatabaseModule('bitcoin', 'mainnet')
             expect(stubs.execFileAsync.called).to.be.true
+        })
+
+        // uuid:8a3e5182. The install branch is entered when checkIfDatabaseModuleExists
+        // returns null, and that helper swallows EVERY error and also answers null on
+        // any inspect output it cannot parse. So "we are installing" is not evidence
+        // the container is absent, while the force-remove that follows is `docker rm -f`
+        // against the stack's only persistent data store. These pin that the delete now
+        // needs docker's own "no such container", not merely a falsy lookup.
+        for (const presence of ['exists', 'unknown']) {
+            it(`refuses to force-remove the MariaDB container when the probe says '${presence}'`, async function () {
+                const stubs = makeStubs()
+                stubs.probeContainerPresenceByName = sinon.stub().resolves(presence)
+                stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+                stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                const ds = loadDatabaseService(stubs)
+
+                let threw = null
+                try {
+                    await ds.buildDatabaseModule('bitcoin', 'mainnet')
+                } catch (err) { threw = err }
+
+                expect(threw, 'an ambiguous probe must abort, not delete').to.be.an.instanceOf(Error)
+                expect(threw.message).to.include(presence)
+                expect(threw.message).to.include('xchain-node-database')
+                expect(stubs.forceRemoveContainerByName.called, 'docker rm -f must not run').to.be.false
+                expect(findDockerRunArgs(stubs.execFileAsync), 'docker run must not run').to.be.null
+            })
+        }
+
+        it('force-removes only after docker positively reports the container gone', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.onFirstCall().rejects(new Error('No such container'))
+            stubs.execFileAsync.resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+            const ds = loadDatabaseService(stubs)
+            await ds.buildDatabaseModule('bitcoin', 'mainnet')
+
+            expect(stubs.probeContainerPresenceByName.calledWith('xchain-node-database')).to.be.true
+            expect(stubs.forceRemoveContainerByName.calledOnce).to.be.true
+            expect(findDockerRunArgs(stubs.execFileAsync)).to.not.be.null
         })
 
         it('throws instead of returning undefined when docker run output is not a 64-hex id', async function () {
@@ -895,6 +938,44 @@ describe('DatabaseService', function () {
             const ds = loadDatabaseService(stubs)
             const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT 1', '--batch --skip-column-names')
             expect(result).to.equal('1')
+        })
+
+        // The real mariadb client clusters short flags, and the docker sibling
+        // hands this string to it verbatim, so '-BN' has to mean batch mode here
+        // too. It did not: the token regexes demanded a whitespace-delimited
+        // '-B', so every '-BN' caller (the halt-marker probe in the bootstrap
+        // health gate, the external-DB freshness check that gates a DROP/restore)
+        // read '' and parsed it into a NaN that loses every comparison.
+        it('recognizes the clustered short flag -BN as batch mode', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([['3'], ['5']])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT id FROM tbl', '-BN')
+            expect(result).to.equal('3\n5')
+        })
+
+        it('recognizes the clustered short flag in either order (-NB)', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([['7']])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT id FROM tbl', '-NB')
+            expect(result).to.equal('7')
+        })
+
+        it('asks the driver for array rows when a clustered flag grants batch mode', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([['1']])
+            const ds = loadDatabaseService(stubs)
+            await ds.executeNativeMariaDbCommand(extCfg, 'SELECT 1', '-BN')
+            expect(stubs.mariadb.createConnection.lastCall.args[0].rowsAsArray).to.equal(true)
+        })
+
+        it('still returns empty for an option string carrying no batch flag', async function () {
+            const stubs = makeStubs()
+            stubs.mariadb._fakeConn.query.resolves([['1']])
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.executeNativeMariaDbCommand(extCfg, 'SELECT 1', '-N')
+            expect(result).to.equal('')
         })
 
         it('closes connection even when query throws', async function () {

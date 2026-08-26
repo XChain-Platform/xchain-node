@@ -696,10 +696,28 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         fs.rmSync(workDir, { recursive: true })
         console.log('Bootstrap restore complete')
 
-    } finally {
-        console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
-        await startContainer(containerId)
+    } catch (err) {
+        // Post-wipe regime (uuid:7edc76f3). Every statement in the try above runs
+        // at or after `find /data -mindepth 1 -delete`, so a failure here leaves
+        // the LevelDB store partially wiped. Restarting the container over it (the
+        // old unconditional `finally`) boots a fresh XChainUtxoTracker with
+        // halted=false, so get_sync_status / GET /status report a normal non-503
+        // status and BootstrapHealthGate has nothing to refuse on: an emptied
+        // store reads as caught up. Mirrors the tracker's own contract in
+        // xchain-utxo-tracker/src/bootstrap-recovery.js `handleRestoreFailure`,
+        // where a post-wipe abort fails loud instead of resuming.
+        err.postWipe = true
+        console.log(
+            `[fatal] ${XChainService.XCHAIN_UTXO_TRACKER} bootstrap restore failed AFTER the LevelDB\n` +
+            `volume was wiped; the store is incomplete and the container has been left STOPPED so it\n` +
+            `cannot report a wiped store as caught up. Re-run the restore with\n` +
+            `XCHAIN_NODE_FORCE_BOOTSTRAP=1, or clear the volume and resync from scratch.`
+        )
+        throw err
     }
+
+    console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
+    await startContainer(containerId)
 
     return true
 }
@@ -839,13 +857,34 @@ async function utxoTrackerVolumeHasData(coin, network) {
     }
 }
 
+// Age in whole days of the resolved archive, from the UTC <YYYYMMDD_HHMMSS>
+// stamp in its name (the field latest.php orders by). Null when the name
+// carries none, as a hand-placed latest.tgz does.
+function bootstrapArchiveAgeDays(archiveUrl, now = Date.now()) {
+    const stamp = /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(path.basename(archiveUrl || ''))
+    if (!stamp) return null
+    const [, y, mo, d, h, mi, s] = stamp
+    const published = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s))
+    if (!Number.isFinite(published)) return null
+    const days = Math.floor((now - published) / 86400000)
+    return days >= 0 ? days : null
+}
+
+// Days before a published archive is called out at restore time. Warn, never
+// refuse: a stale archive still beats the days of scratch sync refusing costs.
+// Above the weekly publish cadence, so only a publisher that missed runs trips it.
+const BOOTSTRAP_STALE_AFTER_DAYS = 10
+
 // Stream <BOOTSTRAP_BASE_URL>/<module>/<coin>/<network>/latest.tgz into destDir
 // as latest.tgz. Returns the filename on success, null when none is published
 // (404). Follows the http→https redirect. Throws on other network errors.
 async function downloadBootstrap(coin, network, module, destDir) {
     const url      = `${BOOTSTRAP_BASE_URL}/${module}/${coin}/${network}/latest.tgz`
     const destPath = path.join(destDir, 'latest.tgz')
-    ensureDir(destDir)
+    // destDir is the bind-mounted bootstrap volume, which a service container
+    // may already have created root-owned; the writable variant chowns it back
+    // (same failure ensureDirWritable was written for on the create path).
+    await ensureDirWritable(destDir)
 
     const response = await axios({
         method: 'get',
@@ -890,6 +929,24 @@ async function downloadBootstrap(coin, network, module, destDir) {
     // latest.tgz is served directly and its .sig sits beside it).
     const finalUrl = response.request && response.request.res && response.request.res.responseUrl
         ? response.request.res.responseUrl : url
+
+    // Report the age during the install, not after a halt traced back to it.
+    // Only the tracker can be left unable to walk forward, so only it is warned
+    // about that; the others just resync from the archive height.
+    const ageDays = bootstrapArchiveAgeDays(finalUrl)
+    if (ageDays !== null && ageDays >= BOOTSTRAP_STALE_AFTER_DAYS) {
+        const consequence = module === XChainService.XCHAIN_UTXO_TRACKER
+            ? '  A snapshot whose tip has drifted past the chain it is restored onto can leave the tracker\n' +
+              '  unable to walk forward, which halts it until it is reset and rebuilt. If that happens, the\n' +
+              '  archive is the cause, not your host.'
+            : '  It still restores; the service resyncs forward from the archive height, which just takes longer\n' +
+              '  the older the archive is.'
+        console.log(
+            `WARNING: the published ${module} bootstrap for ${coin}/${network} is ${ageDays} days old ` +
+            `(${path.basename(finalUrl)}).\n` + consequence
+        )
+    }
+
     const sigPath = destPath + BOOTSTRAP_SIG_SUFFIX
     const sigResponse = await axios({
         method: 'get',
@@ -908,12 +965,70 @@ async function downloadBootstrap(coin, network, module, destDir) {
     return 'latest.tgz'
 }
 
+// What each service's bootstrap attempt did, for the end-of-install summary:
+// a skipped restore is the difference between a published height and hours of
+// rescanning, too costly to leave as one warning mid-log. Reset per run.
+const bootstrapOutcomes = []
+
+function recordBootstrapOutcome(module, status, detail) {
+    bootstrapOutcomes.push({ module, status, detail })
+}
+
+function resetBootstrapOutcomes() {
+    bootstrapOutcomes.length = 0
+}
+
+// Printed at the end of install/update. Says nothing when no bootstrap was
+// attempted, so ordinary runs stay quiet.
+function reportBootstrapOutcomes() {
+    if (bootstrapOutcomes.length === 0) return
+    const failed = bootstrapOutcomes.filter((o) => o.status === 'failed')
+    // Wiped-then-failed is NOT part of `failed`: those services are down, not
+    // syncing from block 0, so the paragraph below would misdescribe them.
+    const wipedDown = bootstrapOutcomes.filter((o) => o.status === 'wiped-left-down')
+    console.log('\nBootstrap restore summary:')
+    for (const o of bootstrapOutcomes) {
+        const line = o.status === 'restored' ? 'restored'
+            : o.status === 'none-published' ? 'none published, syncing from scratch'
+            : o.status === 'disabled' ? 'disabled by XCHAIN_NODE_NO_BOOTSTRAP'
+            : o.status === 'wiped-left-down' ? `NOT restored, DATA WIPED, container left stopped: ${o.detail}`
+            : `NOT restored: ${o.detail}`
+        console.log(`  ${o.module}: ${line}`)
+    }
+    if (wipedDown.length > 0) {
+        console.log(
+            '\nThose services had their data directory wiped by a restore that then failed, so\n' +
+            'their containers were deliberately left STOPPED rather than restarted over an\n' +
+            'incomplete store that would report itself caught up. Re-run install with\n' +
+            'XCHAIN_NODE_FORCE_BOOTSTRAP=1 to take the restore again, or clear the volume and\n' +
+            'start the service to resync from block 0.\n'
+        )
+    }
+    if (failed.length > 0) {
+        console.log(
+            '\nThose services are now syncing from block 0, which takes hours to days\n' +
+            'rather than minutes. Fix the cause above, then re-run install with\n' +
+            'XCHAIN_NODE_FORCE_BOOTSTRAP=1 to take the restore again: without it a\n' +
+            'service that has already started syncing is left alone.\n'
+        )
+    }
+}
+
+// Opt-in restore over an already-populated service. Off by default because the
+// restore wipes the data directory; needed because a failed restore leaves a
+// service scratch-syncing, which reads as populated to every later run.
+function forceBootstrapRequested() {
+    const v = process.env.XCHAIN_NODE_FORCE_BOOTSTRAP
+    return v !== undefined && v !== '' && v !== '0'
+}
+
 // On a FRESH utxo-tracker install, download the published bootstrap and restore
 // it. Best-effort: any failure (no bootstrap published, download/restore error)
 // logs a warning and returns so the install proceeds with a normal sync.
 async function ensureBootstrapUtxoTracker(coin, network) {
     if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
         console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
+        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'disabled')
         return false
     }
     try {
@@ -924,13 +1039,28 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         const fileName = await downloadBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, bootstrapDir)
         if (!fileName) {
             console.log('No bootstrap available; the tracker will sync from scratch')
+            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'none-published')
             return false
         }
         await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
         console.log('Bootstrap installed; tracker will continue from the bootstrap height')
+        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'restored')
         return true
     } catch (err) {
-        console.log(`WARNING: bootstrap auto-restore failed (${redactSecrets(err.message)}): the tracker will sync from scratch`)
+        const reason = redactSecrets(err.message)
+        // A post-wipe abort did NOT leave a scratch-syncing tracker: the store was
+        // emptied and the container was left stopped (uuid:7edc76f3), so the old
+        // "will sync from scratch" wording described a state that is not on disk.
+        if (err.postWipe) {
+            console.log(
+                `WARNING: bootstrap auto-restore failed (${reason}) AFTER the LevelDB volume was wiped: ` +
+                `the tracker store is incomplete and its container was left stopped, not syncing.`
+            )
+            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'wiped-left-down', reason)
+            return false
+        }
+        console.log(`WARNING: bootstrap auto-restore failed (${reason}): the tracker will sync from scratch`)
+        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'failed', reason)
         return false
     }
 }
@@ -1004,6 +1134,7 @@ async function mariaDbModuleHasData(coin, network, module) {
 async function ensureBootstrapMariaDb(coin, network, module) {
     if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
         console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
+        recordBootstrapOutcome(module, 'disabled')
         return false
     }
     try {
@@ -1016,13 +1147,17 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         const fileName = await downloadBootstrap(coin, network, module, bootstrapDir)
         if (!fileName) {
             console.log('No bootstrap available; the service will sync from scratch')
+            recordBootstrapOutcome(module, 'none-published')
             return false
         }
         await restoreBootstrap(coin, network, module, fileName)
         console.log('Bootstrap installed; the service will continue from the bootstrap height')
+        recordBootstrapOutcome(module, 'restored')
         return true
     } catch (err) {
-        console.log(`WARNING: bootstrap auto-restore failed (${redactSecrets(err.message)}): the service will sync from scratch`)
+        const reason = redactSecrets(err.message)
+        console.log(`WARNING: bootstrap auto-restore failed (${reason}): the service will sync from scratch`)
+        recordBootstrapOutcome(module, 'failed', reason)
         return false
     }
 }
@@ -1068,6 +1203,11 @@ module.exports = {
     ensureBootstrapUtxoTracker,
     mariaDbModuleHasData,
     ensureBootstrapMariaDb,
+    forceBootstrapRequested,
+    reportBootstrapOutcomes,
+    resetBootstrapOutcomes,
+    bootstrapArchiveAgeDays,
+    BOOTSTRAP_STALE_AFTER_DAYS,
     // Bootstrap signing (supply-chain integrity)
     signBootstrapArchive,
     verifyBootstrapSignature,

@@ -477,6 +477,158 @@ describe('BootstrapService', function () {
             expect(stubs.axios.secondCall.args[0].url).to.match(/\/latest\.tgz\.sig$/)
         })
 
+        // A published archive is not simply a head start: the service walks
+        // forward from the restored tip, so one that aged past the chain it
+        // lands on can halt the tracker with the node parked behind it.
+        describe('the age of the archive an operator is about to take', function () {
+
+            const AUG_23 = Date.UTC(2026, 7, 23, 12, 0, 0)
+
+            it('reads the publisher timestamp out of the archive name', function () {
+                const bs = loadBootstrapService(makeStubs())
+                const url = 'https://sync.example/b/testnet-xchain-utxo-tracker-20260801_082909.tar.gz'
+                expect(bs.bootstrapArchiveAgeDays(url, AUG_23)).to.equal(22)
+            })
+
+            it('reads a same-day archive as zero days old, not stale', function () {
+                const bs = loadBootstrapService(makeStubs())
+                const url = 'https://sync.example/b/testnet-xchain-utxo-tracker-20260823_042943.tar.gz'
+                expect(bs.bootstrapArchiveAgeDays(url, AUG_23)).to.equal(0)
+            })
+
+            it('says nothing about a hand-placed name that carries no timestamp', function () {
+                const bs = loadBootstrapService(makeStubs())
+                expect(bs.bootstrapArchiveAgeDays('https://sync.example/b/latest.tgz', AUG_23)).to.be.null
+                expect(bs.bootstrapArchiveAgeDays('', AUG_23)).to.be.null
+                expect(bs.bootstrapArchiveAgeDays(undefined, AUG_23)).to.be.null
+            })
+
+            it('does not report a negative age for a clock-skewed future stamp', function () {
+                const bs = loadBootstrapService(makeStubs())
+                const url = 'https://sync.example/b/testnet-xchain-utxo-tracker-20260901_000000.tar.gz'
+                expect(bs.bootstrapArchiveAgeDays(url, AUG_23)).to.be.null
+            })
+
+            it('warns during the download when the resolved archive has aged out', async function () {
+                const stubs = makeStubs()
+                stubs.fs.existsSync.returns(true)
+
+                const dataStream  = new PassThrough()
+                const writeStream = new PassThrough()
+                drainPassThrough(writeStream)
+                stubs.fs.createWriteStream.returns(writeStream)
+
+                const staleUrl = 'https://sync.example/b/testnet-xchain-utxo-tracker-20200101_000000.tar.gz'
+                stubs.axios.onFirstCall().resolves({
+                    status:  200,
+                    headers: { 'content-length': '100' },
+                    data:    dataStream,
+                    request: { res: { responseUrl: staleUrl } },
+                })
+                stubs.axios.onSecondCall().resolves({ status: 200, data: 'sig-bytes' })
+
+                const logged = []
+                const origLog = console.log
+                console.log = (...args) => logged.push(args.join(' '))
+                try {
+                    const bs = loadBootstrapService(stubs)
+                    const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+                    setImmediate(() => { dataStream.end(); writeStream.emit('finish') })
+                    await promise
+                } finally {
+                    console.log = origLog
+                }
+
+                const warning = logged.find(l => l.includes('days old'))
+                expect(warning, 'no staleness warning was printed').to.be.a('string')
+                expect(warning).to.contain('testnet-xchain-utxo-tracker-20200101_000000.tar.gz')
+            })
+
+            // A weekly publisher puts a healthy archive at six days old
+            // routinely, and a warning that fires on healthy state is one
+            // nobody reads by the second month.
+            it('stays quiet through a normal weekly publish cadence', async function () {
+                const bs = loadBootstrapService(makeStubs())
+                const sixDays = Date.UTC(2026, 7, 7, 0, 0, 0)
+                const url = 'https://sync.example/b/testnet-xchain-utxo-tracker-20260801_000000.tar.gz'
+                expect(bs.bootstrapArchiveAgeDays(url, sixDays)).to.equal(6)
+                expect(bs.BOOTSTRAP_STALE_AFTER_DAYS).to.be.above(7)
+            })
+
+            it('names the halt for the tracker and only the slower resync for the rest', async function () {
+                const staleUrl = mod => `https://sync.example/b/testnet-${mod}-20200101_000000.tar.gz`
+
+                async function warningFor(module) {
+                    const stubs = makeStubs()
+                    stubs.fs.existsSync.returns(true)
+                    const dataStream  = new PassThrough()
+                    const writeStream = new PassThrough()
+                    drainPassThrough(writeStream)
+                    stubs.fs.createWriteStream.returns(writeStream)
+                    stubs.axios.onFirstCall().resolves({
+                        status: 200,
+                        headers: { 'content-length': '100' },
+                        data: dataStream,
+                        request: { res: { responseUrl: staleUrl(module) } },
+                    })
+                    stubs.axios.onSecondCall().resolves({ status: 200, data: 'sig-bytes' })
+
+                    const logged = []
+                    const origLog = console.log
+                    console.log = (...args) => logged.push(args.join(' '))
+                    try {
+                        const bs = loadBootstrapService(stubs)
+                        const promise = bs.downloadBootstrap(COIN, NETWORK, module, '/tmp/dest')
+                        setImmediate(() => { dataStream.end(); writeStream.emit('finish') })
+                        await promise
+                    } finally {
+                        console.log = origLog
+                    }
+                    return logged.find(l => l.includes('days old')) || ''
+                }
+
+                expect(await warningFor(XChainService.XCHAIN_UTXO_TRACKER)).to.contain('halts it')
+                const decoderWarning = await warningFor(XChainService.XCHAIN_DECODER)
+                expect(decoderWarning).to.contain('resyncs forward')
+                expect(decoderWarning).to.not.contain('halts it')
+            })
+
+            it('stays quiet about an archive published today', async function () {
+                const stubs = makeStubs()
+                stubs.fs.existsSync.returns(true)
+
+                const dataStream  = new PassThrough()
+                const writeStream = new PassThrough()
+                drainPassThrough(writeStream)
+                stubs.fs.createWriteStream.returns(writeStream)
+
+                const pad = n => String(n).padStart(2, '0')
+                const now = new Date()
+                const today = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}_000000`
+                stubs.axios.onFirstCall().resolves({
+                    status:  200,
+                    headers: { 'content-length': '100' },
+                    data:    dataStream,
+                    request: { res: { responseUrl: `https://sync.example/b/testnet-xchain-utxo-tracker-${today}.tar.gz` } },
+                })
+                stubs.axios.onSecondCall().resolves({ status: 200, data: 'sig-bytes' })
+
+                const logged = []
+                const origLog = console.log
+                console.log = (...args) => logged.push(args.join(' '))
+                try {
+                    const bs = loadBootstrapService(stubs)
+                    const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+                    setImmediate(() => { dataStream.end(); writeStream.emit('finish') })
+                    await promise
+                } finally {
+                    console.log = origLog
+                }
+
+                expect(logged.find(l => l.includes('days old'))).to.be.undefined
+            })
+        })
+
         it('creates destDir when it does not exist', async function () {
             const stubs = makeStubs()
             stubs.fs.existsSync.returns(false)
@@ -603,6 +755,133 @@ describe('BootstrapService', function () {
             expect(capturedUrl).to.include(COIN)
             expect(capturedUrl).to.include(NETWORK)
             expect(capturedUrl).to.include('latest.tgz')
+        })
+    })
+
+    // A restore that does not happen costs hours of rescanning from block 0, so
+    // the run must say so and must offer a way to take it again: a service that
+    // starts scratch-syncing reads as populated to every later run.
+    describe('bootstrap restore is reported, not just logged', function () {
+
+        afterEach(function () {
+            delete process.env.XCHAIN_NODE_NO_BOOTSTRAP
+            delete process.env.XCHAIN_NODE_FORCE_BOOTSTRAP
+        })
+
+        function captureReport(bs) {
+            const lines = []
+            const realLog = console.log
+            console.log = (...args) => lines.push(args.join(' '))
+            try { bs.reportBootstrapOutcomes() } finally { console.log = realLog }
+            return lines.join('\n')
+        }
+
+        it('says nothing at all when no bootstrap was attempted', function () {
+            const bs = loadBootstrapService(makeStubs())
+            bs.resetBootstrapOutcomes()
+            expect(captureReport(bs)).to.equal('')
+        })
+
+        it('names the service and the reason when a restore fails', async function () {
+            const stubs = makeStubs()
+            stubs.axios.rejects(new Error('EACCES: permission denied'))
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+
+            await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            const report = captureReport(bs)
+
+            expect(report).to.contain(XChainService.XCHAIN_UTXO_TRACKER)
+            expect(report).to.contain('NOT restored')
+            expect(report).to.contain('EACCES')
+            // The operator has to be told the run is now a from-scratch sync and
+            // how to take the restore again; that is the whole point of the summary.
+            expect(report).to.contain('block 0')
+            expect(report).to.contain('XCHAIN_NODE_FORCE_BOOTSTRAP')
+        })
+
+        it('distinguishes "none published" from a failure', async function () {
+            const stubs = makeStubs()
+            stubs.axios.resolves({ status: 404, headers: {}, data: new PassThrough() })
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+
+            await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            const report = captureReport(bs)
+
+            expect(report).to.contain('none published')
+            expect(report).to.not.contain('NOT restored')
+            expect(report).to.not.contain('XCHAIN_NODE_FORCE_BOOTSTRAP')
+        })
+
+        it('reports a disabled run as disabled rather than failed', async function () {
+            process.env.XCHAIN_NODE_NO_BOOTSTRAP = '1'
+            const bs = loadBootstrapService(makeStubs())
+            bs.resetBootstrapOutcomes()
+
+            await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            const report = captureReport(bs)
+
+            expect(report).to.contain('disabled by XCHAIN_NODE_NO_BOOTSTRAP')
+            expect(report).to.not.contain('NOT restored')
+        })
+
+        it('reports each service separately when several fail in one run', async function () {
+            const stubs = makeStubs()
+            stubs.axios.rejects(new Error('EACCES: permission denied'))
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+
+            await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            const report = captureReport(bs)
+
+            expect(report).to.contain(XChainService.XCHAIN_UTXO_TRACKER)
+            expect(report).to.contain(XChainService.XCHAIN_DECODER)
+        })
+
+        it('starts a fresh report per run instead of replaying the last one', async function () {
+            const stubs = makeStubs()
+            stubs.axios.rejects(new Error('EACCES: permission denied'))
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+            await bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            expect(captureReport(bs)).to.contain('NOT restored')
+
+            bs.resetBootstrapOutcomes()
+            expect(captureReport(bs)).to.equal('')
+        })
+    })
+
+    describe('forceBootstrapRequested()', function () {
+
+        afterEach(function () {
+            delete process.env.XCHAIN_NODE_FORCE_BOOTSTRAP
+        })
+
+        it('is off when the variable is unset, so a healthy service is never wiped', function () {
+            const bs = loadBootstrapService(makeStubs())
+            expect(bs.forceBootstrapRequested()).to.be.false
+        })
+
+        it('is off for an explicit 0 or empty value', function () {
+            const bs = loadBootstrapService(makeStubs())
+            for (const v of ['0', '']) {
+                process.env.XCHAIN_NODE_FORCE_BOOTSTRAP = v
+                expect(bs.forceBootstrapRequested(), `value ${JSON.stringify(v)}`).to.be.false
+            }
+        })
+
+        it('is on for a set value, which is what re-offers a spent restore', function () {
+            const bs = loadBootstrapService(makeStubs())
+            for (const v of ['1', 'true', 'yes']) {
+                process.env.XCHAIN_NODE_FORCE_BOOTSTRAP = v
+                expect(bs.forceBootstrapRequested(), `value ${v}`).to.be.true
+            }
         })
     })
 
@@ -1076,8 +1355,14 @@ describe('BootstrapService', function () {
                 expect.fail()
             } catch (err) {
                 expect(err.message).to.include('docker tar restore exited with code 1')
+                // Post-wipe abort (uuid:7edc76f3): the volume was already cleared,
+                // so the error is tagged and the container is NOT restarted. A
+                // restart here boots a fresh tracker with halted=false over an
+                // incomplete store, which then reports itself caught up.
+                expect(err.postWipe).to.be.true
             }
-            expect(stubs.dockerService.startContainer.called).to.be.true
+            expect(stubs.dockerService.stopContainer.called).to.be.true
+            expect(stubs.dockerService.startContainer.called).to.be.false
         })
 
         it('throws when malformed archive (inner archive missing after extract)', async function () {

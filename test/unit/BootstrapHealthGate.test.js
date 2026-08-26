@@ -23,13 +23,26 @@ const COIN    = 'litecoin'
 const NETWORK = 'mainnet'
 const SVC_CONTAINER = 'c'.repeat(64)
 const DB_CONTAINER  = 'd'.repeat(64)
+const DECODER_DB = 'xchain_ltc_mainnet_decoder'
+const INDEXER_DB = 'xchain_ltc_mainnet_indexer'
 
 // A container that is up, stable, and passing its healthcheck.
 function healthyInspect({ started = '2026-01-01T00:00:00.000Z' } = {}) {
     return `running|false|0|${started}|healthy\n`
 }
 
-function loadGate({ external = false } = {}) {
+// The external-DB helper answers per query by default (both marker tables
+// present, no marker rows), the same clean-database shape the docker runner
+// fakes. A test that wants the "helper answered with nothing" shape - a
+// mis-parsed client option, a driver that returned no rows - passes
+// nativeResolves: '' and gets that for every call.
+function nativeHelperStub(nativeResolves) {
+    if (nativeResolves !== null) return sinon.stub().resolves(nativeResolves)
+    return sinon.stub().callsFake(async (cfg, sql) =>
+        (/information_schema\.TABLES/.test(sql) ? '1\t1' : '0'))
+}
+
+function loadGate({ external = false, nativeResolves = null } = {}) {
     return proxyquire('../../src/services/BootstrapHealthGate', {
         '../config/constants': {
             XChainService,
@@ -42,13 +55,16 @@ function loadGate({ external = false } = {}) {
                 INDEXER_API_PORT: 3004,
                 UTXO_TRACKER_API_PORT: 3001
             }),
-            getModuleDatabaseName: sinon.stub().returns('xchain_ltc_mainnet_decoder')
+            // Module-aware, because gating an indexer must probe TWO databases and a
+            // test cannot express "decoder dirty, indexer clean" while both share a name.
+            getModuleDatabaseName: sinon.stub().callsFake(m =>
+                (m === XChainService.XCHAIN_INDEXER ? INDEXER_DB : DECODER_DB))
         },
         './DatabaseService': {
             getDatabaseContainerId:      sinon.stub().resolves(DB_CONTAINER),
             askMariadbRootPassword:      sinon.stub().resolves('rootpass'),
             getExternalDbConfig:         sinon.stub().resolves({ host: 'h', port: 3306, root_user: 'root', root_password: 'p' }),
-            executeNativeMariaDbCommand: sinon.stub().resolves('0\t0')
+            executeNativeMariaDbCommand: nativeHelperStub(nativeResolves)
         },
         '../utils/dockerMariadb': {
             dockerMariadbArgs: (id, args) => ['exec', '-e', 'MYSQL_PWD', id, ...args],
@@ -61,13 +77,22 @@ function loadGate({ external = false } = {}) {
 // so each test states only what it changes.
 function makeRunner({
     inspect = healthyInspect(),
-    status  = { status: 'healthy', lag_blocks: 0, reorg_halted: false },
+    // A real decoder publishes reorg_halt_checked_at beside reorg_halted (both shipped
+    // in the same commit), and only a decoder that never completed a marker probe
+    // leaves it null. The fixture said "not halted" without ever having looked.
+    status  = { status: 'healthy', lag_blocks: 0, reorg_halted: false, reorg_halt_checked_at: 1756000000000 },
     tables  = '1\t1',
     reorgHaltRows = '0',
     syncHaltRows  = '0',
     inspectThrows = null,
     statusThrows  = null,
-    sqlThrows     = null
+    sqlThrows     = null,
+    // Answers for the PAIRED DECODER database an indexer gate probes second. Left
+    // null, that database answers exactly as the gated one does; set it to express
+    // the scenario the gate exists for and a single-database fake cannot reach:
+    // decoder dirty, indexer clean. Accepts { tables, reorgHaltRows, syncHaltRows,
+    // throws }.
+    decoder       = null
 } = {}) {
     return sinon.stub().callsFake(async (cmd, args) => {
         if (args[0] === 'inspect') {
@@ -83,9 +108,12 @@ function makeRunner({
         // invocation carries its own `-e MYSQL_PWD` ahead of the client's `-e <sql>`.
         const sql = args[args.lastIndexOf('-e') + 1] || ''
         if (sqlThrows) throw sqlThrows
-        if (/information_schema\.TABLES/.test(sql)) return { stdout: tables }
-        if (/REORG_HALT/.test(sql)) return { stdout: reorgHaltRows }
-        if (/sync_halt/.test(sql)) return { stdout: syncHaltRows }
+        const up = (decoder && sql.includes(DECODER_DB)) ? decoder : null
+        if (up && up.throws) throw up.throws
+        const pick = (key, fallback) => (up && up[key] !== undefined) ? up[key] : fallback
+        if (/information_schema\.TABLES/.test(sql)) return { stdout: pick('tables', tables) }
+        if (/REORG_HALT/.test(sql)) return { stdout: pick('reorgHaltRows', reorgHaltRows) }
+        if (/sync_halt/.test(sql)) return { stdout: pick('syncHaltRows', syncHaltRows) }
         return { stdout: '' }
     })
 }
@@ -147,7 +175,7 @@ describe('BootstrapHealthGate', function () {
             expect(res.skipped).to.equal(false)
         })
 
-        it('skips the marker queries for tables the schema does not have', async function () {
+        it('skips the sync_halt query on a schema that has no sync_halt table', async function () {
             const gate = loadGate()
             const runner = makeRunner({ tables: '1\t0' })
             await callGate(gate, { runner })
@@ -155,10 +183,121 @@ describe('BootstrapHealthGate', function () {
             expect(sqls.some(s => /FROM `[^`]+`\.sync_halt/.test(s))).to.equal(false)
         })
 
+        // The header contract says a probe that cannot be PARSED is a refusal too,
+        // not only one that throws. Each of these parses to NaN, loses every
+        // `> 0` comparison, and reads as "healthy, no halt markers" without it.
+        it('REFUSES when the marker-table probe returns nothing (unreadable, not clean)', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ tables: '' }) }))
+            expect(err.message).to.match(/marker-table probe[\s\S]*returned unreadable output/)
+        })
+
+        it('REFUSES when the marker-table probe returns non-numeric output', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ tables: 'x\ty' }) }))
+            expect(err.message).to.match(/marker-table probe[\s\S]*returned unreadable output/)
+        })
+
+        // A decoder/indexer always provisions `events`; a probe that cannot see it
+        // is not looking at the database that is about to be dumped.
+        it('REFUSES a MariaDB source whose schema reports no events table', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ tables: '0\t1' }) }))
+            expect(err.message).to.match(/reports no events table/)
+        })
+
+        it('REFUSES when the REORG_HALT count itself is unreadable', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHaltRows: '' }) }))
+            expect(err.message).to.match(/REORG_HALT marker probe returned unreadable output/)
+        })
+
+        it('REFUSES when the sync_halt count itself is unreadable', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ syncHaltRows: 'nope' }) }))
+            expect(err.message).to.match(/sync_halt marker probe returned unreadable output/)
+        })
+
+        // External-DB mode reads the markers over the native driver rather than
+        // docker exec. An empty answer there (the shape a mis-parsed client option
+        // string produced) must refuse, not certify the archive.
+        it('REFUSES in external-DB mode when the native probe answers with nothing', async function () {
+            const gate = loadGate({ external: true, nativeResolves: '' })
+            const err = await refusal(callGate(gate, { runner: makeRunner() }))
+            expect(err.message).to.match(/could not read the halt markers/)
+            expect(err.message).to.match(/returned unreadable output/)
+        })
+
         it('REFUSES when the marker query itself fails (fail closed, never assume clean)', async function () {
             const gate = loadGate()
             const err = await refusal(callGate(gate, { runner: makeRunner({ sqlThrows: new Error('access denied') }) }))
             expect(err.message).to.match(/could not read the halt markers/)
+        })
+
+        // An indexer's own events table only ever carries code='REORG'; the REORG_HALT
+        // row lives solely in the paired decoder database. Probing only the gated
+        // module's own database therefore asked a question that could not come back
+        // yes, and the gate's one image-independent backstop had no reach at all here.
+        it('REFUSES an indexer whose PAIRED DECODER database carries a REORG_HALT row', async function () {
+            const gate = loadGate()
+            const runner = makeRunner({
+                status:  { status: 'healthy', lag: 0, decoderReorgHalted: false },
+                decoder: { reorgHaltRows: '1' }
+            })
+            const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
+            expect(err.message).to.match(new RegExp(`paired decoder database ${DECODER_DB} carries a durable REORG_HALT`))
+            expect(err.message).to.match(/frozen behind a decoder that aborted mid-rollback/)
+        })
+
+        it('REFUSES an indexer whose paired decoder database carries an uncleared sync halt', async function () {
+            const gate = loadGate()
+            const runner = makeRunner({
+                status:  { status: 'healthy', lag: 0, decoderReorgHalted: false },
+                decoder: { syncHaltRows: '2' }
+            })
+            const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
+            expect(err.message).to.match(/paired decoder database[\s\S]*uncleared[\s\S]*sync_halt/)
+        })
+
+        // Fail closed on the UPSTREAM probe too: "the decoder database is not there"
+        // must not arrive as "the decoder has no halt marker".
+        it('REFUSES an indexer when the paired decoder database is absent', async function () {
+            const gate = loadGate()
+            const runner = makeRunner({
+                status:  { status: 'healthy', lag: 0, decoderReorgHalted: false },
+                decoder: { tables: '0\t0' }
+            })
+            const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
+            expect(err.message).to.match(/paired decoder database[\s\S]*could not be probed/)
+            expect(err.message).to.match(/reports no events table/)
+        })
+
+        it('REFUSES an indexer when the paired decoder probe throws', async function () {
+            const gate = loadGate()
+            const runner = makeRunner({
+                status:  { status: 'healthy', lag: 0, decoderReorgHalted: false },
+                decoder: { throws: new Error('access denied') }
+            })
+            const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
+            expect(err.message).to.match(/paired decoder database[\s\S]*could not be probed[\s\S]*access denied/)
+        })
+
+        it('passes an indexer when BOTH its own and the decoder database are clean', async function () {
+            const gate = loadGate()
+            const runner = makeRunner({ status: { status: 'healthy', lag: 0, decoderReorgHalted: false } })
+            const res = await callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner })
+            expect(res.skipped).to.equal(false)
+            const sqls = runner.getCalls().map(c => (c.args[1] || []).join(' '))
+            expect(sqls.some(s => s.includes(INDEXER_DB))).to.equal(true)
+            expect(sqls.some(s => s.includes(DECODER_DB))).to.equal(true)
+        })
+
+        it('gating a decoder queries no second database', async function () {
+            const gate = loadGate()
+            const runner = makeRunner()
+            await callGate(gate, { runner })
+            const sqls = runner.getCalls().map(c => (c.args[1] || []).join(' '))
+            expect(sqls.some(s => s.includes(INDEXER_DB))).to.equal(false)
         })
 
         it('does not run marker queries for the utxo-tracker (LevelDB, no such table)', async function () {
@@ -290,7 +429,11 @@ describe('BootstrapHealthGate', function () {
                     if (isRpc) return { stdout: JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'Method not found' } }) }
                     return { stdout: JSON.stringify({ status: 'healthy', db: true, running: true, lag_blocks: 2 }) }
                 }
-                const sql = args[args.indexOf('-e') + 1] || ''
+                // lastIndexOf, as in makeRunner: the docker invocation carries its
+                // own `-e MYSQL_PWD` ahead of the client's `-e <sql>`. indexOf reads
+                // MYSQL_PWD as the statement, which makes this fake answer the
+                // marker probe with '0' and leaves the marker path unexercised.
+                const sql = args[args.lastIndexOf('-e') + 1] || ''
                 if (/information_schema\.TABLES/.test(sql)) return { stdout: '1\t1' }
                 return { stdout: '0' }
             })
@@ -335,6 +478,60 @@ describe('BootstrapHealthGate', function () {
             const gate = loadGate()
             const reasons = gate.evaluateStatusPayload({ status: 'healthy', lag: 0, decoderReorgHalted: true })
             expect(reasons.join(' ')).to.match(/upstream decoder carries a durable REORG_HALT/)
+        })
+
+        // The decoder's marker probe is fail-soft: a DB fault keeps the last known
+        // state, which starts at false with checked_at null. So "never managed to
+        // look" and "looked, clean" publish the identical boolean, and only the
+        // timestamp tells them apart.
+        it('REFUSES a decoder that reports not-halted having never completed a probe', function () {
+            const gate = loadGate()
+            const reasons = gate.evaluateStatusPayload(
+                { status: 'healthy', lag_blocks: 0, reorg_halted: false, reorg_halt_checked_at: null })
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/never completed a REORG_HALT marker probe/)
+        })
+
+        it('passes the same decoder once a probe has actually completed', function () {
+            const gate = loadGate()
+            expect(gate.evaluateStatusPayload(
+                { status: 'healthy', lag_blocks: 0, reorg_halted: false, reorg_halt_checked_at: 1756000000000 }
+            )).to.deep.equal([])
+        })
+
+        // The indexer publishes no companion timestamp for decoderReorgHalted, so the
+        // proof rule must not reach it: keying on the wrong field would refuse every
+        // indexer bootstrap in the fleet.
+        it('does not demand a probe timestamp from an indexer payload', function () {
+            const gate = loadGate()
+            expect(gate.evaluateStatusPayload({ status: 'healthy', lag: 0, decoderReorgHalted: false }))
+                .to.deep.equal([])
+        })
+
+        it('REFUSES an indexer reporting its block counter wedged', function () {
+            const gate = loadGate()
+            const reasons = gate.evaluateStatusPayload(
+                { status: 'healthy', lag: 3, stallClass: 'wedged', stallReason: 'vm_executor_host_fault' })
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/WEDGED/)
+            expect(reasons[0]).to.match(/vm_executor_host_fault/)
+        })
+
+        // The negative control that keeps the wedge check from becoming a fleet-wide
+        // refusal: on testnet4 the future-stamped-block wait is the PERMANENT steady
+        // state, and it carries degraded:true with a named stallReason the whole time.
+        it('passes the healthy future-block wait and an in-grace barrier defer', function () {
+            const gate = loadGate()
+            expect(gate.evaluateStatusPayload({
+                status: 'healthy', lag: 6, stallClass: 'future_block_wait', degraded: true,
+                stallReason: 'price_sync_barrier', waitingOnFutureBlock: true
+            })).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({
+                status: 'healthy', lag: 3, stallClass: 'barrier_defer', degraded: true,
+                stallReason: 'match_barrier'
+            })).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({ status: 'healthy', lag: 0, stallClass: 'none' }))
+                .to.deep.equal([])
         })
 
         it('refuses when the node tip is stale, since the lag is then unknowable', function () {

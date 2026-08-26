@@ -102,6 +102,76 @@ function migrationDeclaresDeployPrecondition(raw) {
 }
 
 /**
+ * The `mode=` a migration header declares, or null when it declares none.
+ * Prologue-anchored exactly like migrationDeclaresDeployPrecondition, so a token
+ * in body prose or a data literal cannot answer for the file.
+ *
+ * Twin of the modules' own Database._migrationMode, duplicated for the reason
+ * given above: this tool reads a cloned tree whose dependencies are not
+ * installed. Keep them in step.
+ */
+function migrationMode(raw) {
+    const prologue = []
+    for (const line of String(raw).split('\n')) {
+        const trimmed = line.trim()
+        if (trimmed === '' || trimmed.startsWith('--')) { prologue.push(line); continue }
+        break
+    }
+    const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*([A-Za-z]+)/im)
+    return m ? m[1].toLowerCase() : null
+}
+
+/**
+ * Every gated (mode=manual) migration in `dir` that the ledger has not recorded,
+ * sorted. This is the blast radius of an UNSCOPED migrate run against that
+ * database: the runner applies every pending manual file, not just the one an
+ * operator names. The refusal names that whole set, so the consequence is on
+ * screen rather than left for the operator to discover.
+ */
+function pendingManualMigrations(dir, applied) {
+    let files
+    try {
+        files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort()
+    } catch {
+        return []
+    }
+    return files.filter(f => {
+        if (applied && applied.has(f)) return false
+        try {
+            return migrationMode(fs.readFileSync(path.join(dir, f), 'utf8')) === 'manual'
+        } catch {
+            return false
+        }
+    })
+}
+
+/**
+ * Does the build CURRENTLY RUNNING in the target container understand per-file
+ * migration targeting (`--file`)?
+ *
+ * This matters because the remedy an operator is about to run executes inside
+ * that container, on its build, not on the one being deployed. A build without
+ * the flag does not reject it: it ignores it and applies every pending manual
+ * migration, which on a live database can mean a data backfill and a
+ * dedup-then-unique nobody authorised.
+ *
+ * Returns true, false, or null when the container could not be read at all
+ * (stopped, absent, docker unreachable). Callers must treat null like false:
+ * an unverified capability is not a capability, and the cost of being wrong is
+ * asymmetric.
+ */
+async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
+    try {
+        const cat = deps.getDockerContainerFileCat || require('./DockerService').getDockerContainerFileCat
+        const source = await cat(container, 'src/migrate.js')
+        if (!source) return null
+        return /['"]--file['"]/.test(String(source))
+    } catch {
+        return null
+    }
+}
+
+/**
  * Every migration filename in `dir` whose header declares a deploy precondition,
  * sorted. A missing directory yields [] - a module (or a ref) with no migrations
  * declares no preconditions, which is not an error.
@@ -195,16 +265,41 @@ async function defaultReadAppliedMigrations({ database, coin, network }, deps = 
     }
 }
 
-function refusalMessage(module, coin, network, dbName, missing) {
+function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
     const container = getDockerContainerImageName(module, coin, network)
     const files = missing.join(', ')
+    const plural = missing.length > 1
+
+    // The remedy runs on the build inside the container, which is the one being
+    // REPLACED. Only name the scoped command when that build was confirmed to
+    // honour --file; otherwise the command would quietly widen to every pending
+    // manual migration, so state that instead of printing it.
+    let instructions
+    if (remedy.supportsPerFile === true) {
+        instructions = 'apply ' + (plural ? 'them' : 'it') +
+            ' deliberately, with the writer quiesced, then re-run the update:\n' +
+            missing.map(f => '    docker exec -i ' + container + ' node src/migrate.js --file ' + f).join('\n')
+    } else {
+        const wouldApply = (remedy.pendingManual && remedy.pendingManual.length)
+            ? remedy.pendingManual
+            : missing
+        instructions = 'DO NOT run `node src/migrate.js` inside ' + container + '. ' +
+            (remedy.supportsPerFile === false
+                ? 'That container runs a build with no per-file targeting: it ignores --file'
+                : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +
+            ' and apply EVERY pending manual migration on ' + dbName + ', which is ' +
+            wouldApply.length + ' file(s):\n' +
+            wouldApply.map(f => '    ' + f + (missing.includes(f) ? '  (the one you need)' : '')).join('\n') + '\n' +
+            '  Apply ' + (plural ? 'the needed files' : 'the needed file') + ' with a build that supports ' +
+            '--file, or apply the statement by hand with the writer quiesced, then re-run the update.'
+    }
+
     return 'update refused: the ' + module + ' source about to be deployed asserts migration' +
-        (missing.length > 1 ? 's' : '') + ' ' + files + ' at startup, but ' + dbName +
-        ' has not applied ' + (missing.length > 1 ? 'them' : 'it') + '. Deploying now replaces a working ' +
+        (plural ? 's' : '') + ' ' + files + ' at startup, but ' + dbName +
+        ' has not applied ' + (plural ? 'them' : 'it') + '. Deploying now replaces a working ' +
         'container with one that crash-loops on boot (the 2026-08-09 mainnet halt: all three indexers went to ' +
-        'Restarting(1) on exactly this). These migrations are operator-gated on purpose - apply ' +
-        (missing.length > 1 ? 'them' : 'it') + ' deliberately, with the writer quiesced, then re-run the update:\n' +
-        missing.map(f => '    docker exec -i ' + container + ' node src/migrate.js --file ' + f).join('\n') + '\n' +
+        'Restarting(1) on exactly this). These migrations are operator-gated on purpose - ' +
+        instructions + '\n' +
         '  Take a fresh backup first: DEPLOY-ORDER.md says so for every migration-bearing deploy, ' +
         'and the coin boxes back up only WEEKLY. ' +
         'Set ' + SKIP_ENV + '=1 to override.'
@@ -276,7 +371,23 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
     }
 
     const missing = required.filter(f => !result.applied.has(f))
-    if (missing.length) throw new Error(refusalMessage(module, coin, network, dbName, missing))
+    if (missing.length) {
+        // Only reached on the refusal path, so the probe costs a healthy deploy
+        // nothing and cannot introduce a new way for one to fail: both the probe
+        // and the pending-scan degrade to the cautious branch of the message.
+        const container   = getDockerContainerImageName(module, coin, network)
+        const probe       = deps.runningBuildSupportsPerFileMigrations || runningBuildSupportsPerFileMigrations
+        const listPending = deps.pendingManualMigrations || pendingManualMigrations
+        let supportsPerFile = null
+        let pendingManual   = []
+        try {
+            supportsPerFile = await probe(container, deps)
+            pendingManual   = listPending(path.join(getModuleTmpDir(module), 'src', 'sql', 'migrations'), result.applied)
+        } catch {
+            supportsPerFile = null
+        }
+        throw new Error(refusalMessage(module, coin, network, dbName, missing, { supportsPerFile, pendingManual }))
+    }
 
     return { checked: true, required, missing: [], ok: true }
 }
@@ -286,7 +397,11 @@ module.exports = {
     SKIP_ENV,
     LEDGER_TABLE,
     migrationDeclaresDeployPrecondition,
+    migrationMode,
     listDeployPreconditionMigrations,
+    pendingManualMigrations,
+    runningBuildSupportsPerFileMigrations,
+    refusalMessage,
     // Exported for the unit suite: the refusal path hinges on an unreachable
     // database returning `unreadable` rather than throwing past the guard, and
     // that is a property of the real driver call, not of a stub.

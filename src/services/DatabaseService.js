@@ -30,7 +30,7 @@ const { sleep, redactSecrets }    = require('../utils/helpers')
 const { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../utils/sqlSafety')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort } = require('./ConfigService')
-const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName } = require('./DockerService')
+const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName } = require('./DockerService')
 const { assertNoDbCredentialDrift, isDbCredentialDriftError } = require('./DbCredentialDrift')
 const { statusChanged }           = require('./StatusService')
 const {
@@ -248,14 +248,40 @@ async function _pingMariaDb({ host, port, root_user, root_password }) {
     }
 }
 
+// Read a mariadb client option string the way the client itself reads argv:
+// short flags cluster, so "-BN" means "-B -N". The docker path hands this same
+// string to a real client that clusters (executeDockerMariaDbCommand splits it
+// straight into argv), and the native helper below claims to mirror it, so a
+// clustered spelling must not quietly mean "not batch mode": that returns '' for
+// a SELECT, and every caller parseInts '' into NaN, which compares false against
+// every threshold and reads as "nothing found" (an absent halt marker, an empty
+// database). Only the flags this helper implements are recognized; an unknown
+// one is ignored exactly as it is today.
+function parseMariaDbClientOptions(commandOptions) {
+    let batchMode = false
+    let noHeaders = false
+    for (const token of String(commandOptions || '').trim().split(/\s+/)) {
+        if (!token || token[0] !== '-') continue
+        if (token.startsWith('--')) {
+            if (token === '--batch')             batchMode = true
+            if (token === '--skip-column-names') noHeaders = true
+            continue
+        }
+        // A short-flag token is a cluster of single letters ("-BN" == "-B -N").
+        if (token.includes('B')) batchMode = true
+        if (token.includes('N')) noHeaders = true
+    }
+    return { batchMode, noHeaders }
+}
+
 // Execute a single SQL statement against the external (host-native) MariaDB
 // as the root user. Mirrors the interface of executeDockerMariaDbCommand
 // so callers can switch on EXTERNAL_DB without changing their structure.
-// commandOptions is honored for "-B -N" (batch, no-headers) which existing
-// callers use to parse single-value queries.
+// commandOptions is honored for batch/no-headers ("-B -N", the clustered
+// "-BN", and the long forms) which existing callers use to parse single-value
+// queries.
 async function executeNativeMariaDbCommand(externalCfg, command, commandOptions = "") {
-    const batchMode = /(^|\s)-B(\s|$)/.test(commandOptions) || /(^|\s)--batch(\s|$)/.test(commandOptions)
-    const noHeaders = /(^|\s)-N(\s|$)/.test(commandOptions) || /(^|\s)--skip-column-names(\s|$)/.test(commandOptions)
+    const { batchMode, noHeaders } = parseMariaDbClientOptions(commandOptions)
 
     const conn = await mariadb.createConnection({
         host:          externalCfg.host,
@@ -1019,11 +1045,36 @@ async function buildDatabaseModule(coin, network) {
         // allocated". Lazy require avoids a load-time cycle (ModuleService
         // requires this module at top).
         // Name-keyed cleanup immediately before `docker run --name`, making
-        // (re)creation idempotent against a leftover carcass this registry-gated
-        // branch (`if (!existingId)`) cannot see: a container that exists but
-        // whose registry insert failed on an earlier run. Runs before the
-        // port-conflict check so this container's own carcass never self-flags
-        // as a conflict (uuid:9533ee7a).
+        // (re)creation idempotent against a leftover `Created`-state carcass.
+        // Runs before the port-conflict check so this container's own carcass
+        // never self-flags as a conflict (uuid:9533ee7a).
+        //
+        // Gated on a POSITIVE absence, unlike the module and crypto-node install
+        // paths that share this shape (ModuleService.buildAndUp,
+        // NodeService.buildCryptoNode), because their target container is
+        // disposable and this one is the stack's only persistent data store: it
+        // holds xchain_node.modules plus every per-coin decoder/indexer schema,
+        // on an anonymous volume a recreate orphans.
+        //
+        // The branch condition is NOT evidence of absence. It reads
+        // checkIfDatabaseModuleExists, which swallows every error and also
+        // answers null on any inspect output that is not clean 64-hex, so a
+        // daemon hiccup, a slow inspect, or a container whose State probe failed
+        // all arrive here looking exactly like a fresh install, and the
+        // force-remove below would then be `docker rm -f` against a LIVE MariaDB.
+        // So re-probe and demand docker's own "no such container" before
+        // deleting anything, the same fail-safe StatusService.isContainerGoneError
+        // applies before dropping a registry row (uuid:8a3e5182).
+        const dbPresence = await probeContainerPresenceByName(containerPrefix)
+        if (dbPresence !== 'gone') {
+            throw new Error(
+                "Refusing to (re)create the MariaDB container: docker reports '" + dbPresence + "' for container '" +
+                containerPrefix + "', which is not a confirmed absence. This install path force-removes that container " +
+                "and would orphan the database volume holding every module's data. Run `docker inspect " + containerPrefix +
+                "` and `docker ps -a` to see what is actually there, then re-run once docker answers cleanly. " +
+                "If the container is genuinely dead and you want it rebuilt from empty, remove it yourself first."
+            )
+        }
         try {
             await forceRemoveContainerByName(containerPrefix)
         } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }

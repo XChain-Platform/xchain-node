@@ -96,23 +96,26 @@ const projectFolders = {
     "xchain-vm":            "XChainVM"
 }
 
+// HTTPS, not SSH: the repos are public, and a fresh machine has no GitHub SSH
+// key, so git@ URLs fail the very first module clone of a documented install.
+// SSH/fork/local-source workflows go through XCHAIN_NODE_MODULES_URLS_OVERRIDE.
 const modulesUrls = {
-    "xchain-encoder":       "git@github.com:XChain-Platform/xchain-encoder.git",
-    "xchain-decoder":       "git@github.com:XChain-Platform/xchain-decoder.git",
-    "xchain-utxo-tracker":  "git@github.com:XChain-Platform/xchain-utxo-tracker.git",
-    "xchain-indexer":       "git@github.com:XChain-Platform/xchain-indexer.git",
-    "xchain-regtest-miner": "git@github.com:XChain-Platform/xchain-regtest-miner.git",
-    "xchain-hub":           "git@github.com:XChain-Platform/xchain-hub.git",
-    "xchain-explorer":      "git@github.com:XChain-Platform/xchain-explorer.git",
-    "xchain-e2e-test":      "git@github.com:XChain-Platform/xchain-e2e-test.git",
-    "xchain-sync":          "git@github.com:XChain-Platform/xchain-sync.git",
-    "xchain-vm":            "git@github.com:XChain-Platform/xchain-vm.git",
+    "xchain-encoder":       "https://github.com/XChain-Platform/xchain-encoder.git",
+    "xchain-decoder":       "https://github.com/XChain-Platform/xchain-decoder.git",
+    "xchain-utxo-tracker":  "https://github.com/XChain-Platform/xchain-utxo-tracker.git",
+    "xchain-indexer":       "https://github.com/XChain-Platform/xchain-indexer.git",
+    "xchain-regtest-miner": "https://github.com/XChain-Platform/xchain-regtest-miner.git",
+    "xchain-hub":           "https://github.com/XChain-Platform/xchain-hub.git",
+    "xchain-explorer":      "https://github.com/XChain-Platform/xchain-explorer.git",
+    "xchain-e2e-test":      "https://github.com/XChain-Platform/xchain-e2e-test.git",
+    "xchain-sync":          "https://github.com/XChain-Platform/xchain-sync.git",
+    "xchain-vm":            "https://github.com/XChain-Platform/xchain-vm.git",
     // Not an installable service; listed so LIBRARY_BUNDLES can stage it
     // into the xchain-e2e-test build context (test:sdk suites).
-    "xchain-sdk":           "git@github.com:XChain-Platform/xchain-sdk.git",
+    "xchain-sdk":           "https://github.com/XChain-Platform/xchain-sdk.git",
     // Also not installable; staged into the e2e-test build context so the
     // template suites (amm/escrow/crowdsale/vesting) can load their source.
-    "xchain-contracts":     "git@github.com:XChain-Platform/xchain-contracts.git"
+    "xchain-contracts":     "https://github.com/XChain-Platform/xchain-contracts.git"
 }
 
 // Optional env-var override for local-source workflows. Lets you point any

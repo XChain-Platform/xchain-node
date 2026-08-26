@@ -510,6 +510,30 @@ async function forceRemoveContainerByName(name) {
     })
 }
 
+// Tri-state presence probe by NAME: 'exists', 'gone', or 'unknown'.
+//
+// Every other lookup in this codebase collapses "genuinely absent", "daemon
+// hiccup", "inspect timed out" and "payload I could not parse" into one falsy
+// answer. That is right for a READ and wrong for a DELETE: a caller about to
+// force-remove a STATEFUL container needs positive evidence there is nothing
+// there to destroy, and a falsy lookup is not that evidence. Classification
+// follows the house rule already stated at StatusService.isContainerGoneError:
+// docker SAYING "no such object/container" is the only thing that means gone,
+// and everything else is 'unknown' and must be treated as possibly-live.
+function probeContainerPresenceByName(name) {
+    return new Promise((resolve) => {
+        execFile('docker', ['inspect', '--type', 'container', '--format', '{{.Id}}', name], (error, stdout, stderr) => {
+            if (error) {
+                const text = String((stderr || '') + ' ' + (error.stderr || '') + ' ' + (error.message || '')).toLowerCase()
+                resolve(/no such (object|container)/.test(text) ? 'gone' : 'unknown')
+                return
+            }
+            // A clean exit that did not yield an id is not an absence either.
+            resolve(/^[a-f0-9]{64}$/.test(String(stdout).trim()) ? 'exists' : 'unknown')
+        })
+    })
+}
+
 // Bind mounts of a container, by name, as [{ source, destination }]. Returns []
 // when the container does not exist (or inspect output is unparseable): the
 // caller (the mount-drift guard in NodeService.buildCryptoNode) treats "no
@@ -583,6 +607,7 @@ module.exports = {
     killContainer,
     getContainerBindMounts,
     forceRemoveContainerByName,
+    probeContainerPresenceByName,
     execContainer,
     shellContainer,
     logContainer,

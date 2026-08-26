@@ -373,6 +373,54 @@ describe('DockerService', function () {
         })
     })
 
+    // uuid:8a3e5182. A caller about to DELETE a stateful container needs positive
+    // evidence of absence, and every other lookup here answers falsy for "absent",
+    // "daemon hiccup" and "unparseable payload" alike. Only docker's own
+    // "no such container" may read as gone.
+    describe('probeContainerPresenceByName()', function () {
+        function probeWith(handler) {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args).to.deep.equal(['inspect', '--type', 'container', '--format', '{{.Id}}', 'xchain-node-database'])
+                handler(cb)
+            })
+            return loadDockerService(stubs).probeContainerPresenceByName('xchain-node-database')
+        }
+
+        const ID = 'a'.repeat(64)
+
+        it("reports 'exists' on a clean 64-hex id", async function () {
+            expect(await probeWith(cb => cb(null, ID + '\n', ''))).to.equal('exists')
+        })
+
+        it("reports 'gone' only when docker says no such container", async function () {
+            expect(await probeWith(cb => {
+                cb(new Error('Command failed'), '', 'Error: No such object: xchain-node-database\n')
+            })).to.equal('gone')
+        })
+
+        it("reports 'unknown' when the daemon is unreachable", async function () {
+            expect(await probeWith(cb => {
+                cb(new Error('Cannot connect to the Docker daemon at unix:///var/run/docker.sock'), '',
+                   'Cannot connect to the Docker daemon at unix:///var/run/docker.sock')
+            })).to.equal('unknown')
+        })
+
+        it("reports 'unknown' on a timeout, which carries no absence evidence", async function () {
+            expect(await probeWith(cb => {
+                const err = new Error('spawn ETIMEDOUT')
+                err.killed = true
+                cb(err, '', '')
+            })).to.equal('unknown')
+        })
+
+        it("reports 'unknown' on a clean exit that yielded no id", async function () {
+            expect(await probeWith(cb => cb(null, 'Warning: something\n', ''))).to.equal('unknown')
+        })
+    })
+
     describe('getStatusFromContainer()', function () {
         it('runs docker inspect and returns parsed JSON', async function () {
             const stubs = makeStubs()
