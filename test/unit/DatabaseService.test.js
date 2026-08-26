@@ -1349,6 +1349,51 @@ describe('DatabaseService', function () {
             expect(executedCommands.find(c => c && c.includes('DrillB')), 'no wildcard grant on mainnet').to.not.exist;
         });
 
+        it('grants SLAVE MONITOR to indexer and decoder accounts, on MAINNET too', async function () {
+            // Unlike the DrillB grant above, this one is NOT withheld from mainnet: a
+            // silently stalled replica does the most damage there, and the privilege is a
+            // read-only view of replication topology rather than data access.
+            for (const [module, coin, network, dbName, user] of [
+                ['xchain-indexer', 'bitcoin',  'mainnet', 'XChain_BTC_Mainnet_Indexer',  'xchain_indexer_bitcoin_mainnet'],
+                ['xchain-decoder', 'litecoin', 'testnet', 'XChain_LTC_Testnet_Decoder',  'xchain_decoder_litecoin_testnet'],
+            ]) {
+                const stubs = makeStubs();
+                const executedCommands = [];
+                stubs.spawn.callsFake(fakeSpawn((sql) => {
+                    executedCommands.push(sql);
+                    if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' };
+                    if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' };
+                    return { stdout: '' };
+                }));
+                const ds = loadDatabaseService(stubs);
+                await ds.addUserPasswordToDatabase(module, coin, network, dbName, user, 'test-pass');
+                const grant = executedCommands.find(c => c && c.includes('SLAVE MONITOR'));
+                expect(grant, module + ' on ' + network + ' must be able to read replication status').to.exist;
+                expect(grant).to.include('ON *.*');
+                expect(grant, 'the grant must name the account being provisioned').to.include(user);
+            }
+        });
+
+        it('withholds SLAVE MONITOR from the hub account', async function () {
+            // Scope check with teeth: the grant is for the accounts xchain-sync actually
+            // polls. A blanket "every account provisioned here" version of the fix would
+            // pass the test above and quietly widen the hub's privileges too.
+            const stubs = makeStubs();
+            const executedCommands = [];
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executedCommands.push(sql);
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' };
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' };
+                return { stdout: '' };
+            }));
+            const ds = loadDatabaseService(stubs);
+            await ds.addUserPasswordToDatabase(
+                'xchain-hub', 'bitcoin', 'mainnet',
+                'xchain_node', 'xchain_node_user', 'test-pass'
+            );
+            expect(executedCommands.find(c => c && c.includes('SLAVE MONITOR')), 'hub does not poll replicas').to.not.exist;
+        });
+
         it('rotates the password via ALTER USER on the docker path when the user does not match', async function () {
             // userCount == 0 covers both "user absent" and "user exists with a different
             // password". The docker path must ALTER USER (not just CREATE USER IF NOT EXISTS,
@@ -1560,6 +1605,34 @@ describe('DatabaseService', function () {
                 )
                 const mvhQuery = queries.find(q => q && q.includes('MVH'))
                 expect(mvhQuery).to.exist
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+
+        it('grants SLAVE MONITOR to an indexer account via native mariadb (EXTERNAL_DB)', async function () {
+            // The native-DB boxes are the ones whose schemas can be fed by real MariaDB
+            // replication, so the probe this unblocks is the only signal separating a
+            // stopped SQL thread from a quiet chain.
+            const stubs = makeStubs()
+            const queries = []
+            stubs.mariadb._fakeConn.query.callsFake((sql) => {
+                queries.push(sql)
+                if (sql.includes('SELECT COUNT')) return Promise.resolve([['0']])
+                if (sql.includes('SHOW GRANTS')) return Promise.resolve([['GRANT USAGE ON *.* TO user']])
+                return Promise.resolve([])
+            })
+            const saved = setExtEnv()
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                await ds.addUserPasswordToDatabase(
+                    'xchain-indexer', 'bitcoin', 'mainnet',
+                    'XChain_BTC_Mainnet_Indexer', 'xchain_indexer_bitcoin_mainnet', 'test-pass', true
+                )
+                const grant = queries.find(q => q && q.includes('SLAVE MONITOR'))
+                expect(grant).to.exist
+                expect(grant).to.include('ON *.*')
+                expect(grant, 'the grant must name the account being provisioned').to.include('xchain_indexer_bitcoin_mainnet')
             } finally {
                 restoreEnv(saved)
             }

@@ -594,6 +594,19 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 console.log(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
             }
 
+            // The sync server polls these accounts for the replication engine's view of
+            // their freshness, a read MariaDB 10.5 moved into SLAVE MONITOR: without it the
+            // probe fails closed and publishes every chain as stale. Global by nature (no
+            // per-schema form) but read-only, and granted here because a container recreate
+            // reprovisions the account and would otherwise drop it.
+            if (module === XChainService.XCHAIN_INDEXER || module === XChainService.XCHAIN_DECODER) {
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                    "GRANT SLAVE MONITOR ON *.* TO " + mariadbUser
+                )
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
+                console.log(redactSecrets("Replication-status read permission granted to " + mariadbUser + "!"))
+            }
+
             // Same shape as the MVH grant above, for the other suite that needs a
             // throwaway schema without a privileged account: the two-node parity drills
             // (xchain-e2e-test scripts/bet-parity-node.sh) clone the live indexer
@@ -692,6 +705,19 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
                 console.log(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
+            }
+
+            // See the docker branch above: the same replication-status read grant. It
+            // matters MORE here, not less: an EXTERNAL_DB box is exactly where the served
+            // schemas can be fed by native MariaDB replication, so the probe this grant
+            // unblocks is the only thing that can tell a stopped SQL thread apart from a
+            // quiet chain.
+            if (module === XChainService.XCHAIN_INDEXER || module === XChainService.XCHAIN_DECODER) {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "GRANT SLAVE MONITOR ON *.* TO " + mariadbUser
+                )
+                await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
+                console.log(redactSecrets("Replication-status read permission granted to " + mariadbUser + "!"))
             }
 
             // See the docker branch above: the same DrillB parity grant, since the
