@@ -991,7 +991,7 @@ describe('ConfigService', function () {
                 })
             })
 
-            // The four PRICE v2 batch knobs (D24): non-consensus, so a passthrough
+            // The four PRICE batch knobs: non-consensus, so a passthrough
             // omission just leaves the hub on its own default rather than drifting
             // a federation, but an operator install still needs them to reach the
             // container to tune window/grace/timeout/buffer at all.

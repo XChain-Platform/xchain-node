@@ -753,7 +753,7 @@ async function getDefaultConfig(module, coin, network) {
             // a live drill from waiting 10 minutes per finalization; real networks
             // leave them unset and take the hub defaults.
             "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
-            // PRICE v2 batch-publisher knobs (window length, finalization grace,
+            // PRICE batch-publisher knobs (window length, finalization grace,
             // co-sign timeout, buffer cap). Deliberately NOT consensus-grouped in
             // HubConsensusEnvGuard: batch validation is range-agnostic, so two hubs
             // running different window sizes just elect different leaders and may

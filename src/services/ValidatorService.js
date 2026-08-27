@@ -280,6 +280,13 @@ function getCapabilityConfigMountDir() {
 
 module.exports = {
     initValidator,
+    // Exported so a multi-validator deployment (the project's own colocated seed
+    // validators) can generate the SAME capabilities.json a community operator
+    // gets from `validator init`, instead of hand-rolling a second copy that
+    // drifts. One hub per xchain-node install makes `init` itself unusable there,
+    // but the CONFIG has no reason to differ, and a divergent MIN_STAKE here is a
+    // consensus fork rather than a local misconfiguration.
+    defaultCapabilityConfig,
     getValidatorSettings,
     getValidatorEnv,
     getCapabilityConfigHostPath,
