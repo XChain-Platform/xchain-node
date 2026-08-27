@@ -480,6 +480,68 @@ describe('ConfigService', function () {
                 expect(files[coinSidecar] || '').to.include('NODE_USER=' + gluedUser)  // relocated to the sidecar
             })
 
+            // A validator-mode hub REFUSES TO BOOT with no HUB_API_KEY, and `validator init`
+            // now leaves one in the shared hub sidecar. These pin the consumption half: the
+            // generated credential has to reach the hub container, and every service on the
+            // host that authenticates to that hub has to present the SAME value.
+            describe('HUB_API_KEY from the shared hub sidecar', function () {
+                // Not a credential: a fixture value chosen to be unmistakable in a diff.
+                const SIDECAR_FIXTURE = 'sidecar-fixture-value-not-a-credential'
+                let saved
+
+                beforeEach(function () {
+                    saved = {}
+                    for (const k of ['HUB_API_KEY', 'HUB_ALLOW_UNAUTHENTICATED', 'HUB_NETWORK']) {
+                        saved[k] = process.env[k]
+                        delete process.env[k]
+                    }
+                })
+                afterEach(function () {
+                    for (const [k, v] of Object.entries(saved)) {
+                        if (v === undefined) delete process.env[k]
+                        else process.env[k] = v
+                    }
+                })
+
+                it('deploys the hub KEYED off the sidecar instead of declaring it keyless', async function () {
+                    const { cs } = makeMemoryConfigService({ [hubSidecar]: 'HUB_API_KEY=' + SIDECAR_FIXTURE + '\n' })
+                    const cfg = await cs.getDefaultConfig(HUB_MODULE_NAME, '', '')
+                    expect(cfg['HUB_API_KEY']).to.equal(SIDECAR_FIXTURE)
+                    expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
+                })
+
+                // Otherwise the fix just moves the dead node downstream: a keyed hub 401s
+                // the co-located indexer's chain-tip writes.
+                it('gives the co-located indexer the same key the hub runs with', async function () {
+                    const { cs } = makeMemoryConfigService({ [hubSidecar]: 'HUB_API_KEY=' + SIDECAR_FIXTURE + '\n' })
+                    const hubCfg = await cs.getDefaultConfig(HUB_MODULE_NAME, '', '')
+                    const idxCfg = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'testnet')
+                    const syncCfg = await cs.getDefaultConfig(SYNC_MODULE_NAME, '', '')
+                    // Named explicitly, not just compared: two services that both resolved
+                    // NOTHING are equal too, and that is the outage this pins against.
+                    expect(hubCfg['HUB_API_KEY']).to.equal(SIDECAR_FIXTURE)
+                    expect(idxCfg['HUB_API_KEY']).to.equal(SIDECAR_FIXTURE)
+                    expect(syncCfg['HUB_API_KEY']).to.equal(SIDECAR_FIXTURE)
+                })
+
+                it('yields to a host-env key (an operator override is never overwritten)', async function () {
+                    process.env.HUB_API_KEY = 'host-env-fixture-value'
+                    const { cs } = makeMemoryConfigService({ [hubSidecar]: 'HUB_API_KEY=' + SIDECAR_FIXTURE + '\n' })
+                    const cfg = await cs.getDefaultConfig(HUB_MODULE_NAME, '', '')
+                    expect(cfg['HUB_API_KEY']).to.equal('host-env-fixture-value')
+                })
+
+                // A node that never ran `validator init` must deploy exactly as before:
+                // this path reads, it never mints.
+                it('leaves a node with no generated key on its prior keyless declaration', async function () {
+                    const { cs, files } = makeMemoryConfigService()
+                    const cfg = await cs.getDefaultConfig(HUB_MODULE_NAME, '', '')
+                    expect(cfg['HUB_API_KEY']).to.equal(undefined)
+                    expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal('true')
+                    expect(files[hubSidecar] || '').to.not.include('HUB_API_KEY=')
+                })
+            })
+
             it('HUB_DB_PASS falls back to the shared static default when rotation cannot apply it', async function () {
                 const { cs, files } = makeMemoryConfigService()
                 const coinCfg = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
@@ -1031,6 +1093,107 @@ describe('ConfigService', function () {
                     for (const k of ORACLE_BATCH_VARS) expect(config[k]).to.be.undefined
                 })
             })
+        })
+    })
+
+    // The credential `validator init` mints so the hub can boot at all. Driven against a
+    // REAL temp directory: the whole value of this function is the file it leaves behind -
+    // its mode, its other keys, its stability across runs - and a stubbed fs shows none of
+    // that. Every assertion here is on SHAPE read back out of the file; the generated value
+    // is never returned by the code and is never rendered by a test, so a failing assertion
+    // cannot print a live credential.
+    describe('ensureHubApiKey()', function () {
+        const os     = require('os')
+        const realFs = require('fs')
+        const crypto = require('crypto')
+        let dir
+
+        function serviceWithConfigDir(d) {
+            return proxyquire('../../src/services/ConfigService', {
+                '../config/constants': { ...require('../../src/config/constants'), configDir: d }
+            })
+        }
+
+        function sidecarPath() { return path.join(dir, 'hub.local') }
+
+        function readKeyShape() {
+            const line = realFs.readFileSync(sidecarPath(), 'utf8')
+                .split(/\r?\n/).find(l => l.startsWith('HUB_API_KEY='))
+            if (!line) return null
+            const value = line.slice('HUB_API_KEY='.length)
+            return { length: value.length, hex: /^[0-9a-f]+$/.test(value) }
+        }
+
+        // Identity of the file's CONTENT without holding the content: proof that a second
+        // run left the credential untouched, printable in a failure message.
+        function sidecarDigest() {
+            return crypto.createHash('sha256').update(realFs.readFileSync(sidecarPath())).digest('hex')
+        }
+
+        beforeEach(function () { dir = realFs.mkdtempSync(path.join(os.tmpdir(), 'xchain-hub-api-key-')) })
+        afterEach(function () { realFs.rmSync(dir, { recursive: true, force: true }) })
+
+        it('generates a key into the shared hub sidecar on a host that has none', async function () {
+            const cs = serviceWithConfigDir(dir)
+            const result = await cs.ensureHubApiKey()
+            expect(result.generated).to.be.true
+            expect(result.path).to.equal(sidecarPath())
+            expect(readKeyShape()).to.deep.equal({ length: 64, hex: true })
+        })
+
+        it('locks the sidecar to 0600, so no other local user can read the credential', async function () {
+            const cs = serviceWithConfigDir(dir)
+            await cs.ensureHubApiKey()
+            expect(realFs.statSync(sidecarPath()).mode & 0o777).to.equal(0o600)
+        })
+
+        // The strongest no-leak guarantee available: a value the function does not hand
+        // back cannot be logged, echoed into a report, or asserted on by mistake.
+        it('never returns the key itself, only where it lives', async function () {
+            const cs = serviceWithConfigDir(dir)
+            const result = await cs.ensureHubApiKey()
+            expect(Object.keys(result).sort()).to.deep.equal(['generated', 'path'])
+            expect(JSON.stringify(result)).to.not.match(/[0-9a-f]{64}/)
+        })
+
+        // Rotating on a re-run would 401 every indexer and explorer already configured
+        // with the old key, which is a worse outage than the one this closes.
+        it('reuses an existing key and leaves the file byte-identical', async function () {
+            const cs = serviceWithConfigDir(dir)
+            await cs.ensureHubApiKey()
+            const before = sidecarDigest()
+            const second = await cs.ensureHubApiKey()
+            expect(second.generated).to.be.false
+            expect(second.path).to.equal(sidecarPath())
+            expect(sidecarDigest()).to.equal(before)
+        })
+
+        it('adopts a key the operator wrote by hand rather than replacing it', async function () {
+            realFs.writeFileSync(sidecarPath(), 'HUB_API_KEY=operator-written-fixture\n', { mode: 0o600 })
+            const before = sidecarDigest()
+            const cs = serviceWithConfigDir(dir)
+            const result = await cs.ensureHubApiKey()
+            expect(result.generated).to.be.false
+            expect(sidecarDigest()).to.equal(before)
+        })
+
+        // The same file already carries HUB_DB_PASS. Clobbering it would take the hub's
+        // database down as the price of giving it an API key.
+        it('preserves the other credentials already in the sidecar', async function () {
+            realFs.writeFileSync(sidecarPath(), 'HUB_DB_PASS=db-fixture-value\n', { mode: 0o600 })
+            const cs = serviceWithConfigDir(dir)
+            await cs.ensureHubApiKey()
+            const body = realFs.readFileSync(sidecarPath(), 'utf8')
+            expect(body).to.include('HUB_DB_PASS=db-fixture-value')
+            expect(readKeyShape()).to.deep.equal({ length: 64, hex: true })
+        })
+
+        it('creates the config directory when it does not exist yet', async function () {
+            const nested = path.join(dir, 'not-created-yet')
+            const cs = serviceWithConfigDir(nested)
+            const result = await cs.ensureHubApiKey()
+            expect(result.generated).to.be.true
+            expect(realFs.existsSync(path.join(nested, 'hub.local'))).to.be.true
         })
     })
 

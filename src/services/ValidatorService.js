@@ -24,6 +24,13 @@
  *   hub-caps/capabilities.json  HUB_CAPABILITY_CONFIG: MIN_STAKE thresholds +
  *                               self-test blocks
  *
+ * The hub's API key is deliberately NOT one of these. A hub refuses to boot
+ * without HUB_API_KEY unless keyless operation is declared, so init mints one,
+ * but it belongs to the HOST rather than to this validator identity: the local
+ * indexer and the shared services authenticate to the same hub with the same
+ * value. It therefore lives in the shared 0600 sidecar config/hub.local
+ * alongside HUB_DB_PASS (ConfigService.ensureHubApiKey).
+ *
  * Why capabilities.json sits in its own `hub-caps/` subdirectory rather than
  * beside the other two: the hub container mounts it, and a SINGLE-FILE bind
  * mount breaks `docker cp` against that container forever. Docker's copy path
@@ -45,6 +52,7 @@ const fs   = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { configDir } = require('../config/constants')
+const { ensureHubApiKey } = require('./ConfigService')
 
 const VALIDATOR_DIR   = path.join(configDir, 'validator')
 const KEY_FILE        = path.join(VALIDATOR_DIR, 'signing.key')
@@ -172,11 +180,25 @@ function assertCapsDirIsolated() {
     }
 }
 
+// One line of operator-facing output naming WHERE the hub credential lives. The value
+// is never printed: an API key in a terminal is an API key in a scrollback buffer.
+function reportHubApiKey(hubApiKey) {
+    console.log('  hub API key : ' + hubApiKey.path
+        + ' (mode 0600, key HUB_API_KEY, ' + (hubApiKey.generated ? 'generated now' : 'already present, reused') + ')')
+}
+
 // Generate a key + write all validator files. Idempotent guard via `force`.
 async function initValidator(opts = {}) {
+    // A validator-mode hub REFUSES TO BOOT with no HUB_API_KEY, so init has to leave one
+    // behind or this whole ceremony ends in a node that cannot start. Done BEFORE the
+    // already-initialized early return, because a node initialized before this existed is
+    // exactly the node sitting in that refused-boot state; re-running init repairs it.
+    const hubApiKey = await ensureHubApiKey()
+
     if (isInitialized() && !opts.force) {
         const existing = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
         console.log('Validator already initialized. Pubkey: ' + existing.pubkey)
+        reportHubApiKey(hubApiKey)
         console.log('Re-run with --force to regenerate (this creates a NEW key; you would need to re-stake).')
         return existing
     }
@@ -220,6 +242,7 @@ async function initValidator(opts = {}) {
     console.log('  signing key : ' + KEY_FILE + ' (mode 0600, keep this secret and back it up)')
     console.log('  settings    : ' + SETTINGS_FILE)
     console.log('  capabilities: ' + CAPS_FILE)
+    reportHubApiKey(hubApiKey)
     console.log('')
     console.log('  PUBKEY (stake XCHAIN to this to qualify capabilities):')
     console.log('    ' + pubkey)

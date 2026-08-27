@@ -269,7 +269,7 @@ async function dbPasswordCanRotate() {
 // and persisting it on first use. getDefaultConfig() calls are sequential in the installer,
 // so the read-or-generate is not racy in practice.
 async function getOrCreateHubDbPass() {
-    const hubLocalPath = path.resolve(configDir, "hub.local")
+    const hubLocalPath = hubSidecarPath()
     let pass = await readSidecarValue(hubLocalPath, "HUB_DB_PASS")
     if (!pass) {
         // Only mint a random shared password where the rotation can apply it; otherwise use
@@ -282,6 +282,51 @@ async function getOrCreateHubDbPass() {
         }
     }
     return pass
+}
+
+// Path of the shared hub sidecar. Not per coin/network: the hub is one service on the
+// host and its credentials are shared by every stack that talks to it.
+function hubSidecarPath() {
+    return path.resolve(configDir, "hub.local")
+}
+
+/**
+ * Make sure this host has a HUB_API_KEY on disk, generating one on first use.
+ *
+ * A hub refuses to boot with no key unless keyless operation is explicitly declared, so
+ * `validator init` has to leave a credential behind or the documented onboarding path
+ * ends in a node that cannot start. Read-or-generate against the same shared 0600
+ * sidecar the hub DB password uses: one host, one hub credential, and every service
+ * that authenticates to this hub reads it from that file.
+ *
+ * An existing key is REUSED and never rotated, including under `validator init --force`
+ * (which regenerates the signing key). The API key is already configured into indexers
+ * and explorers that write to this hub, so minting a new one behind their back would
+ * 401 all of them.
+ *
+ * Returns the sidecar PATH and whether it just generated, never the key itself: callers
+ * report where the credential lives, and no caller has a reason to print it.
+ *
+ * @returns {Promise<{path: string, generated: boolean}>}
+ */
+async function ensureHubApiKey() {
+    const sidecarPath = hubSidecarPath()
+    const existing = await readSidecarValue(sidecarPath, "HUB_API_KEY")
+    if (existing) return { path: sidecarPath, generated: false }
+    // 32 bytes: the strength the runbook told operators to mint by hand.
+    upsertSidecarValues(sidecarPath, { HUB_API_KEY: crypto.randomBytes(32).toString('hex') })
+    return { path: sidecarPath, generated: true }
+}
+
+// Fill in HUB_API_KEY from the shared sidecar when the host env did not supply one.
+// The hub, the co-located indexer and the shared services must all present the SAME
+// value or their writes 401 against each other, so they resolve it from one file.
+// Host env still wins, and this NEVER mints: generation belongs to `validator init`,
+// so a standalone install with no validator stays keyless exactly as before.
+async function applyHubApiKeyFromSidecar(target) {
+    if (target["HUB_API_KEY"] !== undefined && target["HUB_API_KEY"] !== "") return
+    const key = await readSidecarValue(hubSidecarPath(), "HUB_API_KEY")
+    if (key) target["HUB_API_KEY"] = key
 }
 
 async function getDefaultConfig(module, coin, network) {
@@ -485,11 +530,14 @@ async function getDefaultConfig(module, coin, network) {
             }
             // The indexer pushes chain tips / config to the hub (HUB_API_URL); when that
             // hub enforces HUB_API_KEY, the indexer must present the same key or its writes
-            // 401. Sourced from host env (.env) so it persists across `update`. Unset leaves
-            // the indexer sending no key (keyless, the prior default).
+            // 401. Sourced from host env (.env) so it persists across `update`, then from the
+            // shared hub sidecar so an indexer co-located with a validator hub picks up the
+            // key `validator init` generated. Neither set leaves the indexer sending no key
+            // (keyless, the prior default).
             if (process.env.HUB_API_KEY !== undefined && process.env.HUB_API_KEY !== "") {
                 defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
             }
+            await applyHubApiKeyFromSidecar(defaultValues)
 
             // The hub authenticates to each indexer's federation API (attestation, stake polling,
             // capability snapshots) with <COIN>_INDEXER_API_KEY; the indexer fails closed unless its
@@ -592,11 +640,13 @@ async function getDefaultConfig(module, coin, network) {
         // discovery via getallconfigs, the explorer's hub reads) must present the
         // hub's API key once the hub enforces its sensitive-read tier: getallconfigs
         // 401s keyless when HUB_API_KEY is set hub-side. Sourced from host env so it
-        // persists across `update`, mirroring the indexer's passthrough above. Unset
-        // keeps the prior keyless behavior (fine against a keyless hub).
+        // persists across `update`, then from the shared hub sidecar, mirroring the
+        // indexer's passthrough above. Neither set keeps the prior keyless behavior
+        // (fine against a keyless hub).
         if (process.env.HUB_API_KEY !== undefined && process.env.HUB_API_KEY !== "") {
             defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
         }
+        await applyHubApiKeyFromSidecar(defaultValues)
 
         // The browser wallet calls the hub cross-origin (ping, config reads).
         // The hub disables CORS unless CORS_ORIGIN is set, so a browser wallet is
@@ -822,6 +872,12 @@ async function getDefaultConfig(module, coin, network) {
                 defaultValues[varName] = value
             }
         }
+
+        // `validator init` leaves a generated key in the shared hub sidecar so the
+        // onboarding path produces a hub that BOOTS. Read it here (host env still wins),
+        // before the keyless declaration below: a node that has a credential must deploy
+        // authenticated rather than be handed the escape hatch it no longer needs.
+        await applyHubApiKeyFromSidecar(defaultValues)
 
         // The hub now REFUSES to boot when HUB_API_KEY is unset unless
         // keyless operation is declared with HUB_ALLOW_UNAUTHENTICATED. A managed
@@ -1184,6 +1240,7 @@ module.exports = {
     persistSidecarCreds,
     upsertSidecarValues,
     readSidecarValue,
+    ensureHubApiKey,
     filterCommandParameters,
     resolveArgs
 }
