@@ -753,6 +753,16 @@ async function getDefaultConfig(module, coin, network) {
             // a live drill from waiting 10 minutes per finalization; real networks
             // leave them unset and take the hub defaults.
             "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
+            // PRICE v2 batch-publisher knobs (window length, finalization grace,
+            // co-sign timeout, buffer cap). Deliberately NOT consensus-grouped in
+            // HubConsensusEnvGuard: batch validation is range-agnostic, so two hubs
+            // running different window sizes just elect different leaders and may
+            // double-publish overlapping windows, which is idempotent at ingest and
+            // is the same posture today's publisher failover already has. They
+            // change what a leader PROPOSES, never what any node ACCEPTS. Passed
+            // through so the host env survives a hub container regenerate.
+            "ORACLE_BATCH_WINDOW_ROUNDS", "ORACLE_BATCH_GRACE_MS",
+            "ORACLE_BATCH_SIGN_TIMEOUT_MS", "ORACLE_BATCH_BUFFER_MAX_ROUNDS",
             // Per-IP request/min cap on the hub's express API (default 100). Too low
             // for legitimate multi-indexer re-bootstrap: every indexer on a box shares
             // one source IP, so a fleet bootstrapping HubDbSync tables (oracle_prices,
