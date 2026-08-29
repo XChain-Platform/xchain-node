@@ -119,11 +119,17 @@ async function checkIfDatabaseModuleExists(coin, network) {
     }
 }
 
-async function checkIfDatabaseIsReady(user, userPassword, database = null) {
+// The 10x10s default is a POST-`docker run` readiness wait: mariadb takes tens of
+// seconds to accept connections on a cold container. A caller using this to answer
+// "do these credentials still work" is asking a different question, whose negative
+// answer (ER_ACCESS_DENIED, unknown database) is not transient, so it must be able
+// to buy a shorter budget instead of paying ~100s to learn it. Same reasoning the
+// env-override ping and the provisioning precheck already act on above.
+async function checkIfDatabaseIsReady(user, userPassword, database = null, { tries = 10, retryDelay = 10000 } = {}) {
     const mariadbContainerId = await getDatabaseContainerId()
 
-    let tries = 10
-    while (tries > 0) {
+    let remaining = tries
+    while (remaining > 0) {
         try {
             const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', user], { interactive: true })
             if (database) args.push('-D', database)
@@ -131,8 +137,8 @@ async function checkIfDatabaseIsReady(user, userPassword, database = null) {
             await execFileAsync('docker', args, { env: mariadbEnv(userPassword) })
             return true
         } catch {
-            tries--
-            if (tries > 0) await sleep(10000)
+            remaining--
+            if (remaining > 0) await sleep(retryDelay)
         }
     }
     return false
@@ -1214,7 +1220,17 @@ async function ensureXchainNodeAccess() {
     }
 
     if (existing) {
-        const works = await checkIfDatabaseIsReady(existing.user, existing.password, XCHAIN_NODE_DB)
+        // A credential probe, not a readiness wait, so it buys a short budget: the
+        // failure this asks about (credentials.json copied from another host, or a
+        // reset DB container) is permanent, and on the default 10x10s budget every
+        // sleep was spent before reaching the reprovision below. preCheck calls this
+        // while the global command lock is held (precheck.js -> cli.js), so those
+        // ~100s blocked every other xchain-node invocation on the box with no output.
+        // Two attempts, not one: a container whose socket is a beat behind still
+        // gets a second chance, and the cost of losing that race is bounded anyway
+        // (the reprovision re-stamps existing.password through idempotent DDL).
+        const works = await checkIfDatabaseIsReady(existing.user, existing.password, XCHAIN_NODE_DB,
+            { tries: 2, retryDelay: 1000 })
         if (works) return existing
         console.log("Stored xchain-node credentials no longer work against this MariaDB (auth or xchain_node DB missing); reprovisioning")
     }
