@@ -60,7 +60,7 @@ xchain-node stop all bitcoin regtest
 xchain-node start all bitcoin regtest
 ```
 
-See [`README.md`](./README.md) and the [Operations doc](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/OPERATIONS.md) for the full CLI reference.
+See [`README.md`](./README.md) and the [Operations doc](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/operations.md) for the full CLI reference.
 
 ---
 
