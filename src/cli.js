@@ -62,6 +62,20 @@ function installUnhandledRejectionHandler() {
     })
 }
 
+// Same backstop as above, for a synchronous throw that escapes an action
+// handler instead of a rejection. Without this, node prints its own uncaught
+// exception dump and the process state past that point is unknown, so this
+// still exits non-zero rather than letting the CLI continue.
+function installUncaughtExceptionHandler() {
+    process.on('uncaughtException', (err) => {
+        const detail = err instanceof Error
+            ? (err.stack || err.message)
+            : String(err)
+        console.error('xchain-node: command failed: ' + detail)
+        process.exit(1)
+    })
+}
+
 // Which ref, if any, the command about to run will install its modules at.
 //
 // Only `install` and `update` take one; every other command yields null and
@@ -81,6 +95,7 @@ function refForPreCheck(commandName, actionCommand) {
 
 async function parseCommand() {
     installUnhandledRejectionHandler()
+    installUncaughtExceptionHandler()
     const program = new Command()
 
     const commandsNeedingVersions = ['install', 'update', 'reinstall']
@@ -616,12 +631,13 @@ Notes:
     program.parse(process.argv)
 }
 
-// installUnhandledRejectionHandler is exported for its unit test only; the CLI
-// installs it itself at the top of parseCommand().
+// installUnhandledRejectionHandler and installUncaughtExceptionHandler are
+// exported for their unit tests only; the CLI installs both itself at the top
+// of parseCommand().
 // refForPreCheck is exported for its unit test: it decides which tree the hub is
 // built from, and the defect it fixes was invisible in every log until a deploy
 // line named the wrong branch.
-module.exports = { parseCommand, installUnhandledRejectionHandler, refForPreCheck }
+module.exports = { parseCommand, installUnhandledRejectionHandler, installUncaughtExceptionHandler, refForPreCheck }
 
 // Allow running this file directly (`node src/cli.js <cmd>`) as well as via the
 // bin entrypoint `src/index.js`. When cli.js is required as a module (index.js
