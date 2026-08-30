@@ -1002,9 +1002,21 @@ async function buildDatabaseModule(coin, network) {
         await execFileAsync('docker', ['pull', 'mariadb:10.11'])
         await execFileAsync('docker', ['tag', 'mariadb:10.11', containerPrefix])
 
-        // Cap json-file log growth so a long-running node cannot fill the
-        // host disk; sized to keep --tail reads inside a single rotated file.
-        const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb', '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3']
+        // Cap json-file log growth so a long-running node cannot fill the host
+        // disk, at the same 50m x 4 = 200 MB the module containers carry
+        // (ModuleService.buildAndUp holds the sizing arithmetic; spec
+        // proactive-system-watch, 2.0.5). The DB measured 37.7 KB/h on regtest
+        // 2026-08-30, so 10m x 3 = 30 MB missed the 48 h floor once the x10
+        // fleet inflation and x2 headroom are applied (36 MB needed); 200 MB
+        // clears it with room. --tail reads stay inside one rotated file.
+        //
+        // REACHABLE ONLY ON A MANUAL RECREATE. This branch runs on first
+        // install; the DB container is excluded from `update`
+        // (moduleOperations.js RECREATE/update paths) and from `recreate`
+        // (RECREATE_UNSUPPORTED_MODULES), so no automated fleet path re-applies
+        // it. An already-installed DB keeps 10m x 3 until an operator tears the
+        // container down and reinstalls it inside a maintenance window.
+        const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb', '--log-opt', 'max-size=50m', '--log-opt', 'max-file=4']
         // Visibility-only probe (#3876). A stalled-but-alive mariadbd was invisible
         // to `docker ps` and to anything reading container health, while
         // --restart unless-stopped only ever fires on process EXIT. Deliberately

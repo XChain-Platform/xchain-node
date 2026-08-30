@@ -609,6 +609,33 @@ function resolveStartPeriod(module, fallback) {
     return fallback
 }
 
+// LOG_LEVEL / LOG_FORMAT / METRICS_ENABLED / XCHAIN_LOG_PATCH are read by every
+// service's observability shim, and nothing carries them from the deploy host
+// into a container unless they are named here: they appear in no module config
+// store, so the shim stands on its compiled defaults and an operator has no way
+// to raise a single box to debug, switch it to NDJSON, or expose /metrics
+// without editing code (spec proactive-system-watch, D20).
+//
+// Resolution is narrowest-first: a value already in the per-install module
+// config store wins, so an operator who pinned LOG_LEVEL for one coin keeps it;
+// otherwise the deploy host's own environment supplies it. When neither sets a
+// name nothing is fabricated, keeping the container env as small as it is today
+// and leaving the shim defaults (LOG_LEVEL=info, LOG_FORMAT=text,
+// METRICS_ENABLED=false, XCHAIN_LOG_PATCH=1) in force. Values ride the same
+// bare `--env NAME` path as every other key, so none of them reach argv.
+const OBSERVABILITY_ENV_KEYS = ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH']
+
+function resolveObservabilityEnv(environmentVariables, hostEnv = process.env) {
+    const overlay = {}
+    for (const key of OBSERVABILITY_ENV_KEYS) {
+        if (environmentVariables && key in environmentVariables) continue
+        const raw = hostEnv[key]
+        if (raw === undefined || raw === '') continue
+        overlay[key] = String(raw)
+    }
+    return overlay
+}
+
 function buildHealthcheckArgs(module, environmentVariables) {
     const hc = SERVICE_HEALTHCHECK[module]
     if (!hc) return []
@@ -888,11 +915,14 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         // `docker run` error.message (which upstream logging prints, and an operator
         // pastes into a bug report). Mirrors DatabaseService's MYSQL_ROOT_PASSWORD
         // treatment. The value reaches the container identically; only argv changes.
+        // The observability names resolved above join the map here so they travel
+        // the same value-out-of-argv path.
         const envArgs = []
         const dockerEnv = { ...process.env }
-        for (const key in environmentVariables) {
+        const containerEnv = { ...environmentVariables, ...resolveObservabilityEnv(environmentVariables) }
+        for (const key in containerEnv) {
             envArgs.push('--env', key)
-            dockerEnv[key] = String(environmentVariables[key])
+            dockerEnv[key] = String(containerEnv[key])
         }
 
         // Everything from here on is image-independent: tear down the old container
@@ -929,11 +959,23 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 // would fire during the exit window and falsely mark them unhealthy.
                 const healthcheckArgs = onlyExecution ? [] : buildHealthcheckArgs(module, environmentVariables)
                 // Cap json-file log growth on persistent containers so a
-                // long-running node cannot fill the host disk. Sized so the
-                // --tail 100 log reader still lands inside a single rotated
-                // file. One-shot execution containers exit immediately and
-                // need no cap.
-                const logOptArgs = onlyExecution ? [] : ['--log-opt', 'max-size=10m', '--log-opt', 'max-file=3']
+                // long-running node cannot fill the host disk, and keep at least
+                // 48 h of history readable so a fault can be reviewed the day
+                // after it happened (spec proactive-system-watch, 2.0.5).
+                //
+                // 50m x 4 = 200 MB. Sizing, from the regtest measurement of
+                // 2026-08-30: the hub is the loudest module at 152 KB/h, and a
+                // public testnet validator is taken at 10x that (a five-peer
+                // PBFT set fans every round out across peers where the regtest
+                // hub runs solo, plus real user traffic), so 1.52 MB/h. 48 h at
+                // 2x headroom needs 146 MB, which a 10m x 3 = 30 MB
+                // window does not reach: 30 MB is under 20 h at that rate.
+                // The cap is a ceiling, not a reservation: the quiet
+                // modules measured 5-38 KB/h and never approach it. --tail 100
+                // still lands inside a single rotated file at this size.
+                //
+                // One-shot execution containers exit immediately and need no cap.
+                const logOptArgs = onlyExecution ? [] : ['--log-opt', 'max-size=50m', '--log-opt', 'max-file=4']
                 const runArgs = [
                     'run', '-d', ...restartArgs, '--name', containerPrefix, '--hostname', containerPrefix,
                     ...logOptArgs,
@@ -1244,6 +1286,8 @@ module.exports = {
     buildAndUp,
     buildHealthcheckArgs,
     buildModuleDockerArgs,
+    resolveObservabilityEnv,
+    OBSERVABILITY_ENV_KEYS,
     assertNoHostPortConflicts,
     installModule,
     uninstallModule
