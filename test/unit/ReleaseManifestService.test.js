@@ -375,11 +375,32 @@ describe('ReleaseManifestService', () => {
             }
         })
 
-        it('pins every component at the platform version it ships in', () => {
-            // A component pinned at some other tag would mean the manifest and the
-            // release number disagree about what "XChain 0.9.0" contains.
+        it('pins no component above the platform version it ships in', () => {
+            // Sparse lockstep (spec section 4): a component's version is the platform
+            // version at which it LAST CHANGED, components tag only the trains they
+            // participate in, and a gap means "unchanged that release". So the
+            // resolution rule is each component at its highest tag <= the train, not
+            // every component at the train exactly.
+            //
+            // This asserted equality until 0.12.1, and passed only because every
+            // train through 0.12.0 happened to move all twelve repos. The first
+            // patch train, which by section 7 tags only the repos it touches, is
+            // what distinguishes the two readings: it pins one component at 0.12.1
+            // and eleven at their unchanged 0.12.0 tags, which is correct and which
+            // the equality reading called a defect.
+            //
+            // A pin ABOVE the train is still a real defect, and is what remains
+            // guarded here: it would mean the manifest ships code the release number
+            // does not name.
+            const rank = (v) => v.replace(/^v/, '').split('.').map(Number)
+            const above = (a, b) => {
+                const [x, y, z] = rank(a), [p, q, r] = rank(b)
+                return x !== p ? x > p : y !== q ? y > q : z > r
+            }
             for (const [name, pin] of Object.entries(shipped.components)) {
-                expect(pin.tag, `${name} tag matches the train`).to.equal('v' + shipped.platform_version)
+                expect(above(pin.tag, shipped.platform_version),
+                    `${name} pinned at ${pin.tag}, above the ${shipped.platform_version} train`
+                ).to.equal(false)
             }
         })
 
