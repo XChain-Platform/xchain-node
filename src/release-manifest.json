@@ -1,14 +1,16 @@
 {
   "_comment": [
-    "Pinned component set for XChain Platform v0.12.0.",
+    "Pinned component set for XChain Platform v0.12.1.",
     "Written at ceremony step 6 from the ACTUAL tagged master merge commits.",
     "xchain-node is the carrier and is not listed: checking out its tag IS this manifest.",
     "Every module in constants.js modulesUrls is pinned here, all 12 of them.",
-    "Each commit below is the master MERGE commit its v0.12.0 tag names, and every",
-    "one of those tags is GPG-signed by the platform release key and reports",
-    "verified against the tagger identity releases@xchain.io."
+    "A patch train tags only the repos it touches, so every component except the",
+    "patched one still pins its v0.12.0 tag, and each of those tags is unchanged.",
+    "Each commit below is the master MERGE commit its tag names, and every tag is",
+    "GPG-signed by the platform release key and reports verified against the",
+    "tagger identity releases@xchain.io."
   ],
-  "platform_version": "0.12.0",
+  "platform_version": "0.12.1",
   "released": "2026-08-31",
   "components": {
     "xchain-vm": {
@@ -20,8 +22,8 @@
       "commit": "9f333337c1362ff2651aa8877d7a5445476b5b12"
     },
     "xchain-indexer": {
-      "tag": "v0.12.0",
-      "commit": "f0b276e612a5fe3a55f90be9196944691fedfb90"
+      "tag": "v0.12.1",
+      "commit": "aee2bf21ecd6dc0fa90c26e7108dbedceb609bda"
     },
     "xchain-hub": {
       "tag": "v0.12.0",
