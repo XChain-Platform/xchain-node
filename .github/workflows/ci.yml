@@ -19,7 +19,7 @@ on:
 
 jobs:
   ci:
-    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@6f4d39ae85787fc31e90a31588d87610a2c33103 # pin: XChain-Platform/.github @ master 2026-08-14; bump deliberately
+    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@fd9160695d677f0538e959460ba5d8dfbb7f3c8e # pin: XChain-Platform/.github @ master 2026-08-31; bump deliberately
     # Override the Node version for a repo if ever needed:
     # with:
     #   node-version: "20"
