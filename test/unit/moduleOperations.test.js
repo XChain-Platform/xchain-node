@@ -152,6 +152,33 @@ function loadOperations(stubs) {
 
 describe('moduleOperations', function () {
 
+    // withInstallTarget resolves the operator's ref slot, and with no ref that
+    // means the latest release: two live api.github.com calls, one to find the
+    // tag and one to fetch and signature-verify its manifest. A unit suite must
+    // not depend on the public internet for that. Unauthenticated quota is per
+    // runner IP on a shared pool, so this failed on other people's traffic, and
+    // the failure surfaced as "expected false to be true" on an unrelated stub
+    // assertion, because the fetch threw before the assertion's subject ever
+    // ran. The signed-release path has its own suites; here it is a precondition.
+    //
+    // The stub replaces the module's export rather than riding proxyquire,
+    // because withInstallTarget requires the service lazily at call time and a
+    // proxyquire map only intercepts requires made while the module loads.
+    let resolveInstallTargetStub
+    beforeEach(function () {
+        const releaseManifest = require('../../src/services/ReleaseManifestService')
+        resolveInstallTargetStub = sinon.stub(releaseManifest, 'resolveInstallTarget').resolves({
+            kind: 'release',
+            ref: 'v0.11.0',
+            tag: 'v0.11.0',
+            manifest: { platform_version: '0.11.0', components: {} },
+            resolvedFrom: 'latest published release'
+        })
+    })
+    afterEach(function () {
+        resolveInstallTargetStub.restore()
+    })
+
     // -------------------------------------------------------------------
     // installModules
     // -------------------------------------------------------------------
