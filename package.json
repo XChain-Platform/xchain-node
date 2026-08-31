@@ -1,6 +1,6 @@
 {
   "name": "xchain-node",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "xchain-node allows users to install, configure and run XChain platform nodes.",
   "license": "AGPL-3.0-or-later",
   "repository": {
