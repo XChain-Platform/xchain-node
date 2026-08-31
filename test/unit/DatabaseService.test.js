@@ -50,6 +50,19 @@ function fakeSpawn(respond) {
     }
 }
 
+// The `docker exec ... mariadb -u <user> -e 'SELECT 1'` attempts a readiness or
+// credential probe actually made, filtered out of the docker inspect / port /
+// run traffic that shares the same execFileAsync stub. Pass `user` to count the
+// attempts made as ONE account when a flow probes with two.
+function mariadbAttempts(stubs, user = null) {
+    return stubs.execFileAsync.getCalls().filter((c) => {
+        const args = c.args[1]
+        if (!Array.isArray(args) || !args.includes('mariadb')) return false
+        if (!user) return true
+        return args[args.indexOf('-u') + 1] === user
+    })
+}
+
 function makeStubs(overrides = {}) {
     // execFileAsync is what the source uses (via promisify(execFile)) for all
     // docker inspect / docker port / docker pull / docker run calls.
@@ -676,6 +689,26 @@ describe('DatabaseService', function () {
             expect(dockerCall.args[1]).to.include('MYSQL_PWD')
             expect(dockerCall.args[1].some(a => String(a).includes('s3cret-pw'))).to.be.false
             expect(dockerCall.args[2].env.MYSQL_PWD).to.equal('s3cret-pw')
+        })
+
+        // The 10x10s budget belongs to the post-`docker run` readiness wait. A
+        // caller asking "do these credentials still work" gets a PERMANENT answer,
+        // so it must be able to buy a shorter budget than ~100s of sleeps.
+        it('honours a caller-supplied retry budget', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.rejects(new Error('ERROR 1045 (28000): Access denied for user'))
+            const ds = loadDatabaseService(stubs)
+            const result = await ds.checkIfDatabaseIsReady('u', 'p', 'xchain_node', { tries: 2, retryDelay: 1 })
+            expect(result).to.be.false
+            expect(mariadbAttempts(stubs)).to.have.length(2)
+        })
+
+        it('still spends the full readiness budget when the caller passes none', async function () {
+            const stubs = makeStubs()
+            stubs.execFileAsync.rejects(new Error('connection refused'))
+            const ds = loadDatabaseService(stubs)
+            expect(await ds.checkIfDatabaseIsReady('root', 'rootpass')).to.be.false
+            expect(mariadbAttempts(stubs)).to.have.length(10)
         })
     })
 
@@ -1349,6 +1382,51 @@ describe('DatabaseService', function () {
             expect(executedCommands.find(c => c && c.includes('DrillB')), 'no wildcard grant on mainnet').to.not.exist;
         });
 
+        it('grants SLAVE MONITOR to indexer and decoder accounts, on MAINNET too', async function () {
+            // Unlike the DrillB grant above, this one is NOT withheld from mainnet: a
+            // silently stalled replica does the most damage there, and the privilege is a
+            // read-only view of replication topology rather than data access.
+            for (const [module, coin, network, dbName, user] of [
+                ['xchain-indexer', 'bitcoin',  'mainnet', 'XChain_BTC_Mainnet_Indexer',  'xchain_indexer_bitcoin_mainnet'],
+                ['xchain-decoder', 'litecoin', 'testnet', 'XChain_LTC_Testnet_Decoder',  'xchain_decoder_litecoin_testnet'],
+            ]) {
+                const stubs = makeStubs();
+                const executedCommands = [];
+                stubs.spawn.callsFake(fakeSpawn((sql) => {
+                    executedCommands.push(sql);
+                    if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' };
+                    if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' };
+                    return { stdout: '' };
+                }));
+                const ds = loadDatabaseService(stubs);
+                await ds.addUserPasswordToDatabase(module, coin, network, dbName, user, 'test-pass');
+                const grant = executedCommands.find(c => c && c.includes('SLAVE MONITOR'));
+                expect(grant, module + ' on ' + network + ' must be able to read replication status').to.exist;
+                expect(grant).to.include('ON *.*');
+                expect(grant, 'the grant must name the account being provisioned').to.include(user);
+            }
+        });
+
+        it('withholds SLAVE MONITOR from the hub account', async function () {
+            // Scope check with teeth: the grant is for the accounts xchain-sync actually
+            // polls. A blanket "every account provisioned here" version of the fix would
+            // pass the test above and quietly widen the hub's privileges too.
+            const stubs = makeStubs();
+            const executedCommands = [];
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executedCommands.push(sql);
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' };
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' };
+                return { stdout: '' };
+            }));
+            const ds = loadDatabaseService(stubs);
+            await ds.addUserPasswordToDatabase(
+                'xchain-hub', 'bitcoin', 'mainnet',
+                'xchain_node', 'xchain_node_user', 'test-pass'
+            );
+            expect(executedCommands.find(c => c && c.includes('SLAVE MONITOR')), 'hub does not poll replicas').to.not.exist;
+        });
+
         it('rotates the password via ALTER USER on the docker path when the user does not match', async function () {
             // userCount == 0 covers both "user absent" and "user exists with a different
             // password". The docker path must ALTER USER (not just CREATE USER IF NOT EXISTS,
@@ -1560,6 +1638,34 @@ describe('DatabaseService', function () {
                 )
                 const mvhQuery = queries.find(q => q && q.includes('MVH'))
                 expect(mvhQuery).to.exist
+            } finally {
+                restoreEnv(saved)
+            }
+        })
+
+        it('grants SLAVE MONITOR to an indexer account via native mariadb (EXTERNAL_DB)', async function () {
+            // The native-DB boxes are the ones whose schemas can be fed by real MariaDB
+            // replication, so the probe this unblocks is the only signal separating a
+            // stopped SQL thread from a quiet chain.
+            const stubs = makeStubs()
+            const queries = []
+            stubs.mariadb._fakeConn.query.callsFake((sql) => {
+                queries.push(sql)
+                if (sql.includes('SELECT COUNT')) return Promise.resolve([['0']])
+                if (sql.includes('SHOW GRANTS')) return Promise.resolve([['GRANT USAGE ON *.* TO user']])
+                return Promise.resolve([])
+            })
+            const saved = setExtEnv()
+            try {
+                const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true })
+                await ds.addUserPasswordToDatabase(
+                    'xchain-indexer', 'bitcoin', 'mainnet',
+                    'XChain_BTC_Mainnet_Indexer', 'xchain_indexer_bitcoin_mainnet', 'test-pass', true
+                )
+                const grant = queries.find(q => q && q.includes('SLAVE MONITOR'))
+                expect(grant).to.exist
+                expect(grant).to.include('ON *.*')
+                expect(grant, 'the grant must name the account being provisioned').to.include('xchain_indexer_bitcoin_mainnet')
             } finally {
                 restoreEnv(saved)
             }
@@ -2121,29 +2227,27 @@ describe('DatabaseService', function () {
                 loadCredentials: sinon.stub().returns(existing)
             })
             // Flow:
-            //   1. getDatabaseContainerId (call 0) -> valid container ID
+            //   1. getDatabaseContainerId -> valid container ID
             //   2. checkIfDatabaseIsReady(existing.user, existing.password, ...) ->
-            //      getDatabaseContainerId (call 1) -> valid ID, then mariadb SELECT fails (calls 2-11)
+            //      mariadb SELECT fails as that user
             //   3. askMariadbRootPassword returns the CACHED password (this test
             //      never overrides getDbRootPassword, so it stays the makeStubs()
             //      default 'rootpass') and returns before reaching env-var /
             //      ping-verification logic (uuid:2c5ec698) -> no extra exec calls
-            //   4. checkIfDatabaseIsReady("root", rootPassword) ->
-            //      getDatabaseContainerId (call 12) -> valid ID, then mariadb SELECT succeeds (call 13)
+            //   4. checkIfDatabaseIsReady("root", rootPassword) -> succeeds
             //   5. DDL via executeDockerMariaDbCommand (execFile callback style)
-            let callCount = 0
+            //
+            // Discriminating on the ACCOUNT rather than on a call ordinal: the two
+            // probes now carry different retry budgets, and a fake keyed on "after
+            // N calls" silently re-describes the flow whenever either budget moves.
             stubs.execFileAsync.callsFake((cmd, args) => {
-                callCount++
-                // Inspect calls (docker inspect) → always succeed
                 if (Array.isArray(args) && args.includes('inspect')) {
                     return Promise.resolve({ stdout: VALID_CONTAINER_ID + '\n' })
                 }
-                // After 12+ calls, let root mariadb check pass (call 13)
-                if (callCount > 12) {
-                    return Promise.resolve({ stdout: 'OK' })
+                if (Array.isArray(args) && args[args.indexOf('-u') + 1] === existing.user) {
+                    return Promise.reject(new Error('auth failed'))
                 }
-                // Existing-creds mariadb checks fail
-                return Promise.reject(new Error('auth failed'))
+                return Promise.resolve({ stdout: 'OK' })
             })
             const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
             process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'root-pass'
@@ -2153,6 +2257,12 @@ describe('DatabaseService', function () {
                 const result = await ds.ensureXchainNodeAccess()
                 expect(stubs.saveCredentials.called).to.be.true
                 expect(result.user).to.equal('xchain_node_testuser')
+                // preCheck holds the global command lock across this call, so the
+                // stored-credential probe must not sit through the readiness budget
+                // to learn an answer (access denied / unknown DB) that is permanent:
+                // ten attempts ten seconds apart blocked every other xchain-node
+                // invocation on the box for ~100s with no output.
+                expect(mariadbAttempts(stubs, existing.user)).to.have.length(2)
             } finally {
                 if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
                 else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved

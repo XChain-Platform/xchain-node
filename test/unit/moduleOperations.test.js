@@ -38,6 +38,10 @@ function makeStubs() {
         killContainer: sinon.stub().resolves(true),
         removeContainer: sinon.stub().resolves(true),
         forceRemoveContainerByName: sinon.stub().resolves(true),
+        // Default 'exists' keeps the presence probe out of the way of every test
+        // that is not about presence: the recreate guard refuses only on a
+        // POSITIVE 'gone', so this default preserves pre-guard behaviour.
+        probeContainerPresenceByName: sinon.stub().resolves('exists'),
         stopContainer: sinon.stub().resolves(true),
         startContainer: sinon.stub().resolves(true),
         restartContainer: sinon.stub().resolves(true),
@@ -87,6 +91,7 @@ function loadOperations(stubs) {
             killContainer: stubs.killContainer,
             removeContainer: stubs.removeContainer,
             forceRemoveContainerByName: stubs.forceRemoveContainerByName,
+            probeContainerPresenceByName: stubs.probeContainerPresenceByName,
             stopContainer: stubs.stopContainer,
             startContainer: stubs.startContainer,
             restartContainer: stubs.restartContainer,
@@ -514,13 +519,91 @@ describe('moduleOperations', function () {
             expect(stubs.setHubDatabaseParameters.called).to.be.false
         })
 
+        // Registry DRIFT: the row is gone but the container is still on the host.
+        // Recreating is right here, and is why the not-installed guard keys off a
+        // positive docker probe rather than off the missing row alone.
         it('recreates a container the registry has lost rather than skipping it', async function () {
             const stubs = makeStubs()
             stubs.db.getModuleContainer.resolves(null)
+            stubs.probeContainerPresenceByName.resolves('exists')
             const ops = loadOperations(stubs)
             await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
             expect(stubs.buildAndUp.calledOnce).to.be.true
             expect(stubs.buildAndUp.firstCall.args[3]).to.equal(null)
+        })
+
+        // UNINSTALLED: no row and docker positively reports no container. Recreating
+        // here hands back a service the operator tore down, built from the image tag
+        // `uninstall` leaves behind, and then rotates the shared DB accounts for it.
+        it('refuses to recreate a module docker positively reports gone', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            stubs.probeContainerPresenceByName.resolves('gone')
+            const warn = sinon.stub(console, 'warn')
+            let result
+            try {
+                result = await loadOperations(stubs).recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+            } finally { warn.restore() }
+            expect(stubs.buildAndUp.called).to.be.false
+            expect(result.recreated).to.deep.equal([])
+            expect(result.skipped).to.deep.equal([
+                { module: 'xchain-indexer', coin: 'dogecoin', network: 'regtest', reason: 'not-installed' }
+            ])
+            expect(stubs.setDatabaseParameters.called).to.be.false
+            expect(stubs.probeContainerPresenceByName.calledWith('dogecoin-regtest-xchain-indexer')).to.be.true
+        })
+
+        // 'unknown' is a daemon hiccup, not an absence. Refusing on it would turn a
+        // docker blip into a refusal to repair a live container's credentials.
+        it('still recreates when the presence probe is inconclusive', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            stubs.probeContainerPresenceByName.resolves('unknown')
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+            expect(stubs.buildAndUp.calledOnce).to.be.true
+            expect(stubs.buildAndUp.firstCall.args[3]).to.equal(null)
+        })
+
+        // A registered container never reaches the probe: one `docker inspect` per
+        // venue on `recreate all` is worth paying only where the row is missing.
+        it('does not probe docker when the registry has a container id', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.recreateModules({ dogecoin: { regtest: ['xchain-indexer'] } })
+            expect(stubs.probeContainerPresenceByName.called).to.be.false
+        })
+
+        // `recreate all` fans out over every coin x network x service, so one bad
+        // venue must not abort the sweep: the rest would go untouched behind a flat
+        // "recreate failed" that hides which venues were already recreated.
+        it('finishes the sweep past a failing venue and names every failure', async function () {
+            const stubs = makeStubs()
+            stubs.buildAndUp.onFirstCall().rejects(new Error('No local image tagged x to reuse'))
+            const err = sinon.stub(console, 'error')
+            try {
+                await loadOperations(stubs).recreateModules({ dogecoin: { regtest: ['xchain-encoder', 'xchain-indexer'] } })
+                expect.fail('a sweep with a failed venue must not resolve')
+            } catch (e) {
+                expect(e.message).to.match(/xchain-encoder \(dogecoin regtest\)/)
+                expect(e.message).to.match(/No local image tagged/)
+            } finally { err.restore() }
+            expect(stubs.buildAndUp.calledTwice).to.be.true
+            expect(stubs.buildAndUp.secondCall.args.slice(0, 3))
+                .to.deep.equal(['xchain-indexer', 'dogecoin', 'regtest'])
+        })
+
+        // The venues that DID come back start on the config store's password, so
+        // they still need their accounts rotated before the run reports failure.
+        it('provisions the venues that came back before failing the run', async function () {
+            const stubs = makeStubs()
+            stubs.buildAndUp.onFirstCall().rejects(new Error('boom'))
+            const err = sinon.stub(console, 'error')
+            try {
+                await loadOperations(stubs).recreateModules({ dogecoin: { regtest: ['xchain-encoder', 'xchain-indexer'] } })
+                expect.fail('a sweep with a failed venue must not resolve')
+            } catch { /* asserted above */ } finally { err.restore() }
+            expect(stubs.setDatabaseParameters.calledOnce).to.be.true
         })
 
         it('refuses the modules whose containers are not built from the config map', async function () {

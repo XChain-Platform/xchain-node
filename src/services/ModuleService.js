@@ -23,7 +23,8 @@ const fs        = require('fs')
 const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, SERVICE_REGISTRY, DEFAULT_MODULE_BRANCH
+    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, SERVICE_REGISTRY, DEFAULT_MODULE_BRANCH,
+    Coin, Network
 } = require('../config/constants')
 const { db }                = require('../state')
 const {
@@ -32,9 +33,9 @@ const {
     getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
-const { killContainer, removeContainer, getPublishedHostPorts, forceRemoveContainerByName } = require('./DockerService')
+const { killContainer, removeContainer, getPublishedHostPorts, forceRemoveContainerByName, addContainerToNetwork } = require('./DockerService')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./DatabaseService')
-const { redactSecrets } = require('../utils/helpers')
+const { redactSecrets, sleep } = require('../utils/helpers')
 
 // Sibling directories used to make a rewrite-clone atomic-ish (see cloneGit).
 // Both live beside the module checkout inside the modules dir, so the two
@@ -609,6 +610,33 @@ function resolveStartPeriod(module, fallback) {
     return fallback
 }
 
+// LOG_LEVEL / LOG_FORMAT / METRICS_ENABLED / XCHAIN_LOG_PATCH are read by every
+// service's observability shim, and nothing carries them from the deploy host
+// into a container unless they are named here: they appear in no module config
+// store, so the shim stands on its compiled defaults and an operator has no way
+// to raise a single box to debug, switch it to NDJSON, or expose /metrics
+// without editing code (spec proactive-system-watch, D20).
+//
+// Resolution is narrowest-first: a value already in the per-install module
+// config store wins, so an operator who pinned LOG_LEVEL for one coin keeps it;
+// otherwise the deploy host's own environment supplies it. When neither sets a
+// name nothing is fabricated, keeping the container env as small as it is today
+// and leaving the shim defaults (LOG_LEVEL=info, LOG_FORMAT=text,
+// METRICS_ENABLED=false, XCHAIN_LOG_PATCH=1) in force. Values ride the same
+// bare `--env NAME` path as every other key, so none of them reach argv.
+const OBSERVABILITY_ENV_KEYS = ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH']
+
+function resolveObservabilityEnv(environmentVariables, hostEnv = process.env) {
+    const overlay = {}
+    for (const key of OBSERVABILITY_ENV_KEYS) {
+        if (environmentVariables && key in environmentVariables) continue
+        const raw = hostEnv[key]
+        if (raw === undefined || raw === '') continue
+        overlay[key] = String(raw)
+    }
+    return overlay
+}
+
 function buildHealthcheckArgs(module, environmentVariables) {
     const hc = SERVICE_HEALTHCHECK[module]
     if (!hc) return []
@@ -717,6 +745,80 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
     }
 
     return { portArgs, volumeArgs, ulimitArgs, singleton: !!docker.singleton }
+}
+
+/**
+ * Which sibling-coin docker networks a module's container must join beyond its
+ * own, given what is installed on this host. Pure; exported for tests.
+ *
+ * The indexer is the one module with cross-chain sibling reads: the ROLLCALL
+ * epoch close and the ANCHOR reward rail both make a BTC indexer ask the DOGE
+ * indexer of the SAME network what is on chain. Each coin/network stack runs on
+ * its own bridge network, and container-name DNS only resolves across a network
+ * both containers hold, so without the extra membership those reads can only
+ * fail. `docker network connect` state dies with the container, which means a
+ * hand-applied attach silently evaporates at the next update or recreate; the
+ * attachment must be re-declared HERE, at every create. Membership is granted
+ * to every locally installed sibling coin on the same network tier (mirroring
+ * the hub, which joins every stack) rather than to dogecoin alone, so the next
+ * cross-chain read does not need this file changed. Sibling stacks on other
+ * hosts are out of scope by construction: their indexer URLs are real
+ * hostnames, not container names, and docker networks do not span hosts.
+ *
+ * @param {string} module
+ * @param {string|null} coin
+ * @param {string|null} network
+ * @param {Object<string,string[]>} installedCoinsAndNetworks coin -> networks
+ * @returns {string[]} docker network names to join, sorted
+ */
+function crossChainNetworksFor(module, coin, network, installedCoinsAndNetworks) {
+    if (module !== XChainService.XCHAIN_INDEXER) return []
+    if (!coin || !network) return []
+    const networks = []
+    for (const siblingCoin in (installedCoinsAndNetworks || {})) {
+        if (siblingCoin === coin) continue
+        if ((installedCoinsAndNetworks[siblingCoin] || []).includes(network)) {
+            networks.push(getDockerNetwork(siblingCoin, network))
+        }
+    }
+    return networks.sort()
+}
+
+// Join a freshly created container to the sibling networks computed above.
+// Same retry posture as the hub's attachSharedContainer: addContainerToNetwork
+// is idempotent, one retry absorbs the docker race behind most failures. A
+// persistent failure is reported loudly with its operational consequence but
+// does not fail the create: the sibling stack may legitimately be mid-teardown,
+// and the message names the exact symptom to look for and the remedy.
+async function attachCrossChainNetworks(module, coin, network, containerId) {
+    // The installed map mirrors StatusService.getInstalledCoinsAndNetworks but
+    // is derived here from getStatus, the StatusService seam this module
+    // already holds: pulling a second function out of StatusService widens the
+    // coupling surface every consumer of this module has to satisfy.
+    const modulesStatus = await getStatus(null, null, false)
+    const installedCoinsAndNetworks = {}
+    for (const nextCoin in modulesStatus) {
+        if (!Object.values(Coin).includes(nextCoin)) continue
+        installedCoinsAndNetworks[nextCoin] =
+            Object.keys(modulesStatus[nextCoin]).filter(n => Object.values(Network).includes(n))
+    }
+    const networks = crossChainNetworksFor(module, coin, network, installedCoinsAndNetworks)
+    for (const networkName of networks) {
+        try {
+            await addContainerToNetwork(containerId, networkName)
+        } catch (firstErr) {
+            await sleep(3000)
+            try {
+                await addContainerToNetwork(containerId, networkName)
+            } catch (retryErr) {
+                console.error("WARNING: could not join " + module + " (" + coin + " " + network + ") to the "
+                    + networkName + " network (" + redactSecrets(retryErr) + "). Cross-chain reads over that "
+                    + "network (ROLLCALL epoch close, ANCHOR rewards) will stall while the container looks "
+                    + "healthy. Remedy: docker network connect " + networkName + " " + containerId.slice(0, 12)
+                    + ", or recreate the module once the network exists.")
+            }
+        }
+    }
 }
 
 /**
@@ -888,11 +990,14 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         // `docker run` error.message (which upstream logging prints, and an operator
         // pastes into a bug report). Mirrors DatabaseService's MYSQL_ROOT_PASSWORD
         // treatment. The value reaches the container identically; only argv changes.
+        // The observability names resolved above join the map here so they travel
+        // the same value-out-of-argv path.
         const envArgs = []
         const dockerEnv = { ...process.env }
-        for (const key in environmentVariables) {
+        const containerEnv = { ...environmentVariables, ...resolveObservabilityEnv(environmentVariables) }
+        for (const key in containerEnv) {
             envArgs.push('--env', key)
-            dockerEnv[key] = String(environmentVariables[key])
+            dockerEnv[key] = String(containerEnv[key])
         }
 
         // Everything from here on is image-independent: tear down the old container
@@ -929,11 +1034,23 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 // would fire during the exit window and falsely mark them unhealthy.
                 const healthcheckArgs = onlyExecution ? [] : buildHealthcheckArgs(module, environmentVariables)
                 // Cap json-file log growth on persistent containers so a
-                // long-running node cannot fill the host disk. Sized so the
-                // --tail 100 log reader still lands inside a single rotated
-                // file. One-shot execution containers exit immediately and
-                // need no cap.
-                const logOptArgs = onlyExecution ? [] : ['--log-opt', 'max-size=10m', '--log-opt', 'max-file=3']
+                // long-running node cannot fill the host disk, and keep at least
+                // 48 h of history readable so a fault can be reviewed the day
+                // after it happened (spec proactive-system-watch, 2.0.5).
+                //
+                // 50m x 4 = 200 MB. Sizing, from the regtest measurement of
+                // 2026-08-30: the hub is the loudest module at 152 KB/h, and a
+                // public testnet validator is taken at 10x that (a five-peer
+                // PBFT set fans every round out across peers where the regtest
+                // hub runs solo, plus real user traffic), so 1.52 MB/h. 48 h at
+                // 2x headroom needs 146 MB, which a 10m x 3 = 30 MB
+                // window does not reach: 30 MB is under 20 h at that rate.
+                // The cap is a ceiling, not a reservation: the quiet
+                // modules measured 5-38 KB/h and never approach it. --tail 100
+                // still lands inside a single rotated file at this size.
+                //
+                // One-shot execution containers exit immediately and need no cap.
+                const logOptArgs = onlyExecution ? [] : ['--log-opt', 'max-size=50m', '--log-opt', 'max-file=4']
                 const runArgs = [
                     'run', '-d', ...restartArgs, '--name', containerPrefix, '--hostname', containerPrefix,
                     ...logOptArgs,
@@ -960,6 +1077,11 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         if (/^[a-f0-9]{64}$/.test(containerId)) {
                             if (!onlyExecution) {
                                 if (await db.insertModuleContainer(module, coin, network, containerId)) {
+                                    // Cross-chain network membership is part of creating the
+                                    // container, not a post-install nicety: install, update and
+                                    // recreate all funnel through here, and each of them replaces
+                                    // the container that held any hand-applied membership.
+                                    await attachCrossChainNetworks(module, coin, network, containerId)
                                     await statusChanged()
                                     resolve(containerId)
                                 } else {
@@ -1242,8 +1364,11 @@ module.exports = {
     getModuleCommit,
     resolveBundledLibRef,
     buildAndUp,
+    crossChainNetworksFor,
     buildHealthcheckArgs,
     buildModuleDockerArgs,
+    resolveObservabilityEnv,
+    OBSERVABILITY_ENV_KEYS,
     assertNoHostPortConflicts,
     installModule,
     uninstallModule

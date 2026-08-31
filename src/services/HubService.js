@@ -196,6 +196,19 @@ async function updateHubOrExplorer(module) {
                 hubUpdated = await moduleConnector.updateConfig(jsonConfig)
             } catch (err) { lastErr = err }
 
+            // A FALSY RETURN is a failure too, and it was the one reported with no
+            // cause at all. _call() catches its own transport errors and returns
+            // null, so a 401 from a key-enforcing hub never reaches the catch above
+            // and lastErr stays null - which is precisely the case that printed
+            // "There was a problem trying to update a config" and nothing else, on
+            // the single most informative fact about the failure. The connector
+            // already records why each endpoint failed, for exactly this purpose.
+            if (!hubUpdated && !lastErr
+                && Array.isArray(moduleConnector.lastFailures)
+                && moduleConnector.lastFailures.length) {
+                lastErr = moduleConnector.lastFailures.join('; ')
+            }
+
             tries--
             if (tries <= 0) {
                 throw "There was a problem trying to update a config in the " + module + " module" +

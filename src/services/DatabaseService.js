@@ -119,11 +119,17 @@ async function checkIfDatabaseModuleExists(coin, network) {
     }
 }
 
-async function checkIfDatabaseIsReady(user, userPassword, database = null) {
+// The 10x10s default is a POST-`docker run` readiness wait: mariadb takes tens of
+// seconds to accept connections on a cold container. A caller using this to answer
+// "do these credentials still work" is asking a different question, whose negative
+// answer (ER_ACCESS_DENIED, unknown database) is not transient, so it must be able
+// to buy a shorter budget instead of paying ~100s to learn it. Same reasoning the
+// env-override ping and the provisioning precheck already act on above.
+async function checkIfDatabaseIsReady(user, userPassword, database = null, { tries = 10, retryDelay = 10000 } = {}) {
     const mariadbContainerId = await getDatabaseContainerId()
 
-    let tries = 10
-    while (tries > 0) {
+    let remaining = tries
+    while (remaining > 0) {
         try {
             const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', user], { interactive: true })
             if (database) args.push('-D', database)
@@ -131,8 +137,8 @@ async function checkIfDatabaseIsReady(user, userPassword, database = null) {
             await execFileAsync('docker', args, { env: mariadbEnv(userPassword) })
             return true
         } catch {
-            tries--
-            if (tries > 0) await sleep(10000)
+            remaining--
+            if (remaining > 0) await sleep(retryDelay)
         }
     }
     return false
@@ -594,6 +600,19 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 console.log(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
             }
 
+            // The sync server polls these accounts for the replication engine's view of
+            // their freshness, a read MariaDB 10.5 moved into SLAVE MONITOR: without it the
+            // probe fails closed and publishes every chain as stale. Global by nature (no
+            // per-schema form) but read-only, and granted here because a container recreate
+            // reprovisions the account and would otherwise drop it.
+            if (module === XChainService.XCHAIN_INDEXER || module === XChainService.XCHAIN_DECODER) {
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
+                    "GRANT SLAVE MONITOR ON *.* TO " + mariadbUser
+                )
+                await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
+                console.log(redactSecrets("Replication-status read permission granted to " + mariadbUser + "!"))
+            }
+
             // Same shape as the MVH grant above, for the other suite that needs a
             // throwaway schema without a privileged account: the two-node parity drills
             // (xchain-e2e-test scripts/bet-parity-node.sh) clone the live indexer
@@ -692,6 +711,19 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
                 console.log(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
+            }
+
+            // See the docker branch above: the same replication-status read grant. It
+            // matters MORE here, not less: an EXTERNAL_DB box is exactly where the served
+            // schemas can be fed by native MariaDB replication, so the probe this grant
+            // unblocks is the only thing that can tell a stopped SQL thread apart from a
+            // quiet chain.
+            if (module === XChainService.XCHAIN_INDEXER || module === XChainService.XCHAIN_DECODER) {
+                await executeNativeMariaDbCommand(externalCfg,
+                    "GRANT SLAVE MONITOR ON *.* TO " + mariadbUser
+                )
+                await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
+                console.log(redactSecrets("Replication-status read permission granted to " + mariadbUser + "!"))
             }
 
             // See the docker branch above: the same DrillB parity grant, since the
@@ -970,9 +1002,21 @@ async function buildDatabaseModule(coin, network) {
         await execFileAsync('docker', ['pull', 'mariadb:10.11'])
         await execFileAsync('docker', ['tag', 'mariadb:10.11', containerPrefix])
 
-        // Cap json-file log growth so a long-running node cannot fill the
-        // host disk; sized to keep --tail reads inside a single rotated file.
-        const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb', '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3']
+        // Cap json-file log growth so a long-running node cannot fill the host
+        // disk, at the same 50m x 4 = 200 MB the module containers carry
+        // (ModuleService.buildAndUp holds the sizing arithmetic; spec
+        // proactive-system-watch, 2.0.5). The DB measured 37.7 KB/h on regtest
+        // 2026-08-30, so 10m x 3 = 30 MB missed the 48 h floor once the x10
+        // fleet inflation and x2 headroom are applied (36 MB needed); 200 MB
+        // clears it with room. --tail reads stay inside one rotated file.
+        //
+        // REACHABLE ONLY ON A MANUAL RECREATE. This branch runs on first
+        // install; the DB container is excluded from `update`
+        // (moduleOperations.js RECREATE/update paths) and from `recreate`
+        // (RECREATE_UNSUPPORTED_MODULES), so no automated fleet path re-applies
+        // it. An already-installed DB keeps 10m x 3 until an operator tears the
+        // container down and reinstalls it inside a maintenance window.
+        const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb', '--log-opt', 'max-size=50m', '--log-opt', 'max-file=4']
         // Visibility-only probe (#3876). A stalled-but-alive mariadbd was invisible
         // to `docker ps` and to anything reading container health, while
         // --restart unless-stopped only ever fires on process EXIT. Deliberately
@@ -1188,7 +1232,17 @@ async function ensureXchainNodeAccess() {
     }
 
     if (existing) {
-        const works = await checkIfDatabaseIsReady(existing.user, existing.password, XCHAIN_NODE_DB)
+        // A credential probe, not a readiness wait, so it buys a short budget: the
+        // failure this asks about (credentials.json copied from another host, or a
+        // reset DB container) is permanent, and on the default 10x10s budget every
+        // sleep was spent before reaching the reprovision below. preCheck calls this
+        // while the global command lock is held (precheck.js -> cli.js), so those
+        // ~100s blocked every other xchain-node invocation on the box with no output.
+        // Two attempts, not one: a container whose socket is a beat behind still
+        // gets a second chance, and the cost of losing that race is bounded anyway
+        // (the reprovision re-stamps existing.password through idempotent DDL).
+        const works = await checkIfDatabaseIsReady(existing.user, existing.password, XCHAIN_NODE_DB,
+            { tries: 2, retryDelay: 1000 })
         if (works) return existing
         console.log("Stored xchain-node credentials no longer work against this MariaDB (auth or xchain_node DB missing); reprovisioning")
     }

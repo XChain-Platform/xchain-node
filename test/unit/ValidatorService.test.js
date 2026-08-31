@@ -33,9 +33,21 @@ function makeSeedHex() {
     return crypto.randomBytes(32).toString('hex')
 }
 
-function loadValidatorService(fsStub) {
+// The shared 0600 sidecar the hub API key lands in. It is NOT under validator/: the key
+// belongs to the host (the hub, the local indexer and the shared services all present it),
+// while validator/ holds this node's identity.
+const FAKE_HUB_SIDECAR = path.join(FAKE_CONFIG_DIR, 'hub.local')
+
+// ConfigService owns the sidecar plumbing and is stubbed here so init never touches a real
+// config directory. `generated` mirrors the read-or-generate result the real one returns.
+function makeHubApiKeyStub(generated = true) {
+    return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, generated })
+}
+
+function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub()) {
     return proxyquire('../../src/services/ValidatorService', {
         'fs': fsStub,
+        './ConfigService': { ensureHubApiKey },
         '../config/constants': {
             configDir: FAKE_CONFIG_DIR
         }
@@ -276,6 +288,73 @@ describe('ValidatorService', function () {
             const vs = loadValidatorService(fs)
             await vs.initValidator()
             expect(fs.mkdirSync.called).to.be.false
+        })
+
+        // A validator-mode hub REFUSES TO BOOT with no HUB_API_KEY, so an init that leaves
+        // none behind produces a documented onboarding path ending in a dead node.
+        describe('hub API key', function () {
+
+            // Capture output rather than let assertions read the real console: these tests
+            // are about what does and does not get printed.
+            function captureInit(fs, ensure) {
+                const logged = []
+                const stub = sinon.stub(console, 'log').callsFake(m => logged.push(String(m)))
+                return (async () => {
+                    try {
+                        const vs = loadValidatorService(fs, ensure)
+                        await vs.initValidator()
+                        return logged
+                    } finally {
+                        stub.restore()
+                    }
+                })()
+            }
+
+            it('ensures a hub API key exists as part of init', async function () {
+                const ensure = makeHubApiKeyStub()
+                await captureInit(makeFs(), ensure)
+                expect(ensure.calledOnce).to.be.true
+            })
+
+            it('tells the operator WHERE the credential lives', async function () {
+                const logged = await captureInit(makeFs(), makeHubApiKeyStub())
+                const line = logged.find(l => l.includes('hub API key'))
+                expect(line).to.exist
+                expect(line).to.include(FAKE_HUB_SIDECAR)
+                expect(line).to.include('0600')
+            })
+
+            // The value is a credential; a terminal is a scrollback buffer. init only ever
+            // receives a path and a boolean, so there is nothing for it to print.
+            it('prints no key material, only the path', async function () {
+                const ensure = makeHubApiKeyStub()
+                const logged = await captureInit(makeFs(), ensure)
+                expect(ensure.firstCall.returnValue).to.be.a('promise')
+                const output = logged.join('\n')
+                expect(output).to.not.match(/HUB_API_KEY=\S/)
+            })
+
+            // A node initialized before this existed is EXACTLY the node stuck at a refused
+            // boot, so re-running init has to repair it rather than return early.
+            it('repairs an already-initialized node that has no key yet', async function () {
+                const ensure = makeHubApiKeyStub()
+                const fs = makeFs({
+                    existsSync: sinon.stub().callsFake(p =>
+                        p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                    readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+                })
+                const logged = await captureInit(fs, ensure)
+                expect(ensure.calledOnce).to.be.true
+                expect(logged.some(l => l.includes('already initialized'))).to.be.true
+                expect(logged.some(l => l.includes(FAKE_HUB_SIDECAR))).to.be.true
+            })
+
+            it('reports a pre-existing key as reused rather than claiming a fresh one', async function () {
+                const logged = await captureInit(makeFs(), makeHubApiKeyStub(false))
+                const line = logged.find(l => l.includes('hub API key'))
+                expect(line).to.include('reused')
+                expect(line).to.not.include('generated now')
+            })
         })
 
         it('creates the capability-config directory and writes the config inside it', async function () {

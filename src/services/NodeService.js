@@ -416,10 +416,15 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 'run', '-d',
                 '--restart', 'unless-stopped',
                 '--name', containerPrefix,
-                // Cap json-file log growth so a long-running node cannot
-                // fill the host disk; sized to keep --tail reads inside a
-                // single rotated file.
-                '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3',
+                // Cap json-file log growth so a long-running node cannot fill
+                // the host disk, at the same 50m x 4 = 200 MB the module
+                // containers carry (ModuleService.buildAndUp holds the sizing
+                // arithmetic; spec proactive-system-watch, 2.0.5). Chain nodes
+                // are the quietest containers measured on regtest (686 B/h BTC,
+                // 4.4 KB/h DOGE, 2.5 KB/h LTC on 2026-08-30), so this is far
+                // past the 48 h floor even allowing for a mainnet node's much
+                // heavier P2P chatter. --tail reads stay inside one rotated file.
+                '--log-opt', 'max-size=50m', '--log-opt', 'max-file=4',
                 '--hostname', NODE_MODULE_NAME,
                 '--network-alias', NODE_MODULE_NAME,
                 '--ulimit', 'nofile=2048:2048',

@@ -2820,4 +2820,115 @@ describe('ModuleService', function () {
             expect(assertNoHubConsensusEnvDrift.called).to.equal(false)
         })
     })
+
+    // -----------------------------------------------------------------------
+    // Log retention and observability env (spec proactive-system-watch, 2.0.5 / D20)
+    // -----------------------------------------------------------------------
+
+    describe('resolveObservabilityEnv()', function () {
+        const ms = require('../../src/services/ModuleService')
+
+        it('names exactly the four shim controls', function () {
+            expect(ms.OBSERVABILITY_ENV_KEYS).to.deep.equal(
+                ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH'])
+        })
+
+        it('carries a deploy-host value into the container env', function () {
+            const overlay = ms.resolveObservabilityEnv({}, { LOG_LEVEL: 'debug', LOG_FORMAT: 'json' })
+            expect(overlay).to.deep.equal({ LOG_LEVEL: 'debug', LOG_FORMAT: 'json' })
+        })
+
+        it('leaves a per-install config-store value alone', function () {
+            // The narrower source wins: an operator who pinned LOG_LEVEL for one
+            // coin must not have it overwritten by whatever the deploy shell holds.
+            const overlay = ms.resolveObservabilityEnv({ LOG_LEVEL: 'warn' }, { LOG_LEVEL: 'debug' })
+            expect(overlay).to.not.have.property('LOG_LEVEL')
+        })
+
+        it('fabricates nothing when neither source sets a name', function () {
+            expect(ms.resolveObservabilityEnv({ NETWORK: 'bitcoin-mainnet' }, {})).to.deep.equal({})
+        })
+
+        it('treats an empty host value as unset', function () {
+            expect(ms.resolveObservabilityEnv({}, { LOG_LEVEL: '' })).to.deep.equal({})
+        })
+
+        it('never carries a name that is not one of the four', function () {
+            const overlay = ms.resolveObservabilityEnv({}, { HUB_DB_PASS: 'x', LOG_LEVEL: 'debug' })
+            expect(Object.keys(overlay)).to.deep.equal(['LOG_LEVEL'])
+        })
+    })
+
+    describe('buildAndUp(): log retention and observability env', function () {
+        it('caps json-file logs at 50m x 4 so 48 h of history survives', async function () {
+            const stubs = makeStubs()
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') cb(null)
+                else if (args[0] === 'run') { runArgs = args; cb(null, 'a'.repeat(64) + '\n') }
+                else cb(null)
+            })
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(runArgs).to.include('max-size=50m')
+            expect(runArgs).to.include('max-file=4')
+            expect(runArgs).to.not.include('max-size=10m')
+            expect(runArgs).to.not.include('max-file=3')
+        })
+
+        it('forwards a host-set LOG_LEVEL as a bare --env name, value out of argv', async function () {
+            const stubs = makeStubs()
+            let runArgs = null
+            let runOpts = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] }
+                else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') { cb(null) }
+                else if (args[0] === 'run') { runArgs = args; runOpts = opts; cb(null, 'a'.repeat(64) + '\n') }
+                else { cb(null) }
+            })
+            const previous = process.env.LOG_LEVEL
+            process.env.LOG_LEVEL = 'debug'
+            try {
+                const ms = loadModuleService(stubs)
+                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            } finally {
+                if (previous === undefined) delete process.env.LOG_LEVEL
+                else process.env.LOG_LEVEL = previous
+            }
+            expect(runArgs).to.include('LOG_LEVEL')
+            expect(runArgs).to.not.include('LOG_LEVEL=debug')
+            expect(runOpts.env.LOG_LEVEL).to.equal('debug')
+        })
+
+        it('adds no observability name when the deploy host sets none', async function () {
+            const stubs = makeStubs()
+            let runArgs = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') cb(null)
+                else if (args[0] === 'run') { runArgs = args; cb(null, 'a'.repeat(64) + '\n') }
+                else cb(null)
+            })
+            const saved = {}
+            for (const k of ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH']) {
+                saved[k] = process.env[k]
+                delete process.env[k]
+            }
+            try {
+                const ms = loadModuleService(stubs)
+                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            } finally {
+                for (const k of Object.keys(saved)) {
+                    if (saved[k] !== undefined) process.env[k] = saved[k]
+                }
+            }
+            expect(runArgs).to.not.include('LOG_LEVEL')
+            expect(runArgs).to.not.include('LOG_FORMAT')
+            expect(runArgs).to.not.include('METRICS_ENABLED')
+            expect(runArgs).to.not.include('XCHAIN_LOG_PATCH')
+        })
+    })
 })

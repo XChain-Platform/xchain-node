@@ -25,7 +25,7 @@ const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
-const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
+const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
@@ -332,6 +332,7 @@ async function recreateModules(servicesList) {
     const { setDatabaseParameters, setHubDatabaseParameters } = require('../services/DatabaseService')
 
     const outcome = { recreated: [], skipped: [] }
+    const failures = []
     let touchedDbModule = false
     let touchedHubModule = false
     for (const nextCoin in servicesList) {
@@ -353,7 +354,38 @@ async function recreateModules(servicesList) {
                     continue
                 }
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                await buildAndUp(nextModule, nextCoin, nextNetwork, moduleContainerId, false, null, { reuseImage: true })
+                if (!moduleContainerId) {
+                    // No registry row is TWO different states and this verb must not
+                    // conflate them. Registry drift (row lost, container still up) has
+                    // to keep recreating: dropping it was what made `update node` a
+                    // silent no-op. An explicitly uninstalled venue must NOT: uninstall
+                    // removes the container and the row but leaves the image tag, so
+                    // buildAndUp's reuseImage check passes, `null` reads as "nothing to
+                    // tear down", and the operator gets back a service they tore down,
+                    // built from a stale image and re-stamped into the registry that
+                    // status/precheck/autoheal trust. Discriminate on a POSITIVE docker
+                    // answer only: 'unknown' is a daemon hiccup, not an absence.
+                    const presence = await probeContainerPresenceByName(
+                        getDockerContainerImageName(nextModule, nextCoin, nextNetwork))
+                    if (presence === 'gone') {
+                        console.warn(`recreate: ${nextModule} (${nextCoin} ${nextNetwork}) has no container; nothing to recreate. Install it first.`)
+                        outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-installed' })
+                        continue
+                    }
+                }
+                try {
+                    await buildAndUp(nextModule, nextCoin, nextNetwork, moduleContainerId, false, null, { reuseImage: true })
+                } catch (err) {
+                    // Visiting the rest of the sweep after one venue fails follows
+                    // uninstallModules: `recreate all` was already half-applied by the
+                    // time it threw, and stopping there hid which venues had been
+                    // touched behind one flat `recreate failed:`. The run still REJECTS
+                    // below, naming every venue - a failure never becomes a skip.
+                    const why = (err && err.message) ? err.message : String(err)
+                    console.error(`recreate: ${nextModule} (${nextCoin} ${nextNetwork}) FAILED: ${why}`)
+                    failures.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: why })
+                    continue
+                }
                 outcome.recreated.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
                 if (nextModule === XChainService.XCHAIN_DECODER || nextModule === XChainService.XCHAIN_INDEXER) {
                     touchedDbModule = true
@@ -376,6 +408,13 @@ async function recreateModules(servicesList) {
     // The `update` path rotates here for the same reason (ModuleService installModule).
     if (touchedHubModule) await setHubDatabaseParameters()
     await statusChanged()
+    if (failures.length) {
+        // Rejecting AFTER provisioning is deliberate: the venues that did come back
+        // start on the config store's password and would crash-loop on
+        // ER_ACCESS_DENIED if the run bailed before rotating their accounts.
+        throw new Error('recreate failed for ' + failures.length + ' module(s): '
+            + failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; '))
+    }
     return outcome
 }
 
