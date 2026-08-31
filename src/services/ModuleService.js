@@ -23,7 +23,8 @@ const fs        = require('fs')
 const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, SERVICE_REGISTRY, DEFAULT_MODULE_BRANCH
+    XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, SERVICE_REGISTRY, DEFAULT_MODULE_BRANCH,
+    Coin, Network
 } = require('../config/constants')
 const { db }                = require('../state')
 const {
@@ -32,9 +33,9 @@ const {
     getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
-const { killContainer, removeContainer, getPublishedHostPorts, forceRemoveContainerByName } = require('./DockerService')
+const { killContainer, removeContainer, getPublishedHostPorts, forceRemoveContainerByName, addContainerToNetwork } = require('./DockerService')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./DatabaseService')
-const { redactSecrets } = require('../utils/helpers')
+const { redactSecrets, sleep } = require('../utils/helpers')
 
 // Sibling directories used to make a rewrite-clone atomic-ish (see cloneGit).
 // Both live beside the module checkout inside the modules dir, so the two
@@ -747,6 +748,80 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
 }
 
 /**
+ * Which sibling-coin docker networks a module's container must join beyond its
+ * own, given what is installed on this host. Pure; exported for tests.
+ *
+ * The indexer is the one module with cross-chain sibling reads: the ROLLCALL
+ * epoch close and the ANCHOR reward rail both make a BTC indexer ask the DOGE
+ * indexer of the SAME network what is on chain. Each coin/network stack runs on
+ * its own bridge network, and container-name DNS only resolves across a network
+ * both containers hold, so without the extra membership those reads can only
+ * fail. `docker network connect` state dies with the container, which means a
+ * hand-applied attach silently evaporates at the next update or recreate; the
+ * attachment must be re-declared HERE, at every create. Membership is granted
+ * to every locally installed sibling coin on the same network tier (mirroring
+ * the hub, which joins every stack) rather than to dogecoin alone, so the next
+ * cross-chain read does not need this file changed. Sibling stacks on other
+ * hosts are out of scope by construction: their indexer URLs are real
+ * hostnames, not container names, and docker networks do not span hosts.
+ *
+ * @param {string} module
+ * @param {string|null} coin
+ * @param {string|null} network
+ * @param {Object<string,string[]>} installedCoinsAndNetworks coin -> networks
+ * @returns {string[]} docker network names to join, sorted
+ */
+function crossChainNetworksFor(module, coin, network, installedCoinsAndNetworks) {
+    if (module !== XChainService.XCHAIN_INDEXER) return []
+    if (!coin || !network) return []
+    const networks = []
+    for (const siblingCoin in (installedCoinsAndNetworks || {})) {
+        if (siblingCoin === coin) continue
+        if ((installedCoinsAndNetworks[siblingCoin] || []).includes(network)) {
+            networks.push(getDockerNetwork(siblingCoin, network))
+        }
+    }
+    return networks.sort()
+}
+
+// Join a freshly created container to the sibling networks computed above.
+// Same retry posture as the hub's attachSharedContainer: addContainerToNetwork
+// is idempotent, one retry absorbs the docker race behind most failures. A
+// persistent failure is reported loudly with its operational consequence but
+// does not fail the create: the sibling stack may legitimately be mid-teardown,
+// and the message names the exact symptom to look for and the remedy.
+async function attachCrossChainNetworks(module, coin, network, containerId) {
+    // The installed map mirrors StatusService.getInstalledCoinsAndNetworks but
+    // is derived here from getStatus, the StatusService seam this module
+    // already holds: pulling a second function out of StatusService widens the
+    // coupling surface every consumer of this module has to satisfy.
+    const modulesStatus = await getStatus(null, null, false)
+    const installedCoinsAndNetworks = {}
+    for (const nextCoin in modulesStatus) {
+        if (!Object.values(Coin).includes(nextCoin)) continue
+        installedCoinsAndNetworks[nextCoin] =
+            Object.keys(modulesStatus[nextCoin]).filter(n => Object.values(Network).includes(n))
+    }
+    const networks = crossChainNetworksFor(module, coin, network, installedCoinsAndNetworks)
+    for (const networkName of networks) {
+        try {
+            await addContainerToNetwork(containerId, networkName)
+        } catch (firstErr) {
+            await sleep(3000)
+            try {
+                await addContainerToNetwork(containerId, networkName)
+            } catch (retryErr) {
+                console.error("WARNING: could not join " + module + " (" + coin + " " + network + ") to the "
+                    + networkName + " network (" + redactSecrets(retryErr) + "). Cross-chain reads over that "
+                    + "network (ROLLCALL epoch close, ANCHOR rewards) will stall while the container looks "
+                    + "healthy. Remedy: docker network connect " + networkName + " " + containerId.slice(0, 12)
+                    + ", or recreate the module once the network exists.")
+            }
+        }
+    }
+}
+
+/**
  * Build the module image and (re)create its container from the current config.
  *
  * `options.reuseImage` keeps the image that is already tagged for this container and
@@ -1002,6 +1077,11 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         if (/^[a-f0-9]{64}$/.test(containerId)) {
                             if (!onlyExecution) {
                                 if (await db.insertModuleContainer(module, coin, network, containerId)) {
+                                    // Cross-chain network membership is part of creating the
+                                    // container, not a post-install nicety: install, update and
+                                    // recreate all funnel through here, and each of them replaces
+                                    // the container that held any hand-applied membership.
+                                    await attachCrossChainNetworks(module, coin, network, containerId)
                                     await statusChanged()
                                     resolve(containerId)
                                 } else {
@@ -1284,6 +1364,7 @@ module.exports = {
     getModuleCommit,
     resolveBundledLibRef,
     buildAndUp,
+    crossChainNetworksFor,
     buildHealthcheckArgs,
     buildModuleDockerArgs,
     resolveObservabilityEnv,
