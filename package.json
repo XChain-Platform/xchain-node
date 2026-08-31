@@ -9,6 +9,7 @@
   },
   "main": "src/index.js",
   "dependencies": {
+    "@dankest-llc/xchain-sdk": "^0.11.1",
     "axios": "^1.18.1",
     "blessed": "^0.1.81",
     "chalk": "^5.6.0",
@@ -60,7 +61,8 @@
     "serialize-javascript": "^7.0.5",
     "tmp": "^0.2.7",
     "js-yaml": "^4.3.1",
-    "form-data": "^4.0.6"
+    "form-data": "^4.0.6",
+    "ip-address": "^10.3.1"
   },
   "bin": {
     "xchain-node": "./src/index.js"

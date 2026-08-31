@@ -27,6 +27,26 @@ const FAKE_SETTINGS_FILE = path.join(FAKE_VALIDATOR_DIR, 'validator.json')
 const FAKE_CAPS_DIR      = path.join(FAKE_VALIDATOR_DIR, 'hub-caps')
 const FAKE_CAPS_FILE     = path.join(FAKE_CAPS_DIR, 'capabilities.json')
 const FAKE_LEGACY_CAPS   = path.join(FAKE_VALIDATOR_DIR, 'capabilities.json')
+// The coin wallets and the DOGE signer the hub mounts. The stake WIF lives in
+// wallets.env, OUTSIDE the mounted signer directory, so the hub never sees it.
+const FAKE_WALLETS_FILE  = path.join(FAKE_VALIDATOR_DIR, 'wallets.env')
+const FAKE_SIGNER_DIR    = path.join(FAKE_VALIDATOR_DIR, 'signer')
+const FAKE_SIGNER_FILE   = path.join(FAKE_SIGNER_DIR, 'signer.js')
+const FAKE_SIGNER_ENV    = path.join(FAKE_SIGNER_DIR, '.env')
+
+// What a written wallets.env looks like: the argument of the writeFileSync
+// call that targeted it, parsed back into KEY=VALUE.
+function writtenWallets(fs) {
+    const call = fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_WALLETS_FILE)
+    if (!call) return null
+    const out = {}
+    for (const line of String(call.args[1]).split('\n')) {
+        if (!line || line.startsWith('#')) continue
+        const eq = line.indexOf('=')
+        out[line.substring(0, eq)] = line.substring(eq + 1)
+    }
+    return out
+}
 
 // Generate a real 64-hex Ed25519 seed for tests that need valid crypto
 function makeSeedHex() {
@@ -172,13 +192,16 @@ describe('ValidatorService', function () {
             expect(result.capabilities).to.deep.equal(['price', 'cross_chain', 'oracle_publish', 'attestation'])
         })
 
-        it('returns existing settings without re-writing when already initialized', async function () {
-            const existingSettings = makeSettings()
+        it('returns existing settings and never rotates the signing key when already initialized', async function () {
+            // network already recorded and wallets already present: nothing to repair.
+            const existingSettings = makeSettings(undefined, { network: 'testnet', P2P_PORT: 10002 })
             const fs = makeFs({
                 existsSync: sinon.stub().callsFake(p =>
                     p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                lstatSync: fileLstat([FAKE_WALLETS_FILE]),
                 readFileSync: sinon.stub().callsFake(p => {
                     if (p === FAKE_SETTINGS_FILE) return JSON.stringify(existingSettings)
+                    if (p === FAKE_WALLETS_FILE) return 'NETWORK=testnet\nSTAKE_ADDRESS=mKept\nDOGE_ADDRESS=nKept\n'
                     return ''
                 })
             })
@@ -186,6 +209,48 @@ describe('ValidatorService', function () {
             const result = await vs.initValidator()
             expect(result).to.deep.equal(existingSettings)
             expect(fs.writeFileSync.called).to.be.false
+        })
+
+        // A validator initialized before wallets existed must be able to get
+        // them by re-running init. Making it pass --force (a NEW signing key,
+        // a re-stake and another activation wait) would be a punishing upgrade.
+        it('repairs a pre-wallets validator on a re-run, without touching the signing key', async function () {
+            const existingSettings = makeSettings(undefined, { network: 'testnet', P2P_PORT: 10002 })
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p =>
+                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                readFileSync: sinon.stub().callsFake(p =>
+                    p === FAKE_SETTINGS_FILE ? JSON.stringify(existingSettings) : '{}')
+            })
+            const vs = loadValidatorService(fs)
+            await vs.initValidator()
+            const w = writtenWallets(fs)
+            expect(w, 'wallets were created').to.exist
+            expect(w.NETWORK).to.equal('testnet')
+            const wrote = fs.writeFileSync.getCalls().map(c => c.args[0])
+            expect(wrote, 'signing key untouched').to.not.include(FAKE_KEY_FILE)
+            expect(wrote, 'settings untouched (network already recorded)').to.not.include(FAKE_SETTINGS_FILE)
+            expect(wrote).to.include(FAKE_SIGNER_FILE)
+        })
+
+        it('records the network on a validator.json that predates the field', async function () {
+            const old = makeSettings()                       // no `network`, P2P_PORT 10001
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p =>
+                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                lstatSync: fileLstat([FAKE_WALLETS_FILE]),   // wallets present, so only the network is repaired
+                readFileSync: sinon.stub().callsFake(p => {
+                    if (p === FAKE_SETTINGS_FILE) return JSON.stringify(old)
+                    if (p === FAKE_WALLETS_FILE) return 'NETWORK=mainnet\nSTAKE_ADDRESS=1Kept\nDOGE_ADDRESS=DKept\n'
+                    return ''
+                })
+            })
+            const vs = loadValidatorService(fs)
+            const result = await vs.initValidator()
+            expect(result.network).to.equal('mainnet')       // derived from port 10001
+            const settingsWrite = fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_SETTINGS_FILE)
+            expect(settingsWrite, 'the derived network is persisted').to.exist
+            expect(JSON.parse(settingsWrite.args[1]).network).to.equal('mainnet')
         })
 
         it('re-generates key with force=true even when already initialized', async function () {
@@ -259,17 +324,40 @@ describe('ValidatorService', function () {
             expect(keyWriteCall.args[2]).to.deep.equal({ mode: 0o600 })
         })
 
-        it('skips capabilities file write when it already exists and force is false', async function () {
-            const existingSettings = makeSettings()
+        it('leaves an existing, operator-tuned capabilities file alone when force is false', async function () {
+            // An operator already set their own publisher address: init fills only
+            // placeholders, so nothing in this file is a placeholder and it stays.
+            const tuned = JSON.stringify({ oracle_publish: { doge_address: 'DOperatorOwnAddress', doge_wallet: '/their/path' } })
             const fs = makeFs({
-                existsSync: sinon.stub().callsFake(p => p === FAKE_CAPS_FILE),
-                lstatSync:  fileLstat([FAKE_CAPS_FILE])
+                existsSync:   sinon.stub().callsFake(p => p === FAKE_CAPS_FILE),
+                lstatSync:    fileLstat([FAKE_CAPS_FILE]),
+                readFileSync: sinon.stub().callsFake(p => p === FAKE_CAPS_FILE ? tuned : '{}')
                 // SETTINGS_FILE and KEY_FILE do NOT exist → triggers a fresh init
             })
             const vs = loadValidatorService(fs)
             await vs.initValidator()
             const capsWriteCalls = fs.writeFileSync.getCalls().filter(c => c.args[0] === FAKE_CAPS_FILE)
             expect(capsWriteCalls.length).to.equal(0)
+        })
+
+        it('fills only the publisher placeholders in an existing capabilities file', async function () {
+            const stale = JSON.stringify({
+                DISABLED_CAPABILITIES: ['cross_chain'],
+                oracle_publish: { doge_address: 'REPLACE_WITH_DOGE_ADDRESS', doge_wallet: 'REPLACE_WITH_DOGE_WALLET_PATH' }
+            })
+            const fs = makeFs({
+                existsSync:   sinon.stub().callsFake(p => p === FAKE_CAPS_FILE),
+                lstatSync:    fileLstat([FAKE_CAPS_FILE]),
+                readFileSync: sinon.stub().callsFake(p => p === FAKE_CAPS_FILE ? stale : '{}')
+            })
+            const vs = loadValidatorService(fs)
+            await vs.initValidator()
+            const capsWriteCalls = fs.writeFileSync.getCalls().filter(c => c.args[0] === FAKE_CAPS_FILE)
+            expect(capsWriteCalls.length).to.equal(1)
+            const written = JSON.parse(capsWriteCalls[0].args[1])
+            expect(written.DISABLED_CAPABILITIES).to.deep.equal(['cross_chain'])
+            expect(written.oracle_publish.doge_address).to.match(/^D/)
+            expect(written.oracle_publish.doge_wallet).to.equal('/XChainHub/operator-signer/.env')
         })
 
         it('creates validator dir if it does not exist', async function () {
@@ -283,7 +371,9 @@ describe('ValidatorService', function () {
 
         it('skips validator dir creation if it already exists', async function () {
             const fs = makeFs({
-                existsSync: sinon.stub().callsFake(p => p === FAKE_VALIDATOR_DIR || p === FAKE_CAPS_DIR)
+                existsSync: sinon.stub().callsFake(p =>
+                    p === FAKE_VALIDATOR_DIR || p === FAKE_CAPS_DIR || p === FAKE_SIGNER_DIR ||
+                    p === path.join(FAKE_SIGNER_DIR, 'node_modules'))
             })
             const vs = loadValidatorService(fs)
             await vs.initValidator()
@@ -664,6 +754,565 @@ describe('ValidatorService', function () {
         it('is configDir/validator', function () {
             const vs = loadValidatorService(makeFs())
             expect(vs.VALIDATOR_DIR).to.equal(FAKE_VALIDATOR_DIR)
+        })
+    })
+
+    // The two coin wallets init writes: the BTC stake wallet (fees, mints, the
+    // STAKE itself) and the DOGE wallet the hub publishes price rounds and
+    // anchors from. Real key generation through the SDK, offline; only the
+    // filesystem is faked.
+    describe('coin wallets', function () {
+
+        afterEach(function () {
+            delete process.env.XCHAIN_NODE_STAKE_WIF
+            delete process.env.XCHAIN_NODE_DOGE_WIF
+            delete process.env.HUB_NETWORK
+            delete process.env.DOGE_ENCODER_URL
+            delete process.env.XCHAIN_NODE_HUB_SIGNER_DIR
+        })
+
+        it('generates a testnet stake wallet and a testnet DOGE wallet for port 10002', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            const result = await vs.initValidator({ p2pPort: '10002' })
+            expect(result.network).to.equal('testnet')
+            const w = writtenWallets(fs)
+            expect(w).to.exist
+            expect(w.NETWORK).to.equal('testnet')
+            expect(w.STAKE_ADDRESS).to.match(/^[mn][a-km-zA-HJ-NP-Z1-9]{25,34}$/)   // BTC testnet P2PKH
+            expect(w.DOGE_ADDRESS).to.match(/^n[a-km-zA-HJ-NP-Z1-9]{33}$/)          // DOGE testnet P2PKH
+            expect(w.STAKE_WIF_SECRET).to.be.a('string').with.length.above(50)
+            expect(w.DOGE_WIF_SECRET).to.be.a('string').with.length.above(50)
+            expect(w.STAKE_PUBKEY_HEX).to.match(/^0[23][0-9a-f]{64}$/)
+            expect(w.DOGE_PUBKEY_HEX).to.match(/^0[23][0-9a-f]{64}$/)
+        })
+
+        it('writes wallets.env and the signer .env with mode 0600, and the signer module beside it', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            await vs.initValidator({ network: 'testnet' })
+            const byPath = p => fs.writeFileSync.getCalls().find(c => c.args[0] === p)
+            expect(byPath(FAKE_WALLETS_FILE).args[2]).to.deep.equal({ mode: 0o600 })
+            expect(byPath(FAKE_SIGNER_ENV).args[2]).to.deep.equal({ mode: 0o600 })
+            expect(fs.chmodSync.calledWith(FAKE_WALLETS_FILE, 0o600)).to.be.true
+            expect(fs.chmodSync.calledWith(FAKE_SIGNER_ENV, 0o600)).to.be.true
+            const signer = byPath(FAKE_SIGNER_FILE)
+            expect(signer).to.exist
+            expect(signer.args[1]).to.include("require('@dankest-llc/xchain-sdk')")
+            expect(signer.args[1]).to.include('async walletSign(psbtHex)')
+            expect(signer.args[1]).to.include('async broadcast(payload)')
+        })
+
+        it('points the signer at the DOGE wallet and the public testnet encoder', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            await vs.initValidator({ network: 'testnet' })
+            const w = writtenWallets(fs)
+            const env = fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_SIGNER_ENV).args[1]
+            expect(env).to.include('DOGE_NETWORK=dogecoin-testnet')
+            expect(env).to.include('DOGE_ADDRESS=' + w.DOGE_ADDRESS)
+            expect(env).to.include('DOGE_WIF=' + w.DOGE_WIF_SECRET)
+            expect(env).to.include('DOGE_ENCODER_URL=https://encoder.xchain.io/TDOGE')
+            // The stake key is NOT in the mounted directory.
+            expect(env).to.not.include(w.STAKE_WIF_SECRET)
+        })
+
+        it('fills oracle_publish in the fresh capabilities file from the DOGE wallet', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            await vs.initValidator({ network: 'testnet' })
+            const w = writtenWallets(fs)
+            const caps = JSON.parse(fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_CAPS_FILE).args[1])
+            expect(caps.oracle_publish.doge_address).to.equal(w.DOGE_ADDRESS)
+            expect(caps.oracle_publish.doge_wallet).to.equal('/XChainHub/operator-signer/.env')
+        })
+
+        it('--network names the federation and picks the matching port', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            const result = await vs.initValidator({ network: 'testnet' })
+            expect(result.P2P_PORT).to.equal(10002)
+            expect(result.network).to.equal('testnet')
+            expect(result.SEED_NODES).to.deep.equal(['01','02','03','04','05'].map(n => 'ws://validator' + n + '.xchain.io:10002'))
+        })
+
+        it('rejects an unknown --network', async function () {
+            const vs = loadValidatorService(makeFs())
+            let err = null
+            try { await vs.initValidator({ network: 'devnet' }) } catch (e) { err = e }
+            expect(err).to.exist
+            expect(err.message).to.match(/--network must be one of/)
+        })
+
+        it('defaults ORACLE_EPOCH_START to the testnet federation value', async function () {
+            const vs = loadValidatorService(makeFs())
+            const result = await vs.initValidator({ p2pPort: '10002' })
+            expect(result.ORACLE_EPOCH_START).to.equal(1787875200000)
+        })
+
+        it('--oracle-epoch-start still overrides the federation default', async function () {
+            const vs = loadValidatorService(makeFs())
+            const result = await vs.initValidator({ p2pPort: '10002', oracleEpochStart: '1717200000000' })
+            expect(result.ORACLE_EPOCH_START).to.equal(1717200000000)
+        })
+
+        it('leaves ORACLE_EPOCH_START null on mainnet, where no federation value is known yet', async function () {
+            const vs = loadValidatorService(makeFs())
+            const result = await vs.initValidator({ p2pPort: '10001' })
+            expect(result.network).to.equal('mainnet')
+            expect(result.ORACLE_EPOCH_START).to.be.null
+        })
+
+        it('skips wallets on a non-standard port and says so, without failing init', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            const logged = []
+            const stub = sinon.stub(console, 'log').callsFake(m => logged.push(String(m)))
+            try { await vs.initValidator({ p2pPort: '10099' }) } finally { stub.restore() }
+            expect(writtenWallets(fs)).to.be.null
+            expect(logged.some(l => /Wallets skipped: the network is unknown/.test(l))).to.be.true
+        })
+
+        it('refuses to import a key when the network is unknown', async function () {
+            const vs = loadValidatorService(makeFs())
+            process.env.XCHAIN_NODE_STAKE_WIF = 'cV' + 'x'.repeat(50)
+            let err = null
+            try { await vs.initValidator({ p2pPort: '10099', importStakeKey: true }) } catch (e) { err = e }
+            expect(err).to.exist
+            expect(err.message).to.match(/without knowing the network/)
+        })
+
+        it('--no-wallets skips wallet generation entirely', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            await vs.initValidator({ network: 'testnet', wallets: false })
+            expect(writtenWallets(fs)).to.be.null
+            const caps = JSON.parse(fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_CAPS_FILE).args[1])
+            expect(caps.oracle_publish.doge_address).to.equal('REPLACE_WITH_DOGE_ADDRESS')
+        })
+
+        it('imports operator-supplied WIFs from the environment and derives their addresses', async function () {
+            // Generate two known keys through the SDK, then hand them to init the
+            // way a vanity-address operator would: as WIFs, never as argv.
+            const { XChainSDK } = require('@dankest-llc/xchain-sdk')
+            const btc  = new XChainSDK({ network: 'bitcoin-testnet' })
+            const doge = new XChainSDK({ network: 'dogecoin-testnet' })
+            const stakeKey = btc.wallet.generateKeyPair()
+            const dogeKey  = doge.wallet.generateKeyPair()
+            process.env.XCHAIN_NODE_STAKE_WIF = stakeKey.wif
+            process.env.XCHAIN_NODE_DOGE_WIF  = dogeKey.wif
+
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            await vs.initValidator({ network: 'testnet' })
+            const w = writtenWallets(fs)
+            expect(w.STAKE_ADDRESS).to.equal(btc.wallet.deriveAddress(stakeKey.publicKey))
+            expect(w.STAKE_WIF_SECRET).to.equal(stakeKey.wif)
+            expect(w.DOGE_ADDRESS).to.equal(doge.wallet.deriveAddress(dogeKey.publicKey))
+            expect(w.DOGE_WIF_SECRET).to.equal(dogeKey.wif)
+        })
+
+        it('rejects a WIF from the wrong network', async function () {
+            const { XChainSDK } = require('@dankest-llc/xchain-sdk')
+            const mainnetKey = new XChainSDK({ network: 'bitcoin-mainnet' }).wallet.generateKeyPair()
+            process.env.XCHAIN_NODE_STAKE_WIF = mainnetKey.wif
+            const vs = loadValidatorService(makeFs())
+            let err = null
+            try { await vs.initValidator({ network: 'testnet' }) } catch (e) { err = e }
+            expect(err).to.exist
+        })
+
+        it('keeps existing wallets across --force (a funded address must not be abandoned silently)', async function () {
+            const existing = [
+                'NETWORK=testnet', 'STAKE_ADDRESS=mExistingStake', 'STAKE_PUBKEY_HEX=02aa', 'STAKE_WIF_SECRET=cExisting',
+                'DOGE_ADDRESS=nExistingDoge', 'DOGE_PUBKEY_HEX=02bb', 'DOGE_WIF_SECRET=cExistingDoge', ''
+            ].join('\n')
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                lstatSync:  fileLstat([FAKE_WALLETS_FILE]),
+                readFileSync: sinon.stub().callsFake(p => {
+                    if (p === FAKE_WALLETS_FILE) return existing
+                    if (p === FAKE_SETTINGS_FILE) return JSON.stringify(makeSettings())
+                    return '{}'
+                })
+            })
+            const vs = loadValidatorService(fs)
+            await vs.initValidator({ force: true, p2pPort: '10002' })
+            expect(writtenWallets(fs)).to.be.null
+            // The fresh capabilities file (force rewrites it) still names the kept DOGE wallet.
+            const caps = JSON.parse(fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_CAPS_FILE).args[1])
+            expect(caps.oracle_publish.doge_address).to.equal('nExistingDoge')
+        })
+
+        it('--force-wallets replaces them', async function () {
+            const existing = 'NETWORK=testnet\nSTAKE_ADDRESS=mExistingStake\nDOGE_ADDRESS=nExistingDoge\n'
+            const fs = makeFs({
+                lstatSync:    fileLstat([FAKE_WALLETS_FILE]),
+                readFileSync: sinon.stub().callsFake(p => p === FAKE_WALLETS_FILE ? existing : '{}')
+            })
+            const vs = loadValidatorService(fs)
+            await vs.initValidator({ p2pPort: '10002', forceWallets: true })
+            const w = writtenWallets(fs)
+            expect(w).to.exist
+            expect(w.STAKE_ADDRESS).to.not.equal('mExistingStake')
+        })
+
+        // Docker mounts the parent bind first, then the SDK on top of
+        // signer/node_modules. A missing mountpoint under a read-only mount is
+        // not a degraded signer, it aborts container creation, so init has to
+        // leave the empty directory behind.
+        it('creates the node_modules mountpoint the SDK mount lands on', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            await vs.initValidator({ network: 'testnet' })
+            expect(fs.mkdirSync.calledWith(path.join(FAKE_SIGNER_DIR, 'node_modules'), { recursive: true })).to.be.true
+        })
+
+        it('creates that mountpoint at mount time too, for a config written before it existed', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p !== path.join(FAKE_SIGNER_DIR, 'node_modules')),
+                lstatSync:  fileLstat([FAKE_SIGNER_FILE, FAKE_SIGNER_ENV])
+            })
+            const vs = loadValidatorService(fs)
+            expect(vs.getSignerMountDir()).to.equal(FAKE_SIGNER_DIR)
+            expect(fs.mkdirSync.calledWith(path.join(FAKE_SIGNER_DIR, 'node_modules'), { recursive: true })).to.be.true
+        })
+
+        it('does not claim a signer mount when the signer files are absent', function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            expect(vs.getSignerMountDir()).to.be.null
+            expect(fs.mkdirSync.called).to.be.false
+        })
+
+        it('publicWalletInfo never carries a WIF', function () {
+            const vs = loadValidatorService(makeFs())
+            const info = vs.publicWalletInfo({
+                NETWORK: 'testnet', STAKE_ADDRESS: 'mA', STAKE_PUBKEY_HEX: '02', STAKE_WIF_SECRET: 'cSECRET',
+                DOGE_ADDRESS: 'nB', DOGE_PUBKEY_HEX: '03', DOGE_WIF_SECRET: 'cSECRET2'
+            })
+            expect(JSON.stringify(info)).to.not.include('SECRET')
+            expect(info).to.deep.equal({ network: 'testnet', stakeAddress: 'mA', stakePubkeyHex: '02', dogeAddress: 'nB', dogePubkeyHex: '03' })
+        })
+
+        describe('hub env wiring', function () {
+
+            function walletedFs(seed, settings, extra = {}) {
+                const wallets = [
+                    'NETWORK=testnet', 'STAKE_ADDRESS=mStake', 'STAKE_PUBKEY_HEX=02aa', 'STAKE_WIF_SECRET=cStake',
+                    'DOGE_ADDRESS=nDoge', 'DOGE_PUBKEY_HEX=02bb', 'DOGE_WIF_SECRET=cDoge', ''
+                ].join('\n')
+                return makeFs({
+                    existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                    lstatSync:  fileLstat([FAKE_WALLETS_FILE, FAKE_SIGNER_FILE, FAKE_SIGNER_ENV]),
+                    readFileSync: sinon.stub().callsFake(p => {
+                        if (p === FAKE_KEY_FILE) return seed
+                        if (p === FAKE_WALLETS_FILE) return wallets
+                        return JSON.stringify(settings)
+                    }),
+                    ...extra
+                })
+            }
+
+            it('hands the hub the DOGE publisher address, pubkey, encoder and signer module, never the WIF', function () {
+                const seed = makeSeedHex()
+                const vs = loadValidatorService(walletedFs(seed, makeSettings(undefined, { network: 'testnet', P2P_PORT: 10002 })))
+                const env = vs.getValidatorEnv()
+                expect(env.HUB_NETWORK).to.equal('testnet')
+                expect(env.DOGE_ADDRESS).to.equal('nDoge')
+                expect(env.DOGE_PUBKEY_HEX).to.equal('02bb')
+                expect(env.DOGE_ENCODER_URL).to.equal('https://encoder.xchain.io/TDOGE')
+                expect(env.HUB_SIGNER_MODULE).to.equal('/XChainHub/operator-signer/signer.js')
+                expect(JSON.stringify(env)).to.not.include('cDoge')
+                expect(JSON.stringify(env)).to.not.include('cStake')
+            })
+
+            it('host env wins over the recorded values', function () {
+                process.env.HUB_NETWORK = 'regtest'
+                process.env.DOGE_ENCODER_URL = 'http://my-encoder:3113'
+                const vs = loadValidatorService(walletedFs(makeSeedHex(), makeSettings(undefined, { network: 'testnet' })))
+                const env = vs.getValidatorEnv()
+                expect(env).to.not.have.property('HUB_NETWORK')   // passthrough already carries the host value
+                expect(env.DOGE_ENCODER_URL).to.equal('http://my-encoder:3113')
+            })
+
+            it('an operator-supplied signer directory takes precedence over the generated one', function () {
+                process.env.XCHAIN_NODE_HUB_SIGNER_DIR = '/home/op/hub-signer'
+                const vs = loadValidatorService(walletedFs(makeSeedHex(), makeSettings(undefined, { network: 'testnet' })))
+                expect(vs.getSignerMountDir()).to.be.null
+                expect(vs.getValidatorEnv()).to.not.have.property('HUB_SIGNER_MODULE')
+            })
+
+            it('a validator without wallets gets no DOGE wiring (pre-wallets install)', function () {
+                const seed = makeSeedHex()
+                const fs = makeFs({
+                    existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                    readFileSync: sinon.stub().callsFake(p => p === FAKE_KEY_FILE ? seed : JSON.stringify(makeSettings()))
+                })
+                const env = loadValidatorService(fs).getValidatorEnv()
+                expect(env).to.not.have.property('DOGE_ADDRESS')
+                expect(env).to.not.have.property('HUB_SIGNER_MODULE')
+            })
+        })
+    })
+
+    // ROLLCALL: `validator status` surfaces the DOGE publisher runway in roll
+    // calls, whether the configured signer can PUBLISH one (not merely sign
+    // it), and this key's BTC-side absence streak from the indexer's
+    // getrollcallabsences({source, limit}) read.
+    describe('ROLLCALL status reporting', function () {
+
+        describe('rollcallEpochBlocks()', function () {
+
+            it('is 30 on regtest and 1008 on testnet, mainnet, and anything unrecognized', function () {
+                const vs = loadValidatorService(makeFs())
+                expect(vs.rollcallEpochBlocks('regtest')).to.equal(30)
+                expect(vs.rollcallEpochBlocks('testnet')).to.equal(1008)
+                expect(vs.rollcallEpochBlocks('mainnet')).to.equal(1008)
+                expect(vs.rollcallEpochBlocks('devnet')).to.equal(1008)
+            })
+        })
+
+        describe('rollcallAbsenceStreak()', function () {
+
+            it('returns 0 for an empty list (healthy: no absence on record, not "unknown")', function () {
+                const vs = loadValidatorService(makeFs())
+                expect(vs.rollcallAbsenceStreak([], 30)).to.equal(0)
+            })
+
+            it('counts a single absence as a streak of one', function () {
+                const vs = loadValidatorService(makeFs())
+                expect(vs.rollcallAbsenceStreak([{ epoch_height: 100, evicted: 0 }], 30)).to.equal(1)
+            })
+
+            it('counts two absences one epoch apart as a streak of two', function () {
+                const vs = loadValidatorService(makeFs())
+                const rows = [{ epoch_height: 130, evicted: 1 }, { epoch_height: 100, evicted: 0 }]
+                expect(vs.rollcallAbsenceStreak(rows, 30)).to.equal(2)
+            })
+
+            it('stops the streak at a rolled (present) epoch between two absences, even though only absences are in the array', function () {
+                const vs = loadValidatorService(makeFs())
+                // 160 -> 130 is one epoch (consecutive); 130 -> 70 is two epochs, so
+                // whatever epoch happened at 100 was NOT an absence and breaks the run.
+                const rows = [{ epoch_height: 160, evicted: 0 }, { epoch_height: 130, evicted: 0 }, { epoch_height: 70, evicted: 0 }]
+                expect(vs.rollcallAbsenceStreak(rows, 30)).to.equal(2)
+            })
+
+            it('only counts the run starting at the head of the array, never a streak buried deeper in the history', function () {
+                const vs = loadValidatorService(makeFs())
+                // A lone, older absence with no adjacent row: even though it is "2
+                // consecutive" if paired with something further down, nothing here
+                // is adjacent to it, so head-counting gives 1, not a longer run
+                // found by scanning the rest of the array.
+                const rows = [{ epoch_height: 500, evicted: 0 }, { epoch_height: 100, evicted: 0 }, { epoch_height: 70, evicted: 1 }]
+                expect(vs.rollcallAbsenceStreak(rows, 30)).to.equal(1)
+            })
+        })
+
+        describe('getActiveSignerFile()', function () {
+
+            afterEach(function () { delete process.env.XCHAIN_NODE_HUB_SIGNER_DIR })
+
+            it('prefers an operator-supplied signer directory', function () {
+                process.env.XCHAIN_NODE_HUB_SIGNER_DIR = '/home/op/hub-signer'
+                const vs = loadValidatorService(makeFs())
+                expect(vs.getActiveSignerFile()).to.equal(path.join('/home/op/hub-signer', 'signer.js'))
+            })
+
+            it('falls back to the generated signer.js once init has written one', function () {
+                const fs = makeFs({ lstatSync: fileLstat([FAKE_SIGNER_FILE, FAKE_SIGNER_ENV]) })
+                const vs = loadValidatorService(fs)
+                expect(vs.getActiveSignerFile()).to.equal(FAKE_SIGNER_FILE)
+            })
+
+            it('is null when no signer is configured at all', function () {
+                const vs = loadValidatorService(makeFs())
+                expect(vs.getActiveSignerFile()).to.be.null
+            })
+        })
+
+        describe('signerModuleExportsBroadcast()', function () {
+
+            it('recognizes the CLI-generated template shape (object-literal broadcast beside walletSign)', function () {
+                const fs = makeFs({
+                    lstatSync: fileLstat([FAKE_SIGNER_FILE]),
+                    readFileSync: sinon.stub().returns(
+                        '/* broadcast(payload)  -> Promise<{txid}>  optional, replaces the default pipeline */\n' +
+                        'module.exports = {\n  async broadcast(payload) { return { txid: "x" } },\n  async walletSign(p) { return "s" }\n};'
+                    )
+                })
+                const vs = loadValidatorService(fs)
+                expect(vs.signerModuleExportsBroadcast(FAKE_SIGNER_FILE)).to.be.true
+            })
+
+            it('recognizes the separate exports.broadcast = assignment form', function () {
+                const fs = makeFs({
+                    lstatSync: fileLstat([FAKE_SIGNER_FILE]),
+                    readFileSync: sinon.stub().returns(
+                        'exports.walletSign = async function (p) { return "s" };\n' +
+                        'exports.broadcast = async function (payload) { return { txid: "y" } };'
+                    )
+                })
+                const vs = loadValidatorService(fs)
+                expect(vs.signerModuleExportsBroadcast(FAKE_SIGNER_FILE)).to.be.true
+            })
+
+            it('returns false for a hand-built module that only signs', function () {
+                const fs = makeFs({
+                    lstatSync: fileLstat([FAKE_SIGNER_FILE]),
+                    readFileSync: sinon.stub().returns('module.exports = {\n  async walletSign(p) { return "s" }\n};')
+                })
+                const vs = loadValidatorService(fs)
+                expect(vs.signerModuleExportsBroadcast(FAKE_SIGNER_FILE)).to.be.false
+            })
+
+            it('is not fooled by a contract comment BEFORE module.exports that only mentions broadcast', function () {
+                const fs = makeFs({
+                    lstatSync: fileLstat([FAKE_SIGNER_FILE]),
+                    readFileSync: sinon.stub().returns(
+                        '/*\n * walletSign(psbtHex) -> Promise<txHex>   REQUIRED\n' +
+                        ' * broadcast(payload)  -> Promise<{txid}>  optional, replaces the default pipeline\n */\n' +
+                        'module.exports = {\n  async walletSign(p) { return "s" }\n};'
+                    )
+                })
+                const vs = loadValidatorService(fs)
+                expect(vs.signerModuleExportsBroadcast(FAKE_SIGNER_FILE)).to.be.false
+            })
+
+            it('is not fooled by a TODO comment INSIDE the exports block that mentions broadcast(', function () {
+                // Here the misleading text sits AFTER the `module.exports` token, so
+                // only stripping comments before the scan (not the tail-scoping alone)
+                // keeps this from reading as a real export.
+                const fs = makeFs({
+                    lstatSync: fileLstat([FAKE_SIGNER_FILE]),
+                    readFileSync: sinon.stub().returns(
+                        'module.exports = {\n' +
+                        '  // TODO: implement broadcast(payload) once the HSM supports it\n' +
+                        '  async walletSign(p) { return "s" }\n' +
+                        '};'
+                    )
+                })
+                const vs = loadValidatorService(fs)
+                expect(vs.signerModuleExportsBroadcast(FAKE_SIGNER_FILE)).to.be.false
+            })
+
+            it('returns null when there is no signer file to check', function () {
+                const vs = loadValidatorService(makeFs())
+                expect(vs.signerModuleExportsBroadcast(FAKE_SIGNER_FILE)).to.be.null
+            })
+        })
+
+        describe('getRollcallStatus()', function () {
+
+            // A fake SDK shaped like the parts the status command touches: the DOGE
+            // network's address balance and the BTC network's absence read. Mirrors
+            // ValidatorStakeService's test fakes (same sdk.explorer.* shape).
+            function makeRollcallSdk({ dogeBalance, dogeThrows, absences, absencesThrows, noAbsencesMethod } = {}) {
+                const explorerDoge = {
+                    getAddress: dogeThrows
+                        ? sinon.stub().rejects(new Error(dogeThrows))
+                        : sinon.stub().resolves({ balances: { confirmed: dogeBalance !== undefined ? dogeBalance : '0' } })
+                }
+                const explorerBtc = {}
+                if (!noAbsencesMethod) {
+                    explorerBtc.getRollcallAbsences = absencesThrows
+                        ? sinon.stub().rejects(new Error(absencesThrows))
+                        : sinon.stub().resolves({ absences: absences || [] })
+                }
+                return { dogeSdk: { explorer: explorerDoge }, btcSdk: { explorer: explorerBtc } }
+            }
+
+            const WALLET = { network: 'testnet', stakeAddress: 'mStake', dogeAddress: 'nDoge' }
+
+            function routedMakeSdk(dogeSdk, btcSdk) {
+                return sdkNetwork => sdkNetwork === 'dogecoin-testnet' ? dogeSdk : btcSdk
+            }
+
+            it('healthy: a DOGE runway, no absences, and a publish-capable signer', async function () {
+                const vs = loadValidatorService(makeFs())
+                const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeBalance: '0.03', absences: [] })
+                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+                    makeSdk: routedMakeSdk(dogeSdk, btcSdk),
+                    getActiveSignerFile: () => null
+                })
+                expect(result.doge).to.deep.equal({ unavailable: false, balance: 0.03, rollcalls: 5 })
+                expect(result.absences).to.deep.equal({ unavailable: false, streak: 0, evictedNow: false })
+                expect(result.broadcast).to.be.null
+            })
+
+            it('a streak of one reads as a warning shot, not an eviction', async function () {
+                const vs = loadValidatorService(makeFs())
+                const rows = [{ epoch_height: 100, source: 'mStake', close_block: 100, evicted: 0 }]
+                const { dogeSdk, btcSdk } = makeRollcallSdk({ absences: rows })
+                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+                })
+                expect(result.absences).to.deep.equal({ unavailable: false, streak: 1, evictedNow: false })
+            })
+
+            it('a streak of two with evicted:1 on the head row reads as evicted', async function () {
+                const vs = loadValidatorService(makeFs())
+                // 1008 BTC blocks apart: one ROLLCALL epoch on testnet, so these two
+                // absences are genuinely back-to-back.
+                const rows = [
+                    { epoch_height: 2016, source: 'mStake', close_block: 2016, evicted: 1 },
+                    { epoch_height: 1008, source: 'mStake', close_block: 1008, evicted: 0 }
+                ]
+                const { dogeSdk, btcSdk } = makeRollcallSdk({ absences: rows })
+                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+                })
+                expect(result.absences.streak).to.equal(2)
+                expect(result.absences.evictedNow).to.be.true
+            })
+
+            it('degrades to unavailable, never a reassuring zero, when the absence read throws', async function () {
+                const vs = loadValidatorService(makeFs())
+                const { dogeSdk, btcSdk } = makeRollcallSdk({ absencesThrows: 'ECONNREFUSED' })
+                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+                })
+                expect(result.absences.unavailable).to.be.true
+                expect(result.absences).to.not.have.property('streak')
+            })
+
+            it('degrades to unavailable, not "no absences", when the indexer predates this read', async function () {
+                const vs = loadValidatorService(makeFs())
+                const { dogeSdk, btcSdk } = makeRollcallSdk({ noAbsencesMethod: true })
+                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+                })
+                expect(result.absences.unavailable).to.be.true
+                expect(result.absences.reason).to.match(/does not expose/)
+            })
+
+            it('degrades the DOGE runway to unavailable rather than reporting 0 roll calls', async function () {
+                const vs = loadValidatorService(makeFs())
+                const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeThrows: 'timeout', absences: [] })
+                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+                })
+                expect(result.doge.unavailable).to.be.true
+                expect(result.doge).to.not.have.property('rollcalls')
+            })
+
+            it('reports a signer with no broadcast export, naming the file, independent of wallet state', async function () {
+                const OPERATOR_SIGNER = '/home/op/hub-signer/signer.js'
+                const fs = makeFs({
+                    lstatSync: fileLstat([OPERATOR_SIGNER]),
+                    readFileSync: sinon.stub().returns('module.exports = {\n  async walletSign(p) { return "s" }\n};')
+                })
+                const vs = loadValidatorService(fs)
+                const result = await vs.getRollcallStatus(null, 'testnet', {
+                    getActiveSignerFile: () => OPERATOR_SIGNER
+                })
+                // With no walletInfo, doge/absences stay null but broadcast is still computed:
+                // the check has nothing to do with whether wallets exist.
+                expect(result.doge).to.be.null
+                expect(result.absences).to.be.null
+                expect(result.broadcast).to.deep.equal({ file: OPERATOR_SIGNER, exportsBroadcast: false })
+            })
         })
     })
 })

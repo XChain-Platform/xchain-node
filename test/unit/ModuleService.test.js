@@ -1526,7 +1526,9 @@ describe('ModuleService', function () {
                 './DatabaseService': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './ValidatorService': {
                     getCapabilityConfigMountDir: () => capsHostDir,
-                    CAPS_CONTAINER_DIR: '/validator'
+                    getSignerMountDir: () => null,
+                    CAPS_CONTAINER_DIR: '/validator',
+                    SIGNER_CONTAINER_DIR: '/XChainHub/operator-signer'
                 },
                 './VersionService': { getLocalNodeVersion: sinon.stub().resolves(null), getLocalModuleVersion: sinon.stub().resolves(null), checkRemoteNodeVersion: sinon.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon.stub().resolves(true), getCryptoNode: sinon.stub().resolves() },

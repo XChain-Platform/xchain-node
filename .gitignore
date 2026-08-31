@@ -38,3 +38,7 @@ config/*.bak*
 # Coverage output (c8/nyc) - generated, not source
 coverage/
 .nyc_output/
+
+# Validator identity, coin wallets and the DOGE signer written by `validator init`.
+# Private keys live here (signing.key, wallets.env, signer/.env): never a repo artifact.
+config/validator/

@@ -84,25 +84,30 @@ as a full validator (P2P + PBFT + capability staking), generate a validator
 identity first. This is offline and needs no running stack:
 
 ```bash
-xchain-node validator init \
-  --seed-nodes seed1.example:10001,seed2.example:10001 \
-  --p2p-addr <your-public-host>:10001 \
-  --oracle-epoch-start <shared-federation-unix-ms> \
-  --capabilities price,cross_chain,oracle_publish,attestation
+xchain-node validator init --network testnet --p2p-addr <your-public-host>:10002
 ```
 
-It generates an Ed25519 signing key (saved `0600` under `config/validator/`),
-prints the **pubkey to stake XCHAIN to**, and writes a starter `capabilities.json`
-under `config/validator/hub-caps/` (its own subdirectory, mounted read-only into
-the hub container; the signing key is never mounted). Edit that file to set real
-`cross_chain` RPC endpoints and `oracle_publish` DOGE values, then install/start
-the hub. It will boot in validator mode with your key and capability config
-mounted automatically:
+It generates an Ed25519 signing key, a BTC **stake wallet** and a DOGE
+**publisher wallet** (all `0600` under `config/validator/`, git-ignored), prints
+the **pubkey to stake XCHAIN to** and the **two addresses to fund**, and writes
+`capabilities.json` under `config/validator/hub-caps/` already pointed at the
+DOGE wallet, plus the signer module the hub loads to publish price rounds and
+anchors from it. Seed nodes, network and the testnet oracle epoch default to
+the federation's values. To use keys you already hold (a vanity address, say),
+add `--import-stake-key` / `--import-doge-key`; each prompts for the WIF with
+echo off.
+
+Fund the two addresses, then stake and start:
 
 ```bash
-xchain-node install master xchain-hub
-xchain-node validator status      # show pubkey, peers, capabilities
+xchain-node validator stake              # dry run: balances and the plan
+xchain-node validator stake --broadcast  # mints XCHAIN on testnet if short, then STAKEs
+xchain-node install master xchain-hub    # boots in validator mode, signer mounted
+xchain-node validator status             # pubkey, network, wallets, peers, capabilities
 ```
+
+The full walkthrough, including the BTC indexer the hub needs and how to verify
+membership on the explorer, is `xchain-documentation/operations/run-a-validator.md`.
 
 ## Host environment variables
 
