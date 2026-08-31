@@ -19,7 +19,7 @@ on:
 
 jobs:
   ci:
-    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@6f4d39ae85787fc31e90a31588d87610a2c33103 # pin: XChain-Platform/.github @ master 2026-08-14; bump deliberately
+    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@fd9160695d677f0538e959460ba5d8dfbb7f3c8e # pin: XChain-Platform/.github @ master 2026-08-31; bump deliberately
     # Override the Node version for a repo if ever needed:
     # with:
     #   node-version: "20"
@@ -88,5 +88,13 @@ jobs:
       - name: Install dependencies
         run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
+      # Same reason the shared test gate carries it: this job runs the unit tier
+      # too, and the release-signature verification resolves signed digest files
+      # through the GitHub API. Unauthenticated quota is per runner IP on a shared
+      # pool, so the fetch 403s, installModules throws a ReleaseIntegrityError
+      # before the bootstrap summary is ever reported, and the failure surfaces as
+      # an unrelated "expected false to be true" on a stub assertion.
       - name: Coverage thresholds (c8 --check-coverage)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: npm run coverage:check
