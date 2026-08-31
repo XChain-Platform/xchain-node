@@ -69,9 +69,18 @@ class HubConnector {
                 if(err.response && err.response.data && err.response.data.result !== undefined){
                     degraded = err.response.data.result;
                 } else {
-                    // Unreachable. Record why so the caller can report which
-                    // endpoints failed instead of an undiagnosable null.
-                    this.lastFailures.push(url + ' → ' + (err.code || err.message));
+                    // Unreachable, or answered with a status carrying no JSON-RPC
+                    // result. Record why so the caller can report which endpoints
+                    // failed instead of an undiagnosable null.
+                    //
+                    // The HTTP STATUS leads when there is one. axios reports every
+                    // 4xx as code ERR_BAD_REQUEST, so a 401 from a key-enforcing hub
+                    // recorded as "ERR_BAD_REQUEST" - true, and useless: it reads as
+                    // a malformed request rather than a missing HUB_API_KEY, which
+                    // is the one thing an operator needs to be told here.
+                    const status = err.response && err.response.status;
+                    this.lastFailures.push(url + ' → ' +
+                        (status ? 'HTTP ' + status + ' ' : '') + (err.code || err.message));
                 }
             }
         }
