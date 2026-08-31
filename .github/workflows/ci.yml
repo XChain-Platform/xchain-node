@@ -88,5 +88,13 @@ jobs:
       - name: Install dependencies
         run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
+      # Same reason the shared test gate carries it: this job runs the unit tier
+      # too, and the release-signature verification resolves signed digest files
+      # through the GitHub API. Unauthenticated quota is per runner IP on a shared
+      # pool, so the fetch 403s, installModules throws a ReleaseIntegrityError
+      # before the bootstrap summary is ever reported, and the failure surfaces as
+      # an unrelated "expected false to be true" on a stub assertion.
       - name: Coverage thresholds (c8 --check-coverage)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: npm run coverage:check
