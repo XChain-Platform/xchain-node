@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-09-01
+
+### Added
+- `validator stake` and `validator unstake` mint, stake and withdraw against the public network, so an operator can join before installing any stack.
+- `validator init` builds the stake and publisher wallets and prints the two addresses to fund.
+
+### Fixed
+- An unrecognised service name is refused with the list of valid ones, instead of silently expanding to every service on every coin and network.
+- A coin image builds from a context that holds its Dockerfile, and never writes live credentials into the tracked config template.
+- A mutating command waits out a busy lock instead of losing the run, and a locked bootstrap create is retried by the publisher.
+- The next step printed after `validator init` names the release rather than a branch.
+
 ## [0.12.1] - 2026-08-31
 
 ### Fixed
