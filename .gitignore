@@ -21,6 +21,8 @@ crypto_nodes/*/*.tar.gz
 crypto_nodes/bitcoin/bitcoin/
 crypto_nodes/dogecoin/dogecoin/
 crypto_nodes/litecoin/litecoin/
+# The build writes the credential-injected conf here, beside the tracked template.
+crypto_nodes/*/*.generated.conf
 
 # Per-coin/network node configs - never track (generated at install). The main files hold
 # only non-secret operator overrides now, but stay ignored to protect any leftover files

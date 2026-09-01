@@ -26,9 +26,15 @@ function makeNodeServiceStubs(overrides = {}) {
         writeFileSync:     sinon.stub(),
         readFileSync:      sinon.stub().returns('rpcuser=old\nrpcpassword=old\n'),
         mkdirSync:         sinon.stub(),
+        copyFileSync:      sinon.stub(),
         // ensureHostDir lstats before mkdir; default: path absent.
         lstatSync:         sinon.stub().throws(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
     }
+    // The per-coin Dockerfile and conf templates ship in git, so they are present
+    // for every build. Model that: a default-false existsSync makes the build
+    // scaffold look absent and every install path fail closed on a precondition
+    // that never fails in a real checkout.
+    fsStub.existsSync.withArgs(sinon.match(/crypto_nodes[\\/][a-z]+[\\/](Dockerfile|[a-z]+-[a-z]+\.conf)$/)).returns(true)
     const dbStub = {
         insertModuleContainer: sinon.stub().resolves(true),
         isReady:               sinon.stub().returns(true)
@@ -819,10 +825,13 @@ describe('NodeService: buildCryptoNode()', function () {
             // EACCES "failed to create"; ensureHostDir lstats first and skips.
             const stubs = makeNodeServiceStubs()
             stubs.fs.lstatSync = sinon.stub().returns({ isSymbolicLink: () => true })
-            stubs.fs.mkdirSync.throws(new Error('EACCES: permission denied'))
+            // Scoped to the blocks path: staging the build scaffold also creates
+            // its own directory, and a blanket throw would fail there instead,
+            // never reaching the case under test.
+            stubs.fs.mkdirSync.withArgs(sinon.match(/bigdisk/)).throws(new Error('EACCES: permission denied'))
             const args = await build(stubs, { envBlocksDir: '/bigdisk' })
             expect(args).to.not.be.null
-            expect(stubs.fs.mkdirSync.called).to.be.false
+            expect(stubs.fs.mkdirSync.calledWith(sinon.match(/bigdisk/))).to.be.false
         })
     })
 
@@ -910,7 +919,9 @@ describe('NodeService: buildCryptoNode()', function () {
         // does); a synchronous stub would let the throw be captured by the Promise
         // executor and mask the bug.
         const stubs = makeNodeServiceStubs()
-        stubs.fs.mkdirSync.throws(new Error('EACCES: permission denied'))
+        // Scoped to the blocks path (see the symlink case above): a blanket throw
+        // now trips staging the build scaffold first and never reaches this guard.
+        stubs.fs.mkdirSync.withArgs(sinon.match(/^\/blocks/)).throws(new Error('EACCES: permission denied'))
         stubs.execFile.callsFake((cmd, args, opts, cb) => {
             if (args[0] === 'build') return setImmediate(() => cb(null))
             if (args[0] === 'run')   return setImmediate(() => cb(null, 'a'.repeat(64) + '\n'))
