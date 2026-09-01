@@ -190,7 +190,9 @@ describe('SERVICE_REGISTRY', function () {
                 },
                 './ValidatorService': {
                     getCapabilityConfigMountDir: () => '/host/validator/hub-caps',
-                    CAPS_CONTAINER_DIR: '/validator'
+                    getSignerMountDir: () => null,
+                    CAPS_CONTAINER_DIR: '/validator',
+                    SIGNER_CONTAINER_DIR: '/XChainHub/operator-signer'
                 },
                 '../state': { db: {}, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
                 './StatusService': { statusChanged: async () => {}, getStatus: async () => ({}) },
@@ -201,6 +203,37 @@ describe('SERVICE_REGISTRY', function () {
             expect(r.volumeArgs).to.deep.equal(['-v', '/host/validator/hub-caps:/validator:ro'])
             // No mount arg may end in a file name: that is the shape that breaks docker cp.
             expect(r.volumeArgs.some(a => /capabilities\.json:/.test(a))).to.be.false
+        })
+
+        it('hub: mounts the generated DOGE signer (ro) with this package\'s node_modules beside it', function () {
+            const path = require('path')
+            const ms2 = proxyquire('../../src/services/ModuleService', {
+                './ConfigService': {
+                    getUtxoTrackerVolumeName: () => 'v', getModuleDir: (m) => '/m/' + m,
+                    checkIfModuleExists: () => true, moduleDirExists: () => false,
+                    getDockerContainerImageName: () => 'x', getDockerNetwork: () => 'n',
+                    getDefaultConfig: async () => ({}), validatePort: () => true
+                },
+                './ValidatorService': {
+                    getCapabilityConfigMountDir: () => '/host/validator/hub-caps',
+                    getSignerMountDir: () => '/host/validator/signer',
+                    CAPS_CONTAINER_DIR: '/validator',
+                    SIGNER_CONTAINER_DIR: '/XChainHub/operator-signer'
+                },
+                '../state': { db: {}, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
+                './StatusService': { statusChanged: async () => {}, getStatus: async () => ({}) },
+                './DockerService': { getPublishedHostPorts: async () => new Map() },
+                './DatabaseService': { setDatabaseParameters: async () => {}, setHubDatabaseParameters: async () => {} }
+            })
+            const r = ms2.buildModuleDockerArgs(HUB_MODULE_NAME, { HUB_PORT: 10000, HUB_CAPABILITY_CONFIG: '/validator/capabilities.json' }, '', '')
+            const nodeModules = path.resolve(__dirname, '..', '..', 'node_modules')
+            expect(r.volumeArgs).to.deep.equal([
+                '-v', '/host/validator/hub-caps:/validator:ro',
+                '-v', '/host/validator/signer:/XChainHub/operator-signer:ro',
+                '-v', nodeModules + ':/XChainHub/operator-signer/node_modules:ro'
+            ])
+            // Read-only, both of them: the hub must not be able to alter the signer or its key file.
+            expect(r.volumeArgs.filter(a => a.includes('operator-signer')).every(a => a.endsWith(':ro'))).to.be.true
         })
 
         it('hub: a mount refusal from ValidatorService fails the build instead of silently dropping the config', function () {
@@ -215,7 +248,9 @@ describe('SERVICE_REGISTRY', function () {
                     getCapabilityConfigMountDir: () => {
                         throw new Error('refusing to mount /host/validator/hub-caps into the hub container')
                     },
-                    CAPS_CONTAINER_DIR: '/validator'
+                    getSignerMountDir: () => null,
+                    CAPS_CONTAINER_DIR: '/validator',
+                    SIGNER_CONTAINER_DIR: '/XChainHub/operator-signer'
                 },
                 '../state': { db: {}, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
                 './StatusService': { statusChanged: async () => {}, getStatus: async () => ({}) },

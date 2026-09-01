@@ -32,6 +32,11 @@
 #     good archive in place as the newest. This exists because the weekly cron
 #     once published a halted litecoin/mainnet decoder as the newest "good"
 #     archive, which every "take the latest" path then selected.
+#   - Waits out a concurrent xchain-node command rather than losing the run.
+#     `bootstrap create` is MUTATING, so any update/reset holds the command lock
+#     and every combo fails at once; a create is retried for $LOCK_WAIT_MIN
+#     minutes, then reported LOCKED (busy box, not a broken source). The retry
+#     is here rather than in the CLI so it works against a pinned fleet too.
 #   - Redirects the (large) work + output dirs onto a roomy volume via
 #     XCHAIN_NODE_DATA_DIR / XCHAIN_NODE_TMP_DIR - the defaults live under the
 #     repo on the small root fs and WILL fill it mid-create otherwise.
@@ -88,6 +93,8 @@ SYNC_HOST="${SYNC_HOST:-user@your-sync-host}"
 SYNC_DIR="${SYNC_DIR:-/misc/backups/bootstraps}"
 KEEP="${KEEP:-2}"                                       # archives to retain per combo (local + remote)
 LOCK_FILE="${LOCK_FILE:-/tmp/publish-bootstraps.lock}"
+LOCK_WAIT_MIN="${LOCK_WAIT_MIN:-30}"                    # minutes to wait out a concurrent xchain-node command (0 = refuse at once)
+LOCK_POLL_SEC="${LOCK_POLL_SEC:-30}"                    # seconds between those attempts
 TRACKER_SVC="xchain-utxo-tracker"
 ALL_SERVICES=(xchain-decoder xchain-indexer xchain-utxo-tracker)
 
@@ -241,15 +248,35 @@ for c in "${SELECTED[@]}"; do
   # two need different operator responses: a refusal means the SERVICE is broken
   # (and the last good archive correctly stays newest), a create-fail means the
   # publish machinery is broken.
-  create_log="$(mktemp)"
-  create_rc=0
-  XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY="$SIGNING_KEY" \
-  XCHAIN_NODE_DATA_DIR="$STAGE_DIR" \
-  XCHAIN_NODE_TMP_DIR="$TMP_DIR" \
-  "$XCHAIN_NODE_BIN" bootstrap create "$svc" "$coin" "$net" >"$create_log" 2>&1 || create_rc=$?
+  # The wait for a lock holder lives HERE, not in the CLI, so it works against
+  # any CLI the box happens to carry (a fleet pinned to a release predates the
+  # CLI-side wait). XCHAIN_NODE_MUTATING_LOCK_WAIT_MS is pinned to 0 so a newer
+  # CLI does not also wait and multiply the budget.
+  lock_deadline=$(( $(date +%s) + LOCK_WAIT_MIN * 60 ))
+  while : ; do
+    create_log="$(mktemp)"
+    create_rc=0
+    XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY="$SIGNING_KEY" \
+    XCHAIN_NODE_DATA_DIR="$STAGE_DIR" \
+    XCHAIN_NODE_TMP_DIR="$TMP_DIR" \
+    XCHAIN_NODE_MUTATING_LOCK_WAIT_MS=0 \
+    "$XCHAIN_NODE_BIN" bootstrap create "$svc" "$coin" "$net" >"$create_log" 2>&1 || create_rc=$?
+    if [ "$create_rc" = 0 ]; then break; fi
+    if ! grep -q 'holds the command lock' "$create_log"; then break; fi
+    if [ "$(date +%s)" -ge "$lock_deadline" ]; then break; fi
+    log "  locked by another xchain-node command; retrying in ${LOCK_POLL_SEC}s (budget ${LOCK_WAIT_MIN}m)"
+    rm -f "$create_log"
+    sleep "$LOCK_POLL_SEC"
+  done
   cat "$create_log"
   if [ "$create_rc" != 0 ]; then
-    if grep -q 'Refusing to create a bootstrap' "$create_log"; then
+    # Contention is neither a broken publisher nor a broken source: the box was
+    # busy. Name it so, or CREATE-FAIL sends the operator hunting a fault that
+    # does not exist.
+    if grep -q 'holds the command lock' "$create_log"; then
+      log "  LOCKED: $c - another xchain-node command still held the command lock after ${LOCK_WAIT_MIN}m. Nothing published; the previous archive stays newest."
+      SUMMARY+=("$c: LOCKED")
+    elif grep -q 'Refusing to create a bootstrap' "$create_log"; then
       log "  REFUSED: $c source is not known-good (reasons above). Nothing published; the previous archive stays newest."
       SUMMARY+=("$c: SOURCE-UNHEALTHY")
     else

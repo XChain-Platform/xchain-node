@@ -41,7 +41,10 @@ const { getStatus }            = require('./services/StatusService')
 const { scanAndRegisterModules } = require('./services/DiscoveryService')
 const { maybeReportTelemetry } = require('./services/TelemetryService')
 const { makeBootstrap, listServedBootstrapCombos } = require('./services/BootstrapService')
-const { initValidator, getValidatorSettings, isInitialized, getCapabilityConfigHostPath } = require('./services/ValidatorService')
+const { initValidator, getValidatorSettings, isInitialized, getCapabilityConfigHostPath,
+        readWallets, publicWalletInfo, getSignerMountDir, COIN_NETWORKS, WALLETS_FILE,
+        getRollcallStatus } = require('./services/ValidatorService')
+const { stakeValidator, unstakeValidator } = require('./services/ValidatorStakeService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 const { acquireCommandLock } = require('./utils/commandLock')
 
@@ -117,6 +120,10 @@ async function parseCommand() {
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.
     const LOCK_WAIT_MS = parseInt(process.env.XCHAIN_NODE_LOCK_WAIT_MS || '15000', 10) || 15000
+    // How long a MUTATING command blocks for a lock holder before refusing. Zero
+    // keeps the interactive contract below; an unattended caller sets it so a
+    // scheduled run waits out a deploy instead of losing its work.
+    const MUTATING_LOCK_WAIT_MS = parseInt(process.env.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS || '0', 10) || 0
     program.hook('preAction', async (thisCommand, actionCommand) => {
         setVerbose(thisCommand.opts().verbose ?? false)
         if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
@@ -136,7 +143,7 @@ async function parseCommand() {
         //
         // A mutating command keeps the lock through its whole action (released on
         // process exit, since actions terminate via process.exit()) and refuses
-        // immediately if another instance holds it. A non-mutating command holds
+        // a held lock unless asked to wait. A non-mutating command holds
         // the lock only across preCheck, releasing it right after, so a
         // long-running `monitor`/`tail`/`logs` does not pin the lock for its
         // lifetime; it waits a bounded time for a busy mutator, then errors.
@@ -145,7 +152,7 @@ async function parseCommand() {
         try {
             release = acquireCommandLock({
                 command: commandName,
-                waitMs: holdThroughAction ? 0 : LOCK_WAIT_MS
+                waitMs: holdThroughAction ? MUTATING_LOCK_WAIT_MS : LOCK_WAIT_MS
             })
         } catch (err) {
             console.error(err.message)
@@ -595,18 +602,64 @@ Notes:
         .description('Generate a validator signing key + config so the hub runs in validator mode')
         .option('--seed-nodes <list>',        'comma-separated peer addresses (host:port,host:port)')
         .option('--p2p-addr <addr>',          'this validator\'s public address (host:port)')
-        .option('--p2p-port <port>',          'P2P listen port (default 10001)')
-        .option('--oracle-epoch-start <ms>',  'shared oracle epoch start (unix ms); must match the federation')
+        .option('--p2p-port <port>',          'P2P listen port (10002 testnet, 10001 mainnet; default 10001)')
+        .option('--network <name>',           'federation to join: testnet or mainnet (default: implied by --p2p-port)')
+        .option('--oracle-epoch-start <ms>',  'shared oracle epoch start (unix ms); defaults to the known federation value')
         .option('--capabilities <list>',      'enabled capabilities (default price,cross_chain,oracle_publish,attestation)')
-        .option('--force',                    'overwrite existing validator config (generates a NEW key)')
+        .option('--import-stake-key',         'use your own BTC stake key: prompts for the WIF (or set XCHAIN_NODE_STAKE_WIF)')
+        .option('--import-doge-key',          'use your own DOGE publisher key: prompts for the WIF (or set XCHAIN_NODE_DOGE_WIF)')
+        .option('--no-wallets',               'skip wallet generation (you run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR)')
+        .option('--force',                    'overwrite existing validator config (generates a NEW signing key; wallets are kept)')
+        .option('--force-wallets',            'also replace existing wallets (the old addresses and any coin at them are abandoned)')
         .action(async (opts) => {
-            await initValidator(opts)
+            try {
+                await initValidator(opts)
+            } catch (e) {
+                console.error('\nERROR: ' + e.message + '\n')
+                return process.exit(1)
+            }
+            return process.exit(0)
+        })
+
+    validator
+        .command('stake')
+        .description('Mint XCHAIN if short (testnet) and broadcast the STAKE naming this validator\'s pubkey; dry run without --broadcast')
+        .option('--amount <xchain>',   'amount to stake (default 25000, clears every capability floor)')
+        .option('--broadcast',         'actually send the transactions (default: print the plan only)')
+        .option('--no-wait',           'return once the STAKE is broadcast instead of waiting for it to index')
+        .option('--serialize',         'send one action per block (default: chained back to back into one block)')
+        .option('--fee-per-kb <coin>', 'fee rate in coin per kB (default: the encoder\'s estimate)')
+        .option('--timeout <minutes>', 'how long to wait for the stake to index (default 120)')
+        .action(async (opts) => {
+            try {
+                await stakeValidator(opts)
+            } catch (e) {
+                console.error('\nERROR: ' + e.message + '\n')
+                return process.exit(1)
+            }
+            return process.exit(0)
+        })
+
+    validator
+        .command('unstake')
+        .description('Withdraw this validator\'s stake and leave the active set; dry run without --broadcast')
+        .option('--broadcast',         'actually send the transaction (default: print the plan only)')
+        .option('--no-wait',           'return once broadcast instead of waiting for it to index')
+        .option('--fee-per-kb <coin>', 'fee rate in coin per kB (default: the encoder\'s estimate)')
+        .option('--timeout <minutes>', 'how long to wait for it to index (default 120)')
+        .action(async (opts) => {
+            try {
+                await unstakeValidator(opts)
+            } catch (e) {
+                console.error('\nERROR: ' + e.message + '\n')
+                return process.exit(1)
+            }
             return process.exit(0)
         })
 
     validator
         .command('status')
-        .description('Show this node\'s validator configuration (pubkey, peers, capabilities)')
+        .description('Show this node\'s validator configuration (pubkey, wallets, peers, capabilities)')
         .action(async () => {
             const s = getValidatorSettings()
             if (!s) {
@@ -616,6 +669,7 @@ Notes:
             } else {
                 console.log('Validator enabled.')
                 console.log('  pubkey       : ' + s.pubkey)
+                console.log('  network      : ' + (s.network || '(unset; set HUB_NETWORK in .env)'))
                 console.log('  p2p address  : ' + s.P2P_VALIDATOR_ADDR)
                 console.log('  seed nodes   : ' + ((s.SEED_NODES || []).join(', ') || '(none)'))
                 console.log('  oracle epoch : ' + (s.ORACLE_EPOCH_START || '(unset, required before oracle runs)'))
@@ -624,6 +678,56 @@ Notes:
                 // bind mount cannot break `docker cp`), and this is where an operator
                 // coming from an older install finds it after the migration.
                 console.log('  caps config  : ' + (getCapabilityConfigHostPath() || '(missing; re-run validator init)'))
+                // Addresses only. The keys stay in the 0600 file.
+                const w = publicWalletInfo(readWallets())
+                const coins = COIN_NETWORKS[(w && w.network) || s.network] || { stakeCoin: 'coin', dogeCoin: 'DOGE' }
+                if (w) {
+                    console.log('  stake wallet : ' + w.stakeAddress + '  (' + coins.stakeCoin + ' for fees, holds the XCHAIN stake)')
+                    console.log('  DOGE wallet  : ' + w.dogeAddress + '  (' + coins.dogeCoin + ' for price rounds and anchors)')
+                    console.log('  keys file    : ' + WALLETS_FILE + ' (mode 0600; back it up)')
+                    console.log('  DOGE signer  : ' + (process.env.XCHAIN_NODE_HUB_SIGNER_DIR
+                        ? process.env.XCHAIN_NODE_HUB_SIGNER_DIR + ' (operator-supplied, XCHAIN_NODE_HUB_SIGNER_DIR)'
+                        : (getSignerMountDir() || '(missing; re-run validator init)')))
+                } else {
+                    console.log('  wallets      : (none; re-run validator init, or run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR)')
+                }
+                // ROLLCALL reporting: the DOGE runway (reusing the address read above,
+                // never a second fetch), whether the configured signer can PUBLISH a
+                // roll call rather than only sign one, and this key's BTC-side absence
+                // streak. Each degrades to its own "unavailable" line instead of
+                // crashing the whole command or printing a reassuring zero.
+                const rollcall = await getRollcallStatus(w, (w && w.network) || s.network)
+                if (rollcall.doge) {
+                    console.log(rollcall.doge.unavailable
+                        ? '  DOGE runway  : unavailable (could not read the DOGE wallet balance' +
+                          (rollcall.doge.error ? ': ' + rollcall.doge.error : '') + ')'
+                        : '  DOGE runway  : ' + rollcall.doge.balance + ' ' + coins.dogeCoin + ' confirmed, ~' +
+                          rollcall.doge.rollcalls + ' roll call(s) of runway (~0.006 ' + coins.dogeCoin +
+                          ' each: two ~0.003 ' + coins.dogeCoin + ' transactions)')
+                }
+                if (rollcall.broadcast) {
+                    console.log(rollcall.broadcast.exportsBroadcast
+                        ? '  roll call    : this signer exports broadcast, so it can publish roll calls'
+                        : '  roll call    : NO broadcast export in ' + rollcall.broadcast.file +
+                          ' - it can SIGN a roll call but never PUBLISH one, silently. Add broadcast(payload) ' +
+                          'or use the CLI-generated signer.')
+                }
+                if (rollcall.absences) {
+                    if (rollcall.absences.unavailable) {
+                        console.log('  roll call absences (BTC): unavailable (' +
+                            (rollcall.absences.error || rollcall.absences.reason || 'indexer read failed') +
+                            '); check the explorer before assuming this key is safe')
+                    } else if (rollcall.absences.streak === 0) {
+                        console.log('  roll call absences (BTC): none on record')
+                    } else if (rollcall.absences.streak === 1) {
+                        console.log('  roll call absences (BTC): 1 (warning shot; one more consecutive miss evicts this stake)')
+                    } else {
+                        console.log('  roll call absences (BTC): ' + rollcall.absences.streak +
+                            (rollcall.absences.evictedNow ? '  EVICTED - dropped from every capability set' : ''))
+                    }
+                }
+                console.log('')
+                console.log('  On-chain membership: xchain-node validator stake   (dry run shows balances and the stake)')
             }
             return process.exit(0)
         })

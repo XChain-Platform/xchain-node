@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-0.12.1-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-2%2C568%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-2%2C659%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -84,25 +84,30 @@ as a full validator (P2P + PBFT + capability staking), generate a validator
 identity first. This is offline and needs no running stack:
 
 ```bash
-xchain-node validator init \
-  --seed-nodes seed1.example:10001,seed2.example:10001 \
-  --p2p-addr <your-public-host>:10001 \
-  --oracle-epoch-start <shared-federation-unix-ms> \
-  --capabilities price,cross_chain,oracle_publish,attestation
+xchain-node validator init --network testnet --p2p-addr <your-public-host>:10002
 ```
 
-It generates an Ed25519 signing key (saved `0600` under `config/validator/`),
-prints the **pubkey to stake XCHAIN to**, and writes a starter `capabilities.json`
-under `config/validator/hub-caps/` (its own subdirectory, mounted read-only into
-the hub container; the signing key is never mounted). Edit that file to set real
-`cross_chain` RPC endpoints and `oracle_publish` DOGE values, then install/start
-the hub. It will boot in validator mode with your key and capability config
-mounted automatically:
+It generates an Ed25519 signing key, a BTC **stake wallet** and a DOGE
+**publisher wallet** (all `0600` under `config/validator/`, git-ignored), prints
+the **pubkey to stake XCHAIN to** and the **two addresses to fund**, and writes
+`capabilities.json` under `config/validator/hub-caps/` already pointed at the
+DOGE wallet, plus the signer module the hub loads to publish price rounds and
+anchors from it. Seed nodes, network and the testnet oracle epoch default to
+the federation's values. To use keys you already hold (a vanity address, say),
+add `--import-stake-key` / `--import-doge-key`; each prompts for the WIF with
+echo off.
+
+Fund the two addresses, then stake and start:
 
 ```bash
-xchain-node install master xchain-hub
-xchain-node validator status      # show pubkey, peers, capabilities
+xchain-node validator stake              # dry run: balances and the plan
+xchain-node validator stake --broadcast  # mints XCHAIN on testnet if short, then STAKEs
+xchain-node install master xchain-hub    # boots in validator mode, signer mounted
+xchain-node validator status             # pubkey, network, wallets, peers, capabilities
 ```
+
+The full walkthrough, including the BTC indexer the hub needs and how to verify
+membership on the explorer, is `xchain-documentation/operations/run-a-validator.md`.
 
 ## Host environment variables
 
@@ -151,11 +156,11 @@ Turn it off with any of: `--no-telemetry` on any command (sticks for future runs
 
 | Command | Description |
 |---|---|
-| `npm test` | Unit tests (1,676 tests) |
+| `npm test` | Unit tests (1,766 tests) |
 | `npm run test:integration` | Integration tests (103 tests) |
 | `npm run test:smoke` | Smoke tests (159 tests) |
 | `npm run test:boundary` | Boundary condition tests (57 tests) |
-| `npm run test:security` | Security tests (73 tests) |
+| `npm run test:security` | Security tests (74 tests) |
 | `npm run test:e2e` | End-to-end tests (57 tests) |
 | `npm run test:fuzz` | Fuzz tests (264 tests) |
 | `npm run test:chaos` | Chaos engineering tests (121 tests) |
@@ -163,7 +168,7 @@ Turn it off with any of: `--no-telemetry` on any command (sticks for future runs
 | `npm run test:regression:p0` | Regression P0: critical gate (33 tests) |
 | `npm run test:regression:p0p1` | Regression P0+P1: standard gate (51 tests) |
 | `npm run test:mutation` | Mutation testing (Stryker Mutator) |
-| `npm run test:all` | All tests (~2,438 tests; excludes security/boundary) |
+| `npm run test:all` | All tests (~2,528 tests; excludes security/boundary) |
 | `npm run benchmark` | Performance benchmarks (5 scenarios) |
 | `npm run benchmark:quick` | Quick benchmarks |
 

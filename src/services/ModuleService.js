@@ -736,6 +736,22 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
             // in-container path. No-op when unconfigured.
             if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR && fs.existsSync(process.env.XCHAIN_NODE_HUB_SIGNER_DIR)) {
                 volumeArgs.push('-v', `${process.env.XCHAIN_NODE_HUB_SIGNER_DIR}:/XChainHub/operator-signer:ro`)
+            } else {
+                // The signer `validator init` wrote. Its signer.js requires the
+                // SDK, resolved from a node_modules mounted beside it: this
+                // package's own node_modules, so init never has to run npm and
+                // the container sees exactly the SDK the CLI uses. The SDK mount
+                // lands INSIDE the read-only signer mount, which docker can only
+                // do when the mountpoint already exists on the host (otherwise
+                // container creation fails outright); getSignerMountDir()
+                // guarantees that directory before naming the mount.
+                const { getSignerMountDir, SIGNER_CONTAINER_DIR } = require('./ValidatorService')
+                const signerDir = getSignerMountDir()
+                if (signerDir) {
+                    const nodeModules = path.resolve(__dirname, '..', '..', 'node_modules')
+                    volumeArgs.push('-v', `${signerDir}:${SIGNER_CONTAINER_DIR}:ro`)
+                    volumeArgs.push('-v', `${nodeModules}:${SIGNER_CONTAINER_DIR}/node_modules:ro`)
+                }
             }
         }
     }

@@ -31,6 +31,14 @@ const nodeVersion = process.versions.node
 const { gitHubDownloader, db, getRemoteModuleVersions } = require('../state')
 const { decompressTarGz }               = require('../utils/helpers')
 const { cryptoNodesDir }                = require('../config/constants')
+
+// The repo's own crypto_nodes tree, which ships each coin's Dockerfile and conf
+// templates in git. Deliberately NOT a constant sourced from config/constants and
+// NOT env-overridable: cryptoNodesDir says where a node is BUILT and may point at
+// a separate volume, while this says where the build scaffold is READ FROM, which
+// is always the source tree. Conflating the two is the bug this pair exists to
+// prevent.
+const bundledCryptoNodesDir = path.join(__dirname, '..', '..', 'crypto_nodes')
 const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('./ConfigService')
 const { statusChanged }                 = require('./StatusService')
 const { checkRemoteNodeVersion }        = require('./VersionService')
@@ -283,6 +291,58 @@ function ensureHostDir(dirPath) {
     fs.mkdirSync(dirPath, { recursive: true })
 }
 
+// The image is built with the coin's own directory as the Docker context, so
+// that directory must hold BOTH the downloaded daemon tree and the Dockerfile +
+// conf template the repo ships in git. Only the daemon tree is downloaded there,
+// so on the default layout the scaffold is present by accident: cryptoNodesDir
+// already IS the repo's crypto_nodes. Point XCHAIN_NODE_CRYPTO_NODES_DIR at a
+// separate volume (which the README recommends for a small root partition) and
+// the build context holds nothing but the tarball, so `docker build` reports
+// "failed to read dockerfile" after the whole download has already run.
+//
+// Copy the scaffold in before every build. Returns the conf file's basename for
+// the CONF_FILE build arg. Fails closed with the missing path named, rather than
+// letting docker report a two-byte build context.
+function stageBuildScaffold(coin, network, nodeDir, defaultConfig) {
+    const bundledCoinDir = path.join(bundledCryptoNodesDir, coin)
+    const confFileName   = `${coin}-${network}.conf`
+
+    const dockerfileSrc = path.join(bundledCoinDir, 'Dockerfile')
+    const confSrc       = path.join(bundledCoinDir, confFileName)
+    for (const src of [dockerfileSrc, confSrc]) {
+        if (!fs.existsSync(src)) {
+            throw new Error(`Missing build scaffold ${src}. The repo ships crypto_nodes/${coin}/ in git; ` +
+                `this install appears to be running from an incomplete checkout.`)
+        }
+    }
+
+    fs.mkdirSync(nodeDir, { recursive: true })
+    if (path.resolve(nodeDir) !== path.resolve(bundledCoinDir)) {
+        fs.copyFileSync(dockerfileSrc, path.join(nodeDir, 'Dockerfile'))
+    }
+
+    // The conf template ships __XCHAIN_NODE_RPC_USER__/__XCHAIN_NODE_RPC_PASSWORD__
+    // placeholders. Fail closed when the provisioned credentials are missing rather
+    // than baking a placeholder (or "undefined") into the image: an image whose RPC
+    // credentials are the literal placeholder tokens is unreachable by every service
+    // that shares them, and it fails at runtime rather than here.
+    if (!defaultConfig['NODE_USER'] || !defaultConfig['NODE_PASSWORD']) {
+        throw new Error(`Missing NODE_USER/NODE_PASSWORD for ${coin} ${network}; refusing to build node with placeholder RPC credentials`)
+    }
+
+    // Substitute into a generated sibling, never back into the template. The
+    // template is tracked in git, so injecting in place wrote live RPC credentials
+    // into a tracked file and left every built-from host with a dirty worktree
+    // holding a secret. The generated name is gitignored.
+    const generatedName = `${coin}-${network}.generated.conf`
+    let confContent = fs.readFileSync(confSrc, 'utf8')
+    confContent = confContent.replace(/^rpcuser=.*$/m,     `rpcuser=${defaultConfig['NODE_USER']}`)
+    confContent = confContent.replace(/^rpcpassword=.*$/m, `rpcpassword=${defaultConfig['NODE_PASSWORD']}`)
+    fs.writeFileSync(path.join(nodeDir, generatedName), confContent, { mode: 0o600 })
+
+    return generatedName
+}
+
 async function buildCryptoNode(coin, network, bitcoinVer = null) {
     const defaultConfig = await getDefaultConfig(NODE_MODULE_NAME, coin, network)
     const defaultExposedPort = defaultConfig["NODE_EXPOSED_PORT"]
@@ -290,22 +350,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
     const containerPrefix = getDockerContainerImageName(NODE_MODULE_NAME, coin, network)
     const nodeDir = cryptoNodesDir + "/" + coin
 
-    // Inject the provisioned RPC credentials into the coin-node conf file
-    // so the daemon and the xchain services share the same credentials.
-    const confFileName = `${coin}-${network}.conf`
-    const confFilePath = path.join(nodeDir, confFileName)
-    if (fs.existsSync(confFilePath)) {
-        // The bundled conf ships __XCHAIN_NODE_RPC_USER__/__XCHAIN_NODE_RPC_PASSWORD__
-        // placeholder tokens; fail closed if the provisioned credentials are
-        // missing rather than baking the placeholder (or "undefined") into the image.
-        if (!defaultConfig['NODE_USER'] || !defaultConfig['NODE_PASSWORD']) {
-            throw new Error(`Missing NODE_USER/NODE_PASSWORD for ${coin} ${network}; refusing to build node with placeholder RPC credentials`)
-        }
-        let confContent = fs.readFileSync(confFilePath, 'utf8')
-        confContent = confContent.replace(/^rpcuser=.*$/m,     `rpcuser=${defaultConfig['NODE_USER']}`)
-        confContent = confContent.replace(/^rpcpassword=.*$/m, `rpcpassword=${defaultConfig['NODE_PASSWORD']}`)
-        fs.writeFileSync(confFilePath, confContent)
-    }
+    const confFileName = stageBuildScaffold(coin, network, nodeDir, defaultConfig)
 
     // Pre-flight host-port collision check (multi-stack hosts): same guard
     // the service- and DB-install paths use. Two different-NODE_PREFIX stacks
@@ -320,7 +365,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
 
     return new Promise((resolve, reject) => {
         console.log("Building image of " + coin + " " + network + " node")
-        execFile('docker', ['build', '.', '--build-arg', 'CONF_FILE=' + coin + '-' + network + '.conf', '-t', containerPrefix], { cwd: nodeDir }, async (error) => {
+        execFile('docker', ['build', '.', '--build-arg', 'CONF_FILE=' + confFileName, '-t', containerPrefix], { cwd: nodeDir }, async (error) => {
             if (error) {
                 console.error("Error creating Docker image: " + error.message)
                 reject("Error creating Docker image: " + error.message)
@@ -608,6 +653,7 @@ async function installNode(coin, network) {
 module.exports = {
     getCryptoNode,
     buildCryptoNode,
+    stageBuildScaffold,
     installNode,
     resolveBlocksDir,
     resolveNodeVersionPin,

@@ -1114,9 +1114,24 @@ async function getDefaultConfig(module, coin, network) {
     return defaultConfig
 }
 
+// Short names operators actually type for the shared services, whose canonical
+// names carry an `xchain-` prefix that is easy to omit. 'explorer' already had
+// this treatment; the others did not, so `recreate hub` matched no container and
+// looked like the hub was simply unsupported.
+const SERVICE_ALIASES = {
+    hub:  HUB_MODULE_NAME,
+    sync: SYNC_MODULE_NAME,
+    db:   DB_MODULE_NAME
+}
+
 function filterCommandParameters(branch, modules, coins, networks) {
     const servicesList = {}
     let addExplorer = false
+
+    // Callers that bypass resolveArgs (recreate, start/stop/restart, logs) hand
+    // the operator's raw token straight through, so the alias map has to apply
+    // here too.
+    if (modules && SERVICE_ALIASES[modules]) modules = SERVICE_ALIASES[modules]
 
     if (coins && coins !== "all") {
         coins = [coins]
@@ -1194,14 +1209,27 @@ function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = 
             throw new Error("'xchain-node' is the CLI itself, not an installable service. Omit it to operate on all services, or name a specific one (e.g. xchain-indexer, xchain-decoder, xchain-hub).")
         }
 
+        const aliased = SERVICE_ALIASES[arg]
+
         if (knownChains.includes(arg)) {
             chain = arg
         } else if (knownNetworks.includes(arg)) {
             network = arg
         } else if (knownServices.includes(arg)) {
             service = arg
+        } else if (aliased) {
+            service = aliased
         } else if (expectBranch && !branch) {
             branch = arg
+        } else {
+            // Nothing claimed this token. The 'xchain-node' guard above exists
+            // because a dropped token leaves service='all', and that trap is not
+            // specific to that one name: `install master hub` silently expanded to
+            // EVERY service on every coin and network rather than refusing. An
+            // operator reaching for one service must never get all of them.
+            throw new Error(`Unrecognized argument '${arg}'. Valid services: ` +
+                knownServices.filter(s => s !== 'explorer').sort().join(', ') + '. ' +
+                `Valid coins: ${knownChains.join(', ')}. Networks: ${knownNetworks.join(', ')}.`)
         }
     }
 
