@@ -33,17 +33,66 @@ const {
     getValidatorSettings, readWallets, publicWalletInfo, promptSecret, loadSdk,
     COIN_NETWORKS, WALLETS_FILE
 } = require('./ValidatorService')
+const { getCoinConfigByFullName } = require('../coins')
 
 const STAKE_TICK = 'XCHAIN'
 // One stake that clears every capability floor at once (llm attestation
 // provider is the highest at 25000); see the indexer's STAKING.CAPABILITIES.
 const DEFAULT_STAKE_AMOUNT = 25000
-// Blocks between an action landing and the stake changing state, in either
-// direction: a STAKE is not counted for this long, and an UNSTAKE keeps
-// counting for this long (xchain-indexer/src/coins/BTC.js ACTIVATION_DELAY_BLOCKS,
-// applied to the deactivation block in actions/unstake.js).
-const ACTIVATION_DELAY_BLOCKS = 6
 const PUBLIC_EXPLORER = 'https://explorer.xchain.io'
+
+// Approximate target block spacing per chain, used ONLY to gloss a block count
+// as wall-clock time an operator can plan around. Display-only: nothing branches
+// on it, and every block count itself comes from the coin registry. The coin
+// files carry no spacing field, so these mirror the arithmetic their own STAKING
+// comments already state ("~7 days at ~10 min/block").
+const BLOCK_MINUTES = { bitcoin: 10, litecoin: 2.5, dogecoin: 1 }
+
+// A block count as a duration. Empty on regtest, where blocks are mined on
+// demand and any wall-clock figure would be a fabrication, and empty for a chain
+// with no spacing entry rather than a wrong one.
+function roughDuration(blocks, fullName, network) {
+    const perBlock = BLOCK_MINUTES[fullName]
+    if (network === 'regtest' || !(perBlock > 0) || !(blocks > 0)) return ''
+    const minutes = blocks * perBlock
+    if (minutes < 90) return 'roughly ' + Math.round(minutes) + ' minutes'
+    const hours = minutes / 60
+    if (hours < 36) return 'roughly ' + Math.round(hours) + ' hours'
+    return 'roughly ' + Math.round(hours / 24) + ' days'
+}
+
+function paren(text) {
+    return text ? ' (' + text + ')' : ''
+}
+
+/**
+ * The two clocks that govern a stake, read per-chain from the vendored canonical
+ * coin registry (src/coins/<COIN>.js STAKING) rather than restated here. Both
+ * are per-chain (BTC 6/1000, LTC 24/4032, DOGE 60/10080), so a hardcoded pair
+ * would misreport two of the three chains.
+ *
+ * They are separate clocks and they differ by more than two orders of magnitude,
+ * which is exactly why both have to be printed. Both count from the same block,
+ * the one the action lands in (xchain-indexer/src/actions/unstake.js:
+ * deactivation_block = BLOCK_INDEX + ACTIVATION_DELAY_BLOCKS, COOLDOWN_END_BLOCK
+ * = BLOCK_INDEX + COOLDOWN_BLOCKS):
+ *   activation: how long a STAKE waits before it counts, and how long an
+ *     UNSTAKEd one keeps counting toward every capability before it drops out.
+ *   cooldown:   how long the escrowed XCHAIN stays locked afterwards, until the
+ *     indexer's block-end sweep credits it back and it can be spent again.
+ *
+ * Reads the in-repo registry, so the dry-run path stays offline.
+ */
+function stakeTiming(coins, network) {
+    const fullName = String(coins.stake).split('-')[0]
+    const staking  = getCoinConfigByFullName(fullName, network).STAKING || {}
+    return {
+        activationBlocks: staking.ACTIVATION_DELAY_BLOCKS,
+        cooldownBlocks:   staking.COOLDOWN_BLOCKS,
+        activationFor:    roughDuration(staking.ACTIVATION_DELAY_BLOCKS, fullName, network),
+        cooldownFor:      roughDuration(staking.COOLDOWN_BLOCKS, fullName, network)
+    }
+}
 
 function fail(msg) {
     const e = new Error(msg)
@@ -229,7 +278,8 @@ function openValidatorSession(opts, deps) {
  */
 async function unstakeValidator(opts = {}, deps = {}) {
     const log = deps.log || console.log
-    const { coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
+    const { network, coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
+    const timing = stakeTiming(coins, network)
 
     // Read the set rather than a per-pubkey lookup (see readChainState): the
     // SDK exposes no getValidator, and a lookup failure must not read as
@@ -262,9 +312,17 @@ async function unstakeValidator(opts = {}, deps = {}) {
     log('  Steps:')
     log('    UNSTAKE v0: withdraw the full stake for this pubkey')
     log('')
-    log('  The stake keeps counting toward every capability for ' + ACTIVATION_DELAY_BLOCKS +
-        ' more blocks after this is')
-    log('  indexed, then drops out of the active set and your XCHAIN is spendable again.')
+    // Two clocks, printed together on purpose. Leaving the active set and getting
+    // the coins back are different events an order of magnitude or two apart, and
+    // an operator told only the first one plans an hour and waits a week.
+    log('  Two clocks start at the block this lands in, and they are far apart:')
+    log('    active set: ' + timing.activationBlocks + ' more blocks' + paren(timing.activationFor) +
+        '. Until then the stake keeps')
+    log('                counting toward every capability; then it drops out.')
+    log('    cooldown  : ' + timing.cooldownBlocks + ' blocks' + paren(timing.cooldownFor) +
+        '. The ' + active.amount + ' ' + STAKE_TICK + ' stays locked')
+    log('                until the cooldown sweep credits it back, and is NOT')
+    log('                spendable before then.')
 
     if (!opts.broadcast) {
         log('')
@@ -284,9 +342,14 @@ async function unstakeValidator(opts = {}, deps = {}) {
         { waitForIndexer: opts.wait !== false, timeout: timeoutMs, pollInterval: 15000 })
     log('    txid ' + r.txid + (opts.wait !== false ? '  (indexed)' : '  (broadcast)'))
     log('')
-    log('  Unstaked. You leave the active set ' + ACTIVATION_DELAY_BLOCKS +
-        ' blocks after the block this landed in;')
-    log('  until then the federation still counts you, which is why standing down is not instant.')
+    log('  Unstaked. You leave the active set ' + timing.activationBlocks + ' blocks' +
+        paren(timing.activationFor) + ' after the block')
+    log('  this landed in; until then the federation still counts you, which is why standing')
+    log('  down is not instant.')
+    log('  Your ' + active.amount + ' ' + STAKE_TICK + ' stays locked for ' + timing.cooldownBlocks +
+        ' blocks' + paren(timing.cooldownFor) + ' from that same')
+    log('  block, then the cooldown sweep credits it back and it is spendable. Do not plan')
+    log('  around having it sooner.')
     log('  Watch it at ' + explorerUrl(coins, 'validator/' + pubkey))
     log('')
     return { unstaked: true, txid: r.txid }
@@ -300,6 +363,7 @@ async function stakeValidator(opts = {}, deps = {}) {
     const log = deps.log || console.log
     const { network, coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
     const amount = parseInt(opts.amount) || DEFAULT_STAKE_AMOUNT
+    const timing = stakeTiming(coins, network)
 
     const state = await readChainState(sdk, address, pubkey)
     const plan  = planMints(network, state.tokenBal, amount, state.mintMax, state.mintAddressMax)
@@ -335,6 +399,17 @@ async function stakeValidator(opts = {}, deps = {}) {
     log('')
     log('  Steps:')
     for (const s of steps) log('    ' + s)
+
+    // The exit cost, stated before the money moves rather than after. Getting the
+    // stake back is the cooldown clock, not the activation clock, and it is the
+    // one that decides whether this XCHAIN is reachable next week.
+    log('')
+    log('  The ' + amount + ' ' + STAKE_TICK + ' is escrowed for as long as you stay staked. Standing down')
+    log('  later frees it only after a cooldown of ' + timing.cooldownBlocks + ' blocks' +
+        paren(timing.cooldownFor) + ', on top of the')
+    log('  ' + timing.activationBlocks + ' blocks it takes to leave the active set. Do not stake ' +
+        STAKE_TICK + ' you may')
+    log('  need before then.')
 
     const blockers = []
     if (plan.reason) blockers.push(plan.reason)
@@ -432,8 +507,10 @@ async function stakeValidator(opts = {}, deps = {}) {
     if (opts.wait === false) {
         log('  Broadcast. Watch it land at ' + explorerUrl(coins, 'validator/' + pubkey))
     } else {
-        log('  Staked. The stake activates 6 blocks after it is indexed; peers admit you on their next')
-        log('  signer-set refresh after that. Watch it at ' + explorerUrl(coins, 'validator/' + pubkey))
+        log('  Staked. The stake activates ' + timing.activationBlocks + ' blocks' + paren(timing.activationFor) +
+            ' after it is indexed; peers')
+        log('  admit you on their next signer-set refresh after that.')
+        log('  Watch it at ' + explorerUrl(coins, 'validator/' + pubkey))
     }
     log('  Next: xchain-node install master xchain-hub')
     log('')
@@ -441,6 +518,6 @@ async function stakeValidator(opts = {}, deps = {}) {
 }
 
 module.exports = {
-    stakeValidator, unstakeValidator, planMints, readChainState,
-    DEFAULT_STAKE_AMOUNT, ACTIVATION_DELAY_BLOCKS, STAKE_TICK
+    stakeValidator, unstakeValidator, planMints, readChainState, stakeTiming,
+    DEFAULT_STAKE_AMOUNT, STAKE_TICK
 }

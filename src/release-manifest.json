@@ -1,17 +1,17 @@
 {
     "_comment": [
-        "Pinned component set for XChain Platform v0.12.2.",
+        "Pinned component set for XChain Platform v0.12.3.",
         "Written at ceremony step 6 from the ACTUAL tagged master merge commits.",
         "xchain-node is the carrier and is not listed: checking out its tag IS this manifest.",
-        "A patch train tags only the repos it touches. This one moves the CARRIER ONLY:",
-        "every component below is unchanged from v0.12.1 and keeps the tag it already",
-        "carries, which is what section 4 means by a version being the platform version",
-        "at which a component last changed. A gap is unchanged, not skipped.",
+        "A patch train tags only the repos it touches. This one moves the carrier and",
+        "xchain-hub; every other component is unchanged from v0.12.1 or earlier and keeps",
+        "the tag it already carries, which is what section 4 means by a version being the",
+        "platform version at which a component last changed. A gap is unchanged, not skipped.",
         "Each commit below is the master MERGE commit its tag names, and every tag is",
         "GPG-signed by the platform release key and reports verified against the",
         "tagger identity releases@xchain.io."
     ],
-    "platform_version": "0.12.2",
+    "platform_version": "0.12.3",
     "released": "2026-09-01",
     "components": {
         "xchain-vm": {
@@ -27,8 +27,8 @@
             "commit": "aee2bf21ecd6dc0fa90c26e7108dbedceb609bda"
         },
         "xchain-hub": {
-            "tag": "v0.12.0",
-            "commit": "638f2e13b2d9b4b86f6dda9e5dc88455f27a6c55"
+            "tag": "v0.12.3",
+            "commit": "bb5b0d180b544ea08b5720b9f8416256fd07641c"
         },
         "xchain-sync": {
             "tag": "v0.12.0",

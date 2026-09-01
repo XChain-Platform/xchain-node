@@ -13,7 +13,10 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 
-const { stakeValidator, unstakeValidator, planMints } = require('../../src/services/ValidatorStakeService')
+const { stakeValidator, unstakeValidator, planMints, stakeTiming } = require('../../src/services/ValidatorStakeService')
+// The authoritative source for both stake clocks. Read here too, so a test that
+// asserts the CLI's numbers cannot itself become the place they are frozen.
+const { getCoinConfig } = require('../../src/coins')
 
 const PUBKEY  = 'ab'.repeat(32)
 const ADDRESS = 'mStakeAddress'
@@ -129,7 +132,62 @@ describe('ValidatorStakeService', function () {
         })
     })
 
+    // Both clocks are per-chain (BTC 6/1000, LTC 24/4032, DOGE 60/10080). A CLI
+    // that hardcodes BTC's pair is wrong by 4x on LTC and 10x on DOGE, which is
+    // the drift these assertions exist to catch.
+    describe('stakeTiming()', function () {
+
+        it('reads both clocks from the coin registry, not from the CLI', function () {
+            const btc = getCoinConfig('BTC', 'testnet').STAKING
+            const t   = stakeTiming({ stake: 'bitcoin-testnet' }, 'testnet')
+            expect(t.activationBlocks).to.equal(btc.ACTIVATION_DELAY_BLOCKS)
+            expect(t.cooldownBlocks).to.equal(btc.COOLDOWN_BLOCKS)
+            expect(t.cooldownBlocks).to.be.above(t.activationBlocks)
+        })
+
+        it('tracks the per-chain values for litecoin and dogecoin', function () {
+            for (const [full, tick] of [['litecoin', 'LTC'], ['dogecoin', 'DOGE']]) {
+                const staking = getCoinConfig(tick, 'mainnet').STAKING
+                const t = stakeTiming({ stake: full + '-mainnet' }, 'mainnet')
+                expect(t.activationBlocks, tick).to.equal(staking.ACTIVATION_DELAY_BLOCKS)
+                expect(t.cooldownBlocks, tick).to.equal(staking.COOLDOWN_BLOCKS)
+            }
+        })
+
+        // Every chain sizes the same two intervals to the same wall-clock targets;
+        // only the block counts differ.
+        it('glosses both counts as the same durations on every chain', function () {
+            for (const full of ['bitcoin', 'litecoin', 'dogecoin']) {
+                const t = stakeTiming({ stake: full + '-mainnet' }, 'mainnet')
+                expect(t.activationFor, full).to.equal('roughly 60 minutes')
+                expect(t.cooldownFor, full).to.equal('roughly 7 days')
+            }
+        })
+
+        it('gives no duration on regtest, where blocks are mined on demand', function () {
+            const t = stakeTiming({ stake: 'bitcoin-regtest' }, 'regtest')
+            expect(t.activationFor).to.equal('')
+            expect(t.cooldownFor).to.equal('')
+            expect(t.cooldownBlocks).to.be.a('number')
+        })
+    })
+
     describe('stakeValidator()', function () {
+
+        // The exit cost belongs before the money moves. An operator who reads only
+        // the activation delay budgets an hour for capital locked up for a week.
+        it('the plan states the escrow and the cooldown that frees it', async function () {
+            const { logged } = await run({}, { xchain: 30000, coin: '0.001' })
+            const out = logged.join('\n')
+            expect(out).to.include('25000 XCHAIN is escrowed for as long as you stay staked')
+            expect(out).to.include('cooldown of 1000 blocks (roughly 7 days)')
+            expect(out).to.include('6 blocks it takes to leave the active set')
+        })
+
+        it('the post-broadcast summary takes the activation delay from the registry', async function () {
+            const { logged } = await run({ broadcast: true }, { xchain: 30000, coin: '0.001' })
+            expect(logged.join('\n')).to.include('activates 6 blocks (roughly 60 minutes) after it is indexed')
+        })
 
         it('dry run prints the plan and sends nothing', async function () {
             const { result, calls, logged } = await run({}, { xchain: 0, coin: '0.001' })
@@ -332,10 +390,43 @@ describe('ValidatorStakeService', function () {
             expect(result.unstaked).to.be.true
         })
 
-        it('says the delay out loud: the stake keeps counting for 6 more blocks', async function () {
+        // Leaving the active set and getting the coins back are two clocks nearly
+        // three orders of magnitude apart. Printing only the first told operators
+        // their XCHAIN was spendable in an hour when it is locked for a week.
+        it('the plan prints BOTH clocks: 6 blocks to leave the set, 1000 to unlock', async function () {
+            const { logged } = await runUnstake({}, { existing: STAKED })
+            const out = logged.join('\n')
+            expect(out).to.include('active set: 6 more blocks (roughly 60 minutes)')
+            expect(out).to.include('cooldown  : 1000 blocks (roughly 7 days)')
+            expect(out).to.include('25000 XCHAIN stays locked')
+            expect(out).to.include('NOT')
+            expect(out).to.include('spendable before then')
+        })
+
+        it('the post-broadcast summary repeats both clocks, not just the delay', async function () {
             const { logged } = await runUnstake({ broadcast: true }, { existing: STAKED })
-            expect(logged.join('\n')).to.include('for 6 more blocks')
-            expect(logged.join('\n')).to.include('leave the active set 6 blocks after')
+            const out = logged.join('\n')
+            expect(out).to.include('leave the active set 6 blocks (roughly 60 minutes) after the block')
+            expect(out).to.include('stays locked for 1000 blocks (roughly 7 days)')
+            expect(out).to.include('cooldown sweep credits it back')
+        })
+
+        // The old text promised spendability at the activation delay. Nothing in
+        // either message may say the coins come back on that clock again.
+        it('never claims the XCHAIN is spendable once the stake leaves the set', async function () {
+            const { logged } = await runUnstake({ broadcast: true }, { existing: STAKED })
+            expect(logged.join('\n')).to.not.match(/6 (more )?blocks[^.]*spendable/)
+            expect(logged.join('\n')).to.not.include('XCHAIN is spendable again')
+        })
+
+        // Regtest mines on demand, so a wall-clock gloss there would be invented.
+        it('omits the duration on regtest, where block spacing is meaningless', async function () {
+            const { logged } = await runUnstake({}, { existing: STAKED },
+                { network: 'regtest', P2P_PORT: undefined })
+            const out = logged.join('\n')
+            expect(out).to.include('active set: 6 more blocks.')
+            expect(out).to.include('cooldown  : 1000 blocks.')
+            expect(out).to.not.include('roughly')
         })
 
         it('does nothing when the pubkey carries no valid stake', async function () {
