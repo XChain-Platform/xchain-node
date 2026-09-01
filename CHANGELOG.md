@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.3] - 2026-09-01
+
+### Fixed
+- `validator stake` and `validator unstake` state both clocks: when the stake leaves the active set, and when the escrowed XCHAIN is spendable after the staking cooldown. The old text promised the money back at the activation delay, which is a week early on Bitcoin.
+- Both delays are read per chain from the coin registry rather than hardcoded, so Litecoin and Dogecoin print their own values.
+- Pinned hub 0.12.3, which tells a peer it is not in the signer set instead of reporting an invalid signature.
+
 ## [0.12.2] - 2026-09-01
 
 ### Added
