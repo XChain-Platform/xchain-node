@@ -69,6 +69,13 @@ const { configDir } = require('../config/constants')
 const { ensureHubApiKey } = require('./ConfigService')
 
 const VALIDATOR_DIR   = path.join(configDir, 'validator')
+// The stack ref this CLI tells an operator to install. xchain-node's own
+// version IS the platform version, so deriving the hint here keeps it on the
+// release the operator is actually holding, and it cannot rot the way a
+// hardcoded ref does. It said `master` until 2026-09-01: an unpinned tracking
+// install, contradicting every other instruction we give, printed at the exact
+// moment a new validator is deciding what to run.
+const RELEASE_REF = 'v' + require('../../package.json').version
 const KEY_FILE        = path.join(VALIDATOR_DIR, 'signing.key')
 const SETTINGS_FILE   = path.join(VALIDATOR_DIR, 'validator.json')
 
@@ -766,14 +773,14 @@ async function initValidator(opts = {}) {
             : 'already present, kept')
         console.log('')
         console.log('  Then: xchain-node validator stake            (mints XCHAIN on testnet, then stakes)')
-        console.log('        xchain-node install master xchain-hub  (starts the validator)')
+        console.log('        xchain-node install ' + RELEASE_REF + ' xchain-hub  (starts the validator)')
     } else if (walletsSkippedNoNetwork) {
         console.log('  Wallets skipped: the network is unknown for port ' + p2pPort + '. Re-run with --network testnet|mainnet')
         console.log('  to generate them, or run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR.')
     } else {
         console.log('  Wallets skipped (--no-wallets). Run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR')
         console.log('  and set oracle_publish.doge_address in ' + CAPS_FILE + ' by hand.')
-        console.log('  Then: xchain-node install master xchain-hub')
+        console.log('  Then: xchain-node install ' + RELEASE_REF + ' xchain-hub')
     }
     console.log('')
     if (!settings.ORACLE_EPOCH_START)
