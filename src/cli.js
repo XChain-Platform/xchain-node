@@ -120,6 +120,10 @@ async function parseCommand() {
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.
     const LOCK_WAIT_MS = parseInt(process.env.XCHAIN_NODE_LOCK_WAIT_MS || '15000', 10) || 15000
+    // How long a MUTATING command blocks for a lock holder before refusing. Zero
+    // keeps the interactive contract below; an unattended caller sets it so a
+    // scheduled run waits out a deploy instead of losing its work.
+    const MUTATING_LOCK_WAIT_MS = parseInt(process.env.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS || '0', 10) || 0
     program.hook('preAction', async (thisCommand, actionCommand) => {
         setVerbose(thisCommand.opts().verbose ?? false)
         if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
@@ -139,7 +143,7 @@ async function parseCommand() {
         //
         // A mutating command keeps the lock through its whole action (released on
         // process exit, since actions terminate via process.exit()) and refuses
-        // immediately if another instance holds it. A non-mutating command holds
+        // a held lock unless asked to wait. A non-mutating command holds
         // the lock only across preCheck, releasing it right after, so a
         // long-running `monitor`/`tail`/`logs` does not pin the lock for its
         // lifetime; it waits a bounded time for a busy mutator, then errors.
@@ -148,7 +152,7 @@ async function parseCommand() {
         try {
             release = acquireCommandLock({
                 command: commandName,
-                waitMs: holdThroughAction ? 0 : LOCK_WAIT_MS
+                waitMs: holdThroughAction ? MUTATING_LOCK_WAIT_MS : LOCK_WAIT_MS
             })
         } catch (err) {
             console.error(err.message)

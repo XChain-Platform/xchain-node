@@ -32,6 +32,10 @@
 #     good archive in place as the newest. This exists because the weekly cron
 #     once published a halted litecoin/mainnet decoder as the newest "good"
 #     archive, which every "take the latest" path then selected.
+#   - Waits out a concurrent xchain-node command rather than losing the run.
+#     `bootstrap create` is MUTATING, so any update/reset holds the command lock
+#     and every combo fails at once; a create waits $LOCK_WAIT_MIN minutes for
+#     the holder, then reports the combo LOCKED (busy box, not a broken source).
 #   - Redirects the (large) work + output dirs onto a roomy volume via
 #     XCHAIN_NODE_DATA_DIR / XCHAIN_NODE_TMP_DIR - the defaults live under the
 #     repo on the small root fs and WILL fill it mid-create otherwise.
@@ -88,6 +92,7 @@ SYNC_HOST="${SYNC_HOST:-user@your-sync-host}"
 SYNC_DIR="${SYNC_DIR:-/misc/backups/bootstraps}"
 KEEP="${KEEP:-2}"                                       # archives to retain per combo (local + remote)
 LOCK_FILE="${LOCK_FILE:-/tmp/publish-bootstraps.lock}"
+LOCK_WAIT_MIN="${LOCK_WAIT_MIN:-30}"                    # minutes to wait out a concurrent xchain-node command (0 = refuse at once)
 TRACKER_SVC="xchain-utxo-tracker"
 ALL_SERVICES=(xchain-decoder xchain-indexer xchain-utxo-tracker)
 
@@ -246,10 +251,17 @@ for c in "${SELECTED[@]}"; do
   XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY="$SIGNING_KEY" \
   XCHAIN_NODE_DATA_DIR="$STAGE_DIR" \
   XCHAIN_NODE_TMP_DIR="$TMP_DIR" \
+  XCHAIN_NODE_MUTATING_LOCK_WAIT_MS="$((LOCK_WAIT_MIN * 60000))" \
   "$XCHAIN_NODE_BIN" bootstrap create "$svc" "$coin" "$net" >"$create_log" 2>&1 || create_rc=$?
   cat "$create_log"
   if [ "$create_rc" != 0 ]; then
-    if grep -q 'Refusing to create a bootstrap' "$create_log"; then
+    # Contention is neither a broken publisher nor a broken source: the box was
+    # busy. Name it so, or CREATE-FAIL sends the operator hunting a fault that
+    # does not exist.
+    if grep -q 'holds the command lock' "$create_log"; then
+      log "  LOCKED: $c - another xchain-node command still held the command lock after ${LOCK_WAIT_MIN}m. Nothing published; the previous archive stays newest."
+      SUMMARY+=("$c: LOCKED")
+    elif grep -q 'Refusing to create a bootstrap' "$create_log"; then
       log "  REFUSED: $c source is not known-good (reasons above). Nothing published; the previous archive stays newest."
       SUMMARY+=("$c: SOURCE-UNHEALTHY")
     else
