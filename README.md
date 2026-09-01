@@ -4,8 +4,8 @@
 # XChain Platform Node
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.11.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-1636%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.12.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-2%2C652%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -156,19 +156,19 @@ Turn it off with any of: `--no-telemetry` on any command (sticks for future runs
 
 | Command | Description |
 |---|---|
-| `npm test` | Unit tests (1,084 tests) |
-| `npm run test:integration` | Integration tests (87 tests) |
-| `npm run test:smoke` | Smoke tests (50 tests) |
+| `npm test` | Unit tests (1,759 tests) |
+| `npm run test:integration` | Integration tests (103 tests) |
+| `npm run test:smoke` | Smoke tests (159 tests) |
 | `npm run test:boundary` | Boundary condition tests (57 tests) |
-| `npm run test:security` | Security tests (27 tests) |
+| `npm run test:security` | Security tests (74 tests) |
 | `npm run test:e2e` | End-to-end tests (57 tests) |
-| `npm run test:fuzz` | Fuzz tests (95 tests) |
+| `npm run test:fuzz` | Fuzz tests (264 tests) |
 | `npm run test:chaos` | Chaos engineering tests (121 tests) |
 | `npm run test:regression` | Regression tests (58 tests) |
 | `npm run test:regression:p0` | Regression P0: critical gate (33 tests) |
 | `npm run test:regression:p0p1` | Regression P0+P1: standard gate (51 tests) |
 | `npm run test:mutation` | Mutation testing (Stryker Mutator) |
-| `npm run test:all` | All tests (~1,552 tests; excludes security/boundary) |
+| `npm run test:all` | All tests (~2,521 tests; excludes security/boundary) |
 | `npm run benchmark` | Performance benchmarks (5 scenarios) |
 | `npm run benchmark:quick` | Quick benchmarks |
 
