@@ -133,6 +133,15 @@ async function parseCommand() {
         // operator can prepare their validator identity before any stack is up.
         const parentName = actionCommand.parent && actionCommand.parent.name()
         if (commandName === 'validator' || parentName === 'validator') return
+        // `rollback` is declared but unimplemented: its action only names the
+        // reset-and-restore recovery path and exits non-zero. Provisioning
+        // Docker/MariaDB/hub and taking the mutating lock to reach a two-line
+        // refusal is what made it read as a hang. Measured 2026-08-30 while
+        // repairing a regtest indexer: an operator reached for `rollback`
+        // mid-incident and waited ~10 minutes on a command that printed nothing.
+        // It stays listed in mutatingCommands above so that a real
+        // implementation, which would drop this early return, is serialized.
+        if (commandName === 'rollback') return
 
         // preCheck provisions shared containers/DB/hub (buildDatabaseModule,
         // ensureXchainNodeAccess, scanAndRegisterModules, installHubModule) for
@@ -526,16 +535,25 @@ gate could report them, so the cron exited 0 while a consumer archive went stale
 
     program
         .command('rollback')
-        .description('Rollback XChain service to a set block_index')
+        .description('NOT IMPLEMENTED - prints the reset + bootstrap restore path for recovering a service to a block_index')
         .argument('<block_index>', 'The index of the last known good block')
         .argument('<service>',     '(xchain-decoder, xchain-utxo-tracker, xchain-indexer, all)')
         .argument('<chain>',       '(bitcoin, litecoin, dogecoin)')
         .argument('<network>',     '(mainnet, testnet, regtest)')
-        .action(async () => {
+        .action(async (blockIndex, service, chain, network) => {
             // Not yet implemented. Fail loudly instead of silently doing nothing,
-            // so operators don't believe a rollback occurred.
-            console.error('`rollback` is not yet implemented. To recover a service to a known-good block, use `reset` followed by a bootstrap restore.')
-            process.exitCode = 1
+            // so operators don't believe a rollback occurred. This is reached
+            // during an incident, so it prints the runnable recovery path with
+            // the operator's own arguments already substituted in, and exits
+            // through process.exit(): setting process.exitCode alone left the
+            // process alive on whatever handles were open, which is how a
+            // command that had already printed its answer still looked hung.
+            console.error('`rollback` is not yet implemented; nothing was rolled back.')
+            console.error(`To recover ${service} (${chain} ${network}) to block ${blockIndex}, use reset followed by a bootstrap restore:`)
+            console.error(`    xchain-node reset ${service} ${chain} ${network}`)
+            console.error(`    xchain-node bootstrap restore ${service} ${chain} ${network}`)
+            console.error('Restore rewinds to the newest bootstrap at or before that block, then the service re-parses forward.')
+            return process.exit(1)
         })
 
     program
