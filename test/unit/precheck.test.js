@@ -32,7 +32,8 @@ function loadPrecheck(overrides) {
         checkContainerdDataRootRelocation: sinon.stub().resolves(null),
         updateHub:              sinon.stub().resolves(),
         updateExplorer:         sinon.stub().resolves(),
-        installHubModule:       sinon.stub().resolves()
+        installHubModule:       sinon.stub().resolves(),
+        applyHubApiKeyFromSidecar: sinon.stub().resolves()
     }, overrides)
 
     const precheck = proxyquire('../../src/precheck.js', {
@@ -48,7 +49,10 @@ function loadPrecheck(overrides) {
             createDockerNetwork:              sinon.stub().resolves(),
             checkContainerdDataRootRelocation: stubs.checkContainerdDataRootRelocation
         },
-        './services/ConfigService':    { getDockerNetwork: () => 'xchain' },
+        './services/ConfigService':    {
+            getDockerNetwork:          () => 'xchain',
+            applyHubApiKeyFromSidecar: stubs.applyHubApiKeyFromSidecar
+        },
         './services/VersionService':   { checkAllRemoteVersions: stubs.checkAllRemoteVersions },
         './services/StatusService':    { getStatus: stubs.getStatus },
         './services/HubService':       { installHubModule: stubs.installHubModule, updateHub: stubs.updateHub },
@@ -247,5 +251,60 @@ describe('preCheck: the hub is staged at the ref the command named', function ()
 
         expect(installHubModule.calledOnce).to.be.true
         expect(installHubModule.firstCall.args[0]).to.equal(null)
+    })
+})
+
+// `validator init` mints HUB_API_KEY into config/hub.local and the hub container
+// deploys keyed from that sidecar, but HubConnector only sends process.env.HUB_API_KEY,
+// which dotenv fills from .env alone. Nothing bridged the two, so on every validator
+// host provisioned per the runbook the CLI's own updateconfig push was keyless against
+// a keyed hub: `install xchain-hub` started the hub, then failed "HTTP 401" on the
+// push, and so did every state-changing command after it (reported by a community
+// testnet validator, 2026-09-02).
+describe('preCheck: the CLI presents the sidecar HUB_API_KEY to the hub @regression', function () {
+
+    const saved = process.env.HUB_API_KEY
+    afterEach(function () {
+        if (saved === undefined) delete process.env.HUB_API_KEY
+        else process.env.HUB_API_KEY = saved
+    })
+
+    it('hydrates process.env from the sidecar before the hub is installed or pushed to', async function () {
+        delete process.env.HUB_API_KEY
+        const applyHubApiKeyFromSidecar = sinon.stub().callsFake(async (target) => {
+            target.HUB_API_KEY = 'sidecar-key'
+        })
+        const installHubModule = sinon.stub().callsFake(async () => {
+            expect(process.env.HUB_API_KEY).to.equal('sidecar-key')
+        })
+        const updateHub = sinon.stub().callsFake(async () => {
+            expect(process.env.HUB_API_KEY).to.equal('sidecar-key')
+        })
+        const { precheck } = loadPrecheck({ applyHubApiKeyFromSidecar, installHubModule, updateHub })
+
+        await precheck.preCheck(false, true)
+
+        expect(applyHubApiKeyFromSidecar.calledOnce).to.be.true
+        expect(applyHubApiKeyFromSidecar.firstCall.args[0]).to.equal(process.env)
+        expect(installHubModule.calledOnce).to.be.true
+        expect(updateHub.calledOnce).to.be.true
+        expect(applyHubApiKeyFromSidecar.calledBefore(installHubModule)).to.be.true
+    })
+
+    it('runs the hydration through the real sidecar reader with a host-env key left untouched', async function () {
+        // The real reader, not a stub: host env wins, and an unset key with no
+        // sidecar on disk stays unset (never minted).
+        const cs = require('../../src/services/ConfigService')
+        process.env.HUB_API_KEY = 'host-env-key'
+        await cs.applyHubApiKeyFromSidecar(process.env)
+        expect(process.env.HUB_API_KEY).to.equal('host-env-key')
+    })
+
+    it('is a no-op on a host with no sidecar (a standalone install stays keyless)', async function () {
+        delete process.env.HUB_API_KEY
+        const { precheck, stubs } = loadPrecheck({})
+        await precheck.preCheck(false, true)
+        expect(stubs.applyHubApiKeyFromSidecar.calledOnce).to.be.true
+        expect(process.env.HUB_API_KEY).to.equal(undefined)
     })
 })

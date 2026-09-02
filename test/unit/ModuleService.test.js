@@ -133,6 +133,19 @@ function loadModuleService(stubs, constantsOverride, extraProxies) {
         },
         './ExplorerService': {
             installExplorerModule: sinon.stub().resolves(true)
+        },
+        // Venue independence: buildAndUp('xchain-hub') calls the real guard, which
+        // shells out to `docker inspect` on the HOST running the suite. On a box
+        // with no hub container it returns null and every hub test passes; on a CI
+        // venue that happens to run a regtest hub it reads that container's live
+        // consensus env, finds the fixture env does not carry HUB_NETWORK or
+        // ORACLE_MIN_SUBMISSIONS, and refuses the deploy - failing hub tests that
+        // are about ports, health probes and capability mounts. Stub it here so the
+        // default answer is the clean one everywhere. Tests that assert ON the
+        // guard's wiring override this through extraProxies.
+        './HubConsensusEnvGuard': {
+            assertNoHubConsensusEnvDrift: sinon.stub().resolves([]),
+            isHubConsensusEnvDriftError: () => false
         }
     }
     if (constantsOverride) {
@@ -171,16 +184,32 @@ describe('ModuleService', function () {
     const RealDockerService = require('../../src/services/DockerService')
     const realGetPublishedHostPorts = RealDockerService.getPublishedHostPorts
 
+    // Same venue independence for the hub consensus-env guard, which buildAndUp
+    // lazily requires for xchain-hub. Unstubbed it runs `docker inspect` against
+    // the host's own hub container: null (pass) on a box with no hub, a REFUSAL on
+    // a CI venue running a regtest hub, because the fixture env carries none of the
+    // consensus-shaped vars that live container was deployed with. loadModuleService
+    // now stubs it by default; this makes a load that forgets fail loudly and
+    // identically on every box instead of only on the venue that has a hub.
+    const RealHubConsensusEnvGuard = require('../../src/services/HubConsensusEnvGuard')
+    const realAssertNoHubConsensusEnvDrift = RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift
+
     before(function () {
         RealDockerService.getPublishedHostPorts = async function () {
             throw new Error(
                 'unit test reached the real host-port probe: stub DockerService.getPublishedHostPorts'
             )
         }
+        RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift = async function () {
+            throw new Error(
+                'unit test reached the real hub consensus-env guard: stub HubConsensusEnvGuard.assertNoHubConsensusEnvDrift'
+            )
+        }
     })
 
     after(function () {
         RealDockerService.getPublishedHostPorts = realGetPublishedHostPorts
+        RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift = realAssertNoHubConsensusEnvDrift
     })
 
     // -------------------------------------------------------------------
@@ -1532,7 +1561,14 @@ describe('ModuleService', function () {
                 },
                 './VersionService': { getLocalNodeVersion: sinon.stub().resolves(null), getLocalModuleVersion: sinon.stub().resolves(null), checkRemoteNodeVersion: sinon.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon.stub().resolves(true), getCryptoNode: sinon.stub().resolves() },
-                './ExplorerService': { installExplorerModule: sinon.stub().resolves(true) }
+                './ExplorerService': { installExplorerModule: sinon.stub().resolves(true) },
+                // This load bypasses loadModuleService, so it needs the guard stub of
+                // its own; without it the test reads whatever hub container the host
+                // is running (see loadModuleService for the full note).
+                './HubConsensusEnvGuard': {
+                    assertNoHubConsensusEnvDrift: sinon.stub().resolves([]),
+                    isHubConsensusEnvDriftError: () => false
+                }
             })
             await ms2.buildAndUp('xchain-hub', 'bitcoin', 'mainnet')
             // Should have a volume mount for the capability config, and it must be
@@ -2423,7 +2459,13 @@ describe('ModuleService', function () {
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon3.stub().resolves(true), getCryptoNode: sinon3.stub().resolves() },
-                './ExplorerService': { installExplorerModule: sinon3.stub().resolves(true) }
+                './ExplorerService': { installExplorerModule: sinon3.stub().resolves(true) },
+                // Another load that bypasses loadModuleService, and it installs the
+                // HUB, so the guard fires: stub it here too (see loadModuleService).
+                './HubConsensusEnvGuard': {
+                    assertNoHubConsensusEnvDrift: sinon3.stub().resolves([]),
+                    isHubConsensusEnvDriftError: () => false
+                }
             })
             // With inspect rejection, containerExistsByName returns false → proceeds with install
             const result = await ms.installModule('xchain-hub', null, null, false)
@@ -2820,6 +2862,28 @@ describe('ModuleService', function () {
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
 
             expect(assertNoHubConsensusEnvDrift.called).to.equal(false)
+        })
+
+        it('does not reach the real guard from a default harness load (venue independence)', async function () {
+            // Regression guard for the CI failure this row closed: a hub buildAndUp
+            // test that did not stub HubConsensusEnvGuard ran the real one, which
+            // inspects the HOST's hub container. It passed on a laptop with no hub
+            // and failed on the venue that had one. The file-level before() hook
+            // makes the real guard throw, so this passes only while loadModuleService
+            // supplies the stub by default.
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') cb(null)
+                else if (args[0] === 'run') cb(null, 'a'.repeat(64) + '\n')
+                else cb(null)
+            })
+            const ms = loadModuleService(stubs)
+
+            await ms.buildAndUp('xchain-hub', null, null)
+
+            // The real guard would have thrown; reaching here means the stub answered.
+            expect(stubs.execFile.called).to.equal(true)
         })
     })
 

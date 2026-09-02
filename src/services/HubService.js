@@ -64,8 +64,20 @@ function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
 // defaultConfigCoinNetwork fields buildHubModuleConfig('xchain-indexer', ...)
 // reads above, rather than re-deriving them, to guarantee byte-identical
 // values instead of two independent paths that could drift apart.
+//
+// hub_url ships IN this block, beside self_sync, so the pairing is structural:
+// whatever condition produces self_sync produces the URL with it. Emitted by
+// separate conditions, an explorer opted in after its container exists is told
+// to self-sync with no hub URL to sync from, warns once at startup and then
+// serves the frozen mirror indefinitely. This block reaches the explorer over
+// the hub's config push; HUB_API_URL is a container env ConfigService writes at
+// install/recreate time from the same host env var, and the explorer falls back
+// to it for hand-written config.json deployments.
 function buildCheckpointConfig(defaultConfigCoinNetwork) {
     return {
+        hub_url: process.env.HUB_API_URL ||
+            ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" +
+             defaultConfigCoinNetwork.HUB_PORT),
         db_host:   defaultConfigCoinNetwork.INDEXER_DB_HOST,
         db_port:   defaultConfigCoinNetwork.INDEXER_DB_PORT,
         user:      defaultConfigCoinNetwork.INDEXER_DB_USER,
@@ -78,6 +90,41 @@ function buildCheckpointConfig(defaultConfigCoinNetwork) {
         self_sync: true
     }
 }
+
+// Is the self-synced checkpoint mirror opted in for THIS deployment?
+//
+// EXPLORER_CHECKPOINT_SELF_SYNC is a host env read at command time, but the
+// checkpoint blocks it produces are written per coin/network into stores that are
+// only ever upserted, never reconciled. So the opt-in has to outlive the shell that
+// first set it, and as a bare `process.env` read it did not: a coin installed later
+// from a shell that never exported the env (a second terminal, a cron-driven update,
+// an operator who sourced a different env file) got NO checkpoint block, while the
+// coins installed earlier kept theirs. The explorer then serves exactly one coin's
+// hub-mirrored routes as a fail-loud 500 - price_snapshots, oracle_prices,
+// state_checkpoints, capability_snapshots, cross_chain_matches - while every sibling
+// coin answers normally, which reads as a broken query rather than the config gap it
+// is (and with ALLOW_NO_COLOCATED_HUB_DB=1 the explorer boots anyway, so nothing at
+// startup says so either). Measured on a regtest venue whose LTC leg 500'd on
+// /RLTC/api/price_snapshots/FINALIZED/status while RBTC and RDOGE were fine.
+//
+// The installed explorer container's own env is the durable record of the earlier
+// opt-in: ConfigService writes HUB_API_URL into the explorer ONLY inside the same
+// opt-in branch, so its presence there means self-sync was chosen for this
+// deployment. Reading it back makes every later push emit the block for every
+// installed coin, so the gap self-heals on the next mutation instead of needing a
+// hand-edit. Tolerant by design: no explorer container, or an unreadable one, is
+// simply "not opted in".
+async function isCheckpointSelfSyncEnabled(deps = {}) {
+    const env = deps.env || process.env
+    if (env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && env.EXPLORER_CHECKPOINT_SELF_SYNC !== "") return true
+
+    const readEnv = deps.readContainerEnv || readContainerEnv
+    const containerEnv = await readEnv(getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""), deps)
+    if (!containerEnv) return false
+
+    return (containerEnv.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && containerEnv.EXPLORER_CHECKPOINT_SELF_SYNC !== "") ||
+           (containerEnv.HUB_API_URL !== undefined && containerEnv.HUB_API_URL !== "")
+}
 const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
 const { sleep, redactSecrets }                 = require('../utils/helpers')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = require('./ConfigService')
@@ -85,6 +132,10 @@ const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./St
 const { addContainerToNetwork }                = require('./DockerService')
 const { cloneGit, buildAndUp }                 = require('./ModuleService')
 const { addUserPasswordToDatabase, getExternalDbConfig } = require('./DatabaseService')
+// The explorer container's env is the durable record of the checkpoint self-sync
+// opt-in; this reader already exists for the DB-credential drift guard and is
+// tolerant of a missing container, which is exactly the posture wanted here.
+const { readContainerEnv }                     = require('./DbCredentialDrift')
 const HubConnector                             = require('../HubConnector.js')
 
 async function updateHubOrExplorer(module) {
@@ -118,6 +169,11 @@ async function updateHubOrExplorer(module) {
     // saved at the first-run prompt would be misreported to the hub (uuid:52c5b5f1).
     const externalDbCfg = EXTERNAL_DB ? await getExternalDbConfig() : null
 
+    // Resolved once per push, for the same reason: the answer is a property of the
+    // deployment, not of the coin/network being emitted, so every installed coin gets
+    // the same verdict and none is silently left without a checkpoint block.
+    const checkpointSelfSync = await isCheckpointSelfSyncEnabled()
+
     if (module === "xchain-explorer") {
         jsonConfig["configs"] = []
         jsonConfig = jsonConfig["configs"]
@@ -150,9 +206,9 @@ async function updateHubOrExplorer(module) {
             // Row 39: advertise a self-synced checkpoint schema for this coin/
             // network once an indexer is actually installed for it (the
             // checkpoint config needs the indexer's own DB host/port/user/pass)
-            // and the operator opted in. See buildCheckpointConfig above.
-            if (process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== "" &&
-                XChainService.XCHAIN_INDEXER in lastStatus[nextCoin][nextNetwork]) {
+            // and the operator opted in (once, at any point in this deployment's
+            // life: see isCheckpointSelfSyncEnabled). See buildCheckpointConfig above.
+            if (checkpointSelfSync && XChainService.XCHAIN_INDEXER in lastStatus[nextCoin][nextNetwork]) {
                 const checkpointConfig = buildCheckpointConfig(defaultConfigCoinNetwork)
                 if (module === "xchain-explorer") {
                     nextConfigObject.checkpoint = checkpointConfig
@@ -363,5 +419,11 @@ async function installHubModule(branch = null) {
 module.exports = {
     updateHubOrExplorer,
     updateHub,
-    installHubModule
+    installHubModule,
+    // Exported for the unit suite: the self_sync/hub_url pairing is the whole
+    // point of this block and must be pinned without booting a docker install.
+    buildCheckpointConfig,
+    // Same: the opt-in must survive a shell that never exported the env, and that
+    // is pinned against a stubbed container-env read rather than a live docker.
+    isCheckpointSelfSyncEnabled
 }

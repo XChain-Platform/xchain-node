@@ -22,7 +22,7 @@ const { dataDir, moduleDir, tmpDir, containersFilesDir,
 const { db, isVerbose }                = require('./state')
 const { redactSecrets }                = require('./utils/helpers')
 const { checkDockerInstalledAndReachable, createDockerNetwork, checkContainerdDataRootRelocation } = require('./services/DockerService')
-const { getDockerNetwork } = require('./services/ConfigService')
+const { getDockerNetwork, applyHubApiKeyFromSidecar } = require('./services/ConfigService')
 const { checkAllRemoteVersions }       = require('./services/VersionService')
 const { getStatus }                    = require('./services/StatusService')
 const { installHubModule, updateHub }  = require('./services/HubService')
@@ -162,6 +162,18 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     }
     if (isVerbose()) console.log("Getting modules status")
     await getStatus(null, null, false, checkVersions)
+
+    // The CLI authenticates to the hub with the SAME credential the hub was deployed
+    // with. `validator init` mints that key into config/hub.local, and getDefaultConfig
+    // reads the sidecar when it builds the hub container's env, so the hub boots keyed;
+    // but HubConnector only sends what is in process.env, which dotenv fills from .env
+    // alone. On every validator host provisioned per the runbook that left the CLI's
+    // own updateconfig push keyless against a keyed hub: `install xchain-hub` started
+    // the hub and then failed with "HTTP 401" on its config push, and every
+    // state-changing command after it did the same. Same precedence as the container
+    // env: a host-env HUB_API_KEY still wins, the sidecar only fills an empty one, and
+    // this never mints (a host with no sidecar stays keyless exactly as before).
+    await applyHubApiKeyFromSidecar(process.env)
 
     try {
         if (isVerbose()) console.log("Checking/Installing hub module")
