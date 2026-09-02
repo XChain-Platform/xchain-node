@@ -135,3 +135,73 @@ describe('HubService.buildCheckpointConfig hub endpoint', function () {
         expect(cfg.user).to.equal('xchain_indexer_bitcoin_regtest')
     })
 })
+
+// The opt-in that decides whether a coin gets a checkpoint block at all. Read bare
+// off process.env, a push run from a shell that never exported the env emits no
+// block - and because both config stores are upsert-only, the coins installed
+// earlier keep theirs while the one installed later has none. The explorer
+// then 500s that one coin's hub-mirrored routes (price_snapshots, oracle_prices,
+// state_checkpoints) while every sibling coin answers normally.
+describe('HubService.isCheckpointSelfSyncEnabled', function () {
+
+    const EXPLORER_CONTAINER = 'xchain-node-xchain-explorer'
+
+    it('is opted in when the host env carries the flag', async function () {
+        const { svc } = loadHubService()
+        const enabled = await svc.isCheckpointSelfSyncEnabled({
+            env: { EXPLORER_CHECKPOINT_SELF_SYNC: '1' },
+            readContainerEnv: async () => { throw new Error('must not need docker when the env says yes') }
+        })
+        expect(enabled).to.be.true
+    })
+
+    it('stays opted in when the env is gone but the explorer container remembers', async function () {
+        const { svc } = loadHubService()
+        const seen = []
+        const enabled = await svc.isCheckpointSelfSyncEnabled({
+            env: {},
+            readContainerEnv: async (name) => {
+                seen.push(name)
+                return { HUB_API_URL: 'http://xchain-node-xchain-hub:10000', SOMETHING_ELSE: 'x' }
+            }
+        })
+        expect(enabled).to.be.true
+        expect(seen).to.deep.equal([EXPLORER_CONTAINER])
+    })
+
+    it('reads the flag itself off the container when it is there', async function () {
+        const { svc } = loadHubService()
+        const enabled = await svc.isCheckpointSelfSyncEnabled({
+            env: {},
+            readContainerEnv: async () => ({ EXPLORER_CHECKPOINT_SELF_SYNC: '1' })
+        })
+        expect(enabled).to.be.true
+    })
+
+    it('is not opted in when neither the env nor the container says so', async function () {
+        const { svc } = loadHubService()
+        const enabled = await svc.isCheckpointSelfSyncEnabled({
+            env: {},
+            readContainerEnv: async () => ({ EXPLORER_PORT: '18080' })
+        })
+        expect(enabled).to.be.false
+    })
+
+    it('treats an empty env value as unset rather than as an opt-in', async function () {
+        const { svc } = loadHubService()
+        const enabled = await svc.isCheckpointSelfSyncEnabled({
+            env: { EXPLORER_CHECKPOINT_SELF_SYNC: '' },
+            readContainerEnv: async () => ({ HUB_API_URL: '' })
+        })
+        expect(enabled).to.be.false
+    })
+
+    it('is not opted in when there is no explorer container to ask', async function () {
+        const { svc } = loadHubService()
+        const enabled = await svc.isCheckpointSelfSyncEnabled({
+            env: {},
+            readContainerEnv: async () => null
+        })
+        expect(enabled).to.be.false
+    })
+})
