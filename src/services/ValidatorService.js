@@ -39,11 +39,13 @@
  * Never as an argv value: a WIF in argv is a WIF in every process listing.
  *
  * The hub's API key is deliberately NOT one of these. A hub refuses to boot
- * without HUB_API_KEY unless keyless operation is declared, so init mints one,
- * but it belongs to the HOST rather than to this validator identity: the local
- * indexer and the shared services authenticate to the same hub with the same
- * value. It therefore lives in the shared 0600 sidecar config/hub.local
- * alongside HUB_DB_PASS (ConfigService.ensureHubApiKey).
+ * without HUB_API_KEY unless keyless operation is declared, so a FRESH init
+ * mints one, but it belongs to the HOST rather than to this validator identity:
+ * the local indexer and the shared services authenticate to the same hub with
+ * the same value. It therefore lives in the shared 0600 sidecar config/hub.local
+ * alongside HUB_DB_PASS (ConfigService.ensureHubApiKey). A RE-RUN over an
+ * already-initialized node only READS it (ConfigService.readHubApiKey): see
+ * initValidator for why minting there breaks a keyless deployment.
  *
  * Why capabilities.json sits in its own `hub-caps/` subdirectory rather than
  * beside the other two: the hub container mounts it, and a SINGLE-FILE bind
@@ -66,7 +68,7 @@ const fs   = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { configDir } = require('../config/constants')
-const { ensureHubApiKey } = require('./ConfigService')
+const { ensureHubApiKey, readHubApiKey } = require('./ConfigService')
 
 const VALIDATOR_DIR   = path.join(configDir, 'validator')
 // The stack ref this CLI tells an operator to install. xchain-node's own
@@ -574,9 +576,40 @@ function assertCapsDirIsolated() {
     }
 }
 
-// One line of operator-facing output naming WHERE the hub credential lives. The value
-// is never printed: an API key in a terminal is an API key in a scrollback buffer.
+/**
+ * Resolve the host's hub credential for this init run.
+ *
+ * A fresh install may GENERATE one (the hub refuses to boot in validator mode without it,
+ * so an install that leaves none behind ends in a node that cannot start). A re-run over an
+ * already-provisioned node may only READ, because minting one there is a silent outage:
+ * see the refusal wording in reportHubApiKey. `--mint-hub-api-key` is the explicit opt-in
+ * for the one case a re-run legitimately needs to generate, an old install that was
+ * provisioned before init minted anything and now sits at a refused hub boot.
+ */
+async function resolveHubApiKey(alreadyInitialized, opts) {
+    if (!alreadyInitialized || opts.mintHubApiKey) {
+        const key = await ensureHubApiKey()
+        return { path: key.path, generated: key.generated, missing: false }
+    }
+    const key = await readHubApiKey()
+    return { path: key.path, generated: false, missing: !key.present }
+}
+
+// One line of operator-facing output naming WHERE the hub credential lives, or the refusal
+// and its consequence when there is none to name. The value is never printed: an API key in
+// a terminal is an API key in a scrollback buffer.
 function reportHubApiKey(hubApiKey) {
+    if (hubApiKey.missing) {
+        console.log('  hub API key : NONE in ' + hubApiKey.path + ' - this host runs its hub KEYLESS,')
+        console.log('                and re-running init does NOT mint one. Every indexer, explorer and')
+        console.log('                service already pointed at this hub carries no key either, so a key')
+        console.log('                appearing here would flip the hub to authenticated on its next deploy')
+        console.log('                and 401 all of them at once, while the hub still reported healthy.')
+        console.log('                Re-run with --mint-hub-api-key ONLY if the hub is refusing to boot for')
+        console.log('                want of a key, and put the same value in every consumer before')
+        console.log('                redeploying the hub.')
+        return
+    }
     console.log('  hub API key : ' + hubApiKey.path
         + ' (mode 0600, key HUB_API_KEY, ' + (hubApiKey.generated ? 'generated now' : 'already present, reused') + ')')
 }
@@ -585,11 +618,12 @@ function reportHubApiKey(hubApiKey) {
  * Set up the two coin wallets and the DOGE signer, or report why not.
  *
  * Shared by a fresh init and by a re-run over an already-initialized
- * validator, for the same reason ensureHubApiKey runs before the
- * already-initialized early return: a node initialized BEFORE wallets existed
- * is exactly the node that needs them, and making it rotate its signing key
- * (and therefore re-stake, and wait out the activation delay again) to get
- * them would be a punishing upgrade path for a working validator.
+ * validator: a node initialized BEFORE wallets existed is exactly the node that
+ * needs them, and making it rotate its signing key (and therefore re-stake, and
+ * wait out the activation delay again) to get them would be a punishing upgrade
+ * path for a working validator. Wallets are safe to repair on a re-run because
+ * generating them affects nothing outside this node; the hub API key is not,
+ * which is why that one only reads on a re-run (see initValidator).
  *
  * An existing wallets.env is KEPT unless --force-wallets: the signing key is
  * cheap to replace, but a funded stake or publisher address is not, and
@@ -638,13 +672,22 @@ function reportWallets(walletInfo, network, verb) {
 
 // Generate a key + write all validator files. Idempotent guard via `force`.
 async function initValidator(opts = {}) {
-    // A validator-mode hub REFUSES TO BOOT with no HUB_API_KEY, so init has to leave one
-    // behind or this whole ceremony ends in a node that cannot start. Done BEFORE the
-    // already-initialized early return, because a node initialized before this existed is
-    // exactly the node sitting in that refused-boot state; re-running init repairs it.
-    const hubApiKey = await ensureHubApiKey()
+    // A validator-mode hub REFUSES TO BOOT with no HUB_API_KEY, so a FRESH init has to
+    // leave one behind or this whole ceremony ends in a node that cannot start.
+    //
+    // A RE-RUN over an already-provisioned node must NOT mint one, however it got here
+    // (plain re-run or --force). A hub deployed with no key runs keyless
+    // (HUB_ALLOW_UNAUTHENTICATED), and every indexer, explorer and shared service pointed
+    // at it carries no key either; a key appearing in the sidecar flips the hub to
+    // authenticated on its next deploy and 401s all of them at once. Measured on a regtest
+    // host: three indexers dropped off the hub-db sync socket while the visible symptom
+    // named none of it (a mirror-barrier timeout, hub healthy). So the re-run path reads
+    // and reports, and says out loud what minting would cost; --mint-hub-api-key is the
+    // explicit opt-in for the old install that really is stuck at a refused hub boot.
+    const alreadyInitialized = isInitialized()
+    const hubApiKey = await resolveHubApiKey(alreadyInitialized, opts)
 
-    if (isInitialized() && !opts.force) {
+    if (alreadyInitialized && !opts.force) {
         const existing = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
         console.log('Validator already initialized. Pubkey: ' + existing.pubkey)
         reportHubApiKey(hubApiKey)

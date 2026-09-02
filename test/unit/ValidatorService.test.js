@@ -64,10 +64,16 @@ function makeHubApiKeyStub(generated = true) {
     return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, generated })
 }
 
-function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub()) {
+// The non-minting read a re-run uses. `present` is what the sidecar already holds.
+function makeHubApiKeyReadStub(present = false) {
+    return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, present })
+}
+
+function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub(),
+                              readHubApiKey = makeHubApiKeyReadStub()) {
     return proxyquire('../../src/services/ValidatorService', {
         'fs': fsStub,
-        './ConfigService': { ensureHubApiKey },
+        './ConfigService': { ensureHubApiKey, readHubApiKey },
         '../config/constants': {
             configDir: FAKE_CONFIG_DIR
         }
@@ -389,18 +395,27 @@ describe('ValidatorService', function () {
 
             // Capture output rather than let assertions read the real console: these tests
             // are about what does and does not get printed.
-            function captureInit(fs, ensure) {
+            function captureInit(fs, ensure, read = makeHubApiKeyReadStub(), opts = {}) {
                 const logged = []
                 const stub = sinon.stub(console, 'log').callsFake(m => logged.push(String(m)))
                 return (async () => {
                     try {
-                        const vs = loadValidatorService(fs, ensure)
-                        await vs.initValidator()
+                        const vs = loadValidatorService(fs, ensure, read)
+                        await vs.initValidator(opts)
                         return logged
                     } finally {
                         stub.restore()
                     }
                 })()
+            }
+
+            // An already-initialized node: settings and signing key both on disk.
+            function initializedFs() {
+                return makeFs({
+                    existsSync: sinon.stub().callsFake(p =>
+                        p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                    readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+                })
             }
 
             it('ensures a hub API key exists as part of init', async function () {
@@ -427,26 +442,66 @@ describe('ValidatorService', function () {
                 expect(output).to.not.match(/HUB_API_KEY=\S/)
             })
 
-            // A node initialized before this existed is EXACTLY the node stuck at a refused
-            // boot, so re-running init has to repair it rather than return early.
-            it('repairs an already-initialized node that has no key yet', async function () {
-                const ensure = makeHubApiKeyStub()
-                const fs = makeFs({
-                    existsSync: sinon.stub().callsFake(p =>
-                        p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
-                    readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
-                })
-                const logged = await captureInit(fs, ensure)
-                expect(ensure.calledOnce).to.be.true
-                expect(logged.some(l => l.includes('already initialized'))).to.be.true
-                expect(logged.some(l => l.includes(FAKE_HUB_SIDECAR))).to.be.true
-            })
-
             it('reports a pre-existing key as reused rather than claiming a fresh one', async function () {
                 const logged = await captureInit(makeFs(), makeHubApiKeyStub(false))
                 const line = logged.find(l => l.includes('hub API key'))
                 expect(line).to.include('reused')
                 expect(line).to.not.include('generated now')
+            })
+
+            // A credential APPEARING is as breaking as one disappearing. A hub with no key
+            // runs keyless and every consumer pointed at it carries no key either, so a key
+            // minted by a re-run 401s all of them on the hub's next deploy while the hub
+            // itself still reports healthy. Measured on a regtest host: three indexers
+            // dropped off the hub-db sync socket behind a mirror-barrier timeout.
+            describe('a re-run over an already-initialized node', function () {
+
+                it('does NOT mint a key on a keyless host', async function () {
+                    const ensure = makeHubApiKeyStub()
+                    const read   = makeHubApiKeyReadStub(false)
+                    await captureInit(initializedFs(), ensure, read)
+                    expect(ensure.called).to.be.false
+                    expect(read.calledOnce).to.be.true
+                })
+
+                it('names the consequence instead of minting silently', async function () {
+                    const logged = await captureInit(initializedFs(), makeHubApiKeyStub(), makeHubApiKeyReadStub(false))
+                    const output = logged.join('\n')
+                    expect(output).to.include('KEYLESS')
+                    expect(output).to.include('401')
+                    expect(output).to.include('--mint-hub-api-key')
+                    expect(output).to.include(FAKE_HUB_SIDECAR)
+                })
+
+                // --force rotates the SIGNING KEY, which is this node's business alone. The
+                // hub credential is the whole host's, so it stays read-only there too.
+                it('does NOT mint under --force either', async function () {
+                    const ensure = makeHubApiKeyStub()
+                    const read   = makeHubApiKeyReadStub(false)
+                    const logged = await captureInit(initializedFs(), ensure, read, { force: true, wallets: false })
+                    expect(ensure.called).to.be.false
+                    expect(logged.join('\n')).to.include('--mint-hub-api-key')
+                })
+
+                it('still reports an existing key, without rotating it', async function () {
+                    const ensure = makeHubApiKeyStub()
+                    const logged = await captureInit(initializedFs(), ensure, makeHubApiKeyReadStub(true))
+                    expect(ensure.called).to.be.false
+                    const line = logged.find(l => l.includes('hub API key'))
+                    expect(line).to.include(FAKE_HUB_SIDECAR)
+                    expect(line).to.include('reused')
+                })
+
+                // The old install that really is stuck at a refused hub boot still has a
+                // repair path; it is now something the operator asks for by name.
+                it('mints when --mint-hub-api-key asks it to', async function () {
+                    const ensure = makeHubApiKeyStub()
+                    const read   = makeHubApiKeyReadStub(false)
+                    const logged = await captureInit(initializedFs(), ensure, read, { mintHubApiKey: true })
+                    expect(ensure.calledOnce).to.be.true
+                    expect(read.called).to.be.false
+                    expect(logged.find(l => l.includes('hub API key'))).to.include('generated now')
+                })
             })
         })
 

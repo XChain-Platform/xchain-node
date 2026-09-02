@@ -627,6 +627,7 @@ Notes:
         .option('--import-stake-key',         'use your own BTC stake key: prompts for the WIF (or set XCHAIN_NODE_STAKE_WIF)')
         .option('--import-doge-key',          'use your own DOGE publisher key: prompts for the WIF (or set XCHAIN_NODE_DOGE_WIF)')
         .option('--no-wallets',               'skip wallet generation (you run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR)')
+        .option('--mint-hub-api-key',         'on a re-run, generate a HUB_API_KEY if this host has none (401s every consumer that carries no key)')
         .option('--force',                    'overwrite existing validator config (generates a NEW signing key; wallets are kept)')
         .option('--force-wallets',            'also replace existing wallets (the old addresses and any coin at them are abandoned)')
         .action(async (opts) => {

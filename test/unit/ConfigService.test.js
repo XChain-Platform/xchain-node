@@ -23,9 +23,24 @@ const {
     moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir
 } = require('../../src/config/constants')
 
+// getDefaultConfig() pulls ValidatorService in lazily for the hub module, and
+// ValidatorService reads config/validator/ off the REAL filesystem through its own
+// `fs` binding, which the fs stub below does not reach. On a developer or operator
+// box that has run `xchain-node validator init` that directory exists, so an
+// unstubbed run reads the machine's recorded network (HUB_NETWORK) and its live
+// signing.key into the config object under test: assertions about a standalone
+// install then fail, and a real key ends up in a test fixture. Every factory here
+// therefore describes a machine with no validator, which is the state CI runs in
+// (config/validator/ is gitignored). Tests that WANT a validator stub their own.
+const NO_VALIDATOR = {
+    getValidatorSettings: () => null,
+    getValidatorEnv:      () => ({})
+}
+
 function makeConfigService(fsStub) {
     return proxyquire('../../src/services/ConfigService', {
-        'fs': fsStub || require('fs')
+        'fs': fsStub || require('fs'),
+        './ValidatorService': NO_VALIDATOR
     })
 }
 
@@ -400,6 +415,7 @@ describe('ConfigService', function () {
                 }
                 const cs = proxyquire('../../src/services/ConfigService', {
                     'fs': fsStub,
+                    './ValidatorService': NO_VALIDATOR,
                     './DatabaseService': {
                         getDatabaseContainerId: async () => dbContainerId,
                         getExternalDbConfig: async () => ({ host: '172.18.0.1', port: 3307, root_user: 'root', root_password: 'x' })
@@ -1051,6 +1067,20 @@ describe('ConfigService', function () {
                     const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
                     expect(config['HUB_NETWORK']).to.be.undefined
                 })
+
+                // The guard on the guard: the test above only describes a standalone
+                // install while ValidatorService is stubbed out. Unstubbed it reads the
+                // real config/validator/ through its own fs binding, so on any box that
+                // has run `validator init` the suite both fails here and pulls that
+                // machine's live signing key into a fixture. Assert the validator env is
+                // absent, which is the shape only an isolated read can produce.
+                it('reads no validator identity off the host filesystem', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['SIGNING_PRIVKEY_HEX']).to.be.undefined
+                    expect(config['P2P_VALIDATOR_ADDR']).to.be.undefined
+                    expect(config['HUB_CAPABILITY_CONFIG']).to.be.undefined
+                })
             })
 
             // The four PRICE batch knobs: non-consensus, so a passthrough
@@ -1198,6 +1228,45 @@ describe('ConfigService', function () {
     })
 
     describe('filterCommandParameters()', function () {
+
+        // The non-minting read. A key APPEARING on a keyless host 401s every consumer that
+        // carries none, so callers that only need to report where the credential lives must
+        // have a way to ask that cannot create one.
+        describe('readHubApiKey()', function () {
+
+            it('reports absence and writes NOTHING on a keyless host', async function () {
+                const cs = serviceWithConfigDir(dir)
+                const result = await cs.readHubApiKey()
+                expect(result.present).to.be.false
+                expect(result.path).to.equal(sidecarPath())
+                expect(realFs.existsSync(sidecarPath())).to.be.false
+            })
+
+            it('leaves a sidecar that holds other credentials byte-identical', async function () {
+                realFs.writeFileSync(sidecarPath(), 'HUB_DB_PASS=db-fixture-value\n', { mode: 0o600 })
+                const before = sidecarDigest()
+                const cs = serviceWithConfigDir(dir)
+                expect((await cs.readHubApiKey()).present).to.be.false
+                expect(sidecarDigest()).to.equal(before)
+            })
+
+            it('reports a present key without rotating it', async function () {
+                const cs = serviceWithConfigDir(dir)
+                await cs.ensureHubApiKey()
+                const before = sidecarDigest()
+                const result = await cs.readHubApiKey()
+                expect(result.present).to.be.true
+                expect(sidecarDigest()).to.equal(before)
+            })
+
+            it('never returns the key itself, only whether there is one', async function () {
+                const cs = serviceWithConfigDir(dir)
+                await cs.ensureHubApiKey()
+                const result = await cs.readHubApiKey()
+                expect(Object.keys(result).sort()).to.deep.equal(['path', 'present'])
+                expect(JSON.stringify(result)).to.not.match(/[0-9a-f]{64}/)
+            })
+        })
         const { filterCommandParameters } = require('../../src/services/ConfigService')
 
         it('passes single module/coin/network through unchanged', function () {

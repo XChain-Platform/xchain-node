@@ -318,6 +318,25 @@ async function ensureHubApiKey() {
     return { path: sidecarPath, generated: true }
 }
 
+/**
+ * Report whether this host already holds a HUB_API_KEY, WITHOUT ever minting one.
+ *
+ * A credential APPEARING is as breaking as one disappearing. A hub deployed with no key
+ * runs keyless (HUB_ALLOW_UNAUTHENTICATED), and every indexer, explorer and shared service
+ * pointed at it carries no key either; a key landing in this sidecar flips the hub to
+ * authenticated on its next deploy and 401s all of them at once, while the hub itself still
+ * looks healthy. So the callers that only need to SAY where the credential lives (a re-run
+ * of `validator init` over an already-provisioned node) read through here, and generation
+ * stays with the fresh-install path in ensureHubApiKey.
+ *
+ * @returns {Promise<{path: string, present: boolean}>}
+ */
+async function readHubApiKey() {
+    const sidecarPath = hubSidecarPath()
+    const existing = await readSidecarValue(sidecarPath, "HUB_API_KEY")
+    return { path: sidecarPath, present: !!existing }
+}
+
 // Fill in HUB_API_KEY from the shared sidecar when the host env did not supply one.
 // The hub, the co-located indexer and the shared services must all present the SAME
 // value or their writes 401 against each other, so they resolve it from one file.
@@ -1287,6 +1306,7 @@ module.exports = {
     readSidecarValue,
     ensureHubApiKey,
     applyHubApiKeyFromSidecar,
+    readHubApiKey,
     filterCommandParameters,
     resolveArgs
 }
