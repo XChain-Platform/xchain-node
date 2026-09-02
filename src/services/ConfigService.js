@@ -1269,6 +1269,7 @@ module.exports = {
     upsertSidecarValues,
     readSidecarValue,
     ensureHubApiKey,
+    applyHubApiKeyFromSidecar,
     filterCommandParameters,
     resolveArgs
 }
