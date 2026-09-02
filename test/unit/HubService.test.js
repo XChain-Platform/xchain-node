@@ -79,3 +79,59 @@ describe('HubService.updateHub network attachment', function () {
         expect(attach.callCount).to.equal(2)
     })
 })
+
+// The self_sync flag and the hub URL the explorer's mirror writer follows ship
+// together, from one condition. Delivered by separate conditions (this block over
+// the hub config push, HUB_API_URL as a container env written at install time), an
+// explorer is told to self-sync with no hub to sync from: it warns once and serves
+// the frozen mirror indefinitely.
+describe('HubService.buildCheckpointConfig hub endpoint', function () {
+
+    const COIN_CONFIG = {
+        INDEXER_DB_HOST: 'mariadb',
+        INDEXER_DB_PORT: 3306,
+        INDEXER_DB_USER: 'xchain_indexer_bitcoin_regtest',
+        INDEXER_DB_PASS: 'secret',
+        INDEXER_DB_NAME: 'XChain_BTC_regtest',
+        HUB_PORT:        10000
+    }
+
+    let savedHubUrl
+
+    beforeEach(function () {
+        savedHubUrl = process.env.HUB_API_URL
+        delete process.env.HUB_API_URL
+    })
+
+    afterEach(function () {
+        if (savedHubUrl === undefined) delete process.env.HUB_API_URL
+        else process.env.HUB_API_URL = savedHubUrl
+    })
+
+    it('emits a hub_url alongside every self_sync it advertises', function () {
+        const { svc } = loadHubService()
+        const cfg = svc.buildCheckpointConfig(COIN_CONFIG)
+        expect(cfg.self_sync).to.be.true
+        expect(cfg.hub_url).to.be.a('string').and.to.have.length.above(0)
+    })
+
+    it('defaults the endpoint to the hub container on the docker network', function () {
+        const { svc } = loadHubService()
+        expect(svc.buildCheckpointConfig(COIN_CONFIG).hub_url).to.equal('http://xchain-node-xchain-hub:10000')
+    })
+
+    it('honours an operator HUB_API_URL from the host env', function () {
+        process.env.HUB_API_URL = 'http://hub.internal:10000'
+        const { svc } = loadHubService()
+        expect(svc.buildCheckpointConfig(COIN_CONFIG).hub_url).to.equal('http://hub.internal:10000')
+    })
+
+    it('keeps the mirror schema and indexer credentials it already carried', function () {
+        const { svc } = loadHubService()
+        const cfg = svc.buildCheckpointConfig(COIN_CONFIG)
+        expect(cfg.name).to.equal('XChain_BTC_regtest_HubMirror')
+        expect(cfg.db_host).to.equal('mariadb')
+        expect(cfg.db_port).to.equal(3306)
+        expect(cfg.user).to.equal('xchain_indexer_bitcoin_regtest')
+    })
+})

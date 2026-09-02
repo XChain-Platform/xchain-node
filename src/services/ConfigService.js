@@ -671,6 +671,15 @@ async function getDefaultConfig(module, coin, network) {
             // startup assertion to a warning and says nothing about whether a
             // local mirror should be provisioned). Emitted only when opted in, so
             // a deployment that never uses self-sync carries no unused hub URL.
+            //
+            // This env is no longer the mirror writer's ONLY source: the same URL
+            // now ships inside the checkpoint config block beside self_sync
+            // (HubService.buildCheckpointConfig), because these two lived on
+            // different delivery paths - container env written at install time
+            // versus the hub's config push - and opting in after the container
+            // existed left the explorer self-syncing with nowhere to sync from.
+            // Kept for the explorer's other hub reads (HubOperationalCache) and as
+            // the fallback for hand-written config.json deployments.
             if (process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== "") {
                 defaultValues.HUB_API_URL = process.env.HUB_API_URL ||
                     ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" + defaultValues.HUB_PORT)

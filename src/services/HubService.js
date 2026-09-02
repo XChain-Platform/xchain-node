@@ -64,8 +64,20 @@ function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
 // defaultConfigCoinNetwork fields buildHubModuleConfig('xchain-indexer', ...)
 // reads above, rather than re-deriving them, to guarantee byte-identical
 // values instead of two independent paths that could drift apart.
+//
+// hub_url ships IN this block, beside self_sync, so the pairing is structural:
+// whatever condition produces self_sync produces the URL with it. Emitted by
+// separate conditions, an explorer opted in after its container exists is told
+// to self-sync with no hub URL to sync from, warns once at startup and then
+// serves the frozen mirror indefinitely. This block reaches the explorer over
+// the hub's config push; HUB_API_URL is a container env ConfigService writes at
+// install/recreate time from the same host env var, and the explorer falls back
+// to it for hand-written config.json deployments.
 function buildCheckpointConfig(defaultConfigCoinNetwork) {
     return {
+        hub_url: process.env.HUB_API_URL ||
+            ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" +
+             defaultConfigCoinNetwork.HUB_PORT),
         db_host:   defaultConfigCoinNetwork.INDEXER_DB_HOST,
         db_port:   defaultConfigCoinNetwork.INDEXER_DB_PORT,
         user:      defaultConfigCoinNetwork.INDEXER_DB_USER,
@@ -363,5 +375,8 @@ async function installHubModule(branch = null) {
 module.exports = {
     updateHubOrExplorer,
     updateHub,
-    installHubModule
+    installHubModule,
+    // Exported for the unit suite: the self_sync/hub_url pairing is the whole
+    // point of this block and must be pinned without booting a docker install.
+    buildCheckpointConfig
 }
