@@ -1369,9 +1369,6 @@ describe('ConfigService', function () {
             expect(result.generated).to.be.true
             expect(realFs.existsSync(path.join(nested, 'hub.local'))).to.be.true
         })
-    })
-
-    describe('filterCommandParameters()', function () {
 
         // The non-minting read. A key APPEARING on a keyless host 401s every consumer that
         // carries none, so callers that only need to report where the credential lives must
@@ -1411,6 +1408,9 @@ describe('ConfigService', function () {
                 expect(JSON.stringify(result)).to.not.match(/[0-9a-f]{64}/)
             })
         })
+    })
+
+    describe('filterCommandParameters()', function () {
         const { filterCommandParameters } = require('../../src/services/ConfigService')
 
         it('passes single module/coin/network through unchanged', function () {
