@@ -17,9 +17,10 @@
  * SHELL happens to export it; a var it does not export is simply left out of
  * the container env, and the hub falls back to its own built-in default with
  * no message anywhere. For most of the ~30 hub passthrough vars that is fine
- * (they are genuinely optional). Five of them are not: HUB_NETWORK,
- * ORACLE_MIN_SUBMISSIONS, ORACLE_ROUND_INTERVAL, ORACLE_SUBMISSION_WINDOW and
- * XCHAIN_PRICE_INDEXER_DB_* are CONSENSUS-SHAPED (they change what the hub's
+ * (they are genuinely optional). A handful are not: HUB_NETWORK,
+ * ORACLE_MIN_SUBMISSIONS, ORACLE_ROUND_INTERVAL, ORACLE_SUBMISSION_WINDOW,
+ * XCHAIN_PRICE_INDEXER_DB_* and (on regtest, see below) the four XCHAIN/BTC
+ * derivation overrides are CONSENSUS-SHAPED (they change what the hub's
  * oracle finalizes, or whether it finalizes at all), so a `recreate` run from
  * a shell that lacks one of them silently deploys a hub with different
  * consensus behavior than the one that was just torn down. That is the same
@@ -46,6 +47,32 @@
  *
  * Values are never logged, only compared, for the same reason as
  * DbCredentialDrift: XCHAIN_PRICE_INDEXER_DB_PASS is a credential.
+ *
+ * NETWORK-GATED KEYS
+ * ------------------
+ * Some of the passthrough vars are consensus-shaped only on the network where
+ * the hub actually honors them. The four XCHAIN/BTC derivation parameters
+ * (XCHAIN_PRICE_WINDOW_BLOCKS, _CONFIRMATION_BUFFER, _BOOTSTRAP_SATS,
+ * _MIN_BTC_VOLUME) are the case that forced this: XchainPriceSource's
+ * pinOffRegtest honors them ONLY when HUB_NETWORK is regtest, and pins them to
+ * the constants.js values (with a "set but IGNORED" warning) on mainnet,
+ * testnet and standalone alike.
+ *
+ * Adding them to the flat key list unconditionally would have been the wrong
+ * fix, and worse than leaving them out. This guard counts a DROP as drift, so
+ * a mainnet hub whose container still carries a stale, already-ignored
+ * XCHAIN_PRICE_BOOTSTRAP_SATS would have had every future recreate REFUSED
+ * until the operator either re-exported a variable the hub throws away or set
+ * the override - a refusal protecting a value that cannot change anything.
+ *
+ * So the honored set is DERIVED from the network rather than fixed: a group
+ * may carry `honoredOn`, and its keys enter the comparison only when the
+ * deploy's effective network is in that list. The effective network is read
+ * from HUB_NETWORK alone (this deploy's, else the running container's), never
+ * from the coin/network the node command is operating on, because HUB_NETWORK
+ * is exactly what the hub's own gate reads: falling back to the node's network
+ * would make the guard protect keys a standalone hub (HUB_NETWORK unset) is
+ * already ignoring, which is the same wrong refusal in a different disguise.
  ********************************************************************/
 
 const { HUB_MODULE_NAME } = require('../config/constants')
@@ -85,23 +112,100 @@ const CONSENSUS_ENV_GROUPS = [
         ],
         why: 'feeds the derived XCHAIN/USD price; unset is a supported "abstain from the pair" state for a ' +
             'hub that never had it, but a hub that WAS deriving the pair losing this source changes what it submits'
+    },
+    {
+        keys: [
+            'XCHAIN_PRICE_WINDOW_BLOCKS', 'XCHAIN_PRICE_CONFIRMATION_BUFFER',
+            'XCHAIN_PRICE_BOOTSTRAP_SATS', 'XCHAIN_PRICE_MIN_BTC_VOLUME'
+        ],
+        // Honored only on regtest, so guarded only on regtest. See NETWORK-GATED
+        // KEYS in the header: on any other network the hub pins these to the
+        // constants.js values and warns, which makes a drop unable to change
+        // anything and a refusal over one pure obstruction.
+        honoredOn: ['regtest'],
+        why: 'the CONSENSUS-UNIFORM XCHAIN/BTC derivation parameters, honored on regtest only; on a regtest ' +
+            'venue losing one silently retunes the window, buffer, bootstrap price or supersession threshold ' +
+            'this hub derives the pair with, which is what an e2e drill is measuring'
     }
 ]
 
 const CONSENSUS_ENV_KEYS = CONSENSUS_ENV_GROUPS.flatMap(g => g.keys)
 
+// The key whose value decides which of the network-gated groups apply. Guarded
+// in its own right (the first group), so a deploy that would drop it is refused
+// on that ground before any of its gating consequences matter.
+const NETWORK_KEY = 'HUB_NETWORK'
+
 /**
- * Which of the consensus-shaped keys this deploy supplies vs. leaves for the
- * hub's own default. Pure: reads only the object passed in.
+ * The network this deploy's hub will actually run as, lowercased, for deciding
+ * which network-gated keys are in force. '' means standalone/unset, which every
+ * gated group treats the same as a non-regtest network (the hub's own seams all
+ * fail closed to the consensus pin there).
  *
  * @param {Object<string,string>} intended The env this deploy is about to write.
+ * @param {Object<string,string>|null} [liveEnv] The running container's frozen env, if any.
+ * @returns {string}
+ */
+function resolveHubNetwork(intended, liveEnv) {
+    const fromIntended = (intended || {})[NETWORK_KEY]
+    if (fromIntended !== undefined && fromIntended !== null && String(fromIntended) !== '') {
+        return String(fromIntended).toLowerCase()
+    }
+    // The shell that invoked this deploy did not export it. The running
+    // container's value is the next best evidence of what this hub IS: a
+    // regtest hub whose recreate lost HUB_NETWORK still had its price knobs
+    // honored a moment ago, and dropping one alongside is real drift.
+    const fromLive = (liveEnv || {})[NETWORK_KEY]
+    if (fromLive !== undefined && fromLive !== null && String(fromLive) !== '') {
+        return String(fromLive).toLowerCase()
+    }
+    return ''
+}
+
+/**
+ * Whether a consensus-shaped key is honored by a hub running on `network`.
+ * An ungated group (no `honoredOn`) is honored everywhere.
+ *
+ * @param {string} key
+ * @param {string} network Lowercased network name, '' for standalone/unset.
+ * @returns {boolean}
+ */
+function isConsensusEnvKeyHonoredOn(key, network) {
+    const group = CONSENSUS_ENV_GROUPS.find(g => g.keys.includes(key))
+    if (!group || !group.honoredOn) return true
+    return group.honoredOn.includes(String(network || '').toLowerCase())
+}
+
+/**
+ * The consensus-shaped keys in force on `network`: the flat list minus every
+ * network-gated key this hub would ignore. Everything the guard walks (drift
+ * comparison and the supply log alike) comes from here, so a key the hub
+ * ignores is never reported as missing and never counted as drift when dropped.
+ *
+ * @param {string} network Lowercased network name, '' for standalone/unset.
+ * @returns {string[]}
+ */
+function consensusEnvKeysForNetwork(network) {
+    return CONSENSUS_ENV_KEYS.filter(key => isConsensusEnvKeyHonoredOn(key, network))
+}
+
+/**
+ * Which of the consensus-shaped keys this deploy supplies vs. leaves for the
+ * hub's own default. Pure: reads only the objects passed in.
+ *
+ * Scoped to the keys the deploy's network actually honors, so a mainnet deploy
+ * is never told it "did not supply" a regtest-only derivation override.
+ *
+ * @param {Object<string,string>} intended The env this deploy is about to write.
+ * @param {string} [network] Effective network; defaults to this deploy's own HUB_NETWORK.
  * @returns {{supplied: string[], defaulted: string[]}}
  */
-function describeConsensusEnvSupply(intended) {
+function describeConsensusEnvSupply(intended, network) {
     const src = intended || {}
+    const scope = consensusEnvKeysForNetwork(network === undefined ? resolveHubNetwork(src, null) : network)
     const supplied = []
     const defaulted = []
-    for (const key of CONSENSUS_ENV_KEYS) {
+    for (const key of scope) {
         const v = src[key]
         if (v === undefined || v === null || v === '') defaulted.push(key)
         else supplied.push(key)
@@ -118,6 +222,11 @@ function describeConsensusEnvSupply(intended) {
  * (including nothing at all). A key the live container never carried is not
  * drift: that hub was already running without it, so there is nothing to lose.
  *
+ * A key this hub's network does not honor is not drift either, whatever the
+ * live container carries. Unsetting a variable the hub already throws away is
+ * housekeeping, not a consensus change, and the guard must not stand in front
+ * of it (see NETWORK-GATED KEYS in the header).
+ *
  * @param {Object<string,string>} intended The env this deploy is about to write.
  * @param {Object<string,string>|null} liveEnv The running container's frozen env, or null.
  * @returns {Array<{key: string}>}
@@ -126,7 +235,7 @@ function findHubConsensusEnvDrift(intended, liveEnv) {
     const drift = []
     if (!liveEnv) return drift
     const next = intended || {}
-    for (const key of CONSENSUS_ENV_KEYS) {
+    for (const key of consensusEnvKeysForNetwork(resolveHubNetwork(next, liveEnv))) {
         const live = liveEnv[key]
         if (live === undefined || live === null || live === '') continue
         const nextValue = (next[key] === undefined || next[key] === null) ? '' : String(next[key])
@@ -163,9 +272,10 @@ function formatHubConsensusEnvDriftError(drift) {
  * install gets the same observability a recreate does.
  *
  * @param {Object<string,string>} intended The env this deploy is about to write.
+ * @param {string} [network] Effective network; defaults to this deploy's own HUB_NETWORK.
  */
-function logConsensusEnvSupplyState(intended) {
-    const { supplied, defaulted } = describeConsensusEnvSupply(intended)
+function logConsensusEnvSupplyState(intended, network) {
+    const { supplied, defaulted } = describeConsensusEnvSupply(intended, network)
     if (defaulted.length > 0) {
         console.warn(
             'WARNING: hub consensus-shaped settings NOT supplied by the invoking shell (the hub will use ' +
@@ -192,10 +302,16 @@ function logConsensusEnvSupplyState(intended) {
 async function assertNoHubConsensusEnvDrift(environmentVariables, deps = {}) {
     const env = deps.env || process.env
 
-    logConsensusEnvSupplyState(environmentVariables)
-
     const containerName = deps.containerName || getDockerContainerImageName(HUB_MODULE_NAME, null, null)
     const liveEnv = await readContainerEnv(containerName, deps)
+
+    // Read the container BEFORE logging so the supply report is scoped to the
+    // same network the drift comparison uses: a recreate whose shell dropped
+    // HUB_NETWORK still resolves regtest from the running container, and its
+    // regtest-only derivation overrides belong in the report. readContainerEnv
+    // returns null rather than throwing, so this still logs on a fresh install.
+    logConsensusEnvSupplyState(environmentVariables, resolveHubNetwork(environmentVariables, liveEnv))
+
     if (!liveEnv) return [] // no running hub container: fresh install, nothing to drift against
 
     const drift = findHubConsensusEnvDrift(environmentVariables, liveEnv)
@@ -226,8 +342,12 @@ function isHubConsensusEnvDriftError(err) {
 module.exports = {
     DRIFT_OVERRIDE_ENV,
     DRIFT_ERROR_CODE,
+    NETWORK_KEY,
     CONSENSUS_ENV_GROUPS,
     CONSENSUS_ENV_KEYS,
+    resolveHubNetwork,
+    isConsensusEnvKeyHonoredOn,
+    consensusEnvKeysForNetwork,
     describeConsensusEnvSupply,
     findHubConsensusEnvDrift,
     formatHubConsensusEnvDriftError,
