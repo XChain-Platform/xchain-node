@@ -25,12 +25,13 @@ const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
-const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
+const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
 const { assertRequiredMigrationsApplied } = require('../services/MigrationPreconditionService')
 const { statusChanged } = require('../services/StatusService')
+const { reindexAffectedModules, recordReindex } = require('../services/BootstrapRepublishLedger')
 
 // Resolve the operator's single ref slot into an install target and publish it
 // for the duration of the run, so every module clone and every bundled-library
@@ -749,6 +750,50 @@ async function restartStoppedModules(modules, coin, network) {
     return failed
 }
 
+/**
+ * Resolve the HOST directory that holds this chain's node datadir, asking the
+ * node container itself first.
+ *
+ * `dataDir` is env-derived (XCHAIN_NODE_DATA_DIR, else the in-repo data/), so a
+ * shell that never sourced the operator's profile resolves a path the stack has
+ * never used. The wipe was guarded on fs.existsSync of that path, so the guard
+ * went silently false and `reset all` reported success with the chain untouched.
+ * The container name is already resolved deterministically from the prefix and
+ * coin/network, so use that same key to read the datadir off the container's own
+ * bind mounts: whatever the daemon actually writes to is what a reset must wipe.
+ *
+ * Falls back to the env-derived path only when it really is on disk. Returns
+ * path=null when neither answer exists, and the caller fails closed on that
+ * rather than skipping the wipe.
+ *
+ * @returns {Promise<{path: (string|null), resolvedFrom: (string|null), configuredPath: string, containerName: string}>}
+ */
+async function resolveNodeDataPath(coin, network) {
+    const containerName  = getDockerContainerImageName(NODE_MODULE_NAME, coin, network)
+    const configuredPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
+
+    let mounts = []
+    try {
+        mounts = await getContainerBindMounts(containerName)
+    } catch { /* no container, or docker unreachable: fall through to the configured path */ }
+    const dataMount = (Array.isArray(mounts) ? mounts : [])
+        .find(m => m && m.destination === `/root/.${coin}` && m.source)
+    if (dataMount) {
+        return {
+            path: dataMount.source,
+            resolvedFrom: `the /root/.${coin} bind mount of container ${containerName}`,
+            configuredPath,
+            containerName
+        }
+    }
+
+    if (fs.existsSync(configuredPath)) {
+        return { path: configuredPath, resolvedFrom: 'the configured data dir', configuredPath, containerName }
+    }
+
+    return { path: null, resolvedFrom: null, configuredPath, containerName }
+}
+
 // The service names `reset` can act on. `reset` is the only destructive CLI path
 // and the only one that bypasses resolveArgs/filterCommandParameters, so it must
 // validate its own raw args: without this an unrecognised service (a typo, or a
@@ -819,10 +864,50 @@ async function resetModules(service, coin, network, force = false, withIndexer =
     const blocksHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}` : null
     const txindexHostPath = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
 
+    // Resolve the node datadir BEFORE anything is stopped or confirmed, and
+    // refuse the whole reset by name when it cannot be resolved. The
+    // old code re-derived the path from XCHAIN_NODE_DATA_DIR at the wipe site
+    // and skipped the wipe whenever that path was absent, so a reset run from a
+    // profile-less shell wiped the decoder/indexer DBs, left the chain in place,
+    // and exited 0; the missing "Clearing node data" line was the only tell.
+    // "Not installed" stays a legitimate skip, and is stated out loud.
+    let nodeDataPath = null
+    if (resetNode) {
+        let nodeInstalled    = null
+        let registryReadable = true
+        try {
+            nodeInstalled = await db.getModuleContainer(NODE_MODULE_NAME, coin, network)
+        } catch { registryReadable = false }
+
+        const resolved = await resolveNodeDataPath(coin, network)
+        if (resolved.path) {
+            nodeDataPath = resolved.path
+            if (path.resolve(nodeDataPath) !== path.resolve(resolved.configuredPath)) {
+                console.log(`Node datadir resolved from ${resolved.resolvedFrom}: ${nodeDataPath}`)
+                console.log(`  (XCHAIN_NODE_DATA_DIR in this shell would have pointed at ${resolved.configuredPath})`)
+            }
+        } else if (registryReadable && !nodeInstalled) {
+            console.log(`No ${NODE_MODULE_NAME} container is installed for ${coin} ${network}; there is no node data to clear.`)
+        } else {
+            const envState = process.env.XCHAIN_NODE_DATA_DIR && process.env.XCHAIN_NODE_DATA_DIR.trim() !== ''
+                ? `set to ${process.env.XCHAIN_NODE_DATA_DIR}`
+                : 'UNSET in this shell (non-interactive shells do not source the profile)'
+            console.log(`Aborted: cannot resolve the ${coin} ${network} node datadir. No data was touched.`)
+            console.log(`  Container ${resolved.containerName} reported no /root/.${coin} bind mount `
+                + '(it is absent, or docker is unreachable from here).')
+            console.log(`  The configured path ${resolved.configuredPath} does not exist either.`)
+            console.log(`  XCHAIN_NODE_DATA_DIR is ${envState}.`)
+            console.log('  Set XCHAIN_NODE_DATA_DIR to this stack\'s data root (or make docker reachable so the')
+            console.log('  node container can be inspected) and re-run. Refusing rather than resetting the')
+            console.log('  databases around a chain that would stay untouched.')
+            return false
+        }
+    }
+
     if (!force) {
         const targets = []
         if (resetNode) {
-            targets.push('node datadir')
+            if (nodeDataPath) targets.push(`node datadir (${nodeDataPath})`)
             if (blocksDir) {
                 targets.push(`relocated blocks dir (${blocksHostPath})`)
                 targets.push(`relocated txindex dir (${txindexHostPath})`)
@@ -905,8 +990,10 @@ async function resetModules(service, coin, network, force = false, withIndexer =
     }
 
     if (resetNode) {
-        const nodeDataPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
-        if (fs.existsSync(nodeDataPath)) {
+        // No existsSync guard here any more: the path was resolved (and the
+        // reset refused, or the "not installed" skip announced) up top, so an
+        // unresolvable datadir can no longer read as a silent no-op.
+        if (nodeDataPath) {
             console.log(`Clearing node data at ${nodeDataPath}...`)
             await execFileAsync('docker', ['run', '--rm', '-v', `${nodeDataPath}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
         }
@@ -955,6 +1042,40 @@ async function resetModules(service, coin, network, force = false, withIndexer =
             console.warn("  Run on the hub DB before the indexer catches up:")
             console.warn("    DELETE FROM price_ingest_watermarks WHERE source_chain = '"
                 + (CoinTickerSymbol[coin] || coin) + "';")
+        }
+    }
+
+    // A reset is a REINDEX: from here the wiped stores rebuild on a new lineage,
+    // and every bootstrap archive already published for these combos describes
+    // the old one. Without a marker nothing forces a republish, so the
+    // stale-lineage archive stays newest until the next scheduled run (up to a
+    // week for a tracker, which is opt-in besides) and no age check catches it,
+    // because the file is hours old and simply wrong. Mark the combos DUE so
+    // the publisher pulls them into its next plan regardless of schedule or
+    // tracker opt-in.
+    //
+    // Best-effort by design: the wipes already happened, so a bookkeeping
+    // failure must never abort the restart pass and leave the stack down. It is
+    // reported loudly instead, with the command to publish by hand.
+    const reindexedModules = reindexAffectedModules({
+        node: resetNode, utxoTracker: resetUtxoTracker, decoder: resetDecoder, indexer: resetIndexer
+    })
+    if (reindexedModules.length > 0) {
+        try {
+            const marked = recordReindex(reindexedModules, coin, network, { reason: `reset ${service}` })
+            if (marked.length > 0) {
+                console.log(`Marked ${marked.length} bootstrap combo(s) for republish after this reindex: ${marked.join(', ')}`)
+            } else {
+                throw new Error('the republish ledger could not be written')
+            }
+        } catch (err) {
+            console.warn('WARNING: could not record this reindex in the bootstrap republish ledger: '
+                + ((err && err.message) ? err.message : err))
+            console.warn('  The published archives for these combos are now from the PRE-reset lineage and')
+            console.warn('  nothing will force a republish. Republish by hand once the stack has caught up:')
+            for (const module of reindexedModules) {
+                console.warn(`    xchain-node bootstrap create ${module} ${coin} ${network}`)
+            }
         }
     }
 
@@ -1038,5 +1159,6 @@ module.exports = {
     execModules,
     shellModule,
     runE2ETest,
-    resetModules
+    resetModules,
+    resolveNodeDataPath
 }

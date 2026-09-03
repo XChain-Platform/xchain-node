@@ -50,6 +50,12 @@ function makeStubs() {
         logContainer: sinon.stub().resolves(true),
         startDockerMonitor: sinon.stub().resolves(true),
         waitContainer: sinon.stub().resolves(0),
+        // The node container answers where its datadir really lives.
+        // Default: a host path that is NOT the env-derived one, which is the
+        // ordinary case on a stack whose datadir was relocated.
+        getContainerBindMounts: sinon.stub().resolves([
+            { source: '/srv/xchain/data/node/bitcoin/mainnet', destination: '/root/.bitcoin' }
+        ]),
         saveContainerLogs: sinon.stub().resolves(true),
         buildDatabaseModule: sinon.stub().resolves(true),
         resetDatabases: sinon.stub().resolves(true),
@@ -72,6 +78,15 @@ function makeStubs() {
         bootstrapService: {
             resetBootstrapOutcomes:  sinon.stub(),
             reportBootstrapOutcomes: sinon.stub()
+        },
+        // The reindex -> forced-republish ledger. Stubbed so a reset in these
+        // suites never writes the developer's real ~/.xchain-node; the ledger's
+        // own rules live in BootstrapRepublishLedger.test.js.
+        republishLedger: {
+            reindexAffectedModules: sinon.stub().callsFake(
+                require('../../src/services/BootstrapRepublishLedger').reindexAffectedModules),
+            recordReindex: sinon.stub().callsFake((modules, coin, network) =>
+                (modules || []).map(m => `${m}:${coin}:${network}`))
         }
     }
 }
@@ -100,7 +115,8 @@ function loadOperations(stubs) {
             logContainer: stubs.logContainer,
             startDockerMonitor: stubs.startDockerMonitor,
             waitContainer: stubs.waitContainer,
-            saveContainerLogs: stubs.saveContainerLogs
+            saveContainerLogs: stubs.saveContainerLogs,
+            getContainerBindMounts: stubs.getContainerBindMounts
         },
         '../services/DatabaseService': {
             buildDatabaseModule: stubs.buildDatabaseModule,
@@ -134,6 +150,10 @@ function loadOperations(stubs) {
             statusChanged: stubs.statusChanged
         },
         '../services/BootstrapService': stubs.bootstrapService,
+        '../services/BootstrapRepublishLedger': {
+            reindexAffectedModules: stubs.republishLedger.reindexAffectedModules,
+            recordReindex:          stubs.republishLedger.recordReindex
+        },
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs,
         'util': {
@@ -1147,6 +1167,102 @@ describe('moduleOperations', function () {
             // No bounce candidates for node-only reset
         })
 
+        // The node datadir came from XCHAIN_NODE_DATA_DIR, and the wipe
+        // was guarded on fs.existsSync of that path. A reset run from a shell
+        // that never sourced the operator's profile therefore resolved a path
+        // the stack has never used, the guard went silently false, and the run
+        // wiped the decoder/indexer DBs, left the chain in place, and exited 0.
+        // The missing "Clearing node data" line was the only tell.
+        describe('node datadir resolution', function () {
+
+            // The host side of every `docker run --rm -v <host>:/data` this
+            // reset issued: what was actually wiped, in host paths.
+            function wipedHostPaths(execFileStub) {
+                return execFileStub.getCalls()
+                    .filter(c => c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1][0] === 'run')
+                    .map(c => c.args[1][c.args[1].indexOf('-v') + 1])
+            }
+
+            it('wipes the path the node container reports, not the env-derived one', async function () {
+                const stubs = makeStubs()
+                // Nothing at the env-derived path: the old guard's silent skip.
+                stubs.fs.existsSync.returns(false)
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
+                expect(result).to.be.true
+                expect(wipedHostPaths(stubs.execFile))
+                    .to.include('/srv/xchain/data/node/bitcoin/mainnet:/data')
+            })
+
+            it('falls back to the configured datadir when the container reports no mount', async function () {
+                const stubs = makeStubs()
+                stubs.getContainerBindMounts.resolves([])
+                stubs.fs.existsSync.returns(true)
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
+                expect(result).to.be.true
+                const wiped = wipedHostPaths(stubs.execFile)
+                expect(wiped.some(p => p.endsWith('/node/bitcoin/mainnet:/data'))).to.be.true
+            })
+
+            it('refuses the whole reset when the datadir resolves to nothing', async function () {
+                const stubs = makeStubs()
+                stubs.getContainerBindMounts.resolves([])
+                stubs.fs.existsSync.returns(false)
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const result = await ops.resetModules('all', 'bitcoin', 'mainnet', true)
+                expect(result).to.be.false
+                // Fails closed BEFORE anything is stopped or wiped: the whole
+                // point is that the DBs must not go without the chain.
+                expect(stubs.stopContainer.called).to.be.false
+                expect(stubs.resetDatabases.called).to.be.false
+                expect(wipedHostPaths(stubs.execFile)).to.be.empty
+            })
+
+            it('names the container, the configured path and the env var in the refusal', async function () {
+                const stubs = makeStubs()
+                stubs.getContainerBindMounts.resolves([])
+                stubs.fs.existsSync.returns(false)
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const lines = []
+                const logStub = sinon.stub(console, 'log').callsFake((...args) => lines.push(args.join(' ')))
+                try {
+                    await ops.resetModules('all', 'bitcoin', 'mainnet', true)
+                } finally {
+                    logStub.restore()
+                }
+                const output = lines.join('\n')
+                expect(output).to.include('Aborted: cannot resolve the bitcoin mainnet node datadir')
+                expect(output).to.include('No data was touched.')
+                expect(output).to.include('bitcoin-mainnet-node')
+                expect(output).to.include('XCHAIN_NODE_DATA_DIR')
+            })
+
+            it('skips the node wipe out loud, and completes, when no node is installed', async function () {
+                const stubs = makeStubs()
+                stubs.getContainerBindMounts.resolves([])
+                stubs.fs.existsSync.returns(false)
+                stubs.db.getModuleContainer.withArgs('node', 'bitcoin', 'mainnet').resolves(null)
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const lines = []
+                const logStub = sinon.stub(console, 'log').callsFake((...args) => lines.push(args.join(' ')))
+                let result
+                try {
+                    result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
+                } finally {
+                    logStub.restore()
+                }
+                expect(result).to.be.true
+                expect(lines.join('\n')).to.include('no node data to clear')
+                expect(wipedHostPaths(stubs.execFile)).to.be.empty
+            })
+        })
+
         it('stops and resets utxo-tracker when service=xchain-utxo-tracker', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
@@ -1154,6 +1270,81 @@ describe('moduleOperations', function () {
             const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
             expect(result).to.be.true
             expect(stubs.stopContainer.called).to.be.true
+        })
+
+        // A reset rebuilds a store on a NEW lineage, so every bootstrap
+        // already published for that combo describes the old one and restoring
+        // it puts a fresh install on a chain this box no longer agrees with.
+        // Nothing forced a republish, and no age check caught it because the
+        // wrong archive was hours old. The reset itself has to arm the marker.
+        describe('marks the reindexed combos for a forced bootstrap republish', function () {
+
+            it('marks the tracker combo when the tracker volume is wiped', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                expect(await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'testnet', true)).to.be.true
+
+                expect(stubs.republishLedger.recordReindex.calledOnce).to.be.true
+                const [modules, coin, network, opts] = stubs.republishLedger.recordReindex.firstCall.args
+                expect(modules).to.deep.equal(['xchain-utxo-tracker'])
+                expect(coin).to.equal('bitcoin')
+                expect(network).to.equal('testnet')
+                expect(opts.reason).to.include('reset xchain-utxo-tracker')
+            })
+
+            // A re-genesis is run as `reset all`, and that is where all three
+            // derived archives really do go stale.
+            it('marks all three on a reset all', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                const clock = sinon.useFakeTimers()
+                const promise = ops.resetModules('all', 'bitcoin', 'testnet', true)
+                await clock.tickAsync(6000)   // past the decoder/indexer bounce delay
+                clock.restore()
+                expect(await promise).to.be.true
+
+                expect(stubs.republishLedger.recordReindex.calledOnce).to.be.true
+                expect(stubs.republishLedger.recordReindex.firstCall.args[0])
+                    .to.deep.equal(['xchain-utxo-tracker', 'xchain-decoder', 'xchain-indexer'])
+            })
+
+            // A node-only reset resyncs the same chain and leaves every derived
+            // store untouched, so warning about three combos there would be
+            // noise on an ordinary resync.
+            it('marks nothing for a node-only reset', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const ops = loadOperations(stubs)
+                expect(await ops.resetModules('node', 'bitcoin', 'testnet', true)).to.be.true
+                expect(stubs.republishLedger.recordReindex.called).to.be.false
+            })
+
+            // Nothing was wiped on an aborted reset, so the published archives
+            // are still the right lineage: arming here would force a pointless
+            // tracker republish (which costs downtime) on every refused reset.
+            it('marks nothing when the reset aborts before any wipe', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                // The decoder/indexer pair is only coherent when both move
+                // together, so a decoder-only reset with the indexer installed
+                // is refused before anything is touched.
+                const ops = loadOperations(stubs)
+                expect(await ops.resetModules('xchain-decoder', 'bitcoin', 'testnet', true)).to.be.false
+                expect(stubs.republishLedger.recordReindex.called).to.be.false
+            })
+
+            // The wipes already happened by the time this runs, so a ledger
+            // failure must never abort the restart pass and leave the stack down.
+            it('does not abort the reset when the ledger cannot be written', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                stubs.republishLedger.recordReindex.throws(new Error('read-only home'))
+                const ops = loadOperations(stubs)
+                expect(await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'testnet', true)).to.be.true
+                expect(stubs.startContainer.called).to.be.true
+            })
         })
 
         it('resets decoder: stops, resets DB, and bounces', async function () {
