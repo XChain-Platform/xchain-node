@@ -612,26 +612,49 @@ async function getDefaultConfig(module, coin, network) {
             // win. HUB_DB_PASS is reconciled after the per-install DB password is resolved
             // (see below); HUB_DB_HOST/PORT are already set above.
             //
-            // WHY regtest IS EXCLUDED, corrected 2026-07-26. The old note here said "regtest
-            // has no hub to sync from", which stopped being true at 336a7d5 (HUB_API_URL is
-            // now composed for regtest too, and a regtest indexer does reach the hub: enabling
-            // this on litecoin-regtest bootstrapped 3 real rows into oracle_prices). The
-            // exclusion is still right, for a different and harder reason: turning the mirror
-            // on ARMS the block-loop price barriers, and `_priceTimeSyncSatisfied` only opens
-            // on `streamWatermark >= blockTime + 600s` (the frozen price grace). Production
-            // block timestamps LAG wall clock, so the watermark runs ahead and the escape
-            // fires; regtest blocks are stamped at ~now, so it can NEVER be 600s ahead and
-            // every freshly mined block defers forever. Observed live: block 1479 deferred on
-            // a 60s timeout, repeatedly, until this was reverted.
+            // WHY regtest WAS EXCLUDED UNTIL NOW, corrected 2026-07-26 then armed 2026-09-03
+            // (the regtest mirror wedge). The old note here said "regtest has no hub to sync from", which
+            // stopped being true at 336a7d5 (HUB_API_URL is now composed for regtest too, and
+            // a regtest indexer does reach the hub: enabling this on litecoin-regtest
+            // bootstrapped 3 real rows into oracle_prices). The exclusion stood for a
+            // different and harder reason: turning the mirror on ARMS the block-loop
+            // watermark barriers (price, oracle, and now the ATTEST response mirror), and
+            // each one only opens once the mirror's stream watermark clears the row's time
+            // plus that barrier's grace. Production block timestamps LAG wall clock, so the
+            // watermark runs ahead and the escape fires; regtest blocks are stamped at ~now,
+            // so a real-network grace can NEVER be satisfied and every freshly mined block
+            // defers forever. Observed live: block 1479 deferred on a 60s timeout, repeatedly,
+            // until this was reverted.
             //
-            // To enable it on regtest deliberately (the mirror-leg test venue), the
-            // operator must ALSO set HUB_SYNC_PRICE_GRACE_S=0 and HUB_SYNC_ORACLE_GRACE_S=0,
-            // which hub_db_sync honours on regtest only, precisely for this. Do not "fix" the
-            // wedge by widening those off regtest: a per-node grace forks settlement.
-            if (network !== "regtest") {
-                defaultValues.HUB_DB_NAME         = defaultValues.INDEXER_DB_NAME
-                defaultValues.HUB_DB_USER         = defaultValues.INDEXER_DB_USER
-                defaultValues.HUB_DB_SYNC_ENABLED = "true"
+            // Armed unconditionally now (mainnet/testnet keep the exact same assignment they
+            // always had) because leaving the mirror off on regtest silently defeats every
+            // reader that expects hub state to reach the indexer, not just PRICE but
+            // the ATTEST response mirror this arms for too. Arming the pointer alone would
+            // reproduce the price wedge above, so every watermark grace this mirror gates is
+            // defaulted to 0 on regtest in the SAME step below: a config-file value or a host
+            // env override for any one of them still wins (resolveWatermarkGrace in
+            // hub_db_sync.js honours an override on regtest only, so the default below is
+            // exactly the value that seam already expects). Do not widen these off regtest:
+            // a per-node grace forks settlement.
+            defaultValues.HUB_DB_NAME         = defaultValues.INDEXER_DB_NAME
+            defaultValues.HUB_DB_USER         = defaultValues.INDEXER_DB_USER
+            defaultValues.HUB_DB_SYNC_ENABLED = "true"
+
+            if (network === Network.REGTEST) {
+                // The three barrier graces the armed regtest mirror must clear to avoid the
+                // wedge above. HUB_SYNC_ATTEST_RESPONSE_GRACE_S is the passthrough this row
+                // adds (xchain-indexer/src/hub_db_sync.js:615 reads it via resolveWatermarkGrace);
+                // HUB_SYNC_PRICE_GRACE_S / HUB_SYNC_ORACLE_GRACE_S are the pair the regtest mirror wedge already
+                // requires be set to 0 alongside it. A host env value always wins over the
+                // regtest default so an e2e drill can still exercise a nonzero grace.
+                const hubSyncRegtestGraceVars = [
+                    "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S"
+                ]
+                for (const varName of hubSyncRegtestGraceVars) {
+                    defaultValues[varName] = (process.env[varName] !== undefined && process.env[varName] !== "")
+                        ? process.env[varName]
+                        : "0"
+                }
             }
         }
     } else {
@@ -913,6 +936,23 @@ async function getDefaultConfig(module, coin, network) {
             // landing latency differs from the fleet's tunes it here rather than
             // being clamped to a window that does not suit it.
             "ORACLE_BATCH_LANDING_RESERVE_MS",
+            // ATTEST response mirror regtest-only overrides (the attest response mirror design). Both are
+            // honoured by the receiving hub module ONLY when HUB_NETWORK=regtest (a warn-
+            // and-ignore off regtest, the same posture resolveWatermarkGrace takes on the
+            // indexer side), so passing them through here unconditionally mirrors the
+            // ORACLE_BATCH_* family above: they cannot arm anything off regtest by any path
+            // in this file, the real gate lives at the point of consumption.
+            //
+            // ATTEST_RESPONSE_FORWARD_S_OVERRIDE lets a regtest venue's leader pick a short
+            // effective_time margin instead of the real 120s ATTEST_RESPONSE_FORWARD_S, so a
+            // response can bind within the same short block cadence a regtest drill runs at
+            // (xchain-hub/src/lib/attest_response_timing.js).
+            "ATTEST_RESPONSE_FORWARD_S_OVERRIDE",
+            // ATTEST_BATCH_WINDOW_S_OVERRIDE is the same seam for the batch cadence:
+            // AttestationBatchPublisher (row 20, not yet built) will read it on the same
+            // regtest-only pattern as the forward override above, so the passthrough is
+            // wired ahead of that publisher rather than after it.
+            "ATTEST_BATCH_WINDOW_S_OVERRIDE",
             // Per-IP request/min cap on the hub's express API (default 100). Too low
             // for legitimate multi-indexer re-bootstrap: every indexer on a box shares
             // one source IP, so a fleet bootstrapping HubDbSync tables (oracle_prices,
@@ -1176,16 +1216,21 @@ async function getDefaultConfig(module, coin, network) {
         if (Object.keys(freshDbCreds).length) upsertSidecarValues(localFilePath, freshDbCreds)
 
         // The indexer's hub-DB connection reuses its OWN DB account (HUB_DB_NAME/USER are set
-        // to the indexer's in the indexer block above, mainnet/testnet), so its hub-DB password
-        // must be the INDEXER_DB_PASS the container will actually get, not the shared hub
-        // password. Set it here, before the shared HUB_DB_PASS fallback below, so that fallback
-        // sees the key already present and skips. An operator override (already in
-        // defaultConfig) wins. On the non-rotatable path (dbPasswordCanRotate() false, the
-        // 2026-06-26 outage fallback) INDEXER_DB_PASS is still absent here and only lands via
-        // the static-defaults merge below; mirror that same static default instead of copying
+        // to the indexer's in the indexer block above, on every network including regtest
+        // since the regtest mirror is armed too), so its hub-DB password must be the
+        // INDEXER_DB_PASS the container will actually get, not the shared hub password. Set
+        // it here, before the shared HUB_DB_PASS fallback below, so that fallback sees the
+        // key already present and skips. An operator override (already in defaultConfig)
+        // wins. On the non-rotatable path (dbPasswordCanRotate() false, the 2026-06-26
+        // outage fallback) INDEXER_DB_PASS is still absent here and only lands via the
+        // static-defaults merge below; mirror that same static default instead of copying
         // `undefined`, which would both mismatch the account AND occupy the key so the
-        // fallback/merge never repaired it (HubDbSync ER_ACCESS_DENIED lockout, #2246).
-        if (module === XChainService.XCHAIN_INDEXER && network !== "regtest" && !("HUB_DB_PASS" in defaultConfig)) {
+        // fallback/merge never repaired it (HubDbSync ER_ACCESS_DENIED lockout, #2246). Not
+        // network-gated: leaving regtest out here while HUB_DB_NAME/USER above point at the
+        // indexer's own account would hand the armed mirror the WRONG password (the shared
+        // hub password against the indexer's own DB user), so the mirror this row arms would
+        // never actually connect.
+        if (module === XChainService.XCHAIN_INDEXER && !("HUB_DB_PASS" in defaultConfig)) {
             defaultConfig["HUB_DB_PASS"] = defaultConfig["INDEXER_DB_PASS"] !== undefined
                 ? defaultConfig["INDEXER_DB_PASS"]
                 : defaultValues["INDEXER_DB_PASS"]

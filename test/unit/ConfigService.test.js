@@ -874,6 +874,67 @@ describe('ConfigService', function () {
                 })
             })
 
+            // Regtest mirror arming: the regtest indexer's hub-mirror connection, unset
+            // before this row, and the three watermark graces that must be zeroed alongside
+            // it or an armed regtest venue wedges every freshly mined block (the price-grace
+            // failure the regtest mirror wedge records).
+            describe('regtest mirror arming', function () {
+                const GRACE_VARS = [
+                    'HUB_SYNC_PRICE_GRACE_S', 'HUB_SYNC_ORACLE_GRACE_S', 'HUB_SYNC_ATTEST_RESPONSE_GRACE_S'
+                ]
+                let saved
+                beforeEach(function () {
+                    saved = {}
+                    for (const v of GRACE_VARS) { saved[v] = process.env[v]; delete process.env[v] }
+                })
+                afterEach(function () {
+                    for (const v of GRACE_VARS) {
+                        if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v]
+                    }
+                })
+
+                it('arms the regtest indexer hub-mirror pointer at its own DB account', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['HUB_DB_NAME']).to.equal(config['INDEXER_DB_NAME'])
+                    expect(config['HUB_DB_USER']).to.equal(config['INDEXER_DB_USER'])
+                    expect(config['HUB_DB_SYNC_ENABLED']).to.equal('true')
+                    // The password must follow the same account, or the armed mirror
+                    // authenticates as the indexer's own DB user with the wrong password.
+                    expect(config['HUB_DB_PASS']).to.equal(config['INDEXER_DB_PASS'])
+                })
+
+                it('defaults all three watermark graces to 0 on regtest when the host sets none of them', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    for (const v of GRACE_VARS) expect(config[v], v).to.equal('0')
+                })
+
+                it('lets a host-set grace value win over the regtest default', async function () {
+                    process.env.HUB_SYNC_ATTEST_RESPONSE_GRACE_S = '30'
+                    process.env.HUB_SYNC_PRICE_GRACE_S = '15'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['HUB_SYNC_ATTEST_RESPONSE_GRACE_S']).to.equal('30')
+                    expect(config['HUB_SYNC_PRICE_GRACE_S']).to.equal('15')
+                    // The var left unset by the host still gets the regtest default.
+                    expect(config['HUB_SYNC_ORACLE_GRACE_S']).to.equal('0')
+                })
+
+                it('leaves mainnet/testnet mirror arming exactly as before (same account, no grace defaults)', async function () {
+                    process.env.HUB_SYNC_ATTEST_RESPONSE_GRACE_S = '30' // must be ignored off regtest
+                    const cs = makeServiceWithConfig('')
+                    for (const network of ['mainnet', 'testnet']) {
+                        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', network)
+                        expect(config['HUB_DB_NAME'], network).to.equal(config['INDEXER_DB_NAME'])
+                        expect(config['HUB_DB_USER'], network).to.equal(config['INDEXER_DB_USER'])
+                        expect(config['HUB_DB_SYNC_ENABLED'], network).to.equal('true')
+                        expect(config['HUB_DB_PASS'], network).to.equal(config['INDEXER_DB_PASS'])
+                        for (const v of GRACE_VARS) expect(config, network + ' ' + v).to.not.have.property(v)
+                    }
+                })
+            })
+
             it('returns correct INDEXER_COIN ticker', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
@@ -1265,6 +1326,50 @@ describe('ConfigService', function () {
                     const cs = makeServiceWithConfig('')
                     const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
                     for (const k of ORACLE_BATCH_VARS) expect(config[k]).to.be.undefined
+                })
+            })
+
+            // The hub-side regtest-only override seams. The gate that keeps
+            // them inert off regtest lives at the point of consumption (attest_response_timing.js,
+            // and the not-yet-built AttestationBatchPublisher on the same pattern), so this
+            // suite only pins that the passthrough itself reaches the container config.
+            describe('ATTEST response mirror regtest-only override passthrough', function () {
+                const ATTEST_OVERRIDE_VARS = [
+                    'ATTEST_RESPONSE_FORWARD_S_OVERRIDE', 'ATTEST_BATCH_WINDOW_S_OVERRIDE'
+                ]
+                let saved
+                beforeEach(function () {
+                    saved = {}
+                    for (const k of ATTEST_OVERRIDE_VARS) { saved[k] = process.env[k]; delete process.env[k] }
+                })
+                afterEach(function () {
+                    for (const [k, v] of Object.entries(saved)) {
+                        if (v === undefined) delete process.env[k]
+                        else process.env[k] = v
+                    }
+                })
+
+                it('injects both ATTEST override knobs from host env into the hub config', async function () {
+                    process.env.ATTEST_RESPONSE_FORWARD_S_OVERRIDE = '2'
+                    process.env.ATTEST_BATCH_WINDOW_S_OVERRIDE = '30'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['ATTEST_RESPONSE_FORWARD_S_OVERRIDE']).to.equal('2')
+                    expect(config['ATTEST_BATCH_WINDOW_S_OVERRIDE']).to.equal('30')
+                })
+
+                it('injects only the one override set, leaving the other unset', async function () {
+                    process.env.ATTEST_RESPONSE_FORWARD_S_OVERRIDE = '2'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['ATTEST_RESPONSE_FORWARD_S_OVERRIDE']).to.equal('2')
+                    expect(config).to.not.have.property('ATTEST_BATCH_WINDOW_S_OVERRIDE')
+                })
+
+                it('leaves both ATTEST override knobs unset when host env is absent', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    for (const k of ATTEST_OVERRIDE_VARS) expect(config[k]).to.be.undefined
                 })
             })
         })
