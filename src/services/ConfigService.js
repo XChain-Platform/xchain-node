@@ -829,7 +829,15 @@ async function getDefaultConfig(module, coin, network) {
             // collectively blows 100/min and gets 429'd, so the heartbeat gate then stays
             // closed and the chain stalls. Raise for prod fleets. Passed through so the
             // host env survives a hub container regenerate.
-            "HUB_RATE_LIMIT_RPM",
+            //
+            // The hub exempts loopback and private-range callers from
+            // that cap by default, which covers the case above: the indexers reach the hub
+            // container over the bridge network this compose file creates, so a managed
+            // node no longer needs the limit raised to rebuild price history from the chain.
+            // HUB_RATE_LIMIT_EXEMPT_LOCAL=false turns the exemption off and restores the
+            // old behavior for an operator who wants the cap enforced on every caller;
+            // passed through for the same container-regenerate reason.
+            "HUB_RATE_LIMIT_RPM", "HUB_RATE_LIMIT_EXEMPT_LOCAL",
             // XCHAIN derived-price source. XCHAIN is listed on no exchange, so
             // a validator computes XCHAIN/USD from realized fills in its OWN BTC indexer
             // database instead of fetching it. Every native-coin fee decision on LTC and
