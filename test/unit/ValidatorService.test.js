@@ -301,11 +301,14 @@ describe('ValidatorService', function () {
             expect(result.ORACLE_EPOCH_START).to.equal(1717200000000)
         })
 
-        it('sets ORACLE_EPOCH_START to null when not provided', async function () {
+        // With no opts the port defaults to 10001, which names the mainnet
+        // federation, so the epoch defaults to that federation's ruled value
+        // rather than to null. Null is reserved for a port naming no federation.
+        it('falls back to the mainnet federation epoch when none is supplied', async function () {
             const fs = makeFs()
             const vs = loadValidatorService(fs)
             const result = await vs.initValidator()
-            expect(result.ORACLE_EPOCH_START).to.be.null
+            expect(result.ORACLE_EPOCH_START).to.equal(1788220800000)
         })
 
         it('uses partial capabilities from opts.capabilities', async function () {
@@ -856,11 +859,33 @@ describe('ValidatorService', function () {
             expect(result.ORACLE_EPOCH_START).to.equal(1717200000000)
         })
 
-        it('leaves ORACLE_EPOCH_START null on mainnet, where no federation value is known yet', async function () {
+        it('defaults ORACLE_EPOCH_START to the mainnet federation value', async function () {
             const vs = loadValidatorService(makeFs())
             const result = await vs.initValidator({ p2pPort: '10001' })
             expect(result.network).to.equal('mainnet')
+            expect(result.ORACLE_EPOCH_START).to.equal(1788220800000)
+        })
+
+        it('leaves ORACLE_EPOCH_START null when the network is unknown', async function () {
+            const vs = loadValidatorService(makeFs())
+            const result = await vs.initValidator({ p2pPort: '10009' })
+            expect(result.network).to.be.null
             expect(result.ORACLE_EPOCH_START).to.be.null
+        })
+
+        // Both federation defaults must sit in the PAST. A future epoch numbers
+        // every round negative and OracleRound drops peer submissions for
+        // round < 0, which is the failure testnet paid a federation-wide flag
+        // day for on 2026-08-28; mainnet is ruled past up front to avoid it.
+        // They must also differ, so a round number never lines up across the
+        // two federations.
+        it('both federation default epochs are in the past, and differ', async function () {
+            const vs = loadValidatorService(makeFs())
+            const mainnet = await vs.initValidator({ p2pPort: '10001' })
+            const testnet = await vs.initValidator({ p2pPort: '10002', force: true })
+            expect(mainnet.ORACLE_EPOCH_START).to.be.a('number').and.to.be.lessThan(Date.now())
+            expect(testnet.ORACLE_EPOCH_START).to.be.a('number').and.to.be.lessThan(Date.now())
+            expect(mainnet.ORACLE_EPOCH_START).to.not.equal(testnet.ORACLE_EPOCH_START)
         })
 
         it('skips wallets on a non-standard port and says so, without failing init', async function () {

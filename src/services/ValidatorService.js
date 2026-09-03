@@ -123,8 +123,12 @@ const P2P_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 }
 // Oracle round-numbering anchor per federation. A hub with a different value
 // computes different round numbers and its submissions never line up, so the
 // known federations' values are defaults here; --oracle-epoch-start overrides.
+// Both values are deliberately in the PAST: an epoch in the future numbers
+// every round negative and OracleRound drops peer submissions for round < 0,
+// which is what cost testnet a federation-wide flag day on 2026-08-28.
 // testnet: read from the live validator01-05 containers on 2026-08-29.
-const ORACLE_EPOCH_START_BY_NETWORK = { testnet: 1787875200000 }
+// mainnet: ruled by the operator board 2026-09-01 (2026-09-01T00:00:00Z).
+const ORACLE_EPOCH_START_BY_NETWORK = { mainnet: 1788220800000, testnet: 1787875200000 }
 
 // SDK network names and public encoder coin prefixes per hub network.
 const COIN_NETWORKS = {
