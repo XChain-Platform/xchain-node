@@ -34,6 +34,8 @@ const { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, execute
 const { assertSafeArchiveMemberNames, redactSecrets } = require('../utils/helpers')
 const { dockerMariadbArgs, mariadbEnv }               = require('../utils/dockerMariadb')
 const { assertBootstrapSourceHealthy }                = require('./BootstrapHealthGate')
+const { recordBootstrapPublished }                    = require('./BootstrapRepublishLedger')
+const { declareEncoderMaintenance, clearEncoderMaintenance } = require('./EncoderMaintenanceWindow')
 
 // Bootstrap signing (supply-chain integrity):
 //
@@ -435,12 +437,167 @@ async function makeBootstrap(coin, network, module) {
     // first so an unknown module still fails on its own message.
     await assertBootstrapSourceHealthy(coin, network, module)
 
-    switch (module) {
-        case XChainService.XCHAIN_UTXO_TRACKER:
-            return makeBootstrapUtxoTracker(coin, network)
-        default:
-            return makeBootstrapMariaDb(coin, network, module)
+    const result = module === XChainService.XCHAIN_UTXO_TRACKER
+        ? await makeBootstrapUtxoTracker(coin, network)
+        : await makeBootstrapMariaDb(coin, network, module)
+
+    // A fresh archive is a fresh LINEAGE, so it clears any republish this
+    // combo was owed after a reset (see BootstrapRepublishLedger). Recorded on
+    // CREATE rather than after the upload: the create is what re-derives the
+    // archive from the post-reindex store, and an upload that then fails is
+    // already reported as PUBLISH-FAIL and retried by the next scheduled run.
+    // Never fatal - the archive exists either way.
+    try {
+        recordBootstrapPublished(module, coin, network)
+    } catch (err) {
+        console.log(`Warning: could not clear the bootstrap republish marker for ${module} ${coin}/${network} (${err.message}).`)
     }
+
+    return result
+}
+
+// Where the pre-compress hardlink snapshot of the tracker volume lives.
+//
+// It has to sit INSIDE the volume, because a hardlink cannot cross a
+// filesystem, and the volume is the only thing mounted into the helper
+// container. It is a sibling of the LevelDB store (LevelUpDb opens
+// /data/<dbName>, never /data itself), so the running tracker never looks at
+// it. Fixed literal with no shell metacharacters: it is interpolated into the
+// snapshot shell script below.
+const TRACKER_SNAPSHOT_DIR = '.xchain-bootstrap-snapshot'
+
+// Freeze the tracker volume without keeping the tracker down for the compress.
+//
+// Taken while the container is STOPPED, so the store is quiescent and the
+// result is a byte-exact point-in-time copy. Two passes, because the two kinds
+// of file in a classic-level store need different treatment:
+//
+//   1. Hardlink everything. Compaction afterwards unlinks the SSTs it merges
+//      away, but the snapshot's links keep those inodes alive, so the compress
+//      reads the store as it stood at the stop even though the tracker has been
+//      serving traffic for hours by then. That is the whole trick, and it is
+//      only sound because an .ldb/.sst file is written once and never edited.
+//
+//   2. Replace the link with a real copy for every OTHER regular file. LevelDB
+//      appends to its live MANIFEST and write-ahead log in place, and a
+//      hardlink shares the inode, so those would follow the live store forward
+//      and the archive would carry a manifest describing SSTs it does not hold.
+//      In practice leveldb opens a fresh MANIFEST/log per open (reuse_logs is
+//      off) and rewrites CURRENT via rename, so the links would usually survive
+//      untouched; "usually" is not a property to hand a published mainnet
+//      bootstrap. These files are kilobytes-to-megabytes next to a 162 GB
+//      store, so copying them costs nothing measurable.
+//
+// Cost while the snapshot is held: the volume keeps every SST the tracker
+// compacts away during the run, so it needs headroom for that churn rather than
+// for a second full copy. The snapshot is dropped in the caller's finally.
+//
+// Rejects when the volume's filesystem will not take the hardlinks; the caller
+// falls back to the old behavior (compress with the container stopped).
+async function snapshotTrackerVolume(volumeName) {
+    const snapPath = `/data/${TRACKER_SNAPSHOT_DIR}`
+    const script = [
+        'set -e',
+        `rm -rf ${snapPath}`,
+        `mkdir -p ${snapPath}`,
+        // -mindepth 1 -maxdepth 1 walks only the volume's top level, and the
+        // ! -name guard keeps the snapshot from copying itself.
+        `find /data -mindepth 1 -maxdepth 1 ! -name ${TRACKER_SNAPSHOT_DIR} -exec cp -al {} ${snapPath}/ ';'`,
+        // Pass 2. The .xcsnap guard keeps a temp file from being re-processed
+        // if the directory walk sees one mid-flight.
+        `find ${snapPath} -type f ! -name '*.ldb' ! -name '*.sst' ! -name '*.xcsnap'` +
+            ` -exec sh -c 'cp -a "$1" "$1.xcsnap" && mv -f "$1.xcsnap" "$1"' _ {} ';'`
+    ].join('\n')
+
+    await execFileAsync('docker', [
+        'run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', script
+    ])
+    return true
+}
+
+// Headroom the volume should have spare before we pin its compaction churn for
+// the length of a compress, as a fraction of the store size. A guess by
+// construction (nobody can predict a run's write amplification), so it only
+// gates a warning.
+const TRACKER_SNAPSHOT_HEADROOM_RATIO = 0.15
+
+async function warnOnThinTrackerVolume(volumeName, totalBytes) {
+    if (!totalBytes || totalBytes <= 0) return
+    let availableBytes = 0
+    try {
+        const { stdout } = await execFileAsync('docker', [
+            'run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'df', '-Pk', '/data'
+        ])
+        const cols = stdout.trim().split('\n').pop().trim().split(/\s+/)
+        availableBytes = (parseInt(cols[3], 10) || 0) * 1024
+    } catch {
+        return   // unknown free space: nothing honest to say
+    }
+    const wanted = Math.round(totalBytes * TRACKER_SNAPSHOT_HEADROOM_RATIO)
+    if (availableBytes >= wanted) return
+    const gb = bytes => (bytes / 1024 / 1024 / 1024).toFixed(1)
+    console.log(
+        `WARNING: ${volumeName} has ${gb(availableBytes)} GB free against a ${gb(totalBytes)} GB store.\n` +
+        `The snapshot holds every SST the tracker compacts away while the archive is built, so a long\n` +
+        `run on this volume can fill it and halt the tracker. Free space or expect a stopped tracker.`
+    )
+}
+
+async function removeTrackerSnapshot(volumeName) {
+    await execFileAsync('docker', [
+        'run', '--rm', '-v', `${volumeName}:/data`, 'alpine',
+        'rm', '-rf', `/data/${TRACKER_SNAPSHOT_DIR}`
+    ])
+}
+
+// Bundle already-compressed members into the published .tar.gz WITHOUT
+// recompressing them.
+//
+// The outer archive exists only so the payload travels with its own checksum;
+// its members (data.tar.gz / dump.sql.gz) are gzip streams already, which
+// deflate cannot shrink. The old `tar czf` therefore pushed the whole dataset
+// through gzip a second time for no size win: on 2026-08-01 that was 162.5 GB
+// of incompressible bytes re-deflated. Level 0 emits stored deflate blocks, so
+// the result is still a genuine gzip file that every existing consumer reads
+// unchanged (`tar tzf` / `tar xzf`, the tracker's own single-layer restore),
+// only without the CPU.
+function writeStoredGzipTar(finalOutput, workDir, members) {
+    return new Promise((resolve, reject) => {
+        const tarProc     = spawn('tar', ['cf', '-', '-C', workDir, ...members])
+        const storeStream = zlib.createGzip({ level: 0 })
+        const writeStream = fs.createWriteStream(finalOutput)
+
+        let tarExit  = null
+        let written  = false
+        let settled  = false
+
+        // The half-written file sits in the directory the publish rsyncs from,
+        // so it has to go: a truncated archive that survives here is one the
+        // next node restores from.
+        const discardPartial = () => {
+            try { writeStream.destroy() } catch { /* already torn down */ }
+            try { fs.rmSync(finalOutput, { force: true }) } catch { /* nothing to remove */ }
+        }
+
+        // Both conditions are required: tar can die mid-stream, which ends the
+        // pipe and fires 'finish' on a TRUNCATED archive. Resolving on 'finish'
+        // alone would publish that truncated file as a good bootstrap.
+        const settle = () => {
+            if (settled || tarExit === null || !written) return
+            settled = true
+            if (tarExit !== 0) { discardPartial(); reject(new Error(`tar exited with code ${tarExit}`)) }
+            else resolve()
+        }
+        const fail = err => { if (!settled) { settled = true; discardPartial(); reject(err) } }
+
+        tarProc.stdout.pipe(storeStream).pipe(writeStream)
+        tarProc.stderr.on('data', () => {})
+        tarProc.on('error', fail)
+        storeStream.on('error', fail)
+        writeStream.on('error', fail)
+        writeStream.on('finish', () => { written = true; settle() })
+        tarProc.on('close', code => { tarExit = code; settle() })
+    })
 }
 
 async function makeBootstrapUtxoTracker(coin, network) {
@@ -456,6 +613,13 @@ async function makeBootstrapUtxoTracker(coin, network) {
     const checksumFile  = path.join(workDir, 'data.sha256')
     const finalOutput   = path.join(outputDir, archiveName)
 
+    // Drop a snapshot left behind by a crashed run BEFORE measuring, so the
+    // estimate describes the real dataset and no stale directory can end up
+    // inside the archive on the stopped-container fallback path. Deliberately
+    // not swallowed: failing here costs no downtime, whereas publishing a
+    // snapshot-polluted archive is silent corruption.
+    await removeTrackerSnapshot(volumeName)
+
     let totalBytes = 0
     try {
         const { stdout } = await execFileAsync(
@@ -470,25 +634,86 @@ async function makeBootstrapUtxoTracker(coin, network) {
     // below, so a capacity failure never costs the tracker any downtime.
     assertBootstrapCapacity(workDir, outputDir, totalBytes, `${coin}/${network} utxo-tracker`)
 
+    // Warn, don't refuse: the snapshot below pins every SST the tracker compacts
+    // away while the compress runs, so the VOLUME (not just the staging and
+    // output filesystems checked above) needs churn headroom for the length of
+    // the run. Refusing here would be worse than the old behavior, but filling
+    // the volume halts the tracker, so the operator should hear about it.
+    await warnOnThinTrackerVolume(volumeName, totalBytes)
+
     const containerId = await db.getModuleContainer(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     if (!containerId) throw new Error(`utxo-tracker container not found for ${coin}/${network}`)
+
+    // Staging and output dirs are prepared before the stop for the same reason
+    // as the capacity check: a read-only mount or a missing parent should not be
+    // discovered with the tracker already dark.
+    if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
+    ensureDir(workDir)
+    await ensureDirWritable(outputDir)
+
+    // Declared BEFORE the stop, so the first probe that sees the tracker gone
+    // already has the operator's reason for it. The encoder keeps reporting the
+    // outage truthfully (tracker_reachable:false, 503); this only lets the
+    // public board call it Maintenance instead of Degraded. Best-effort by
+    // construction: a status label must never hold up a publish.
+    let maintenanceDeclared = await declareEncoderMaintenance(coin, network, {
+        reason: `${XChainService.XCHAIN_UTXO_TRACKER} bootstrap publish`
+    })
+    // Ends the window the moment the tracker is back, not when the whole
+    // multi-hour compress finishes: on the snapshot path the encoder recovers
+    // seconds after the stop, and leaving the window open would have /status
+    // advertising maintenance on an encoder that is serving again. Idempotent,
+    // and never throws for the same reason the declare does not.
+    const endMaintenanceWindow = async () => {
+        if (!maintenanceDeclared) return
+        maintenanceDeclared = false
+        await clearEncoderMaintenance(coin, network)
+    }
 
     console.log(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
     await stopContainer(containerId)
 
+    let snapshotTaken     = false
+    let containerRestored = false
     try {
-        if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
-        ensureDir(workDir)
-        await ensureDirWritable(outputDir)
+        try {
+            snapshotTaken = await snapshotTrackerVolume(volumeName)
+        } catch (err) {
+            console.log(`Volume snapshot unavailable (${err.message}); compressing with the tracker stopped.`)
+            // A half-written snapshot must not be swept into the fallback
+            // archive, and a volume we cannot clean is not one we can publish
+            // from: let this throw into the outer finally, which restarts the
+            // container.
+            await removeTrackerSnapshot(volumeName)
+        }
+
+        // The whole point of the snapshot: the outage ends HERE, seconds after
+        // the stop, instead of after the multi-hour compress below. Without it
+        // the monthly cron took each mainnet encoder's tracker dark for the
+        // full run (2026-08-01: 3h36m BTC, 1h04m LTC, 42m DOGE), which the
+        // encoder correctly published as tracker_reachable:false.
+        if (snapshotTaken) {
+            console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container (compressing from the snapshot)...`)
+            await startContainer(containerId)
+            containerRestored = true
+            await endMaintenanceWindow()
+        }
+
+        const tarSource = snapshotTaken ? `/data/${TRACKER_SNAPSHOT_DIR}` : '/data'
 
         const progress = startProgress('Compressing LevelDB data...', totalBytes)
+        // Hashed inline off the gzip output rather than by re-reading the
+        // finished file: at tracker scale that second full read was another
+        // pass over 162.5 GB to learn something the write already knew.
+        const innerHash = crypto.createHash('sha256')
         await new Promise((resolve, reject) => {
-            const tarProc     = spawn('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'tar', 'cf', '-', '-C', '/data', '.'])
+            const tarProc     = spawn('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'tar', 'cf', '-', '-C', tarSource, '.'])
             const counter     = new PassThrough()
             const gzipStream  = zlib.createGzip()
             const writeStream = fs.createWriteStream(innerArchive)
 
             counter.on('data', chunk => progress.update(chunk.length))
+            gzipStream.on('data', chunk => innerHash.update(chunk))
 
             tarProc.stdout.pipe(counter).pipe(gzipStream).pipe(writeStream)
 
@@ -503,13 +728,12 @@ async function makeBootstrapUtxoTracker(coin, network) {
         const innerStats = await fs.promises.stat(innerArchive)
         progress.stop(`LevelDB compressed: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB`)
 
-        process.stdout.write('Computing checksum... ')
-        const checksum = await computeSha256(innerArchive)
+        const checksum = innerHash.digest('hex')
         await fs.promises.writeFile(checksumFile, `${checksum}  data.tar.gz\n`)
-        console.log(checksum)
+        console.log(`Checksum: ${checksum}`)
 
         console.log(`Wrapping into ${archiveName}...`)
-        await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, 'data.tar.gz', 'data.sha256'])
+        await writeStoredGzipTar(finalOutput, workDir, ['data.tar.gz', 'data.sha256'])
 
         await maybeSignBootstrap(finalOutput)
 
@@ -517,8 +741,21 @@ async function makeBootstrapUtxoTracker(coin, network) {
         console.log(redactSecrets(`Bootstrap created: ${finalOutput}`))
 
     } finally {
-        console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
-        await startContainer(containerId)
+        // Cleanup first, but never let it throw past the restart: a pinned
+        // snapshot costs disk, a tracker left stopped costs the encoder.
+        try {
+            await removeTrackerSnapshot(volumeName)
+        } catch (err) {
+            console.log(`Warning: could not remove /data/${TRACKER_SNAPSHOT_DIR} in ${volumeName} (${err.message}); it holds disk until removed.`)
+        }
+        if (!containerRestored) {
+            console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
+            await startContainer(containerId)
+        }
+        // After the restart, always: the fallback path held the window for the
+        // whole compress, and a failed run must not leave the board excusing an
+        // encoder that is serving again.
+        await endMaintenanceWindow()
     }
 
     return true
