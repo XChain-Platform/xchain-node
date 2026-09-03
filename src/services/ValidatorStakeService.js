@@ -245,7 +245,11 @@ async function waitForBalance(sdk, address, amount, timeoutMs, log, pollMs) {
  * matter (network resolution and the WIF/address match).
  */
 function openValidatorSession(opts, deps) {
-    const settings = deps.settings || getValidatorSettings()
+    // An explicit null is the caller SAYING there is no validator, not an absent
+    // injection: `||` treats the two alike and falls through to the real validator
+    // directory, which leaves the no-validator path exercisable only on a machine
+    // that happens to have none. Same idiom as deps.wallets below.
+    const settings = deps.settings !== undefined ? deps.settings : getValidatorSettings()
     if (!settings) throw fail('no validator configured. Run: xchain-node validator init')
     const network = settings.network || (settings.P2P_PORT === 10002 ? 'testnet' : (settings.P2P_PORT === 10001 ? 'mainnet' : null))
     if (!network || !COIN_NETWORKS[network]) throw fail('validator network unknown; re-run `validator init --network testnet|mainnet`.')
