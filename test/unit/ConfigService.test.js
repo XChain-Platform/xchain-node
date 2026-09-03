@@ -936,6 +936,57 @@ describe('ConfigService', function () {
                 }
             })
 
+            // Both serving limits default to values tuned for a PUBLIC explorer:
+            // 500 requests/min/IP, and a 6-hour tip-age gate that delists a coin.
+            // A private venue needs both loosened (a regtest chain only advances
+            // when someone mines, so an idle one goes "stale" while lag stays 0),
+            // and the explorer is a shared service with no per-venue config file,
+            // so host env is the only injection point it has.
+            it('passes the explorer serving limits through from the host env', async function () {
+                const prev = {
+                    rpm:  process.env.EXPLORER_RATE_LIMIT_RPM,
+                    fq:   process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM,
+                    age:  process.env.EXPLORER_TIP_MAX_AGE_S,
+                    coin: process.env.EXPLORER_TIP_MAX_AGE_S_RBTC
+                }
+                process.env.EXPLORER_RATE_LIMIT_RPM     = '5000'
+                process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM = '2000'
+                process.env.EXPLORER_TIP_MAX_AGE_S      = '0'
+                process.env.EXPLORER_TIP_MAX_AGE_S_RBTC = '0'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                    expect(config['EXPLORER_RATE_LIMIT_RPM']).to.equal('5000')
+                    expect(config['EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM']).to.equal('2000')
+                    expect(config['EXPLORER_TIP_MAX_AGE_S']).to.equal('0')
+                    // Deliberately NOT carried: the explorer honours the per-coin
+                    // form itself, and passing it through here would need a
+                    // computed env read, which the platform's coverage gate cannot
+                    // scan. The global knob covers the case this exists for.
+                    expect(config).to.not.have.property('EXPLORER_TIP_MAX_AGE_S_RBTC')
+                } finally {
+                    for (const [k, v] of [
+                        ['EXPLORER_RATE_LIMIT_RPM', prev.rpm],
+                        ['EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM', prev.fq],
+                        ['EXPLORER_TIP_MAX_AGE_S', prev.age],
+                        ['EXPLORER_TIP_MAX_AGE_S_RBTC', prev.coin]
+                    ]) {
+                        if (v === undefined) delete process.env[k]
+                        else process.env[k] = v
+                    }
+                }
+            })
+
+            // Unset stays unset: the explorer's own defaults must keep applying to
+            // a deployment that never sets these, or every install would start
+            // emitting a limit nobody chose.
+            it('emits no serving-limit keys when the host env carries none', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                expect(config).to.not.have.property('EXPLORER_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_TIP_MAX_AGE_S')
+            })
+
             it('returns EXPLORER_API_PORT_HTTP as 8080', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)

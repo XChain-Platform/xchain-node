@@ -712,6 +712,42 @@ async function getDefaultConfig(module, coin, network) {
             if (process.env.EXPLORER_VM_QUERY_ENABLED !== undefined && process.env.EXPLORER_VM_QUERY_ENABLED !== "") {
                 defaultValues.EXPLORER_VM_QUERY_ENABLED = process.env.EXPLORER_VM_QUERY_ENABLED
             }
+
+            // Serving limits, same host-env injection point as the knobs above,
+            // because every one of these defaults is tuned for a PUBLIC explorer
+            // and is wrong for a private venue:
+            //   EXPLORER_*RATE_LIMIT_RPM - the request budgets, per IP: 500/min
+            //     overall, and tighter ones on the quote/pre-flight/checkpoint
+            //     routes. A dev box reaches the explorer through one tunnel, so
+            //     every browser and every test run shares a single bucket, and a
+            //     browser-driven suite sustains 400-600/min on its own.
+            //   EXPLORER_TIP_MAX_AGE_S   - 6h by default, and 0 disables it. A
+            //     regtest chain has no block cadence: it advances only when someone
+            //     mines, so an idle one crosses the age gate and the explorer delists
+            //     a chain that is perfectly healthy (503 COIN_DATA_STALE on every
+            //     read, lag 0 on /status).
+            // Read BY NAME rather than by scanning process.env for a pattern: a
+            // computed read is invisible to the platform's env-var coverage gate,
+            // which is what turns an undocumented variable into a silent one. The
+            // per-coin EXPLORER_TIP_MAX_AGE_S_<CODE> form is deliberately NOT
+            // carried here - the explorer honours it directly, and the global knob
+            // already covers the case this passthrough exists for (an instance
+            // serving nothing but a private venue).
+            for (const key of [
+                "EXPLORER_RATE_LIMIT_RPM",
+                "EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM",
+                "EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM",
+                "EXPLORER_TIP_MAX_AGE_S"
+            ]) {
+                const value = {
+                    EXPLORER_RATE_LIMIT_RPM:                process.env.EXPLORER_RATE_LIMIT_RPM,
+                    EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM:      process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM,
+                    EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM: process.env.EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM,
+                    EXPLORER_TIP_MAX_AGE_S:                 process.env.EXPLORER_TIP_MAX_AGE_S
+                }[key]
+                if (value === undefined || value === "") continue
+                defaultValues[key] = value
+            }
         }
 
         // The explorer resolves each coin's utxo-tracker and decoder from
