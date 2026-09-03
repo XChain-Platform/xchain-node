@@ -41,6 +41,7 @@ const { getStatus }            = require('./services/StatusService')
 const { scanAndRegisterModules } = require('./services/DiscoveryService')
 const { maybeReportTelemetry } = require('./services/TelemetryService')
 const { makeBootstrap, listServedBootstrapCombos } = require('./services/BootstrapService')
+const { listRepublishDue } = require('./services/BootstrapRepublishLedger')
 const { initValidator, getValidatorSettings, isInitialized, getCapabilityConfigHostPath,
         readWallets, publicWalletInfo, getSignerMountDir, COIN_NETWORKS, WALLETS_FILE,
         getRollcallStatus } = require('./services/ValidatorService')
@@ -108,7 +109,7 @@ async function parseCommand() {
     // updateconfig round-trip on multi-coin nodes. Any command NOT listed here
     // (install, update, start, stop, restart, uninstall, reset, sync, …) still
     // pushes; the default is to sync, so a new/unknown command stays safe.
-    const readOnlyCommands = ['ps', 'tail', 'logs', 'monitor', 'tailmonitor', 'bootstrap-combos']
+    const readOnlyCommands = ['ps', 'tail', 'logs', 'monitor', 'tailmonitor', 'bootstrap-combos', 'bootstrap-republish-due']
     // Commands that mutate stack state (containers, images, DBs, config
     // pushes). Two of these interleaving from concurrent shells can corrupt an
     // install mid-flight, so they serialize on a pidfile lock; a second
@@ -142,6 +143,13 @@ async function parseCommand() {
         // It stays listed in mutatingCommands above so that a real
         // implementation, which would drop this early return, is serialized.
         if (commandName === 'rollback') return
+        // `bootstrap-republish-due` reads one local JSON file and prints it. It
+        // must not provision Docker/MariaDB or take the command lock: the
+        // publisher asks it on EVERY run, and a read-only command that waits out
+        // a lock holder exits non-zero, which the publisher would read as "no
+        // combo is due" and silently drop the forced republish this whole
+        // mechanism exists to guarantee.
+        if (commandName === 'bootstrap-republish-due') return
 
         // preCheck provisions shared containers/DB/hub (buildDatabaseModule,
         // ensureXchainNodeAccess, scanAndRegisterModules, installHubModule) for
@@ -358,6 +366,31 @@ gate could report them, so the cron exited 0 while a consumer archive went stale
         .action(async () => {
             const combos = await listServedBootstrapCombos()
             for (const combo of combos) console.log(combo)
+            return process.exit(0)
+        })
+
+    program
+        .command('bootstrap-republish-due')
+        .description('List combos whose published bootstrap predates their last reindex (scriptable)')
+        .option('--json', 'emit the full records (reindexedAt, publishedAt, reason) instead of bare combos')
+        .addHelpText('after', `
+A reset wipes a store and rebuilds it on a NEW lineage, so every bootstrap
+already published for that combo describes the old one: a fresh install that
+takes it restores pre-reindex state and halts. Nothing forced a republish, and
+no age check catches it, because the stale-lineage archive is hours old and
+simply wrong.
+
+\`reset\` records the combos it wiped, \`bootstrap create\` records what it
+re-derived, and this lists the difference. scripts/publish-bootstraps.sh reads
+it to pull due combos into its plan even when the schedule or the tracker
+opt-in would have skipped them.`)
+        .action(async (options) => {
+            const due = listRepublishDue()
+            if (options && options.json) {
+                console.log(JSON.stringify(due, null, 2))
+            } else {
+                for (const entry of due) console.log(entry.combo)
+            }
             return process.exit(0)
         })
 

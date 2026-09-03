@@ -21,13 +21,13 @@
  * restores pre-reindex state and then halts or diverges the first time it meets
  * a block the old lineage disagreed about.
  *
- * Nothing forced a republish after such a reindex. The publisher runs on a
- * timer (nightly for decoder/indexer, weekly for trackers, and trackers are
- * opt-in besides because their create takes the container down), so the stale-
- * lineage archive stayed newest for up to a week, and no age check caught it:
- * the file itself was hours old, perfectly fresh, and completely wrong.
+ * A timer alone cannot force that republish. The publisher runs nightly for
+ * decoder/indexer and weekly for trackers (trackers opt-in besides, because
+ * their create takes the container down), so a stale-lineage archive can stand
+ * as newest for up to a week, and no age check catches it: the file itself is
+ * hours old, perfectly fresh, and completely wrong.
  *
- * So make the reindex itself the trigger. `reset` records the combos it wiped
+ * So the reindex itself is the trigger. `reset` records the combos it wiped
  * here; `bootstrap create` records what it published; a combo whose reindex is
  * NEWER than its last publish is DUE, and the publisher pulls due combos into
  * its plan even when the schedule or the tracker opt-in would have skipped them.
@@ -164,10 +164,9 @@ function writeReindexLedger(ledger) {
  * valid, so fanning out from it would warn about three combos on every ordinary
  * node resync. The case that really does stale the derived archives is a
  * re-genesis, and that is run as `reset all`, which wipes those stores directly
- * and marks them through their own flags. (Measured 2026-08-24 in
- * claude/runbooks/testnet-regenesis-2026-08-24.md: even a re-genesis leaves the
+ * and marks them through their own flags. Even a re-genesis leaves the
  * utxo-tracker archives valid, because the tracker follows the raw chain UTXO
- * set and consumes no firstBlock.)
+ * set and consumes no firstBlock.
  */
 // `node` is accepted and deliberately unused, so the caller can pass the reset
 // flags whole and the decision above stays readable at this one site.
