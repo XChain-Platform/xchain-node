@@ -906,6 +906,13 @@ async function getDefaultConfig(module, coin, network) {
             // through so the host env survives a hub container regenerate.
             "ORACLE_BATCH_WINDOW_ROUNDS", "ORACLE_BATCH_GRACE_MS",
             "ORACLE_BATCH_SIGN_TIMEOUT_MS", "ORACLE_BATCH_BUFFER_MAX_ROUNDS",
+            // Same family: the time budgeted between a window closing and its batch
+            // being readable on chain (assembly, co-signing, broadcast, one DOGE
+            // confirmation). The publisher subtracts it from the fee-price staleness
+            // bound to derive the window ceiling, so a venue whose
+            // landing latency differs from the fleet's tunes it here rather than
+            // being clamped to a window that does not suit it.
+            "ORACLE_BATCH_LANDING_RESERVE_MS",
             // Per-IP request/min cap on the hub's express API (default 100). Too low
             // for legitimate multi-indexer re-bootstrap: every indexer on a box shares
             // one source IP, so a fleet bootstrapping HubDbSync tables (oracle_prices,

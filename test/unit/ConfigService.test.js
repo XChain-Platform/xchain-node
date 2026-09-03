@@ -1224,14 +1224,15 @@ describe('ConfigService', function () {
                 })
             })
 
-            // The four PRICE batch knobs: non-consensus, so a passthrough
+            // The five PRICE batch knobs: non-consensus, so a passthrough
             // omission just leaves the hub on its own default rather than drifting
             // a federation, but an operator install still needs them to reach the
-            // container to tune window/grace/timeout/buffer at all.
+            // container to tune window/grace/timeout/buffer/landing-reserve at all.
             describe('ORACLE_BATCH_* passthrough', function () {
                 const ORACLE_BATCH_VARS = [
                     'ORACLE_BATCH_WINDOW_ROUNDS', 'ORACLE_BATCH_GRACE_MS',
-                    'ORACLE_BATCH_SIGN_TIMEOUT_MS', 'ORACLE_BATCH_BUFFER_MAX_ROUNDS'
+                    'ORACLE_BATCH_SIGN_TIMEOUT_MS', 'ORACLE_BATCH_BUFFER_MAX_ROUNDS',
+                    'ORACLE_BATCH_LANDING_RESERVE_MS'
                 ]
                 let saved
                 beforeEach(function () {
@@ -1245,20 +1246,22 @@ describe('ConfigService', function () {
                     }
                 })
 
-                it('injects all four ORACLE_BATCH_* knobs from host env into the hub config', async function () {
-                    process.env.ORACLE_BATCH_WINDOW_ROUNDS = '6'
+                it('injects all five ORACLE_BATCH_* knobs from host env into the hub config', async function () {
+                    process.env.ORACLE_BATCH_WINDOW_ROUNDS = '2'
                     process.env.ORACLE_BATCH_GRACE_MS = '300000'
                     process.env.ORACLE_BATCH_SIGN_TIMEOUT_MS = '60000'
                     process.env.ORACLE_BATCH_BUFFER_MAX_ROUNDS = '4032'
+                    process.env.ORACLE_BATCH_LANDING_RESERVE_MS = '300000'
                     const cs = makeServiceWithConfig('')
                     const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
-                    expect(config['ORACLE_BATCH_WINDOW_ROUNDS']).to.equal('6')
+                    expect(config['ORACLE_BATCH_WINDOW_ROUNDS']).to.equal('2')
                     expect(config['ORACLE_BATCH_GRACE_MS']).to.equal('300000')
                     expect(config['ORACLE_BATCH_SIGN_TIMEOUT_MS']).to.equal('60000')
                     expect(config['ORACLE_BATCH_BUFFER_MAX_ROUNDS']).to.equal('4032')
+                    expect(config['ORACLE_BATCH_LANDING_RESERVE_MS']).to.equal('300000')
                 })
 
-                it('leaves all four ORACLE_BATCH_* knobs unset when host env is absent (hub default unchanged)', async function () {
+                it('leaves all five ORACLE_BATCH_* knobs unset when host env is absent (hub default unchanged)', async function () {
                     const cs = makeServiceWithConfig('')
                     const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
                     for (const k of ORACLE_BATCH_VARS) expect(config[k]).to.be.undefined
