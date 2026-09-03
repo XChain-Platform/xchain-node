@@ -547,6 +547,35 @@ async function getDefaultConfig(module, coin, network) {
                     defaultValues[varName] = process.env[varName]
                 }
             }
+            // ROLLCALL rail env (xchain-indexer only). Two separate things, both of which a
+            // deployed indexer needs before an epoch close can do anything at all.
+            //
+            // 1. DOGE_INDEXER_API_URL / DOGE_INDEXER_API_KEY, on EVERY network. Roll calls
+            //    land on DOGECOIN and the BTC indexer is the only place the close runs, so
+            //    rollcall_proof_client.js (and anchor_proof_client.js beside it) has to be
+            //    able to ask a DOGE indexer. With no URL the close returns
+            //    `{decided:false, reason:'DOGE indexer not configured'}` and the BTC indexer
+            //    DEFERS the block forever, which is exactly how a single-coin venue wedges.
+            //    Sourced from host env so the pair survives an `update` instead of needing
+            //    to be hand-set on the container after every deploy.
+            //
+            // 2. XC_ROLLCALL_REGTEST_ACTIVATION, on REGTEST ONLY. This is the one value a
+            //    regtest venue owns: the no-tunable-input rule is scoped to shared-ledger
+            //    networks, because two regtest venues cannot fork each other. It is gated on
+            //    the network here as well as in the indexer's own rollcall_activation.js,
+            //    which is structurally unable to reach the environment for mainnet or
+            //    testnet - two independent gates, so neither one being edited alone can arm
+            //    a shared ledger from a host variable.
+            //
+            // The passthrough is the only supported way to arm a deployed indexer.
+            const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
+            if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION")
+            for (const varName of rollcallPassthroughVars) {
+                if (process.env[varName] !== undefined && process.env[varName] !== "") {
+                    defaultValues[varName] = process.env[varName]
+                }
+            }
+
             // The indexer pushes chain tips / config to the hub (HUB_API_URL); when that
             // hub enforces HUB_API_KEY, the indexer must present the same key or its writes
             // 401. Sourced from host env (.env) so it persists across `update`, then from the
@@ -933,7 +962,21 @@ async function getDefaultConfig(module, coin, network) {
             // HUB_ALLOW_UNAUTHENTICATED=true is the documented keyless escape hatch and
             // suits a single-host regtest venue that already ran open; a real network
             // sets HUB_API_KEY instead.
-            "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED"
+            "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED",
+            // The regtest ROLLCALL arming opt-in. The hub carries a byte-twin of
+            // the indexer's rollcall_activation.js, and ROLLCALL_ACTIVATION is one of
+            // consensus_rules_digest.js's SHARED_GATES, so an indexer armed against an
+            // inert container hub reports a rules MISMATCH on the venue. Both sides take
+            // the same variable, so a venue arms as a unit.
+            //
+            // Passed through with no network gate, unlike the indexer's copy above: the
+            // hub is a shared service and getDefaultConfig is called for it as
+            // (module, null, null), so there is no network here to gate on. That is safe
+            // because the real gate is in the hub's own rollcall_activation.js, which can
+            // reach the environment for regtest and for nothing else - mainnet and testnet
+            // are literal there and unreachable from env by any path in the file. On a
+            // mainnet or testnet hub this variable is therefore inert, not dangerous.
+            "XC_ROLLCALL_REGTEST_ACTIVATION"
         ]
         for (const varName of hubPassthroughVars) {
             // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also

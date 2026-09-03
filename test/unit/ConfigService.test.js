@@ -784,6 +784,96 @@ describe('ConfigService', function () {
                 })
             })
 
+            // The passthrough is the only supported way to arm a DEPLOYED indexer for
+            // ROLLCALL, and the only way its DOGE proof peer survives an `update`.
+            describe('ROLLCALL rail passthrough', function () {
+                const ROLLCALL_VARS = [
+                    'DOGE_INDEXER_API_URL', 'DOGE_INDEXER_API_KEY', 'XC_ROLLCALL_REGTEST_ACTIVATION'
+                ]
+                let saved
+                beforeEach(function () {
+                    saved = {}
+                    for (const v of ROLLCALL_VARS) { saved[v] = process.env[v]; delete process.env[v] }
+                })
+                afterEach(function () {
+                    for (const v of ROLLCALL_VARS) {
+                        if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v]
+                    }
+                })
+
+                it('passes the DOGE proof peer through to the indexer on regtest', async function () {
+                    process.env.DOGE_INDEXER_API_URL = 'http://dogecoin-regtest-indexer:3004/api'
+                    process.env.DOGE_INDEXER_API_KEY = 'not-a-real-key'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['DOGE_INDEXER_API_URL']).to.equal('http://dogecoin-regtest-indexer:3004/api')
+                    expect(config['DOGE_INDEXER_API_KEY']).to.equal('not-a-real-key')
+                })
+
+                // Roll calls land on DOGE on every network, so the close needs a reachable
+                // DOGE indexer on testnet and mainnet too, not only on the acceptance venue.
+                it('passes the DOGE proof peer through on testnet as well', async function () {
+                    process.env.DOGE_INDEXER_API_URL = 'https://doge.example.invalid/api'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'testnet')
+                    expect(config['DOGE_INDEXER_API_URL']).to.equal('https://doge.example.invalid/api')
+                })
+
+                it('arms the indexer on regtest when the host opts in', async function () {
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['XC_ROLLCALL_REGTEST_ACTIVATION']).to.equal('armed')
+                })
+
+                it('carries a bare arming height through unaltered', async function () {
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = '900'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['XC_ROLLCALL_REGTEST_ACTIVATION']).to.equal('900')
+                })
+
+                // The deploy path is the SECOND gate. rollcall_activation.js cannot reach
+                // the environment for a shared-ledger network at all, and this makes the
+                // host variable stop at the container door there as well, so neither gate
+                // being edited alone can arm mainnet or testnet from a host variable.
+                it('NEVER arms a shared-ledger indexer, whatever the host env says', async function () {
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    for (const net of ['mainnet', 'testnet']) {
+                        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', net)
+                        expect(config, net).to.not.have.property('XC_ROLLCALL_REGTEST_ACTIVATION')
+                    }
+                })
+
+                it('does NOT inject the rollcall vars into a non-indexer coin module (decoder)', async function () {
+                    process.env.DOGE_INDEXER_API_URL           = 'http://x/api'
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
+                    expect(config).to.not.have.property('DOGE_INDEXER_API_URL')
+                    expect(config).to.not.have.property('XC_ROLLCALL_REGTEST_ACTIVATION')
+                })
+
+                // ROLLCALL_ACTIVATION is a consensus_rules_digest SHARED_GATE, so an armed
+                // indexer beside an inert container hub reports a rules mismatch. A venue
+                // has to arm as a unit, which means the hub takes the same variable.
+                it('arms the container hub from the same variable, so the venue arms as a unit', async function () {
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-hub', null, null)
+                    expect(config['XC_ROLLCALL_REGTEST_ACTIVATION']).to.equal('armed')
+                })
+
+                it('omits every rollcall var when unset, so a venue ships INERT', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    for (const v of ROLLCALL_VARS) expect(config).to.not.have.property(v)
+                    const hub = await cs.getDefaultConfig('xchain-hub', null, null)
+                    expect(hub).to.not.have.property('XC_ROLLCALL_REGTEST_ACTIVATION')
+                })
+            })
+
             it('returns correct INDEXER_COIN ticker', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
