@@ -451,6 +451,30 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues["CORS_ORIGIN"] = process.env.CORS_ORIGIN || "*"
         }
 
+        // Encoder passthrough. A production encoder sits behind a reverse proxy on
+        // ANOTHER box, reached over a public address, so its default trust-proxy
+        // setting (loopback, uniquelocal) never honours X-Forwarded-For and the
+        // per-IP limiter keys every visitor on the proxy's egress address: one
+        // bucket per encoder for the whole world. ENCODER_TRUST_PROXY names that
+        // egress address so the container recovers the real client.
+        // ENCODER_RATE_LIMIT_RPM rides the same passthrough, placed after the
+        // regtest block above so a host value wins over the 99999 regtest literal
+        // and survives update/recreate. Read BY NAME, same as the explorer
+        // passthrough below: a computed process.env read is invisible to the
+        // platform's env-var coverage gate, which is what turns an undocumented
+        // variable into a silent one.
+        if (module === XChainService.XCHAIN_ENCODER) {
+            const encoderPassthroughVars = ["ENCODER_TRUST_PROXY", "ENCODER_RATE_LIMIT_RPM"]
+            for (const key of encoderPassthroughVars) {
+                const value = {
+                    ENCODER_TRUST_PROXY:    process.env.ENCODER_TRUST_PROXY,
+                    ENCODER_RATE_LIMIT_RPM: process.env.ENCODER_RATE_LIMIT_RPM
+                }[key]
+                if (value === undefined || value === "") continue
+                defaultValues[key] = value
+            }
+        }
+
         // Native-coin protocol fee destination (per coin/network). Defaults from the vendored
         // canonical coin registry (src/coins), so a stock install provisions the decoder's
         // FEE_DESTINATION (fee-output capture into transaction_outputs) and the indexer's
@@ -768,11 +792,16 @@ async function getDefaultConfig(module, coin, network) {
             // Serving limits, same host-env injection point as the knobs above,
             // because every one of these defaults is tuned for a PUBLIC explorer
             // and is wrong for a private venue:
-            //   EXPLORER_*RATE_LIMIT_RPM - the request budgets, per IP: 500/min
-            //     overall, and tighter ones on the quote/pre-flight/checkpoint
-            //     routes. A dev box reaches the explorer through one tunnel, so
-            //     every browser and every test run shares a single bucket, and a
-            //     browser-driven suite sustains 400-600/min on its own.
+            //   EXPLORER_*RATE_LIMIT_RPM - the eight request budgets, per IP: the
+            //     app-wide cap, the quote/pre-flight caps, and the five per-route
+            //     caps (checkpoint-list, checkpoint-verify, action-proof,
+            //     validator-set-proof, vm-query). A dev box reaches the explorer
+            //     through one tunnel, so every browser and every test run shares a
+            //     single bucket, and a browser-driven suite sustains far more than
+            //     any one of these caps on its own. All eight are now reachable
+            //     from the host env; the five per-route caps were unreachable on a
+            //     node-managed explorer (the regtest venue), which could raise only
+            //     the app-wide and fee-quote caps before this change.
             //   EXPLORER_TIP_MAX_AGE_S   - 6h by default, and 0 disables it. A
             //     regtest chain has no block cadence: it advances only when someone
             //     mines, so an idle one crosses the age gate and the explorer delists
@@ -789,13 +818,23 @@ async function getDefaultConfig(module, coin, network) {
                 "EXPLORER_RATE_LIMIT_RPM",
                 "EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM",
                 "EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM",
-                "EXPLORER_TIP_MAX_AGE_S"
+                "EXPLORER_TIP_MAX_AGE_S",
+                "EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM",
+                "EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM",
+                "EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM",
+                "EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM",
+                "EXPLORER_VM_QUERY_RATE_LIMIT_RPM"
             ]) {
                 const value = {
-                    EXPLORER_RATE_LIMIT_RPM:                process.env.EXPLORER_RATE_LIMIT_RPM,
-                    EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM:      process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM,
-                    EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM: process.env.EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM,
-                    EXPLORER_TIP_MAX_AGE_S:                 process.env.EXPLORER_TIP_MAX_AGE_S
+                    EXPLORER_RATE_LIMIT_RPM:                   process.env.EXPLORER_RATE_LIMIT_RPM,
+                    EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM:         process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM,
+                    EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM:    process.env.EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM,
+                    EXPLORER_TIP_MAX_AGE_S:                    process.env.EXPLORER_TIP_MAX_AGE_S,
+                    EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM:   process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM,
+                    EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM: process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM,
+                    EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM:      process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM,
+                    EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM: process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM,
+                    EXPLORER_VM_QUERY_RATE_LIMIT_RPM:          process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM
                 }[key]
                 if (value === undefined || value === "") continue
                 defaultValues[key] = value

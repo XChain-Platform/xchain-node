@@ -1032,6 +1032,94 @@ describe('ConfigService', function () {
                 const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
                 expect(config['DECODER_DB_PORT']).to.equal(3306)
             })
+
+            // Encoder passthrough (rate-limits-that-fit-the-wallet D7/D8/C8, row 12):
+            // ENCODER_TRUST_PROXY and ENCODER_RATE_LIMIT_RPM survive an
+            // update/recreate only if they ride the host env into the container's
+            // default config, mirroring the explorer serving-limit passthrough below.
+            describe('encoder passthrough (ENCODER_TRUST_PROXY / ENCODER_RATE_LIMIT_RPM)', function () {
+
+                it('passes ENCODER_TRUST_PROXY and ENCODER_RATE_LIMIT_RPM through from the host env', async function () {
+                    const prev = {
+                        proxy: process.env.ENCODER_TRUST_PROXY,
+                        rpm:   process.env.ENCODER_RATE_LIMIT_RPM
+                    }
+                    process.env.ENCODER_TRUST_PROXY    = '203.0.113.9'
+                    process.env.ENCODER_RATE_LIMIT_RPM = '240'
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const config = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
+                        expect(config['ENCODER_TRUST_PROXY']).to.equal('203.0.113.9')
+                        expect(config['ENCODER_RATE_LIMIT_RPM']).to.equal('240')
+                    } finally {
+                        for (const [k, v] of [
+                            ['ENCODER_TRUST_PROXY', prev.proxy],
+                            ['ENCODER_RATE_LIMIT_RPM', prev.rpm]
+                        ]) {
+                            if (v === undefined) delete process.env[k]
+                            else process.env[k] = v
+                        }
+                    }
+                })
+
+                it('emits neither key when the host env carries no encoder passthrough values', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
+                    expect(config).to.not.have.property('ENCODER_TRUST_PROXY')
+                    expect(config).to.not.have.property('ENCODER_RATE_LIMIT_RPM')
+                })
+
+                // The regtest block above sets ENCODER_RATE_LIMIT_RPM=99999 unconditionally
+                // (a bursty e2e-suite accommodation); this passthrough runs AFTER it, so an
+                // operator's host value still wins on a regtest venue.
+                it('lets a host ENCODER_RATE_LIMIT_RPM win over the regtest 99999 literal', async function () {
+                    const prev = process.env.ENCODER_RATE_LIMIT_RPM
+                    process.env.ENCODER_RATE_LIMIT_RPM = '300'
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const config = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'regtest')
+                        expect(config['ENCODER_RATE_LIMIT_RPM']).to.equal('300')
+                    } finally {
+                        if (prev === undefined) delete process.env.ENCODER_RATE_LIMIT_RPM
+                        else process.env.ENCODER_RATE_LIMIT_RPM = prev
+                    }
+                })
+
+                it('keeps the regtest 99999 literal when the host env sets no override', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'regtest')
+                    expect(config['ENCODER_RATE_LIMIT_RPM']).to.equal(99999)
+                })
+
+                // Gated on module === XCHAIN_ENCODER; a decoder or utxo-tracker config
+                // for the same coin/network must never pick this up.
+                it('does not leak the encoder passthrough onto decoder or utxo-tracker configs', async function () {
+                    const prev = {
+                        proxy: process.env.ENCODER_TRUST_PROXY,
+                        rpm:   process.env.ENCODER_RATE_LIMIT_RPM
+                    }
+                    process.env.ENCODER_TRUST_PROXY    = '203.0.113.9'
+                    process.env.ENCODER_RATE_LIMIT_RPM = '240'
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const decoderConfig = await cs.getDefaultConfig(XChainService.XCHAIN_DECODER, 'bitcoin', 'mainnet')
+                        expect(decoderConfig).to.not.have.property('ENCODER_TRUST_PROXY')
+                        expect(decoderConfig).to.not.have.property('ENCODER_RATE_LIMIT_RPM')
+                        const trackerConfig = await cs.getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
+                        expect(trackerConfig).to.not.have.property('ENCODER_TRUST_PROXY')
+                        expect(trackerConfig).to.not.have.property('ENCODER_RATE_LIMIT_RPM')
+                    } finally {
+                        for (const [k, v] of [
+                            ['ENCODER_TRUST_PROXY', prev.proxy],
+                            ['ENCODER_RATE_LIMIT_RPM', prev.rpm]
+                        ]) {
+                            if (v === undefined) delete process.env[k]
+                            else process.env[k] = v
+                        }
+                    }
+                })
+
+            })
         })
 
         describe('without coin/network (shared service config)', function () {
@@ -1136,6 +1224,56 @@ describe('ConfigService', function () {
                 const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
                 expect(config).to.not.have.property('EXPLORER_RATE_LIMIT_RPM')
                 expect(config).to.not.have.property('EXPLORER_TIP_MAX_AGE_S')
+            })
+
+            // The five per-route knobs (checkpoint-list/verify, action-proof,
+            // validator-set-proof, vm-query) were missing from this passthrough
+            // (row 14, rate-limits-that-fit-the-wallet C10): a node-managed
+            // explorer (the regtest venue) could raise only the app-wide and
+            // fee-quote caps before this change.
+            it('passes the five per-route explorer rate limits through from the host env', async function () {
+                const prev = {
+                    list:    process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM,
+                    verify:  process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM,
+                    action:  process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM,
+                    valset:  process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM,
+                    vmquery: process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM
+                }
+                process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM     = '150'
+                process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM   = '95'
+                process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM        = '95'
+                process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM = '35'
+                process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM            = '25'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                    expect(config['EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM']).to.equal('150')
+                    expect(config['EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM']).to.equal('95')
+                    expect(config['EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM']).to.equal('95')
+                    expect(config['EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM']).to.equal('35')
+                    expect(config['EXPLORER_VM_QUERY_RATE_LIMIT_RPM']).to.equal('25')
+                } finally {
+                    for (const [k, v] of [
+                        ['EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM', prev.list],
+                        ['EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM', prev.verify],
+                        ['EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM', prev.action],
+                        ['EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM', prev.valset],
+                        ['EXPLORER_VM_QUERY_RATE_LIMIT_RPM', prev.vmquery]
+                    ]) {
+                        if (v === undefined) delete process.env[k]
+                        else process.env[k] = v
+                    }
+                }
+            })
+
+            it('emits no per-route explorer rate-limit keys when the host env carries none', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                expect(config).to.not.have.property('EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_VM_QUERY_RATE_LIMIT_RPM')
             })
 
             it('returns EXPLORER_API_PORT_HTTP as 8080', async function () {
