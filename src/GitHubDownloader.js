@@ -147,24 +147,37 @@ class GitHubDownloader {
 
     const repoKey = `${owner}/${repoName}`;
     const fullOutputPath = path.join(outputPath, `${repoName}`);
+    // Extract into a staging sibling and swap it in, never into the live tree.
+    // downloadReleaseAsset flattens the archive's top-level directory only when
+    // it is the sole entry of the output path, so extracting over a previous
+    // release's bin/ and share/ left the new release nested one level down: the
+    // Dockerfile installed the OLD bin/*, and the version file claimed the new
+    // release (litecoind v0.21.4 reported itself under a v0.21.5.6 version file
+    // on the regtest rehearsal, 2026-09-03). Staging also keeps the previous
+    // tree intact when the download or hash check fails.
+    const stagingPath = fullOutputPath + '.staging';
 
     const release = await this.getReleaseByTag(owner, repoName, version);
-    
+
     if (verifyHash && !this.hasHash(repoKey, version)) {
       throw new Error( `Required SHA-256 hash not found for ${repoKey}@${version}`);
     }
 
     try {
-      await this.downloadReleaseAsset(release, fullOutputPath, repoKey, version, verifyHash);
+      if (fs.existsSync(stagingPath)) {
+        fs.rmSync(stagingPath, { recursive: true, force: true });
+      }
+      await this.downloadReleaseAsset(release, stagingPath, repoKey, version, verifyHash);
+      fs.writeFileSync(path.join(stagingPath, version_file_name), version)
 
-	  if (fs.existsSync(fullOutputPath)) {
-	    fs.writeFileSync(fullOutputPath + "/" + version_file_name, version)
-	  }
-	  
+      if (fs.existsSync(fullOutputPath)) {
+        fs.rmSync(fullOutputPath, { recursive: true, force: true });
+      }
+      fs.renameSync(stagingPath, fullOutputPath);
       return fullOutputPath;
     } catch (error) {
-      if (fs.existsSync(fullOutputPath)) {
-        fs.rmSync(fullOutputPath, { recursive: true });
+      if (fs.existsSync(stagingPath)) {
+        fs.rmSync(stagingPath, { recursive: true, force: true });
       }
       throw error;
     }

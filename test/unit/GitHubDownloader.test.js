@@ -36,6 +36,7 @@ function loadDownloader(opts = {}) {
         createWriteStream: sinon.stub(),
         mkdirSync: sinon.stub(),
         rmSync: sinon.stub(),
+        renameSync: sinon.stub(),
         readdirSync: sinon.stub().returns([]),
         statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
         readFileSync: sinon.stub().callsFake((p, enc) => {
@@ -518,7 +519,7 @@ describe('GitHubDownloader', function () {
             }
         })
 
-        it('cleans up output directory when download fails', async function () {
+        it('cleans up the staging directory when download fails and leaves the previous tree alone', async function () {
             const axiosStub = makeAxiosStub()
             // getReleaseByTag returns a release, but downloadReleaseAsset will fail (no matching asset)
             axiosStub.get.resolves({
@@ -531,7 +532,7 @@ describe('GitHubDownloader', function () {
                 existsSync: sinon.stub().callsFake((p) => {
                     // hashes file exists
                     if (p.endsWith('hashes.json')) return true
-                    // output path exists (to trigger cleanup)
+                    // staging and output paths exist (to trigger cleanup)
                     return true
                 }),
                 readFileSync: sinon.stub().callsFake((p) => {
@@ -540,6 +541,7 @@ describe('GitHubDownloader', function () {
                 }),
                 writeFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 mkdirSync: sinon.stub(),
                 createWriteStream: sinon.stub(),
                 statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
@@ -551,8 +553,51 @@ describe('GitHubDownloader', function () {
                 await dl.downloadRepoVersion('owner', 'repo', 'v1.0.0', { verifyHash: false })
                 expect.fail()
             } catch (e) {
-                expect(fsStub.rmSync.called).to.be.true
+                const removed = fsStub.rmSync.getCalls().map(c => c.args[0])
+                expect(removed).to.include(path.join('./downloads', 'repo') + '.staging')
+                // The daemon tree a running container was built from survives a failed update.
+                expect(removed).to.not.include(path.join('./downloads', 'repo'))
+                expect(fsStub.renameSync.called).to.be.false
             }
+        })
+
+        it('extracts into a staging directory and swaps it over the previous version tree', async function () {
+            // Regression: extracting straight into the live tree left the new
+            // release nested beside the previous bin/ and share/, so the image
+            // was built from the OLD binaries under a NEW version file.
+            const axiosStub = makeAxiosStub()
+            axiosStub.get.resolves({ data: { tag_name: 'v1.0.0', assets: [] } })
+            const fsStub = {
+                existsSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return true
+                    return !p.endsWith('.staging') // previous tree present, no stale staging dir
+                }),
+                readFileSync: sinon.stub().callsFake((p) => {
+                    if (p.endsWith('hashes.json')) return JSON.stringify(validHashesData)
+                    return Buffer.from('data')
+                }),
+                writeFileSync: sinon.stub(),
+                rmSync: sinon.stub(),
+                renameSync: sinon.stub(),
+                mkdirSync: sinon.stub(),
+                createWriteStream: sinon.stub(),
+                statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),
+                readdirSync: sinon.stub().returns([])
+            }
+            const { GitHubDownloader } = loadDownloader({ fs: fsStub, axios: axiosStub })
+            const dl = new GitHubDownloader('/test/hashes.json')
+            dl.downloadReleaseAsset = sinon.stub().resolves()
+            const live    = path.join('./downloads', 'repo')
+            const staging = live + '.staging'
+            const result = await dl.downloadRepoVersion('owner', 'repo', 'v1.0.0', { verifyHash: false })
+
+            expect(dl.downloadReleaseAsset.firstCall.args[1]).to.equal(staging)
+            expect(fsStub.writeFileSync.firstCall.args[0]).to.equal(path.join(staging, '__VERSION__.txt'))
+            expect(fsStub.rmSync.calledWith(live)).to.be.true
+            expect(fsStub.renameSync.calledOnceWith(staging, live)).to.be.true
+            // Order: the old tree goes only after the new one is fully staged.
+            expect(dl.downloadReleaseAsset.calledBefore(fsStub.rmSync)).to.be.true
+            expect(result).to.equal(live)
         })
 
         it('writes version file on successful download', async function () {
@@ -572,6 +617,7 @@ describe('GitHubDownloader', function () {
                 }),
                 writeFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 mkdirSync: sinon.stub(),
                 createWriteStream: sinon.stub(),
                 statSync: sinon.stub().returns({ isFile: () => true, isDirectory: () => false }),

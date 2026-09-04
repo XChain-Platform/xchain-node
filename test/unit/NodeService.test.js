@@ -130,6 +130,8 @@ function loadNodeService(stubs) {
         './DockerService':   {
             createDockerNetwork: sinon.stub().resolves(),
             forceRemoveContainerByName: stubs.forceRemoveContainerByName || sinon.stub().resolves(true),
+            // Graceful stop of the previous daemon before the force-remove.
+            stopContainerByName: stubs.stopContainerByName || sinon.stub().resolves(true),
             // Mount-drift guard. Default: no previous container.
             getContainerBindMounts: stubs.getContainerBindMounts || sinon.stub().resolves([])
         },
@@ -820,6 +822,26 @@ describe('NodeService: buildCryptoNode()', function () {
             expect(stubs.forceRemoveContainerByName.calledOnce).to.be.true
         })
 
+        it('stops the previous daemon gracefully, with a flush budget, before force-removing it', async function () {
+            // Regression: `docker rm -f` alone is SIGKILL, and a killed daemon
+            // restarts at its last flushed block index (16 regtest blocks lost
+            // on the v0.21.5.6 litecoind rehearsal, 2026-09-03).
+            const stubs = makeNodeServiceStubs()
+            stubs.stopContainerByName       = sinon.stub().resolves(true)
+            stubs.forceRemoveContainerByName = sinon.stub().resolves(true)
+            const args = await build(stubs, { envBlocksDir: null })
+
+            expect(stubs.stopContainerByName.calledOnce).to.be.true
+            const [name, budget] = stubs.stopContainerByName.firstCall.args
+            expect(name).to.equal('xchain-node-bitcoin-mainnet-node')
+            expect(budget).to.be.a('number').and.to.be.at.least(300)
+            expect(stubs.stopContainerByName.calledBefore(stubs.forceRemoveContainerByName)).to.be.true
+            // The same budget applies to an operator's `docker stop` / `restart`.
+            const stopTimeoutIdx = args.indexOf('--stop-timeout')
+            expect(stopTimeoutIdx).to.be.greaterThan(-1)
+            expect(args[stopTimeoutIdx + 1]).to.equal(String(budget))
+        })
+
         it('treats an existing symlink at the blocks host path as provisioned (no mkdir)', async function () {
             // Regression: mkdirSync on an existing symlink surfaced a misleading
             // EACCES "failed to create"; ensureHostDir lstats first and skips.
@@ -1128,7 +1150,7 @@ describe('NodeService: installNode()', function () {
                 getLocalModuleVersion:   sinon.stub().resolves('1.0.0'),
                 getContainerModuleVersion: sinon.stub().resolves('1.0.0')
             },
-            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
+            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true), stopContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': {
                 buildDatabaseModule:   sinon.stub().resolves(),
                 setDatabaseParameters: sinon.stub().resolves()
@@ -1179,7 +1201,7 @@ describe('NodeService: installNode()', function () {
             './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true, readSidecarValue: sinon.stub().resolves(undefined), upsertSidecarValues: sinon.stub() },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
-            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
+            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true), stopContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
             './ModuleService': { cloneGit: cloneGitStub, buildAndUp: buildAndUpStub, assertNoHostPortConflicts: sinon.stub().resolves() },
             './BootstrapService': { utxoTrackerVolumeHasData: sinon.stub().resolves(true), ensureBootstrapUtxoTracker: sinon.stub().resolves(), forceBootstrapRequested:     () => false }
@@ -1216,7 +1238,7 @@ describe('NodeService: installNode()', function () {
             './ConfigService':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true, readSidecarValue: sinon.stub().resolves(undefined), upsertSidecarValues: sinon.stub() },
             './StatusService':  { statusChanged: stubs.statusChanged },
             './VersionService': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
-            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true) },
+            './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true), stopContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
             './ModuleService': { cloneGit: sinon.stub().resolves(true), buildAndUp: sinon.stub().resolves('e'.repeat(64)), assertNoHostPortConflicts: sinon.stub().resolves() },
             './BootstrapService': {

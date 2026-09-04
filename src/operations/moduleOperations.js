@@ -25,7 +25,7 @@ const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
-const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
+const { createDockerNetwork, killContainer, removeContainer, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
 const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
@@ -231,17 +231,15 @@ async function updateModulesOnBranch(servicesList, branch = null) {
                 }
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 if (nextModule === NODE_MODULE_NAME) {
-                    // Tear down the existing node container before rebuilding. The node
-                    // branch of installModule calls buildCryptoNode, which `docker run
-                    // --name`s the node but never removes a prior container of that name
-                    // on `update` that collided and crashed (unhandled rejection).
-                    // Remove by NAME so it also clears a leftover Created-state carcass
-                    // the module registry no longer tracks; a no-op on a clean or
-                    // already-missing node. (Done here rather than inside buildCryptoNode
-                    // to keep that hot path, shared with fresh `install`, untouched;
-                    // the node is briefly down during the image rebuild, which an update
-                    // implies anyway.)
-                    await forceRemoveContainerByName(getDockerContainerImageName(NODE_MODULE_NAME, nextCoin, nextNetwork))
+                    // The running node is deliberately left alone here. buildCryptoNode
+                    // stops it gracefully (SIGTERM with a flush budget) and force-removes
+                    // the stopped carcass right before its `docker run --name`, so the
+                    // daemon keeps serving through the download and image build and its
+                    // block index is flushed before it goes. An up-front `docker rm -f`
+                    // at this point was SIGKILL: the killed daemon came back at its last
+                    // flushed index (16 regtest blocks lost, 2026-09-03), and it also
+                    // hid the old container from buildCryptoNode's bind-mount drift guard.
+                    //
                     // Recreate even when the container was missing from the registry:
                     // the old `if (!moduleContainerId) continue` made `update node` a
                     // silent no-op (exit 0, nothing created) once the node had crashed or

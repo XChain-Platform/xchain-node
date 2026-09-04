@@ -28,6 +28,13 @@ const {
 } = require('../config/constants')
 const nodeVersion = process.versions.node
 
+// Shutdown budget for a chain daemon container, in seconds. A daemon flushes
+// its block index and chainstate only on a clean shutdown, and a mainnet
+// bitcoind with a large dbcache can take minutes to do it. `docker stop`
+// returns as soon as the process exits, so a wide budget costs nothing on the
+// common path and only matters when the flush is genuinely slow.
+const NODE_STOP_TIMEOUT_SECONDS = 600
+
 const { gitHubDownloader, db, getRemoteModuleVersions } = require('../state')
 const { decompressTarGz }               = require('../utils/helpers')
 const { cryptoNodesDir }                = require('../config/constants')
@@ -234,7 +241,7 @@ async function getCryptoNode(coin, network, version) {
 
 // Whether the coin's pinned daemon honors `-blocksdir`. Dogecoin Core (v1.14.x)
 // is based on a pre-0.18 Bitcoin Core and silently ignores the flag (added
-// upstream in Bitcoin Core 0.18); Bitcoin (v28) and Litecoin (v0.21) both honor
+// upstream in Bitcoin Core 0.18); Bitcoin (v31) and Litecoin (v0.21) both honor
 // it. For a daemon that ignores it, blocks are relocated by bind-mounting the
 // external path straight onto the in-datadir blocks directory instead.
 function daemonSupportsBlocksdir(coin) {
@@ -420,7 +427,7 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
             // came from exactly this: an env-less rebuild dropped the relocated
             // blocks/txindex mounts, so the daemon restarted over an empty
             // blocks store with a current chainstate.
-            const { forceRemoveContainerByName, getContainerBindMounts } = require('./DockerService')
+            const { forceRemoveContainerByName, getContainerBindMounts, stopContainerByName } = require('./DockerService')
             let existingMounts = []
             try {
                 existingMounts = await getContainerBindMounts(containerPrefix)
@@ -435,6 +442,13 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                     `config/node.local as XCHAIN_NODE_BLOCKS_DIR=<path>, then retry. The existing container was left untouched.`)
                 return
             }
+
+            // Stop the running daemon cleanly BEFORE the force-remove below:
+            // `docker rm -f` is SIGKILL, and a killed daemon restarts at its last
+            // flushed block index. The regtest litecoind rehearsal of the
+            // v0.21.5.6 bump lost 16 mined blocks that way (2026-09-03); a
+            // mainnet node would face a long replay or a corrupt store instead.
+            await stopContainerByName(containerPrefix, NODE_STOP_TIMEOUT_SECONDS)
 
             // Name-keyed cleanup immediately before `docker run --name`, making
             // (re)creation idempotent against a leftover carcass unregistered by
@@ -461,6 +475,10 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 'run', '-d',
                 '--restart', 'unless-stopped',
                 '--name', containerPrefix,
+                // Same shutdown budget for an operator's `docker stop`/`restart`
+                // and for dockerd's own shutdown: the default 10 s is far too
+                // short for a chain daemon to flush.
+                '--stop-timeout', String(NODE_STOP_TIMEOUT_SECONDS),
                 // Cap json-file log growth so a long-running node cannot fill
                 // the host disk, at the same 50m x 4 = 200 MB the module
                 // containers carry (ModuleService.buildAndUp holds the sizing

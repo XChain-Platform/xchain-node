@@ -400,13 +400,16 @@ describe('moduleOperations', function () {
             expect(stubs.buildAndUp.called).to.be.false
         })
 
-        it('tears down the existing node container by name before rebuilding', async function () {
+        it('leaves the running node container to buildCryptoNode instead of force-removing it up front', async function () {
+            // Regression: an up-front `docker rm -f` is SIGKILL, so the daemon
+            // restarted at its last flushed block index (16 regtest blocks lost,
+            // 2026-09-03). buildCryptoNode stops it gracefully and removes the
+            // stopped carcass itself, right before its `docker run`.
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.updateModules({ bitcoin: { mainnet: ['node'] } })
-            // getDockerContainerImageName stub renders as `${coin}-${net}-${mod}`
-            expect(stubs.forceRemoveContainerByName.calledWith('bitcoin-mainnet-node')).to.be.true
-            expect(stubs.forceRemoveContainerByName.calledBefore(stubs.installModule)).to.be.true
+            expect(stubs.forceRemoveContainerByName.called).to.be.false
+            expect(stubs.installModule.calledWith('node', 'bitcoin', 'mainnet', true, null)).to.be.true
         })
 
         it('recreates the node even when its container is missing (no silent no-op)', async function () {

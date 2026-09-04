@@ -14,6 +14,10 @@ function listConfFiles() {
         const dir = path.join(cryptoNodesDir, coin)
         if (!fs.statSync(dir).isDirectory()) continue
         for (const f of fs.readdirSync(dir)) {
+            // The build writes the credential-bearing copy as a gitignored
+            // `<coin>-<network>.generated.conf` sibling (stageBuildScaffold);
+            // only the tracked templates are under test here.
+            if (f.endsWith('.generated.conf')) continue
             if (f.endsWith('.conf')) files.push(path.join(dir, f))
         }
     }
