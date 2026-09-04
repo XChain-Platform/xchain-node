@@ -16,11 +16,16 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const DECODER = 'xchain-decoder'
 const INDEXER = 'xchain-indexer'
+const HUB     = 'xchain-hub'
+
+// The shared hub account every co-located install provisions under its own prefix.
+const HUB_USER = 'xchain_hub'
 
 function load() {
     return proxyquire('../../src/services/DbCredentialDrift', {
         '../config/constants': {
-            XChainService: { XCHAIN_DECODER: DECODER, XCHAIN_INDEXER: INDEXER }
+            XChainService: { XCHAIN_DECODER: DECODER, XCHAIN_INDEXER: INDEXER },
+            HUB_MODULE_NAME: HUB
         },
         './ConfigService': {
             getDockerContainerImageName: (mod, coin, net) => `xchain-node-${coin}-${net}-${mod}`
@@ -31,6 +36,17 @@ function load() {
 // A `docker inspect --format {{json .Config.Env}}` response for one container.
 function inspectStub(envsByName) {
     return sinon.stub().callsFake(async (cmd, args) => {
+        const name = args[args.length - 1]
+        const env = envsByName[name]
+        if (!env) throw new Error('No such container: ' + name)
+        return { stdout: JSON.stringify(Object.keys(env).map(k => `${k}=${env[k]}`)) + '\n' }
+    })
+}
+
+// A docker daemon that answers both `ps` (the name sweep) and `inspect` (the env read).
+function dockerStub(envsByName) {
+    return sinon.stub().callsFake(async (cmd, args) => {
+        if (args[0] === 'ps') return { stdout: Object.keys(envsByName).join('\n') + '\n' }
         const name = args[args.length - 1]
         const env = envsByName[name]
         if (!env) throw new Error('No such container: ' + name)
@@ -263,6 +279,129 @@ describe('DbCredentialDrift', () => {
             // The excluded module shares the account, so recreating only the flagged
             // one converges half the stack and leaves the other half locked out.
             expect(thrown.message).to.contain(`recreate ${INDEXER} ${DECODER}`)
+        })
+    })
+
+    describe('findHubDbCredentialDrift', () => {
+
+        it('flags a sibling install whose hub carries a different shared password', () => {
+            const { findHubDbCredentialDrift } = load()
+            const drift = findHubDbCredentialDrift(
+                { user: HUB_USER, pass: 'hpass' },
+                [
+                    { name: 'xchain-node-xchain-hub',  env: { HUB_DB_USER: HUB_USER, HUB_DB_PASS: 'hpass' } },
+                    { name: 'scratch-clone-xchain-hub', env: { HUB_DB_USER: HUB_USER, HUB_DB_PASS: 'other' } }
+                ]
+            )
+            expect(drift).to.have.length(1)
+            expect(drift[0].container).to.equal('scratch-clone-xchain-hub')
+            expect(drift[0].account).to.equal(HUB_USER)
+        })
+
+        // The indexer points HUB_DB_USER at its OWN account, so its differing
+        // HUB_DB_PASS is not this account's and must not raise a refusal.
+        it('does not flag an indexer whose hub connection uses its own account', () => {
+            const { findHubDbCredentialDrift } = load()
+            const drift = findHubDbCredentialDrift(
+                { user: HUB_USER, pass: 'hpass' },
+                [{
+                    name: 'xchain-node-dogecoin-regtest-xchain-indexer',
+                    env: { HUB_DB_USER: 'xchain_indexer_dogecoin_regtest', HUB_DB_PASS: 'ipass' }
+                }]
+            )
+            expect(drift).to.deep.equal([])
+        })
+
+        it('treats an absent or empty value on either side as no claim', () => {
+            const { findHubDbCredentialDrift } = load()
+            const containers = [
+                { name: 'no-pass',  env: { HUB_DB_USER: HUB_USER } },
+                { name: 'empty',    env: { HUB_DB_USER: HUB_USER, HUB_DB_PASS: '' } },
+                { name: 'no-user',  env: { HUB_DB_PASS: 'other' } }
+            ]
+            expect(findHubDbCredentialDrift({ user: HUB_USER, pass: 'hpass' }, containers)).to.deep.equal([])
+            expect(findHubDbCredentialDrift({ user: HUB_USER }, [
+                { name: 'live', env: { HUB_DB_USER: HUB_USER, HUB_DB_PASS: 'other' } }
+            ])).to.deep.equal([])
+            expect(findHubDbCredentialDrift(null, containers)).to.deep.equal([])
+        })
+    })
+
+    describe('assertNoHubDbCredentialDrift', () => {
+
+        const HUB_CONTAINERS = {
+            'xchain-node-xchain-hub':    { HUB_DB_USER: HUB_USER, HUB_DB_PASS: 'hpass' },
+            'scratch-clone-xchain-hub':  { HUB_DB_USER: HUB_USER, HUB_DB_PASS: 'sibling-secret' },
+            'xchain-node-dogecoin-regtest-xchain-indexer': { HUB_DB_USER: 'xchain_indexer', HUB_DB_PASS: 'ipass' }
+        }
+
+        it('resolves when every holder of the shared account agrees', async () => {
+            const { assertNoHubDbCredentialDrift } = load()
+            const drift = await assertNoHubDbCredentialDrift(
+                { user: HUB_USER, pass: 'hpass' },
+                {
+                    execFileAsync: dockerStub({
+                        'xchain-node-xchain-hub': { HUB_DB_USER: HUB_USER, HUB_DB_PASS: 'hpass' }
+                    }),
+                    env: {}
+                })
+            expect(drift).to.deep.equal([])
+        })
+
+        // The sibling hub runs under another NODE_PREFIX, so a name-derived lookup
+        // would never see it; the daemon sweep is what makes it visible.
+        it('throws a tagged error naming a sibling hub under a different prefix', async () => {
+            const { assertNoHubDbCredentialDrift, DRIFT_ERROR_CODE } = load()
+            let thrown = null
+            try {
+                await assertNoHubDbCredentialDrift(
+                    { user: HUB_USER, pass: 'hpass' },
+                    { execFileAsync: dockerStub(HUB_CONTAINERS), env: {} })
+            } catch (err) { thrown = err }
+            expect(thrown).to.be.an('error')
+            expect(thrown.code).to.equal(DRIFT_ERROR_CODE)
+            expect(thrown.drift).to.have.length(1)
+            expect(thrown.message).to.contain('scratch-clone-xchain-hub')
+            expect(thrown.message).to.contain(`recreate ${HUB}`)
+            // The refusal reaches logs and bug reports, so it may never carry a value.
+            expect(thrown.message).to.not.contain('sibling-secret')
+            expect(thrown.message).to.not.contain('hpass')
+        })
+
+        it('ignores a container the caller is about to replace, and never inspects it', async () => {
+            const { assertNoHubDbCredentialDrift } = load()
+            const docker = dockerStub({
+                'xchain-node-xchain-hub': { HUB_DB_USER: HUB_USER, HUB_DB_PASS: 'stale' }
+            })
+            const drift = await assertNoHubDbCredentialDrift(
+                { user: HUB_USER, pass: 'hpass' },
+                { execFileAsync: docker, env: {}, excludeContainers: ['xchain-node-xchain-hub'] })
+            expect(drift).to.deep.equal([])
+            const inspected = docker.getCalls()
+                .filter(c => c.args[1][0] === 'inspect')
+                .map(c => c.args[1][c.args[1].length - 1])
+            expect(inspected).to.not.contain('xchain-node-xchain-hub')
+        })
+
+        it('treats an unreadable docker daemon as no drift', async () => {
+            const { assertNoHubDbCredentialDrift } = load()
+            const drift = await assertNoHubDbCredentialDrift(
+                { user: HUB_USER, pass: 'hpass' },
+                { execFileAsync: sinon.stub().rejects(new Error('Cannot connect to the Docker daemon')), env: {} })
+            expect(drift).to.deep.equal([])
+        })
+
+        it('proceeds with a warning when the override env is set', async () => {
+            const { assertNoHubDbCredentialDrift, DRIFT_OVERRIDE_ENV } = load()
+            const log = sinon.stub(console, 'log')
+            try {
+                const drift = await assertNoHubDbCredentialDrift(
+                    { user: HUB_USER, pass: 'hpass' },
+                    { execFileAsync: dockerStub(HUB_CONTAINERS), env: { [DRIFT_OVERRIDE_ENV]: '1' } })
+                expect(drift).to.have.length(1)
+            } finally {
+                log.restore()
+            }
         })
     })
 

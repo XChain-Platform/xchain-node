@@ -644,6 +644,30 @@ describe('NodeService: buildCryptoNode()', function () {
         expect(runArgs).to.include('8333:8332')
     })
 
+    // No caller ever passed a version, so the container carried the literal
+    // string CRYPTO_NODE_VERSION=null and nothing anywhere read it
+    // (uuid:1d4208f4). The version answer is /<coin>/__VERSION__.txt.
+    it('bakes no CRYPTO_NODE_VERSION env into the coin-node container', async function () {
+        const stubs = makeNodeServiceStubs()
+        let runArgs = null
+
+        stubs.execFile.callsFake((cmd, args, opts, cb) => {
+            if (args[0] === 'build') return cb(null)
+            if (args[0] === 'run') { runArgs = args; return cb(null, 'f'.repeat(64) + '\n') }
+        })
+
+        const ns = loadNodeService(stubs)
+        await ns.buildCryptoNode('bitcoin', 'mainnet')
+
+        expect(runArgs).to.not.be.null
+        expect(runArgs.some(a => String(a).startsWith('CRYPTO_NODE_VERSION'))).to.be.false
+        expect(runArgs.some(a => String(a).includes('null'))).to.be.false
+        // The image tag still closes the argv, so this is not passing on a
+        // truncated run call.
+        expect(runArgs[runArgs.length - 1]).to.equal('xchain-node-bitcoin-mainnet-node')
+        expect(runArgs[runArgs.length - 2]).to.equal('-t')
+    })
+
     it('aborts before the docker build when a host-port conflict is detected', async function () {
         const stubs = makeNodeServiceStubs()
         stubs.assertNoHostPortConflicts = sinon.stub().rejects(

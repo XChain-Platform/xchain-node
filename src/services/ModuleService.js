@@ -1255,6 +1255,18 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                 }, { excludeModules: [module] })
             }
 
+            // Same ordering rule for the SHARED hub account: setHubDatabaseParameters
+            // runs its guard after buildAndUp has already torn this hub down and back
+            // up, so refuse here while nothing has been touched yet (uuid:a48aab2c).
+            if (module === HUB_MODULE_NAME && !onlyExecution) {
+                const { assertNoHubDbCredentialDrift } = require('./DbCredentialDrift')
+                const hubCfg = await getDefaultConfig(HUB_MODULE_NAME, null, null)
+                await assertNoHubDbCredentialDrift(
+                    { user: hubCfg["HUB_DB_USER"], pass: hubCfg["HUB_DB_PASS"] },
+                    { excludeContainers: [getDockerContainerImageName(HUB_MODULE_NAME, "", "")] }
+                )
+            }
+
             // Under a pinned install the manifest, not the operator's branch
             // argument, decides this module's ref: `install v0.9.0` means the
             // v0.9.0 component set, and the pinned commit is verified after the

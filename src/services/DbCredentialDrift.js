@@ -33,7 +33,7 @@ const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 
-const { XChainService } = require('../config/constants')
+const { XChainService, HUB_MODULE_NAME } = require('../config/constants')
 const { getDockerContainerImageName } = require('./ConfigService')
 
 // Escape hatch for the operator who knows the lagging container is about to be
@@ -54,6 +54,10 @@ const ACCOUNT_CONSUMERS = [
     { module: XChainService.XCHAIN_INDEXER, envKey: 'DECODER_DB_PASS', account: 'decoder' },
     { module: XChainService.XCHAIN_INDEXER, envKey: 'INDEXER_DB_PASS', account: 'indexer' }
 ]
+
+// Env keys by which a container declares the SHARED hub account it authenticates with.
+const HUB_USER_ENV_KEY = 'HUB_DB_USER'
+const HUB_PASS_ENV_KEY = 'HUB_DB_PASS'
 
 /**
  * Compare the passwords a provision is about to write against the passwords the
@@ -117,6 +121,109 @@ function formatDbCredentialDriftError(coin, network, drift, alsoRecreate = []) {
         `\`xchain-node recreate ${modules.join(' ')} ${coin} ${network}\` from the install that owns ` +
         `the stack. Set ${DRIFT_OVERRIDE_ENV}=1 to rotate anyway.`
     )
+}
+
+/**
+ * Compare the SHARED hub password a provision is about to write against the
+ * passwords the running containers already carry. Pure: no docker, no logging.
+ *
+ * @param {{user?: string, pass?: string}} intended  The hub account this install will write.
+ * @param {Array<{name: string, env: Object<string,string>}>} containers Running containers.
+ * @returns {Array<{container: string, envKey: string, account: string}>} One row per lockout.
+ */
+function findHubDbCredentialDrift(intended, containers) {
+    const drift = []
+    const user = intended ? intended.user : undefined
+    const pass = intended ? intended.pass : undefined
+    // Claim nothing when this install names no account or no password for it.
+    if (!user || !pass) return drift
+    for (const container of containers || []) {
+        const env = container.env || {}
+        // Keys on the ACCOUNT, not the module: the indexer points HUB_DB_USER at its
+        // own account, so a module-keyed row false-alarms on it (uuid:a48aab2c).
+        if (env[HUB_USER_ENV_KEY] !== user) continue
+        const live = env[HUB_PASS_ENV_KEY]
+        // Absent on either side is no claim, the same rule findDbCredentialDrift uses.
+        if (live === undefined || live === null || live === '') continue
+        if (live !== pass) {
+            drift.push({ container: container.name, envKey: HUB_PASS_ENV_KEY, account: user })
+        }
+    }
+    return drift
+}
+
+/**
+ * Render the shared-account refusal. The coin/network formatter above would print
+ * blanks here, because the hub is a shared service with neither.
+ *
+ * @param {Array<{container: string, envKey: string, account: string}>} drift
+ * @returns {string}
+ */
+function formatHubDbCredentialDriftError(drift) {
+    const lines = drift.map(d =>
+        `  - ${d.container} carries a ${d.envKey} that differs from this install's config ` +
+        `(shared '${d.account}' account)`
+    )
+    return (
+        `Refusing to rotate the shared hub MariaDB account: a running container was built from a ` +
+        `DIFFERENT config store and would be locked out (ER_ACCESS_DENIED) the moment the password ` +
+        `is written.\n` +
+        lines.join('\n') + '\n' +
+        `Nothing has been changed. Point both installs at one config/hub.local, then run ` +
+        `\`xchain-node recreate ${HUB_MODULE_NAME}\` from the install that owns the stack. ` +
+        `Set ${DRIFT_OVERRIDE_ENV}=1 to rotate anyway.`
+    )
+}
+
+/**
+ * List every running container's name, or [] when docker cannot answer.
+ * Tolerant by design: an unreadable daemon is not drift.
+ *
+ * @param {{execFileAsync?: Function}} [deps]
+ * @returns {Promise<string[]>}
+ */
+async function listRunningContainerNames(deps = {}) {
+    const runDocker = deps.execFileAsync || execFileAsync
+    try {
+        const { stdout } = await runDocker('docker', ['ps', '--format', '{{.Names}}'])
+        return String(stdout).split('\n').map(name => name.trim()).filter(Boolean)
+    } catch {
+        return []
+    }
+}
+
+/**
+ * Fail closed when a running holder of the shared hub account would be locked out
+ * by the password this install is about to write.
+ *
+ * @param {{user?: string, pass?: string}} intended
+ * @param {{execFileAsync?: Function, env?: Object, excludeContainers?: string[]}} [deps]
+ * @returns {Promise<Array>} the drift rows (empty when clean, or when overridden)
+ */
+async function assertNoHubDbCredentialDrift(intended, deps = {}) {
+    const env = deps.env || process.env
+    // Sweeps the whole daemon instead of deriving names: the hub has no coin/network
+    // to derive from, and a co-located install runs its own under another NODE_PREFIX.
+    const exclude = new Set(Array.isArray(deps.excludeContainers) ? deps.excludeContainers : [])
+    const containers = []
+    for (const name of await listRunningContainerNames(deps)) {
+        if (exclude.has(name)) continue
+        const containerEnv = await readContainerEnv(name, deps)
+        if (containerEnv) containers.push({ name, env: containerEnv })
+    }
+
+    const drift = findHubDbCredentialDrift(intended, containers)
+    if (drift.length === 0) return drift
+
+    if (env[DRIFT_OVERRIDE_ENV] === '1') {
+        console.log(formatHubDbCredentialDriftError(drift))
+        console.log(`${DRIFT_OVERRIDE_ENV}=1 is set; rotating anyway.`)
+        return drift
+    }
+    const error = new Error(formatHubDbCredentialDriftError(drift))
+    error.code = DRIFT_ERROR_CODE
+    error.drift = drift
+    throw error
 }
 
 /**
@@ -209,5 +316,9 @@ module.exports = {
     formatDbCredentialDriftError,
     readContainerEnv,
     assertNoDbCredentialDrift,
+    findHubDbCredentialDrift,
+    formatHubDbCredentialDriftError,
+    listRunningContainerNames,
+    assertNoHubDbCredentialDrift,
     isDbCredentialDriftError
 }

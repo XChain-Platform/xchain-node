@@ -125,7 +125,9 @@ function makeStubs(overrides = {}) {
 
 // configValues merges into the getDefaultConfig() result, for tests that need a
 // key the shared default does not carry (e.g. HUB_DB_NAME).
-function loadDatabaseService(stubs, constants = {}, configValues = {}) {
+// configServiceOverrides replaces individual ConfigService exports (getModuleDatabaseName
+// for the identifier-allowlist cases), applied last so it wins over the defaults below.
+function loadDatabaseService(stubs, constants = {}, configValues = {}, configServiceOverrides = {}) {
     const defaultConstants = {
         DB_MODULE_NAME: 'database',
         HUB_MODULE_NAME: 'xchain-hub',
@@ -178,7 +180,8 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}) {
             getDockerContainerImageName: (mod) => 'xchain-node-' + mod,
             getDockerNetwork: (coin, net) => 'xchain-node' + (coin ? '-' + coin : '') + (net ? '-' + net : ''),
             getModuleDatabaseName: (mod, coin, net) => 'XChain_BTC_Mainnet_Decoder',
-            validatePort: require('../../src/services/ConfigService').validatePort
+            validatePort: require('../../src/services/ConfigService').validatePort,
+            ...configServiceOverrides
         },
         './DockerService': {
             getStatusFromContainer: stubs.getStatusFromContainer,
@@ -1127,6 +1130,59 @@ describe('DatabaseService', function () {
             }
         })
 
+        // The fall-through is right, the silence is not: an operator who set the
+        // variable believes it IS the credential in force, so a mid-rotation
+        // divergence has to be named where it happens (uuid:aa6c2267).
+        it('warns, without printing a value, when the env override does not authenticate', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'stale-env-pass'
+            const warned = []
+            const warnStub = sinon.stub(console, 'warn').callsFake((...args) => warned.push(args.join(' ')))
+            try {
+                const stubs = makeStubs()
+                stubs.getDbRootPassword.returns(null)
+                stubs.execFileAsync
+                    .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                    .onCall(1).rejects(new Error('Access denied for user root'))
+                    .onCall(2).resolves({ stdout: 'container-root-pass\n' })
+                    .onCall(3).resolves({ stdout: 'mysqld is alive\n' })
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('container-root-pass')
+                const output = warned.join('\n')
+                expect(output).to.include('XCHAIN_NODE_DB_ROOT_PASSWORD')
+                expect(output).to.include('MYSQL_ROOT_PASSWORD')
+                expect(output).to.not.include('stale-env-pass')
+                expect(output).to.not.include('container-root-pass')
+            } finally {
+                warnStub.restore()
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('stays silent when the env override authenticates', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'env-root-pass'
+            const warned = []
+            const warnStub = sinon.stub(console, 'warn').callsFake((...args) => warned.push(args.join(' ')))
+            try {
+                const stubs = makeStubs()
+                stubs.getDbRootPassword.returns(null)
+                stubs.execFileAsync
+                    .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                    .onCall(1).resolves({ stdout: 'mysqld is alive\n' })
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('env-root-pass')
+                expect(warned.join('\n')).to.not.include('XCHAIN_NODE_DB_ROOT_PASSWORD')
+            } finally {
+                warnStub.restore()
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
         it('reads root password from running container printenv', async function () {
             const stubs = makeStubs()
             stubs.getDbRootPassword.returns(null)
@@ -1729,6 +1785,57 @@ describe('DatabaseService', function () {
             }
             expect(err).to.not.equal(null)
             expect(String(err.message)).to.contain('MariaDB container not found')
+            expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
+
+        // A database name reaches SQL as text, so this destructive site gates it
+        // on the same allowlist every sibling DDL site applies (uuid:0257cadf).
+        // The whole set is asserted before the first DROP, so a bad name on the
+        // SECOND module cannot fire with the first database already gone.
+        it('refuses the docker-mode reset when a derived database name is not a safe identifier', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs, {}, {}, {
+                getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Decoder; DROP DATABASE mysql'
+            })
+            let err = null
+            try {
+                await ds.resetDatabases('bitcoin', 'mainnet')
+            } catch (e) { err = e }
+            expect(err).to.not.equal(null)
+            expect(String(err.message)).to.contain('Unsafe MariaDB database name')
+            expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
+
+        it('refuses the external-DB reset on the second module before the first is dropped', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const queried = []
+            stubs.mariadb.createConnection = sinon.stub().resolves({
+                query: async (sql) => { queried.push(sql); return [] },
+                end: async () => {}
+            })
+            let call = 0
+            const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true }, {}, {
+                // First module resolves clean, second does not: the pre-loop
+                // assertion is what keeps the first DROP from having run.
+                getModuleDatabaseName: () => (++call === 1 ? 'XChain_BTC_Mainnet_Decoder' : 'bad-name')
+            })
+            let err = null
+            try {
+                await ds.resetDatabases('bitcoin', 'mainnet')
+            } catch (e) { err = e }
+            expect(err).to.not.equal(null)
+            expect(String(err.message)).to.contain('Unsafe MariaDB database name')
+            expect(queried.filter(q => String(q).includes('DROP DATABASE'))).to.have.length(0)
             expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
         })
     })

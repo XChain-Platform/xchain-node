@@ -1438,7 +1438,6 @@ module.exports = {
     ensureHubApiKey,
     applyHubApiKeyFromSidecar,
     readHubApiKey,
-    applyHubApiKeyFromSidecar,
     filterCommandParameters,
     resolveArgs
 }

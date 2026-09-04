@@ -26,7 +26,7 @@ const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
 const { createDockerNetwork, killContainer, removeContainer, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
-const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId } = require('../services/DatabaseService')
+const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId, pingExternalDatabase } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
 const { assertRequiredMigrationsApplied } = require('../services/MigrationPreconditionService')
@@ -926,20 +926,31 @@ async function resetModules(service, coin, network, force = false, withIndexer =
         }
     }
 
-    // Fail fast BEFORE any destructive wipe: in docker (non-external) mode a
-    // DB reset needs the MariaDB container, and resetDatabases would otherwise
-    // `docker exec null` and abort mid-reset with node/utxo data already wiped
-    // (the half-reset failure the EXTERNAL_DB branch already guards). Probe here
-    // so nothing is touched when the container is gone (uuid:6f6584dc). It sits
-    // ahead of the stop loop, not after it: this abort returns before the restart
-    // pass, so probing later left every already-stopped service DOWN while still
-    // reporting that no data was touched (uuid:bb190060).
+    // Fail fast BEFORE any destructive wipe: a DB reset needs a working MariaDB,
+    // and resetDatabases is not reached until AFTER the stop loop and every wipe
+    // below, so discovering the problem there half-destroys the stack. In docker
+    // mode the failure is `docker exec null` with the container gone
+    // (uuid:6f6584dc); in EXTERNAL_DB mode it is an unreachable host, or a
+    // getExternalDbConfig throw on a partial env, and NOTHING probed for it
+    // (uuid:41887889). Both modes are probed here. It sits ahead of the stop
+    // loop, not after it: this abort returns before the restart pass, so probing
+    // later left every already-stopped service DOWN while still reporting that
+    // no data was touched (uuid:bb190060).
     const dbResetNeeded = resetDecoder || resetIndexer
-    if (dbResetNeeded && !EXTERNAL_DB) {
-        const dbContainerId = await getDatabaseContainerId()
-        if (!dbContainerId) {
-            console.log('Aborted: MariaDB container not found; install the database first. No data was touched.')
-            return false
+    if (dbResetNeeded) {
+        if (EXTERNAL_DB) {
+            const probe = await pingExternalDatabase()
+            if (!probe.ok) {
+                console.log(`Aborted: cannot reach the external MariaDB at ${probe.host}:${probe.port}`
+                    + ` (${probe.error}). No data was touched.`)
+                return false
+            }
+        } else {
+            const dbContainerId = await getDatabaseContainerId()
+            if (!dbContainerId) {
+                console.log('Aborted: MariaDB container not found; install the database first. No data was touched.')
+                return false
+            }
         }
     }
 

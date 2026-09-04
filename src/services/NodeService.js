@@ -350,7 +350,7 @@ function stageBuildScaffold(coin, network, nodeDir, defaultConfig) {
     return generatedName
 }
 
-async function buildCryptoNode(coin, network, bitcoinVer = null) {
+async function buildCryptoNode(coin, network) {
     const defaultConfig = await getDefaultConfig(NODE_MODULE_NAME, coin, network)
     const defaultExposedPort = defaultConfig["NODE_EXPOSED_PORT"]
     const defaultNodePort = defaultConfig["NODE_PORT"]
@@ -516,7 +516,11 @@ async function buildCryptoNode(coin, network, bitcoinVer = null) {
                 }
                 runArgs.push('-p', `${defaultExposedPort}:${defaultNodePort}`)
             }
-            runArgs.push('-e', `CRYPTO_NODE_VERSION=${bitcoinVer}`, '-t', containerPrefix)
+            // No CRYPTO_NODE_VERSION env: no caller ever supplied a version, so the
+            // key only ever baked the literal "null" into every coin-node container
+            // while nothing read it (uuid:1d4208f4). The daemon version lives in the
+            // image at /<coin>/__VERSION__.txt (VersionService.getContainerNodeVersion).
+            runArgs.push('-t', containerPrefix)
             // Only daemons that honor -blocksdir need a CMD override to pass it.
             // doged relocates via the nested bind-mount above and keeps its
             // default CMD (which already references its conf).

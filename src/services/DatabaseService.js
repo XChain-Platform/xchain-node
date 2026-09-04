@@ -31,7 +31,7 @@ const { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../utils/sql
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort } = require('./ConfigService')
 const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName } = require('./DockerService')
-const { assertNoDbCredentialDrift, isDbCredentialDriftError } = require('./DbCredentialDrift')
+const { assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError } = require('./DbCredentialDrift')
 const { statusChanged }           = require('./StatusService')
 const {
     XCHAIN_NODE_DB, getOsUserDbName, generatePassword,
@@ -254,6 +254,27 @@ async function _pingMariaDb({ host, port, root_user, root_password }) {
     }
 }
 
+// Resolve the external config and prove the server answers, REPORTING failure
+// instead of throwing. A caller standing in front of a destructive section needs
+// to abort cleanly and return; an exception unwinding out of it skips the
+// restart pass and leaves the stack down (uuid:41887889). Swallows the
+// non-interactive throw from getExternalDbConfig for the same reason. Never
+// returns or logs the password.
+async function pingExternalDatabase() {
+    let cfg = null
+    try {
+        cfg = await getExternalDbConfig()
+    } catch (err) {
+        return { ok: false, host: null, port: null, error: (err && err.message) || String(err) }
+    }
+    try {
+        await _pingMariaDb(cfg)
+        return { ok: true, host: cfg.host, port: cfg.port }
+    } catch (err) {
+        return { ok: false, host: cfg.host, port: cfg.port, error: (err && err.message) || String(err) }
+    }
+}
+
 // Read a mariadb client option string the way the client itself reads argv:
 // short flags cluster, so "-BN" means "-B -N". The docker path hands this same
 // string to a real client that clusters (executeDockerMariaDbCommand splits it
@@ -376,6 +397,14 @@ async function askMariadbRootPassword(coin, network) {
                 return envPassword
             }
         } catch { /* fall through to the container-env read / prompt below */ }
+        // Say so when the override loses. The fall-through is correct, but an
+        // operator who set this variable believes it IS the credential in force,
+        // so a silent switch to the container's own password hides exactly the
+        // half-done rotation this resolver exists to survive (uuid:aa6c2267).
+        // Names the variable, never a value: this line reaches logs and CI output.
+        console.warn('WARNING: XCHAIN_NODE_DB_ROOT_PASSWORD did not authenticate against the running '
+            + 'MariaDB container and is being ignored; falling back to the container\'s own '
+            + 'MYSQL_ROOT_PASSWORD. Rotate both sides, or unset the variable.')
     }
 
     // If the mariadb container is already up, its MYSQL_ROOT_PASSWORD env is
@@ -851,11 +880,31 @@ async function setDatabaseParameters() {
 // this only after a successful hub buildAndUp, so the hub exists.
 async function setHubDatabaseParameters() {
     const cfg = await getDefaultConfig(HUB_MODULE_NAME, null, null)
+
+    // Refuse before the ALTER USER when another running container holds this shared
+    // account on a different password: the hub half of the guard above (uuid:a48aab2c).
+    // Excludes this install's own hub, which the caller has just rebuilt on the
+    // intended password, so its frozen value is not a lockout.
+    await assertNoHubDbCredentialDrift(
+        { user: cfg["HUB_DB_USER"], pass: cfg["HUB_DB_PASS"] },
+        { excludeContainers: [getDockerContainerImageName(HUB_MODULE_NAME, "", "")] }
+    )
+
     await addUserPasswordToDatabase(HUB_MODULE_NAME, "", "", cfg["HUB_DB_NAME"], cfg["HUB_DB_USER"], cfg["HUB_DB_PASS"])
     return true
 }
 
 async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]) {
+    // Gate every derived name on the identifier allowlist before the first DROP.
+    // A database name reaches SQL as text (an identifier cannot be bound), which
+    // is why addUserPasswordToDatabase, clearHubPriceIngestWatermark and the
+    // BootstrapHealthGate readers all assert it; this destructive site was the
+    // one that opted out (uuid:0257cadf). Asserted for the whole set up front,
+    // not per iteration: a name refused on the second module would otherwise
+    // throw with the first module's database already dropped.
+    const resetTargets = modules.map(module =>
+        assertSafeDbIdentifier(getModuleDatabaseName(module, coin, network), 'database name'))
+
     // External (host-native) MariaDB: there is no database container to exec
     // into it (`docker exec ... null` failed here and aborted the reset mid-way,
     // leaving data wiped, DBs stale, services stopped). Use the driver-based
@@ -863,8 +912,7 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
     // mariadb CLI, the driver rejects multi-statement strings.
     if (EXTERNAL_DB) {
         const cfg = await getExternalDbConfig()
-        for (const module of modules) {
-            const dbName = getModuleDatabaseName(module, coin, network)
+        for (const dbName of resetTargets) {
             await executeNativeMariaDbCommand(cfg, `DROP DATABASE IF EXISTS ${dbName}`)
             await executeNativeMariaDbCommand(cfg, `CREATE DATABASE ${dbName}`)
             console.log(`Database ${dbName} reset!`)
@@ -886,8 +934,7 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
         throw new Error("MariaDB container not found; install the database first")
     }
 
-    for (const module of modules) {
-        const dbName = getModuleDatabaseName(module, coin, network)
+    for (const dbName of resetTargets) {
         await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
             `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`
         )
@@ -1288,6 +1335,7 @@ module.exports = {
     executeDockerMariaDbCommand,
     executeNativeMariaDbCommand,
     getExternalDbConfig,
+    pingExternalDatabase,
     addUserPasswordToDatabase,
     setDatabaseParameters,
     setHubDatabaseParameters,
