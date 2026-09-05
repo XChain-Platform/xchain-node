@@ -1,5 +1,20 @@
 name: E2E (regtest)
 
+# The RUN title, which is a different string from `name` above and is the one
+# that actually distinguishes runs in the Actions list. Without it every leg of
+# a three-coin matrix renders as the identical "E2E (regtest)" and the only way
+# to tell which chain a run is testing is to open it - which is exactly what you
+# are doing when a release matrix is in flight and you want the one that failed.
+#
+# A dispatch names its coin. A scheduled run covers all three in one run (see the
+# matrix on the job), so it says so rather than naming a coin it is not limited
+# to. The ref is included because the same workflow grades develop, a release
+# branch and a published tag, and "which code" is the second question after
+# "which chain". A suite filter is appended only when one is set, so the common
+# full-suite run stays short.
+run-name: >-
+  E2E ${{ github.event_name == 'schedule' && 'all coins' || inputs.coin }} regtest @ ${{ inputs.ref || 'develop' }}${{ inputs.suite && format(' [{0} only]', inputs.suite) || '' }}
+
 # Cross-component integration gate. Boots the FULL XChain stack on regtest via
 # xchain-node - which clones every service repo at the REF THIS RUN NAMES and
 # runs them as Docker containers - then runs the live xchain-e2e-test suites against it
