@@ -14,7 +14,7 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
-const { modulesUrls, XChainService, DEFAULT_NODE_PREFIX } = require('../../src/config/constants')
+const { modulesUrls, XChainService, DEFAULT_NODE_PREFIX, DEPENDENCY_HEALTH_START_PERIOD } = require('../../src/config/constants')
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -894,6 +894,68 @@ describe('ModuleService', function () {
                 if (saved === undefined) delete process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER
                 else process.env.XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER = saved
             }
+        })
+
+        // A probe that judges a hard dependency's startup must be granted a window at
+        // least as long as the step it judges. These three each judge another
+        // container: the encoder's GET /status 503s until the utxo-tracker is synced,
+        // and the hub's `health` and the explorer's `ping` race a SELECT 1 against
+        // MariaDB. Pins that they cannot drift back one service at a time.
+        describe('dependency-derived healthcheck start periods', function () {
+            // '60s' / '900' / '2m' / '1500ms' all reach docker; compare in seconds.
+            function startPeriodSeconds(args) {
+                const i = args.indexOf('--health-start-period')
+                expect(i, 'no --health-start-period in the emitted args').to.be.greaterThan(-1)
+                const raw = String(args[i + 1])
+                const m = /^(\d+)(ms|s|m|h)?$/.exec(raw)
+                expect(m, 'unparsable start period ' + JSON.stringify(raw)).to.not.equal(null)
+                const n = parseInt(m[1], 10)
+                const unit = m[2] || 's'
+                return unit === 'ms' ? n / 1000 : unit === 'm' ? n * 60 : unit === 'h' ? n * 3600 : n
+            }
+
+            // Env overrides are per service and would mask the descriptor defaults
+            // these cases are about, so clear the four in play and restore after.
+            const overrideKeys = [
+                'XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_ENCODER',
+                'XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER',
+                'XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_HUB',
+                'XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_EXPLORER'
+            ]
+            let savedOverrides = {}
+            beforeEach(function () {
+                savedOverrides = {}
+                for (const key of overrideKeys) {
+                    savedOverrides[key] = process.env[key]
+                    delete process.env[key]
+                }
+            })
+            afterEach(function () {
+                for (const key of overrideKeys) {
+                    if (savedOverrides[key] === undefined) delete process.env[key]
+                    else process.env[key] = savedOverrides[key]
+                }
+            })
+
+            it('grants the encoder a window at least as long as the utxo-tracker it probes', function () {
+                const ms = loadModuleService(makeStubs())
+                const encoder = ms.buildHealthcheckArgs('xchain-encoder', { ENCODER_API_PORT: '3003' })
+                const tracker = ms.buildHealthcheckArgs('xchain-utxo-tracker', { UTXO_TRACKER_API_PORT: '3001' })
+                expect(startPeriodSeconds(encoder),
+                    'the encoder probes GET /status, which 503s until the tracker is synced'
+                ).to.be.at.least(startPeriodSeconds(tracker))
+            })
+
+            it('grants the hub and the explorer at least the DB start period their probes SELECT 1 against', function () {
+                const ms = loadModuleService(makeStubs())
+                const dbSeconds = startPeriodSeconds(['--health-start-period', DEPENDENCY_HEALTH_START_PERIOD])
+                const hub = ms.buildHealthcheckArgs('xchain-hub', { HUB_PORT: '10000' })
+                const explorer = ms.buildHealthcheckArgs('xchain-explorer', { EXPLORER_API_PORT_HTTP: '80' })
+                expect(startPeriodSeconds(hub), 'hub `health` 503s while MariaDB is still initializing')
+                    .to.be.at.least(dbSeconds)
+                expect(startPeriodSeconds(explorer), 'explorer `ping` 503s while MariaDB is still initializing')
+                    .to.be.at.least(dbSeconds)
+            })
         })
 
         it('returns [] with no warning for a module that has no healthcheck descriptor', function () {

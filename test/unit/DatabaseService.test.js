@@ -141,6 +141,12 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}, configSer
         EXTERNAL_DB_HOST: '127.0.0.1',
         EXTERNAL_DB_PORT: 3306,
         EXTERNAL_DB_ROOT_USER: 'root',
+        // The DB container's own --health-start-period, shared with the hub and
+        // explorer healthcheck descriptors whose probes SELECT 1 against it. Read
+        // from the real module rather than restated here: this stub is noCallThru,
+        // so a name missing from it reaches buildDatabaseModule as undefined and
+        // lands in the docker run args as an undefined element.
+        DEPENDENCY_HEALTH_START_PERIOD: require('../../src/config/constants').DEPENDENCY_HEALTH_START_PERIOD,
         ...constants
     }
 
@@ -551,6 +557,15 @@ describe('DatabaseService', function () {
             expect(String(runArgs[cmdIdx + 1])).to.include('healthcheck.sh')
             expect(runArgs).to.include('--health-interval')
             expect(runArgs).to.include('--health-start-period')
+            // The DB side of the cross-file window invariant: the hub and explorer
+            // descriptors take the same constant because their probes SELECT 1 against
+            // THIS container. Pin the emitted value, not just the flag, because no
+            // other guard reads this arg and a literal put back here would drift alone.
+            const spIdx = runArgs.indexOf('--health-start-period')
+            expect(String(runArgs[spIdx + 1]),
+                'the DB start period must stay DEPENDENCY_HEALTH_START_PERIOD: the hub and ' +
+                'explorer windows are derived from it and would silently go narrow'
+            ).to.equal(require('../../src/config/constants').DEPENDENCY_HEALTH_START_PERIOD)
         })
 
         // The probe is visibility ONLY. AutohealService restarts a container only

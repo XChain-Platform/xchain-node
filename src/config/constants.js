@@ -32,6 +32,13 @@ const SEP                    = "-"
 const DB_SEP                 = "_"
 const HUB_PORT               = 10000
 
+// Docker healthcheck grace for a container whose probe judges a HARD DEPENDENCY's
+// startup, not its own boot. Both such steps are 60s: MariaDB's server init and
+// the utxo-tracker's first sync. Such a probe must be granted a window at least
+// as long as the step it judges, or it reports that startup as a failure, so
+// every dependent window derives from this one name and follows when it is raised.
+const DEPENDENCY_HEALTH_START_PERIOD = '60s'
+
 // External (host-native) MariaDB mode. When XCHAIN_NODE_EXTERNAL_DB=1, the
 // CLI skips provisioning its own dockerized MariaDB and instead expects a
 // reachable MariaDB at the configured host/port. All managed services
@@ -364,6 +371,7 @@ module.exports = {
     SEP,
     DB_SEP,
     HUB_PORT,
+    DEPENDENCY_HEALTH_START_PERIOD,
     EXTERNAL_DB,
     EXTERNAL_DB_HOST,
     EXTERNAL_DB_PORT,

@@ -77,9 +77,9 @@ function loadGate({ external = false, nativeResolves = null } = {}) {
 // so each test states only what it changes.
 function makeRunner({
     inspect = healthyInspect(),
-    // A real decoder publishes reorg_halt_checked_at beside reorg_halted (both shipped
-    // in the same commit), and only a decoder that never completed a marker probe
-    // leaves it null. The fixture said "not halted" without ever having looked.
+    // Models the rich JSON-RPC `health` payload, the first surface probeServiceStatus
+    // tries; it publishes reorg_halt_checked_at beside reorg_halted. A null
+    // timestamp means no marker probe ever completed, so it is not a "not halted".
     status  = { status: 'healthy', lag_blocks: 0, reorg_halted: false, reorg_halt_checked_at: 1756000000000 },
     tables  = '1\t1',
     reorgHaltRows = '0',

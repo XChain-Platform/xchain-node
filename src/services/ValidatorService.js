@@ -1048,24 +1048,18 @@ module.exports = {
     readWallets,
     publicWalletInfo,
     getSignerMountDir,
-    ensureSignerModulesMountpoint,
-    fillPublisherConfig,
     promptSecret,
     loadSdk,
     COIN_NETWORKS,
-    PUBLIC_ENCODER_BASE,
     CAPS_CONTAINER_PATH,
     CAPS_CONTAINER_DIR,
-    CAPS_DIR,
     VALIDATOR_DIR,
     WALLETS_FILE,
-    SIGNER_DIR,
     SIGNER_CONTAINER_DIR,
     // Roll-call status reporting (`validator status`).
     getRollcallStatus,
     getActiveSignerFile,
     signerModuleExportsBroadcast,
     rollcallAbsenceStreak,
-    rollcallEpochBlocks,
-    ROLLCALL_DOGE_COST_PER_CALL
+    rollcallEpochBlocks
 }

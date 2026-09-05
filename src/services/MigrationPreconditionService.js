@@ -395,13 +395,11 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
 module.exports = {
     MIGRATION_BEARING_MODULES,
     SKIP_ENV,
-    LEDGER_TABLE,
     migrationDeclaresDeployPrecondition,
     migrationMode,
     listDeployPreconditionMigrations,
     pendingManualMigrations,
     runningBuildSupportsPerFileMigrations,
-    refusalMessage,
     // Exported for the unit suite: the refusal path hinges on an unreachable
     // database returning `unreadable` rather than throwing past the guard, and
     // that is a property of the real driver call, not of a stub.

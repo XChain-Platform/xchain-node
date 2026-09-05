@@ -311,14 +311,11 @@ function isDbCredentialDriftError(err) {
 module.exports = {
     DRIFT_OVERRIDE_ENV,
     DRIFT_ERROR_CODE,
-    ACCOUNT_CONSUMERS,
     findDbCredentialDrift,
     formatDbCredentialDriftError,
     readContainerEnv,
     assertNoDbCredentialDrift,
     findHubDbCredentialDrift,
-    formatHubDbCredentialDriftError,
-    listRunningContainerNames,
     assertNoHubDbCredentialDrift,
     isDbCredentialDriftError
 }

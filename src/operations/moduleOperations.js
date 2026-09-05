@@ -1168,6 +1168,5 @@ module.exports = {
     execModules,
     shellModule,
     runE2ETest,
-    resetModules,
-    resolveNodeDataPath
+    resetModules
 }

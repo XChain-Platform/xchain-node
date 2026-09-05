@@ -340,9 +340,7 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
 module.exports = {
     runAutoheal,
     getUnhealthySinceMs,
-    getStateFilePath,
     restartBackoffMs,
-    DEFAULT_GRACE_MS,
     DEFAULT_COOLDOWN_MS,
     DEFAULT_COOLDOWN_CEILING_MS
 }

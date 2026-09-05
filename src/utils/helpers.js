@@ -125,6 +125,5 @@ module.exports = {
     stringToNetwork,
     decompressTarGz,
     assertSafeArchiveMemberNames,
-    assertSafeTarGzMembers,
     redactSecrets
 }

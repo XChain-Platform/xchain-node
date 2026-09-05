@@ -23,7 +23,8 @@ const { Password, Input, NumberPrompt } = require('enquirer')
 
 const {
     DB_MODULE_NAME, HUB_MODULE_NAME, XChainService, SEP, CoinTickerSymbol,
-    EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER
+    EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER,
+    DEPENDENCY_HEALTH_START_PERIOD
 } = require('../config/constants')
 const { db, getDbRootPassword, setDbRootPassword } = require('../state')
 const { sleep, redactSecrets }    = require('../utils/helpers')
@@ -1070,7 +1071,12 @@ async function buildDatabaseModule(coin, network) {
         // not enrolled in autoheal: the DB has no SERVICE_HEALTHCHECK descriptor,
         // so AutohealService's `hc.autoheal !== true` gate skips it outright.
         runArgs.push('--health-cmd', 'healthcheck.sh --connect --innodb_initialized')
-        runArgs.push('--health-interval', '15s', '--health-timeout', '5s', '--health-retries', '5', '--health-start-period', '60s')
+        // The start period is DEPENDENCY_HEALTH_START_PERIOD, shared with the hub and
+        // explorer descriptors in ModuleService whose probes SELECT 1 against this
+        // container: their grace windows are derived from this one, so widening
+        // MariaDB's server-init budget widens theirs in the same edit instead of
+        // leaving them judging a DB that is still starting.
+        runArgs.push('--health-interval', '15s', '--health-timeout', '5s', '--health-retries', '5', '--health-start-period', DEPENDENCY_HEALTH_START_PERIOD)
         runArgs.push('--network', getDockerNetwork(coin, network))
         const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
         // Every other docker run port in this file is validated before reaching

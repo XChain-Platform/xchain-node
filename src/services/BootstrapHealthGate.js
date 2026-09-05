@@ -176,10 +176,18 @@ function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}
     // marker probe is fail-soft on purpose (a DB blip keeps the last known state),
     // and that state starts at false with checked_at null, so a decoder that has
     // NEVER completed a probe publishes exactly what a clean one publishes. Keyed on
-    // OWNING reorg_halted: the boolean and its timestamp shipped in the same decoder
-    // commit, so a payload carrying one always carries the other, and an image
-    // publishing neither is unaffected. The indexer's decoderReorgHalted has no
-    // companion timestamp yet; extend this to it when the indexer publishes one.
+    // OWNING reorg_halted, and the pairing is per SURFACE rather than per image: the
+    // decoder's JSON-RPC `health` result has always carried the timestamp, its GET
+    // /status body did not until the field was added there (xchain-decoder
+    // src/api.js), and its /live body still publishes the boolean alone. Only the
+    // first two are probed here (see probeServiceStatus, which tries JSON-RPC `health`
+    // then GET /status and nothing else), so an image predating that /status field is
+    // refused by this leg on the fallback path. That is the intended fail-closed
+    // direction and costs nothing today, because such a body carries no lag field
+    // either and the lag leg below already refuses it. Do not restate this as "one
+    // field implies the other": that claim was false for the /status fallback for as
+    // long as it stood here. The indexer's decoderReorgHalted has no companion
+    // timestamp yet; extend this to it when the indexer publishes one.
     if (Object.prototype.hasOwnProperty.call(payload, 'reorg_halted')
         && (payload.reorg_halt_checked_at === null || payload.reorg_halt_checked_at === undefined))
         reasons.push('the decoder has never completed a REORG_HALT marker probe (reorg_halt_checked_at is ' +
@@ -520,9 +528,5 @@ module.exports = {
     BootstrapSourceUnhealthyError,
     // Exported for tests / reuse
     evaluateContainerState,
-    evaluateStatusPayload,
-    probeServiceStatus,
-    readHaltMarkers,
-    CRASH_LOOP_UPTIME_MS,
-    DEFAULT_MAX_LAG_BLOCKS
+    evaluateStatusPayload
 }

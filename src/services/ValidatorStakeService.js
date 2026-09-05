@@ -522,6 +522,5 @@ async function stakeValidator(opts = {}, deps = {}) {
 }
 
 module.exports = {
-    stakeValidator, unstakeValidator, planMints, readChainState, stakeTiming,
-    DEFAULT_STAKE_AMOUNT, STAKE_TICK
+    stakeValidator, unstakeValidator, planMints, stakeTiming
 }

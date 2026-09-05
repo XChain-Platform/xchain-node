@@ -24,7 +24,7 @@ const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     XChainService, SEP, modulesUrls, LIBRARY_BUNDLES, SERVICE_REGISTRY, DEFAULT_MODULE_BRANCH,
-    Coin, Network
+    Coin, Network, DEPENDENCY_HEALTH_START_PERIOD
 } = require('../config/constants')
 const { db }                = require('../state')
 const {
@@ -533,15 +533,28 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 //   interval=15s  - frequent enough to detect a stuck service quickly without hammering
 //   timeout=5s    - generous but short of the interval; covers a slow DB query
 //   retries=3     - three misses (~45s) before marking unhealthy; avoids flapping
-//   startPeriod=  - varies: fast workers (encoder) get 30s; DB-dependent services
-//                   (decoder, indexer, utxo-tracker, miner) get 60s; hub/explorer get
-//                   45s; sync gets its own hub-wait window, see its line below. A
-//                   service whose probe judges a startup step must grant a window
-//                   at least as long as that step, or the probe reports the startup
-//                   itself as a failure.
+//   startPeriod=  - NOT sized from the service's own boot time. A service whose
+//                   probe judges a startup step must grant a window at least as
+//                   long as that step, or the probe reports the startup itself as
+//                   a failure, so every entry whose probe cannot pass until a HARD
+//                   DEPENDENCY is up takes DEPENDENCY_HEALTH_START_PERIOD (60s,
+//                   config/constants.js) rather than a number of its own: encoder
+//                   (its default /status 503s until the utxo-tracker is reachable
+//                   and synced), hub and explorer (their probes run SELECT 1 against
+//                   MariaDB). Self-judging boots keep their own literal: decoder
+//                   (/live), indexer, utxo-tracker and miner all take 60s for their
+//                   own DB connect or wallet prep, and sync gets its own hub-wait
+//                   window, see its line below.
 const SERVICE_HEALTHCHECK = {
     [XChainService.XCHAIN_DECODER]:       { portKey: 'DECODER_API_PORT',       probe: 'http_get',     path: '/live', interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
-    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '30s', autoheal: true },
+    // The encoder carries no `path`, so its probe is the default GET /status, and
+    // that route 503s until the utxo-tracker is reachable AND synced
+    // (xchain-encoder/src/api.js, getServeReadiness). Its window therefore has to
+    // cover the TRACKER's startup, not the encoder's own fast boot: at the former
+    // 30s a simultaneous cold start had the encoder's grace expiring while the
+    // tracker was still inside the 60s window it declares one line below, and this
+    // is the one autoheal: true service whose probe judges another container.
+    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD, autoheal: true },
     [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
     [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
     // The miner's API is JSON-RPC only (no GET /status route); an http_get probe 500s
@@ -556,8 +569,11 @@ const SERVICE_HEALTHCHECK = {
     // hub that had stopped producing usable consensus data read healthy through the
     // narrow probe. Deliberately no autoheal: oracle staleness is usually
     // upstream, where a restart flaps the container and disrupts in-flight rounds.
-    [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
-    [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: '45s' },
+    // Both this and the explorer's probe race a SELECT 1 against MariaDB and 503
+    // when it loses, so both windows cover the DB container's own 60s start period
+    // rather than the 45s each was given from its own boot time.
+    [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
+    [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
     // sync's startPeriod covers MAX_HUB_WAIT_MS (xchain-sync/src/config.js, default
     // 300000ms), not just process boot: /health answers 503 'starting' for the
     // whole hub wait instead of reporting healthy with zero pollers running, and

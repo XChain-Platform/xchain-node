@@ -189,10 +189,5 @@ async function maybeReportTelemetry(commandName, cliOptOut) {
 
 module.exports = {
     maybeReportTelemetry,
-    isOptedOut,
-    eventForCommand,
-    gatherPayload,
-    getPrefPath,
-    loadPref,
-    savePref
+    gatherPayload
 }

@@ -207,7 +207,6 @@ module.exports = {
     readContainerFile,
     getGithubProjectVersion,
     checkRemoteNodeVersion,
-    getRemoteModuleVersion,
     checkAllRemoteVersions,
     getLocalNodeVersion,
     getContainerNodeVersion,
