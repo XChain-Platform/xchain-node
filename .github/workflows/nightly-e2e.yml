@@ -28,12 +28,23 @@ name: E2E (regtest)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  # Manual / on-demand gate. The nightly schedule is intentionally DISABLED while the
-  # sub-repos are PRIVATE - a scheduled run would fail at the first private clone and
-  # spam nightly failures. Re-enable it once the repos are public per the launch plan
-  # (anonymous HTTPS clones just work then, and no SUBREPO_CLONE_TOKEN is needed):
-  #   schedule:
-  #     - cron: '0 7 * * *'    # 07:00 UTC nightly
+  # Nightly gate, RE-ENABLED 2026-09-05. It was disabled only because the sub-repos
+  # were PRIVATE and a scheduled run would fail at the first clone; they are public
+  # now, so anonymous HTTPS clones work and no SUBREPO_CLONE_TOKEN is needed.
+  #
+  # WHY A NIGHTLY IS WORTH ITS RUNNER TIME. This gate is the only thing that
+  # exercises consensus and money movement end to end, and a full pass is ~1h50m,
+  # so a release cut that meets it for the first time discovers a whole train's
+  # worth of breakage against a two-hour clock and has to restart it. Running the
+  # same pass every night against develop moves that discovery to a day when
+  # nobody is waiting. The v0.15.0 cut is the worked example: at cut time the last
+  # matrix evidence was three days old AND had been taken against master, so the
+  # entire attestation-mirror and roll-call surface had never once met this gate.
+  #
+  # Hosted minutes are free on a public repo, so the cost of the nightly is zero
+  # and the cost of not having it is a restarted release.
+  schedule:
+    - cron: '0 7 * * *'    # 07:00 UTC nightly, against the `ref` default below
   #
   # NOTE for whoever re-enables the cron: a scheduled workflow runs from the
   # DEFAULT branch's file, so once develop is the default the nightly boots
@@ -107,6 +118,17 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    # WHY THE COIN LIST IS EVENT-DEPENDENT. A scheduled run carries NO inputs, so
+    # without this it would silently test bitcoin alone and the nightly would be
+    # two thirds blind: the litecoin and dogecoin legs are where the chain-specific
+    # breakage actually lands. A dispatch keeps exactly its old behaviour, one
+    # chosen coin, because a subset proves a fix and must not pretend to be a train.
+    # The three legs are independent stacks, so fail-fast would throw away two
+    # answers to report one; a release needs all three verdicts, not the first.
+    strategy:
+      fail-fast: false
+      matrix:
+        coin: ${{ fromJSON(github.event_name == 'schedule' && '["bitcoin","litecoin","dogecoin"]' || format('["{0}"]', github.event.inputs.coin || 'bitcoin')) }}
     # A BTC full action suite alone runs ~1h50m of wall clock, and the security
     # and performance suites are sequenced AFTER it, so at 120 the two of them
     # shared whatever minutes the action suite happened to leave - usually none.
@@ -126,7 +148,7 @@ jobs:
     # legitimately long pass.
     timeout-minutes: 360
     env:
-      COIN: ${{ github.event.inputs.coin || 'bitcoin' }}
+      COIN: ${{ matrix.coin }}
       # Drives BOTH the xchain-node checkout below and the `install` boot
       # argument, so the CLI running the install is the same version as the
       # stack it installs. Splitting those two was how "we tested the release"
