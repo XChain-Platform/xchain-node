@@ -193,18 +193,47 @@ jobs:
       # shorter attempt trades away no safety at all, only the cost of a failure.
       #
       # It is here because the grace above fixed the barrier that could never be
-      # satisfied, and revealed one that legitimately can not be yet: on this
-      # venue the hub mirror runs a minute or two behind a chain that mines in
-      # seconds, so blocks defer for real. Measured at the 60s default on
-      # 2026-09-06: 119 deferrals cost 119 minutes of a 289-minute bitcoin leg,
-      # 41% of the wall clock, and the indexer fell far enough behind that thirty
-      # e2e waits gave up on rows that simply had not landed. Ten seconds keeps
-      # the barrier honest while making a deferral cost a tenth as much.
+      # satisfied, and revealed a second cost behind it. Measured at the 60s
+      # default on 2026-09-06: 119 deferrals cost 119 minutes of a 289-minute
+      # bitcoin leg, 41% of the wall clock. Ten seconds keeps the barrier honest
+      # while making a deferral cost a tenth as much.
+      #
+      # CORRECTION, measured 2026-09-06 off run 34015867460's own artifact: those
+      # 119 deferrals were NOT a lagging mirror. They all name the SAME block, and
+      # the stream watermark tracked wall clock throughout (1-6s behind, advancing
+      # at 0.9999 of real time) while the hub logged no late heartbeat and no
+      # backpressure close. The block was future-stamped by the COINPay clock jump
+      # (see XCHAIN_COINPAY_EXPIRATION_S below), so the barrier was waiting on real
+      # time, not on delivery. This knob therefore makes a failed attempt cheaper
+      # but recovers no wall clock on its own; the window below is what does.
       #
       # NOT a consensus input, unlike the grace, so it carries no fork risk - but
       # it is still passed through on regtest only, because a shared ledger wants
       # the long attempt: there a lagging mirror is a fault worth waiting on.
       HUB_PRICE_SYNC_TIMEOUT_MS: "10000"
+      # COINPay obligation expiration window, in seconds. The shared-ledger value is
+      # 7200 (two hours), which no e2e suite can wait out, so the COINPay expiry case
+      # freezes the node clock past the deadline and mines. That stamps the mined
+      # blocks two hours into the FUTURE, and the anchor-attest barrier above compares
+      # a block's own timestamp against a wall-clock watermark: the indexer then waits
+      # those two hours in REAL time on that one block, with every other block behind
+      # it deferred.
+      #
+      # Measured on run 34015867460 (bitcoin, 2026-09-06): blocks 516 and 517 were
+      # mined at 07:08:10Z and stamped 09:18:01Z, and the indexer deferred block 516
+      # 119 times over 2h08m50s. That single stall is 44% of the 289-minute leg and is
+      # the reason thirty downstream waits gave up. Nothing was lagging.
+      #
+      # 300s, not seconds: the case still has to assert the obligation is PENDING
+      # before it expires it, and a window shorter than that setup window would expire
+      # the obligation underneath the assertion and make the case flaky in the other
+      # direction. 300 leaves the clock jump at about five minutes instead of 2h10m.
+      #
+      # Consensus input, so the indexer accepts it ONLY on regtest and ignores it with
+      # a warning anywhere else (resolveCoinpayExpiration); the node's passthrough is
+      # gated on regtest a second time. Neither gate alone can carry it onto a shared
+      # ledger, which is what makes a venue-local window safe to set at all.
+      XCHAIN_COINPAY_EXPIRATION_S: "300"
       # Drives BOTH the xchain-node checkout below and the `install` boot
       # argument, so the CLI running the install is the same version as the
       # stack it installs. Splitting those two was how "we tested the release"

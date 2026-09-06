@@ -631,10 +631,32 @@ async function getDefaultConfig(module, coin, network) {
             //    Gated on regtest anyway, because a shared ledger wants the long
             //    attempt: there a lagging mirror is a real fault worth waiting on, not
             //    a cadence mismatch.
+            // 5. XCHAIN_COINPAY_EXPIRATION_S, on REGTEST ONLY, for the same reason as (2)
+            //    and (3) and with the same two independent gates: the indexer's own
+            //    resolveCoinpayExpiration IGNORES it off regtest with a warning, because
+            //    the window is added to a match's BLOCK_TIME and STORED as the
+            //    obligation's deadline, so a per-node value expires the same escrow at
+            //    different blocks and forks the ledger.
+            //
+            //    WHY A REGTEST VENUE NEEDS IT. The e2e COINPay expiry case cannot wait out
+            //    a two-hour deadline, so it freezes the node clock past the deadline and
+            //    mines. That stamps the mined blocks two hours into the FUTURE, and the
+            //    anchor-attest barrier in (3) compares a block's own timestamp against a
+            //    wall-clock watermark, so the indexer then waits those two hours in real
+            //    time on that one block.
+            //
+            //    MEASURED, on the 2026-09-06 release matrix run 34015867460: all 119
+            //    deferrals in the BTC leg named the SAME block, held 2h08m50s, while the
+            //    watermark tracked wall clock throughout (1-6s behind, advancing at 0.9999
+            //    of real time) and the hub logged no late heartbeat and no backpressure.
+            //    Nothing was lagging. Shortening the window on regtest removes the clock
+            //    jump that causes it, rather than teaching every barrier to special-case a
+            //    future-stamped block.
             const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
             if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
                                                                           "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
-                                                                          "HUB_PRICE_SYNC_TIMEOUT_MS")
+                                                                          "HUB_PRICE_SYNC_TIMEOUT_MS",
+                                                                          "XCHAIN_COINPAY_EXPIRATION_S")
             for (const varName of rollcallPassthroughVars) {
                 if (process.env[varName] !== undefined && process.env[varName] !== "") {
                     defaultValues[varName] = process.env[varName]
