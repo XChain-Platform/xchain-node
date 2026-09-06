@@ -5,17 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-- `ENCODER_TRUST_PROXY`, `ENCODER_RATE_LIMIT_RPM`, and five explorer per-route rate-limit knobs now pass through from the host env, so a container recreate no longer drops them.
-## [0.15.0] - 2026-09-04
+## [0.15.0] - 2026-09-07
 
 ### Added
 - The indexer's hub mirror is armed on regtest, and the attest response, roll-call rail and oracle batch landing-reserve knobs pass through to the hub and indexer.
 - A private explorer can set its own serving limits.
 - A reindex forces a bootstrap republish.
 - The tracker volume is snapshotted by hardlink and an encoder maintenance window is declared around it.
+- `ENCODER_TRUST_PROXY`, `ENCODER_RATE_LIMIT_RPM`, and five explorer per-route rate-limit knobs now pass through from the host env, so a container recreate no longer drops them.
 
 ### Fixed
 - A chain daemon is stopped gracefully on update and its release tree is staged before the swap.
