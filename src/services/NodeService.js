@@ -638,8 +638,12 @@ async function installNode(coin, network) {
     console.log("Downloading xchain-utxo-tracker...")
     await cloneGit(XChainService.XCHAIN_UTXO_TRACKER, true)
     console.log("Building xchain-utxo-tracker...")
-    const { utxoTrackerVolumeHasData, ensureBootstrapUtxoTracker, forceBootstrapRequested } = require('./BootstrapService')
-    const utxoWasFresh = !(await utxoTrackerVolumeHasData(coin, network)) || forceBootstrapRequested()
+    // Only a CONFIRMED empty volume authorises the restore below; an inspection
+    // that failed is not evidence of emptiness (uuid:7037604f).
+    const { utxoTrackerVolumeFreshness, ensureBootstrapUtxoTracker, forceBootstrapRequested,
+        FRESHNESS_EMPTY } = require('./BootstrapService')
+    const utxoWasFresh = (await utxoTrackerVolumeFreshness(coin, network)) === FRESHNESS_EMPTY
+        || forceBootstrapRequested()
     await buildAndUp(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     if (utxoWasFresh) await ensureBootstrapUtxoTracker(coin, network)
 

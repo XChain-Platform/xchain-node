@@ -861,6 +861,94 @@ describe('ValidatorService', function () {
             expect(signer.args[1]).to.include('async broadcast(payload)')
         })
 
+        // The emitted signer runs both phases of the P2SH encoding, and phase 1 puts
+        // real DOGE on chain. A failure after that point must not reach the hub looking
+        // like a clean pre-send failure: the hub would requeue, re-enter broadcast(),
+        // run createTx over fresh UTXOs and fund the same payload a second time. So the
+        // template is driven for real here rather than grepped, with the SDK stubbed.
+        describe('the emitted signer marks post-funding failures', function () {
+            const vm     = require('vm')
+            const PHASE1 = 'f'.repeat(64)
+
+            // Compile the written template and hand it a stub SDK, so the two-phase
+            // pipeline can be exercised without a key, an encoder or a network.
+            function loadEmittedSigner(source, encoder) {
+                const mod = { exports: {} }
+                vm.runInNewContext(source, {
+                    require: (id) => {
+                        if (id === 'path')   return path
+                        if (id === 'dotenv') return { config: () => ({}) }
+                        if (id === '@dankest-llc/xchain-sdk') return { XChainSDK: function () {
+                            this._requireEncoder = () => encoder
+                            this.wallet = {
+                                signPsbt:       () => ({ txHex: 'hex-1', txid: PHASE1 }),
+                                signRevealPsbt: () => ({ txHex: 'hex-2', txid: 'e'.repeat(64) })
+                            }
+                        } }
+                        throw new Error('unexpected require in the emitted signer: ' + id)
+                    },
+                    module: mod, exports: mod.exports, __dirname: FAKE_SIGNER_DIR, console,
+                    process: { env: {
+                        DOGE_NETWORK:     'dogecoin-testnet',
+                        DOGE_WIF:         'test-wif',
+                        DOGE_ADDRESS:     'test-address',
+                        DOGE_ENCODER_URL: 'http://encoder.invalid'
+                    } },
+                    Number, String, Error, Promise, Object
+                }, { filename: 'signer.js' })
+                return mod.exports
+            }
+
+            async function emitSigner() {
+                const fs = makeFs()
+                const vs = loadValidatorService(fs)
+                await vs.initValidator({ network: 'testnet' })
+                return fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_SIGNER_FILE).args[1]
+            }
+
+            function stubEncoder(overrides) {
+                return Object.assign({
+                    createTx:    async () => ({ psbt: 'psbt-1', encoding: 'P2SH' }),
+                    broadcastTx: async () => ({ txid: PHASE1 }),
+                    spendP2sh:   async () => ({ psbt: 'psbt-2' })
+                }, overrides || {})
+            }
+
+            it('is valid JavaScript once the template literal is expanded', async function () {
+                const source = await emitSigner()
+                expect(() => new vm.Script(source, { filename: 'signer.js' })).to.not.throw()
+            })
+
+            it('tags a definitive phase-2 rejection with fundsCommitted and the phase-1 txid', async function () {
+                const signer = loadEmittedSigner(await emitSigner(), stubEncoder({
+                    spendP2sh: async () => { throw new Error('Encoder RPC error: bad-txns-inputs-missingorspent') }
+                }))
+                let caught = null
+                try { await signer.broadcast('wire') } catch (e) { caught = e }
+                expect(caught).to.exist
+                expect(caught.fundsCommitted).to.equal(true)
+                expect(caught.phase1Txid).to.equal(PHASE1)
+                // The SAME object is rethrown: the hub classifies on message and response.
+                expect(caught.message).to.equal('Encoder RPC error: bad-txns-inputs-missingorspent')
+            })
+
+            it('leaves a pre-funding failure untagged, so the round stays retryable', async function () {
+                const signer = loadEmittedSigner(await emitSigner(), stubEncoder({
+                    createTx: async () => { throw new Error('Encoder RPC error: no UTXOs available') }
+                }))
+                let caught = null
+                try { await signer.broadcast('wire') } catch (e) { caught = e }
+                expect(caught).to.exist
+                expect(caught.fundsCommitted).to.equal(undefined)
+            })
+
+            it('does not tag a successful two-phase publish', async function () {
+                const signer = loadEmittedSigner(await emitSigner(), stubEncoder())
+                const res = await signer.broadcast('wire')
+                expect(res.phase1_txid).to.equal(PHASE1)
+            })
+        })
+
         it('points the signer at the DOGE wallet and the public testnet encoder', async function () {
             const fs = makeFs()
             const vs = loadValidatorService(fs)

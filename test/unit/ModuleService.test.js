@@ -1865,7 +1865,7 @@ describe('ModuleService', function () {
         it('calls ensureBootstrapUtxoTracker when utxo-tracker volume was fresh', async function () {
             const sinon3 = require('sinon')
             const ensureBootstrapUtxoTrackerStub = sinon3.stub().resolves()
-            const utxoTrackerVolumeHasDataStub = sinon3.stub().resolves(false) // false → fresh
+            const utxoTrackerVolumeFreshnessStub = sinon3.stub().resolves('empty') // confirmed empty = fresh
             const containerId = 'f'.repeat(64)
             const execFileStub = sinon3.stub()
             execFileStub.callsFake((cmd, args, ...rest) => {
@@ -1907,9 +1907,10 @@ describe('ModuleService', function () {
                 './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './BootstrapService': {
-                    utxoTrackerVolumeHasData: utxoTrackerVolumeHasDataStub,
+                    utxoTrackerVolumeFreshness: utxoTrackerVolumeFreshnessStub,
+                    FRESHNESS_EMPTY: 'empty',
                     ensureBootstrapUtxoTracker: ensureBootstrapUtxoTrackerStub,
-                    mariaDbModuleHasData: sinon3.stub().resolves(true),
+                    mariaDbModuleFreshness: sinon3.stub().resolves('populated'),
                     ensureBootstrapMariaDb: sinon3.stub().resolves()
                 },
                 './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
@@ -1917,7 +1918,7 @@ describe('ModuleService', function () {
                 './ExplorerService': { installExplorerModule: sinon3.stub().resolves(true) }
             })
             const result = await ms.installModule('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
-            expect(utxoTrackerVolumeHasDataStub.calledOnce).to.be.true
+            expect(utxoTrackerVolumeFreshnessStub.calledOnce).to.be.true
             expect(ensureBootstrapUtxoTrackerStub.calledOnce).to.be.true
             expect(result).to.equal(containerId)
         })
@@ -1925,7 +1926,7 @@ describe('ModuleService', function () {
         it('calls ensureBootstrapMariaDb when decoder DB was fresh', async function () {
             const sinon3 = require('sinon')
             const ensureBootstrapMariaDbStub = sinon3.stub().resolves()
-            const mariaDbModuleHasDataStub = sinon3.stub().resolves(false) // false → fresh
+            const mariaDbModuleFreshnessStub = sinon3.stub().resolves('empty') // confirmed empty = fresh
             const setDatabaseParametersStub = sinon3.stub().resolves()
             const containerId = 'a'.repeat(64)
             const execFileStub = sinon3.stub()
@@ -1972,9 +1973,10 @@ describe('ModuleService', function () {
                 // whatever containers the venue happens to be running.
                 './DbCredentialDrift': { assertNoDbCredentialDrift: sinon3.stub().resolves([]) },
                 './BootstrapService': {
-                    utxoTrackerVolumeHasData: sinon3.stub().resolves(true),
+                    utxoTrackerVolumeFreshness: sinon3.stub().resolves('populated'),
+                    FRESHNESS_EMPTY: 'empty',
                     ensureBootstrapUtxoTracker: sinon3.stub().resolves(),
-                    mariaDbModuleHasData: mariaDbModuleHasDataStub,
+                    mariaDbModuleFreshness: mariaDbModuleFreshnessStub,
                     ensureBootstrapMariaDb: ensureBootstrapMariaDbStub
                 },
                 './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
@@ -1982,9 +1984,73 @@ describe('ModuleService', function () {
                 './ExplorerService': { installExplorerModule: sinon3.stub().resolves(true) }
             })
             const result = await ms.installModule('xchain-decoder', 'bitcoin', 'mainnet', true)
-            expect(mariaDbModuleHasDataStub.calledOnce).to.be.true
+            expect(mariaDbModuleFreshnessStub.calledOnce).to.be.true
             expect(setDatabaseParametersStub.calledOnce).to.be.true
             expect(ensureBootstrapMariaDbStub.calledOnce).to.be.true
+            expect(result).to.equal(containerId)
+        })
+
+        // uuid:7037604f: ensureBootstrapMariaDb reaches DROP DATABASE, so only a
+        // CONFIRMED empty store may authorise it. An inspection failure during a
+        // rolling update answers unknown, which must leave a populated store
+        // untouched.
+        it('does NOT call ensureBootstrapMariaDb when the decoder DB freshness is unknown', async function () {
+            const sinon3 = require('sinon')
+            const ensureBootstrapMariaDbStub = sinon3.stub().resolves()
+            const mariaDbModuleFreshnessStub = sinon3.stub().resolves('unknown')
+            const containerId = 'a'.repeat(64)
+            const execFileStub = sinon3.stub()
+            execFileStub.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (cmd === 'git') { cb(null) }
+                else if (cmd === 'docker' && args[0] === 'build') { cb(null) }
+                else if (cmd === 'docker' && args[0] === 'run') { cb(null, containerId + '\n') }
+                else { cb(null, '') }
+            })
+            const configStub = {
+                getModuleDir: (mod) => '/modules/' + mod,
+                getModuleTmpDir: (mod) => '/tmp/' + mod,
+                moduleDirExists: sinon3.stub().returns(false),
+                checkIfModuleExists: sinon3.stub().returns(true),
+                removeModuleDir: sinon3.stub(),
+                removeModuleTmpDir: sinon3.stub(),
+                createModuleTmpDir: sinon3.stub(),
+                getDockerContainerImageName: (mod, coin, net) => `${coin}-${net}-${mod}`,
+                getDockerNetwork: (coin, net) => `net-${coin}-${net}`,
+                validatePort: () => true,
+                getDefaultConfig: sinon3.stub().resolves({
+                    DECODER_PORT: 3002, DECODER_API_PORT: 3002,
+                    DECODER_BOOTSTRAP_VOLUME: '/bootstrap'
+                })
+            }
+            const ms = proxyquireCallThru('../../src/services/ModuleService', {
+                'child_process': { execFile: execFileStub },
+                'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
+                '../state': {
+                    db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
+                    getRemoteModuleVersions: () => ({}),
+                    getLastStatus: () => null
+                },
+                './ConfigService': configStub,
+                './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
+                './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves() },
+                './DbCredentialDrift': { assertNoDbCredentialDrift: sinon3.stub().resolves([]) },
+                './BootstrapService': {
+                    utxoTrackerVolumeFreshness: sinon3.stub().resolves('populated'),
+                    FRESHNESS_EMPTY: 'empty',
+                    ensureBootstrapUtxoTracker: sinon3.stub().resolves(),
+                    mariaDbModuleFreshness: mariaDbModuleFreshnessStub,
+                    ensureBootstrapMariaDb: ensureBootstrapMariaDbStub,
+                    forceBootstrapRequested: () => false
+                },
+                './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
+                './NodeService': { buildCryptoNode: sinon3.stub().resolves(true), getCryptoNode: sinon3.stub().resolves() },
+                './ExplorerService': { installExplorerModule: sinon3.stub().resolves(true) }
+            })
+            const result = await ms.installModule('xchain-decoder', 'bitcoin', 'mainnet', true)
+            expect(mariaDbModuleFreshnessStub.calledOnce).to.be.true
+            expect(ensureBootstrapMariaDbStub.called).to.be.false
             expect(result).to.equal(containerId)
         })
 
@@ -2036,9 +2102,10 @@ describe('ModuleService', function () {
                 './DatabaseService': { setDatabaseParameters: setDatabaseParametersStub, setHubDatabaseParameters: sinon3.stub().resolves() },
                 './DbCredentialDrift': { assertNoDbCredentialDrift: assertNoDbCredentialDriftStub },
                 './BootstrapService': {
-                    utxoTrackerVolumeHasData: sinon3.stub().resolves(true),
+                    utxoTrackerVolumeFreshness: sinon3.stub().resolves('populated'),
+                    FRESHNESS_EMPTY: 'empty',
                     ensureBootstrapUtxoTracker: sinon3.stub().resolves(),
-                    mariaDbModuleHasData: sinon3.stub().resolves(true),
+                    mariaDbModuleFreshness: sinon3.stub().resolves('populated'),
                     ensureBootstrapMariaDb: sinon3.stub().resolves()
                 },
                 './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },

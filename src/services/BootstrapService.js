@@ -838,6 +838,32 @@ async function makeBootstrapMariaDb(coin, network, module) {
     const innerStats = await fs.promises.stat(innerArchive)
     progress.stop(`${dbName} dumped: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB compressed`)
 
+    // Re-gate the SOURCE before anything is packaged, checksummed or signed.
+    //
+    // The pre-flight gate in makeBootstrap runs before the dump, and the producers
+    // stay live throughout it: a decoder can write events.code='REORG_HALT' and
+    // xchain-sync can insert an uncleared sync_halt row while mariadb-dump is
+    // streaming. Without this second reading the archive ships carrying the very
+    // marker the gate exists to refuse, signed, as the newest (and therefore
+    // default) file in the served directory.
+    //
+    // Deliberately conservative rather than exact: the reading is taken after the
+    // --single-transaction snapshot point, so it can discard an archive whose halt
+    // arrived after the snapshot, and it cannot see a marker inserted and then
+    // cleared during the dump. Publishing nothing beats publishing unverified, and
+    // the same reading also catches every other late fault the gate covers (the
+    // container died mid-dump, lag grew past the ceiling, the module went wedged).
+    // Cheap: askMariadbRootPassword caches, so no second prompt, and a skipped gate
+    // (XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE) skips both calls alike.
+    try {
+        await assertBootstrapSourceHealthy(coin, network, module)
+    } catch (err) {
+        console.log(`The ${module} source stopped being known-good while ${dbName} was dumping; `
+            + 'discarding the finished dump rather than publishing it.')
+        try { fs.rmSync(workDir, { recursive: true }) } catch { /* the refusal is what matters */ }
+        throw err
+    }
+
     process.stdout.write('Computing checksum... ')
     const checksum = await computeSha256(innerArchive)
     await fs.promises.writeFile(checksumFile, `${checksum}  dump.sql.gz\n`)
@@ -1071,26 +1097,54 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     }
 }
 
-// Whether the utxo-tracker LevelDB volume already holds data. Used as a
-// race-free freshness gate: it must be checked BEFORE the container starts,
-// because a freshly-started tracker creates an (empty) LevelDB immediately.
-// Returns false when the volume is absent or empty (i.e. a fresh install).
-async function utxoTrackerVolumeHasData(coin, network) {
+// The three answers a freshness probe may give. Only EMPTY is a positive
+// finding of "there is nothing here to lose", and only EMPTY may authorise the
+// destructive restore path. UNKNOWN keeps an inspection FAILURE distinct from
+// that finding: conflated, a transient MariaDB or docker fault during a rolling
+// update reads a populated store as fresh and drives an unforced DROP DATABASE
+// + restore over it (uuid:7037604f).
+const FRESHNESS_EMPTY     = 'empty'
+const FRESHNESS_POPULATED = 'populated'
+const FRESHNESS_UNKNOWN   = 'unknown'
+
+// Say so once, in the operator's log, whenever a probe could not answer. Silent
+// UNKNOWNs are how the old conflation stayed invisible for so long.
+function reportUnknownFreshness(subject, err) {
+    console.log(`WARNING: could not determine whether ${subject} already holds data `
+        + `(${redactSecrets(String((err && err.message) || err))}).`)
+    console.log('  Treating it as NOT empty: automatic bootstrap restore is skipped rather than')
+    console.log('  risking a DROP over populated data. Re-run once the inspection works, or set')
+    console.log('  FORCE_BOOTSTRAP to restore anyway.')
+}
+
+// Freshness of the utxo-tracker LevelDB volume. Used as a race-free gate: it
+// must be checked BEFORE the container starts, because a freshly-started tracker
+// creates an (empty) LevelDB immediately.
+//
+// EMPTY when docker itself says there is no such volume, or the volume is there
+// and holds nothing. POPULATED when it holds anything. UNKNOWN for every other
+// inspection failure, which is NOT evidence of absence.
+async function utxoTrackerVolumeFreshness(coin, network) {
     // Routed through the shared helper (uuid:a61fc673): the unprefixed name
     // used here previously read the wrong stack's freshness under a
     // non-default NODE_PREFIX.
     const volumeName = getUtxoTrackerVolumeName(coin, network)
     try {
         await execFileAsync('docker', ['volume', 'inspect', volumeName])
-    } catch {
-        return false // volume doesn't exist yet (fresh install)
+    } catch (err) {
+        if (/no such volume/i.test(String((err && (err.message || err.stderr)) || ''))) {
+            return FRESHNESS_EMPTY // docker SAID it is absent: a fresh install
+        }
+        reportUnknownFreshness(`the Docker volume ${volumeName}`, err)
+        return FRESHNESS_UNKNOWN
     }
     try {
         const { stdout } = await execFileAsync('docker',
             ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'ls -A /data 2>/dev/null | head -1'])
-        return stdout.trim().length > 0
-    } catch {
-        return false
+        return String(stdout).trim().length > 0 ? FRESHNESS_POPULATED : FRESHNESS_EMPTY
+    } catch (err) {
+        reportUnknownFreshness(`the Docker volume ${volumeName}`, err)
+        return FRESHNESS_UNKNOWN
     }
 }
 
@@ -1302,15 +1356,27 @@ async function ensureBootstrapUtxoTracker(coin, network) {
     }
 }
 
-// Whether the decoder/indexer MariaDB database already holds indexed data.
-// The MariaDB analogue of utxoTrackerVolumeHasData: a fresh install has either
-// no database yet or an empty `blocks` table (both decoder and indexer carry a
-// `blocks` table that fills as they follow the chain). Used as the freshness
-// gate before the service container starts decoding/indexing. Best-effort:
-// any lookup error is treated as "fresh" so install proceeds with a normal sync.
-async function mariaDbModuleHasData(coin, network, module) {
+// Freshness of the decoder/indexer MariaDB database. The MariaDB analogue of
+// utxoTrackerVolumeFreshness: a fresh install has either no database yet or an
+// empty `blocks` table (both decoder and indexer carry a `blocks` table that
+// fills as they follow the chain). Used as the freshness gate before the service
+// container starts decoding/indexing.
+//
+// EMPTY only on a successful inspection that found no database, no `blocks`
+// table, or no rows. POPULATED on a successful inspection that found rows.
+// UNKNOWN whenever the inspection itself failed or answered something that will
+// not parse: a lookup error says nothing about how much data the database holds,
+// and reading it as EMPTY is what let a rolling-update blip authorise
+// DROP DATABASE over a populated store (uuid:7037604f).
+async function mariaDbModuleFreshness(coin, network, module) {
     const { askMariadbRootPassword } = require('./DatabaseService')
     const dbName = getModuleDatabaseName(module, coin, network)
+    // Row counts and table counts are only evidence when they parse: an answer
+    // that does not parse becomes null, never a number that lands on "fresh".
+    const countOf = (out) => {
+        const n = parseInt(String(out).trim(), 10)
+        return Number.isFinite(n) ? n : null
+    }
 
     // External-DB mode has no local `xchain-node-database` container, so the
     // container-id lookup below always returns null and would report "fresh"
@@ -1322,35 +1388,46 @@ async function mariaDbModuleHasData(coin, network, module) {
         try {
             const externalCfg = await getExternalDbConfig()
             const existsQuery = `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}' AND TABLE_NAME = 'blocks'`
-            const tblOut = await executeNativeMariaDbCommand(externalCfg, existsQuery, '-BN')
-            if (parseInt(String(tblOut).trim(), 10) === 0) return false
+            const tables = countOf(await executeNativeMariaDbCommand(externalCfg, existsQuery, '-BN'))
+            if (tables === null) throw new Error(`unparseable table count for ${dbName}.blocks`)
+            if (tables === 0) return FRESHNESS_EMPTY
             const countQuery = `SELECT COUNT(*) FROM \`${dbName}\`.blocks`
-            const cntOut = await executeNativeMariaDbCommand(externalCfg, countQuery, '-BN')
-            return parseInt(String(cntOut).trim(), 10) > 0
-        } catch {
-            return false
+            const rows = countOf(await executeNativeMariaDbCommand(externalCfg, countQuery, '-BN'))
+            if (rows === null) throw new Error(`unparseable row count for ${dbName}.blocks`)
+            return rows > 0 ? FRESHNESS_POPULATED : FRESHNESS_EMPTY
+        } catch (err) {
+            reportUnknownFreshness(`the external database ${dbName}`, err)
+            return FRESHNESS_UNKNOWN
         }
     }
 
     let dbContainerId
     try {
         dbContainerId = await getDatabaseContainerId()
-    } catch { return false }
-    if (!dbContainerId) return false // no DB container yet (fresh install)
+    } catch (err) {
+        reportUnknownFreshness(`the database ${dbName}`, err)
+        return FRESHNESS_UNKNOWN
+    }
+    if (!dbContainerId) return FRESHNESS_EMPTY // no DB container yet (fresh install)
 
     let rootPassword
     try {
         rootPassword = await askMariadbRootPassword(coin, network)
-    } catch { return false }
+    } catch (err) {
+        reportUnknownFreshness(`the database ${dbName}`, err)
+        return FRESHNESS_UNKNOWN
+    }
 
     try {
-        // Does the `blocks` table exist? (DB or table absent ⇒ fresh)
+        // Does the `blocks` table exist? (DB or table absent means fresh)
         const existsQuery = `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}' AND TABLE_NAME = 'blocks'`
         const { stdout: tblOut } = await execFileAsync(
             'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', existsQuery, 'information_schema']),
             { env: mariadbEnv(rootPassword) }
         )
-        if (parseInt(tblOut.trim(), 10) === 0) return false
+        const tables = countOf(tblOut)
+        if (tables === null) throw new Error(`unparseable table count for ${dbName}.blocks`)
+        if (tables === 0) return FRESHNESS_EMPTY
 
         // Table exists: does it hold any rows?
         const countQuery = `SELECT COUNT(*) FROM \`${dbName}\`.blocks`
@@ -1358,9 +1435,12 @@ async function mariaDbModuleHasData(coin, network, module) {
             'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', countQuery]),
             { env: mariadbEnv(rootPassword) }
         )
-        return parseInt(cntOut.trim(), 10) > 0
-    } catch {
-        return false
+        const rows = countOf(cntOut)
+        if (rows === null) throw new Error(`unparseable row count for ${dbName}.blocks`)
+        return rows > 0 ? FRESHNESS_POPULATED : FRESHNESS_EMPTY
+    } catch (err) {
+        reportUnknownFreshness(`the database ${dbName}`, err)
+        return FRESHNESS_UNKNOWN
     }
 }
 
@@ -1436,10 +1516,13 @@ module.exports = {
     makeBootstrap,
     restoreBootstrap,
     downloadBootstrap,
-    utxoTrackerVolumeHasData,
+    utxoTrackerVolumeFreshness,
     ensureBootstrapUtxoTracker,
-    mariaDbModuleHasData,
+    mariaDbModuleFreshness,
     ensureBootstrapMariaDb,
+    FRESHNESS_EMPTY,
+    FRESHNESS_POPULATED,
+    FRESHNESS_UNKNOWN,
     forceBootstrapRequested,
     reportBootstrapOutcomes,
     resetBootstrapOutcomes,

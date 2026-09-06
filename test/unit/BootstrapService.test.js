@@ -453,17 +453,30 @@ describe('BootstrapService', function () {
         })
     })
 
-    describe('utxoTrackerVolumeHasData()', function () {
+    // uuid:7037604f: the caller reads "empty" as "fresh, restore a bootstrap over
+    // it", so an inspection FAILURE must never answer empty. Only a CONFIRMED
+    // empty volume may.
+    describe('utxoTrackerVolumeFreshness()', function () {
 
-        it('returns false when docker volume inspect fails (volume absent)', async function () {
+        it("reports empty when docker itself says there is no such volume", async function () {
             const stubs = makeStubs()
-            stubs.execFile = sinon.stub().rejects(new Error('No such volume'))
+            stubs.execFile = sinon.stub().rejects(new Error('Error: No such volume: xchain-utxo-tracker-x'))
             const bs = loadBootstrapService(stubs)
-            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
-            expect(result).to.be.false
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('empty')
         })
 
-        it('returns true when volume ls shows a non-empty entry', async function () {
+        // A daemon that cannot be reached says nothing about the volume.
+        it('reports unknown when the inspect fails for any other reason', async function () {
+            const stubs = makeStubs()
+            stubs.execFile = sinon.stub().rejects(
+                new Error('Cannot connect to the Docker daemon at unix:///var/run/docker.sock'))
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('unknown')
+        })
+
+        it('reports populated when volume ls shows a non-empty entry', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -472,11 +485,11 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: 'LOCK\n' })                       // ls shows data
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
-            expect(result).to.be.true
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('populated')
         })
 
-        it('returns false when volume ls output is empty', async function () {
+        it('reports empty when volume ls output is empty', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -485,11 +498,11 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: '' })                             // empty volume
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
-            expect(result).to.be.false
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('empty')
         })
 
-        it('returns false when ls exec fails', async function () {
+        it('reports unknown when ls exec fails', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -498,8 +511,8 @@ describe('BootstrapService', function () {
                 return Promise.reject(new Error('exec error'))                     // ls fails
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
-            expect(result).to.be.false
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('unknown')
         })
     })
 
@@ -1179,42 +1192,47 @@ describe('BootstrapService', function () {
         })
     })
 
-    describe('mariaDbModuleHasData()', function () {
+    // uuid:7037604f: ModuleService turns a "fresh" answer into DROP DATABASE +
+    // restore, so every failure below must answer unknown. Only a SUCCESSFUL read
+    // may authorise that path.
+    describe('mariaDbModuleFreshness()', function () {
 
-        it('returns false when getDatabaseContainerId throws', async function () {
+        it('reports unknown when getDatabaseContainerId throws', async function () {
             const stubs = makeStubs()
             stubs.databaseService.getDatabaseContainerId.rejects(new Error('docker error'))
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
         })
 
-        it('returns false when getDatabaseContainerId returns null', async function () {
+        // No DB container at all is a real fresh install, and must stay one or
+        // first installs stop bootstrapping.
+        it('reports empty when getDatabaseContainerId returns null', async function () {
             const stubs = makeStubs()
             stubs.databaseService.getDatabaseContainerId.resolves(null)
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('empty')
         })
 
-        it('returns false when askMariadbRootPassword throws', async function () {
+        it('reports unknown when askMariadbRootPassword throws', async function () {
             const stubs = makeStubs()
             stubs.databaseService.askMariadbRootPassword.rejects(new Error('password error'))
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
         })
 
-        it('returns false when blocks table does not exist (tblOut = 0)', async function () {
+        it('reports empty when the blocks table does not exist (tblOut = 0)', async function () {
             const stubs = makeStubs()
             // First exec → table count = 0
             stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('empty')
         })
 
-        it('returns false when blocks table exists but has 0 rows', async function () {
+        it('reports empty when the blocks table exists but has 0 rows', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -1223,11 +1241,11 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: '0\n' })                        // zero rows
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('empty')
         })
 
-        it('returns true when blocks table has data', async function () {
+        it('reports populated when the blocks table has data', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -1236,11 +1254,11 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: '1000\n' })                      // rows present
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.true
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('populated')
         })
 
-        it('returns true for XCHAIN_INDEXER module', async function () {
+        it('reports populated for XCHAIN_INDEXER module', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -1249,16 +1267,31 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: '500\n' })
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
-            expect(result).to.be.true
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+            expect(result).to.equal('populated')
         })
 
-        it('returns false when exec throws on table check', async function () {
+        it('reports unknown when exec throws on the table check', async function () {
             const stubs = makeStubs()
             stubs.execFile = sinon.stub().rejects(new Error('mariadb exec error'))
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
+        })
+
+        // A count that does not parse is not a count: NaN is refused as unknown,
+        // never reported as the reassuring "fresh".
+        it('reports unknown when the row count does not parse', async function () {
+            const stubs = makeStubs()
+            let callCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                callCount++
+                if (callCount === 1) return Promise.resolve({ stdout: '1\n' })   // table exists
+                return Promise.resolve({ stdout: 'ERROR 2002 (HY000)\n' })
+            })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
         })
     })
 
@@ -2407,6 +2440,65 @@ describe('BootstrapService', function () {
             expect(spawnArgs).to.include('MYSQL_PWD')
             expect(spawnArgs.some(a => String(a).includes('rootpass'))).to.be.false
             expect(spawnOpts.env.MYSQL_PWD).to.equal('rootpass')
+
+            // The gate is consulted TWICE: once before the dump, and once after it
+            // finishes but before anything is checksummed, wrapped or signed. The
+            // producers stay live for the whole dump, so one reading before it
+            // cannot speak for the bytes that ship.
+            expect(stubs.healthGate.assertBootstrapSourceHealthy.callCount).to.equal(2)
+        })
+
+        // A halt marker can be written while mariadb-dump is still streaming, and
+        // such an archive must not ship: signed, it becomes the newest (default)
+        // recovery source.
+        it('discards a finished dump when the source stops being healthy during it', async function () {
+            const stubs = makeStubs()
+
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.askMariadbRootPassword.resolves('rootpass')
+
+            const refusal = new Error("Refusing to create a bootstrap from btc/mainnet xchain-decoder: "
+                + "the database carries a durable REORG_HALT marker")
+            refusal.name = 'BootstrapSourceUnhealthyError'
+            stubs.healthGate.assertBootstrapSourceHealthy
+                .onFirstCall().resolves({ skipped: false, reasons: [] })
+                .onSecondCall().rejects(refusal)
+
+            stubs.execFile = sinon.stub().resolves({ stdout: '52428800\n' })
+
+            const dumpProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(dumpProc)
+
+            stubs.fs.promises.stat.resolves({ size: 512 * 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+
+            setImmediate(() => {
+                dumpProc.stdout.end()
+                writeStream.emit('finish')
+            })
+
+            let err = null
+            try { await promise } catch (e) { err = e }
+            expect(err, 'the create must reject rather than publish').to.equal(refusal)
+
+            // Nothing may be packaged or signed after the refusal.
+            const tarCalls = stubs.execFile.getCalls()
+                .filter(c => c.args[0] === 'tar' && (c.args[1] || [])[0] === 'czf')
+            expect(tarCalls.length, 'no archive may be wrapped').to.equal(0)
+            expect(stubs.fs.promises.writeFile.called, 'no checksum file may be written').to.equal(false)
+
+            // The half-built work directory goes, and the republish ledger stays
+            // honest: nothing was published, so nothing is recorded as published.
+            expect(stubs.fs.rmSync.getCalls().some(c => String(c.args[0]).includes('bootstrap-work')))
+                .to.equal(true)
+            expect(stubs.republishLedger.recordBootstrapPublished.called).to.equal(false)
         })
 
         it('throws when getDatabaseContainerId returns null', async function () {

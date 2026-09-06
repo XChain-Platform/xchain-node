@@ -147,7 +147,8 @@ function loadNodeService(stubs) {
             assertNoHostPortConflicts: stubs.assertNoHostPortConflicts || sinon.stub().resolves()
         },
         './BootstrapService': {
-            utxoTrackerVolumeHasData:    sinon.stub().resolves(true),
+            utxoTrackerVolumeFreshness:  sinon.stub().resolves('populated'),
+            FRESHNESS_EMPTY:             'empty',
             ensureBootstrapUtxoTracker:  sinon.stub().resolves(),
             forceBootstrapRequested:     () => false
         }
@@ -1185,7 +1186,8 @@ describe('NodeService: installNode()', function () {
                 assertNoHostPortConflicts: sinon.stub().resolves()
             },
             './BootstrapService': {
-                utxoTrackerVolumeHasData:   sinon.stub().resolves(true),
+                utxoTrackerVolumeFreshness: sinon.stub().resolves('populated'),
+                FRESHNESS_EMPTY:            'empty',
                 ensureBootstrapUtxoTracker: sinon.stub().resolves(),
                 forceBootstrapRequested:     () => false
             }
@@ -1228,7 +1230,7 @@ describe('NodeService: installNode()', function () {
             './DockerService':   { createDockerNetwork: sinon.stub().resolves(), forceRemoveContainerByName: sinon.stub().resolves(true), stopContainerByName: sinon.stub().resolves(true) },
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
             './ModuleService': { cloneGit: cloneGitStub, buildAndUp: buildAndUpStub, assertNoHostPortConflicts: sinon.stub().resolves() },
-            './BootstrapService': { utxoTrackerVolumeHasData: sinon.stub().resolves(true), ensureBootstrapUtxoTracker: sinon.stub().resolves(), forceBootstrapRequested:     () => false }
+            './BootstrapService': { utxoTrackerVolumeFreshness: sinon.stub().resolves('populated'), FRESHNESS_EMPTY: 'empty', ensureBootstrapUtxoTracker: sinon.stub().resolves(), forceBootstrapRequested:     () => false }
         })
 
         const result = await ns.installNode('bitcoin', 'mainnet')
@@ -1266,7 +1268,8 @@ describe('NodeService: installNode()', function () {
             './DatabaseService': { buildDatabaseModule: sinon.stub().resolves(), setDatabaseParameters: sinon.stub().resolves() },
             './ModuleService': { cloneGit: sinon.stub().resolves(true), buildAndUp: sinon.stub().resolves('e'.repeat(64)), assertNoHostPortConflicts: sinon.stub().resolves() },
             './BootstrapService': {
-                utxoTrackerVolumeHasData:   sinon.stub().resolves(false), // fresh
+                utxoTrackerVolumeFreshness: sinon.stub().resolves('empty'), // confirmed fresh
+                FRESHNESS_EMPTY:            'empty',
                 ensureBootstrapUtxoTracker: ensureBootstrap
             }
         })

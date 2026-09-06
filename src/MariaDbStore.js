@@ -21,6 +21,7 @@
  ********************************************************************/
 
 const mariadb = require('mariadb')
+const crypto = require('crypto')
 const { sleep } = require('./utils/helpers')
 const { NODE_PREFIX, DEFAULT_NODE_PREFIX } = require('./config/constants')
 const { assertSafeDbIdentifier } = require('./utils/sqlSafety')
@@ -44,10 +45,23 @@ const { assertSafeDbIdentifier } = require('./utils/sqlSafety')
  * because the registry is DERIVED state: precheck runs scanAndRegisterModules
  * against `docker ps -a` on every command, immediately after createDatabase, so
  * the first command after the change repopulates it.
+ *
+ * THE NAME MUST BE INJECTIVE IN THE PREFIX, and the sanitized head alone is not.
+ * NODE_PREFIX admits `-`, `.` and `_` (constants.js), and the sanitizer folds the
+ * first two onto the third, so `stack-a`, `stack.a` and `stack_a` all named ONE
+ * table; truncation collapsed any two prefixes sharing a long head the same way.
+ * Two stacks that collide there are back to sharing a registry, which is the
+ * overwrite-and-purge failure this scoping exists to prevent (uuid:c8e46a8b). So
+ * the readable head is shortened to make room for a digest of the RAW prefix:
+ * distinct prefixes now differ in the digest even when the head is identical.
+ * 8 + 30 + 1 + 12 = 51 characters, inside MariaDB's 64-character identifier limit.
  */
 const MODULES_TABLE = NODE_PREFIX === DEFAULT_NODE_PREFIX
     ? 'modules'
-    : assertSafeDbIdentifier('modules_' + NODE_PREFIX.replace(/[^a-z0-9_]/g, '_').substring(0, 40), 'registry table name')
+    : assertSafeDbIdentifier(
+        'modules_' + NODE_PREFIX.replace(/[^a-z0-9_]/g, '_').substring(0, 30)
+            + '_' + crypto.createHash('sha256').update(NODE_PREFIX).digest('hex').substring(0, 12),
+        'registry table name')
 
 class MariaDbStore {
     constructor(config = null) {
@@ -196,6 +210,24 @@ class MariaDbStore {
         } catch (err) {
             return null
         }
+    }
+
+    // Answer the same question as getModuleContainer, but only from evidence.
+    // getModuleContainer returns null for a genuine zero-row miss AND for every
+    // SQL error AND for an unopened pool, so a registry blip is indistinguishable
+    // from "not installed". A caller that acts DESTRUCTIVELY on that answer then
+    // skips stopping a live service and wipes its store underneath it
+    // (uuid:846cc40d). Here the pool is asserted and the query error propagates,
+    // so only an empty result set means absent.
+    async getModuleContainerStrict(module, coin, network) {
+        this.assertReady(`the ${module} registry lookup`)
+        const rows = await this.pool.query(
+            `SELECT container_id FROM ${MODULES_TABLE}
+             WHERE module = ? AND coin = ? AND network = ?`,
+            [module, coin || '', network || '']
+        )
+        if (rows.length === 0) return null
+        return rows[0].container_id
     }
 
     async removeModuleContainer(module, coin, network) {

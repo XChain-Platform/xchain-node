@@ -1814,7 +1814,9 @@ describe('DatabaseService', function () {
                 executed.push(sql)
                 return { stdout: '' }
             }))
-            const ds = loadDatabaseService(stubs, {}, {}, {
+            // Empty configured names so the DERIVED name is the one under test;
+            // the configured name has its own case below.
+            const ds = loadDatabaseService(stubs, {}, { DECODER_DB_NAME: '', INDEXER_DB_NAME: '' }, {
                 getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Decoder; DROP DATABASE mysql'
             })
             let err = null
@@ -1839,7 +1841,7 @@ describe('DatabaseService', function () {
                 end: async () => {}
             })
             let call = 0
-            const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true }, {}, {
+            const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true }, { DECODER_DB_NAME: '', INDEXER_DB_NAME: '' }, {
                 // First module resolves clean, second does not: the pre-loop
                 // assertion is what keeps the first DROP from having run.
                 getModuleDatabaseName: () => (++call === 1 ? 'XChain_BTC_Mainnet_Decoder' : 'bad-name')
@@ -1852,6 +1854,64 @@ describe('DatabaseService', function () {
             expect(String(err.message)).to.contain('Unsafe MariaDB database name')
             expect(queried.filter(q => String(q).includes('DROP DATABASE'))).to.have.length(0)
             expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
+
+        // Provisioning grants on cfg["*_DB_NAME"], which the operator can override in
+        // the coin-network config file. A reset that dropped the DERIVED default name
+        // instead left the live database intact and wiped whatever else on that server
+        // owned the default name (uuid:fd543c4a).
+        it('drops the CONFIGURED database names, not the derived defaults', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs, {},
+                { DECODER_DB_NAME: 'CustomDecoder', INDEXER_DB_NAME: 'CustomIndexer' },
+                { getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Derived' })
+            await ds.resetDatabases('bitcoin', 'mainnet')
+            const drops = executed.filter(c => c && c.includes('DROP DATABASE')).join(' | ')
+            expect(drops).to.contain('CustomDecoder')
+            expect(drops).to.contain('CustomIndexer')
+            expect(drops).to.not.contain('XChain_BTC_Mainnet_Derived')
+        })
+
+        // The configured name is the one an operator types, so it is the untrusted
+        // one; the allowlist must cover it and still fire before the first DROP.
+        it('refuses the reset when a CONFIGURED database name is not a safe identifier', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs, {},
+                { DECODER_DB_NAME: 'XChain_BTC_Mainnet_Decoder', INDEXER_DB_NAME: 'Custom; DROP DATABASE mysql' },
+                { getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Decoder' })
+            let err = null
+            try {
+                await ds.resetDatabases('bitcoin', 'mainnet')
+            } catch (e) { err = e }
+            expect(err).to.not.equal(null)
+            expect(String(err.message)).to.contain('Unsafe MariaDB database name')
+            expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
+
+        // A config that carries no name at all (an older install, or a module outside
+        // the two DB modules) still resets the derived default rather than nothing.
+        it('falls back to the derived name when config carries no database name', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs, {}, { DECODER_DB_NAME: '', INDEXER_DB_NAME: '' },
+                { getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Derived' })
+            await ds.resetDatabases('bitcoin', 'mainnet')
+            const drops = executed.filter(c => c && c.includes('DROP DATABASE')).join(' | ')
+            expect(drops).to.contain('XChain_BTC_Mainnet_Derived')
         })
     })
 

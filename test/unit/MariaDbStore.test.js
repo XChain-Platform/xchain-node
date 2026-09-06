@@ -444,18 +444,50 @@ describe('MariaDbStore registry scoping by NODE_PREFIX', function () {
         expect(statements[0]).to.match(/^CREATE TABLE IF NOT EXISTS modules \(/)
     })
 
+    // A non-default prefix names its table with a readable head plus a digest of the
+    // RAW prefix, so the name is injective (see the MODULES_TABLE stanza).
+    const TABLE_RE = /\bmodules_[a-z0-9_]+_[0-9a-f]{12}\b/
+
+    function tableNameFrom(statements) {
+        const hit = statements[0].match(TABLE_RE)
+        expect(hit, statements[0]).to.not.equal(null)
+        return hit[0]
+    }
+
     it('gives a second stack its own table, so neither upsert nor purge can reach the first', async function () {
         const statements = await statementsFor('stack-b')
         expect(statements.length).to.be.greaterThan(5)
+        const table = tableNameFrom(statements)
+        expect(table).to.match(/^modules_stack_b_/)
         // Every statement, DDL and DML alike: one missed site is a cross-stack write.
         for (const sql of statements) {
-            expect(sql, sql).to.match(/\bmodules_stack_b\b/)
-            expect(sql.replace(/modules_stack_b/g, ''), sql).to.not.match(/\bmodules\b/)
+            expect(sql, sql).to.contain(table)
+            expect(sql.split(table).join(''), sql).to.not.match(/\bmodules\b/)
         }
     })
 
     it('sanitizes a prefix that is legal for docker but not for a MariaDB identifier', async function () {
         const statements = await statementsFor('node.1-alt')
-        for (const sql of statements) expect(sql, sql).to.match(/\bmodules_node_1_alt\b/)
+        for (const sql of statements) expect(sql, sql).to.match(/\bmodules_node_1_alt_[0-9a-f]{12}\b/)
+    })
+
+    // The sanitizer folds `-` and `.` onto `_`, and the head is truncated, so a
+    // head-only name put DISTINCT stacks back on ONE registry - the overwrite and
+    // orphan-purge failure this scoping exists to prevent (uuid:c8e46a8b).
+    it('never gives two distinct prefixes the same table, separator or length', async function () {
+        const separatorVariants = ['stack-a', 'stack.a', 'stack_a']
+        const names = []
+        for (const prefix of separatorVariants) names.push(tableNameFrom(await statementsFor(prefix)))
+        expect(new Set(names).size, names.join(', ')).to.equal(separatorVariants.length)
+
+        // Two prefixes agreeing on a long head and differing only past the old
+        // 40-character truncation point.
+        const head  = 'a'.repeat(45)
+        const longA = tableNameFrom(await statementsFor(head + '-one'))
+        const longB = tableNameFrom(await statementsFor(head + '-two'))
+        expect(longA).to.not.equal(longB)
+
+        // Still legal MariaDB identifiers.
+        for (const name of names.concat([longA, longB])) expect(name.length).to.be.at.most(64)
     })
 })

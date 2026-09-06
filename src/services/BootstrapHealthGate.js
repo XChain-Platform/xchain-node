@@ -140,6 +140,30 @@ function evaluateContainerState(raw, { now = Date.now() } = {}) {
     return reasons
 }
 
+// Parse whitespace-separated COUNT(*) output from a `mariadb -BN` probe into
+// whole nonnegative integers, throwing on anything else.
+//
+// `parseInt` is the wrong tool for a fail-closed probe: it reads a PREFIX and
+// discards the rest, so '0garbage' becomes 0 and '-1' becomes -1, and both then
+// survive `Number.isFinite` and lose every `> 0` comparison the gate makes. That
+// turns unreadable probe output into a healthy zero, which is exactly the "we
+// could not tell" -> "it is fine" collapse the file header forbids. The token
+// count is checked too: a truncated multi-count answer that happens to parse is
+// still not the answer to the question that was asked.
+//
+// `what` names the probe for the refusal reason; `max` bounds a count whose only
+// legal values are known (a table-existence count is 0 or 1).
+function parseCountTokens(raw, { expected, max = null, what }) {
+    const text   = String(raw == null ? '' : raw).trim()
+    const tokens = text.length === 0 ? [] : text.split(/\s+/)
+    const bad = tokens.length !== expected
+        || tokens.some(t => !/^\d+$/.test(t))
+        || (max !== null && tokens.some(t => Number(t) > max))
+    if (bad)
+        throw new Error(`the ${what} returned unreadable output: ${JSON.stringify(text)}`)
+    return tokens.map(Number)
+}
+
 async function inspectContainer(containerId, runner) {
     // RestartCount is top-level, NOT under .State. `{{.State.RestartCount}}` is not a
     // field that reads empty, it is a template-execution ERROR ("map has no entry for
@@ -330,17 +354,14 @@ async function readHaltMarkers(coin, network, module, deps) {
         return String(stdout || '')
     }
 
-    // Read one count, refusing on anything that is not a number. Output the probe
-    // could not produce (an empty string from a mis-parsed client option, a driver
-    // that returned nothing, a permission error rendered on stdout) parsed to NaN
-    // here, and NaN loses every `> 0` comparison below, so "we could not tell"
-    // arrived at the caller as "no halt markers" - the one collapse the file
-    // header forbids.
+    // Read one count, refusing on anything that is not a whole nonnegative
+    // integer. Output the probe could not produce (an empty string from a
+    // mis-parsed client option, a driver that returned nothing, a permission
+    // error rendered on stdout) used to reach `parseInt` and lose every `> 0`
+    // comparison below, so "we could not tell" arrived at the caller as "no halt
+    // markers" - the one collapse the file header forbids.
     const readCount = async (sql, what) => {
-        const raw = String(await run(sql)).trim()
-        const value = parseInt(raw, 10)
-        if (!Number.isFinite(value))
-            throw new Error(`the ${what} probe returned unreadable output: ${JSON.stringify(raw)}`)
+        const [value] = parseCountTokens(await run(sql), { expected: 1, what: `${what} probe` })
         return value
     }
 
@@ -356,11 +377,13 @@ async function readHaltMarkers(coin, network, module, deps) {
             `(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${name}' AND TABLE_NAME='events'), ` +
             `(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${name}' AND TABLE_NAME='sync_halt');`
 
-        const rawTables = String(await run(query)).trim()
-        const tableCounts = rawTables.split(/\s+/).map(n => parseInt(n, 10))
-        if (tableCounts.length !== 2 || !tableCounts.every(Number.isFinite))
-            throw new Error(`the marker-table probe for ${name} returned unreadable output: ${JSON.stringify(rawTables)}`)
-        const [hasEvents, hasSyncHalt] = tableCounts
+        // Two tokens, each 0 or 1: TABLE_SCHEMA + TABLE_NAME is unique in
+        // information_schema.TABLES, so any other value means the output is not the
+        // answer to the question that was asked. Capping at 1 is what makes
+        // `1<TAB>0garbage` a refusal instead of a silent [1, 0] that skips the
+        // sync_halt probe entirely.
+        const [hasEvents, hasSyncHalt] = parseCountTokens(await run(query),
+            { expected: 2, max: 1, what: `marker-table probe for ${name}` })
 
         // `events` is not optional on a decoder/indexer database: both provision it
         // unconditionally at startup (each repo's verifyTables creates every
@@ -528,5 +551,6 @@ module.exports = {
     BootstrapSourceUnhealthyError,
     // Exported for tests / reuse
     evaluateContainerState,
-    evaluateStatusPayload
+    evaluateStatusPayload,
+    parseCountTokens
 }

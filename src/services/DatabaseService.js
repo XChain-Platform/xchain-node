@@ -896,15 +896,39 @@ async function setHubDatabaseParameters() {
 }
 
 async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]) {
-    // Gate every derived name on the identifier allowlist before the first DROP.
+    // Drop the databases this stack ACTUALLY uses, which is what provisioning
+    // resolved: setDatabaseParameters grants on cfg["DECODER_DB_NAME"] /
+    // cfg["INDEXER_DB_NAME"], and both are operator-overridable in the
+    // <coin>-<network> config file. Deriving the DEFAULT name here instead meant
+    // an overridden stack had its live database left untouched while the reset
+    // dropped whatever else on that MariaDB happened to answer to the default
+    // name - a wipe of another stack's data, reported as a successful reset
+    // (uuid:fd543c4a). The derived name stays the fallback for a config that
+    // carries no name at all, and for any module outside the two DB modules.
+    //
+    // Gate every resolved name on the identifier allowlist before the first DROP.
     // A database name reaches SQL as text (an identifier cannot be bound), which
     // is why addUserPasswordToDatabase, clearHubPriceIngestWatermark and the
     // BootstrapHealthGate readers all assert it; this destructive site was the
     // one that opted out (uuid:0257cadf). Asserted for the whole set up front,
     // not per iteration: a name refused on the second module would otherwise
-    // throw with the first module's database already dropped.
-    const resetTargets = modules.map(module =>
-        assertSafeDbIdentifier(getModuleDatabaseName(module, coin, network), 'database name'))
+    // throw with the first module's database already dropped. The assert now
+    // also covers an operator-supplied name, which is the only untrusted one.
+    const configuredDbNameKey = {
+        [XChainService.XCHAIN_DECODER]: "DECODER_DB_NAME",
+        [XChainService.XCHAIN_INDEXER]: "INDEXER_DB_NAME"
+    }
+    const resetTargets = []
+    for (const module of modules) {
+        let dbName = getModuleDatabaseName(module, coin, network)
+        const configKey = configuredDbNameKey[module]
+        if (configKey) {
+            const cfg = await getDefaultConfig(module, coin, network)
+            const configured = cfg ? cfg[configKey] : undefined
+            if (typeof configured === "string" && configured.trim() !== "") dbName = configured.trim()
+        }
+        resetTargets.push(assertSafeDbIdentifier(dbName, 'database name'))
+    }
 
     // External (host-native) MariaDB: there is no database container to exec
     // into it (`docker exec ... null` failed here and aborted the reset mid-way,

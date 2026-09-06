@@ -28,6 +28,9 @@ function makeStubs() {
         updateHub: sinon.stub().resolves(true),
         db: {
             getModuleContainer: sinon.stub().resolves('container-id-123'),
+            // The non-swallowing read the destructive reset paths use: a registry
+            // failure throws here instead of answering "not installed".
+            getModuleContainerStrict: sinon.stub().resolves('container-id-123'),
             removeModuleContainer: sinon.stub().resolves(true),
             // Registry contents AFTER the per-coin uninstall pass. Empty by default =
             // nothing left for a shared service to serve, which is the full-teardown
@@ -1518,6 +1521,187 @@ describe('moduleOperations', function () {
             const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
             expect(result).to.be.false
             expect(stubs.execFile.called).to.be.false
+        })
+
+        // uuid:846cc40d: the stop loop resolved each target through the swallowing
+        // getModuleContainer, which answers null for a SQL error as well as for a
+        // miss. A registry blip after the reachability precheck therefore made a
+        // RUNNING indexer look uninstalled, the loop skipped stopping it, and
+        // resetDatabases dropped its database underneath it while the command
+        // reported success. A read that FAILED is not evidence of absence.
+        describe('the registry read that decides what to stop', function () {
+
+            // Every `docker run --rm -v <host>:/data` this reset issued.
+            function wipeRuns(execFileStub) {
+                return execFileStub.getCalls()
+                    .filter(c => c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1][0] === 'run')
+            }
+
+            it('aborts before any wipe when a target row cannot be read', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                stubs.db.getModuleContainerStrict.callsFake(async (module) => {
+                    if (module === 'xchain-utxo-tracker') throw new Error('ER_LOCK_WAIT_TIMEOUT')
+                    return 'container-id-123'
+                })
+                const ops = loadOperations(stubs)
+                const lines = []
+                const logStub = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+                let result
+                try {
+                    result = await ops.resetModules('all', 'bitcoin', 'mainnet', true)
+                } finally {
+                    logStub.restore()
+                }
+                expect(result).to.be.false
+                expect(stubs.resetDatabases.called).to.be.false
+                expect(wipeRuns(stubs.execFile)).to.be.empty
+                const output = lines.join('\n')
+                expect(output).to.include('cannot read the xchain-utxo-tracker registry row')
+                expect(output).to.include('ER_LOCK_WAIT_TIMEOUT')
+                expect(output).to.include('No data was touched.')
+            })
+
+            it('reports a module the rollback cannot resolve as still down', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                // node resolves and stops, the tracker read fails, and the
+                // rollback's own read fails the same way.
+                stubs.db.getModuleContainerStrict.onCall(0).resolves('container-id-123')
+                stubs.db.getModuleContainerStrict.rejects(new Error('registry unreachable'))
+                const ops = loadOperations(stubs)
+                const lines = []
+                const logStub = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+                let result
+                try {
+                    result = await ops.resetModules('all', 'bitcoin', 'mainnet', true)
+                } finally {
+                    logStub.restore()
+                }
+                expect(result).to.be.false
+                expect(stubs.startContainer.called).to.be.false
+                expect(lines.join('\n')).to.include('STILL DOWN, start by hand: node')
+            })
+
+            // A successful read with no row is still an ordinary "not installed".
+            it('still skips a module that is genuinely absent from the registry', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                stubs.db.getModuleContainerStrict.callsFake(async (module) =>
+                    module === 'xchain-regtest-miner' ? null : 'container-id-123')
+                const ops = loadOperations(stubs)
+                const clock = sinon.useFakeTimers()
+                const promise = ops.resetModules('all', 'bitcoin', 'mainnet', true)
+                await clock.tickAsync(6000)
+                clock.restore()
+                expect(await promise).to.be.true
+                expect(stubs.resetDatabases.calledOnce).to.be.true
+            })
+        })
+
+        // uuid:e24c98d4: the tracker volume wipe swallowed EVERY failure as
+        // "the volume may not exist", so a permission error, an unreachable
+        // daemon or a failed alpine pull left stale tracker data in place while
+        // resetDatabases re-genesised the decoder and indexer around it, and the
+        // run returned true.
+        describe('the utxo-tracker volume wipe', function () {
+
+            const VOLUME = 'xchain-utxo-tracker-bitcoin-mainnet-data'
+
+            function volumeWipeRan(execFileStub) {
+                return execFileStub.getCalls().some(c =>
+                    c.args[1][0] === 'run' && c.args[1].join(' ').includes(VOLUME))
+            }
+
+            it('refuses the reset when the volume presence cannot be determined', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => {
+                    if (args[0] === 'volume') {
+                        return cb(new Error('Cannot connect to the Docker daemon at unix:///var/run/docker.sock'))
+                    }
+                    cb(null, '', '')
+                })
+                const ops = loadOperations(stubs)
+                const lines = []
+                const logStub = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+                let result
+                try {
+                    result = await ops.resetModules('all', 'bitcoin', 'mainnet', true)
+                } finally {
+                    logStub.restore()
+                }
+                expect(result).to.be.false
+                expect(stubs.resetDatabases.called).to.be.false
+                expect(volumeWipeRan(stubs.execFile)).to.be.false
+                const output = lines.join('\n')
+                expect(output).to.include(`cannot determine whether the Docker volume ${VOLUME} exists`)
+                expect(output).to.include('No data was touched.')
+            })
+
+            // Docker SAYING "no such volume" is the only thing that means absent.
+            it('treats docker\'s own no-such-volume as absence and completes', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => {
+                    if (args[0] === 'volume') return cb(new Error(`Error: No such volume: ${VOLUME}`))
+                    cb(null, '', '')
+                })
+                const ops = loadOperations(stubs)
+                const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
+                expect(result).to.be.true
+                expect(volumeWipeRan(stubs.execFile)).to.be.false
+            })
+
+            it('aborts and restores the stack when the wipe fails with nothing else touched', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => {
+                    if (args[0] === 'volume') return cb(null, '', '')
+                    if (args.join(' ').includes(VOLUME)) return cb(new Error('permission denied'))
+                    cb(null, '', '')
+                })
+                const ops = loadOperations(stubs)
+                const lines = []
+                const logStub = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+                let result
+                try {
+                    result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
+                } finally {
+                    logStub.restore()
+                }
+                expect(result).to.be.false
+                expect(stubs.resetDatabases.called).to.be.false
+                const output = lines.join('\n')
+                expect(output).to.include(`clearing the Docker volume ${VOLUME} failed`)
+                expect(output).to.include('permission denied')
+                expect(output).to.include('No data was touched.')
+            })
+
+            // On `reset all` the node datadir is already gone by the time the
+            // volume wipe runs, so the abort must not claim otherwise, must not
+            // let the decoder/indexer databases go, and must not restart services
+            // over a half-reset stack.
+            it('refuses to drop the databases after a failed wipe on reset all', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => {
+                    if (args[0] === 'volume') return cb(null, '', '')
+                    if (args.join(' ').includes(VOLUME)) return cb(new Error('permission denied'))
+                    cb(null, '', '')
+                })
+                const ops = loadOperations(stubs)
+                const lines = []
+                const logStub = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+                let result
+                try {
+                    result = await ops.resetModules('all', 'bitcoin', 'mainnet', true)
+                } finally {
+                    logStub.restore()
+                }
+                expect(result).to.be.false
+                expect(stubs.resetDatabases.called).to.be.false
+                expect(stubs.startContainer.called).to.be.false
+                const output = lines.join('\n')
+                expect(output).to.include('The node data for this stack WAS already cleared')
+                expect(output).to.not.include('No data was touched.')
+            })
         })
 
         it('clears the hub price ingest fence when the indexer DB is reset', async function () {

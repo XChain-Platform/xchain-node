@@ -30,6 +30,18 @@ function logEntry(agoMs, exitCode) {
     }
 }
 
+// Health.Log entry helper keyed to an ABSOLUTE start time, for fixtures whose
+// probes sit around a pass timestamp other than NOW.
+function recordedProbe(atMs, exitCode) {
+    const start = new Date(atMs)
+    return {
+        Start: start.toISOString(),
+        End: new Date(atMs + 1000).toISOString(),
+        ExitCode: exitCode,
+        Output: exitCode === 0 ? 'ok' : 'wget: server returned error'
+    }
+}
+
 // docker-inspect shape for a container in a given health state. `runState` is
 // State.Status and defaults to 'running'; pass 'exited' to model what Docker
 // reports for a STOPPED container, whose Health.Status stays frozen at whatever
@@ -456,6 +468,36 @@ describe('AutohealService', () => {
         expect(fresh.skipped[0].reason).to.equal('inside grace window')
     })
 
+    // A recovery that falls entirely BETWEEN two passes is never seen by the
+    // `!== unhealthy` branch, so the persisted onset survives it. The relapsed
+    // episode then inherits the old episode's clock and is restarted inside its
+    // own grace window. The retained probes carry the evidence: a pass newer
+    // than the recorded onset.
+    it('restarts the grace clock when retained probes show a recovery after the persisted onset', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'relapse')])
+
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW))
+        const first = await service.runAutoheal({ now: NOW })
+        expect(first.restarted).to.have.length(0)
+
+        // Five minutes on. The container passed a probe 45s ago and has been
+        // failing for 30s since: a NEW episode, well inside the 120s grace.
+        const later = NOW + 5 * 60000
+        stubs.getStatusFromContainer.resolves(inspectStatus('unhealthy', [
+            recordedProbe(later - 45000, 0),
+            recordedProbe(later - 30000, 1),
+            recordedProbe(later - 15000, 1),
+            recordedProbe(later, 1)
+        ]))
+        const second = await service.runAutoheal({ now: later })
+
+        expect(stubs.restartContainer.called, 'a relapse must serve its own grace window').to.equal(false)
+        expect(second.skipped[0].reason).to.equal('inside grace window')
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.unhealthySince.relapse, 'the onset must be reseeded to the new episode').to.equal(later - 30000)
+    })
+
     it('prunes persisted onsets for containers that left the registry', async () => {
         stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'gone')])
         stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW))
@@ -508,6 +550,30 @@ describe('AutohealService', () => {
 
         it('returns null on an empty log', () => {
             expect(service.getUnhealthySinceMs({ Log: [] })).to.equal(null)
+        })
+    })
+
+    describe('getLastHealthyProbeMs', () => {
+        it('returns the newest passing probe', () => {
+            const health = inspectStatus('unhealthy', [
+                logEntry(90000, 0), logEntry(60000, 1), logEntry(45000, 0), logEntry(30000, 1)
+            ]).State.Health
+            expect(service.getLastHealthyProbeMs(health)).to.equal(NOW - 45000)
+        })
+
+        it('returns null when every retained probe failed', () => {
+            expect(service.getLastHealthyProbeMs(unhealthyRingBuffer(NOW).State.Health)).to.equal(null)
+        })
+
+        it('returns null on an empty or missing log', () => {
+            expect(service.getLastHealthyProbeMs({ Log: [] })).to.equal(null)
+            expect(service.getLastHealthyProbeMs({})).to.equal(null)
+            expect(service.getLastHealthyProbeMs(null)).to.equal(null)
+        })
+
+        it('returns null rather than throwing on an unparseable timestamp', () => {
+            const health = { Log: [{ Start: 'not-a-date', End: 'nor-this', ExitCode: 0 }] }
+            expect(service.getLastHealthyProbeMs(health)).to.equal(null)
         })
     })
 

@@ -1311,18 +1311,25 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                 }
                 // Fresh-install detection must happen BEFORE buildAndUp starts the
                 // tracker (a fresh tracker creates an empty LevelDB immediately).
+                // Only a CONFIRMED empty store authorises the bootstrap restore
+                // below, because that restore reaches DROP DATABASE: an inspection
+                // failure answers UNKNOWN, never fresh, so a transient MariaDB or
+                // docker fault during a rolling update costs a slow sync from
+                // scratch rather than a populated store (uuid:7037604f).
                 let utxoWasFresh = false
                 if (module === XChainService.XCHAIN_UTXO_TRACKER && !onlyExecution) {
-                    const { utxoTrackerVolumeHasData, forceBootstrapRequested } = require('./BootstrapService')
-                    utxoWasFresh = !(await utxoTrackerVolumeHasData(coin, network)) || forceBootstrapRequested()
+                    const { utxoTrackerVolumeFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = require('./BootstrapService')
+                    utxoWasFresh = (await utxoTrackerVolumeFreshness(coin, network)) === FRESHNESS_EMPTY
+                        || forceBootstrapRequested()
                 }
                 // Decoder/indexer freshness must also be sampled BEFORE buildAndUp;
                 // once the service starts it fills its `blocks` table, which would
                 // make a fresh install look populated.
                 let mariaWasFresh = false
                 if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
-                    const { mariaDbModuleHasData, forceBootstrapRequested } = require('./BootstrapService')
-                    mariaWasFresh = !(await mariaDbModuleHasData(coin, network, module)) || forceBootstrapRequested()
+                    const { mariaDbModuleFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = require('./BootstrapService')
+                    mariaWasFresh = (await mariaDbModuleFreshness(coin, network, module)) === FRESHNESS_EMPTY
+                        || forceBootstrapRequested()
                 }
                 const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
                 if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
