@@ -164,6 +164,29 @@ jobs:
     timeout-minutes: 360
     env:
       COIN: ${{ matrix.coin }}
+      # The anchor-reward attestation barrier holds each block until the hub-mirror
+      # stream watermark is 120s past that block's own timestamp. On a shared ledger
+      # that is free, because blocks are ten minutes apart and the watermark is long
+      # past by the time one is processed. Here blocks are stamped at about wall clock
+      # and the watermark tracks wall clock, so a freshly mined block can never be
+      # 120s behind it: the barrier cannot be satisfied and every affected block burns
+      # its full 60s timeout before proceeding anyway.
+      #
+      # Measured on the 2026-09-06 release matrix, before this line existed: the BTC
+      # leg parsed 367 blocks in six hours and was killed by the job budget, against
+      # 2013 blocks in 1h52m on the pre-mirror build. 160 deferrals, ~2.7 hours spent
+      # waiting for a condition that could not arrive. The litecoin and dogecoin legs
+      # were green in ~2h25m throughout, because this barrier is BTC-only, which is
+      # exactly what made it look like a bitcoin-specific defect rather than a venue
+      # constant sized for a different block cadence.
+      #
+      # 2s, not 0: the barrier still has to MEAN something here, or the venue stops
+      # exercising the ordering it exists to enforce and a real mirror-lag defect would
+      # ride through green. The indexer accepts this ONLY on regtest and ignores it with
+      # a warning anywhere else, because a watermark grace is a consensus input and a
+      # per-node value forks settlement - so this cannot leak onto a shared ledger even
+      # if it is copied somewhere it does not belong.
+      HUB_SYNC_ANCHOR_ATTEST_GRACE_S: "2"
       # Drives BOTH the xchain-node checkout below and the `install` boot
       # argument, so the CLI running the install is the same version as the
       # stack it installs. Splitting those two was how "we tested the release"

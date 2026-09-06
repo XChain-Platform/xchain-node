@@ -591,9 +591,31 @@ async function getDefaultConfig(module, coin, network) {
             //    testnet - two independent gates, so neither one being edited alone can arm
             //    a shared ledger from a host variable.
             //
-            // The passthrough is the only supported way to arm a deployed indexer.
+            // 3. HUB_SYNC_ANCHOR_ATTEST_GRACE_S, on REGTEST ONLY, for the same reason as
+            //    (2) and with the same two independent gates: the indexer's own
+            //    resolveWatermarkGrace IGNORES it off regtest with a warning, because a
+            //    watermark grace is a consensus input and a per-node value forks
+            //    settlement.
+            //
+            //    WHY A REGTEST VENUE NEEDS IT AT ALL. The anchor-reward attestation
+            //    barrier holds a block until `streamWatermark >= blockTime + 120`. Off
+            //    regtest that is free: blocks are ten minutes apart, so by the time one is
+            //    processed the watermark is long past it. On regtest, blocks are stamped at
+            //    about wall clock and the watermark tracks wall clock too, so a freshly
+            //    mined block can NEVER be 120s behind the watermark and the barrier is
+            //    unsatisfiable by construction. Every affected block then burns the full
+            //    60s timeout before proceeding anyway.
+            //
+            //    MEASURED, on the 2026-09-06 release matrix: the BTC leg parsed 367 blocks
+            //    in six hours and was killed by the job budget, against 2013 blocks in 1h52m
+            //    on the pre-mirror build - 160 deferrals at 60s each, about 2.7 hours spent
+            //    waiting for a condition that could not arrive. The other two coins were
+            //    unaffected because this barrier is BTC-only. Nothing was wrong with the
+            //    product: the venue was simply running a shared-ledger constant on a chain
+            //    whose block cadence it was never sized for.
             const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
-            if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION")
+            if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
+                                                                          "HUB_SYNC_ANCHOR_ATTEST_GRACE_S")
             for (const varName of rollcallPassthroughVars) {
                 if (process.env[varName] !== undefined && process.env[varName] !== "") {
                     defaultValues[varName] = process.env[varName]
