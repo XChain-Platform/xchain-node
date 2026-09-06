@@ -1,18 +1,20 @@
 {
     "_comment": [
-        "Pinned component set for XChain Platform v0.12.3.",
+        "Pinned component set for XChain Platform v0.14.0.",
         "Written at ceremony step 6 from the ACTUAL tagged master merge commits.",
         "xchain-node is the carrier and is not listed: checking out its tag IS this manifest.",
-        "A patch train tags only the repos it touches. This one moves the carrier and",
-        "xchain-hub; every other component is unchanged from v0.12.1 or earlier and keeps",
-        "the tag it already carries, which is what section 4 means by a version being the",
-        "platform version at which a component last changed. A gap is unchanged, not skipped.",
+        "A train tags only the repos it touches. This one moves xchain-indexer and xchain-hub",
+        "(the attestation responsible-set liveness ladder, flag day BTC testnet 150780) and",
+        "the carrier; xchain-documentation is tagged with the train but not pinned here.",
+        "Every other component is unchanged and keeps the tag it already carries, which is",
+        "what section 4 means by a version being the platform version at which a component",
+        "last changed. A gap is unchanged, not skipped.",
         "Each commit below is the master MERGE commit its tag names, and every tag is",
         "GPG-signed by the platform release key and reports verified against the",
         "tagger identity releases@xchain.io."
     ],
-    "platform_version": "0.12.3",
-    "released": "2026-09-01",
+    "platform_version": "0.14.0",
+    "released": "2026-09-02",
     "components": {
         "xchain-vm": {
             "tag": "v0.12.0",
@@ -23,12 +25,12 @@
             "commit": "9f333337c1362ff2651aa8877d7a5445476b5b12"
         },
         "xchain-indexer": {
-            "tag": "v0.12.1",
-            "commit": "aee2bf21ecd6dc0fa90c26e7108dbedceb609bda"
+            "tag": "v0.14.0",
+            "commit": "e0d183eaf4011859b9c4f44c34112d61d43be28f"
         },
         "xchain-hub": {
-            "tag": "v0.12.3",
-            "commit": "bb5b0d180b544ea08b5720b9f8416256fd07641c"
+            "tag": "v0.14.0",
+            "commit": "e7f3b9728847a3f7916d6e410bc0f727e6b2b844"
         },
         "xchain-sync": {
             "tag": "v0.12.0",

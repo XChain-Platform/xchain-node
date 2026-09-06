@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `ENCODER_TRUST_PROXY`, `ENCODER_RATE_LIMIT_RPM`, and five explorer per-route rate-limit knobs now pass through from the host env, so a container recreate no longer drops them.
+## [0.14.0] - 2026-09-02
+
+### Fixed
+- `install <ref> xchain-hub` no longer fails with HTTP 401 on a host provisioned by the runbook: the CLI now sends the hub API key that `validator init` generated.
+- The checkpoint config block ships `hub_url` beside `self_sync`, so a fresh install resolves its checkpoint peer.
+- Checkpoint self-sync resolves once per push, so every installed coin gets a checkpoint block instead of only the first.
+- `xchain-node rollback` prints the recovery path and exits 1 rather than hanging in the precheck.
+
+### Activation
+- This train carries a consensus change in the indexer and hub: attestation responsible-set widening activates on Bitcoin testnet at block 150780 and on regtest from genesis, and is inert on mainnet. Update every indexer and hub before that height; a node left on an older build will judge attestation responses differently once a widened one lands.
 
 ## [0.12.3] - 2026-09-01
 
