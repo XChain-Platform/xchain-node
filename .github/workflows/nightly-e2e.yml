@@ -187,6 +187,24 @@ jobs:
       # per-node value forks settlement - so this cannot leak onto a shared ledger even
       # if it is copied somewhere it does not belong.
       HUB_SYNC_ANCHOR_ATTEST_GRACE_S: "2"
+      # Bounds ONE mirror-barrier attempt. On expiry the block is DEFERRED and
+      # retried, never committed uncertified - the indexer says so outright
+      # ("purely operational: it opens no barrier and commits no block") - so a
+      # shorter attempt trades away no safety at all, only the cost of a failure.
+      #
+      # It is here because the grace above fixed the barrier that could never be
+      # satisfied, and revealed one that legitimately can not be yet: on this
+      # venue the hub mirror runs a minute or two behind a chain that mines in
+      # seconds, so blocks defer for real. Measured at the 60s default on
+      # 2026-09-06: 119 deferrals cost 119 minutes of a 289-minute bitcoin leg,
+      # 41% of the wall clock, and the indexer fell far enough behind that thirty
+      # e2e waits gave up on rows that simply had not landed. Ten seconds keeps
+      # the barrier honest while making a deferral cost a tenth as much.
+      #
+      # NOT a consensus input, unlike the grace, so it carries no fork risk - but
+      # it is still passed through on regtest only, because a shared ledger wants
+      # the long attempt: there a lagging mirror is a fault worth waiting on.
+      HUB_PRICE_SYNC_TIMEOUT_MS: "10000"
       # Drives BOTH the xchain-node checkout below and the `install` boot
       # argument, so the CLI running the install is the same version as the
       # stack it installs. Splitting those two was how "we tested the release"

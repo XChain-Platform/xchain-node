@@ -613,9 +613,28 @@ async function getDefaultConfig(module, coin, network) {
             //    unaffected because this barrier is BTC-only. Nothing was wrong with the
             //    product: the venue was simply running a shared-ledger constant on a chain
             //    whose block cadence it was never sized for.
+            // 4. HUB_PRICE_SYNC_TIMEOUT_MS, on REGTEST ONLY here even though the value
+            //    itself is not a consensus input. It bounds ONE mirror-barrier ATTEMPT:
+            //    on expiry the block is DEFERRED and retried, never committed
+            //    uncertified, which XChainIndexer states outright ("purely operational:
+            //    it opens no barrier and commits no block"). So shortening it trades
+            //    nothing away; it only makes a failed attempt cheaper.
+            //
+            //    WHY A FAST VENUE NEEDS IT. Where the mirror legitimately lags the
+            //    chain, every affected block waits the full attempt before deferring.
+            //    Measured on the 2026-09-06 release matrix: 119 anchor-attest deferrals
+            //    at the 60s default burned 119 minutes of a 289-minute BTC leg, 41% of
+            //    the wall clock, and the indexer fell far enough behind that thirty
+            //    e2e waits gave up on rows that had not landed yet. The barrier is
+            //    doing its job; the cost per attempt is what a fast venue cannot afford.
+            //
+            //    Gated on regtest anyway, because a shared ledger wants the long
+            //    attempt: there a lagging mirror is a real fault worth waiting on, not
+            //    a cadence mismatch.
             const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
             if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
-                                                                          "HUB_SYNC_ANCHOR_ATTEST_GRACE_S")
+                                                                          "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
+                                                                          "HUB_PRICE_SYNC_TIMEOUT_MS")
             for (const varName of rollcallPassthroughVars) {
                 if (process.env[varName] !== undefined && process.env[varName] !== "") {
                     defaultValues[varName] = process.env[varName]
