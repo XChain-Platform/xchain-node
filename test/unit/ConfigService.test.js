@@ -326,6 +326,7 @@ describe('ConfigService', function () {
 
             const REGTEST_ONLY = [
                 'XC_ROLLCALL_REGTEST_ACTIVATION',
+                'XC_ROLLCALL_GATES_REGTEST_ACTIVATION',
                 'HUB_SYNC_ANCHOR_ATTEST_GRACE_S',
                 'HUB_PRICE_SYNC_TIMEOUT_MS',
                 'XCHAIN_COINPAY_EXPIRATION_S'
@@ -830,7 +831,8 @@ describe('ConfigService', function () {
             // ROLLCALL, and the only way its DOGE proof peer survives an `update`.
             describe('ROLLCALL rail passthrough', function () {
                 const ROLLCALL_VARS = [
-                    'DOGE_INDEXER_API_URL', 'DOGE_INDEXER_API_KEY', 'XC_ROLLCALL_REGTEST_ACTIVATION'
+                    'DOGE_INDEXER_API_URL', 'DOGE_INDEXER_API_KEY', 'XC_ROLLCALL_REGTEST_ACTIVATION',
+                    'XC_ROLLCALL_GATES_REGTEST_ACTIVATION'
                 ]
                 let saved
                 beforeEach(function () {
@@ -907,12 +909,40 @@ describe('ConfigService', function () {
                     expect(config['XC_ROLLCALL_REGTEST_ACTIVATION']).to.equal('armed')
                 })
 
+                // XC_ROLLCALL_GATES_REGTEST_ACTIVATION (D84) follows the same ROLLCALL rail
+                // env-derived regtest shape: it arms ROLLCALL v1 and the rules-aware
+                // attestation set separately from the rail, so a venue can drive v0 as its
+                // control. Both gates pass through identically at both sites (spec §8, D64).
+                it('arms the indexer gates flag on regtest when the host opts in', async function () {
+                    process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['XC_ROLLCALL_GATES_REGTEST_ACTIVATION']).to.equal('armed')
+                })
+
+                it('NEVER arms the gates flag on a shared-ledger indexer, whatever the host env says', async function () {
+                    process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    for (const net of ['mainnet', 'testnet']) {
+                        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', net)
+                        expect(config, net).to.not.have.property('XC_ROLLCALL_GATES_REGTEST_ACTIVATION')
+                    }
+                })
+
+                it('arms the container hub gates flag from the same variable, so the venue arms as a unit', async function () {
+                    process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-hub', null, null)
+                    expect(config['XC_ROLLCALL_GATES_REGTEST_ACTIVATION']).to.equal('armed')
+                })
+
                 it('omits every rollcall var when unset, so a venue ships INERT', async function () {
                     const cs = makeServiceWithConfig('')
                     const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
                     for (const v of ROLLCALL_VARS) expect(config).to.not.have.property(v)
                     const hub = await cs.getDefaultConfig('xchain-hub', null, null)
                     expect(hub).to.not.have.property('XC_ROLLCALL_REGTEST_ACTIVATION')
+                    expect(hub).to.not.have.property('XC_ROLLCALL_GATES_REGTEST_ACTIVATION')
                 })
             })
 

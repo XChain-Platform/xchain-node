@@ -653,7 +653,11 @@ async function getDefaultConfig(module, coin, network) {
             //    jump that causes it, rather than teaching every barrier to special-case a
             //    future-stamped block.
             const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
+            // XC_ROLLCALL_GATES_REGTEST_ACTIVATION follows XC_ROLLCALL_REGTEST_ACTIVATION's
+            // same env-derived regtest shape (D84): it arms ROLLCALL v1 and the rules-aware
+            // attestation set separately from the rail, so a venue can drive v0 as its control.
             if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
+                                                                          "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
                                                                           "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
                                                                           "HUB_PRICE_SYNC_TIMEOUT_MS",
                                                                           "XCHAIN_COINPAY_EXPIRATION_S")
@@ -1125,7 +1129,12 @@ async function getDefaultConfig(module, coin, network) {
             // reach the environment for regtest and for nothing else - mainnet and testnet
             // are literal there and unreachable from env by any path in the file. On a
             // mainnet or testnet hub this variable is therefore inert, not dangerous.
-            "XC_ROLLCALL_REGTEST_ACTIVATION"
+            "XC_ROLLCALL_REGTEST_ACTIVATION",
+            // XC_ROLLCALL_GATES_REGTEST_ACTIVATION rides beside it with the same
+            // no-network-gate reasoning: it arms ROLLCALL v1 and the rules-aware
+            // attestation set separately from the rail, so a venue can drive v0 as its
+            // control, and the hub's own rollcall_gates_activation.js gates it for real.
+            "XC_ROLLCALL_GATES_REGTEST_ACTIVATION"
         ]
         for (const varName of hubPassthroughVars) {
             // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also

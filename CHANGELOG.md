@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- A regtest venue can arm ROLLCALL gates on its indexer and hub containers through `XC_ROLLCALL_GATES_REGTEST_ACTIVATION`, separately from the roll-call rail.
+
 ## [0.15.2] - 2026-09-07
 
 ### Changed
 - The pinned component set moves the hub, the explorer and the sync client to 0.15.2: the hourly attestation batch publishes from every validator, the explorer custom-content frame stops growing, and a sync replica repairs a lookup hole below its cursor.
+
 
 ## [0.15.1] - 2026-09-07
 
