@@ -25,12 +25,13 @@ const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
-const { createDockerNetwork, killContainer, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs } = require('../services/DockerService')
-const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId } = require('../services/DatabaseService')
+const { createDockerNetwork, killContainer, removeContainer, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
+const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId, pingExternalDatabase } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
 const { assertRequiredMigrationsApplied } = require('../services/MigrationPreconditionService')
 const { statusChanged } = require('../services/StatusService')
+const { reindexAffectedModules, recordReindex } = require('../services/BootstrapRepublishLedger')
 
 // Resolve the operator's single ref slot into an install target and publish it
 // for the duration of the run, so every module clone and every bundled-library
@@ -230,17 +231,15 @@ async function updateModulesOnBranch(servicesList, branch = null) {
                 }
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 if (nextModule === NODE_MODULE_NAME) {
-                    // Tear down the existing node container before rebuilding. The node
-                    // branch of installModule calls buildCryptoNode, which `docker run
-                    // --name`s the node but never removes a prior container of that name
-                    // on `update` that collided and crashed (unhandled rejection).
-                    // Remove by NAME so it also clears a leftover Created-state carcass
-                    // the module registry no longer tracks; a no-op on a clean or
-                    // already-missing node. (Done here rather than inside buildCryptoNode
-                    // to keep that hot path, shared with fresh `install`, untouched;
-                    // the node is briefly down during the image rebuild, which an update
-                    // implies anyway.)
-                    await forceRemoveContainerByName(getDockerContainerImageName(NODE_MODULE_NAME, nextCoin, nextNetwork))
+                    // The running node is deliberately left alone here. buildCryptoNode
+                    // stops it gracefully (SIGTERM with a flush budget) and force-removes
+                    // the stopped carcass right before its `docker run --name`, so the
+                    // daemon keeps serving through the download and image build and its
+                    // block index is flushed before it goes. An up-front `docker rm -f`
+                    // at this point was SIGKILL: the killed daemon came back at its last
+                    // flushed index (16 regtest blocks lost, 2026-09-03), and it also
+                    // hid the old container from buildCryptoNode's bind-mount drift guard.
+                    //
                     // Recreate even when the container was missing from the registry:
                     // the old `if (!moduleContainerId) continue` made `update node` a
                     // silent no-op (exit 0, nothing created) once the node had crashed or
@@ -732,14 +731,35 @@ function isNoSuchContainerError(err) {
     return /no such container/i.test(String(err.message || err.stderr || ''))
 }
 
+// True when a docker error means the named volume is already gone. Same rule
+// isNoSuchContainerError uses, and the one DockerService.probeContainerPresenceByName
+// states: docker SAYING "no such volume" is the only thing that means absent;
+// every other failure is unknown and must be treated as possibly-present.
+function isNoSuchVolumeError(err) {
+    if (!err || typeof err === 'string') return false
+    return /no such volume/i.test(String(err.message || err.stderr || ''))
+}
+
+// The operator-facing reason for a rejected docker or registry call. Handles the
+// bare-string rejection stopContainer can produce as well as an Error.
+function failureReason(err) {
+    return (err && err.message) || String(err)
+}
+
 // Put back the services an aborted reset already stopped, so the abort leaves
 // the stack as it found it rather than half torn down. Returns the modules that
 // could not be restarted, for the operator message.
+//
+// Reads the registry strictly: getModuleContainer answers null on a SQL error as
+// well as on a miss, so a rollback run during the very registry outage that
+// caused the abort restarted nothing and still reported zero failures
+// (uuid:846cc40d). A lookup that fails now lands in `failed` and is named in the
+// STILL DOWN line.
 async function restartStoppedModules(modules, coin, network) {
     const failed = []
     for (const module of modules) {
         try {
-            const containerId = await db.getModuleContainer(module, coin, network)
+            const containerId = await db.getModuleContainerStrict(module, coin, network)
             if (!containerId) continue
             await startContainer(containerId)
         } catch {
@@ -747,6 +767,50 @@ async function restartStoppedModules(modules, coin, network) {
         }
     }
     return failed
+}
+
+/**
+ * Resolve the HOST directory that holds this chain's node datadir, asking the
+ * node container itself first.
+ *
+ * `dataDir` is env-derived (XCHAIN_NODE_DATA_DIR, else the in-repo data/), so a
+ * shell that never sourced the operator's profile resolves a path the stack has
+ * never used. The wipe was guarded on fs.existsSync of that path, so the guard
+ * went silently false and `reset all` reported success with the chain untouched.
+ * The container name is already resolved deterministically from the prefix and
+ * coin/network, so use that same key to read the datadir off the container's own
+ * bind mounts: whatever the daemon actually writes to is what a reset must wipe.
+ *
+ * Falls back to the env-derived path only when it really is on disk. Returns
+ * path=null when neither answer exists, and the caller fails closed on that
+ * rather than skipping the wipe.
+ *
+ * @returns {Promise<{path: (string|null), resolvedFrom: (string|null), configuredPath: string, containerName: string}>}
+ */
+async function resolveNodeDataPath(coin, network) {
+    const containerName  = getDockerContainerImageName(NODE_MODULE_NAME, coin, network)
+    const configuredPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
+
+    let mounts = []
+    try {
+        mounts = await getContainerBindMounts(containerName)
+    } catch { /* no container, or docker unreachable: fall through to the configured path */ }
+    const dataMount = (Array.isArray(mounts) ? mounts : [])
+        .find(m => m && m.destination === `/root/.${coin}` && m.source)
+    if (dataMount) {
+        return {
+            path: dataMount.source,
+            resolvedFrom: `the /root/.${coin} bind mount of container ${containerName}`,
+            configuredPath,
+            containerName
+        }
+    }
+
+    if (fs.existsSync(configuredPath)) {
+        return { path: configuredPath, resolvedFrom: 'the configured data dir', configuredPath, containerName }
+    }
+
+    return { path: null, resolvedFrom: null, configuredPath, containerName }
 }
 
 // The service names `reset` can act on. `reset` is the only destructive CLI path
@@ -819,10 +883,50 @@ async function resetModules(service, coin, network, force = false, withIndexer =
     const blocksHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}` : null
     const txindexHostPath = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
 
+    // Resolve the node datadir BEFORE anything is stopped or confirmed, and
+    // refuse the whole reset by name when it cannot be resolved. The
+    // old code re-derived the path from XCHAIN_NODE_DATA_DIR at the wipe site
+    // and skipped the wipe whenever that path was absent, so a reset run from a
+    // profile-less shell wiped the decoder/indexer DBs, left the chain in place,
+    // and exited 0; the missing "Clearing node data" line was the only tell.
+    // "Not installed" stays a legitimate skip, and is stated out loud.
+    let nodeDataPath = null
+    if (resetNode) {
+        let nodeInstalled    = null
+        let registryReadable = true
+        try {
+            nodeInstalled = await db.getModuleContainer(NODE_MODULE_NAME, coin, network)
+        } catch { registryReadable = false }
+
+        const resolved = await resolveNodeDataPath(coin, network)
+        if (resolved.path) {
+            nodeDataPath = resolved.path
+            if (path.resolve(nodeDataPath) !== path.resolve(resolved.configuredPath)) {
+                console.log(`Node datadir resolved from ${resolved.resolvedFrom}: ${nodeDataPath}`)
+                console.log(`  (XCHAIN_NODE_DATA_DIR in this shell would have pointed at ${resolved.configuredPath})`)
+            }
+        } else if (registryReadable && !nodeInstalled) {
+            console.log(`No ${NODE_MODULE_NAME} container is installed for ${coin} ${network}; there is no node data to clear.`)
+        } else {
+            const envState = process.env.XCHAIN_NODE_DATA_DIR && process.env.XCHAIN_NODE_DATA_DIR.trim() !== ''
+                ? `set to ${process.env.XCHAIN_NODE_DATA_DIR}`
+                : 'UNSET in this shell (non-interactive shells do not source the profile)'
+            console.log(`Aborted: cannot resolve the ${coin} ${network} node datadir. No data was touched.`)
+            console.log(`  Container ${resolved.containerName} reported no /root/.${coin} bind mount `
+                + '(it is absent, or docker is unreachable from here).')
+            console.log(`  The configured path ${resolved.configuredPath} does not exist either.`)
+            console.log(`  XCHAIN_NODE_DATA_DIR is ${envState}.`)
+            console.log('  Set XCHAIN_NODE_DATA_DIR to this stack\'s data root (or make docker reachable so the')
+            console.log('  node container can be inspected) and re-run. Refusing rather than resetting the')
+            console.log('  databases around a chain that would stay untouched.')
+            return false
+        }
+    }
+
     if (!force) {
         const targets = []
         if (resetNode) {
-            targets.push('node datadir')
+            if (nodeDataPath) targets.push(`node datadir (${nodeDataPath})`)
             if (blocksDir) {
                 targets.push(`relocated blocks dir (${blocksHostPath})`)
                 targets.push(`relocated txindex dir (${txindexHostPath})`)
@@ -843,20 +947,31 @@ async function resetModules(service, coin, network, force = false, withIndexer =
         }
     }
 
-    // Fail fast BEFORE any destructive wipe: in docker (non-external) mode a
-    // DB reset needs the MariaDB container, and resetDatabases would otherwise
-    // `docker exec null` and abort mid-reset with node/utxo data already wiped
-    // (the half-reset failure the EXTERNAL_DB branch already guards). Probe here
-    // so nothing is touched when the container is gone (uuid:6f6584dc). It sits
-    // ahead of the stop loop, not after it: this abort returns before the restart
-    // pass, so probing later left every already-stopped service DOWN while still
-    // reporting that no data was touched (uuid:bb190060).
+    // Fail fast BEFORE any destructive wipe: a DB reset needs a working MariaDB,
+    // and resetDatabases is not reached until AFTER the stop loop and every wipe
+    // below, so discovering the problem there half-destroys the stack. In docker
+    // mode the failure is `docker exec null` with the container gone
+    // (uuid:6f6584dc); in EXTERNAL_DB mode it is an unreachable host, or a
+    // getExternalDbConfig throw on a partial env, and NOTHING probed for it
+    // (uuid:41887889). Both modes are probed here. It sits ahead of the stop
+    // loop, not after it: this abort returns before the restart pass, so probing
+    // later left every already-stopped service DOWN while still reporting that
+    // no data was touched (uuid:bb190060).
     const dbResetNeeded = resetDecoder || resetIndexer
-    if (dbResetNeeded && !EXTERNAL_DB) {
-        const dbContainerId = await getDatabaseContainerId()
-        if (!dbContainerId) {
-            console.log('Aborted: MariaDB container not found; install the database first. No data was touched.')
-            return false
+    if (dbResetNeeded) {
+        if (EXTERNAL_DB) {
+            const probe = await pingExternalDatabase()
+            if (!probe.ok) {
+                console.log(`Aborted: cannot reach the external MariaDB at ${probe.host}:${probe.port}`
+                    + ` (${probe.error}). No data was touched.`)
+                return false
+            }
+        } else {
+            const dbContainerId = await getDatabaseContainerId()
+            if (!dbContainerId) {
+                console.log('Aborted: MariaDB container not found; install the database first. No data was touched.')
+                return false
+            }
         }
     }
 
@@ -875,14 +990,37 @@ async function resetModules(service, coin, network, force = false, withIndexer =
     // (uuid:9c88cfe6). Only a "no such container" miss is still a legitimate
     // skip; the registry miss is already handled by the null check.
     const stoppedModules = []
+    // Refuse the whole reset, put back whatever this run stopped, and report it.
+    // Only reachable while nothing has been wiped yet, which is why it may still
+    // promise that no data was touched.
+    const abortBeforeAnyWipe = async (reason) => {
+        const restartFailures = await restartStoppedModules(stoppedModules, coin, network)
+        console.log(`Aborted: ${reason}. No data was touched.`)
+        if (stoppedModules.length > 0) {
+            console.log(`  Restarted ${stoppedModules.length - restartFailures.length} of `
+                + `${stoppedModules.length} already-stopped service(s).`)
+        }
+        if (restartFailures.length > 0) {
+            console.log(`  STILL DOWN, start by hand: ${restartFailures.join(', ')}`)
+        }
+        return false
+    }
     for (const module of modulesToStop) {
         let containerId = null
         try {
-            containerId = await db.getModuleContainer(module, coin, network)
-        } catch { continue /* not installed, skip */ }
-        // getModuleContainer returns null on a registry miss rather than
-        // throwing, so only this explicit check can skip "not installed";
-        // without it stopContainer(null) fails and now ABORTS the reset
+            containerId = await db.getModuleContainerStrict(module, coin, network)
+        } catch (err) {
+            // A registry read that FAILED is not evidence the module is absent.
+            // The swallowing read this replaced answered null on any SQL error, so
+            // a blip after the reachability precheck made a live indexer look
+            // uninstalled: the loop skipped stopping it and the wipes below,
+            // resetDatabases included, ran underneath it (uuid:846cc40d).
+            return await abortBeforeAnyWipe(
+                `cannot read the ${module} registry row (${failureReason(err)}), so it is not known `
+                + 'whether that service is running')
+        }
+        // A SUCCESSFUL read with no row is still a legitimate "not installed"
+        // skip; without this check stopContainer(null) fails and ABORTS the reset
         // (uuid:fd7cc224 sibling site).
         if (!containerId) continue
         try {
@@ -890,25 +1028,48 @@ async function resetModules(service, coin, network, force = false, withIndexer =
             stoppedModules.push(module)
         } catch (err) {
             if (isNoSuchContainerError(err)) continue
-            const restartFailures = await restartStoppedModules(stoppedModules, coin, network)
-            const reason = (err && err.message) || String(err)
-            console.log(`Aborted: ${module} failed to stop (${reason}). No data was touched.`)
-            if (stoppedModules.length > 0) {
-                console.log(`  Restarted ${stoppedModules.length - restartFailures.length} of `
-                    + `${stoppedModules.length} already-stopped service(s).`)
-            }
-            if (restartFailures.length > 0) {
-                console.log(`  STILL DOWN, start by hand: ${restartFailures.join(', ')}`)
-            }
-            return false
+            return await abortBeforeAnyWipe(`${module} failed to stop (${failureReason(err)})`)
         }
     }
 
+    // Classify the tracker volume's presence BEFORE the first wipe. The wipe
+    // below swallowed every failure as "the volume may not exist", so a
+    // permission error, an unreachable daemon or a failed alpine pull left stale
+    // tracker data behind while the decoder/indexer databases were dropped and
+    // the run reported success (uuid:e24c98d4). Only docker SAYING "no such
+    // volume" is absence; anything else refuses here, while the stack is whole.
+    let utxoVolumeName    = null
+    let utxoVolumePresent = false
+    if (resetUtxoTracker) {
+        // Name the volume through the shared helper so it carries NODE_PREFIX
+        // (uuid:7523dd94): an unprefixed name resolves to the DEFAULT_NODE_PREFIX
+        // stack's volume and wipes that one instead of the intended target.
+        utxoVolumeName = getUtxoTrackerVolumeName(coin, network)
+        try {
+            await execFileAsync('docker', ['volume', 'inspect', utxoVolumeName])
+            utxoVolumePresent = true
+        } catch (err) {
+            if (!isNoSuchVolumeError(err)) {
+                return await abortBeforeAnyWipe(
+                    `cannot determine whether the Docker volume ${utxoVolumeName} exists `
+                    + `(${failureReason(err)})`)
+            }
+            console.log(`No Docker volume ${utxoVolumeName} to clear.`)
+        }
+    }
+
+    // Tracks whether anything irreversible has happened yet, so a later abort
+    // reports the stack's real state instead of promising an untouched one.
+    let nodeDataWiped = false
+
     if (resetNode) {
-        const nodeDataPath = path.join(dataDir, NODE_MODULE_NAME, coin, network)
-        if (fs.existsSync(nodeDataPath)) {
+        // No existsSync guard here any more: the path was resolved (and the
+        // reset refused, or the "not installed" skip announced) up top, so an
+        // unresolvable datadir can no longer read as a silent no-op.
+        if (nodeDataPath) {
             console.log(`Clearing node data at ${nodeDataPath}...`)
             await execFileAsync('docker', ['run', '--rm', '-v', `${nodeDataPath}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
+            nodeDataWiped = true
         }
         // Relocated blocks/txindex (XCHAIN_NODE_BLOCKS_DIR) live outside the
         // datadir, so wipe them here too or the daemon restarts over stale
@@ -917,19 +1078,34 @@ async function resetModules(service, coin, network, force = false, withIndexer =
             if (relocated && fs.existsSync(relocated)) {
                 console.log(`Clearing relocated node data at ${relocated}...`)
                 await execFileAsync('docker', ['run', '--rm', '-v', `${relocated}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
+                nodeDataWiped = true
             }
         }
     }
 
-    if (resetUtxoTracker) {
-        // Routed through the shared helper (uuid:7523dd94): the unprefixed name
-        // used here previously wiped the DEFAULT_NODE_PREFIX stack's volume
-        // under a non-default NODE_PREFIX, silently missing the intended target.
-        const volumeName = getUtxoTrackerVolumeName(coin, network)
+    if (resetUtxoTracker && utxoVolumePresent) {
         try {
-            console.log(`Clearing Docker volume ${volumeName}...`)
-            await execFileAsync('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
-        } catch { /* volume may not exist, skip */ }
+            console.log(`Clearing Docker volume ${utxoVolumeName}...`)
+            await execFileAsync('docker', ['run', '--rm', '-v', `${utxoVolumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
+        } catch (err) {
+            // The volume exists and the wipe failed, so the tracker still holds
+            // its old store. Falling through would drop the decoder/indexer
+            // databases around retained tracker data and still return true.
+            const reason = `clearing the Docker volume ${utxoVolumeName} failed (${failureReason(err)})`
+            if (nodeDataWiped) {
+                // Node data is already gone, so this reset is half done and cannot
+                // claim otherwise. Starting the services again would run a
+                // resynced chain under decoder and indexer stores that still
+                // describe the old one, so they stay down until the operator
+                // re-runs the same reset.
+                console.log(`Aborted: ${reason}.`)
+                console.log('  The node data for this stack WAS already cleared; the decoder/indexer')
+                console.log('  databases were NOT touched, and the stopped services are left down.')
+                console.log('  Fix the volume problem and re-run the same reset command.')
+                return false
+            }
+            return await abortBeforeAnyWipe(reason)
+        }
     }
 
     const dbModulesToReset = [
@@ -958,6 +1134,40 @@ async function resetModules(service, coin, network, force = false, withIndexer =
         }
     }
 
+    // A reset is a REINDEX: from here the wiped stores rebuild on a new lineage,
+    // and every bootstrap archive already published for these combos describes
+    // the old one. Without a marker nothing forces a republish, so the
+    // stale-lineage archive stays newest until the next scheduled run (up to a
+    // week for a tracker, which is opt-in besides) and no age check catches it,
+    // because the file is hours old and simply wrong. Mark the combos DUE so
+    // the publisher pulls them into its next plan regardless of schedule or
+    // tracker opt-in.
+    //
+    // Best-effort by design: the wipes already happened, so a bookkeeping
+    // failure must never abort the restart pass and leave the stack down. It is
+    // reported loudly instead, with the command to publish by hand.
+    const reindexedModules = reindexAffectedModules({
+        node: resetNode, utxoTracker: resetUtxoTracker, decoder: resetDecoder, indexer: resetIndexer
+    })
+    if (reindexedModules.length > 0) {
+        try {
+            const marked = recordReindex(reindexedModules, coin, network, { reason: `reset ${service}` })
+            if (marked.length > 0) {
+                console.log(`Marked ${marked.length} bootstrap combo(s) for republish after this reindex: ${marked.join(', ')}`)
+            } else {
+                throw new Error('the republish ledger could not be written')
+            }
+        } catch (err) {
+            console.warn('WARNING: could not record this reindex in the bootstrap republish ledger: '
+                + ((err && err.message) ? err.message : err))
+            console.warn('  The published archives for these combos are now from the PRE-reset lineage and')
+            console.warn('  nothing will force a republish. Republish by hand once the stack has caught up:')
+            for (const module of reindexedModules) {
+                console.warn(`    xchain-node bootstrap create ${module} ${coin} ${network}`)
+            }
+        }
+    }
+
     console.log(`Restarting ${coin} ${network} services...`)
     // Track restart failures instead of swallowing them: a silent skip here
     // left a wiped stack DOWN (node never restarted, every dependent service
@@ -968,14 +1178,21 @@ async function resetModules(service, coin, network, force = false, withIndexer =
     for (const module of modulesToStop) {
         let containerId = null
         try {
-            containerId = await db.getModuleContainer(module, coin, network)
-        } catch { continue /* not installed, skip */ }
-        // getModuleContainer never throws on a registry miss (MariaDbStore
-        // returns null), so the catch above cannot catch "not installed" -
-        // only this explicit null check can. Without it, startContainer(null)
-        // fails on every branch and every `reset all` on mainnet/testnet
-        // (where the regtest-only miner has no registry row) reports a false
-        // failure after the reset actually succeeded (uuid:fd7cc224).
+            containerId = await db.getModuleContainerStrict(module, coin, network)
+        } catch (err) {
+            // Strict, like the stop loop: the swallowing read answered null on a
+            // SQL error too, so a registry blip here left a just-wiped service
+            // DOWN and still reported a clean reset (uuid:846cc40d). Nothing can
+            // be undone at this point, so report it with the other start
+            // failures rather than aborting.
+            startFailures.push({ module, error: `registry lookup failed (${failureReason(err)})` })
+            continue
+        }
+        // A SUCCESSFUL read with no row is "not installed" and stays a skip.
+        // Without this check startContainer(null) fails on every branch, and
+        // every `reset all` on mainnet/testnet (where the regtest-only miner has
+        // no registry row) reports a false failure after the reset actually
+        // succeeded (uuid:fd7cc224).
         if (!containerId) continue /* not installed, skip */
         try {
             await startContainer(containerId)

@@ -77,9 +77,9 @@ function loadGate({ external = false, nativeResolves = null } = {}) {
 // so each test states only what it changes.
 function makeRunner({
     inspect = healthyInspect(),
-    // A real decoder publishes reorg_halt_checked_at beside reorg_halted (both shipped
-    // in the same commit), and only a decoder that never completed a marker probe
-    // leaves it null. The fixture said "not halted" without ever having looked.
+    // Models the rich JSON-RPC `health` payload, the first surface probeServiceStatus
+    // tries; it publishes reorg_halt_checked_at beside reorg_halted. A null
+    // timestamp means no marker probe ever completed, so it is not a "not halted".
     status  = { status: 'healthy', lag_blocks: 0, reorg_halted: false, reorg_halt_checked_at: 1756000000000 },
     tables  = '1\t1',
     reorgHaltRows = '0',
@@ -196,6 +196,55 @@ describe('BootstrapHealthGate', function () {
             const gate = loadGate()
             const err = await refusal(callGate(gate, { runner: makeRunner({ tables: 'x\ty' }) }))
             expect(err.message).to.match(/marker-table probe[\s\S]*returned unreadable output/)
+        })
+
+        // PARTIAL tokens are the shape parseInt hides: it reads a prefix and drops
+        // the rest, so '0garbage' would arrive as a clean 0. A 0 there reads as
+        // "no marker table" and SKIPS the sync_halt probe, so an unreadable answer
+        // must be refused rather than buy itself a pass on the very next check.
+        it('REFUSES when a marker-table token is a partial number, and does not skip sync_halt', async function () {
+            const gate = loadGate()
+            const runner = makeRunner({ tables: '1\t0garbage' })
+            const err = await refusal(callGate(gate, { runner }))
+            expect(err.message).to.match(/marker-table probe[\s\S]*returned unreadable output/)
+            const sqls = runner.getCalls().map(c => (c.args[1] || []).join(' '))
+            expect(sqls.some(s => /FROM `[^`]+`\.sync_halt/.test(s))).to.equal(false)
+            expect(sqls.some(s => /FROM `[^`]+`\.events/.test(s))).to.equal(false)
+        })
+
+        // TABLE_SCHEMA + TABLE_NAME is unique in information_schema.TABLES, so a
+        // table-existence count above 1 is not an answer to the question asked.
+        it('REFUSES a marker-table count outside 0..1', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ tables: '1\t2' }) }))
+            expect(err.message).to.match(/marker-table probe[\s\S]*returned unreadable output/)
+        })
+
+        it('REFUSES when the marker-table probe returns the wrong number of tokens', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ tables: '1' }) }))
+            expect(err.message).to.match(/marker-table probe[\s\S]*returned unreadable output/)
+        })
+
+        // A COUNT(*) is never negative and never has a suffix. Both survive
+        // parseInt + Number.isFinite and then lose the `> 0` test, so an unreadable
+        // marker count is refused, never certified as carrying no halt marker.
+        it('REFUSES a REORG_HALT count that is a partial number', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHaltRows: '0garbage' }) }))
+            expect(err.message).to.match(/REORG_HALT marker probe returned unreadable output/)
+        })
+
+        it('REFUSES a negative REORG_HALT count', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHaltRows: '-1' }) }))
+            expect(err.message).to.match(/REORG_HALT marker probe returned unreadable output/)
+        })
+
+        it('REFUSES a sync_halt count that is a partial number', async function () {
+            const gate = loadGate()
+            const err = await refusal(callGate(gate, { runner: makeRunner({ syncHaltRows: '2 rows' }) }))
+            expect(err.message).to.match(/sync_halt marker probe returned unreadable output/)
         })
 
         // A decoder/indexer always provisions `events`; a probe that cannot see it
@@ -654,5 +703,46 @@ describe('makeBootstrap() consults the source health gate', function () {
         try { await svc.makeBootstrap(COIN, NETWORK, 'xchain-unknown') } catch (e) { err = e }
         expect(err.message).to.match(/Unsupported module/)
         expect(gateStub.called).to.equal(false)
+    })
+})
+
+// The parser the marker probes share. Pinned directly as well as through the
+// gate: under a bare parseInt every one of these strings reads as a healthy number.
+describe('parseCountTokens()', function () {
+
+    const parse = (raw, opts) => loadGate().parseCountTokens(raw, opts)
+
+    it('accepts whole nonnegative integers', function () {
+        expect(parse('0',  { expected: 1, what: 'p' })).to.deep.equal([0])
+        expect(parse('42\n', { expected: 1, what: 'p' })).to.deep.equal([42])
+        expect(parse('1\t0', { expected: 2, max: 1, what: 'p' })).to.deep.equal([1, 0])
+    })
+
+    it('refuses partial tokens, signs, decimals and exponents', function () {
+        for (const raw of ['0garbage', '-1', '1.5', '1e3', 'NaN', '+1', '0x1']) {
+            expect(() => parse(raw, { expected: 1, what: 'p' }), raw)
+                .to.throw(/returned unreadable output/)
+        }
+    })
+
+    it('refuses empty and whitespace-only output', function () {
+        expect(() => parse('',    { expected: 1, what: 'p' })).to.throw(/unreadable output/)
+        expect(() => parse('   ', { expected: 1, what: 'p' })).to.throw(/unreadable output/)
+        expect(() => parse(null,  { expected: 1, what: 'p' })).to.throw(/unreadable output/)
+    })
+
+    it('refuses the wrong token count in either direction', function () {
+        expect(() => parse('1 2', { expected: 1, what: 'p' })).to.throw(/unreadable output/)
+        expect(() => parse('2',   { expected: 2, what: 'p' })).to.throw(/unreadable output/)
+    })
+
+    it('refuses a value above max when one is given, and ignores max when it is not', function () {
+        expect(() => parse('2', { expected: 1, max: 1, what: 'p' })).to.throw(/unreadable output/)
+        expect(parse('2', { expected: 1, what: 'p' })).to.deep.equal([2])
+    })
+
+    it('quotes the offending output in the refusal so the operator can see it', function () {
+        expect(() => parse('0garbage', { expected: 1, what: 'REORG_HALT marker probe' }))
+            .to.throw(/the REORG_HALT marker probe returned unreadable output: "0garbage"/)
     })
 })

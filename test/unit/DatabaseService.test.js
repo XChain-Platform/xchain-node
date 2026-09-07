@@ -125,7 +125,9 @@ function makeStubs(overrides = {}) {
 
 // configValues merges into the getDefaultConfig() result, for tests that need a
 // key the shared default does not carry (e.g. HUB_DB_NAME).
-function loadDatabaseService(stubs, constants = {}, configValues = {}) {
+// configServiceOverrides replaces individual ConfigService exports (getModuleDatabaseName
+// for the identifier-allowlist cases), applied last so it wins over the defaults below.
+function loadDatabaseService(stubs, constants = {}, configValues = {}, configServiceOverrides = {}) {
     const defaultConstants = {
         DB_MODULE_NAME: 'database',
         HUB_MODULE_NAME: 'xchain-hub',
@@ -139,6 +141,12 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}) {
         EXTERNAL_DB_HOST: '127.0.0.1',
         EXTERNAL_DB_PORT: 3306,
         EXTERNAL_DB_ROOT_USER: 'root',
+        // The DB container's own --health-start-period, shared with the hub and
+        // explorer healthcheck descriptors whose probes SELECT 1 against it. Read
+        // from the real module rather than restated here: this stub is noCallThru,
+        // so a name missing from it reaches buildDatabaseModule as undefined and
+        // lands in the docker run args as an undefined element.
+        DEPENDENCY_HEALTH_START_PERIOD: require('../../src/config/constants').DEPENDENCY_HEALTH_START_PERIOD,
         ...constants
     }
 
@@ -178,7 +186,8 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}) {
             getDockerContainerImageName: (mod) => 'xchain-node-' + mod,
             getDockerNetwork: (coin, net) => 'xchain-node' + (coin ? '-' + coin : '') + (net ? '-' + net : ''),
             getModuleDatabaseName: (mod, coin, net) => 'XChain_BTC_Mainnet_Decoder',
-            validatePort: require('../../src/services/ConfigService').validatePort
+            validatePort: require('../../src/services/ConfigService').validatePort,
+            ...configServiceOverrides
         },
         './DockerService': {
             getStatusFromContainer: stubs.getStatusFromContainer,
@@ -548,6 +557,15 @@ describe('DatabaseService', function () {
             expect(String(runArgs[cmdIdx + 1])).to.include('healthcheck.sh')
             expect(runArgs).to.include('--health-interval')
             expect(runArgs).to.include('--health-start-period')
+            // The DB side of the cross-file window invariant: the hub and explorer
+            // descriptors take the same constant because their probes SELECT 1 against
+            // THIS container. Pin the emitted value, not just the flag, because no
+            // other guard reads this arg and a literal put back here would drift alone.
+            const spIdx = runArgs.indexOf('--health-start-period')
+            expect(String(runArgs[spIdx + 1]),
+                'the DB start period must stay DEPENDENCY_HEALTH_START_PERIOD: the hub and ' +
+                'explorer windows are derived from it and would silently go narrow'
+            ).to.equal(require('../../src/config/constants').DEPENDENCY_HEALTH_START_PERIOD)
         })
 
         // The probe is visibility ONLY. AutohealService restarts a container only
@@ -1122,6 +1140,59 @@ describe('DatabaseService', function () {
                 expect(stubs.setDbRootPassword.calledWith('container-root-pass')).to.be.true
                 expect(stubs.setDbRootPassword.calledWith('stale-env-pass')).to.be.false
             } finally {
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        // The fall-through is right, the silence is not: an operator who set the
+        // variable believes it IS the credential in force, so a mid-rotation
+        // divergence has to be named where it happens (uuid:aa6c2267).
+        it('warns, without printing a value, when the env override does not authenticate', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'stale-env-pass'
+            const warned = []
+            const warnStub = sinon.stub(console, 'warn').callsFake((...args) => warned.push(args.join(' ')))
+            try {
+                const stubs = makeStubs()
+                stubs.getDbRootPassword.returns(null)
+                stubs.execFileAsync
+                    .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                    .onCall(1).rejects(new Error('Access denied for user root'))
+                    .onCall(2).resolves({ stdout: 'container-root-pass\n' })
+                    .onCall(3).resolves({ stdout: 'mysqld is alive\n' })
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('container-root-pass')
+                const output = warned.join('\n')
+                expect(output).to.include('XCHAIN_NODE_DB_ROOT_PASSWORD')
+                expect(output).to.include('MYSQL_ROOT_PASSWORD')
+                expect(output).to.not.include('stale-env-pass')
+                expect(output).to.not.include('container-root-pass')
+            } finally {
+                warnStub.restore()
+                if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+                else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
+            }
+        })
+
+        it('stays silent when the env override authenticates', async function () {
+            const saved = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+            process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = 'env-root-pass'
+            const warned = []
+            const warnStub = sinon.stub(console, 'warn').callsFake((...args) => warned.push(args.join(' ')))
+            try {
+                const stubs = makeStubs()
+                stubs.getDbRootPassword.returns(null)
+                stubs.execFileAsync
+                    .onCall(0).resolves({ stdout: VALID_CONTAINER_ID + '\n' })
+                    .onCall(1).resolves({ stdout: 'mysqld is alive\n' })
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.askMariadbRootPassword('bitcoin', 'mainnet')
+                expect(result).to.equal('env-root-pass')
+                expect(warned.join('\n')).to.not.include('XCHAIN_NODE_DB_ROOT_PASSWORD')
+            } finally {
+                warnStub.restore()
                 if (saved === undefined) delete process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
                 else process.env.XCHAIN_NODE_DB_ROOT_PASSWORD = saved
             }
@@ -1730,6 +1801,117 @@ describe('DatabaseService', function () {
             expect(err).to.not.equal(null)
             expect(String(err.message)).to.contain('MariaDB container not found')
             expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
+
+        // A database name reaches SQL as text, so this destructive site gates it
+        // on the same allowlist every sibling DDL site applies (uuid:0257cadf).
+        // The whole set is asserted before the first DROP, so a bad name on the
+        // SECOND module cannot fire with the first database already gone.
+        it('refuses the docker-mode reset when a derived database name is not a safe identifier', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            // Empty configured names so the DERIVED name is the one under test;
+            // the configured name has its own case below.
+            const ds = loadDatabaseService(stubs, {}, { DECODER_DB_NAME: '', INDEXER_DB_NAME: '' }, {
+                getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Decoder; DROP DATABASE mysql'
+            })
+            let err = null
+            try {
+                await ds.resetDatabases('bitcoin', 'mainnet')
+            } catch (e) { err = e }
+            expect(err).to.not.equal(null)
+            expect(String(err.message)).to.contain('Unsafe MariaDB database name')
+            expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
+
+        it('refuses the external-DB reset on the second module before the first is dropped', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const queried = []
+            stubs.mariadb.createConnection = sinon.stub().resolves({
+                query: async (sql) => { queried.push(sql); return [] },
+                end: async () => {}
+            })
+            let call = 0
+            const ds = loadDatabaseService(stubs, { EXTERNAL_DB: true }, { DECODER_DB_NAME: '', INDEXER_DB_NAME: '' }, {
+                // First module resolves clean, second does not: the pre-loop
+                // assertion is what keeps the first DROP from having run.
+                getModuleDatabaseName: () => (++call === 1 ? 'XChain_BTC_Mainnet_Decoder' : 'bad-name')
+            })
+            let err = null
+            try {
+                await ds.resetDatabases('bitcoin', 'mainnet')
+            } catch (e) { err = e }
+            expect(err).to.not.equal(null)
+            expect(String(err.message)).to.contain('Unsafe MariaDB database name')
+            expect(queried.filter(q => String(q).includes('DROP DATABASE'))).to.have.length(0)
+            expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
+
+        // Provisioning grants on cfg["*_DB_NAME"], which the operator can override in
+        // the coin-network config file. A reset that dropped the DERIVED default name
+        // instead left the live database intact and wiped whatever else on that server
+        // owned the default name (uuid:fd543c4a).
+        it('drops the CONFIGURED database names, not the derived defaults', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs, {},
+                { DECODER_DB_NAME: 'CustomDecoder', INDEXER_DB_NAME: 'CustomIndexer' },
+                { getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Derived' })
+            await ds.resetDatabases('bitcoin', 'mainnet')
+            const drops = executed.filter(c => c && c.includes('DROP DATABASE')).join(' | ')
+            expect(drops).to.contain('CustomDecoder')
+            expect(drops).to.contain('CustomIndexer')
+            expect(drops).to.not.contain('XChain_BTC_Mainnet_Derived')
+        })
+
+        // The configured name is the one an operator types, so it is the untrusted
+        // one; the allowlist must cover it and still fire before the first DROP.
+        it('refuses the reset when a CONFIGURED database name is not a safe identifier', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs, {},
+                { DECODER_DB_NAME: 'XChain_BTC_Mainnet_Decoder', INDEXER_DB_NAME: 'Custom; DROP DATABASE mysql' },
+                { getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Decoder' })
+            let err = null
+            try {
+                await ds.resetDatabases('bitcoin', 'mainnet')
+            } catch (e) { err = e }
+            expect(err).to.not.equal(null)
+            expect(String(err.message)).to.contain('Unsafe MariaDB database name')
+            expect(executed.filter(c => c && c.includes('DROP DATABASE'))).to.have.length(0)
+        })
+
+        // A config that carries no name at all (an older install, or a module outside
+        // the two DB modules) still resets the derived default rather than nothing.
+        it('falls back to the derived name when config carries no database name', async function () {
+            const stubs = makeStubs()
+            const executed = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executed.push(sql)
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs, {}, { DECODER_DB_NAME: '', INDEXER_DB_NAME: '' },
+                { getModuleDatabaseName: () => 'XChain_BTC_Mainnet_Derived' })
+            await ds.resetDatabases('bitcoin', 'mainnet')
+            const drops = executed.filter(c => c && c.includes('DROP DATABASE')).join(' | ')
+            expect(drops).to.contain('XChain_BTC_Mainnet_Derived')
         })
     })
 

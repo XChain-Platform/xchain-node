@@ -318,6 +318,25 @@ async function ensureHubApiKey() {
     return { path: sidecarPath, generated: true }
 }
 
+/**
+ * Report whether this host already holds a HUB_API_KEY, WITHOUT ever minting one.
+ *
+ * A credential APPEARING is as breaking as one disappearing. A hub deployed with no key
+ * runs keyless (HUB_ALLOW_UNAUTHENTICATED), and every indexer, explorer and shared service
+ * pointed at it carries no key either; a key landing in this sidecar flips the hub to
+ * authenticated on its next deploy and 401s all of them at once, while the hub itself still
+ * looks healthy. So the callers that only need to SAY where the credential lives (a re-run
+ * of `validator init` over an already-provisioned node) read through here, and generation
+ * stays with the fresh-install path in ensureHubApiKey.
+ *
+ * @returns {Promise<{path: string, present: boolean}>}
+ */
+async function readHubApiKey() {
+    const sidecarPath = hubSidecarPath()
+    const existing = await readSidecarValue(sidecarPath, "HUB_API_KEY")
+    return { path: sidecarPath, present: !!existing }
+}
+
 // Fill in HUB_API_KEY from the shared sidecar when the host env did not supply one.
 // The hub, the co-located indexer and the shared services must all present the SAME
 // value or their writes 401 against each other, so they resolve it from one file.
@@ -432,6 +451,30 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues["CORS_ORIGIN"] = process.env.CORS_ORIGIN || "*"
         }
 
+        // Encoder passthrough. A production encoder sits behind a reverse proxy on
+        // ANOTHER box, reached over a public address, so its default trust-proxy
+        // setting (loopback, uniquelocal) never honours X-Forwarded-For and the
+        // per-IP limiter keys every visitor on the proxy's egress address: one
+        // bucket per encoder for the whole world. ENCODER_TRUST_PROXY names that
+        // egress address so the container recovers the real client.
+        // ENCODER_RATE_LIMIT_RPM rides the same passthrough, placed after the
+        // regtest block above so a host value wins over the 99999 regtest literal
+        // and survives update/recreate. Read BY NAME, same as the explorer
+        // passthrough below: a computed process.env read is invisible to the
+        // platform's env-var coverage gate, which is what turns an undocumented
+        // variable into a silent one.
+        if (module === XChainService.XCHAIN_ENCODER) {
+            const encoderPassthroughVars = ["ENCODER_TRUST_PROXY", "ENCODER_RATE_LIMIT_RPM"]
+            for (const key of encoderPassthroughVars) {
+                const value = {
+                    ENCODER_TRUST_PROXY:    process.env.ENCODER_TRUST_PROXY,
+                    ENCODER_RATE_LIMIT_RPM: process.env.ENCODER_RATE_LIMIT_RPM
+                }[key]
+                if (value === undefined || value === "") continue
+                defaultValues[key] = value
+            }
+        }
+
         // Native-coin protocol fee destination (per coin/network). Defaults from the vendored
         // canonical coin registry (src/coins), so a stock install provisions the decoder's
         // FEE_DESTINATION (fee-output capture into transaction_outputs) and the indexer's
@@ -528,6 +571,98 @@ async function getDefaultConfig(module, coin, network) {
                     defaultValues[varName] = process.env[varName]
                 }
             }
+            // ROLLCALL rail env (xchain-indexer only). Two separate things, both of which a
+            // deployed indexer needs before an epoch close can do anything at all.
+            //
+            // 1. DOGE_INDEXER_API_URL / DOGE_INDEXER_API_KEY, on EVERY network. Roll calls
+            //    land on DOGECOIN and the BTC indexer is the only place the close runs, so
+            //    rollcall_proof_client.js (and anchor_proof_client.js beside it) has to be
+            //    able to ask a DOGE indexer. With no URL the close returns
+            //    `{decided:false, reason:'DOGE indexer not configured'}` and the BTC indexer
+            //    DEFERS the block forever, which is exactly how a single-coin venue wedges.
+            //    Sourced from host env so the pair survives an `update` instead of needing
+            //    to be hand-set on the container after every deploy.
+            //
+            // 2. XC_ROLLCALL_REGTEST_ACTIVATION, on REGTEST ONLY. This is the one value a
+            //    regtest venue owns: the no-tunable-input rule is scoped to shared-ledger
+            //    networks, because two regtest venues cannot fork each other. It is gated on
+            //    the network here as well as in the indexer's own rollcall_activation.js,
+            //    which is structurally unable to reach the environment for mainnet or
+            //    testnet - two independent gates, so neither one being edited alone can arm
+            //    a shared ledger from a host variable.
+            //
+            // 3. HUB_SYNC_ANCHOR_ATTEST_GRACE_S, on REGTEST ONLY, for the same reason as
+            //    (2) and with the same two independent gates: the indexer's own
+            //    resolveWatermarkGrace IGNORES it off regtest with a warning, because a
+            //    watermark grace is a consensus input and a per-node value forks
+            //    settlement.
+            //
+            //    WHY A REGTEST VENUE NEEDS IT AT ALL. The anchor-reward attestation
+            //    barrier holds a block until `streamWatermark >= blockTime + 120`. Off
+            //    regtest that is free: blocks are ten minutes apart, so by the time one is
+            //    processed the watermark is long past it. On regtest, blocks are stamped at
+            //    about wall clock and the watermark tracks wall clock too, so a freshly
+            //    mined block can NEVER be 120s behind the watermark and the barrier is
+            //    unsatisfiable by construction. Every affected block then burns the full
+            //    60s timeout before proceeding anyway.
+            //
+            //    MEASURED, on the 2026-09-06 release matrix: the BTC leg parsed 367 blocks
+            //    in six hours and was killed by the job budget, against 2013 blocks in 1h52m
+            //    on the pre-mirror build - 160 deferrals at 60s each, about 2.7 hours spent
+            //    waiting for a condition that could not arrive. The other two coins were
+            //    unaffected because this barrier is BTC-only. Nothing was wrong with the
+            //    product: the venue was simply running a shared-ledger constant on a chain
+            //    whose block cadence it was never sized for.
+            // 4. HUB_PRICE_SYNC_TIMEOUT_MS, on REGTEST ONLY here even though the value
+            //    itself is not a consensus input. It bounds ONE mirror-barrier ATTEMPT:
+            //    on expiry the block is DEFERRED and retried, never committed
+            //    uncertified, which XChainIndexer states outright ("purely operational:
+            //    it opens no barrier and commits no block"). So shortening it trades
+            //    nothing away; it only makes a failed attempt cheaper.
+            //
+            //    WHY A FAST VENUE NEEDS IT. Where the mirror legitimately lags the
+            //    chain, every affected block waits the full attempt before deferring.
+            //    Measured on the 2026-09-06 release matrix: 119 anchor-attest deferrals
+            //    at the 60s default burned 119 minutes of a 289-minute BTC leg, 41% of
+            //    the wall clock, and the indexer fell far enough behind that thirty
+            //    e2e waits gave up on rows that had not landed yet. The barrier is
+            //    doing its job; the cost per attempt is what a fast venue cannot afford.
+            //
+            //    Gated on regtest anyway, because a shared ledger wants the long
+            //    attempt: there a lagging mirror is a real fault worth waiting on, not
+            //    a cadence mismatch.
+            // 5. XCHAIN_COINPAY_EXPIRATION_S, on REGTEST ONLY, for the same reason as (2)
+            //    and (3) and with the same two independent gates: the indexer's own
+            //    resolveCoinpayExpiration IGNORES it off regtest with a warning, because
+            //    the window is added to a match's BLOCK_TIME and STORED as the
+            //    obligation's deadline, so a per-node value expires the same escrow at
+            //    different blocks and forks the ledger.
+            //
+            //    WHY A REGTEST VENUE NEEDS IT. The e2e COINPay expiry case cannot wait out
+            //    a two-hour deadline, so it freezes the node clock past the deadline and
+            //    mines. That stamps the mined blocks two hours into the FUTURE, and the
+            //    anchor-attest barrier in (3) compares a block's own timestamp against a
+            //    wall-clock watermark, so the indexer then waits those two hours in real
+            //    time on that one block.
+            //
+            //    MEASURED, on the 2026-09-06 release matrix run 34015867460: all 119
+            //    deferrals in the BTC leg named the SAME block, held 2h08m50s, while the
+            //    watermark tracked wall clock throughout (1-6s behind, advancing at 0.9999
+            //    of real time) and the hub logged no late heartbeat and no backpressure.
+            //    Nothing was lagging. Shortening the window on regtest removes the clock
+            //    jump that causes it, rather than teaching every barrier to special-case a
+            //    future-stamped block.
+            const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
+            if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
+                                                                          "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
+                                                                          "HUB_PRICE_SYNC_TIMEOUT_MS",
+                                                                          "XCHAIN_COINPAY_EXPIRATION_S")
+            for (const varName of rollcallPassthroughVars) {
+                if (process.env[varName] !== undefined && process.env[varName] !== "") {
+                    defaultValues[varName] = process.env[varName]
+                }
+            }
+
             // The indexer pushes chain tips / config to the hub (HUB_API_URL); when that
             // hub enforces HUB_API_KEY, the indexer must present the same key or its writes
             // 401. Sourced from host env (.env) so it persists across `update`, then from the
@@ -564,26 +699,49 @@ async function getDefaultConfig(module, coin, network) {
             // win. HUB_DB_PASS is reconciled after the per-install DB password is resolved
             // (see below); HUB_DB_HOST/PORT are already set above.
             //
-            // WHY regtest IS EXCLUDED, corrected 2026-07-26. The old note here said "regtest
-            // has no hub to sync from", which stopped being true at 336a7d5 (HUB_API_URL is
-            // now composed for regtest too, and a regtest indexer does reach the hub: enabling
-            // this on litecoin-regtest bootstrapped 3 real rows into oracle_prices). The
-            // exclusion is still right, for a different and harder reason: turning the mirror
-            // on ARMS the block-loop price barriers, and `_priceTimeSyncSatisfied` only opens
-            // on `streamWatermark >= blockTime + 600s` (the frozen price grace). Production
-            // block timestamps LAG wall clock, so the watermark runs ahead and the escape
-            // fires; regtest blocks are stamped at ~now, so it can NEVER be 600s ahead and
-            // every freshly mined block defers forever. Observed live: block 1479 deferred on
-            // a 60s timeout, repeatedly, until this was reverted.
+            // WHY regtest WAS EXCLUDED UNTIL NOW, corrected 2026-07-26 then armed 2026-09-03
+            // (the regtest mirror wedge). The old note here said "regtest has no hub to sync from", which
+            // stopped being true at 336a7d5 (HUB_API_URL is now composed for regtest too, and
+            // a regtest indexer does reach the hub: enabling this on litecoin-regtest
+            // bootstrapped 3 real rows into oracle_prices). The exclusion stood for a
+            // different and harder reason: turning the mirror on ARMS the block-loop
+            // watermark barriers (price, oracle, and now the ATTEST response mirror), and
+            // each one only opens once the mirror's stream watermark clears the row's time
+            // plus that barrier's grace. Production block timestamps LAG wall clock, so the
+            // watermark runs ahead and the escape fires; regtest blocks are stamped at ~now,
+            // so a real-network grace can NEVER be satisfied and every freshly mined block
+            // defers forever. Observed live: block 1479 deferred on a 60s timeout, repeatedly,
+            // until this was reverted.
             //
-            // To enable it on regtest deliberately (the mirror-leg test venue), the
-            // operator must ALSO set HUB_SYNC_PRICE_GRACE_S=0 and HUB_SYNC_ORACLE_GRACE_S=0,
-            // which hub_db_sync honours on regtest only, precisely for this. Do not "fix" the
-            // wedge by widening those off regtest: a per-node grace forks settlement.
-            if (network !== "regtest") {
-                defaultValues.HUB_DB_NAME         = defaultValues.INDEXER_DB_NAME
-                defaultValues.HUB_DB_USER         = defaultValues.INDEXER_DB_USER
-                defaultValues.HUB_DB_SYNC_ENABLED = "true"
+            // Armed unconditionally now (mainnet/testnet keep the exact same assignment they
+            // always had) because leaving the mirror off on regtest silently defeats every
+            // reader that expects hub state to reach the indexer, not just PRICE but
+            // the ATTEST response mirror this arms for too. Arming the pointer alone would
+            // reproduce the price wedge above, so every watermark grace this mirror gates is
+            // defaulted to 0 on regtest in the SAME step below: a config-file value or a host
+            // env override for any one of them still wins (resolveWatermarkGrace in
+            // hub_db_sync.js honours an override on regtest only, so the default below is
+            // exactly the value that seam already expects). Do not widen these off regtest:
+            // a per-node grace forks settlement.
+            defaultValues.HUB_DB_NAME         = defaultValues.INDEXER_DB_NAME
+            defaultValues.HUB_DB_USER         = defaultValues.INDEXER_DB_USER
+            defaultValues.HUB_DB_SYNC_ENABLED = "true"
+
+            if (network === Network.REGTEST) {
+                // The three barrier graces the armed regtest mirror must clear to avoid the
+                // wedge above. HUB_SYNC_ATTEST_RESPONSE_GRACE_S is the passthrough this row
+                // adds (xchain-indexer/src/hub_db_sync.js:615 reads it via resolveWatermarkGrace);
+                // HUB_SYNC_PRICE_GRACE_S / HUB_SYNC_ORACLE_GRACE_S are the pair the regtest mirror wedge already
+                // requires be set to 0 alongside it. A host env value always wins over the
+                // regtest default so an e2e drill can still exercise a nonzero grace.
+                const hubSyncRegtestGraceVars = [
+                    "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S"
+                ]
+                for (const varName of hubSyncRegtestGraceVars) {
+                    defaultValues[varName] = (process.env[varName] !== undefined && process.env[varName] !== "")
+                        ? process.env[varName]
+                        : "0"
+                }
             }
         }
     } else {
@@ -692,6 +850,57 @@ async function getDefaultConfig(module, coin, network) {
             // `recreate`, mirroring the other explorer passthroughs here.
             if (process.env.EXPLORER_VM_QUERY_ENABLED !== undefined && process.env.EXPLORER_VM_QUERY_ENABLED !== "") {
                 defaultValues.EXPLORER_VM_QUERY_ENABLED = process.env.EXPLORER_VM_QUERY_ENABLED
+            }
+
+            // Serving limits, same host-env injection point as the knobs above,
+            // because every one of these defaults is tuned for a PUBLIC explorer
+            // and is wrong for a private venue:
+            //   EXPLORER_*RATE_LIMIT_RPM - the eight request budgets, per IP: the
+            //     app-wide cap, the quote/pre-flight caps, and the five per-route
+            //     caps (checkpoint-list, checkpoint-verify, action-proof,
+            //     validator-set-proof, vm-query). A dev box reaches the explorer
+            //     through one tunnel, so every browser and every test run shares a
+            //     single bucket, and a browser-driven suite sustains far more than
+            //     any one of these caps on its own. All eight are now reachable
+            //     from the host env; the five per-route caps were unreachable on a
+            //     node-managed explorer (the regtest venue), which could raise only
+            //     the app-wide and fee-quote caps before this change.
+            //   EXPLORER_TIP_MAX_AGE_S   - 6h by default, and 0 disables it. A
+            //     regtest chain has no block cadence: it advances only when someone
+            //     mines, so an idle one crosses the age gate and the explorer delists
+            //     a chain that is perfectly healthy (503 COIN_DATA_STALE on every
+            //     read, lag 0 on /status).
+            // Read BY NAME rather than by scanning process.env for a pattern: a
+            // computed read is invisible to the platform's env-var coverage gate,
+            // which is what turns an undocumented variable into a silent one. The
+            // per-coin EXPLORER_TIP_MAX_AGE_S_<CODE> form is deliberately NOT
+            // carried here - the explorer honours it directly, and the global knob
+            // already covers the case this passthrough exists for (an instance
+            // serving nothing but a private venue).
+            for (const key of [
+                "EXPLORER_RATE_LIMIT_RPM",
+                "EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM",
+                "EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM",
+                "EXPLORER_TIP_MAX_AGE_S",
+                "EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM",
+                "EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM",
+                "EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM",
+                "EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM",
+                "EXPLORER_VM_QUERY_RATE_LIMIT_RPM"
+            ]) {
+                const value = {
+                    EXPLORER_RATE_LIMIT_RPM:                   process.env.EXPLORER_RATE_LIMIT_RPM,
+                    EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM:         process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM,
+                    EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM:    process.env.EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM,
+                    EXPLORER_TIP_MAX_AGE_S:                    process.env.EXPLORER_TIP_MAX_AGE_S,
+                    EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM:   process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM,
+                    EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM: process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM,
+                    EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM:      process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM,
+                    EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM: process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM,
+                    EXPLORER_VM_QUERY_RATE_LIMIT_RPM:          process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM
+                }[key]
+                if (value === undefined || value === "") continue
+                defaultValues[key] = value
             }
         }
 
@@ -822,6 +1031,30 @@ async function getDefaultConfig(module, coin, network) {
             // through so the host env survives a hub container regenerate.
             "ORACLE_BATCH_WINDOW_ROUNDS", "ORACLE_BATCH_GRACE_MS",
             "ORACLE_BATCH_SIGN_TIMEOUT_MS", "ORACLE_BATCH_BUFFER_MAX_ROUNDS",
+            // Same family: the time budgeted between a window closing and its batch
+            // being readable on chain (assembly, co-signing, broadcast, one DOGE
+            // confirmation). The publisher subtracts it from the fee-price staleness
+            // bound to derive the window ceiling, so a venue whose
+            // landing latency differs from the fleet's tunes it here rather than
+            // being clamped to a window that does not suit it.
+            "ORACLE_BATCH_LANDING_RESERVE_MS",
+            // ATTEST response mirror regtest-only overrides (the attest response mirror design). Both are
+            // honoured by the receiving hub module ONLY when HUB_NETWORK=regtest (a warn-
+            // and-ignore off regtest, the same posture resolveWatermarkGrace takes on the
+            // indexer side), so passing them through here unconditionally mirrors the
+            // ORACLE_BATCH_* family above: they cannot arm anything off regtest by any path
+            // in this file, the real gate lives at the point of consumption.
+            //
+            // ATTEST_RESPONSE_FORWARD_S_OVERRIDE lets a regtest venue's leader pick a short
+            // effective_time margin instead of the real 120s ATTEST_RESPONSE_FORWARD_S, so a
+            // response can bind within the same short block cadence a regtest drill runs at
+            // (xchain-hub/src/lib/attest_response_timing.js).
+            "ATTEST_RESPONSE_FORWARD_S_OVERRIDE",
+            // ATTEST_BATCH_WINDOW_S_OVERRIDE is the same seam for the batch cadence:
+            // AttestationBatchPublisher (row 20, not yet built) will read it on the same
+            // regtest-only pattern as the forward override above, so the passthrough is
+            // wired ahead of that publisher rather than after it.
+            "ATTEST_BATCH_WINDOW_S_OVERRIDE",
             // Per-IP request/min cap on the hub's express API (default 100). Too low
             // for legitimate multi-indexer re-bootstrap: every indexer on a box shares
             // one source IP, so a fleet bootstrapping HubDbSync tables (oracle_prices,
@@ -829,7 +1062,15 @@ async function getDefaultConfig(module, coin, network) {
             // collectively blows 100/min and gets 429'd, so the heartbeat gate then stays
             // closed and the chain stalls. Raise for prod fleets. Passed through so the
             // host env survives a hub container regenerate.
-            "HUB_RATE_LIMIT_RPM",
+            //
+            // The hub exempts loopback and private-range callers from
+            // that cap by default, which covers the case above: the indexers reach the hub
+            // container over the bridge network this compose file creates, so a managed
+            // node no longer needs the limit raised to rebuild price history from the chain.
+            // HUB_RATE_LIMIT_EXEMPT_LOCAL=false turns the exemption off and restores the
+            // old behavior for an operator who wants the cap enforced on every caller;
+            // passed through for the same container-regenerate reason.
+            "HUB_RATE_LIMIT_RPM", "HUB_RATE_LIMIT_EXEMPT_LOCAL",
             // XCHAIN derived-price source. XCHAIN is listed on no exchange, so
             // a validator computes XCHAIN/USD from realized fills in its OWN BTC indexer
             // database instead of fetching it. Every native-coin fee decision on LTC and
@@ -870,7 +1111,21 @@ async function getDefaultConfig(module, coin, network) {
             // HUB_ALLOW_UNAUTHENTICATED=true is the documented keyless escape hatch and
             // suits a single-host regtest venue that already ran open; a real network
             // sets HUB_API_KEY instead.
-            "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED"
+            "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED",
+            // The regtest ROLLCALL arming opt-in. The hub carries a byte-twin of
+            // the indexer's rollcall_activation.js, and ROLLCALL_ACTIVATION is one of
+            // consensus_rules_digest.js's SHARED_GATES, so an indexer armed against an
+            // inert container hub reports a rules MISMATCH on the venue. Both sides take
+            // the same variable, so a venue arms as a unit.
+            //
+            // Passed through with no network gate, unlike the indexer's copy above: the
+            // hub is a shared service and getDefaultConfig is called for it as
+            // (module, null, null), so there is no network here to gate on. That is safe
+            // because the real gate is in the hub's own rollcall_activation.js, which can
+            // reach the environment for regtest and for nothing else - mainnet and testnet
+            // are literal there and unreachable from env by any path in the file. On a
+            // mainnet or testnet hub this variable is therefore inert, not dangerous.
+            "XC_ROLLCALL_REGTEST_ACTIVATION"
         ]
         for (const varName of hubPassthroughVars) {
             // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
@@ -1063,16 +1318,21 @@ async function getDefaultConfig(module, coin, network) {
         if (Object.keys(freshDbCreds).length) upsertSidecarValues(localFilePath, freshDbCreds)
 
         // The indexer's hub-DB connection reuses its OWN DB account (HUB_DB_NAME/USER are set
-        // to the indexer's in the indexer block above, mainnet/testnet), so its hub-DB password
-        // must be the INDEXER_DB_PASS the container will actually get, not the shared hub
-        // password. Set it here, before the shared HUB_DB_PASS fallback below, so that fallback
-        // sees the key already present and skips. An operator override (already in
-        // defaultConfig) wins. On the non-rotatable path (dbPasswordCanRotate() false, the
-        // 2026-06-26 outage fallback) INDEXER_DB_PASS is still absent here and only lands via
-        // the static-defaults merge below; mirror that same static default instead of copying
+        // to the indexer's in the indexer block above, on every network including regtest
+        // since the regtest mirror is armed too), so its hub-DB password must be the
+        // INDEXER_DB_PASS the container will actually get, not the shared hub password. Set
+        // it here, before the shared HUB_DB_PASS fallback below, so that fallback sees the
+        // key already present and skips. An operator override (already in defaultConfig)
+        // wins. On the non-rotatable path (dbPasswordCanRotate() false, the 2026-06-26
+        // outage fallback) INDEXER_DB_PASS is still absent here and only lands via the
+        // static-defaults merge below; mirror that same static default instead of copying
         // `undefined`, which would both mismatch the account AND occupy the key so the
-        // fallback/merge never repaired it (HubDbSync ER_ACCESS_DENIED lockout, #2246).
-        if (module === XChainService.XCHAIN_INDEXER && network !== "regtest" && !("HUB_DB_PASS" in defaultConfig)) {
+        // fallback/merge never repaired it (HubDbSync ER_ACCESS_DENIED lockout, #2246). Not
+        // network-gated: leaving regtest out here while HUB_DB_NAME/USER above point at the
+        // indexer's own account would hand the armed mirror the WRONG password (the shared
+        // hub password against the indexer's own DB user), so the mirror this row arms would
+        // never actually connect.
+        if (module === XChainService.XCHAIN_INDEXER && !("HUB_DB_PASS" in defaultConfig)) {
             defaultConfig["HUB_DB_PASS"] = defaultConfig["INDEXER_DB_PASS"] !== undefined
                 ? defaultConfig["INDEXER_DB_PASS"]
                 : defaultValues["INDEXER_DB_PASS"]
@@ -1279,6 +1539,7 @@ module.exports = {
     readSidecarValue,
     ensureHubApiKey,
     applyHubApiKeyFromSidecar,
+    readHubApiKey,
     filterCommandParameters,
     resolveArgs
 }

@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-09-07
+
+### Added
+- The indexer's hub mirror is armed on regtest, and the attest response, roll-call rail and oracle batch landing-reserve knobs pass through to the hub and indexer.
+- A private explorer can set its own serving limits.
+- A reindex forces a bootstrap republish.
+- The tracker volume is snapshotted by hardlink and an encoder maintenance window is declared around it.
+- `ENCODER_TRUST_PROXY`, `ENCODER_RATE_LIMIT_RPM`, and five explorer per-route rate-limit knobs now pass through from the host env, so a container recreate no longer drops them.
+
+### Fixed
+- A chain daemon is stopped gracefully on update and its release tree is staged before the swap.
+- `validator init` no longer mints a hub API key on a re-run, and the CLI sends the key it generated when it pushes config to the hub.
+- `HUB_RATE_LIMIT_EXEMPT_LOCAL` passes through to the hub container.
+- The hub consensus-env guard derives its key list per network.
+- Reset resolves the datadir from the container bind mount and fails closed instead of skipping the chain wipe.
+- An explicitly injected null validator settings object is honoured.
+- The regtest block-assembly fee floor is lowered beside the relay floor.
+- The mainnet federation oracle epoch defaults to its ruled past instant.
+
+### Activation
+- The ATTEST response mirror activates on Bitcoin testnet at block 151324 and on regtest from genesis. Mainnet is unratified and the legacy on-chain response path runs there byte for byte.
+- ROLLCALL activates on Bitcoin testnet at block 151200, which the chain has already passed, so it is live from the moment a node updates. Mainnet is unratified.
+- Both change state derived from existing bytes on testnet, so an updated node and one still on 0.14.0 judge a mirrored response differently once one lands. Update every indexer and hub together.
+
 ## [0.14.0] - 2026-09-02
 
 ### Fixed

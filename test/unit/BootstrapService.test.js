@@ -31,6 +31,44 @@ function drainPassThrough(pt) {
     pt.resume()
 }
 
+/**
+ * The utxo-tracker create path spawns twice (the docker `tar cf -` that feeds
+ * the inner gzip, then the outer `tar cf -` that the store-only gzip wraps), so
+ * a single shared fake proc deadlocks the second call. Hand each spawn its own
+ * proc, drive it to a clean EOF + exit 0, and record what was spawned.
+ *
+ * createWriteStream is swapped for a real PassThrough per call so the pipe
+ * chain ends it naturally and 'finish' fires the way it does in production.
+ */
+function makeAutoSpawn(stubs, { exitCodes = {} } = {}) {
+    const calls = []
+    stubs.spawn = sinon.stub().callsFake((cmd, args) => {
+        const proc = makeSpawnProc()
+        const idx  = calls.length
+        calls.push({ cmd, args, proc })
+        const code = Object.prototype.hasOwnProperty.call(exitCodes, idx) ? exitCodes[idx] : 0
+        setImmediate(() => {
+            proc.stdout.end(Buffer.from('tar-bytes'))
+            setImmediate(() => proc.emit('close', code))
+        })
+        return proc
+    })
+    stubs.fs.createWriteStream.callsFake(() => {
+        const ws = new PassThrough()
+        drainPassThrough(ws)
+        return ws
+    })
+    return calls
+}
+
+/** The argv of the docker `run` that snapshots the tracker volume, or undefined */
+function findSnapshotCall(execFileStub) {
+    return execFileStub.getCalls()
+        .map(c => c.args)
+        .find(([cmd, args]) => cmd === 'docker' && Array.isArray(args) &&
+            args.includes('sh') && String(args[args.length - 1]).includes('cp -al'))
+}
+
 /** Make a fake axios streaming response */
 function makeAxiosStreamResponse(statusCode = 200, contentLength = '1024') {
     const dataStream = new PassThrough()
@@ -111,8 +149,26 @@ function makeStubs(overrides = {}) {
         assertBootstrapSourceHealthy: sinon.stub().resolves({ skipped: false, reasons: [] })
     }
 
+    // The reindex -> forced-republish ledger. Stubbed so a create in these
+    // suites never touches the developer's real ~/.xchain-node; the ledger's own
+    // rules live in BootstrapRepublishLedger.test.js.
+    const republishLedgerStub = {
+        recordBootstrapPublished: sinon.stub().returns(true)
+    }
+
+    // The encoder's scheduled-maintenance sentinel. Stubbed so a create in these
+    // suites never shells out to `docker exec` against a real encoder; the
+    // sentinel's own contents and failure handling live in
+    // EncoderMaintenanceWindow.test.js.
+    const encoderMaintenanceStub = {
+        declareEncoderMaintenance: sinon.stub().resolves(true),
+        clearEncoderMaintenance:   sinon.stub().resolves(true)
+    }
+
     return {
-        healthGate:     healthGateStub,
+        healthGate:      healthGateStub,
+        republishLedger: republishLedgerStub,
+        encoderMaintenance: encoderMaintenanceStub,
         fs:             fsStub,
         db:             dbStub,
         axios:          axiosStub,
@@ -216,6 +272,13 @@ function loadBootstrapService(stubs) {
         },
         './BootstrapHealthGate': {
             assertBootstrapSourceHealthy: stubs.healthGate.assertBootstrapSourceHealthy
+        },
+        './BootstrapRepublishLedger': {
+            recordBootstrapPublished: stubs.republishLedger.recordBootstrapPublished
+        },
+        './EncoderMaintenanceWindow': {
+            declareEncoderMaintenance: stubs.encoderMaintenance.declareEncoderMaintenance,
+            clearEncoderMaintenance:   stubs.encoderMaintenance.clearEncoderMaintenance
         }
     })
 }
@@ -318,6 +381,64 @@ describe('BootstrapService', function () {
         })
     })
 
+    // A reset rebuilds a store on a new lineage, so every archive
+    // already published for that combo is wrong while looking perfectly fresh.
+    // `reset` marks the combo due; only a successful create clears it, and a
+    // create that never reached the archive must leave the marker standing or
+    // the forced republish is silently cancelled by the run that failed to do it.
+    describe('makeBootstrap(): the reindex republish marker', function () {
+
+        it('clears the marker after a create that produced an archive', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '104857600\t/data\n' })
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+            makeAutoSpawn(stubs)
+
+            const bs = loadBootstrapService(stubs)
+            expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+            expect(stubs.republishLedger.recordBootstrapPublished.calledOnce).to.be.true
+            expect(stubs.republishLedger.recordBootstrapPublished.firstCall.args.slice(0, 3))
+                .to.deep.equal([XChainService.XCHAIN_UTXO_TRACKER, COIN, NETWORK])
+        })
+
+        it('leaves the marker standing when the source-health gate refuses', async function () {
+            const stubs = makeStubs()
+            const refusal = new Error('Refusing to create a bootstrap from xchain-decoder')
+            refusal.name = 'BootstrapSourceUnhealthyError'
+            stubs.healthGate.assertBootstrapSourceHealthy.rejects(refusal)
+
+            const bs = loadBootstrapService(stubs)
+            try {
+                await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+                expect.fail('the refusal should propagate')
+            } catch (err) {
+                expect(err.name).to.equal('BootstrapSourceUnhealthyError')
+            }
+            expect(stubs.republishLedger.recordBootstrapPublished.called).to.be.false
+        })
+
+        it('leaves the marker standing when the create itself fails', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '104857600\t/data\n' })
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+            // spawn #0 is the docker tar (inner), spawn #1 the outer wrap: a
+            // dead wrap means no publishable archive was produced.
+            makeAutoSpawn(stubs, { exitCodes: { 1: 2 } })
+
+            const bs = loadBootstrapService(stubs)
+            const err = await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+                .then(() => null, e => e)
+            expect(err).to.not.be.null
+            expect(err.message).to.include('tar exited with code 2')
+            expect(stubs.republishLedger.recordBootstrapPublished.called).to.be.false
+        })
+    })
+
     describe('restoreBootstrap(): dispatch', function () {
 
         it('throws for unsupported module', async function () {
@@ -332,17 +453,30 @@ describe('BootstrapService', function () {
         })
     })
 
-    describe('utxoTrackerVolumeHasData()', function () {
+    // uuid:7037604f: the caller reads "empty" as "fresh, restore a bootstrap over
+    // it", so an inspection FAILURE must never answer empty. Only a CONFIRMED
+    // empty volume may.
+    describe('utxoTrackerVolumeFreshness()', function () {
 
-        it('returns false when docker volume inspect fails (volume absent)', async function () {
+        it("reports empty when docker itself says there is no such volume", async function () {
             const stubs = makeStubs()
-            stubs.execFile = sinon.stub().rejects(new Error('No such volume'))
+            stubs.execFile = sinon.stub().rejects(new Error('Error: No such volume: xchain-utxo-tracker-x'))
             const bs = loadBootstrapService(stubs)
-            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
-            expect(result).to.be.false
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('empty')
         })
 
-        it('returns true when volume ls shows a non-empty entry', async function () {
+        // A daemon that cannot be reached says nothing about the volume.
+        it('reports unknown when the inspect fails for any other reason', async function () {
+            const stubs = makeStubs()
+            stubs.execFile = sinon.stub().rejects(
+                new Error('Cannot connect to the Docker daemon at unix:///var/run/docker.sock'))
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('unknown')
+        })
+
+        it('reports populated when volume ls shows a non-empty entry', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -351,11 +485,11 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: 'LOCK\n' })                       // ls shows data
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
-            expect(result).to.be.true
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('populated')
         })
 
-        it('returns false when volume ls output is empty', async function () {
+        it('reports empty when volume ls output is empty', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -364,11 +498,11 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: '' })                             // empty volume
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
-            expect(result).to.be.false
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('empty')
         })
 
-        it('returns false when ls exec fails', async function () {
+        it('reports unknown when ls exec fails', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -377,8 +511,8 @@ describe('BootstrapService', function () {
                 return Promise.reject(new Error('exec error'))                     // ls fails
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.utxoTrackerVolumeHasData(COIN, NETWORK)
-            expect(result).to.be.false
+            const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+            expect(result).to.equal('unknown')
         })
     })
 
@@ -1058,42 +1192,47 @@ describe('BootstrapService', function () {
         })
     })
 
-    describe('mariaDbModuleHasData()', function () {
+    // uuid:7037604f: ModuleService turns a "fresh" answer into DROP DATABASE +
+    // restore, so every failure below must answer unknown. Only a SUCCESSFUL read
+    // may authorise that path.
+    describe('mariaDbModuleFreshness()', function () {
 
-        it('returns false when getDatabaseContainerId throws', async function () {
+        it('reports unknown when getDatabaseContainerId throws', async function () {
             const stubs = makeStubs()
             stubs.databaseService.getDatabaseContainerId.rejects(new Error('docker error'))
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
         })
 
-        it('returns false when getDatabaseContainerId returns null', async function () {
+        // No DB container at all is a real fresh install, and must stay one or
+        // first installs stop bootstrapping.
+        it('reports empty when getDatabaseContainerId returns null', async function () {
             const stubs = makeStubs()
             stubs.databaseService.getDatabaseContainerId.resolves(null)
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('empty')
         })
 
-        it('returns false when askMariadbRootPassword throws', async function () {
+        it('reports unknown when askMariadbRootPassword throws', async function () {
             const stubs = makeStubs()
             stubs.databaseService.askMariadbRootPassword.rejects(new Error('password error'))
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
         })
 
-        it('returns false when blocks table does not exist (tblOut = 0)', async function () {
+        it('reports empty when the blocks table does not exist (tblOut = 0)', async function () {
             const stubs = makeStubs()
             // First exec → table count = 0
             stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('empty')
         })
 
-        it('returns false when blocks table exists but has 0 rows', async function () {
+        it('reports empty when the blocks table exists but has 0 rows', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -1102,11 +1241,11 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: '0\n' })                        // zero rows
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('empty')
         })
 
-        it('returns true when blocks table has data', async function () {
+        it('reports populated when the blocks table has data', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -1115,11 +1254,11 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: '1000\n' })                      // rows present
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.true
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('populated')
         })
 
-        it('returns true for XCHAIN_INDEXER module', async function () {
+        it('reports populated for XCHAIN_INDEXER module', async function () {
             const stubs = makeStubs()
             let callCount = 0
             stubs.execFile = sinon.stub().callsFake(() => {
@@ -1128,16 +1267,31 @@ describe('BootstrapService', function () {
                 return Promise.resolve({ stdout: '500\n' })
             })
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
-            expect(result).to.be.true
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+            expect(result).to.equal('populated')
         })
 
-        it('returns false when exec throws on table check', async function () {
+        it('reports unknown when exec throws on the table check', async function () {
             const stubs = makeStubs()
             stubs.execFile = sinon.stub().rejects(new Error('mariadb exec error'))
             const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleHasData(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.be.false
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
+        })
+
+        // A count that does not parse is not a count: NaN is refused as unknown,
+        // never reported as the reassuring "fresh".
+        it('reports unknown when the row count does not parse', async function () {
+            const stubs = makeStubs()
+            let callCount = 0
+            stubs.execFile = sinon.stub().callsFake(() => {
+                callCount++
+                if (callCount === 1) return Promise.resolve({ stdout: '1\n' })   // table exists
+                return Promise.resolve({ stdout: 'ERROR 2002 (HY000)\n' })
+            })
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
         })
     })
 
@@ -1714,34 +1868,17 @@ describe('BootstrapService', function () {
 
             stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
 
-            // All execFile calls succeed (du, docker mkdir, chown, chmod, tar czf)
+            // All execFile calls succeed (snapshot cleanup, du, snapshot, docker
+            // mkdir/chown/chmod)
             stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
-
-            const tarProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(tarProc)
 
             stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
             stubs.fs.promises.writeFile.resolves()
 
-            stubs.fs.createReadStream.callsFake(() => {
-                const s = new PassThrough()
-                setImmediate(() => { s.emit('data', Buffer.from('x')); s.emit('end') })
-                return s
-            })
-
-            const writeStream = new PassThrough()
-            drainPassThrough(writeStream)
-            stubs.fs.createWriteStream.returns(writeStream)
+            makeAutoSpawn(stubs)
 
             const bs = loadBootstrapService(stubs)
-            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
-
-            setImmediate(() => {
-                tarProc.stdout.end()
-                writeStream.emit('finish')
-            })
-
-            const result = await promise
+            const result = await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
             expect(result).to.be.true
 
             // Verify Docker fallback was invoked (chown + chmod calls)
@@ -1762,51 +1899,403 @@ describe('BootstrapService', function () {
             stubs.fs.existsSync.returns(false)  // workDir does not exist
             stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
 
-            // execFile: du → stdout, tar czf → ok
-            let execCallIdx = 0
             stubs.execFile = sinon.stub().callsFake((cmd, args) => {
-                execCallIdx++
                 if (cmd === 'docker' && args.includes('du')) {
                     return Promise.resolve({ stdout: '104857600\t/data\n' })
                 }
                 return Promise.resolve({ stdout: '' })
             })
 
-            // spawn for docker tar cf (step 3)
-            const tarProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(tarProc)
-
             stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
             stubs.fs.promises.writeFile.resolves()
 
-            // createReadStream for computeSha256
-            stubs.fs.createReadStream.callsFake(() => {
-                const s = new PassThrough()
-                setImmediate(() => {
-                    s.emit('data', Buffer.from('archive content'))
-                    s.emit('end')
-                })
-                return s
-            })
-
-            // createWriteStream for gzip output
-            const writeStream = new PassThrough()
-            drainPassThrough(writeStream)
-            stubs.fs.createWriteStream.returns(writeStream)
+            makeAutoSpawn(stubs)
 
             const bs = loadBootstrapService(stubs)
-            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
-
-            // tar proc: pipe resolves when writeStream finishes
-            setImmediate(() => {
-                tarProc.stdout.end()
-                writeStream.emit('finish')
-            })
-
-            const result = await promise
+            const result = await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
             expect(result).to.be.true
             expect(stubs.dockerService.stopContainer.calledWith(FAKE_CONTAINER_ID)).to.be.true
             expect(stubs.dockerService.startContainer.calledWith(FAKE_CONTAINER_ID)).to.be.true
+        })
+
+        // Without the snapshot, the monthly publish holds the tracker down for
+        // the whole compress: 2026-08-01 cost 3h36m on BTC, 1h04m on LTC and
+        // 42m on DOGE, each of which the mainnet encoder published as
+        // tracker_reachable:false. The container must come back BEFORE the tar.
+        it('restarts the tracker before the compress, off a hardlink snapshot', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '104857600\t/data\n' })
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+
+            let startedBeforeFirstSpawn = null
+            const spawnCalls = makeAutoSpawn(stubs)
+            const rawSpawn = stubs.spawn
+            stubs.spawn = sinon.stub().callsFake((cmd, args) => {
+                if (startedBeforeFirstSpawn === null) {
+                    startedBeforeFirstSpawn = stubs.dockerService.startContainer.called
+                }
+                return rawSpawn(cmd, args)
+            })
+
+            const bs = loadBootstrapService(stubs)
+            expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+            // The outage is over before any compression starts.
+            expect(startedBeforeFirstSpawn).to.be.true
+            expect(stubs.dockerService.startContainer.callCount).to.equal(1)
+
+            // The snapshot is a hardlink farm taken inside the volume, with the
+            // mutable files detached from the live inodes. Pinned verbatim: this
+            // exact text is what test/../scratch verification runs against real
+            // busybox, and a silent edit here would go unvalidated.
+            const snapshotCall = findSnapshotCall(stubs.execFile)
+            expect(snapshotCall, 'expected a docker sh -c snapshot call').to.exist
+            expect(snapshotCall[1]).to.include('xchain-utxo-tracker-bitcoin-mainnet-data:/data')
+            expect(snapshotCall[1][snapshotCall[1].length - 1]).to.equal([
+                'set -e',
+                'rm -rf /data/.xchain-bootstrap-snapshot',
+                'mkdir -p /data/.xchain-bootstrap-snapshot',
+                "find /data -mindepth 1 -maxdepth 1 ! -name .xchain-bootstrap-snapshot -exec cp -al {} /data/.xchain-bootstrap-snapshot/ ';'",
+                "find /data/.xchain-bootstrap-snapshot -type f ! -name '*.ldb' ! -name '*.sst' ! -name '*.xcsnap'" +
+                    ` -exec sh -c 'cp -a "$1" "$1.xcsnap" && mv -f "$1.xcsnap" "$1"' _ {} ';'`
+            ].join('\n'))
+
+            // ...and the compress reads the snapshot, not the live store.
+            const dockerTar = spawnCalls.find(c => c.cmd === 'docker' && c.args.includes('tar'))
+            expect(dockerTar).to.exist
+            expect(dockerTar.args).to.include('/data/.xchain-bootstrap-snapshot')
+            expect(dockerTar.args).to.not.include('/data')
+
+            // The snapshot is dropped again so it stops pinning compacted SSTs.
+            const rmCalls = stubs.execFile.getCalls().map(c => c.args)
+                .filter(([cmd, args]) => cmd === 'docker' && Array.isArray(args) &&
+                    args.includes('rm') && args.includes('/data/.xchain-bootstrap-snapshot'))
+            expect(rmCalls.length).to.be.at.least(2)  // stale-snapshot sweep + teardown
+        })
+
+        // The outer archive only carries a checksum next
+        // to an already-gzipped payload, so re-deflating 162.5 GB bought
+        // nothing. Level 0 keeps the file a real .gz for every consumer.
+        it('wraps the outer archive with a store-only gzip, not a second deflate', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '104857600\t/data\n' })
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+
+            const gzipOptions = []
+            stubs.zlib.createGzip = sinon.stub().callsFake(opts => {
+                gzipOptions.push(opts)
+                return new PassThrough()
+            })
+
+            const spawnCalls = makeAutoSpawn(stubs)
+
+            const bs = loadBootstrapService(stubs)
+            expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+            // No `tar czf` anywhere: the wrap is a plain tar plus level-0 gzip.
+            const czf = stubs.execFile.getCalls().map(c => c.args)
+                .find(([cmd, args]) => cmd === 'tar' && Array.isArray(args) && args[0] === 'czf')
+            expect(czf, 'outer archive must not be built with tar czf').to.not.exist
+
+            const wrap = spawnCalls.find(c => c.cmd === 'tar')
+            expect(wrap, 'expected a plain tar spawn for the outer archive').to.exist
+            expect(wrap.args.slice(0, 2)).to.deep.equal(['cf', '-'])
+            expect(wrap.args).to.include('data.tar.gz')
+            expect(wrap.args).to.include('data.sha256')
+
+            // Inner payload keeps real compression; the outer wrap does not.
+            expect(gzipOptions).to.have.length(2)
+            expect(gzipOptions[0]).to.equal(undefined)
+            expect(gzipOptions[1]).to.deep.equal({ level: 0 })
+        })
+
+        it('checksums the inner archive inline instead of re-reading it', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '104857600\t/data\n' })
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+            stubs.fs.createReadStream = sinon.stub().throws(new Error('the inner archive must not be re-read'))
+
+            makeAutoSpawn(stubs)
+
+            const bs = loadBootstrapService(stubs)
+            expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+            // The digest written to data.sha256 is the digest of the bytes the
+            // gzip stream actually emitted (the fake gzip is a PassThrough, so
+            // that is the tar payload verbatim).
+            const expected = require('crypto').createHash('sha256').update(Buffer.from('tar-bytes')).digest('hex')
+            const [, body] = stubs.fs.promises.writeFile.getCall(0).args
+            expect(body).to.equal(`${expected}  data.tar.gz\n`)
+        })
+
+        it('falls back to compressing with the tracker stopped when the snapshot fails', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+
+            stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                if (cmd === 'docker' && Array.isArray(args) && args.includes('sh')) {
+                    return Promise.reject(new Error('cp: cannot create hard link'))
+                }
+                return Promise.resolve({ stdout: '104857600\t/data\n' })
+            })
+
+            let startedBeforeFirstSpawn = null
+            const spawnCalls = makeAutoSpawn(stubs)
+            const rawSpawn = stubs.spawn
+            stubs.spawn = sinon.stub().callsFake((cmd, args) => {
+                if (startedBeforeFirstSpawn === null) {
+                    startedBeforeFirstSpawn = stubs.dockerService.startContainer.called
+                }
+                return rawSpawn(cmd, args)
+            })
+
+            const bs = loadBootstrapService(stubs)
+            expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+            // Old behavior, on purpose: a volume that cannot take hardlinks
+            // still gets a correct archive, just with the outage back.
+            expect(startedBeforeFirstSpawn).to.be.false
+            expect(stubs.dockerService.startContainer.callCount).to.equal(1)
+            const dockerTar = spawnCalls.find(c => c.cmd === 'docker' && c.args.includes('tar'))
+            expect(dockerTar.args).to.include('/data')
+            expect(dockerTar.args).to.not.include('/data/.xchain-bootstrap-snapshot')
+        })
+
+        it('aborts before compressing when a failed snapshot cannot be cleaned up', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+
+            // The stale-snapshot sweep before the stop succeeds; the snapshot
+            // itself fails, and so does the cleanup of its debris. Tarring /data
+            // now would sweep a half-built snapshot into the published archive.
+            let rmCalls = 0
+            stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                if (cmd === 'docker' && Array.isArray(args) && args.includes('sh')) {
+                    return Promise.reject(new Error('cp: cannot create hard link'))
+                }
+                if (cmd === 'docker' && Array.isArray(args) && args.includes('rm')) {
+                    rmCalls++
+                    if (rmCalls > 1) return Promise.reject(new Error('rm: permission denied'))
+                }
+                return Promise.resolve({ stdout: '104857600\t/data\n' })
+            })
+
+            makeAutoSpawn(stubs)
+
+            const bs = loadBootstrapService(stubs)
+            const err = await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+                .then(() => null, e => e)
+            expect(err).to.not.be.null
+            expect(err.message).to.include('rm: permission denied')
+            expect(stubs.spawn.called, 'must not compress a polluted volume').to.be.false
+            // The tracker still comes back up.
+            expect(stubs.dockerService.startContainer.calledWith(FAKE_CONTAINER_ID)).to.be.true
+        })
+
+        // The snapshot shrinks the outage but does not
+        // remove it, and the fallback path still holds the tracker down for the
+        // whole compress. Whatever the outage's length, the encoder reports it
+        // honestly and the public board has only one word for it:
+        // Degraded. The publish therefore tells the encoder the outage is
+        // planned, so the board can say Maintenance instead.
+        describe('encoder maintenance window', function () {
+            function trackerStubs() {
+                const stubs = makeStubs()
+                stubs.fs.existsSync.returns(false)
+                stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+                stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+                stubs.execFile = sinon.stub().resolves({ stdout: '104857600\t/data\n' })
+                return stubs
+            }
+
+            it('declares the window BEFORE the tracker stops', async function () {
+                const stubs = trackerStubs()
+                let declaredBeforeStop = null
+                stubs.dockerService.stopContainer = sinon.stub().callsFake(async () => {
+                    declaredBeforeStop = stubs.encoderMaintenance.declareEncoderMaintenance.called
+                })
+                makeAutoSpawn(stubs)
+
+                const bs = loadBootstrapService(stubs)
+                expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+                // Otherwise the first probe after the stop still sees a bare
+                // 503 with nothing to explain it.
+                expect(declaredBeforeStop, 'the window must be declared before the outage starts').to.be.true
+                const [coin, network, opts] = stubs.encoderMaintenance.declareEncoderMaintenance.getCall(0).args
+                expect(coin).to.equal(COIN)
+                expect(network).to.equal(NETWORK)
+                expect(opts.reason).to.include(XChainService.XCHAIN_UTXO_TRACKER)
+            })
+
+            // On the snapshot path the encoder recovers seconds after the stop,
+            // so holding the window open for the multi-hour compress would have
+            // /status advertising maintenance on an encoder that is serving.
+            it('clears the window as soon as the tracker is back, not when the compress ends', async function () {
+                const stubs = trackerStubs()
+                let clearedBeforeFirstSpawn = null
+                const spawnCalls = makeAutoSpawn(stubs)
+                const rawSpawn = stubs.spawn
+                stubs.spawn = sinon.stub().callsFake((cmd, args) => {
+                    if (clearedBeforeFirstSpawn === null) {
+                        clearedBeforeFirstSpawn = stubs.encoderMaintenance.clearEncoderMaintenance.called
+                    }
+                    return rawSpawn(cmd, args)
+                })
+
+                const bs = loadBootstrapService(stubs)
+                expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+                expect(clearedBeforeFirstSpawn).to.be.true
+                // Idempotent: the finally must not clear a window it already closed.
+                expect(stubs.encoderMaintenance.clearEncoderMaintenance.callCount).to.equal(1)
+                expect(spawnCalls.length).to.be.at.least(1)
+            })
+
+            it('holds the window for the whole compress on the stopped-tracker fallback', async function () {
+                const stubs = trackerStubs()
+                stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                    if (cmd === 'docker' && Array.isArray(args) && args.includes('sh')) {
+                        return Promise.reject(new Error('cp: cannot create hard link'))
+                    }
+                    return Promise.resolve({ stdout: '104857600\t/data\n' })
+                })
+                let clearedBeforeFirstSpawn = null
+                const rawSpawnCalls = makeAutoSpawn(stubs)
+                const rawSpawn = stubs.spawn
+                stubs.spawn = sinon.stub().callsFake((cmd, args) => {
+                    if (clearedBeforeFirstSpawn === null) {
+                        clearedBeforeFirstSpawn = stubs.encoderMaintenance.clearEncoderMaintenance.called
+                    }
+                    return rawSpawn(cmd, args)
+                })
+
+                const bs = loadBootstrapService(stubs)
+                expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+                // The tracker is down for the whole run here, so the window has
+                // to outlive the compress and close with the restart.
+                expect(clearedBeforeFirstSpawn).to.be.false
+                expect(stubs.encoderMaintenance.clearEncoderMaintenance.callCount).to.equal(1)
+                expect(rawSpawnCalls.length).to.be.at.least(1)
+            })
+
+            it('clears the window even when the publish fails mid-compress', async function () {
+                const stubs = trackerStubs()
+                // Fallback path, so the window is still open when the run dies:
+                // on the snapshot path it was already closed at the restart.
+                stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                    if (cmd === 'docker' && Array.isArray(args) && args.includes('sh')) {
+                        return Promise.reject(new Error('cp: cannot create hard link'))
+                    }
+                    return Promise.resolve({ stdout: '104857600\t/data\n' })
+                })
+                stubs.fs.promises.writeFile.rejects(new Error('ENOSPC: no space left on device'))
+                makeAutoSpawn(stubs)
+
+                const bs = loadBootstrapService(stubs)
+                const err = await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+                    .then(() => null, e => e)
+                expect(err).to.not.be.null
+                // A failed run must not leave the board excusing an encoder that
+                // is serving again.
+                expect(stubs.encoderMaintenance.clearEncoderMaintenance.called).to.be.true
+            })
+
+            // A cosmetic status label is never worth a failed publish or a
+            // tracker left down.
+            it('publishes normally when the encoder cannot be told', async function () {
+                const stubs = trackerStubs()
+                stubs.encoderMaintenance.declareEncoderMaintenance = sinon.stub().resolves(false)
+                makeAutoSpawn(stubs)
+
+                const bs = loadBootstrapService(stubs)
+                expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+                // Nothing was declared, so nothing is cleared.
+                expect(stubs.encoderMaintenance.clearEncoderMaintenance.called).to.be.false
+                expect(stubs.dockerService.startContainer.calledWith(FAKE_CONTAINER_ID)).to.be.true
+            })
+        })
+
+        // The snapshot buys uptime by pinning compacted SSTs, which costs volume
+        // space for the length of the run. Filling the volume halts the tracker,
+        // so a thin volume has to be said out loud.
+        describe('volume headroom warning', function () {
+            async function runWithDf(dfLine) {
+                const stubs = makeStubs()
+                stubs.fs.existsSync.returns(false)
+                stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+                stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+                stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                    if (cmd === 'docker' && Array.isArray(args) && args.includes('du')) {
+                        // 100 GB store
+                        return Promise.resolve({ stdout: `${100 * 1024 * 1024 * 1024}\t/data\n` })
+                    }
+                    if (cmd === 'docker' && Array.isArray(args) && args.includes('df')) {
+                        return Promise.resolve({ stdout: `Filesystem 1024-blocks Used Available Capacity Mounted on\n${dfLine}\n` })
+                    }
+                    return Promise.resolve({ stdout: '' })
+                })
+                makeAutoSpawn(stubs)
+
+                const logged  = []
+                const origLog = console.log
+                console.log = (...args) => logged.push(args.join(' '))
+                try {
+                    const bs = loadBootstrapService(stubs)
+                    expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+                } finally {
+                    console.log = origLog
+                }
+                return logged.join('\n')
+            }
+
+            it('warns when free space is under the churn headroom', async function () {
+                // 5 GB free against a 100 GB store (headroom wants 15 GB)
+                const out = await runWithDf(`overlay 209715200 104857600 ${5 * 1024 * 1024} 96% /data`)
+                expect(out).to.contain('WARNING')
+                expect(out).to.contain('5.0 GB free against a 100.0 GB store')
+            })
+
+            it('stays quiet when the volume has room', async function () {
+                // 40 GB free against a 100 GB store
+                const out = await runWithDf(`overlay 209715200 104857600 ${40 * 1024 * 1024} 60% /data`)
+                expect(out).to.not.contain('WARNING')
+            })
+        })
+
+        it('refuses to publish a truncated outer archive when the wrap tar dies', async function () {
+            const stubs = makeStubs()
+            stubs.fs.existsSync.returns(false)
+            stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+            stubs.execFile = sinon.stub().resolves({ stdout: '104857600\t/data\n' })
+            stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
+
+            // spawn #0 is the docker tar (inner), spawn #1 the outer wrap.
+            makeAutoSpawn(stubs, { exitCodes: { 1: 2 } })
+
+            const bs = loadBootstrapService(stubs)
+            const err = await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
+                .then(() => null, e => e)
+            expect(err).to.not.be.null
+            expect(err.message).to.include('tar exited with code 2')
+            expect(stubs.dockerService.startContainer.called).to.be.true
+
+            // The partial archive must not be left in the directory the publish
+            // rsyncs from.
+            const removed = stubs.fs.rmSync.getCalls()
+                .some(c => String(c.args[0]).endsWith('.tar.gz'))
+            expect(removed, 'the truncated outer archive must be removed').to.be.true
         })
 
         it('throws when container not found', async function () {
@@ -1826,39 +2315,21 @@ describe('BootstrapService', function () {
             const stubs = makeStubs()
             stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
 
-            // First execFile call (docker du) throws → triggers catch at line 180
-            let execCallCount = 0
-            stubs.execFile = sinon.stub().callsFake(() => {
-                execCallCount++
-                if (execCallCount === 1) return Promise.reject(new Error('docker du failed'))
+            // The `docker du` size estimate throws → progress falls back to ?%
+            stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                if (cmd === 'docker' && Array.isArray(args) && args.includes('du')) {
+                    return Promise.reject(new Error('docker du failed'))
+                }
                 return Promise.resolve({ stdout: '' })
             })
-
-            const tarProc = makeSpawnProc()
-            stubs.spawn = sinon.stub().returns(tarProc)
 
             stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
             stubs.fs.promises.writeFile.resolves()
 
-            stubs.fs.createReadStream.callsFake(() => {
-                const s = new PassThrough()
-                setImmediate(() => { s.emit('data', Buffer.from('x')); s.emit('end') })
-                return s
-            })
-
-            const writeStream = new PassThrough()
-            drainPassThrough(writeStream)
-            stubs.fs.createWriteStream.returns(writeStream)
+            makeAutoSpawn(stubs)
 
             const bs = loadBootstrapService(stubs)
-            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
-
-            setImmediate(() => {
-                tarProc.stdout.end()
-                writeStream.emit('finish')
-            })
-
-            const result = await promise
+            const result = await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)
             expect(result).to.be.true
         })
 
@@ -1969,6 +2440,65 @@ describe('BootstrapService', function () {
             expect(spawnArgs).to.include('MYSQL_PWD')
             expect(spawnArgs.some(a => String(a).includes('rootpass'))).to.be.false
             expect(spawnOpts.env.MYSQL_PWD).to.equal('rootpass')
+
+            // The gate is consulted TWICE: once before the dump, and once after it
+            // finishes but before anything is checksummed, wrapped or signed. The
+            // producers stay live for the whole dump, so one reading before it
+            // cannot speak for the bytes that ship.
+            expect(stubs.healthGate.assertBootstrapSourceHealthy.callCount).to.equal(2)
+        })
+
+        // A halt marker can be written while mariadb-dump is still streaming, and
+        // such an archive must not ship: signed, it becomes the newest (default)
+        // recovery source.
+        it('discards a finished dump when the source stops being healthy during it', async function () {
+            const stubs = makeStubs()
+
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.databaseService.askMariadbRootPassword.resolves('rootpass')
+
+            const refusal = new Error("Refusing to create a bootstrap from btc/mainnet xchain-decoder: "
+                + "the database carries a durable REORG_HALT marker")
+            refusal.name = 'BootstrapSourceUnhealthyError'
+            stubs.healthGate.assertBootstrapSourceHealthy
+                .onFirstCall().resolves({ skipped: false, reasons: [] })
+                .onSecondCall().rejects(refusal)
+
+            stubs.execFile = sinon.stub().resolves({ stdout: '52428800\n' })
+
+            const dumpProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().returns(dumpProc)
+
+            stubs.fs.promises.stat.resolves({ size: 512 * 1024 })
+            stubs.fs.promises.writeFile.resolves()
+
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+
+            const bs = loadBootstrapService(stubs)
+            const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+
+            setImmediate(() => {
+                dumpProc.stdout.end()
+                writeStream.emit('finish')
+            })
+
+            let err = null
+            try { await promise } catch (e) { err = e }
+            expect(err, 'the create must reject rather than publish').to.equal(refusal)
+
+            // Nothing may be packaged or signed after the refusal.
+            const tarCalls = stubs.execFile.getCalls()
+                .filter(c => c.args[0] === 'tar' && (c.args[1] || [])[0] === 'czf')
+            expect(tarCalls.length, 'no archive may be wrapped').to.equal(0)
+            expect(stubs.fs.promises.writeFile.called, 'no checksum file may be written').to.equal(false)
+
+            // The half-built work directory goes, and the republish ledger stays
+            // honest: nothing was published, so nothing is recorded as published.
+            expect(stubs.fs.rmSync.getCalls().some(c => String(c.args[0]).includes('bootstrap-work')))
+                .to.equal(true)
+            expect(stubs.republishLedger.recordBootstrapPublished.called).to.equal(false)
         })
 
         it('throws when getDatabaseContainerId returns null', async function () {

@@ -161,6 +161,29 @@ function getUnhealthySinceMs(health) {
     return since
 }
 
+// When the newest PASSING probe in Health.Log ran, or null when the retained
+// entries hold no pass. Reads Start (the same clock getUnhealthySinceMs seeds
+// the onset from) so the two values compare like for like, falling back to End
+// only when Start is unparseable. Never throws on a missing or garbage log.
+//
+// This is the only positive evidence of a RECOVERY the retained log can carry.
+// Its absence means nothing either way: five entries at a 15s probe interval
+// span ~60-75s, so an older pass has simply rotated out. runAutoheal treats it
+// that way, resetting the episode only on a pass it can actually see.
+function getLastHealthyProbeMs(health) {
+    const log = Array.isArray(health && health.Log) ? health.Log : []
+    for (let i = log.length - 1; i >= 0; i--) {
+        const entry = log[i]
+        if (!entry || entry.ExitCode !== 0) continue
+        const at = Date.parse(entry.Start)
+        if (!Number.isNaN(at)) return at
+        const end = Date.parse(entry.End)
+        if (!Number.isNaN(end)) return end
+        return null
+    }
+    return null
+}
+
 // One autoheal pass over the module registry. Never throws for a single bad
 // container (a vanished container id must not abort the whole sweep).
 // Returns { candidates, restarted, failed, skipped } where each array holds
@@ -271,8 +294,20 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         // ~60-75s back and a 120s grace window is unreachable. Seed
         // from the derived value so a container already wedged when autoheal first
         // runs is credited the episode Docker can still see.
+        // Two halves of one rule. Reset the onset when the retained probes
+        // POSITIVELY show a pass after it: a recovery-then-relapse that falls
+        // entirely between two passes is never observed by the `!== unhealthy`
+        // branch above, so without this the new episode inherits the old one's
+        // clock and gets restarted inside its own grace window. Preserve the
+        // onset when the log merely ROTATED older evidence away, which is the
+        // ordinary case: absence of a pass is not evidence of one.
         let since = state.unhealthySince[containerId]
+        const lastHealthy = getLastHealthyProbeMs(health)
         if (typeof since !== 'number' || !Number.isFinite(since)) {
+            since = Math.min(now, derived)
+            state.unhealthySince[containerId] = since
+            onsetChanged = true
+        } else if (typeof lastHealthy === 'number' && lastHealthy > since) {
             since = Math.min(now, derived)
             state.unhealthySince[containerId] = since
             onsetChanged = true
@@ -340,9 +375,8 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
 module.exports = {
     runAutoheal,
     getUnhealthySinceMs,
-    getStateFilePath,
+    getLastHealthyProbeMs,
     restartBackoffMs,
-    DEFAULT_GRACE_MS,
     DEFAULT_COOLDOWN_MS,
     DEFAULT_COOLDOWN_CEILING_MS
 }

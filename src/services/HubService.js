@@ -135,7 +135,7 @@ const { addUserPasswordToDatabase, getExternalDbConfig } = require('./DatabaseSe
 // The explorer container's env is the durable record of the checkpoint self-sync
 // opt-in; this reader already exists for the DB-credential drift guard and is
 // tolerant of a missing container, which is exactly the posture wanted here.
-const { readContainerEnv }                     = require('./DbCredentialDrift')
+const { readContainerEnv, assertNoHubDbCredentialDrift } = require('./DbCredentialDrift')
 const HubConnector                             = require('../HubConnector.js')
 
 async function updateHubOrExplorer(module) {
@@ -391,6 +391,15 @@ async function installHubModule(branch = null) {
     const { resolveComponentRef } = require('./ReleaseManifestService')
     const hubPin = resolveComponentRef(HUB_MODULE_NAME, branch)
     await cloneGit(HUB_MODULE_NAME, true, false, hubPin.ref, hubPin.commit)
+
+    // Guard the install-time rotation too: it writes the same shared account, and it
+    // runs BEFORE buildAndUp, so a sibling install's live hub is still serving on the
+    // old password when the ALTER lands (uuid:a48aab2c). This install's own hub is
+    // excluded because buildAndUp restarts it on the intended password moments later.
+    await assertNoHubDbCredentialDrift(
+        { user: defaultConfig["HUB_DB_USER"], pass: defaultConfig["HUB_DB_PASS"] },
+        { excludeContainers: [getDockerContainerImageName(HUB_MODULE_NAME, "", "")] }
+    )
 
     await addUserPasswordToDatabase(
         HUB_MODULE_NAME, "", "",

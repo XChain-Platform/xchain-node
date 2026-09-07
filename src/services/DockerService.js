@@ -319,6 +319,20 @@ async function stopContainer(containerId) {
     })
 }
 
+// Graceful stop by NAME with an explicit shutdown budget, for stateful
+// containers (chain daemons) that must flush before they go. SIGTERM first;
+// docker escalates to SIGKILL only after `timeoutSeconds`. Resolves true when
+// docker reports the stop, false otherwise (already gone, never existed, or
+// daemon unreachable): the caller's subsequent force-remove/run surfaces any
+// real error, so a missing container is not a failure here.
+async function stopContainerByName(name, timeoutSeconds) {
+    return new Promise((resolve) => {
+        execFile('docker', ['stop', '-t', String(timeoutSeconds), name], (error, stdout) => {
+            resolve(!error && stdout.trim() === name)
+        })
+    })
+}
+
 async function startContainer(containerId) {
     return new Promise((resolve, reject) => {
         execFile('docker', ['start', containerId], (error, stdout) => {
@@ -601,6 +615,7 @@ module.exports = {
     getDockerContainerFileCat,
     stringToDockerContainerFile,
     stopContainer,
+    stopContainerByName,
     startContainer,
     restartContainer,
     removeContainer,

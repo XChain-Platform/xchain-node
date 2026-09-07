@@ -17,6 +17,9 @@ const {
     DRIFT_OVERRIDE_ENV,
     DRIFT_ERROR_CODE,
     CONSENSUS_ENV_KEYS,
+    resolveHubNetwork,
+    isConsensusEnvKeyHonoredOn,
+    consensusEnvKeysForNetwork,
     describeConsensusEnvSupply,
     findHubConsensusEnvDrift,
     formatHubConsensusEnvDriftError,
@@ -35,7 +38,15 @@ function missingContainerStub() {
 
 describe('HubConsensusEnvGuard', () => {
 
-    it('covers the five named consensus-shaped var groups', () => {
+    // The regtest-only XCHAIN/BTC derivation overrides: honored by
+    // XchainPriceSource.pinOffRegtest only when HUB_NETWORK is regtest, pinned to
+    // the constants.js values everywhere else.
+    const REGTEST_ONLY_KEYS = [
+        'XCHAIN_PRICE_WINDOW_BLOCKS', 'XCHAIN_PRICE_CONFIRMATION_BUFFER',
+        'XCHAIN_PRICE_BOOTSTRAP_SATS', 'XCHAIN_PRICE_MIN_BTC_VOLUME'
+    ]
+
+    it('covers the named consensus-shaped var groups', () => {
         // Pinned so a future edit to the group table cannot silently drop one of
         // the row's named vars without a red test.
         expect(CONSENSUS_ENV_KEYS).to.include.members([
@@ -46,6 +57,56 @@ describe('HubConsensusEnvGuard', () => {
             'XCHAIN_PRICE_INDEXER_DB_NAME', 'XCHAIN_PRICE_INDEXER_DB_USER',
             'XCHAIN_PRICE_INDEXER_DB_PASS', 'XCHAIN_PRICE_INDEXER_DB_COIN'
         ])
+    })
+
+    it('covers the four regtest-only XCHAIN/BTC derivation overrides too', () => {
+        expect(CONSENSUS_ENV_KEYS).to.include.members(REGTEST_ONLY_KEYS)
+    })
+
+    describe('network gating', () => {
+
+        it('resolves the network from this deploy\'s own HUB_NETWORK first', () => {
+            expect(resolveHubNetwork({ HUB_NETWORK: 'Regtest' }, { HUB_NETWORK: 'mainnet' })).to.equal('regtest')
+        })
+
+        it('falls back to the running container when the invoking shell dropped HUB_NETWORK', () => {
+            // A recreate whose shell lacks HUB_NETWORK is still recreating the
+            // regtest hub that is running right now.
+            expect(resolveHubNetwork({}, { HUB_NETWORK: 'regtest' })).to.equal('regtest')
+            expect(resolveHubNetwork({ HUB_NETWORK: '' }, { HUB_NETWORK: 'regtest' })).to.equal('regtest')
+        })
+
+        it('resolves standalone (unset everywhere) to the empty network', () => {
+            expect(resolveHubNetwork({}, null)).to.equal('')
+            expect(resolveHubNetwork(undefined, undefined)).to.equal('')
+        })
+
+        it('honors the derivation overrides on regtest and nowhere else', () => {
+            for (const key of REGTEST_ONLY_KEYS) {
+                expect(isConsensusEnvKeyHonoredOn(key, 'regtest'), key).to.equal(true)
+                expect(isConsensusEnvKeyHonoredOn(key, 'testnet'), key).to.equal(false)
+                expect(isConsensusEnvKeyHonoredOn(key, 'mainnet'), key).to.equal(false)
+                // Standalone fails closed to the pin, exactly as the hub's other
+                // consensus-adjacent seams do.
+                expect(isConsensusEnvKeyHonoredOn(key, ''), key).to.equal(false)
+            }
+        })
+
+        it('leaves the ungated keys, including the per-operator DB source, honored on every network', () => {
+            for (const network of ['regtest', 'testnet', 'mainnet', '']) {
+                expect(isConsensusEnvKeyHonoredOn('HUB_NETWORK', network)).to.equal(true)
+                expect(isConsensusEnvKeyHonoredOn('ORACLE_MIN_SUBMISSIONS', network)).to.equal(true)
+                // Gating these would take every non-regtest hub off the pair.
+                expect(isConsensusEnvKeyHonoredOn('XCHAIN_PRICE_INDEXER_DB_HOST', network)).to.equal(true)
+            }
+        })
+
+        it('scopes the walked key list to the network', () => {
+            expect(consensusEnvKeysForNetwork('regtest')).to.deep.equal(CONSENSUS_ENV_KEYS)
+            const mainnetKeys = consensusEnvKeysForNetwork('mainnet')
+            for (const key of REGTEST_ONLY_KEYS) expect(mainnetKeys).to.not.include(key)
+            expect(mainnetKeys).to.include('XCHAIN_PRICE_INDEXER_DB_HOST')
+        })
     })
 
     describe('describeConsensusEnvSupply()', () => {
@@ -68,7 +129,26 @@ describe('HubConsensusEnvGuard', () => {
         it('treats a null/undefined intended object as everything defaulted', () => {
             const { supplied, defaulted } = describeConsensusEnvSupply(undefined)
             expect(supplied).to.deep.equal([])
-            expect(defaulted).to.deep.equal(CONSENSUS_ENV_KEYS)
+            // Scoped to the network, which is unset here: the regtest-only
+            // overrides are not "missing", they are inapplicable.
+            expect(defaulted).to.deep.equal(consensusEnvKeysForNetwork(''))
+        })
+
+        it('does not report a regtest-only override as missing on a mainnet deploy', () => {
+            const { defaulted } = describeConsensusEnvSupply({ HUB_NETWORK: 'mainnet' })
+            for (const key of REGTEST_ONLY_KEYS) expect(defaulted).to.not.include(key)
+        })
+
+        it('does report a regtest-only override as missing on a regtest deploy', () => {
+            const { defaulted } = describeConsensusEnvSupply({ HUB_NETWORK: 'regtest' })
+            expect(defaulted).to.include.members(REGTEST_ONLY_KEYS)
+        })
+
+        it('takes an explicit network, for the caller that resolved it from the live container', () => {
+            const { supplied } = describeConsensusEnvSupply({ XCHAIN_PRICE_BOOTSTRAP_SATS: '5000' }, 'regtest')
+            expect(supplied).to.deep.equal(['XCHAIN_PRICE_BOOTSTRAP_SATS'])
+            expect(describeConsensusEnvSupply({ XCHAIN_PRICE_BOOTSTRAP_SATS: '5000' }, 'mainnet').supplied)
+                .to.deep.equal([])
         })
     })
 
@@ -118,6 +198,51 @@ describe('HubConsensusEnvGuard', () => {
         it('compares the price-indexer DB password without ever needing to log it', () => {
             const drift = findHubConsensusEnvDrift({}, { XCHAIN_PRICE_INDEXER_DB_PASS: 'topsecret' })
             expect(drift).to.deep.equal([{ key: 'XCHAIN_PRICE_INDEXER_DB_PASS' }])
+        })
+
+        // The trap this row exists to avoid: guarding the derivation overrides
+        // everywhere would refuse the deploy that unsets a variable the hub has
+        // already been ignoring for its whole life.
+        it('does NOT call it drift when a mainnet deploy unsets an override the hub already ignores', () => {
+            const drift = findHubConsensusEnvDrift(
+                { HUB_NETWORK: 'mainnet' },
+                { HUB_NETWORK: 'mainnet', XCHAIN_PRICE_BOOTSTRAP_SATS: '5000', XCHAIN_PRICE_WINDOW_BLOCKS: '10' }
+            )
+            expect(drift).to.deep.equal([])
+        })
+
+        it('does NOT call it drift when a testnet or standalone deploy unsets one either', () => {
+            expect(findHubConsensusEnvDrift(
+                { HUB_NETWORK: 'testnet' },
+                { HUB_NETWORK: 'testnet', XCHAIN_PRICE_MIN_BTC_VOLUME: '0' }
+            )).to.deep.equal([])
+            expect(findHubConsensusEnvDrift({}, { XCHAIN_PRICE_CONFIRMATION_BUFFER: '0' })).to.deep.equal([])
+        })
+
+        it('does NOT call it drift when a mainnet deploy CHANGES an override the hub ignores', () => {
+            const drift = findHubConsensusEnvDrift(
+                { HUB_NETWORK: 'mainnet', XCHAIN_PRICE_WINDOW_BLOCKS: '99' },
+                { HUB_NETWORK: 'mainnet', XCHAIN_PRICE_WINDOW_BLOCKS: '10' }
+            )
+            expect(drift).to.deep.equal([])
+        })
+
+        it('DOES flag a dropped override on a regtest venue, where the hub honors it', () => {
+            const drift = findHubConsensusEnvDrift(
+                { HUB_NETWORK: 'regtest' },
+                { HUB_NETWORK: 'regtest', XCHAIN_PRICE_MIN_BTC_VOLUME: '0' }
+            )
+            expect(drift).to.deep.equal([{ key: 'XCHAIN_PRICE_MIN_BTC_VOLUME' }])
+        })
+
+        it('DOES flag a dropped override when only the RUNNING container says regtest', () => {
+            // The shell lost HUB_NETWORK too; that is drift in its own right, and
+            // the override it silently drops alongside must be named as well.
+            const drift = findHubConsensusEnvDrift(
+                {},
+                { HUB_NETWORK: 'regtest', XCHAIN_PRICE_BOOTSTRAP_SATS: '5000' }
+            )
+            expect(drift.map(d => d.key).sort()).to.deep.equal(['HUB_NETWORK', 'XCHAIN_PRICE_BOOTSTRAP_SATS'])
         })
     })
 
@@ -199,6 +324,34 @@ describe('HubConsensusEnvGuard', () => {
             expect(thrown.code).to.equal(DRIFT_ERROR_CODE)
             expect(thrown.drift).to.deep.equal([{ key: 'ORACLE_MIN_SUBMISSIONS' }])
             expect(isHubConsensusEnvDriftError(thrown)).to.equal(true)
+        })
+
+        it('lets a mainnet recreate unset a stale, already-ignored derivation override', async () => {
+            // End to end over the exact deploy the naive "just add the keys"
+            // change would have refused forever.
+            const drift = await assertNoHubConsensusEnvDrift(
+                { HUB_NETWORK: 'mainnet' },
+                {
+                    execFileAsync: inspectStub({ HUB_NETWORK: 'mainnet', XCHAIN_PRICE_BOOTSTRAP_SATS: '5000' }),
+                    env: {}
+                }
+            )
+            expect(drift).to.deep.equal([])
+        })
+
+        it('still refuses a regtest recreate that would drop a honored derivation override', async () => {
+            let thrown = null
+            try {
+                await assertNoHubConsensusEnvDrift(
+                    { HUB_NETWORK: 'regtest' },
+                    {
+                        execFileAsync: inspectStub({ HUB_NETWORK: 'regtest', XCHAIN_PRICE_WINDOW_BLOCKS: '10' }),
+                        env: {}
+                    }
+                )
+            } catch (err) { thrown = err }
+            expect(isHubConsensusEnvDriftError(thrown)).to.equal(true)
+            expect(thrown.drift).to.deep.equal([{ key: 'XCHAIN_PRICE_WINDOW_BLOCKS' }])
         })
 
         it('proceeds and logs when the override env is set', async () => {

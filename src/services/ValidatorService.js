@@ -39,11 +39,13 @@
  * Never as an argv value: a WIF in argv is a WIF in every process listing.
  *
  * The hub's API key is deliberately NOT one of these. A hub refuses to boot
- * without HUB_API_KEY unless keyless operation is declared, so init mints one,
- * but it belongs to the HOST rather than to this validator identity: the local
- * indexer and the shared services authenticate to the same hub with the same
- * value. It therefore lives in the shared 0600 sidecar config/hub.local
- * alongside HUB_DB_PASS (ConfigService.ensureHubApiKey).
+ * without HUB_API_KEY unless keyless operation is declared, so a FRESH init
+ * mints one, but it belongs to the HOST rather than to this validator identity:
+ * the local indexer and the shared services authenticate to the same hub with
+ * the same value. It therefore lives in the shared 0600 sidecar config/hub.local
+ * alongside HUB_DB_PASS (ConfigService.ensureHubApiKey). A RE-RUN over an
+ * already-initialized node only READS it (ConfigService.readHubApiKey): see
+ * initValidator for why minting there breaks a keyless deployment.
  *
  * Why capabilities.json sits in its own `hub-caps/` subdirectory rather than
  * beside the other two: the hub container mounts it, and a SINGLE-FILE bind
@@ -66,7 +68,7 @@ const fs   = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { configDir } = require('../config/constants')
-const { ensureHubApiKey } = require('./ConfigService')
+const { ensureHubApiKey, readHubApiKey } = require('./ConfigService')
 
 const VALIDATOR_DIR   = path.join(configDir, 'validator')
 // The stack ref this CLI tells an operator to install. xchain-node's own
@@ -123,8 +125,12 @@ const P2P_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 }
 // Oracle round-numbering anchor per federation. A hub with a different value
 // computes different round numbers and its submissions never line up, so the
 // known federations' values are defaults here; --oracle-epoch-start overrides.
+// Both values are deliberately in the PAST: an epoch in the future numbers
+// every round negative and OracleRound drops peer submissions for round < 0,
+// which is what cost testnet a federation-wide flag day on 2026-08-28.
 // testnet: read from the live validator01-05 containers on 2026-08-29.
-const ORACLE_EPOCH_START_BY_NETWORK = { testnet: 1787875200000 }
+// mainnet: ruled by the operator board 2026-09-01 (2026-09-01T00:00:00Z).
+const ORACLE_EPOCH_START_BY_NETWORK = { mainnet: 1788220800000, testnet: 1787875200000 }
 
 // SDK network names and public encoder coin prefixes per hub network.
 const COIN_NETWORKS = {
@@ -336,20 +342,38 @@ module.exports = {
         if (encoded.encoding !== 'P2SH' && encoded.encoding !== 'P2WSH')
             return { txid: signed.txid };
 
-        const spendParams = {
-            pubkey:   ADDRESS,
-            p2shHash: signed.txid,
-            p2shHex:  signed.txHex,
-            data:     payload,
-            encoding: encoded.encoding,
-            change:   ADDRESS
-        };
-        if (FEE_PER_KB !== undefined) spendParams.feePerKb = FEE_PER_KB;
-        const spendResult = await encoder.spendP2sh(spendParams);
-        const spendSigned = sdk.wallet.signRevealPsbt(spendResult.psbt, WIF);
-        await encoder.broadcastTx(spendSigned.txHex);
+        // Phase 1 has funded the P2SH outputs on chain, so every failure below is a
+        // POST-SPEND failure and has to say so on the way out. The hub reads a
+        // definitive encoder rejection as safe to retry, and a retry re-enters this
+        // function, runs createTx over fresh UTXOs and funds the same payload a second
+        // time. fundsCommitted makes the hub fail closed instead; phase1Txid is what an
+        // operator reconciles the stranded funding transaction against.
+        try {
+            const spendParams = {
+                pubkey:   ADDRESS,
+                p2shHash: signed.txid,
+                p2shHex:  signed.txHex,
+                data:     payload,
+                encoding: encoded.encoding,
+                change:   ADDRESS
+            };
+            if (FEE_PER_KB !== undefined) spendParams.feePerKb = FEE_PER_KB;
+            const spendResult = await encoder.spendP2sh(spendParams);
+            const spendSigned = sdk.wallet.signRevealPsbt(spendResult.psbt, WIF);
+            await encoder.broadcastTx(spendSigned.txHex);
 
-        return { txid: spendSigned.txid, phase1_txid: signed.txid };
+            return { txid: spendSigned.txid, phase1_txid: signed.txid };
+        } catch (err) {
+            // Mutate and rethrow the SAME object where there is one: the classifier
+            // reads err.response and err.message off the original, and a fresh wrapper
+            // would drop both. A thrown non-object gets a carrier instead.
+            const tagged = (err && typeof err === 'object')
+                ? err
+                : new Error('doge-signer: phase 2 failed after funding: ' + String(err));
+            tagged.fundsCommitted = true;
+            tagged.phase1Txid     = signed.txid;
+            throw tagged;
+        }
     },
 
     // Sign an encoder-built PSBT -> signed raw tx hex. The hub's built-in
@@ -570,9 +594,40 @@ function assertCapsDirIsolated() {
     }
 }
 
-// One line of operator-facing output naming WHERE the hub credential lives. The value
-// is never printed: an API key in a terminal is an API key in a scrollback buffer.
+/**
+ * Resolve the host's hub credential for this init run.
+ *
+ * A fresh install may GENERATE one (the hub refuses to boot in validator mode without it,
+ * so an install that leaves none behind ends in a node that cannot start). A re-run over an
+ * already-provisioned node may only READ, because minting one there is a silent outage:
+ * see the refusal wording in reportHubApiKey. `--mint-hub-api-key` is the explicit opt-in
+ * for the one case a re-run legitimately needs to generate, an old install that was
+ * provisioned before init minted anything and now sits at a refused hub boot.
+ */
+async function resolveHubApiKey(alreadyInitialized, opts) {
+    if (!alreadyInitialized || opts.mintHubApiKey) {
+        const key = await ensureHubApiKey()
+        return { path: key.path, generated: key.generated, missing: false }
+    }
+    const key = await readHubApiKey()
+    return { path: key.path, generated: false, missing: !key.present }
+}
+
+// One line of operator-facing output naming WHERE the hub credential lives, or the refusal
+// and its consequence when there is none to name. The value is never printed: an API key in
+// a terminal is an API key in a scrollback buffer.
 function reportHubApiKey(hubApiKey) {
+    if (hubApiKey.missing) {
+        console.log('  hub API key : NONE in ' + hubApiKey.path + ' - this host runs its hub KEYLESS,')
+        console.log('                and re-running init does NOT mint one. Every indexer, explorer and')
+        console.log('                service already pointed at this hub carries no key either, so a key')
+        console.log('                appearing here would flip the hub to authenticated on its next deploy')
+        console.log('                and 401 all of them at once, while the hub still reported healthy.')
+        console.log('                Re-run with --mint-hub-api-key ONLY if the hub is refusing to boot for')
+        console.log('                want of a key, and put the same value in every consumer before')
+        console.log('                redeploying the hub.')
+        return
+    }
     console.log('  hub API key : ' + hubApiKey.path
         + ' (mode 0600, key HUB_API_KEY, ' + (hubApiKey.generated ? 'generated now' : 'already present, reused') + ')')
 }
@@ -581,11 +636,12 @@ function reportHubApiKey(hubApiKey) {
  * Set up the two coin wallets and the DOGE signer, or report why not.
  *
  * Shared by a fresh init and by a re-run over an already-initialized
- * validator, for the same reason ensureHubApiKey runs before the
- * already-initialized early return: a node initialized BEFORE wallets existed
- * is exactly the node that needs them, and making it rotate its signing key
- * (and therefore re-stake, and wait out the activation delay again) to get
- * them would be a punishing upgrade path for a working validator.
+ * validator: a node initialized BEFORE wallets existed is exactly the node that
+ * needs them, and making it rotate its signing key (and therefore re-stake, and
+ * wait out the activation delay again) to get them would be a punishing upgrade
+ * path for a working validator. Wallets are safe to repair on a re-run because
+ * generating them affects nothing outside this node; the hub API key is not,
+ * which is why that one only reads on a re-run (see initValidator).
  *
  * An existing wallets.env is KEPT unless --force-wallets: the signing key is
  * cheap to replace, but a funded stake or publisher address is not, and
@@ -634,13 +690,22 @@ function reportWallets(walletInfo, network, verb) {
 
 // Generate a key + write all validator files. Idempotent guard via `force`.
 async function initValidator(opts = {}) {
-    // A validator-mode hub REFUSES TO BOOT with no HUB_API_KEY, so init has to leave one
-    // behind or this whole ceremony ends in a node that cannot start. Done BEFORE the
-    // already-initialized early return, because a node initialized before this existed is
-    // exactly the node sitting in that refused-boot state; re-running init repairs it.
-    const hubApiKey = await ensureHubApiKey()
+    // A validator-mode hub REFUSES TO BOOT with no HUB_API_KEY, so a FRESH init has to
+    // leave one behind or this whole ceremony ends in a node that cannot start.
+    //
+    // A RE-RUN over an already-provisioned node must NOT mint one, however it got here
+    // (plain re-run or --force). A hub deployed with no key runs keyless
+    // (HUB_ALLOW_UNAUTHENTICATED), and every indexer, explorer and shared service pointed
+    // at it carries no key either; a key appearing in the sidecar flips the hub to
+    // authenticated on its next deploy and 401s all of them at once. Measured on a regtest
+    // host: three indexers dropped off the hub-db sync socket while the visible symptom
+    // named none of it (a mirror-barrier timeout, hub healthy). So the re-run path reads
+    // and reports, and says out loud what minting would cost; --mint-hub-api-key is the
+    // explicit opt-in for the old install that really is stuck at a refused hub boot.
+    const alreadyInitialized = isInitialized()
+    const hubApiKey = await resolveHubApiKey(alreadyInitialized, opts)
 
-    if (isInitialized() && !opts.force) {
+    if (alreadyInitialized && !opts.force) {
         const existing = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
         console.log('Validator already initialized. Pubkey: ' + existing.pubkey)
         reportHubApiKey(hubApiKey)
@@ -1001,24 +1066,18 @@ module.exports = {
     readWallets,
     publicWalletInfo,
     getSignerMountDir,
-    ensureSignerModulesMountpoint,
-    fillPublisherConfig,
     promptSecret,
     loadSdk,
     COIN_NETWORKS,
-    PUBLIC_ENCODER_BASE,
     CAPS_CONTAINER_PATH,
     CAPS_CONTAINER_DIR,
-    CAPS_DIR,
     VALIDATOR_DIR,
     WALLETS_FILE,
-    SIGNER_DIR,
     SIGNER_CONTAINER_DIR,
     // Roll-call status reporting (`validator status`).
     getRollcallStatus,
     getActiveSignerFile,
     signerModuleExportsBroadcast,
     rollcallAbsenceStreak,
-    rollcallEpochBlocks,
-    ROLLCALL_DOGE_COST_PER_CALL
+    rollcallEpochBlocks
 }

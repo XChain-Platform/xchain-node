@@ -1,5 +1,9 @@
 {
   "bitcoin/bitcoin": {
+    "v31.1": {
+      "x86_64": "b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e",
+      "aarch64": "dcf1873f2208ba4f962f3398d47e154c39c0084be8f4553e05c940d0ace3d004"
+    },
     "v28.1": {
       "x86_64": "07f77afd326639145b9ba9562912b2ad2ccec47b8a305bd075b4f4cb127b7ed7",
       "aarch64": "6ddb6990690bd4c9a9f4319ed6f6e9c995c85ce5530ee9f120e80ce09e090c44"
@@ -12,6 +16,10 @@
     }
   },
   "litecoin-project/litecoin": {
+    "v0.21.5.6": {
+      "x86_64": "3c0a217651a431ef446641669a0b74ce7dbcd9b9ed1a118fc830b8f6779ee83f",
+      "aarch64": "81c3ca2a7fcbccaabaf0a0ea2022f1990787f0cc1937aaad4dcc61d2856799a8"
+    },
     "v0.21.4": {
       "x86_64": "857fc41091f2bae65c3bf0fd4d388fca915fc93a03f16dd2578ac3cc92898390",
       "aarch64": "517e3a9069e658eb92de98c934c61836589ee2410d99464a768a5698985926c9"

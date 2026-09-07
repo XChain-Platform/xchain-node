@@ -64,10 +64,16 @@ function makeHubApiKeyStub(generated = true) {
     return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, generated })
 }
 
-function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub()) {
+// The non-minting read a re-run uses. `present` is what the sidecar already holds.
+function makeHubApiKeyReadStub(present = false) {
+    return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, present })
+}
+
+function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub(),
+                              readHubApiKey = makeHubApiKeyReadStub()) {
     return proxyquire('../../src/services/ValidatorService', {
         'fs': fsStub,
-        './ConfigService': { ensureHubApiKey },
+        './ConfigService': { ensureHubApiKey, readHubApiKey },
         '../config/constants': {
             configDir: FAKE_CONFIG_DIR
         }
@@ -301,11 +307,14 @@ describe('ValidatorService', function () {
             expect(result.ORACLE_EPOCH_START).to.equal(1717200000000)
         })
 
-        it('sets ORACLE_EPOCH_START to null when not provided', async function () {
+        // With no opts the port defaults to 10001, which names the mainnet
+        // federation, so the epoch defaults to that federation's ruled value
+        // rather than to null. Null is reserved for a port naming no federation.
+        it('falls back to the mainnet federation epoch when none is supplied', async function () {
             const fs = makeFs()
             const vs = loadValidatorService(fs)
             const result = await vs.initValidator()
-            expect(result.ORACLE_EPOCH_START).to.be.null
+            expect(result.ORACLE_EPOCH_START).to.equal(1788220800000)
         })
 
         it('uses partial capabilities from opts.capabilities', async function () {
@@ -386,18 +395,27 @@ describe('ValidatorService', function () {
 
             // Capture output rather than let assertions read the real console: these tests
             // are about what does and does not get printed.
-            function captureInit(fs, ensure) {
+            function captureInit(fs, ensure, read = makeHubApiKeyReadStub(), opts = {}) {
                 const logged = []
                 const stub = sinon.stub(console, 'log').callsFake(m => logged.push(String(m)))
                 return (async () => {
                     try {
-                        const vs = loadValidatorService(fs, ensure)
-                        await vs.initValidator()
+                        const vs = loadValidatorService(fs, ensure, read)
+                        await vs.initValidator(opts)
                         return logged
                     } finally {
                         stub.restore()
                     }
                 })()
+            }
+
+            // An already-initialized node: settings and signing key both on disk.
+            function initializedFs() {
+                return makeFs({
+                    existsSync: sinon.stub().callsFake(p =>
+                        p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                    readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+                })
             }
 
             it('ensures a hub API key exists as part of init', async function () {
@@ -424,26 +442,66 @@ describe('ValidatorService', function () {
                 expect(output).to.not.match(/HUB_API_KEY=\S/)
             })
 
-            // A node initialized before this existed is EXACTLY the node stuck at a refused
-            // boot, so re-running init has to repair it rather than return early.
-            it('repairs an already-initialized node that has no key yet', async function () {
-                const ensure = makeHubApiKeyStub()
-                const fs = makeFs({
-                    existsSync: sinon.stub().callsFake(p =>
-                        p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
-                    readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
-                })
-                const logged = await captureInit(fs, ensure)
-                expect(ensure.calledOnce).to.be.true
-                expect(logged.some(l => l.includes('already initialized'))).to.be.true
-                expect(logged.some(l => l.includes(FAKE_HUB_SIDECAR))).to.be.true
-            })
-
             it('reports a pre-existing key as reused rather than claiming a fresh one', async function () {
                 const logged = await captureInit(makeFs(), makeHubApiKeyStub(false))
                 const line = logged.find(l => l.includes('hub API key'))
                 expect(line).to.include('reused')
                 expect(line).to.not.include('generated now')
+            })
+
+            // A credential APPEARING is as breaking as one disappearing. A hub with no key
+            // runs keyless and every consumer pointed at it carries no key either, so a key
+            // minted by a re-run 401s all of them on the hub's next deploy while the hub
+            // itself still reports healthy. Measured on a regtest host: three indexers
+            // dropped off the hub-db sync socket behind a mirror-barrier timeout.
+            describe('a re-run over an already-initialized node', function () {
+
+                it('does NOT mint a key on a keyless host', async function () {
+                    const ensure = makeHubApiKeyStub()
+                    const read   = makeHubApiKeyReadStub(false)
+                    await captureInit(initializedFs(), ensure, read)
+                    expect(ensure.called).to.be.false
+                    expect(read.calledOnce).to.be.true
+                })
+
+                it('names the consequence instead of minting silently', async function () {
+                    const logged = await captureInit(initializedFs(), makeHubApiKeyStub(), makeHubApiKeyReadStub(false))
+                    const output = logged.join('\n')
+                    expect(output).to.include('KEYLESS')
+                    expect(output).to.include('401')
+                    expect(output).to.include('--mint-hub-api-key')
+                    expect(output).to.include(FAKE_HUB_SIDECAR)
+                })
+
+                // --force rotates the SIGNING KEY, which is this node's business alone. The
+                // hub credential is the whole host's, so it stays read-only there too.
+                it('does NOT mint under --force either', async function () {
+                    const ensure = makeHubApiKeyStub()
+                    const read   = makeHubApiKeyReadStub(false)
+                    const logged = await captureInit(initializedFs(), ensure, read, { force: true, wallets: false })
+                    expect(ensure.called).to.be.false
+                    expect(logged.join('\n')).to.include('--mint-hub-api-key')
+                })
+
+                it('still reports an existing key, without rotating it', async function () {
+                    const ensure = makeHubApiKeyStub()
+                    const logged = await captureInit(initializedFs(), ensure, makeHubApiKeyReadStub(true))
+                    expect(ensure.called).to.be.false
+                    const line = logged.find(l => l.includes('hub API key'))
+                    expect(line).to.include(FAKE_HUB_SIDECAR)
+                    expect(line).to.include('reused')
+                })
+
+                // The old install that really is stuck at a refused hub boot still has a
+                // repair path; it is now something the operator asks for by name.
+                it('mints when --mint-hub-api-key asks it to', async function () {
+                    const ensure = makeHubApiKeyStub()
+                    const read   = makeHubApiKeyReadStub(false)
+                    const logged = await captureInit(initializedFs(), ensure, read, { mintHubApiKey: true })
+                    expect(ensure.calledOnce).to.be.true
+                    expect(read.called).to.be.false
+                    expect(logged.find(l => l.includes('hub API key'))).to.include('generated now')
+                })
             })
         })
 
@@ -803,6 +861,94 @@ describe('ValidatorService', function () {
             expect(signer.args[1]).to.include('async broadcast(payload)')
         })
 
+        // The emitted signer runs both phases of the P2SH encoding, and phase 1 puts
+        // real DOGE on chain. A failure after that point must not reach the hub looking
+        // like a clean pre-send failure: the hub would requeue, re-enter broadcast(),
+        // run createTx over fresh UTXOs and fund the same payload a second time. So the
+        // template is driven for real here rather than grepped, with the SDK stubbed.
+        describe('the emitted signer marks post-funding failures', function () {
+            const vm     = require('vm')
+            const PHASE1 = 'f'.repeat(64)
+
+            // Compile the written template and hand it a stub SDK, so the two-phase
+            // pipeline can be exercised without a key, an encoder or a network.
+            function loadEmittedSigner(source, encoder) {
+                const mod = { exports: {} }
+                vm.runInNewContext(source, {
+                    require: (id) => {
+                        if (id === 'path')   return path
+                        if (id === 'dotenv') return { config: () => ({}) }
+                        if (id === '@dankest-llc/xchain-sdk') return { XChainSDK: function () {
+                            this._requireEncoder = () => encoder
+                            this.wallet = {
+                                signPsbt:       () => ({ txHex: 'hex-1', txid: PHASE1 }),
+                                signRevealPsbt: () => ({ txHex: 'hex-2', txid: 'e'.repeat(64) })
+                            }
+                        } }
+                        throw new Error('unexpected require in the emitted signer: ' + id)
+                    },
+                    module: mod, exports: mod.exports, __dirname: FAKE_SIGNER_DIR, console,
+                    process: { env: {
+                        DOGE_NETWORK:     'dogecoin-testnet',
+                        DOGE_WIF:         'test-wif',
+                        DOGE_ADDRESS:     'test-address',
+                        DOGE_ENCODER_URL: 'http://encoder.invalid'
+                    } },
+                    Number, String, Error, Promise, Object
+                }, { filename: 'signer.js' })
+                return mod.exports
+            }
+
+            async function emitSigner() {
+                const fs = makeFs()
+                const vs = loadValidatorService(fs)
+                await vs.initValidator({ network: 'testnet' })
+                return fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_SIGNER_FILE).args[1]
+            }
+
+            function stubEncoder(overrides) {
+                return Object.assign({
+                    createTx:    async () => ({ psbt: 'psbt-1', encoding: 'P2SH' }),
+                    broadcastTx: async () => ({ txid: PHASE1 }),
+                    spendP2sh:   async () => ({ psbt: 'psbt-2' })
+                }, overrides || {})
+            }
+
+            it('is valid JavaScript once the template literal is expanded', async function () {
+                const source = await emitSigner()
+                expect(() => new vm.Script(source, { filename: 'signer.js' })).to.not.throw()
+            })
+
+            it('tags a definitive phase-2 rejection with fundsCommitted and the phase-1 txid', async function () {
+                const signer = loadEmittedSigner(await emitSigner(), stubEncoder({
+                    spendP2sh: async () => { throw new Error('Encoder RPC error: bad-txns-inputs-missingorspent') }
+                }))
+                let caught = null
+                try { await signer.broadcast('wire') } catch (e) { caught = e }
+                expect(caught).to.exist
+                expect(caught.fundsCommitted).to.equal(true)
+                expect(caught.phase1Txid).to.equal(PHASE1)
+                // The SAME object is rethrown: the hub classifies on message and response.
+                expect(caught.message).to.equal('Encoder RPC error: bad-txns-inputs-missingorspent')
+            })
+
+            it('leaves a pre-funding failure untagged, so the round stays retryable', async function () {
+                const signer = loadEmittedSigner(await emitSigner(), stubEncoder({
+                    createTx: async () => { throw new Error('Encoder RPC error: no UTXOs available') }
+                }))
+                let caught = null
+                try { await signer.broadcast('wire') } catch (e) { caught = e }
+                expect(caught).to.exist
+                expect(caught.fundsCommitted).to.equal(undefined)
+            })
+
+            it('does not tag a successful two-phase publish', async function () {
+                const signer = loadEmittedSigner(await emitSigner(), stubEncoder())
+                const res = await signer.broadcast('wire')
+                expect(res.phase1_txid).to.equal(PHASE1)
+            })
+        })
+
         it('points the signer at the DOGE wallet and the public testnet encoder', async function () {
             const fs = makeFs()
             const vs = loadValidatorService(fs)
@@ -856,11 +1002,33 @@ describe('ValidatorService', function () {
             expect(result.ORACLE_EPOCH_START).to.equal(1717200000000)
         })
 
-        it('leaves ORACLE_EPOCH_START null on mainnet, where no federation value is known yet', async function () {
+        it('defaults ORACLE_EPOCH_START to the mainnet federation value', async function () {
             const vs = loadValidatorService(makeFs())
             const result = await vs.initValidator({ p2pPort: '10001' })
             expect(result.network).to.equal('mainnet')
+            expect(result.ORACLE_EPOCH_START).to.equal(1788220800000)
+        })
+
+        it('leaves ORACLE_EPOCH_START null when the network is unknown', async function () {
+            const vs = loadValidatorService(makeFs())
+            const result = await vs.initValidator({ p2pPort: '10009' })
+            expect(result.network).to.be.null
             expect(result.ORACLE_EPOCH_START).to.be.null
+        })
+
+        // Both federation defaults must sit in the PAST. A future epoch numbers
+        // every round negative and OracleRound drops peer submissions for
+        // round < 0, which is the failure testnet paid a federation-wide flag
+        // day for on 2026-08-28; mainnet is ruled past up front to avoid it.
+        // They must also differ, so a round number never lines up across the
+        // two federations.
+        it('both federation default epochs are in the past, and differ', async function () {
+            const vs = loadValidatorService(makeFs())
+            const mainnet = await vs.initValidator({ p2pPort: '10001' })
+            const testnet = await vs.initValidator({ p2pPort: '10002', force: true })
+            expect(mainnet.ORACLE_EPOCH_START).to.be.a('number').and.to.be.lessThan(Date.now())
+            expect(testnet.ORACLE_EPOCH_START).to.be.a('number').and.to.be.lessThan(Date.now())
+            expect(mainnet.ORACLE_EPOCH_START).to.not.equal(testnet.ORACLE_EPOCH_START)
         })
 
         it('skips wallets on a non-standard port and says so, without failing init', async function () {

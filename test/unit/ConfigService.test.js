@@ -23,9 +23,24 @@ const {
     moduleDir, tmpDir, cryptoNodesDir, dataDir, configDir
 } = require('../../src/config/constants')
 
+// getDefaultConfig() pulls ValidatorService in lazily for the hub module, and
+// ValidatorService reads config/validator/ off the REAL filesystem through its own
+// `fs` binding, which the fs stub below does not reach. On a developer or operator
+// box that has run `xchain-node validator init` that directory exists, so an
+// unstubbed run reads the machine's recorded network (HUB_NETWORK) and its live
+// signing.key into the config object under test: assertions about a standalone
+// install then fail, and a real key ends up in a test fixture. Every factory here
+// therefore describes a machine with no validator, which is the state CI runs in
+// (config/validator/ is gitignored). Tests that WANT a validator stub their own.
+const NO_VALIDATOR = {
+    getValidatorSettings: () => null,
+    getValidatorEnv:      () => ({})
+}
+
 function makeConfigService(fsStub) {
     return proxyquire('../../src/services/ConfigService', {
-        'fs': fsStub || require('fs')
+        'fs': fsStub || require('fs'),
+        './ValidatorService': NO_VALIDATOR
     })
 }
 
@@ -301,6 +316,48 @@ describe('ConfigService', function () {
             return makeConfigService(fsStub)
         }
 
+        // The regtest-only passthrough. Every name here is a value a host env var must
+        // never carry onto a shared ledger: three are consensus inputs where a per-node
+        // value forks settlement, and the fourth only shapes how much a failed barrier
+        // attempt costs. This gate is one of TWO independent ones (the indexer refuses
+        // the same vars again on its own side), and neither had a test, while the list
+        // is edited by whoever needs the next knob.
+        describe('regtest-only env passthrough to the indexer', function () {
+
+            const REGTEST_ONLY = [
+                'XC_ROLLCALL_REGTEST_ACTIVATION',
+                'HUB_SYNC_ANCHOR_ATTEST_GRACE_S',
+                'HUB_PRICE_SYNC_TIMEOUT_MS',
+                'XCHAIN_COINPAY_EXPIRATION_S'
+            ]
+
+            let saved
+            beforeEach(function () {
+                saved = {}
+                for (const k of REGTEST_ONLY) { saved[k] = process.env[k]; process.env[k] = '1234' }
+            })
+            afterEach(function () {
+                for (const k of REGTEST_ONLY) {
+                    if (saved[k] === undefined) delete process.env[k]
+                    else process.env[k] = saved[k]
+                }
+            })
+
+            it('carries every regtest-only var onto a regtest indexer', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig(XChainService.XCHAIN_INDEXER, 'bitcoin', 'regtest')
+                for (const k of REGTEST_ONLY) expect(config[k], k).to.equal('1234')
+            })
+
+            for (const net of ['mainnet', 'testnet']) {
+                it('carries none of them onto ' + net + ', so a host variable cannot reach a shared ledger', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(XChainService.XCHAIN_INDEXER, 'bitcoin', net)
+                    for (const k of REGTEST_ONLY) expect(config, k).to.not.have.property(k)
+                })
+            }
+        })
+
         describe('with coin and network (coin-specific config)', function () {
 
             it('returns NETWORK matching the network arg', async function () {
@@ -400,6 +457,7 @@ describe('ConfigService', function () {
                 }
                 const cs = proxyquire('../../src/services/ConfigService', {
                     'fs': fsStub,
+                    './ValidatorService': NO_VALIDATOR,
                     './DatabaseService': {
                         getDatabaseContainerId: async () => dbContainerId,
                         getExternalDbConfig: async () => ({ host: '172.18.0.1', port: 3307, root_user: 'root', root_password: 'x' })
@@ -768,6 +826,157 @@ describe('ConfigService', function () {
                 })
             })
 
+            // The passthrough is the only supported way to arm a DEPLOYED indexer for
+            // ROLLCALL, and the only way its DOGE proof peer survives an `update`.
+            describe('ROLLCALL rail passthrough', function () {
+                const ROLLCALL_VARS = [
+                    'DOGE_INDEXER_API_URL', 'DOGE_INDEXER_API_KEY', 'XC_ROLLCALL_REGTEST_ACTIVATION'
+                ]
+                let saved
+                beforeEach(function () {
+                    saved = {}
+                    for (const v of ROLLCALL_VARS) { saved[v] = process.env[v]; delete process.env[v] }
+                })
+                afterEach(function () {
+                    for (const v of ROLLCALL_VARS) {
+                        if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v]
+                    }
+                })
+
+                it('passes the DOGE proof peer through to the indexer on regtest', async function () {
+                    process.env.DOGE_INDEXER_API_URL = 'http://dogecoin-regtest-indexer:3004/api'
+                    process.env.DOGE_INDEXER_API_KEY = 'not-a-real-key'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['DOGE_INDEXER_API_URL']).to.equal('http://dogecoin-regtest-indexer:3004/api')
+                    expect(config['DOGE_INDEXER_API_KEY']).to.equal('not-a-real-key')
+                })
+
+                // Roll calls land on DOGE on every network, so the close needs a reachable
+                // DOGE indexer on testnet and mainnet too, not only on the acceptance venue.
+                it('passes the DOGE proof peer through on testnet as well', async function () {
+                    process.env.DOGE_INDEXER_API_URL = 'https://doge.example.invalid/api'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'testnet')
+                    expect(config['DOGE_INDEXER_API_URL']).to.equal('https://doge.example.invalid/api')
+                })
+
+                it('arms the indexer on regtest when the host opts in', async function () {
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['XC_ROLLCALL_REGTEST_ACTIVATION']).to.equal('armed')
+                })
+
+                it('carries a bare arming height through unaltered', async function () {
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = '900'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['XC_ROLLCALL_REGTEST_ACTIVATION']).to.equal('900')
+                })
+
+                // The deploy path is the SECOND gate. rollcall_activation.js cannot reach
+                // the environment for a shared-ledger network at all, and this makes the
+                // host variable stop at the container door there as well, so neither gate
+                // being edited alone can arm mainnet or testnet from a host variable.
+                it('NEVER arms a shared-ledger indexer, whatever the host env says', async function () {
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    for (const net of ['mainnet', 'testnet']) {
+                        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', net)
+                        expect(config, net).to.not.have.property('XC_ROLLCALL_REGTEST_ACTIVATION')
+                    }
+                })
+
+                it('does NOT inject the rollcall vars into a non-indexer coin module (decoder)', async function () {
+                    process.env.DOGE_INDEXER_API_URL           = 'http://x/api'
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
+                    expect(config).to.not.have.property('DOGE_INDEXER_API_URL')
+                    expect(config).to.not.have.property('XC_ROLLCALL_REGTEST_ACTIVATION')
+                })
+
+                // ROLLCALL_ACTIVATION is a consensus_rules_digest SHARED_GATE, so an armed
+                // indexer beside an inert container hub reports a rules mismatch. A venue
+                // has to arm as a unit, which means the hub takes the same variable.
+                it('arms the container hub from the same variable, so the venue arms as a unit', async function () {
+                    process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-hub', null, null)
+                    expect(config['XC_ROLLCALL_REGTEST_ACTIVATION']).to.equal('armed')
+                })
+
+                it('omits every rollcall var when unset, so a venue ships INERT', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    for (const v of ROLLCALL_VARS) expect(config).to.not.have.property(v)
+                    const hub = await cs.getDefaultConfig('xchain-hub', null, null)
+                    expect(hub).to.not.have.property('XC_ROLLCALL_REGTEST_ACTIVATION')
+                })
+            })
+
+            // Regtest mirror arming: the regtest indexer's hub-mirror connection, unset
+            // before this row, and the three watermark graces that must be zeroed alongside
+            // it or an armed regtest venue wedges every freshly mined block (the price-grace
+            // failure the regtest mirror wedge records).
+            describe('regtest mirror arming', function () {
+                const GRACE_VARS = [
+                    'HUB_SYNC_PRICE_GRACE_S', 'HUB_SYNC_ORACLE_GRACE_S', 'HUB_SYNC_ATTEST_RESPONSE_GRACE_S'
+                ]
+                let saved
+                beforeEach(function () {
+                    saved = {}
+                    for (const v of GRACE_VARS) { saved[v] = process.env[v]; delete process.env[v] }
+                })
+                afterEach(function () {
+                    for (const v of GRACE_VARS) {
+                        if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v]
+                    }
+                })
+
+                it('arms the regtest indexer hub-mirror pointer at its own DB account', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['HUB_DB_NAME']).to.equal(config['INDEXER_DB_NAME'])
+                    expect(config['HUB_DB_USER']).to.equal(config['INDEXER_DB_USER'])
+                    expect(config['HUB_DB_SYNC_ENABLED']).to.equal('true')
+                    // The password must follow the same account, or the armed mirror
+                    // authenticates as the indexer's own DB user with the wrong password.
+                    expect(config['HUB_DB_PASS']).to.equal(config['INDEXER_DB_PASS'])
+                })
+
+                it('defaults all three watermark graces to 0 on regtest when the host sets none of them', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    for (const v of GRACE_VARS) expect(config[v], v).to.equal('0')
+                })
+
+                it('lets a host-set grace value win over the regtest default', async function () {
+                    process.env.HUB_SYNC_ATTEST_RESPONSE_GRACE_S = '30'
+                    process.env.HUB_SYNC_PRICE_GRACE_S = '15'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+                    expect(config['HUB_SYNC_ATTEST_RESPONSE_GRACE_S']).to.equal('30')
+                    expect(config['HUB_SYNC_PRICE_GRACE_S']).to.equal('15')
+                    // The var left unset by the host still gets the regtest default.
+                    expect(config['HUB_SYNC_ORACLE_GRACE_S']).to.equal('0')
+                })
+
+                it('leaves mainnet/testnet mirror arming exactly as before (same account, no grace defaults)', async function () {
+                    process.env.HUB_SYNC_ATTEST_RESPONSE_GRACE_S = '30' // must be ignored off regtest
+                    const cs = makeServiceWithConfig('')
+                    for (const network of ['mainnet', 'testnet']) {
+                        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', network)
+                        expect(config['HUB_DB_NAME'], network).to.equal(config['INDEXER_DB_NAME'])
+                        expect(config['HUB_DB_USER'], network).to.equal(config['INDEXER_DB_USER'])
+                        expect(config['HUB_DB_SYNC_ENABLED'], network).to.equal('true')
+                        expect(config['HUB_DB_PASS'], network).to.equal(config['INDEXER_DB_PASS'])
+                        for (const v of GRACE_VARS) expect(config, network + ' ' + v).to.not.have.property(v)
+                    }
+                })
+            })
+
             it('returns correct INDEXER_COIN ticker', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
@@ -865,6 +1074,94 @@ describe('ConfigService', function () {
                 const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
                 expect(config['DECODER_DB_PORT']).to.equal(3306)
             })
+
+            // Encoder passthrough (rate-limits-that-fit-the-wallet D7/D8/C8, row 12):
+            // ENCODER_TRUST_PROXY and ENCODER_RATE_LIMIT_RPM survive an
+            // update/recreate only if they ride the host env into the container's
+            // default config, mirroring the explorer serving-limit passthrough below.
+            describe('encoder passthrough (ENCODER_TRUST_PROXY / ENCODER_RATE_LIMIT_RPM)', function () {
+
+                it('passes ENCODER_TRUST_PROXY and ENCODER_RATE_LIMIT_RPM through from the host env', async function () {
+                    const prev = {
+                        proxy: process.env.ENCODER_TRUST_PROXY,
+                        rpm:   process.env.ENCODER_RATE_LIMIT_RPM
+                    }
+                    process.env.ENCODER_TRUST_PROXY    = '203.0.113.9'
+                    process.env.ENCODER_RATE_LIMIT_RPM = '240'
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const config = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
+                        expect(config['ENCODER_TRUST_PROXY']).to.equal('203.0.113.9')
+                        expect(config['ENCODER_RATE_LIMIT_RPM']).to.equal('240')
+                    } finally {
+                        for (const [k, v] of [
+                            ['ENCODER_TRUST_PROXY', prev.proxy],
+                            ['ENCODER_RATE_LIMIT_RPM', prev.rpm]
+                        ]) {
+                            if (v === undefined) delete process.env[k]
+                            else process.env[k] = v
+                        }
+                    }
+                })
+
+                it('emits neither key when the host env carries no encoder passthrough values', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
+                    expect(config).to.not.have.property('ENCODER_TRUST_PROXY')
+                    expect(config).to.not.have.property('ENCODER_RATE_LIMIT_RPM')
+                })
+
+                // The regtest block above sets ENCODER_RATE_LIMIT_RPM=99999 unconditionally
+                // (a bursty e2e-suite accommodation); this passthrough runs AFTER it, so an
+                // operator's host value still wins on a regtest venue.
+                it('lets a host ENCODER_RATE_LIMIT_RPM win over the regtest 99999 literal', async function () {
+                    const prev = process.env.ENCODER_RATE_LIMIT_RPM
+                    process.env.ENCODER_RATE_LIMIT_RPM = '300'
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const config = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'regtest')
+                        expect(config['ENCODER_RATE_LIMIT_RPM']).to.equal('300')
+                    } finally {
+                        if (prev === undefined) delete process.env.ENCODER_RATE_LIMIT_RPM
+                        else process.env.ENCODER_RATE_LIMIT_RPM = prev
+                    }
+                })
+
+                it('keeps the regtest 99999 literal when the host env sets no override', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'regtest')
+                    expect(config['ENCODER_RATE_LIMIT_RPM']).to.equal(99999)
+                })
+
+                // Gated on module === XCHAIN_ENCODER; a decoder or utxo-tracker config
+                // for the same coin/network must never pick this up.
+                it('does not leak the encoder passthrough onto decoder or utxo-tracker configs', async function () {
+                    const prev = {
+                        proxy: process.env.ENCODER_TRUST_PROXY,
+                        rpm:   process.env.ENCODER_RATE_LIMIT_RPM
+                    }
+                    process.env.ENCODER_TRUST_PROXY    = '203.0.113.9'
+                    process.env.ENCODER_RATE_LIMIT_RPM = '240'
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const decoderConfig = await cs.getDefaultConfig(XChainService.XCHAIN_DECODER, 'bitcoin', 'mainnet')
+                        expect(decoderConfig).to.not.have.property('ENCODER_TRUST_PROXY')
+                        expect(decoderConfig).to.not.have.property('ENCODER_RATE_LIMIT_RPM')
+                        const trackerConfig = await cs.getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
+                        expect(trackerConfig).to.not.have.property('ENCODER_TRUST_PROXY')
+                        expect(trackerConfig).to.not.have.property('ENCODER_RATE_LIMIT_RPM')
+                    } finally {
+                        for (const [k, v] of [
+                            ['ENCODER_TRUST_PROXY', prev.proxy],
+                            ['ENCODER_RATE_LIMIT_RPM', prev.rpm]
+                        ]) {
+                            if (v === undefined) delete process.env[k]
+                            else process.env[k] = v
+                        }
+                    }
+                })
+
+            })
         })
 
         describe('without coin/network (shared service config)', function () {
@@ -918,6 +1215,107 @@ describe('ConfigService', function () {
                     if (prev === undefined) delete process.env.INDEXER_API_URL_BTC_MAINNET
                     else process.env.INDEXER_API_URL_BTC_MAINNET = prev
                 }
+            })
+
+            // Both serving limits default to values tuned for a PUBLIC explorer:
+            // 500 requests/min/IP, and a 6-hour tip-age gate that delists a coin.
+            // A private venue needs both loosened (a regtest chain only advances
+            // when someone mines, so an idle one goes "stale" while lag stays 0),
+            // and the explorer is a shared service with no per-venue config file,
+            // so host env is the only injection point it has.
+            it('passes the explorer serving limits through from the host env', async function () {
+                const prev = {
+                    rpm:  process.env.EXPLORER_RATE_LIMIT_RPM,
+                    fq:   process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM,
+                    age:  process.env.EXPLORER_TIP_MAX_AGE_S,
+                    coin: process.env.EXPLORER_TIP_MAX_AGE_S_RBTC
+                }
+                process.env.EXPLORER_RATE_LIMIT_RPM     = '5000'
+                process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM = '2000'
+                process.env.EXPLORER_TIP_MAX_AGE_S      = '0'
+                process.env.EXPLORER_TIP_MAX_AGE_S_RBTC = '0'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                    expect(config['EXPLORER_RATE_LIMIT_RPM']).to.equal('5000')
+                    expect(config['EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM']).to.equal('2000')
+                    expect(config['EXPLORER_TIP_MAX_AGE_S']).to.equal('0')
+                    // Deliberately NOT carried: the explorer honours the per-coin
+                    // form itself, and passing it through here would need a
+                    // computed env read, which the platform's coverage gate cannot
+                    // scan. The global knob covers the case this exists for.
+                    expect(config).to.not.have.property('EXPLORER_TIP_MAX_AGE_S_RBTC')
+                } finally {
+                    for (const [k, v] of [
+                        ['EXPLORER_RATE_LIMIT_RPM', prev.rpm],
+                        ['EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM', prev.fq],
+                        ['EXPLORER_TIP_MAX_AGE_S', prev.age],
+                        ['EXPLORER_TIP_MAX_AGE_S_RBTC', prev.coin]
+                    ]) {
+                        if (v === undefined) delete process.env[k]
+                        else process.env[k] = v
+                    }
+                }
+            })
+
+            // Unset stays unset: the explorer's own defaults must keep applying to
+            // a deployment that never sets these, or every install would start
+            // emitting a limit nobody chose.
+            it('emits no serving-limit keys when the host env carries none', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                expect(config).to.not.have.property('EXPLORER_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_TIP_MAX_AGE_S')
+            })
+
+            // The five per-route knobs (checkpoint-list/verify, action-proof,
+            // validator-set-proof, vm-query) were missing from this passthrough
+            // (row 14, rate-limits-that-fit-the-wallet C10): a node-managed
+            // explorer (the regtest venue) could raise only the app-wide and
+            // fee-quote caps before this change.
+            it('passes the five per-route explorer rate limits through from the host env', async function () {
+                const prev = {
+                    list:    process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM,
+                    verify:  process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM,
+                    action:  process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM,
+                    valset:  process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM,
+                    vmquery: process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM
+                }
+                process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM     = '150'
+                process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM   = '95'
+                process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM        = '95'
+                process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM = '35'
+                process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM            = '25'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                    expect(config['EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM']).to.equal('150')
+                    expect(config['EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM']).to.equal('95')
+                    expect(config['EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM']).to.equal('95')
+                    expect(config['EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM']).to.equal('35')
+                    expect(config['EXPLORER_VM_QUERY_RATE_LIMIT_RPM']).to.equal('25')
+                } finally {
+                    for (const [k, v] of [
+                        ['EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM', prev.list],
+                        ['EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM', prev.verify],
+                        ['EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM', prev.action],
+                        ['EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM', prev.valset],
+                        ['EXPLORER_VM_QUERY_RATE_LIMIT_RPM', prev.vmquery]
+                    ]) {
+                        if (v === undefined) delete process.env[k]
+                        else process.env[k] = v
+                    }
+                }
+            })
+
+            it('emits no per-route explorer rate-limit keys when the host env carries none', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                expect(config).to.not.have.property('EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM')
+                expect(config).to.not.have.property('EXPLORER_VM_QUERY_RATE_LIMIT_RPM')
             })
 
             it('returns EXPLORER_API_PORT_HTTP as 8080', async function () {
@@ -1051,16 +1449,31 @@ describe('ConfigService', function () {
                     const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
                     expect(config['HUB_NETWORK']).to.be.undefined
                 })
+
+                // The guard on the guard: the test above only describes a standalone
+                // install while ValidatorService is stubbed out. Unstubbed it reads the
+                // real config/validator/ through its own fs binding, so on any box that
+                // has run `validator init` the suite both fails here and pulls that
+                // machine's live signing key into a fixture. Assert the validator env is
+                // absent, which is the shape only an isolated read can produce.
+                it('reads no validator identity off the host filesystem', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['SIGNING_PRIVKEY_HEX']).to.be.undefined
+                    expect(config['P2P_VALIDATOR_ADDR']).to.be.undefined
+                    expect(config['HUB_CAPABILITY_CONFIG']).to.be.undefined
+                })
             })
 
-            // The four PRICE batch knobs: non-consensus, so a passthrough
+            // The five PRICE batch knobs: non-consensus, so a passthrough
             // omission just leaves the hub on its own default rather than drifting
             // a federation, but an operator install still needs them to reach the
-            // container to tune window/grace/timeout/buffer at all.
+            // container to tune window/grace/timeout/buffer/landing-reserve at all.
             describe('ORACLE_BATCH_* passthrough', function () {
                 const ORACLE_BATCH_VARS = [
                     'ORACLE_BATCH_WINDOW_ROUNDS', 'ORACLE_BATCH_GRACE_MS',
-                    'ORACLE_BATCH_SIGN_TIMEOUT_MS', 'ORACLE_BATCH_BUFFER_MAX_ROUNDS'
+                    'ORACLE_BATCH_SIGN_TIMEOUT_MS', 'ORACLE_BATCH_BUFFER_MAX_ROUNDS',
+                    'ORACLE_BATCH_LANDING_RESERVE_MS'
                 ]
                 let saved
                 beforeEach(function () {
@@ -1074,23 +1487,69 @@ describe('ConfigService', function () {
                     }
                 })
 
-                it('injects all four ORACLE_BATCH_* knobs from host env into the hub config', async function () {
-                    process.env.ORACLE_BATCH_WINDOW_ROUNDS = '6'
+                it('injects all five ORACLE_BATCH_* knobs from host env into the hub config', async function () {
+                    process.env.ORACLE_BATCH_WINDOW_ROUNDS = '2'
                     process.env.ORACLE_BATCH_GRACE_MS = '300000'
                     process.env.ORACLE_BATCH_SIGN_TIMEOUT_MS = '60000'
                     process.env.ORACLE_BATCH_BUFFER_MAX_ROUNDS = '4032'
+                    process.env.ORACLE_BATCH_LANDING_RESERVE_MS = '300000'
                     const cs = makeServiceWithConfig('')
                     const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
-                    expect(config['ORACLE_BATCH_WINDOW_ROUNDS']).to.equal('6')
+                    expect(config['ORACLE_BATCH_WINDOW_ROUNDS']).to.equal('2')
                     expect(config['ORACLE_BATCH_GRACE_MS']).to.equal('300000')
                     expect(config['ORACLE_BATCH_SIGN_TIMEOUT_MS']).to.equal('60000')
                     expect(config['ORACLE_BATCH_BUFFER_MAX_ROUNDS']).to.equal('4032')
+                    expect(config['ORACLE_BATCH_LANDING_RESERVE_MS']).to.equal('300000')
                 })
 
-                it('leaves all four ORACLE_BATCH_* knobs unset when host env is absent (hub default unchanged)', async function () {
+                it('leaves all five ORACLE_BATCH_* knobs unset when host env is absent (hub default unchanged)', async function () {
                     const cs = makeServiceWithConfig('')
                     const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
                     for (const k of ORACLE_BATCH_VARS) expect(config[k]).to.be.undefined
+                })
+            })
+
+            // The hub-side regtest-only override seams. The gate that keeps
+            // them inert off regtest lives at the point of consumption (attest_response_timing.js,
+            // and the not-yet-built AttestationBatchPublisher on the same pattern), so this
+            // suite only pins that the passthrough itself reaches the container config.
+            describe('ATTEST response mirror regtest-only override passthrough', function () {
+                const ATTEST_OVERRIDE_VARS = [
+                    'ATTEST_RESPONSE_FORWARD_S_OVERRIDE', 'ATTEST_BATCH_WINDOW_S_OVERRIDE'
+                ]
+                let saved
+                beforeEach(function () {
+                    saved = {}
+                    for (const k of ATTEST_OVERRIDE_VARS) { saved[k] = process.env[k]; delete process.env[k] }
+                })
+                afterEach(function () {
+                    for (const [k, v] of Object.entries(saved)) {
+                        if (v === undefined) delete process.env[k]
+                        else process.env[k] = v
+                    }
+                })
+
+                it('injects both ATTEST override knobs from host env into the hub config', async function () {
+                    process.env.ATTEST_RESPONSE_FORWARD_S_OVERRIDE = '2'
+                    process.env.ATTEST_BATCH_WINDOW_S_OVERRIDE = '30'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['ATTEST_RESPONSE_FORWARD_S_OVERRIDE']).to.equal('2')
+                    expect(config['ATTEST_BATCH_WINDOW_S_OVERRIDE']).to.equal('30')
+                })
+
+                it('injects only the one override set, leaving the other unset', async function () {
+                    process.env.ATTEST_RESPONSE_FORWARD_S_OVERRIDE = '2'
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['ATTEST_RESPONSE_FORWARD_S_OVERRIDE']).to.equal('2')
+                    expect(config).to.not.have.property('ATTEST_BATCH_WINDOW_S_OVERRIDE')
+                })
+
+                it('leaves both ATTEST override knobs unset when host env is absent', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    for (const k of ATTEST_OVERRIDE_VARS) expect(config[k]).to.be.undefined
                 })
             })
         })
@@ -1194,6 +1653,45 @@ describe('ConfigService', function () {
             const result = await cs.ensureHubApiKey()
             expect(result.generated).to.be.true
             expect(realFs.existsSync(path.join(nested, 'hub.local'))).to.be.true
+        })
+
+        // The non-minting read. A key APPEARING on a keyless host 401s every consumer that
+        // carries none, so callers that only need to report where the credential lives must
+        // have a way to ask that cannot create one.
+        describe('readHubApiKey()', function () {
+
+            it('reports absence and writes NOTHING on a keyless host', async function () {
+                const cs = serviceWithConfigDir(dir)
+                const result = await cs.readHubApiKey()
+                expect(result.present).to.be.false
+                expect(result.path).to.equal(sidecarPath())
+                expect(realFs.existsSync(sidecarPath())).to.be.false
+            })
+
+            it('leaves a sidecar that holds other credentials byte-identical', async function () {
+                realFs.writeFileSync(sidecarPath(), 'HUB_DB_PASS=db-fixture-value\n', { mode: 0o600 })
+                const before = sidecarDigest()
+                const cs = serviceWithConfigDir(dir)
+                expect((await cs.readHubApiKey()).present).to.be.false
+                expect(sidecarDigest()).to.equal(before)
+            })
+
+            it('reports a present key without rotating it', async function () {
+                const cs = serviceWithConfigDir(dir)
+                await cs.ensureHubApiKey()
+                const before = sidecarDigest()
+                const result = await cs.readHubApiKey()
+                expect(result.present).to.be.true
+                expect(sidecarDigest()).to.equal(before)
+            })
+
+            it('never returns the key itself, only whether there is one', async function () {
+                const cs = serviceWithConfigDir(dir)
+                await cs.ensureHubApiKey()
+                const result = await cs.readHubApiKey()
+                expect(Object.keys(result).sort()).to.deep.equal(['path', 'present'])
+                expect(JSON.stringify(result)).to.not.match(/[0-9a-f]{64}/)
+            })
         })
     })
 

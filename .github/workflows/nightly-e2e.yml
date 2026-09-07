@@ -1,5 +1,20 @@
 name: E2E (regtest)
 
+# The RUN title, which is a different string from `name` above and is the one
+# that actually distinguishes runs in the Actions list. Without it every leg of
+# a three-coin matrix renders as the identical "E2E (regtest)" and the only way
+# to tell which chain a run is testing is to open it - which is exactly what you
+# are doing when a release matrix is in flight and you want the one that failed.
+#
+# A dispatch names its coin. A scheduled run covers all three in one run (see the
+# matrix on the job), so it says so rather than naming a coin it is not limited
+# to. The ref is included because the same workflow grades develop, a release
+# branch and a published tag, and "which code" is the second question after
+# "which chain". A suite filter is appended only when one is set, so the common
+# full-suite run stays short.
+run-name: >-
+  E2E ${{ github.event_name == 'schedule' && 'all coins' || inputs.coin }} regtest @ ${{ inputs.ref || 'develop' }}${{ inputs.suite && format(' [{0} only]', inputs.suite) || '' }}
+
 # Cross-component integration gate. Boots the FULL XChain stack on regtest via
 # xchain-node - which clones every service repo at the REF THIS RUN NAMES and
 # runs them as Docker containers - then runs the live xchain-e2e-test suites against it
@@ -28,12 +43,23 @@ name: E2E (regtest)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  # Manual / on-demand gate. The nightly schedule is intentionally DISABLED while the
-  # sub-repos are PRIVATE - a scheduled run would fail at the first private clone and
-  # spam nightly failures. Re-enable it once the repos are public per the launch plan
-  # (anonymous HTTPS clones just work then, and no SUBREPO_CLONE_TOKEN is needed):
-  #   schedule:
-  #     - cron: '0 7 * * *'    # 07:00 UTC nightly
+  # Nightly gate, RE-ENABLED 2026-09-05. It was disabled only because the sub-repos
+  # were PRIVATE and a scheduled run would fail at the first clone; they are public
+  # now, so anonymous HTTPS clones work and no SUBREPO_CLONE_TOKEN is needed.
+  #
+  # WHY A NIGHTLY IS WORTH ITS RUNNER TIME. This gate is the only thing that
+  # exercises consensus and money movement end to end, and a full pass is ~1h50m,
+  # so a release cut that meets it for the first time discovers a whole train's
+  # worth of breakage against a two-hour clock and has to restart it. Running the
+  # same pass every night against develop moves that discovery to a day when
+  # nobody is waiting. The v0.15.0 cut is the worked example: at cut time the last
+  # matrix evidence was three days old AND had been taken against master, so the
+  # entire attestation-mirror and roll-call surface had never once met this gate.
+  #
+  # Hosted minutes are free on a public repo, so the cost of the nightly is zero
+  # and the cost of not having it is a restarted release.
+  schedule:
+    - cron: '0 7 * * *'    # 07:00 UTC nightly, against the `ref` default below
   #
   # NOTE for whoever re-enables the cron: a scheduled workflow runs from the
   # DEFAULT branch's file, so once develop is the default the nightly boots
@@ -107,6 +133,17 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    # WHY THE COIN LIST IS EVENT-DEPENDENT. A scheduled run carries NO inputs, so
+    # without this it would silently test bitcoin alone and the nightly would be
+    # two thirds blind: the litecoin and dogecoin legs are where the chain-specific
+    # breakage actually lands. A dispatch keeps exactly its old behaviour, one
+    # chosen coin, because a subset proves a fix and must not pretend to be a train.
+    # The three legs are independent stacks, so fail-fast would throw away two
+    # answers to report one; a release needs all three verdicts, not the first.
+    strategy:
+      fail-fast: false
+      matrix:
+        coin: ${{ fromJSON(github.event_name == 'schedule' && '["bitcoin","litecoin","dogecoin"]' || format('["{0}"]', github.event.inputs.coin || 'bitcoin')) }}
     # A BTC full action suite alone runs ~1h50m of wall clock, and the security
     # and performance suites are sequenced AFTER it, so at 120 the two of them
     # shared whatever minutes the action suite happened to leave - usually none.
@@ -126,7 +163,77 @@ jobs:
     # legitimately long pass.
     timeout-minutes: 360
     env:
-      COIN: ${{ github.event.inputs.coin || 'bitcoin' }}
+      COIN: ${{ matrix.coin }}
+      # The anchor-reward attestation barrier holds each block until the hub-mirror
+      # stream watermark is 120s past that block's own timestamp. On a shared ledger
+      # that is free, because blocks are ten minutes apart and the watermark is long
+      # past by the time one is processed. Here blocks are stamped at about wall clock
+      # and the watermark tracks wall clock, so a freshly mined block can never be
+      # 120s behind it: the barrier cannot be satisfied and every affected block burns
+      # its full 60s timeout before proceeding anyway.
+      #
+      # Measured on the 2026-09-06 release matrix, before this line existed: the BTC
+      # leg parsed 367 blocks in six hours and was killed by the job budget, against
+      # 2013 blocks in 1h52m on the pre-mirror build. 160 deferrals, ~2.7 hours spent
+      # waiting for a condition that could not arrive. The litecoin and dogecoin legs
+      # were green in ~2h25m throughout, because this barrier is BTC-only, which is
+      # exactly what made it look like a bitcoin-specific defect rather than a venue
+      # constant sized for a different block cadence.
+      #
+      # 2s, not 0: the barrier still has to MEAN something here, or the venue stops
+      # exercising the ordering it exists to enforce and a real mirror-lag defect would
+      # ride through green. The indexer accepts this ONLY on regtest and ignores it with
+      # a warning anywhere else, because a watermark grace is a consensus input and a
+      # per-node value forks settlement - so this cannot leak onto a shared ledger even
+      # if it is copied somewhere it does not belong.
+      HUB_SYNC_ANCHOR_ATTEST_GRACE_S: "2"
+      # Bounds ONE mirror-barrier attempt. On expiry the block is DEFERRED and
+      # retried, never committed uncertified - the indexer says so outright
+      # ("purely operational: it opens no barrier and commits no block") - so a
+      # shorter attempt trades away no safety at all, only the cost of a failure.
+      #
+      # It is here because the grace above fixed the barrier that could never be
+      # satisfied, and revealed a second cost behind it. Measured at the 60s
+      # default on 2026-09-06: 119 deferrals cost 119 minutes of a 289-minute
+      # bitcoin leg, 41% of the wall clock. Ten seconds keeps the barrier honest
+      # while making a deferral cost a tenth as much.
+      #
+      # CORRECTION, measured 2026-09-06 off run 34015867460's own artifact: those
+      # 119 deferrals were NOT a lagging mirror. They all name the SAME block, and
+      # the stream watermark tracked wall clock throughout (1-6s behind, advancing
+      # at 0.9999 of real time) while the hub logged no late heartbeat and no
+      # backpressure close. The block was future-stamped by the COINPay clock jump
+      # (see XCHAIN_COINPAY_EXPIRATION_S below), so the barrier was waiting on real
+      # time, not on delivery. This knob therefore makes a failed attempt cheaper
+      # but recovers no wall clock on its own; the window below is what does.
+      #
+      # NOT a consensus input, unlike the grace, so it carries no fork risk - but
+      # it is still passed through on regtest only, because a shared ledger wants
+      # the long attempt: there a lagging mirror is a fault worth waiting on.
+      HUB_PRICE_SYNC_TIMEOUT_MS: "10000"
+      # COINPay obligation expiration window, in seconds. The shared-ledger value is
+      # 7200 (two hours), which no e2e suite can wait out, so the COINPay expiry case
+      # freezes the node clock past the deadline and mines. That stamps the mined
+      # blocks two hours into the FUTURE, and the anchor-attest barrier above compares
+      # a block's own timestamp against a wall-clock watermark: the indexer then waits
+      # those two hours in REAL time on that one block, with every other block behind
+      # it deferred.
+      #
+      # Measured on run 34015867460 (bitcoin, 2026-09-06): blocks 516 and 517 were
+      # mined at 07:08:10Z and stamped 09:18:01Z, and the indexer deferred block 516
+      # 119 times over 2h08m50s. That single stall is 44% of the 289-minute leg and is
+      # the reason thirty downstream waits gave up. Nothing was lagging.
+      #
+      # 300s, not seconds: the case still has to assert the obligation is PENDING
+      # before it expires it, and a window shorter than that setup window would expire
+      # the obligation underneath the assertion and make the case flaky in the other
+      # direction. 300 leaves the clock jump at about five minutes instead of 2h10m.
+      #
+      # Consensus input, so the indexer accepts it ONLY on regtest and ignores it with
+      # a warning anywhere else (resolveCoinpayExpiration); the node's passthrough is
+      # gated on regtest a second time. Neither gate alone can carry it onto a shared
+      # ledger, which is what makes a venue-local window safe to set at all.
+      XCHAIN_COINPAY_EXPIRATION_S: "300"
       # Drives BOTH the xchain-node checkout below and the `install` boot
       # argument, so the CLI running the install is the same version as the
       # stack it installs. Splitting those two was how "we tested the release"
