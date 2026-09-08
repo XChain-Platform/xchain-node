@@ -828,6 +828,11 @@ Notes:
                 console.log('  seed nodes   : ' + ((s.SEED_NODES || []).join(', ') || '(none)'))
                 console.log('  oracle epoch : ' + (s.ORACLE_EPOCH_START || '(unset, required before oracle runs)'))
                 console.log('  capabilities : ' + ((s.capabilities || []).join(', ') || '(none)'))
+                // full_node is a possession-proof tier, not an opt-in capability, and
+                // it ships inert on every network (reward share zero, no verifier
+                // set) until its activation flag day. Said here so an operator whose
+                // stake clears its floor does not go looking for how to earn it.
+                console.log('  full_node    : not active on this network yet (tier turns on with a flag day; nothing to configure)')
                 // Print the live path: it moved into its own directory (so the hub's
                 // bind mount cannot break `docker cp`), and this is where an operator
                 // coming from an older install finds it after the migration.
