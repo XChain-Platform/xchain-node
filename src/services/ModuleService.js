@@ -958,6 +958,20 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     const volumeArgs = built.volumeArgs
     const ulimitArgs = built.ulimitArgs
 
+    // Container memory limit. Derived for the utxo-tracker from the host and
+    // how many trackers share it (MemoryLimitService); explicit for any module
+    // through XCHAIN_NODE_MODULE_MEMORY_MB_<SERVICE>. One-shot execution
+    // containers stay uncapped. Required late so the registry read stays on
+    // the same `db` handle the rest of this file uses.
+    let memoryArgs = []
+    if (!onlyExecution) {
+        const { memoryArgsFor, countInstalledTrackers } = require('./MemoryLimitService')
+        const trackerCount = await countInstalledTrackers(db, { coin, network })
+        const memory = memoryArgsFor(module, { trackerCount })
+        memoryArgs = memory.args
+        if (memory.note) console.log(memory.note)
+    }
+
     // Validate all port values
     if (portArgs.length > 0) {
         for (let i = 0; i < portArgs.length; i++) {
@@ -1089,6 +1103,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                     ...logOptArgs,
                     ...volumeArgs,
                     ...ulimitArgs,
+                    ...memoryArgs,
                     ...healthcheckArgs,
                     '--network', getDockerNetwork(coin, network),
                     ...envArgs,
