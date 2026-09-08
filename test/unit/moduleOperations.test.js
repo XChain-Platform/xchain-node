@@ -104,7 +104,13 @@ function loadOperations(stubs, constantsOverrides = null) {
         '../config/constants': constantsOverrides
             ? Object.assign({}, require('../../src/config/constants'), constantsOverrides)
             : require('../../src/config/constants'),
-        '../state': { db: stubs.db },
+        '../state': {
+            db: stubs.db,
+            // Read lazily by the coin-node "already current" check under
+            // `update all`; empty by default so every other test rebuilds.
+            getLastStatus: stubs.getLastStatus || (() => null),
+            getRemoteModuleVersions: stubs.getRemoteModuleVersions || (() => ({}))
+        },
         '../services/ConfigService': {
             getDockerContainerImageName: (mod, coin, net) => `${coin}-${net}-${mod}`,
             getUtxoTrackerVolumeName: (coin, net) => `xchain-utxo-tracker-${coin}-${net}-data`,
@@ -196,6 +202,10 @@ describe('moduleOperations', function () {
     // because withInstallTarget requires the service lazily at call time and a
     // proxyquire map only intercepts requires made while the module loads.
     let resolveInstallTargetStub
+    // The install-target record is a real file under the data dir and, absent,
+    // a classification of the real module checkouts; neither belongs in a unit
+    // run. Same lazy-require reason as above: stubbed on the module's exports.
+    let recordInstallTargetStub, resolveUpdateTargetStub
     beforeEach(function () {
         const releaseManifest = require('../../src/services/ReleaseManifestService')
         resolveInstallTargetStub = sinon.stub(releaseManifest, 'resolveInstallTarget').resolves({
@@ -205,9 +215,18 @@ describe('moduleOperations', function () {
             manifest: { platform_version: '0.11.0', components: {} },
             resolvedFrom: 'latest published release'
         })
+        const installTarget = require('../../src/services/InstallTargetService')
+        recordInstallTargetStub = sinon.stub(installTarget, 'recordInstallTarget').returns(true)
+        resolveUpdateTargetStub = sinon.stub(installTarget, 'resolveUpdateTarget').resolves({
+            kind: 'release', ref: null, tag: null, inferred: true
+        })
+        delete process.env.XCHAIN_NODE_UPDATE_TARGET
     })
     afterEach(function () {
         resolveInstallTargetStub.restore()
+        recordInstallTargetStub.restore()
+        resolveUpdateTargetStub.restore()
+        delete process.env.XCHAIN_NODE_UPDATE_TARGET
     })
 
     // -------------------------------------------------------------------
@@ -965,6 +984,277 @@ describe('moduleOperations', function () {
             expect(stubs.installModule.calledWith(
                 'xchain-encoder', 'bitcoin', 'mainnet', true, 'container-id-123', false, null
             )).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // updateModules: what a no-ref update means (release node vs branch node)
+    // -------------------------------------------------------------------
+
+    describe('updateModules(): no-ref target resolution', function () {
+
+        // The documented upgrade is `xchain-node update all`. A release-installed
+        // node is a detached checkout, so the old "same branch, newer commits"
+        // reading answered HEAD and failed. Measured on the v0.15.2 fleet roll.
+        it('moves a RELEASE node to the latest release, pinned, refusing any branch fallback', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(resolveInstallTargetStub.calledOnce).to.be.true
+            const [ref, opts] = resolveInstallTargetStub.firstCall.args
+            expect(ref).to.equal(null)
+            expect(opts.fallbackToBranch).to.equal(false)
+            expect(stubs.installModule.calledWith('xchain-encoder', 'bitcoin', 'mainnet', true)).to.be.true
+        })
+
+        it('records what the node is on, so the next no-ref update converges on it', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'v0.11.0')
+            // Under a release update the record is written by withInstallTarget
+            // from the resolved target.
+            expect(recordInstallTargetStub.calledOnce).to.be.true
+            expect(recordInstallTargetStub.firstCall.args[0].kind).to.equal('release')
+        })
+
+        it('keeps a BRANCH node on its branch and takes newer commits', async function () {
+            const stubs = makeStubs()
+            resolveUpdateTargetStub.resolves({ kind: 'branch', ref: 'develop', tag: null, inferred: false })
+            const ops = loadOperations(stubs)
+            const log = sinon.stub(console, 'log')
+            try {
+                await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            } finally { log.restore() }
+            expect(resolveInstallTargetStub.called, 'a branch node must not resolve a release').to.be.false
+            expect(stubs.installModule.calledWith(
+                'xchain-encoder', 'bitcoin', 'mainnet', true, 'container-id-123', false, 'develop'
+            )).to.be.true
+            expect(recordInstallTargetStub.calledWith(sinon.match({ kind: 'branch', ref: 'develop' }))).to.be.true
+        })
+
+        it('treats an explicitly named branch as a decision and records it', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'feature/x')
+            expect(resolveInstallTargetStub.called).to.be.false
+            expect(recordInstallTargetStub.calledWith(sinon.match({ kind: 'branch', ref: 'feature/x' }))).to.be.true
+        })
+
+        it('stops with nothing changed when the latest release cannot be resolved', async function () {
+            const stubs = makeStubs()
+            resolveInstallTargetStub.rejects(new Error('Could not resolve the latest xchain-node release (ENOTFOUND). Nothing was changed.'))
+            const ops = loadOperations(stubs)
+            let err = null
+            try { await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } }) } catch (e) { err = e }
+            expect(err).to.not.equal(null)
+            expect(err.message).to.match(/Nothing was changed/)
+            expect(stubs.installModule.called).to.be.false
+        })
+
+        // The re-executed child of a CLI self-update is handed the tag its parent
+        // resolved and verified; resolving it again would be a second API call
+        // and a second chance to disagree.
+        it('uses the tag a self-update already resolved instead of looking it up again', async function () {
+            const stubs = makeStubs()
+            process.env.XCHAIN_NODE_UPDATE_TARGET = 'v0.11.0'
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(resolveUpdateTargetStub.called, 'the record is not consulted when the target is known').to.be.false
+            expect(resolveInstallTargetStub.firstCall.args[0]).to.equal('v0.11.0')
+        })
+
+        it('clones the default branch, never "HEAD", for a detached module the manifest does not carry', async function () {
+            const stubs = makeStubs()
+            stubs.getModuleBranch.resolves('HEAD')
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(stubs.installModule.calledWith(
+                'xchain-encoder', 'bitcoin', 'mainnet', true, 'container-id-123', false, null
+            )).to.be.true
+        })
+    })
+
+    // -------------------------------------------------------------------
+    // updateModules: `all` includes the shared services, hub first
+    // -------------------------------------------------------------------
+
+    describe('updateModules(): the `all` expansion', function () {
+
+        function servicesFromAll() {
+            return require('../../src/services/ConfigService').filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
+        }
+
+        it('updates the hub, then sync, then the explorer, before any coin stack', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            try {
+                await ops.updateModules(servicesFromAll(), 'v0.11.0', { all: true })
+            } finally { warn.restore() }
+            const order = stubs.installModule.getCalls().map(c => c.args[0])
+            expect(order[0]).to.equal('xchain-hub')
+            expect(order[1]).to.equal('xchain-sync')
+            expect(order[2]).to.equal('xchain-explorer')
+            expect(order.indexOf('xchain-indexer')).to.be.greaterThan(2)
+            // Shared services are addressed under the empty coin/network key.
+            expect(stubs.installModule.firstCall.args.slice(1, 3)).to.deep.equal(['', ''])
+        })
+
+        it('re-runs the validator repair before rebuilding the hub on an initialized validator', async function () {
+            const stubs = makeStubs()
+            const validator = require('../../src/services/ValidatorService')
+            const isInitialized = sinon.stub(validator, 'isInitialized').returns(true)
+            const initValidator = sinon.stub(validator, 'initValidator').resolves({ pubkey: 'ab' })
+            const ops = loadOperations(stubs)
+            const log = sinon.stub(console, 'log')
+            const warn = sinon.stub(console, 'warn')
+            try {
+                await ops.updateModules(servicesFromAll(), 'v0.11.0', { all: true })
+            } finally { log.restore(); warn.restore(); isInitialized.restore(); initValidator.restore() }
+            expect(initValidator.calledOnce).to.equal(true)
+            expect(initValidator.firstCall.args[0]).to.deep.equal({})
+            expect(initValidator.calledBefore(stubs.installModule)).to.equal(true)
+        })
+
+        it('does not touch validator config on a node that is not a validator, or when the hub is out of scope', async function () {
+            const stubs = makeStubs()
+            const validator = require('../../src/services/ValidatorService')
+            const isInitialized = sinon.stub(validator, 'isInitialized').returns(false)
+            const initValidator = sinon.stub(validator, 'initValidator').resolves()
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            try {
+                await ops.updateModules(servicesFromAll(), 'v0.11.0', { all: true })
+                isInitialized.returns(true)
+                await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'v0.11.0')
+            } finally { warn.restore(); isInitialized.restore(); initValidator.restore() }
+            expect(initValidator.called).to.equal(false)
+        })
+
+        it('continues the hub update when the validator repair fails, and says so', async function () {
+            const stubs = makeStubs()
+            const validator = require('../../src/services/ValidatorService')
+            const isInitialized = sinon.stub(validator, 'isInitialized').returns(true)
+            const initValidator = sinon.stub(validator, 'initValidator').rejects(new Error('wallets.env unreadable'))
+            const ops = loadOperations(stubs)
+            const log = sinon.stub(console, 'log')
+            const warn = sinon.stub(console, 'warn')
+            let result
+            try {
+                result = await ops.updateModules(servicesFromAll(), 'v0.11.0', { all: true })
+            } finally { log.restore(); warn.restore(); isInitialized.restore(); initValidator.restore() }
+            expect(warn.calledWithMatch(/wallets\.env unreadable/)).to.equal(true)
+            expect(result.updated.map(u => u.module)).to.include('xchain-hub')
+        })
+
+        it('leaves the hub and sync out of a targeted update, as before', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'v0.11.0')
+            expect(stubs.installModule.getCalls().map(c => c.args[0])).to.deep.equal(['xchain-encoder'])
+        })
+
+        it('reports a shared service that is not installed as skipped, not as a failure', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.callsFake(async (module) => module === 'xchain-sync' ? null : 'container-id-123')
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            const log = sinon.stub(console, 'log')
+            let result
+            try {
+                result = await ops.updateModules(servicesFromAll(), 'v0.11.0', { all: true })
+            } finally { warn.restore(); log.restore() }
+            expect(result.skipped.find(s => s.module === 'xchain-sync').reason).to.equal('not-installed')
+            expect(result.updated.map(u => u.module)).to.include('xchain-hub')
+        })
+
+        // A validator is a hub and nothing else; `all` still expands to every
+        // coin service, and one warning per absent service buried the two lines
+        // that mattered.
+        it('collapses the absent services into one line under `all`, and keeps the per-service warning for a targeted update', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.callsFake(async (module) => module === 'xchain-hub' ? 'container-id-123' : null)
+            const ops = loadOperations(stubs)
+            const warn = sinon.stub(console, 'warn')
+            const log = sinon.stub(console, 'log')
+            let result
+            try {
+                result = await ops.updateModules(servicesFromAll(), 'v0.11.0', { all: true })
+            } finally { warn.restore(); log.restore() }
+            const absent = result.skipped.filter(s => s.reason === 'not-installed').length
+            expect(absent).to.be.greaterThan(1)
+            expect(warn.getCalls().filter(c => /no registered container/.test(c.args[0]))).to.have.lengthOf(0)
+            expect(log.getCalls().filter(c => new RegExp(`skipped ${absent} services not installed`).test(c.args[0]))).to.have.lengthOf(1)
+
+            const warn2 = sinon.stub(console, 'warn')
+            try {
+                await ops.updateModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'v0.11.0')
+            } finally { warn2.restore() }
+            expect(warn2.calledWithMatch(/xchain-encoder \(bitcoin mainnet\) has no registered container/)).to.equal(true)
+        })
+
+        // A rebuild of a coin node that was already at the pinned daemon
+        // version restarted a healthy daemon and broke a relocated datadir's mounts.
+        it('leaves a coin node running when it already carries the pinned daemon version', async function () {
+            const stubs = makeStubs()
+            stubs.getLastStatus = () => ({ bitcoin: { mainnet: { node: { container_version: '28.1\n' } } } })
+            stubs.getRemoteModuleVersions = () => ({ 'node-bitcoin': { tag_name: 'v28.1' } })
+            const ops = loadOperations(stubs)
+            const log = sinon.stub(console, 'log')
+            let result
+            try {
+                result = await ops.updateModules({ bitcoin: { mainnet: ['node', 'xchain-encoder'] } }, 'v0.11.0', { all: true })
+            } finally { log.restore() }
+            expect(stubs.installModule.calledWith('node')).to.be.false
+            expect(result.skipped).to.deep.include({ module: 'node', coin: 'bitcoin', network: 'mainnet', reason: 'current' })
+            expect(result.updated.map(u => u.module)).to.include('xchain-encoder')
+            expect(result.updated.map(u => u.module)).to.not.include('node')
+        })
+
+        it('still rebuilds a coin node that is behind the pinned daemon version', async function () {
+            const stubs = makeStubs()
+            stubs.getLastStatus = () => ({ bitcoin: { mainnet: { node: { container_version: '27.0' } } } })
+            stubs.getRemoteModuleVersions = () => ({ 'node-bitcoin': { tag_name: 'v28.1' } })
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['node'] } }, 'v0.11.0', { all: true })
+            expect(stubs.installModule.calledWith('node', 'bitcoin', 'mainnet', true)).to.be.true
+        })
+
+        it('rebuilds a coin node whose pinned version it cannot determine', async function () {
+            // Any doubt answers "rebuild": the operator could always get one.
+            const stubs = makeStubs()
+            stubs.getLastStatus = () => ({ bitcoin: { mainnet: { node: { container_version: '28.1' } } } })
+            const versions = require('../../src/services/VersionService')
+            const check = sinon.stub(versions, 'checkRemoteNodeVersion').rejects(new Error('rate limited'))
+            const ops = loadOperations(stubs)
+            try {
+                await ops.updateModules({ bitcoin: { mainnet: ['node'] } }, 'v0.11.0', { all: true })
+            } finally { check.restore() }
+            expect(stubs.installModule.calledWith('node', 'bitcoin', 'mainnet', true)).to.be.true
+        })
+
+        it('does not install a coin node that is absent under `all`, but still recreates one on a targeted update', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.callsFake(async (module) => module === 'xchain-hub' ? 'container-id-123' : null)
+            const ops = loadOperations(stubs)
+            const log = sinon.stub(console, 'log')
+            const warn = sinon.stub(console, 'warn')
+            let result
+            try {
+                result = await ops.updateModules(servicesFromAll(), 'v0.11.0', { all: true })
+            } finally { log.restore(); warn.restore() }
+            expect(stubs.installModule.calledWith('node')).to.equal(false)
+            expect(result.skipped).to.deep.include({ module: 'node', coin: 'bitcoin', network: 'mainnet', reason: 'not-installed' })
+
+            await ops.updateModules({ bitcoin: { mainnet: ['node'] } }, 'v0.11.0')
+            expect(stubs.installModule.calledWith('node', 'bitcoin', 'mainnet', true)).to.equal(true)
+        })
+
+        it('rebuilds a coin node on a TARGETED update whatever version it runs', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.updateModules({ bitcoin: { mainnet: ['node'] } }, 'v0.11.0')
+            expect(stubs.installModule.calledWith('node', 'bitcoin', 'mainnet', true)).to.be.true
         })
     })
 

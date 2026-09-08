@@ -236,10 +236,16 @@ async function resolveLatestReleaseTag() {
  * @param {object}      [opts]
  * @param {string}      [opts.defaultBranch]  branch to fall back to when no
  *                                            release can be resolved
+ * @param {boolean}     [opts.fallbackToBranch]  false makes a no-ref call
+ *                       THROW when no release can be resolved instead of
+ *                       degrading to a branch. An install on a fresh box may
+ *                       reasonably fall back to master; an UPDATE of a
+ *                       release node must not, because that fallback would
+ *                       move every pinned module onto a branch tip.
  * @returns {Promise<{kind:'release'|'branch', ref:string, tag:string|null,
  *                    manifest:object|null, resolvedFrom:string}>}
  */
-async function resolveInstallTarget(ref, { defaultBranch = 'master' } = {}) {
+async function resolveInstallTarget(ref, { defaultBranch = 'master', fallbackToBranch = true } = {}) {
     if (isReleaseRef(ref)) {
         const tag = ref.trim()
         return {
@@ -260,12 +266,21 @@ async function resolveInstallTarget(ref, { defaultBranch = 'master' } = {}) {
     try {
         tag = await resolveLatestReleaseTag()
     } catch (err) {
+        if (!fallbackToBranch) {
+            throw new Error(
+                `Could not resolve the latest xchain-node release (${err.message}).`
+                + ' Nothing was changed. Retry, or name the release explicitly (e.g. `update all v0.15.2`).'
+            )
+        }
         console.warn(`Could not resolve the latest xchain-node release (${err.message}).`)
         console.warn(`Falling back to a tracking install of '${defaultBranch}' (UNRELEASED).`)
         return { kind: 'branch', ref: defaultBranch, tag: null, manifest: null, resolvedFrom: 'fallback after lookup failure' }
     }
 
     if (!tag) {
+        if (!fallbackToBranch) {
+            throw new Error('No published xchain-node release exists to update to. Nothing was changed.')
+        }
         // Pre-first-train, and after any release-less bootstrap. Not an error.
         console.log(`No published xchain-node release yet; installing '${defaultBranch}' (UNRELEASED).`)
         return { kind: 'branch', ref: defaultBranch, tag: null, manifest: null, resolvedFrom: 'no published release' }
