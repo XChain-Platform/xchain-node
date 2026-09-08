@@ -16,7 +16,7 @@
  ********************************************************************/
 
 const {
-    NODE_MODULE_NAME, SEP, Coin, Network
+    NODE_MODULE_NAME, SEP, Coin, Network, XChainService
 } = require('../config/constants')
 const {
     db,
@@ -95,6 +95,82 @@ async function loadInstalledModules(coin, network, checkVersions = false) {
     }
 }
 
+// The decoder's `health` JSON-RPC answer, reduced to its REORG_HALT fields, or
+// null when the surface is unreadable. Required late: BootstrapHealthGate pulls
+// in DatabaseService, and StatusService is itself required from the operations
+// layer that DatabaseService reaches back into. The 15s ceiling keeps a wedged
+// container from holding `ps` hostage.
+async function probeServiceHealthPayload(module, containerId, coin, network) {
+    const { probeServiceStatus, MODULE_API_PORT_KEY } = require('./BootstrapHealthGate')
+    const { getDefaultConfig } = require('./ConfigService')
+    const { execFile } = require('child_process')
+    const { promisify } = require('util')
+    const runner = (cmd, args) => promisify(execFile)(cmd, args, { timeout: 15000 })
+    const config = await getDefaultConfig(module, coin, network)
+    const port = config && config[MODULE_API_PORT_KEY[module]]
+    if (!port) return null
+    return probeServiceStatus(containerId, port, runner)
+}
+
+async function probeDecoderReorgHalt(containerId, coin, network) {
+    return reduceDecoderReorgHalt(await probeServiceHealthPayload(XChainService.XCHAIN_DECODER, containerId, coin, network))
+}
+
+// The wait a decoder or tracker publishes while its coin node is still in
+// initial block download below the service's own tip (`node_catching_up`,
+// see the decoder and tracker IBD wait), or null when the service is not waiting or the payload
+// predates the field. Strict on shape: an object with a numeric node height.
+function reduceNodeCatchingUp(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    const wait = payload.node_catching_up
+    if (!wait || typeof wait !== 'object') return null
+    const nodeHeight   = Number(wait.node_height)
+    const storedHeight = Number(wait.stored_height)
+    if (!Number.isFinite(nodeHeight)) return null
+    return {
+        node_height:   nodeHeight,
+        stored_height: Number.isFinite(storedHeight) ? storedHeight : null,
+        since:         wait.since || null
+    }
+}
+
+// The line `ps` prints under the table for a service waiting on its node:
+// what it is waiting for, how far the node has to go, and that it is not stuck.
+function describeNodeCatchingUpNote(coin, network, module, wait) {
+    const gap = (wait.stored_height !== null && Number.isFinite(wait.stored_height))
+        ? " (" + Math.max(0, wait.stored_height - wait.node_height) + " blocks to go)" : ""
+    return coin + "/" + network + " " + module + " is WAITING FOR NODE"
+        + (wait.since ? " since " + wait.since : "")
+        + ": the coin node is at " + wait.node_height + ", still in initial block download below the service's "
+        + (wait.stored_height !== null ? "stored height " + wait.stored_height : "stored height") + gap
+        + ". This is expected after a bootstrap restore next to a fresh node; the service continues on its own once the node passes it."
+}
+
+// The REORG_HALT fields of a decoder health payload, or null for anything that
+// is not a payload. Strict `=== true` on the flag: an older image without the
+// field reads as not halted rather than as a halt.
+function reduceDecoderReorgHalt(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    return {
+        halted:         payload.reorg_halted === true,
+        at:             payload.reorg_halted_at || null,
+        reason:         payload.reorg_halt_reason || null,
+        cleared_at:     payload.reorg_halt_cleared_at || null,
+        cleared_reason: payload.reorg_halt_cleared_reason || null
+    }
+}
+
+// The line `ps` prints under the table for a halted decoder: what it means,
+// since when, why, and both recoveries (the clear names its own preconditions).
+function describeReorgHaltNote(coin, network, reorgHalt) {
+    return coin + "/" + network + " xchain-decoder carries a durable REORG_HALT marker"
+        + (reorgHalt.at ? " since " + reorgHalt.at : "")
+        + ": it parses forward but will refuse the next reorg and stop."
+        + (reorgHalt.reason ? " " + reorgHalt.reason : "")
+        + " Recovery: a full resync, or once the rolled-back range is re-parsed and the database is verified intact, "
+        + "`xchain-node clear-reorg-halt " + coin + " " + network + " --reason \"...\"`."
+}
+
 async function getStatus(coin, network, printStatus = false, checkVersions = false) {
     if (isStatusUpdated()) {
         if (printStatus) console.log(getLastPrintedStatus())
@@ -115,6 +191,8 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
     const remoteModuleVersions = getRemoteModuleVersions()
 
     const rows = []
+    // Lines printed under the table for states a column cannot explain.
+    const notes = []
 
     if (Object.keys(installedModules).length > 0) {
         for (const nextCoin in installedModules) {
@@ -214,6 +292,42 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                             if (healthStatus && healthStatus !== "healthy") {
                                 state += " (" + healthStatus + ")"
                                 isChurning = true
+                            }
+
+                            // A decoder carrying a durable REORG_HALT marker keeps parsing
+                            // and reports a healthy healthcheck (api.js keeps the marker off
+                            // the healthcheck on purpose: autoheal would restart-loop a
+                            // service that is doing useful work), so nothing above shows
+                            // it. The decoder's own health surface does. Read it here for
+                            // running decoders, advisory only: a probe that fails changes
+                            // nothing, and the note under the table names the recovery.
+                            //
+                            // The same surface says when a decoder or tracker is waiting
+                            // out a coin node still in initial block download below its
+                            // own tip (a bootstrap restored next to a fresh node): the
+                            // container is healthy and idle, which without this line
+                            // reads as a service that has stopped following the chain.
+                            const probesHealthSurface = nextModule === XChainService.XCHAIN_DECODER
+                                || nextModule === XChainService.XCHAIN_UTXO_TRACKER
+                            if (probesHealthSurface && containerStatus["State"]["Status"] === "running") {
+                                let payload = null
+                                try {
+                                    payload = await probeServiceHealthPayload(nextModule, containerId, nextCoin, nextCoinNetwork)
+                                } catch { /* advisory: an unreadable surface is not a halt */ }
+                                const reorgHalt = nextModule === XChainService.XCHAIN_DECODER ? reduceDecoderReorgHalt(payload) : null
+                                if (reorgHalt && reorgHalt.halted) {
+                                    state += " REORG_HALT"
+                                    isChurning = true
+                                    nextCoinNetworkModules[nextModule]["reorg_halt"] = reorgHalt
+                                    notes.push(describeReorgHaltNote(nextCoin, nextCoinNetwork, reorgHalt))
+                                }
+                                const wait = reduceNodeCatchingUp(payload)
+                                if (wait) {
+                                    state += " WAITING FOR NODE"
+                                    isChurning = true
+                                    nextCoinNetworkModules[nextModule]["node_catching_up"] = wait
+                                    notes.push(describeNodeCatchingUpNote(nextCoin, nextCoinNetwork, nextModule, wait))
+                                }
                             }
                             const name        = nextModule
                             const rawPorts    = containerStatus["NetworkSettings"]["Ports"] || {}
@@ -327,6 +441,9 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
             + color + row.state.padEnd(COL_STATUS) + "\x1b[0m"
             + row.ports + "\n"
     }
+    for (const note of notes) {
+        output += "\x1b[33m! " + note + "\x1b[0m\n"
+    }
     setLastPrintedStatus(output)
     if (printStatus) console.log(getLastPrintedStatus())
 
@@ -339,5 +456,10 @@ module.exports = {
     statusChanged,
     getStatus,
     loadInstalledModules,
-    getInstalledCoinsAndNetworks
+    getInstalledCoinsAndNetworks,
+    // Exported for tests
+    reduceDecoderReorgHalt,
+    describeReorgHaltNote,
+    reduceNodeCatchingUp,
+    describeNodeCatchingUpNote
 }

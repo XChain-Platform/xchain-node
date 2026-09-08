@@ -53,7 +53,7 @@ const fs       = require('fs')
 const os       = require('os')
 const path     = require('path')
 const crypto   = require('crypto')
-const { execFileSync } = require('child_process')
+const { execFileSync, spawnSync } = require('child_process')
 
 // The XChain Platform release key: RSA 4096, created 2026-07-23, expires
 // 2036-07-20. NOT the wallet's keys - the wallet signs its tags and its release
@@ -222,18 +222,18 @@ function describeGpgError(err) {
 // gpg exiting zero is not the verdict. An expired or revoked key still produces
 // a "good" signature line and exit status 0, and a signature made by any other
 // key in the keyring would pass a naive check. Bind the result to the pin.
-function assertStatusIsGood(status, expected) {
+function assertStatusIsGood(status, expected, subject = SIG_ASSET) {
     const lines = String(status).split('\n').map(line => line.trim())
     const flag  = name => lines.some(line => line.startsWith(`[GNUPG:] ${name}`))
 
     if (flag('REVKEYSIG')) {
-        throw new ReleaseIntegrityError(`${SIG_ASSET} was signed with a REVOKED key. Refusing this release.`)
+        throw new ReleaseIntegrityError(`${subject} was signed with a REVOKED key. Refusing this release.`)
     }
     if (flag('EXPKEYSIG')) {
-        throw new ReleaseIntegrityError(`${SIG_ASSET} was signed with an EXPIRED key. Refusing this release.`)
+        throw new ReleaseIntegrityError(`${subject} was signed with an EXPIRED key. Refusing this release.`)
     }
     if (flag('BADSIG') || !flag('GOODSIG')) {
-        throw new ReleaseIntegrityError(`${SIG_ASSET} is not a good signature over ${SUMS_ASSET}.`)
+        throw new ReleaseIntegrityError(`${subject} does not carry a good signature.`)
     }
 
     // VALIDSIG's first field is the fingerprint of the key that made the
@@ -242,7 +242,7 @@ function assertStatusIsGood(status, expected) {
     // through a future signing-subkey rotation without loosening it.
     const validsig = lines.find(line => line.startsWith('[GNUPG:] VALIDSIG '))
     if (!validsig) {
-        throw new ReleaseIntegrityError(`${SIG_ASSET} produced no VALIDSIG line; refusing an unverified release.`)
+        throw new ReleaseIntegrityError(`${subject} produced no VALIDSIG line; refusing an unverified release.`)
     }
 
     const fields = validsig.replace('[GNUPG:] VALIDSIG ', '').split(/\s+/)
@@ -251,10 +251,87 @@ function assertStatusIsGood(status, expected) {
 
     if (signing !== expected && primary !== expected) {
         throw new ReleaseIntegrityError(
-            `${SIG_ASSET} is signed, but not by the pinned release key.`
+            `${subject} is signed, but not by the pinned release key.`
             + ` Expected ${expected}, got ${signing || 'nothing'}.`
             + ' A valid signature by the wrong key is not an official release.'
         )
+    }
+}
+
+/**
+ * Verify a git tag's signature against the pinned release key.
+ *
+ * Step 1 of the chain in the header, made available to the CLI's own
+ * self-update: before the carrier checks itself out at a release tag it
+ * proves the release key cut that tag. Same ephemeral-homedir discipline as
+ * the digest check above: `git verify-tag` consults GNUPGHOME, so pointing it
+ * at a keyring that holds only the pinned key, and then binding the status
+ * lines to the fingerprint, means no key the operator happens to trust can
+ * satisfy this.
+ *
+ * @param {object}  args
+ * @param {string}  args.repoDir      the checkout holding the tag
+ * @param {string}  args.tag
+ * @param {string} [args.keyPath]
+ * @param {string} [args.fingerprint]
+ * @param {function} [args.execFileSyncImpl]  test seam
+ * @returns {{fingerprint: string}}
+ * @throws {ReleaseIntegrityError}
+ */
+function verifyGitTagSignature({ repoDir, tag, keyPath = KEY_PATH, fingerprint = PLATFORM_KEY_FINGERPRINT, execFileSyncImpl = execFileSync, spawnSyncImpl = spawnSync }) {
+    const expected = normalizeFingerprint(fingerprint)
+    if (!/^[0-9A-F]{40}$/.test(expected)) {
+        throw new ReleaseIntegrityError(
+            `Release signing key is not pinned to a 40-hex fingerprint (got ${JSON.stringify(fingerprint)}).`
+        )
+    }
+    if (!fs.existsSync(keyPath)) {
+        throw new ReleaseIntegrityError(
+            `No release signing key is shipped at ${keyPath}. The trust anchor must travel with the`
+            + ' code; fetching it at verification time proves nothing.'
+        )
+    }
+
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-tagsig-'))
+    const homeDir = path.join(workDir, 'gnupg')
+    fs.mkdirSync(homeDir, { mode: 0o700 })
+
+    try {
+        try {
+            execFileSyncImpl(gpgBinary(), ['--batch', '--no-tty', '--quiet', '--homedir', homeDir, '--import', keyPath],
+                { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+        } catch (err) {
+            if (err && err.code === 'ENOENT') {
+                throw new ReleaseIntegrityError(
+                    'gpg is not installed, so this release tag cannot be verified. Install gnupg, or set'
+                    + ' XCHAIN_NODE_REQUIRE_SIGNED_RELEASE=0 to update without provenance checks.'
+                )
+            }
+            throw new ReleaseIntegrityError(`Could not import the pinned release key: ${describeGpgError(err)}`)
+        }
+
+        // `--raw` prints gpg's status protocol on stderr, whether git exits
+        // zero or not: git exits non-zero for a bad signature and the status
+        // lines still say which kind of bad. spawnSync rather than execFileSync
+        // because the latter surfaces stderr only on failure, and the GOODSIG
+        // line this needs arrives on the SUCCESS path.
+        const run = spawnSyncImpl('git', ['-C', repoDir, 'verify-tag', '--raw', tag], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, GNUPGHOME: homeDir }
+        })
+        const status = [run.stdout, run.stderr].map(part => (part ? String(part) : '')).join('\n')
+        if (run.error || !/\[GNUPG:\]/.test(status)) {
+            const detail = run.error ? run.error.message : (status.trim() || `git exited ${run.status}`)
+            throw new ReleaseIntegrityError(
+                `Tag ${tag} does not verify against the pinned release key (${expected}): ${detail}`
+            )
+        }
+
+        assertStatusIsGood(status, expected, `tag ${tag}`)
+        return { fingerprint: expected }
+    } finally {
+        fs.rmSync(workDir, { recursive: true, force: true })
     }
 }
 
@@ -377,6 +454,8 @@ module.exports = {
     parseSha256sums,
     sha256,
     verifyDetachedSignature,
+    verifyGitTagSignature,
+    assertStatusIsGood,
     assertDigestMatches,
     verifyManifestForTag
 }

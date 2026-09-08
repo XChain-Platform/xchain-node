@@ -1830,6 +1830,11 @@ describe('ModuleService', function () {
     // -------------------------------------------------------------------
 
     describe('containerExistsByName() via installModule', function () {
+        // A full singleton installModule takes 1.2-1.5s on a CI runner (measured
+        // 2026-09-08 at two consecutive commits), which sits under the 2s gate
+        // timeout only while the runner is idle; three concurrent gate runs
+        // pushed it over. The budget states what the path costs, not a hope.
+        this.timeout(10000)
 
         it('rebuilds singleton when remoteUpdate=true even if container exists', async function () {
             const stubs = makeStubs()
@@ -2530,6 +2535,9 @@ describe('ModuleService', function () {
     // -------------------------------------------------------------------
 
     describe('containerExistsByName(): via singleton installModule with inspect rejection', function () {
+        // Same full-install path as the describe above: 1.2s on a CI runner, so
+        // the budget is stated rather than left to the 2s default.
+        this.timeout(10000)
 
         it('treats docker inspect rejection as container-not-present (proceeds with install)', async function () {
             const stubs = makeStubs()
