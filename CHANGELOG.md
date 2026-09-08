@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `reset node`/`reset all` on regtest also purges the hub's cross-chain match, call and capability-snapshot rows for the network (leg-scoped for a non-Bitcoin chain), so a re-genesised chain does not hand every fresh indexer matches from the dead one.
 - `EXPLORER_BATCH_RATE_LIMIT_RPM` passes through to the explorer like the other eight rate-limit knobs, so a deployment can size the batch balance route's limit from its host env.
 - Bootstrap archives carry their end height (a `bootstrap.json` member leading the wrapper), and a fresh install compares it with the coin node's tip before restoring: a node still below the archive is reported as WAITING FOR NODE when the service waits it out, and the restore is refused for a service image that would read the lower tip as a reorg.
 - `ps` marks a decoder or tracker that is waiting out a coin node in initial block download as WAITING FOR NODE and explains it under the table.
