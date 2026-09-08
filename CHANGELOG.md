@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `update all` now includes the hub and the sync client, hub first, leaves a coin node that already runs the pinned daemon version untouched, and no longer tries to install a coin daemon for a chain that is not installed (it skips absent services and reports them on one line).
 - `update` no longer requires a service argument; `xchain-node update` alone means `update all`.
 
+## [0.15.4] - 2026-09-08
+
+### Changed
+- The pinned component set moves the encoder to 0.15.4: every output it authors on Dogecoin floors at the 0.01 DOGE soft dust limit, so P2SH funding legs relay at any fee rate and validator PRICE and ATTEST wires confirm again.
+
 ## [0.15.3] - 2026-09-08
 
 ### Changed
