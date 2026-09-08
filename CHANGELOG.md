@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `update all` now includes the hub and the sync client, hub first, leaves a coin node that already runs the pinned daemon version untouched, and no longer tries to install a coin daemon for a chain that is not installed (it skips absent services and reports them on one line).
 - `update` no longer requires a service argument; `xchain-node update` alone means `update all`.
 
+## [0.15.5] - 2026-09-08
+
+### Changed
+- The pinned component set moves the indexer to 0.15.5, which brings the testnet activation of order-independent chunked DEPLOY assembly forward to 2026-09-08T12:00:00Z.
+
 ## [0.15.4] - 2026-09-08
 
 ### Changed
