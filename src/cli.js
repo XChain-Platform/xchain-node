@@ -119,7 +119,7 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
     } catch {
         return { moved: false, reason: 'unparsed-args' } // the action reports it
     }
-    if (process.env[selfUpdate.TARGET_ENV]) return { moved: false, reason: 'already-reexecuted' }
+    if (process.env.XCHAIN_NODE_UPDATE_TARGET) return { moved: false, reason: 'already-reexecuted' }
     if (selfUpdate.selfUpdateDisabled()) return { moved: false, reason: 'disabled' }
 
     let tag = null
@@ -152,7 +152,7 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
     }
     // The run continues in this process at the resolved tag: hand it on so
     // updateModules does not resolve the latest release a second time.
-    if (outcome && !outcome.moved) process.env[selfUpdate.TARGET_ENV] = tag
+    if (outcome && !outcome.moved) process.env.XCHAIN_NODE_UPDATE_TARGET = tag
     return outcome
 }
 
