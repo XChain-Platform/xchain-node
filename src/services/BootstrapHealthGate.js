@@ -395,8 +395,15 @@ async function readHaltMarkers(coin, network, module, deps) {
             throw new Error(`${name} reports no events table, so the REORG_HALT marker could not be read`)
 
         const found = { reorgHalt: 0, syncHalt: 0 }
+        // LIVE halts only: a REORG_HALT row older than the newest REORG_HALT_CLEARED
+        // row was cleared by an operator through `xchain-node clear-reorg-halt`
+        // (audited in the decoder's events table) and no longer disqualifies the
+        // database. The halt row itself is never deleted, so a plain count would
+        // refuse a cleared database forever.
         found.reorgHalt = await readCount(
-            `SELECT COUNT(*) FROM \`${name}\`.events WHERE code='REORG_HALT';`, 'REORG_HALT marker')
+            `SELECT COUNT(*) FROM \`${name}\`.events WHERE code='REORG_HALT' ` +
+            `AND id > COALESCE((SELECT MAX(id) FROM \`${name}\`.events WHERE code='REORG_HALT_CLEARED'), 0);`,
+            'REORG_HALT marker')
         // sync_halt IS optional: xchain-sync provisions it only where it runs, so an
         // absent table here is a genuine "no such marker", not an unread database.
         if (hasSyncHalt > 0)
@@ -519,7 +526,9 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
             if (markers.reorgHalt > 0)
                 reasons.push("the database carries a durable REORG_HALT marker (events.code='REORG_HALT'): " +
                     'this decoder aborted mid-rollback and will halt at its next reorg. Restoring this archive ' +
-                    'reproduces that fault on every consumer. Recovery is a full resync from a known-good snapshot.')
+                    'reproduces that fault on every consumer. Recovery is a full resync from a known-good snapshot, ' +
+                    'or, once the rolled-back range is re-parsed and the database is verified intact, ' +
+                    '`xchain-node clear-reorg-halt <chain> <network> --reason "..."`.')
             if (markers.syncHalt > 0)
                 reasons.push('the database carries an uncleared xchain-sync divergence halt ' +
                     '(sync_halt with cleared_at IS NULL): its contents are known to diverge from the source of truth.')
@@ -552,5 +561,9 @@ module.exports = {
     // Exported for tests / reuse
     evaluateContainerState,
     evaluateStatusPayload,
-    parseCountTokens
+    parseCountTokens,
+    // StatusService reads a decoder's health surface through the same probe so
+    // `xchain-node ps` can show a latent REORG_HALT.
+    probeServiceStatus,
+    MODULE_API_PORT_KEY
 }

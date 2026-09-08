@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `clear-reorg-halt <chain> <network> --reason "..."` clears a decoder's durable REORG_HALT marker after the decoder verifies its database is intact, recording the reason.
+- `ps` marks a running decoder that carries a REORG_HALT marker and prints the recovery under the table.
+- The bootstrap health gate treats a halt cleared through `clear-reorg-halt` as no longer disqualifying.
 - A regtest venue can arm ROLLCALL gates on its indexer and hub containers through `XC_ROLLCALL_GATES_REGTEST_ACTIVATION`, separately from the roll-call rail.
 - `update` moves the CLI itself to the target release first (signed tag verified against the shipped release key, checkout, `npm install`, re-run on the new code); `XCHAIN_NODE_NO_SELF_UPDATE=1` updates the services only.
 - Every command prints a one-line notice when a newer release than the CLI exists, cached for an hour.

@@ -33,6 +33,7 @@ const {
     stopModules,
     startModules,
     execModules,
+    clearDecoderReorgHalt,
     shellModule,
     runE2ETest,
     resetModules
@@ -592,6 +593,26 @@ opt-in would have skipped them.`)
             const serviceList = filterCommandParameters(null, service, chain, network)
             await execModules(serviceList, command)
             return process.exit(0)
+        })
+
+    program
+        .command('clear-reorg-halt')
+        .description('Clear a decoder\'s durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table')
+        .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
+        .argument('<network>', '(mainnet, testnet, regtest)')
+        .requiredOption('--reason <text>', 'Why this database is known good (recorded with the clear)')
+        .option('--force', 'Clear a database that has held dispenser state; you have compared its dispensers table against a known-good replica')
+        .option('--dry-run', 'Run the checks and report the verdict without writing the clear')
+        .action(async (chain, network, options) => {
+            if (chain === 'all' || network === 'all') {
+                console.log("clear-reorg-halt takes one chain and one network; 'all' is invalid")
+                return process.exit(1)
+            }
+            const serviceList = filterCommandParameters(null, 'xchain-decoder', chain, network)
+            const ok = await clearDecoderReorgHalt(serviceList, {
+                reason: options.reason, force: !!options.force, dryRun: !!options.dryRun
+            })
+            return process.exit(ok ? 0 : 1)
         })
 
     program

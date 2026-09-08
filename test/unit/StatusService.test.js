@@ -58,7 +58,8 @@ function loadStatusService(state, overrides = {}) {
             NODE_MODULE_NAME: 'node',
             SEP:              '-',
             Coin:    { BITCOIN: 'bitcoin', DOGECOIN: 'dogecoin', LITECOIN: 'litecoin' },
-            Network: { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' }
+            Network: { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' },
+            XChainService: { XCHAIN_DECODER: 'xchain-decoder' }
         },
         '../state': state,
         './DockerService': {

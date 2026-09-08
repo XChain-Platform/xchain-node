@@ -844,6 +844,68 @@ describe('moduleOperations', function () {
     })
 
     // -------------------------------------------------------------------
+    // clearDecoderReorgHalt
+    // -------------------------------------------------------------------
+
+    describe('clearDecoderReorgHalt()', function () {
+        const REASON = 'BTC mainnet decoder, no dispensers exist yet, block range intact'
+
+        it('runs the decoder\'s own clear script inside the decoder container with the reason', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const ok = await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: REASON })
+            expect(ok).to.be.true
+            expect(stubs.db.getModuleContainer.calledWith('xchain-decoder', 'bitcoin', 'mainnet')).to.be.true
+            expect(stubs.execContainer.calledWith('container-id-123',
+                ['node', 'src/clear-reorg-halt.js', '--reason', REASON])).to.be.true
+        })
+
+        it('passes --force and --dry-run through', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: REASON, force: true, dryRun: true })
+            expect(stubs.execContainer.firstCall.args[1]).to.deep.equal(
+                ['node', 'src/clear-reorg-halt.js', '--reason', REASON, '--force', '--dry-run'])
+        })
+
+        it('refuses a trivial reason without touching any container', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            expect(await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: 'short' })).to.be.false
+            expect(stubs.execContainer.called).to.be.false
+        })
+
+        it('reports false when the script refuses (non-zero exit) and prints its text', async function () {
+            const stubs = makeStubs()
+            stubs.execContainer.rejects(Object.assign(new Error('exit 4'), { stderr: 'clear-reorg-halt: REFUSED. dispenser state' }))
+            const ops = loadOperations(stubs)
+            const logged = []
+            const orig = console.log
+            console.log = (l) => logged.push(String(l))
+            let ok
+            try { ok = await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: REASON }) }
+            finally { console.log = orig }
+            expect(ok).to.be.false
+            expect(logged.some(l => /REFUSED/.test(l))).to.be.true
+        })
+
+        it('reports false when no decoder container is installed for the target', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainer.resolves(null)
+            const ops = loadOperations(stubs)
+            expect(await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: REASON })).to.be.false
+            expect(stubs.execContainer.called).to.be.false
+        })
+
+        it('ignores non-decoder modules in the list', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            expect(await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-encoder'] } }, { reason: REASON })).to.be.false
+            expect(stubs.execContainer.called).to.be.false
+        })
+    })
+
+    // -------------------------------------------------------------------
     // shellModule
     // -------------------------------------------------------------------
 

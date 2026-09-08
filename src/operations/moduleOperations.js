@@ -799,6 +799,51 @@ async function startModules(servicesList) {
     return true
 }
 
+// Audited clear of a decoder's durable REORG_HALT marker, run inside the decoder
+// container so it uses the service's own DB credentials and code
+// (xchain-decoder/src/clear-reorg-halt.js checks the database is intact, then
+// records the clear as an events row with the reason). One decoder per
+// coin/network; `servicesList` is the filtered map the CLI builds. Returns true
+// only when every targeted decoder answered exit 0.
+async function clearDecoderReorgHalt(servicesList, { reason, force = false, dryRun = false } = {}) {
+    if (typeof reason !== 'string' || reason.trim().length < 8) {
+        console.log('clear-reorg-halt: --reason must say, in at least 8 characters, why this database is known good; it is recorded with the clear.')
+        return false
+    }
+    const args = ['node', 'src/clear-reorg-halt.js', '--reason', reason.trim()]
+    if (force) args.push('--force')
+    if (dryRun) args.push('--dry-run')
+    let targeted = 0
+    let ok = true
+    for (const nextCoin in servicesList) {
+        for (const nextNetwork in servicesList[nextCoin]) {
+            if (!servicesList[nextCoin][nextNetwork].includes(XChainService.XCHAIN_DECODER)) continue
+            const containerId = await db.getModuleContainer(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork)
+            if (!containerId) {
+                console.log('clear-reorg-halt: no xchain-decoder container is installed for ' + nextCoin + ' ' + nextNetwork)
+                ok = false
+                continue
+            }
+            targeted++
+            try {
+                const out = await execContainer(containerId, args)
+                if (out) console.log(out)
+            } catch (err) {
+                // The script prints its refusal on stderr and exits non-zero; docker
+                // exec surfaces that as an error whose stdout/stderr carry the text.
+                const text = [err && err.stdout, err && err.stderr].filter(Boolean).join('\n').trim()
+                console.log(text || ('clear-reorg-halt: failed for ' + nextCoin + ' ' + nextNetwork + ': ' + (err && err.message)))
+                ok = false
+            }
+        }
+    }
+    if (targeted === 0 && ok) {
+        console.log('clear-reorg-halt: no xchain-decoder matched the given chain and network')
+        return false
+    }
+    return ok
+}
+
 async function execModules(servicesList, command) {
     const commandArgs = command.split(/\s+/)
     for (const nextCoin in servicesList) {
@@ -1420,6 +1465,7 @@ module.exports = {
     stopModules,
     startModules,
     execModules,
+    clearDecoderReorgHalt,
     shellModule,
     runE2ETest,
     resetModules
