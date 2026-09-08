@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.5] - 2026-09-08
+
+### Changed
+- The pinned component set moves the indexer to 0.15.5, which brings the testnet activation of order-independent chunked DEPLOY assembly forward to 2026-09-08T12:00:00Z.
+
 ## [0.15.4] - 2026-09-08
 
 ### Changed
