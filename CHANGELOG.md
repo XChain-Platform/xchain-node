@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.0] - 2026-09-08
 
 ### Added
 - Bootstrap archives carry their end height (a `bootstrap.json` member leading the wrapper), and a fresh install compares it with the coin node's tip before restoring: a node still below the archive is reported as WAITING FOR NODE when the service waits it out, and the restore is refused for a service image that would read the lower tip as a reorg.
