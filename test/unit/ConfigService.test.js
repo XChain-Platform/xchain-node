@@ -1348,6 +1348,28 @@ describe('ConfigService', function () {
                 expect(config).to.not.have.property('EXPLORER_VM_QUERY_RATE_LIMIT_RPM')
             })
 
+            // The batch routes (POST /balances, POST /coinpay_obligations) share
+            // one limiter knob, passed through the same way as the other eight
+            // (row 55, rate-limits-that-fit-the-wallet D69).
+            it('passes the batch explorer rate limit through from the host env', async function () {
+                const prev = process.env.EXPLORER_BATCH_RATE_LIMIT_RPM
+                process.env.EXPLORER_BATCH_RATE_LIMIT_RPM = '144'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                    expect(config['EXPLORER_BATCH_RATE_LIMIT_RPM']).to.equal('144')
+                } finally {
+                    if (prev === undefined) delete process.env.EXPLORER_BATCH_RATE_LIMIT_RPM
+                    else process.env.EXPLORER_BATCH_RATE_LIMIT_RPM = prev
+                }
+            })
+
+            it('emits no EXPLORER_BATCH_RATE_LIMIT_RPM when the host env carries none', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                expect(config).to.not.have.property('EXPLORER_BATCH_RATE_LIMIT_RPM')
+            })
+
             it('returns EXPLORER_API_PORT_HTTP as 8080', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)

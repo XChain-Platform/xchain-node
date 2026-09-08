@@ -859,13 +859,13 @@ async function getDefaultConfig(module, coin, network) {
             // Serving limits, same host-env injection point as the knobs above,
             // because every one of these defaults is tuned for a PUBLIC explorer
             // and is wrong for a private venue:
-            //   EXPLORER_*RATE_LIMIT_RPM - the eight request budgets, per IP: the
-            //     app-wide cap, the quote/pre-flight caps, and the five per-route
+            //   EXPLORER_*RATE_LIMIT_RPM - the nine request budgets, per IP: the
+            //     app-wide cap, the quote/pre-flight caps, and the six per-route
             //     caps (checkpoint-list, checkpoint-verify, action-proof,
-            //     validator-set-proof, vm-query). A dev box reaches the explorer
+            //     validator-set-proof, vm-query, batch). A dev box reaches the explorer
             //     through one tunnel, so every browser and every test run shares a
             //     single bucket, and a browser-driven suite sustains far more than
-            //     any one of these caps on its own. All eight are now reachable
+            //     any one of these caps on its own. All nine are now reachable
             //     from the host env; the five per-route caps were unreachable on a
             //     node-managed explorer (the regtest venue), which could raise only
             //     the app-wide and fee-quote caps before this change.
@@ -890,7 +890,8 @@ async function getDefaultConfig(module, coin, network) {
                 "EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM",
                 "EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM",
                 "EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM",
-                "EXPLORER_VM_QUERY_RATE_LIMIT_RPM"
+                "EXPLORER_VM_QUERY_RATE_LIMIT_RPM",
+                "EXPLORER_BATCH_RATE_LIMIT_RPM"
             ]) {
                 const value = {
                     EXPLORER_RATE_LIMIT_RPM:                   process.env.EXPLORER_RATE_LIMIT_RPM,
@@ -900,6 +901,7 @@ async function getDefaultConfig(module, coin, network) {
                     EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM:   process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM,
                     EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM: process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM,
                     EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM:      process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM,
+                    EXPLORER_BATCH_RATE_LIMIT_RPM:             process.env.EXPLORER_BATCH_RATE_LIMIT_RPM,
                     EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM: process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM,
                     EXPLORER_VM_QUERY_RATE_LIMIT_RPM:          process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM
                 }[key]
