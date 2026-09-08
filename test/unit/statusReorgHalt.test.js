@@ -25,7 +25,43 @@ const StatusService = proxyquire('../../src/services/StatusService', {
         getLocalModuleVersion: async () => '0', getContainerModuleVersion: async () => '0'
     }
 })
-const { reduceDecoderReorgHalt, describeReorgHaltNote } = StatusService
+const { reduceDecoderReorgHalt, describeReorgHaltNote, reduceNodeCatchingUp, describeNodeCatchingUpNote } = StatusService
+
+// The same surface carries `node_catching_up` while a decoder or tracker waits
+// out a coin node still in initial block download below its own tip (a
+// bootstrap restored next to a fresh node). Idle and healthy is what
+// docker sees; the wait is what the operator needs to see.
+describe('ps: WAITING FOR NODE surface', function () {
+
+    it('reduces a waiting payload to the two heights and the start of the wait', function () {
+        const r = reduceNodeCatchingUp({ status: 'healthy', node_catching_up: { node_height: 962304, stored_height: 964970, since: '2026-09-07T06:29:08Z' } })
+        expect(r).to.deep.equal({ node_height: 962304, stored_height: 964970, since: '2026-09-07T06:29:08Z' })
+    })
+
+    it('reads null, an absent field, an older image and a malformed object as not waiting', function () {
+        expect(reduceNodeCatchingUp({ status: 'healthy', node_catching_up: null })).to.equal(null)
+        expect(reduceNodeCatchingUp({ status: 'healthy' })).to.equal(null)
+        expect(reduceNodeCatchingUp({ node_catching_up: 'yes' })).to.equal(null)
+        expect(reduceNodeCatchingUp({ node_catching_up: { since: 'x' } })).to.equal(null)
+        expect(reduceNodeCatchingUp(null)).to.equal(null)
+    })
+
+    it('tolerates a missing stored height', function () {
+        const r = reduceNodeCatchingUp({ node_catching_up: { node_height: 5 } })
+        expect(r).to.deep.equal({ node_height: 5, stored_height: null, since: null })
+    })
+
+    it('the note names the service, both heights, the remaining gap and that it resolves itself', function () {
+        const note = describeNodeCatchingUpNote('bitcoin', 'mainnet', 'xchain-decoder', { node_height: 962304, stored_height: 964970, since: '2026-09-07T06:29:08Z' })
+        expect(note).to.match(/^bitcoin\/mainnet xchain-decoder is WAITING FOR NODE since 2026-09-07T06:29:08Z/)
+        expect(note).to.match(/coin node is at 962304/)
+        expect(note).to.match(/stored height 964970 \(2666 blocks to go\)/)
+        expect(note).to.match(/continues on its own once the node passes it/)
+        const bare = describeNodeCatchingUpNote('litecoin', 'testnet', 'xchain-utxo-tracker', { node_height: 5, stored_height: null, since: null })
+        expect(bare).to.match(/^litecoin\/testnet xchain-utxo-tracker is WAITING FOR NODE: /)
+        expect(bare).to.not.match(/blocks to go/)
+    })
+})
 
 describe('ps: decoder REORG_HALT surface', function () {
 

@@ -165,10 +165,25 @@ function makeStubs(overrides = {}) {
         clearEncoderMaintenance:   sinon.stub().resolves(true)
     }
 
+    // The archive metadata member and the restore-time node tip guard. The
+    // metadata writer is stubbed because these suites run on a fake fs; the
+    // guard defaults to "unknown, do not refuse" so restore MECHANICS stay the
+    // subject here. Both have their own suites (BootstrapArchiveMeta.test.js,
+    // BootstrapNodeTipGuard.test.js).
+    const archiveMetaStub = {
+        buildBootstrapMeta: require('../../src/services/BootstrapArchiveMeta').buildBootstrapMeta,
+        writeBootstrapMeta: sinon.stub().resolves('bootstrap.json')
+    }
+    const nodeTipGuardStub = {
+        assessNodeTipForRestore: sinon.stub().resolves({ verdict: 'unknown', refuse: false, detail: 'not compared in this test' })
+    }
+
     return {
         healthGate:      healthGateStub,
         republishLedger: republishLedgerStub,
         encoderMaintenance: encoderMaintenanceStub,
+        archiveMeta:     archiveMetaStub,
+        nodeTipGuard:    nodeTipGuardStub,
         fs:             fsStub,
         db:             dbStub,
         axios:          axiosStub,
@@ -279,6 +294,13 @@ function loadBootstrapService(stubs) {
         './EncoderMaintenanceWindow': {
             declareEncoderMaintenance: stubs.encoderMaintenance.declareEncoderMaintenance,
             clearEncoderMaintenance:   stubs.encoderMaintenance.clearEncoderMaintenance
+        },
+        './BootstrapArchiveMeta': {
+            buildBootstrapMeta: stubs.archiveMeta.buildBootstrapMeta,
+            writeBootstrapMeta: stubs.archiveMeta.writeBootstrapMeta
+        },
+        './BootstrapNodeTipGuard': {
+            assessNodeTipForRestore: stubs.nodeTipGuard.assessNodeTipForRestore
         }
     })
 }
@@ -1192,6 +1214,106 @@ describe('BootstrapService', function () {
         })
     })
 
+    // A bootstrap restored next to a coin node still syncing from zero
+    // put a decoder thousands of blocks above its node; the released services
+    // read that as a reorg and halted. The ensure paths now consult the node
+    // tip guard between the download and the restore.
+    describe('the coin node tip guard between download and restore', function () {
+
+        function stubDownloadedArchive(stubs) {
+            stubs.fs.existsSync.callsFake(p => !/\.(pem|sig)$/.test(String(p)))
+            const dataStream  = new PassThrough()
+            const writeStream = new PassThrough()
+            drainPassThrough(writeStream)
+            stubs.fs.createWriteStream.returns(writeStream)
+            stubs.axios.resolves({ status: 200, headers: {}, data: dataStream })
+            return () => { dataStream.end(); writeStream.emit('finish') }
+        }
+
+        function captureLogs() {
+            const lines = []
+            const stub = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+            return { lines, restore: () => stub.restore() }
+        }
+
+        it('a refusal records node-behind, restores nothing, and the summary says how to take it later', async function () {
+            const stubs = makeStubs()
+            const finishDownload = stubDownloadedArchive(stubs)
+            stubs.nodeTipGuard.assessNodeTipForRestore.resolves({
+                verdict: 'behind-refuse', refuse: true,
+                detail: 'the coin node is at 962304 (initial block download), 2666 blocks below the archive\'s 964970, and this xchain-decoder image does not wait'
+            })
+            stubs.spawn = sinon.stub()
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+
+            const promise = bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            setImmediate(finishDownload)
+            expect(await promise).to.be.false
+
+            // The guard saw the downloaded archive's path, and nothing was
+            // dropped or reimported after it refused.
+            const call = stubs.nodeTipGuard.assessNodeTipForRestore.firstCall.args[0]
+            expect(call).to.include({ coin: COIN, network: NETWORK, module: XChainService.XCHAIN_DECODER })
+            expect(call.archivePath).to.match(/xchain-decoder\/bootstrap\/latest\.tgz$/)
+            expect(stubs.spawn.called, 'no mariadb restore may be spawned').to.equal(false)
+            expect(stubs.dockerService.stopContainer.called).to.equal(false)
+
+            const logs = captureLogs()
+            try { bs.reportBootstrapOutcomes() } finally { logs.restore() }
+            const summary = logs.lines.join('\n')
+            expect(summary).to.match(/xchain-decoder: NOT restored, the coin node is behind the archive: the coin node is at 962304/)
+            expect(summary).to.match(/wait for the\nnode to pass the archive height and re-run install with XCHAIN_NODE_FORCE_BOOTSTRAP=1/)
+        })
+
+        it('a behind-wait verdict still restores and the summary marks it WAITING FOR NODE', async function () {
+            const stubs = makeStubs()
+            const finishDownload = stubDownloadedArchive(stubs)
+            stubVerifiedInner(stubs, { innerName: 'dump.sql.gz', checksumName: 'dump.sha256', manageExistsSync: false })
+            stubs.nodeTipGuard.assessNodeTipForRestore.resolves({
+                verdict: 'behind-wait', refuse: false,
+                detail: 'the coin node is at 962304 (initial block download), 2666 blocks below the archive\'s 964970; the xchain-decoder waits until the node passes 964970'
+            })
+            stubs.databaseService.getDatabaseContainerId.resolves(FAKE_DB_CONTAINER)
+            stubs.db.getModuleContainer.resolves('svc-cid')
+            stubs.fs.promises.stat.resolves({ size: 512 })
+            const mysqlProc = makeSpawnProc()
+            stubs.spawn = sinon.stub().callsFake(() => {
+                setImmediate(() => { drainPassThrough(mysqlProc.stdin); mysqlProc.emit('close', 0) })
+                return mysqlProc
+            })
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+
+            const promise = bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            setImmediate(finishDownload)
+            expect(await promise).to.be.true
+            expect(stubs.spawn.called, 'the restore goes ahead').to.equal(true)
+
+            const logs = captureLogs()
+            try { bs.reportBootstrapOutcomes() } finally { logs.restore() }
+            const summary = logs.lines.join('\n')
+            expect(summary).to.match(/xchain-decoder: restored, WAITING FOR NODE: the coin node is at 962304/)
+            expect(summary).to.not.match(/XCHAIN_NODE_FORCE_BOOTSTRAP/)
+        })
+
+        it('the tracker path refuses the same way, before its volume is touched', async function () {
+            const stubs = makeStubs()
+            const finishDownload = stubDownloadedArchive(stubs)
+            stubs.nodeTipGuard.assessNodeTipForRestore.resolves({ verdict: 'behind-refuse', refuse: true, detail: 'node behind' })
+            stubs.execFile = sinon.stub().resolves({ stdout: '' })
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+
+            const promise = bs.ensureBootstrapUtxoTracker(COIN, NETWORK)
+            setImmediate(finishDownload)
+            expect(await promise).to.be.false
+            expect(stubs.dockerService.stopContainer.called, 'the tracker must not be stopped').to.equal(false)
+            const wipe = stubs.execFile.getCalls().find(c => Array.isArray(c.args[1]) && c.args[1].join(' ').includes('-delete'))
+            expect(wipe, 'the volume must not be cleared').to.not.exist
+        })
+    })
+
     // uuid:7037604f: ModuleService turns a "fresh" answer into DROP DATABASE +
     // restore, so every failure below must answer unknown. Only a SUCCESSFUL read
     // may authorise that path.
@@ -2006,6 +2128,10 @@ describe('BootstrapService', function () {
             expect(wrap.args.slice(0, 2)).to.deep.equal(['cf', '-'])
             expect(wrap.args).to.include('data.tar.gz')
             expect(wrap.args).to.include('data.sha256')
+            // The metadata member leads the wrapper (see BootstrapArchiveMeta).
+            expect(wrap.args.slice(-3)).to.deep.equal(['bootstrap.json', 'data.tar.gz', 'data.sha256'])
+            expect(stubs.archiveMeta.writeBootstrapMeta.calledOnce).to.equal(true)
+            expect(stubs.archiveMeta.writeBootstrapMeta.firstCall.args[1]).to.include({ module: XChainService.XCHAIN_UTXO_TRACKER, height: null })
 
             // Inner payload keeps real compression; the outer wrap does not.
             expect(gzipOptions).to.have.length(2)
@@ -2446,6 +2572,20 @@ describe('BootstrapService', function () {
             // producers stay live for the whole dump, so one reading before it
             // cannot speak for the bytes that ship.
             expect(stubs.healthGate.assertBootstrapSourceHealthy.callCount).to.equal(2)
+
+            // The archive carries its end height (MAX(block_index) of the
+            // dumped blocks table, here whatever the execFile stub answers) as a
+            // bootstrap.json member that LEADS the wrapper, so a restore can read
+            // it without a pass over the archive.
+            const heightQuery = stubs.execFile.getCalls().map(c => c.args)
+                .find(([cmd, args]) => cmd === 'docker' && Array.isArray(args) && args.some(a => /MAX\(block_index\)/.test(String(a))))
+            expect(heightQuery, 'the tip height is read from the dumped database').to.exist
+            expect(stubs.archiveMeta.writeBootstrapMeta.calledOnce).to.equal(true)
+            const [, metaBody] = stubs.archiveMeta.writeBootstrapMeta.firstCall.args
+            expect(metaBody).to.include({ format: 1, module: XChainService.XCHAIN_DECODER, coin: COIN, network: NETWORK, height: 52428800 })
+            const czf = stubs.execFile.getCalls().map(c => c.args)
+                .find(([cmd, args]) => cmd === 'tar' && Array.isArray(args) && args[0] === 'czf')
+            expect(czf[1].slice(-3)).to.deep.equal(['bootstrap.json', 'dump.sql.gz', 'dump.sha256'])
         })
 
         // A halt marker can be written while mariadb-dump is still streaming, and

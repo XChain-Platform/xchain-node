@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Bootstrap archives carry their end height (a `bootstrap.json` member leading the wrapper), and a fresh install compares it with the coin node's tip before restoring: a node still below the archive is reported as WAITING FOR NODE when the service waits it out, and the restore is refused for a service image that would read the lower tip as a reorg.
+- `ps` marks a decoder or tracker that is waiting out a coin node in initial block download as WAITING FOR NODE and explains it under the table.
 - `validator status` says that the `full_node` tier is not active on the network yet, instead of leaving an unearnable capability implied.
 - Every utxo-tracker container gets a memory limit derived from the host and the number of trackers sharing it, so several chains on one host no longer oversubscribe it; `XCHAIN_NODE_MODULE_MEMORY_MB_<SERVICE>` sets an explicit limit for any service (0 disables).
 - `clear-reorg-halt <chain> <network> --reason "..."` clears a decoder's durable REORG_HALT marker after the decoder verifies its database is intact, recording the reason.

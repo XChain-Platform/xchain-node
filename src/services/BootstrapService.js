@@ -32,6 +32,7 @@ const { getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = re
 const { stopContainer, startContainer }               = require('./DockerService')
 const { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('./DatabaseService')
 const { assertSafeArchiveMemberNames, redactSecrets } = require('../utils/helpers')
+const { buildBootstrapMeta, writeBootstrapMeta } = require('./BootstrapArchiveMeta')
 const { dockerMariadbArgs, mariadbEnv }               = require('../utils/dockerMariadb')
 const { assertBootstrapSourceHealthy }                = require('./BootstrapHealthGate')
 const { recordBootstrapPublished }                    = require('./BootstrapRepublishLedger')
@@ -644,6 +645,12 @@ async function makeBootstrapUtxoTracker(coin, network) {
     const containerId = await db.getModuleContainer(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     if (!containerId) throw new Error(`utxo-tracker container not found for ${coin}/${network}`)
 
+    // The height the archive will end at, read from the tracker's own status
+    // while it is still running (the store is LevelDB, nothing else can tell).
+    // Best-effort: an archive without a height still restores, it just cannot
+    // be compared with the coin node at restore time (BootstrapNodeTipGuard).
+    const archiveHeight = await readTrackerCommittedHeight(coin, network, containerId)
+
     // Staging and output dirs are prepared before the stop for the same reason
     // as the capacity check: a read-only mount or a missing parent should not be
     // discovered with the tracker already dark.
@@ -732,8 +739,14 @@ async function makeBootstrapUtxoTracker(coin, network) {
         await fs.promises.writeFile(checksumFile, `${checksum}  data.tar.gz\n`)
         console.log(`Checksum: ${checksum}`)
 
+        // Metadata leads the wrapper so a restore can read the height without
+        // a pass over the whole archive (see BootstrapArchiveMeta).
+        const metaMember = await writeBootstrapMeta(workDir, buildBootstrapMeta({
+            module: XChainService.XCHAIN_UTXO_TRACKER, coin, network, height: archiveHeight
+        }))
+
         console.log(`Wrapping into ${archiveName}...`)
-        await writeStoredGzipTar(finalOutput, workDir, ['data.tar.gz', 'data.sha256'])
+        await writeStoredGzipTar(finalOutput, workDir, [metaMember, 'data.tar.gz', 'data.sha256'])
 
         await maybeSignBootstrap(finalOutput)
 
@@ -869,8 +882,15 @@ async function makeBootstrapMariaDb(coin, network, module) {
     await fs.promises.writeFile(checksumFile, `${checksum}  dump.sql.gz\n`)
     console.log(checksum)
 
+    // The height the dump ends at, for the restore-time comparison with the
+    // coin node (BootstrapNodeTipGuard). Read after the dump so it can only
+    // sit at or above the dump's own tip. Metadata leads the wrapper so the
+    // restore reads it without a pass over the archive.
+    const archiveHeight = await readMariaDbTipHeight(dbName, { dbContainerId, rootPassword, externalCfg })
+    const metaMember = await writeBootstrapMeta(workDir, buildBootstrapMeta({ module, coin, network, height: archiveHeight }))
+
     console.log(`Wrapping into ${archiveName}...`)
-    await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, 'dump.sql.gz', 'dump.sha256'])
+    await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, metaMember, 'dump.sql.gz', 'dump.sha256'])
 
     await maybeSignBootstrap(finalOutput)
 
@@ -878,6 +898,53 @@ async function makeBootstrapMariaDb(coin, network, module) {
     console.log(redactSecrets(`Bootstrap created: ${finalOutput}`))
 
     return true
+}
+
+// MAX(block_index) of the decoder/indexer `blocks` table, or null when it
+// cannot be read. Both schemas carry the column; the indexer's rows can be
+// sparse but its highest index is still the height the dump reaches.
+async function readMariaDbTipHeight(dbName, { dbContainerId, rootPassword, externalCfg }) {
+    const query = `SELECT MAX(block_index) FROM \`${dbName}\`.blocks`
+    try {
+        let out
+        if (EXTERNAL_DB) {
+            out = await executeNativeMariaDbCommand(externalCfg, query, '-BN')
+        } else {
+            const { stdout } = await execFileAsync(
+                'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', query]),
+                { env: mariadbEnv(rootPassword) }
+            )
+            out = stdout
+        }
+        const height = parseInt(String(out).trim(), 10)
+        return Number.isInteger(height) && height >= 0 ? height : null
+    } catch (err) {
+        console.log(`Could not read the ${dbName} tip height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
+        return null
+    }
+}
+
+// The tracker's committed height from its status surface, or null. Asked
+// before the container is stopped for the compress.
+async function readTrackerCommittedHeight(coin, network, containerId) {
+    try {
+        const { probeServiceStatus, MODULE_API_PORT_KEY } = require('./BootstrapHealthGate')
+        if (typeof probeServiceStatus !== 'function') return null
+        const config = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
+        const port = config && config[MODULE_API_PORT_KEY[XChainService.XCHAIN_UTXO_TRACKER]]
+        if (!port) return null
+        const runner = (cmd, args) => execFileAsync(cmd, args, { timeout: 15000 })
+        const payload = await probeServiceStatus(containerId, port, runner)
+        const candidates = ['committed_height', 'tracker_height']
+        for (const key of candidates) {
+            const value = Number(payload && payload[key])
+            if (Number.isInteger(value) && value >= 0) return value
+        }
+        return null
+    } catch (err) {
+        console.log(`Could not read the tracker height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
+        return null
+    }
 }
 
 async function restoreBootstrap(coin, network, module, fileName) {
@@ -1278,13 +1345,24 @@ function reportBootstrapOutcomes() {
     // syncing from block 0, so the paragraph below would misdescribe them.
     const wipedDown = bootstrapOutcomes.filter((o) => o.status === 'wiped-left-down')
     console.log('\nBootstrap restore summary:')
+    const nodeBehind = bootstrapOutcomes.filter((o) => o.status === 'node-behind')
     for (const o of bootstrapOutcomes) {
         const line = o.status === 'restored' ? 'restored'
+            : o.status === 'restored-node-behind' ? `restored, WAITING FOR NODE: ${o.detail}`
+            : o.status === 'node-behind' ? `NOT restored, the coin node is behind the archive: ${o.detail}`
             : o.status === 'none-published' ? 'none published, syncing from scratch'
             : o.status === 'disabled' ? 'disabled by XCHAIN_NODE_NO_BOOTSTRAP'
             : o.status === 'wiped-left-down' ? `NOT restored, DATA WIPED, container left stopped: ${o.detail}`
             : `NOT restored: ${o.detail}`
         console.log(`  ${o.module}: ${line}`)
+    }
+    if (nodeBehind.length > 0) {
+        console.log(
+            '\nThose services were not restored because their coin node has not reached the archive\n' +
+            'height yet and their image would read the node\'s lower tip as a reorg. They sync forward\n' +
+            'from their start height as the node catches up. To take the restore instead, wait for the\n' +
+            'node to pass the archive height and re-run install with XCHAIN_NODE_FORCE_BOOTSTRAP=1.\n'
+        )
     }
     if (wipedDown.length > 0) {
         console.log(
@@ -1302,6 +1380,25 @@ function reportBootstrapOutcomes() {
             'XCHAIN_NODE_FORCE_BOOTSTRAP=1 to take the restore again: without it a\n' +
             'service that has already started syncing is left alone.\n'
         )
+    }
+}
+
+// Compare the archive's end height with the coin node before a restore. The
+// guard never throws; a refusal comes back as { refuse: true, detail } and the
+// caller records it instead of restoring. Required late: the guard reaches the
+// state db and the health gate, which these ensure paths otherwise do not.
+async function assessNodeTipBeforeRestore(coin, network, module, archivePath) {
+    const { assessNodeTipForRestore } = require('./BootstrapNodeTipGuard')
+    return assessNodeTipForRestore({ coin, network, module, archivePath })
+}
+
+// A restore that went ahead with the node still below the archive is reported
+// as such, so the summary says what the service is doing now (waiting).
+function recordRestoredOutcome(module, tip) {
+    if (tip && tip.verdict === 'behind-wait') {
+        recordBootstrapOutcome(module, 'restored-node-behind', tip.detail)
+    } else {
+        recordBootstrapOutcome(module, 'restored')
     }
 }
 
@@ -1333,9 +1430,14 @@ async function ensureBootstrapUtxoTracker(coin, network) {
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'none-published')
             return false
         }
+        const tip = await assessNodeTipBeforeRestore(coin, network, XChainService.XCHAIN_UTXO_TRACKER, path.join(bootstrapDir, fileName))
+        if (tip.refuse) {
+            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'node-behind', tip.detail)
+            return false
+        }
         await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
         console.log('Bootstrap installed; tracker will continue from the bootstrap height')
-        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'restored')
+        recordRestoredOutcome(XChainService.XCHAIN_UTXO_TRACKER, tip)
         return true
     } catch (err) {
         const reason = redactSecrets(err.message)
@@ -1467,9 +1569,14 @@ async function ensureBootstrapMariaDb(coin, network, module) {
             recordBootstrapOutcome(module, 'none-published')
             return false
         }
+        const tip = await assessNodeTipBeforeRestore(coin, network, module, path.join(bootstrapDir, fileName))
+        if (tip.refuse) {
+            recordBootstrapOutcome(module, 'node-behind', tip.detail)
+            return false
+        }
         await restoreBootstrap(coin, network, module, fileName)
         console.log('Bootstrap installed; the service will continue from the bootstrap height')
-        recordBootstrapOutcome(module, 'restored')
+        recordRestoredOutcome(module, tip)
         return true
     } catch (err) {
         const reason = redactSecrets(err.message)
