@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - A regtest venue can arm ROLLCALL gates on its indexer and hub containers through `XC_ROLLCALL_GATES_REGTEST_ACTIVATION`, separately from the roll-call rail.
+- `update` moves the CLI itself to the target release first (signed tag verified against the shipped release key, checkout, `npm install`, re-run on the new code); `XCHAIN_NODE_NO_SELF_UPDATE=1` updates the services only.
+- Every command prints a one-line notice when a newer release than the CLI exists, cached for an hour.
+- The node records whether it is on a release or a branch (`data/install-target.json`) at every install and update.
+
+### Fixed
+- `install xchain-hub` on a fresh box stages the hub from the release manifest: a no-ref install pins it to the latest release instead of cloning master, and `install vX.Y.Z xchain-hub` works on a train in which the hub did not move (v0.15.1 pins hub v0.15.0) instead of failing on a hub tag that does not exist.
+
+### Changed
+- `xchain-node update all` with no ref moves a release node to the latest published release, fully pinned, instead of failing on the detached checkout; a branch node stays on its branch and says so.
+- On a validator, `update all` re-runs the additive validator config repair before rebuilding the hub, so re-running `validator init` by hand after an upgrade is no longer needed.
+- `update all` now includes the hub and the sync client, hub first, leaves a coin node that already runs the pinned daemon version untouched, and no longer tries to install a coin daemon for a chain that is not installed (it skips absent services and reports them on one line).
+- `update` no longer requires a service argument; `xchain-node update` alone means `update all`.
 
 ## [0.15.2] - 2026-09-07
 

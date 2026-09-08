@@ -17,7 +17,7 @@
 
 const {
     HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    EXTERNAL_DB, SERVICE_REGISTRY, XChainService
+    EXTERNAL_DB, SERVICE_REGISTRY, XChainService, DEFAULT_MODULE_BRANCH
 } = require('../config/constants')
 
 // Build the hub/explorer per-module config descriptor from the table-driven
@@ -388,6 +388,41 @@ async function installHubModule(branch = null) {
     console.log("Downloading xchain-hub...")
     // Pinned like the generic path: a release install must stage the manifest's
     // hub, not the tip of whatever branch this checkout defaults to.
+    //
+    // This runs from preCheck, AHEAD of the action that publishes the install
+    // target, so on a fresh box there is no active target to pin from and the
+    // ref arrives raw. Resolving it here is what makes the two documented
+    // operator forms work: `install xchain-hub` (no ref: the latest release,
+    // pinned) and `install vX.Y.Z xchain-hub` on a train in which the hub did
+    // not move (v0.15.1 pins hub v0.15.0, and the hub repo has no v0.15.1 tag,
+    // so cloning the ref as a branch failed; measured in a sandbox 2026-09-08).
+    // The target stays active through buildAndUp so the bundled libraries are
+    // staged from the same manifest, and is cleared before returning; the
+    // action's own withInstallTarget publishes its own afterwards.
+    const {
+        resolveComponentRef, getActiveTarget, isReleaseRef, resolveInstallTarget, setActiveTarget, clearActiveTarget
+    } = require('./ReleaseManifestService')
+    let ownsTarget = false
+    if (!getActiveTarget() && (!branch || isReleaseRef(branch))) {
+        const target = await resolveInstallTarget(branch, { defaultBranch: DEFAULT_MODULE_BRANCH })
+        if (target.kind === 'release') {
+            console.log(`Staging the hub from release ${target.tag} (${target.resolvedFrom}); manifest-pinned.`)
+            setActiveTarget(target)
+            ownsTarget = true
+        } else {
+            branch = target.ref
+        }
+    }
+    try {
+        return await installHubFromResolvedRef(branch, defaultConfig, hubConnector)
+    } finally {
+        if (ownsTarget) clearActiveTarget()
+    }
+}
+
+// The clone-build-wait half of installHubModule, split out so the target
+// published above is cleared on every exit path.
+async function installHubFromResolvedRef(branch, defaultConfig, hubConnector) {
     const { resolveComponentRef } = require('./ReleaseManifestService')
     const hubPin = resolveComponentRef(HUB_MODULE_NAME, branch)
     await cloneGit(HUB_MODULE_NAME, true, false, hubPin.ref, hubPin.commit)

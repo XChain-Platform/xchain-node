@@ -259,6 +259,27 @@ describe('ReleaseManifestService', () => {
             expect(t.resolvedFrom).to.equal('fallback after lookup failure')
         })
 
+        // An UPDATE of a release node must never degrade to a branch: that
+        // fallback would move every pinned module onto a branch tip because
+        // GitHub was unreachable for a moment.
+        it('refuses to fall back to a branch when told not to and the lookup fails', async () => {
+            stubs.axiosGet.rejects(new Error('getaddrinfo ENOTFOUND'))
+            await svc.resolveInstallTarget(null, { defaultBranch: 'master', fallbackToBranch: false }).then(
+                () => { throw new Error('should have rejected') },
+                e => {
+                    expect(e.message).to.match(/Could not resolve the latest xchain-node release/)
+                    expect(e.message).to.match(/Nothing was changed/)
+                })
+        })
+
+        it('refuses to fall back to a branch when told not to and no release exists', async () => {
+            const err = new Error('Not Found'); err.response = { status: 404 }
+            stubs.axiosGet.rejects(err)
+            await svc.resolveInstallTarget(null, { fallbackToBranch: false }).then(
+                () => { throw new Error('should have rejected') },
+                e => expect(e.message).to.match(/No published xchain-node release exists/))
+        })
+
         it('reports a release ref that has no manifest, instead of installing tips', async () => {
             const err = new Error('Not Found'); err.response = { status: 404 }
             stubs.axiosGet.rejects(err)

@@ -258,6 +258,75 @@ describe('ReleaseSignatureService', () => {
         })
     })
 
+    // The CLI self-update checks itself out at a release tag; this is the gate
+    // that proves the release key cut that tag. A real repo and real signed
+    // tags, for the same reason as above: the failure modes live inside git
+    // and gpg (a tag by any trusted key passing, the human-readable verdict
+    // read instead of the status protocol, an unsigned tag exiting zero).
+    describe('verifyGitTagSignature()', () => {
+        let key, other, repo
+
+        function gitIn(dir, args, env = {}) {
+            return execFileSync('git', ['-C', dir, ...args], {
+                encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env }
+            })
+        }
+
+        function signedTag(name, signer) {
+            gitIn(repo, ['-c', `user.signingkey=${signer.fingerprint}`, '-c', 'gpg.program=gpg',
+                '-c', 'user.name=t', '-c', 'user.email=t@example.invalid',
+                'tag', '-s', '-m', name, name], { GNUPGHOME: signer.home })
+        }
+
+        before(function () {
+            if (!gpgAvailable()) return this.skip()
+            this.timeout(30000)
+            key   = makeKeyring('xchain-test-tag-release')
+            other = makeKeyring('xchain-test-tag-impostor')
+            repo  = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-tagrepo-'))
+            gitIn(repo, ['init', '-q'])
+            fs.writeFileSync(path.join(repo, 'f'), 'x')
+            gitIn(repo, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'add', 'f'])
+            gitIn(repo, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'one'])
+            signedTag('v9.9.9', key)
+            signedTag('v9.9.8', other)
+            // A developer's global git config may sign every tag; this one must
+            // stay a plain lightweight tag to be the "unsigned" case.
+            gitIn(repo, ['-c', 'tag.gpgSign=false', 'tag', 'v9.9.7'])
+        })
+
+        after(() => {
+            if (key)   key.cleanup()
+            if (other) other.cleanup()
+            if (repo)  fs.rmSync(repo, { recursive: true, force: true })
+        })
+
+        it('accepts a tag signed by the pinned key', () => {
+            const result = svc.verifyGitTagSignature({ repoDir: repo, tag: 'v9.9.9', keyPath: key.keyPath, fingerprint: key.fingerprint })
+            expect(result.fingerprint).to.equal(key.fingerprint)
+        })
+
+        it('refuses a tag signed by another key, even a valid one', () => {
+            expect(() => svc.verifyGitTagSignature({ repoDir: repo, tag: 'v9.9.8', keyPath: key.keyPath, fingerprint: key.fingerprint }))
+                .to.throw(svc.ReleaseIntegrityError, /not verify against the pinned release key|not by the pinned release key|good signature/)
+        })
+
+        it('refuses an unsigned (lightweight) tag', () => {
+            expect(() => svc.verifyGitTagSignature({ repoDir: repo, tag: 'v9.9.7', keyPath: key.keyPath, fingerprint: key.fingerprint }))
+                .to.throw(svc.ReleaseIntegrityError)
+        })
+
+        it('refuses a tag that does not exist', () => {
+            expect(() => svc.verifyGitTagSignature({ repoDir: repo, tag: 'v0.0.0', keyPath: key.keyPath, fingerprint: key.fingerprint }))
+                .to.throw(svc.ReleaseIntegrityError)
+        })
+
+        it('refuses when the pinned key file is missing', () => {
+            expect(() => svc.verifyGitTagSignature({ repoDir: repo, tag: 'v9.9.9', keyPath: path.join(repo, 'nope.asc'), fingerprint: key.fingerprint }))
+                .to.throw(svc.ReleaseIntegrityError, /No release signing key/)
+        })
+    })
+
     describe('verifyManifestForTag()', () => {
         let key
         const manifestBytes = Buffer.from('{"platform_version":"0.9.0","components":{}}')

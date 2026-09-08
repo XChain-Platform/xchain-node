@@ -48,6 +48,7 @@ const { initValidator, getValidatorSettings, isInitialized, getCapabilityConfigH
 const { stakeValidator, unstakeValidator } = require('./services/ValidatorStakeService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 const { acquireCommandLock } = require('./utils/commandLock')
+const { noticeNewerRelease } = require('./services/SelfUpdateService')
 
 // Commander's action handlers are async, but program.parse() is synchronous:
 // anything an action rejects with escapes as an unhandled rejection, which Node
@@ -95,6 +96,64 @@ function refForPreCheck(commandName, actionCommand) {
     } catch {
         return null
     }
+}
+
+/**
+ * For an `update` that targets a release, move the CLI to that release first
+ * and re-execute the command there (SelfUpdateService). Returns normally when
+ * the CLI is already there, is not a checkout, is told not to, or the update
+ * targets a branch; the command then continues in this process.
+ *
+ * The target is decided the same way updateModules will decide it: a
+ * release ref names the release; no ref means the latest release on a
+ * release node and no self-update on a branch node.
+ */
+async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
+    const { isReleaseRef, resolveLatestReleaseTag } = deps.manifest || require('./services/ReleaseManifestService')
+    const { resolveUpdateTarget } = deps.installTarget || require('./services/InstallTargetService')
+    const selfUpdate = deps.selfUpdate || require('./services/SelfUpdateService')
+
+    let resolved
+    try {
+        resolved = resolveArgs(args, { expectBranch: true, defaultBranch: null })
+    } catch {
+        return { moved: false, reason: 'unparsed-args' } // the action reports it
+    }
+    if (process.env.XCHAIN_NODE_UPDATE_TARGET) return { moved: false, reason: 'already-reexecuted' }
+    if (selfUpdate.selfUpdateDisabled()) return { moved: false, reason: 'disabled' }
+
+    let tag = null
+    if (isReleaseRef(resolved.branch)) {
+        tag = resolved.branch.trim()
+    } else if (!resolved.branch) {
+        const target = await resolveUpdateTarget()
+        if (target.kind !== 'release') return { moved: false, reason: 'branch-node' }
+        tag = await resolveLatestReleaseTag()
+        if (!tag) return { moved: false, reason: 'no-release' }
+    } else {
+        return { moved: false, reason: 'branch-update' }
+    }
+
+    // Serialized like every mutator, so two concurrent updates cannot both
+    // move the checkout. The lock is handed back right before the re-exec so
+    // the child, which takes its own lock in this same hook, is not refused
+    // by its parent.
+    const lock = deps.acquireCommandLock || acquireCommandLock
+    const release = lock({ command: 'update (self-update)', waitMs: 0 })
+    let outcome
+    try {
+        outcome = await selfUpdate.selfUpdateAndReexec({
+            tag,
+            childArgs: selfUpdate.explicitUpdateArgs(resolved, tag),
+            deps: { ...(deps.selfUpdateDeps || {}), beforeSpawn: release }
+        })
+    } finally {
+        release()
+    }
+    // The run continues in this process at the resolved tag: hand it on so
+    // updateModules does not resolve the latest release a second time.
+    if (outcome && !outcome.moved) process.env.XCHAIN_NODE_UPDATE_TARGET = tag
+    return outcome
 }
 
 async function parseCommand() {
@@ -151,6 +210,19 @@ async function parseCommand() {
         // mechanism exists to guarantee.
         if (commandName === 'bootstrap-republish-due') return
 
+        // The CLI moves itself BEFORE anything else runs for a release update:
+        // ahead of the lock (the re-executed child takes it), ahead of preCheck
+        // (the child's preCheck is the one that should run, at the new code).
+        // Nothing to do answers quickly and the command continues here.
+        if (commandName === 'update') {
+            try {
+                await maybeSelfUpdateBeforeUpdate(actionCommand.args || [])
+            } catch (err) {
+                console.error('update failed: ' + redactSecrets(err && err.message ? err.message : err))
+                return process.exit(1)
+            }
+        }
+
         // preCheck provisions shared containers/DB/hub (buildDatabaseModule,
         // ensureXchainNodeAccess, scanAndRegisterModules, installHubModule) for
         // EVERY non-validator command, not just the mutating ones. Running that
@@ -206,6 +278,12 @@ async function parseCommand() {
             const optOut = thisCommand.opts().telemetry === false
             await maybeReportTelemetry(actionCommand.name(), optOut)
         } catch { /* telemetry is best-effort */ }
+        // One line when a newer release exists, on every command that reached
+        // this point. `update` is the command it recommends, so it says nothing
+        // there. Cached an hour, silent offline, never throws.
+        if (commandName !== 'update') {
+            await noticeNewerRelease()
+        }
     })
 
     program
@@ -282,11 +360,14 @@ async function parseCommand() {
 
     program
         .command('update')
-        .description('Update XChain services')
-        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .description('Update XChain services (and the CLI itself) to the latest release, or to a named release or branch')
+        // Every positional is optional: `xchain-node update` alone is the
+        // documented upgrade and means `update all`. The ref keeps its one
+        // order-independent slot, classified by shape like `install`.
+        .argument('[service]', '(node, xchain-hub, xchain-sync, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .argument('[ref]',     '(a release like v0.9.0 for a pinned update, or any branch name; a branch is resolved on the module\'s remote, so push it first, or point the module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE. Omit to keep each module on its current branch)')
+        .argument('[ref]',     '(a release like v0.9.0 for a pinned update, or any branch name; a branch is resolved on the module\'s remote, so push it first, or point the module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE. Omit to move a release node to the latest release, or a branch node to its newest commits)')
         .action(async (service, chain, network, branch) => {
             const resolved = resolveArgs([service, chain, network, branch], { expectBranch: true, defaultBranch: null })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
@@ -296,7 +377,7 @@ async function parseCommand() {
             // nothing to roll back by hand.
             let outcome
             try {
-                outcome = await updateModules(serviceList, resolved.branch)
+                outcome = await updateModules(serviceList, resolved.branch, { all: resolved.service === 'all' })
             } catch (err) {
                 console.error('update failed: ' + redactSecrets(err && err.message ? err.message : err))
                 return process.exit(1)
@@ -793,7 +874,7 @@ Notes:
 // refForPreCheck is exported for its unit test: it decides which tree the hub is
 // built from, and the defect it fixes was invisible in every log until a deploy
 // line named the wrong branch.
-module.exports = { parseCommand, installUnhandledRejectionHandler, installUncaughtExceptionHandler, refForPreCheck }
+module.exports = { parseCommand, installUnhandledRejectionHandler, installUncaughtExceptionHandler, refForPreCheck, maybeSelfUpdateBeforeUpdate }
 
 // Allow running this file directly (`node src/cli.js <cmd>`) as well as via the
 // bin entrypoint `src/index.js`. When cli.js is required as a module (index.js
