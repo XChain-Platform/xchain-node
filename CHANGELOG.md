@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.0] - 2026-09-08
 
 ### Added
 - `reset node`/`reset all` on regtest also purges the hub's cross-chain match, call and capability-snapshot rows for the network (leg-scoped for a non-Bitcoin chain), so a re-genesised chain does not hand every fresh indexer matches from the dead one.
