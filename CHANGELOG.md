@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - A bootstrap restore now removes `latest.tgz` and its `.sig` from the bootstrap volume once the restore succeeds or is refused for a behind node, instead of leaving a multi-gigabyte archive on disk forever; a failed restore still keeps it for diagnosis.
 
+## [0.16.3] - 2026-09-09
+
+### Changed
+- Patch train carrier: the release manifest moves xchain-hub to 0.16.3 (structured round_lost records at every silent oracle round exit, a catch-up sweep wire may spend the change of a wire the same pass sent, and the pushed-tip block-gap line is info); xchain-indexer keeps 0.16.1 and every other component keeps its v0.16.0 or v0.15.0 tag.
+
 ## [0.16.2] - 2026-09-09
 
 ### Changed
