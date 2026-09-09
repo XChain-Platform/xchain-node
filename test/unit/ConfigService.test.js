@@ -34,7 +34,10 @@ const {
 // (config/validator/ is gitignored). Tests that WANT a validator stub their own.
 const NO_VALIDATOR = {
     getValidatorSettings: () => null,
-    getValidatorEnv:      () => ({})
+    getValidatorEnv:      () => ({}),
+    // The hub config states which validator mode it resolved and from where, so a
+    // stub that omits this is not a standalone machine, it is a broken module.
+    validatorModeReport:  () => ({ mode: 'standalone', dir: '/tmp/test-xchain-config/validator', missing: [] })
 }
 
 function makeConfigService(fsStub) {
@@ -411,7 +414,12 @@ describe('ConfigService', function () {
                     'fs': fsStub,
                     './ValidatorService': {
                         getValidatorSettings: () => validatorSettings,
-                        getValidatorEnv: () => ({})
+                        getValidatorEnv: () => ({}),
+                        validatorModeReport: () => ({
+                            mode: validatorSettings ? 'validator' : 'standalone',
+                            dir: '/tmp/test-xchain-config/validator',
+                            missing: []
+                        })
                     }
                 })
             }

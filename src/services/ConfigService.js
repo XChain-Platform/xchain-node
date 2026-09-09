@@ -1292,8 +1292,31 @@ async function getDefaultConfig(module, coin, network) {
         // P2P / signing-key / capability-config env so the hub starts as a full
         // validator. Returns {} (no change) for a standalone node, so the standalone
         // install path is unaffected.
-        const { getValidatorEnv } = require('./ValidatorService')
+        const { getValidatorEnv, validatorModeReport } = require('./ValidatorService')
         Object.assign(defaultValues, getValidatorEnv())
+
+        // State the resolved mode and the directory it came from: an empty validator
+        // env means standalone, disabled, or a configDir carrying no validator/, and
+        // a deploy cannot tell those apart. A statement, never a refusal.
+        const validator = validatorModeReport()
+        if (validator.mode === 'validator') {
+            console.log("xchain-node: this hub deploys in VALIDATOR mode, from " + validator.dir)
+        } else if (validator.mode === 'incomplete') {
+            warnHubConfigOnce("VALIDATOR_STATE_INCOMPLETE",
+                "WARNING: the validator state under " + validator.dir + " is HALF PRESENT (missing " +
+                validator.missing.join(", ") + "), so this hub deploys STANDALONE: no P2P_VALIDATOR_ADDR, " +
+                "no SIGNING_PRIVKEY_HEX, no capability mount, and its anchor publisher will never run. " +
+                "Half a validator state is never a standalone node, so this is a broken install rather " +
+                "than a choice: restore the missing file, or point XCHAIN_NODE_CONFIG_DIR at the config " +
+                "directory that holds the complete set.")
+        } else if (validator.mode === 'disabled') {
+            console.log("xchain-node: this hub deploys STANDALONE because the validator state at " +
+                validator.dir + " records enabled:false.")
+        } else {
+            console.log("xchain-node: this hub deploys STANDALONE (no validator state under " +
+                validator.dir + "). If this host IS meant to be a validator, XCHAIN_NODE_CONFIG_DIR is " +
+                "resolving to the wrong config directory and the real one holds validator/.")
+        }
     }
 
     // Read the config file for this coin/network pair. Non-secret operator overrides live

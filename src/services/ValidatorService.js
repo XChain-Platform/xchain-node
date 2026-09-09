@@ -930,6 +930,25 @@ function getValidatorEnv() {
     return env
 }
 
+// Separate the three states getValidatorEnv() flattens into {}: standalone,
+// disabled, and a configDir holding no validator/ for a host that has one. Report
+// the directory too, because those last two are otherwise indistinguishable.
+function validatorModeReport() {
+    const settingsPresent = fs.existsSync(SETTINGS_FILE)
+    const keyPresent      = fs.existsSync(KEY_FILE)
+    if (settingsPresent && keyPresent) {
+        return { mode: getValidatorSettings() ? 'validator' : 'disabled', dir: VALIDATOR_DIR, missing: [] }
+    }
+    // Half the pair is a broken install, never a standalone node.
+    if (settingsPresent || keyPresent) {
+        const missing = []
+        if (!settingsPresent) missing.push(SETTINGS_FILE)
+        if (!keyPresent) missing.push(KEY_FILE)
+        return { mode: 'incomplete', dir: VALIDATOR_DIR, missing }
+    }
+    return { mode: 'standalone', dir: VALIDATOR_DIR, missing: [SETTINGS_FILE, KEY_FILE] }
+}
+
 // Host path of capabilities.json (the file the operator edits), or null.
 // Migrates a legacy layout first, so this always names the file the hub reads.
 function getCapabilityConfigHostPath() {
@@ -1057,6 +1076,7 @@ module.exports = {
     defaultCapabilityConfig,
     getValidatorSettings,
     getValidatorEnv,
+    validatorModeReport,
     getCapabilityConfigHostPath,
     getCapabilityConfigMountDir,
     ensureCapabilityConfigLayout,
