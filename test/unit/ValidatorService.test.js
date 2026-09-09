@@ -622,6 +622,63 @@ describe('ValidatorService', function () {
             const env = vs.getValidatorEnv()
             expect(env).to.not.have.property('ORACLE_EPOCH_START')
         })
+    })
+
+    // Pin the three states getValidatorEnv() flattens into {}, since a deploy that
+    // cannot separate them reports a mispointed config dir as standalone.
+    describe('validatorModeReport()', function () {
+
+        it('reports validator mode and the directory it resolved from', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p =>
+                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+            })
+            const report = loadValidatorService(fs).validatorModeReport()
+            expect(report.mode).to.equal('validator')
+            expect(report.dir).to.equal(FAKE_VALIDATOR_DIR)
+            expect(report.missing).to.deep.equal([])
+        })
+
+        it('separates a DISABLED validator from one that was never configured', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p =>
+                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings(undefined, { enabled: false })))
+            })
+            const report = loadValidatorService(fs).validatorModeReport()
+            expect(report.mode).to.equal('disabled')
+            expect(report.dir).to.equal(FAKE_VALIDATOR_DIR)
+        })
+
+        it('reports standalone, and still names the directory it checked', function () {
+            // The directory matters most in exactly this case: a mispointed
+            // XCHAIN_NODE_CONFIG_DIR is indistinguishable from a standalone node
+            // unless the deploy says where it looked.
+            const report = loadValidatorService(makeFs()).validatorModeReport()
+            expect(report.mode).to.equal('standalone')
+            expect(report.dir).to.equal(FAKE_VALIDATOR_DIR)
+            expect(report.missing).to.deep.equal([FAKE_SETTINGS_FILE, FAKE_KEY_FILE])
+        })
+
+        it('calls a HALF-present state incomplete, never standalone, and names what is missing', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+            })
+            const report = loadValidatorService(fs).validatorModeReport()
+            expect(report.mode).to.equal('incomplete')
+            expect(report.missing).to.deep.equal([FAKE_KEY_FILE])
+        })
+
+        it('is incomplete with the key present and the settings gone, the other half of the pair', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_KEY_FILE)
+            })
+            const report = loadValidatorService(fs).validatorModeReport()
+            expect(report.mode).to.equal('incomplete')
+            expect(report.missing).to.deep.equal([FAKE_SETTINGS_FILE])
+        })
 
         it('joins SEED_NODES array into comma-separated string', function () {
             const fakeSeed = makeSeedHex()

@@ -27,7 +27,10 @@ const state = require('../../src/state')
 // its live signing key (the hazard ConfigService.test.js documents at the top).
 const NO_VALIDATOR = {
     getValidatorSettings: () => null,
-    getValidatorEnv:      () => ({})
+    getValidatorEnv:      () => ({}),
+    // The hub config states which validator mode it resolved and from where, so a
+    // stub that omits this is not a standalone machine, it is a broken module.
+    validatorModeReport:  () => ({ mode: "standalone", dir: "/tmp/test-xchain-config/validator", missing: [] })
 }
 
 // The hub API-key sidecar is a real file on an operator box. Read, it would key the hub
