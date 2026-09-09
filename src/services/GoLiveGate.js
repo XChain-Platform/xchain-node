@@ -30,11 +30,19 @@ const {
     Network
 } = require('../config/constants')
 
-// The 5 un-decided flag-days share this placeholder activation timestamp
-// (2026-12-31T22:00:00Z). Its presence in a service's consensus sources means
-// the flag-day has not been armed yet: shipping that to a live mainnet
-// silently leaves the gated behavior off until 2027.
-const FLAG_DAY_PLACEHOLDER = '1798761600'
+// An un-armed mainnet activation carries one of two sentinels: 9999999999 (the
+// year-2286 time sentinel) or 999999999 (the height sentinel). Shipping either
+// to a live mainnet silently leaves the gated behavior off for good. The gate
+// reads them only where an activation VALUE lives (an addChange() mainnet
+// argument, a `mainnet:` map entry, or a *MAINNET* constant), never as a bare
+// substring: 999999999 is also an ordinary "no upper bound" in query code.
+//
+// 1798761600 (2026-12-31T22:00:00Z) is NOT a sentinel. It was the shared
+// placeholder for the un-decided flag days until the operator ruled it ARMED
+// on 2026-09-09 (CROSS_CHAIN_ROYALTY's mainnet instant); reading it
+// as un-armed was what made this gate refuse a correctly armed tree.
+const UNARMED_SENTINELS  = ['9999999999', '999999999']
+const FLAG_DAY_PLACEHOLDER = UNARMED_SENTINELS[0]
 
 // Services whose mainnet deployment accepts writes or feeds consensus, and
 // therefore must not boot un-armed. Read surfaces (explorer, decoder,
@@ -50,10 +58,53 @@ function isTruthyEnv(value) {
     return value !== undefined && value !== '' && value !== '0' && String(value).toLowerCase() !== 'false' && String(value).toLowerCase() !== 'no'
 }
 
-// Recursively scan a service's src/ tree for the flag-day placeholder
-// timestamp. Bundled libraries and deps are skipped; only first-party
-// consensus sources (protocol_changes.js, *_activation.js and anything else
-// under src/) are relevant.
+// Drop // and /* */ comments so a sentinel quoted in prose cannot trip the
+// gate. String literals are left in place: the position patterns below all
+// require code context (a call argument, a map key, a const initializer) that
+// a string body cannot supply.
+function stripComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, '')
+}
+
+// True when a service source carries an un-armed sentinel in a MAINNET
+// activation position. Three positions exist in this tree:
+//   1. addChange(NAME, version, mainnetTime, testnetTime, regtestTime,
+//      mainnetBlock, testnetBlock, regtestBlock): arguments 3 and 6, as a
+//      literal or as an identifier resolved through a `const X = <n>` in the
+//      same file (protocol_changes.js declares its instants that way).
+//   2. an activation map's `mainnet:` or `'<COIN>:mainnet':` entry.
+//   3. a `const <...MAINNET...> = <n>` declaration.
+// Testnet and regtest sentinels are deliberate (a rule no live network has
+// exercised yet) and are not this gate's business.
+function hasUnarmedMainnetActivation(source) {
+    const code = stripComments(source)
+    const isSentinel = (v) => UNARMED_SENTINELS.includes(String(v).trim())
+
+    const constants = {}
+    for (const m of code.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(\d+)\b/g)) constants[m[1]] = m[2]
+    const resolves = (arg) => {
+        const a = arg.trim()
+        if (/^\d+$/.test(a)) return isSentinel(a)
+        return Object.prototype.hasOwnProperty.call(constants, a) && isSentinel(constants[a])
+    }
+
+    for (const m of code.matchAll(/addChange\s*\(([^)]*)\)/g)) {
+        const args = m[1].split(',')
+        if ((args[2] !== undefined && resolves(args[2])) || (args[5] !== undefined && resolves(args[5]))) return true
+    }
+    for (const m of code.matchAll(/(?:\bmainnet\b|['"][A-Za-z]+:mainnet['"])\s*:\s*(\d+)\b/g)) {
+        if (isSentinel(m[1])) return true
+    }
+    for (const [name, value] of Object.entries(constants)) {
+        if (name.includes('MAINNET') && isSentinel(value)) return true
+    }
+    return false
+}
+
+// Recursively scan a service's src/ tree for un-armed mainnet activations.
+// Bundled libraries and deps are skipped; only first-party consensus sources
+// (protocol_changes.js, *_activation.js and anything else under src/) are
+// relevant.
 function findFlagDayPlaceholders(moduleDir) {
     const hits = []
     const srcDir = path.join(moduleDir, 'src')
@@ -70,7 +121,7 @@ function findFlagDayPlaceholders(moduleDir) {
             } else if (entry.isFile() && entry.name.endsWith('.js')) {
                 let content
                 try { content = fs.readFileSync(full, 'utf8') } catch { continue }
-                if (content.includes(FLAG_DAY_PLACEHOLDER)) {
+                if (hasUnarmedMainnetActivation(content)) {
                     hits.push(path.relative(moduleDir, full))
                 }
             }
@@ -114,7 +165,7 @@ function collectViolations(module, environmentVariables, moduleDir) {
     if (moduleDir) {
         const placeholders = findFlagDayPlaceholders(moduleDir)
         if (placeholders.length > 0) {
-            violations.push('flag-day placeholder timestamp ' + FLAG_DAY_PLACEHOLDER + ' (un-armed) present in: ' + placeholders.join(', '))
+            violations.push('un-armed mainnet activation sentinel (' + UNARMED_SENTINELS.join(' or ') + ') present in: ' + placeholders.join(', '))
         }
     }
 
@@ -156,5 +207,7 @@ module.exports = {
     assertGoLiveReady,
     collectViolations,
     findFlagDayPlaceholders,
-    FLAG_DAY_PLACEHOLDER
+    hasUnarmedMainnetActivation,
+    FLAG_DAY_PLACEHOLDER,
+    UNARMED_SENTINELS
 }
