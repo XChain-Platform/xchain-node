@@ -982,9 +982,10 @@ const PRICE_FENCE_TABLE = 'price_ingest_watermarks'
 // that wipes the indexer DB, never left to a runbook line.
 //
 // Returns true when the row was cleared, false when this MariaDB holds no hub DB
-// to clear it in (a stack pushing to a hub elsewhere), in which case the manual
-// statement is printed. Only the calling chain's row is touched: another chain's
-// fence is still protecting that chain's live ingest.
+// to clear it in (a stack pushing to a hub elsewhere), or when that hub belongs
+// to another network, in which case the manual statement is printed. Only the
+// calling chain's row is touched: another chain's fence is still protecting that
+// chain's live ingest.
 async function clearHubPriceIngestWatermark(coin, network) {
     const ticker = CoinTickerSymbol[coin]
     if (!ticker) {
@@ -995,6 +996,11 @@ async function clearHubPriceIngestWatermark(coin, network) {
     const hubDbName = cfg && cfg["HUB_DB_NAME"]
     if (!hubDbName) {
         warnPriceFenceNotCleared(ticker, "the hub configuration carries no HUB_DB_NAME")
+        return false
+    }
+    const foreignNetwork = hubFenceBelongsToAnotherNetwork(cfg, network)
+    if (foreignNetwork) {
+        warnPriceFenceNotCleared(ticker, foreignNetwork)
         return false
     }
     // Same contract as addUserPasswordToDatabase: the DB name is an identifier
@@ -1033,6 +1039,34 @@ async function clearHubPriceIngestWatermark(coin, network) {
     console.log(redactSecrets("Cleared the hub price ingest fence for " + ticker + " ("
         + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted"))
     return true
+}
+
+// Whether the hub database this reset is about to touch belongs to a network
+// other than the one being reset.
+//
+// The fence row is keyed by source_chain ALONE: the hub's table is
+// `source_chain VARCHAR(10) PRIMARY KEY` with no network column, so one row per
+// chain serves every network that hub federates and there is nothing for a
+// WHERE clause to scope on. That makes the reset's own coin/network arguments
+// insufficient: a regtest reset run beside a hub that federates testnet clears
+// the TESTNET fence for that chain, which then admits a stale replay from an
+// orphaned range on a live network. Establish first that the co-located hub
+// really is this stack's.
+//
+// HUB_NETWORK is a host-env passthrough and is often unset here; an unset value
+// contradicts nothing and the clear proceeds exactly as before. Same tolerance
+// hubHoldsAnotherNetwork applies to the cross-chain purge, and the same reason:
+// a guard that refused on absent evidence would turn every ordinary reset into a
+// manual step and the price rail would stay down for it.
+function hubFenceBelongsToAnotherNetwork(cfg, network) {
+    const hubNetwork = (cfg && typeof cfg["HUB_NETWORK"] === 'string')
+        ? cfg["HUB_NETWORK"].trim().toLowerCase()
+        : ''
+    const resetNetwork = String(network || '').trim().toLowerCase()
+    if (hubNetwork === '' || hubNetwork === resetNetwork) return null
+    return "the hub on this MariaDB is configured for " + hubNetwork
+        + ", not " + (resetNetwork || 'the network being reset')
+        + ", and this fence row is keyed by chain alone, so clearing it here would drop that network's fence"
 }
 
 // One wording for every "could not clear it here" branch, so the operator always

@@ -1947,6 +1947,59 @@ describe('DatabaseService', function () {
             expect(del).to.not.match(/TRUNCATE|DELETE FROM `XChain_Hub`\.price_ingest_watermarks\s*$/)
         })
 
+        // The fence row is keyed by source_chain alone (the hub's table is
+        // `source_chain VARCHAR(10) PRIMARY KEY`, with no network column), so one
+        // row per chain serves every network that hub federates. A reset therefore
+        // cannot scope the DELETE with a WHERE clause; the only thing that can
+        // establish whose fence this is, is the hub's own configured network.
+        describe('a hub database shared with another network', function () {
+
+            it('does not touch the fence when the hub federates a different network', async function () {
+                const stubs = makeStubs()
+                const executed = dockerRunner(stubs, 1)
+                const warn = sinon.stub(console, 'warn')
+                // A regtest stack whose co-located hub serves the live testnet.
+                const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub', HUB_NETWORK: 'testnet' })
+                const result = await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest')
+                const lines = warn.getCalls().map(c => String(c.args[0])).join('\n')
+                warn.restore()
+
+                expect(result).to.be.false
+                // The testnet fence survives: nothing at all was issued.
+                expect(executed.some(s => /DELETE FROM/.test(s))).to.be.false
+                expect(lines).to.contain('configured for testnet')
+                expect(lines).to.contain("source_chain = 'BTC'")
+            })
+
+            it('clears it when the hub federates the network being reset', async function () {
+                const stubs = makeStubs()
+                const executed = dockerRunner(stubs, 1)
+                const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub', HUB_NETWORK: 'regtest' })
+                expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest')).to.be.true
+                const del = executed.find(s => /^DELETE FROM/.test(s))
+                expect(del).to.contain("source_chain = 'BTC'")
+            })
+
+            it('reads the configured network case- and whitespace-insensitively', async function () {
+                const stubs = makeStubs()
+                const executed = dockerRunner(stubs, 1)
+                const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub', HUB_NETWORK: '  Regtest ' })
+                expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest')).to.be.true
+                expect(executed.some(s => /^DELETE FROM/.test(s))).to.be.true
+            })
+
+            // HUB_NETWORK is a host-env passthrough and is usually absent here. An
+            // absent value contradicts nothing, and refusing on it would make every
+            // ordinary reset a manual step with the price rail down for it.
+            it('clears it as before when the hub config names no network', async function () {
+                const stubs = makeStubs()
+                const executed = dockerRunner(stubs, 1)
+                const ds = loadDatabaseService(stubs, {}, HUB_CFG)
+                expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'testnet')).to.be.true
+                expect(executed.some(s => /^DELETE FROM/.test(s))).to.be.true
+            })
+        })
+
         it('prints the manual statement and returns false when this MariaDB has no hub table', async function () {
             const stubs = makeStubs()
             const executed = dockerRunner(stubs, 0)
