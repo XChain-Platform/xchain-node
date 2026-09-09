@@ -33,6 +33,9 @@ function loadPrecheck(overrides) {
         updateHub:              sinon.stub().resolves(),
         updateExplorer:         sinon.stub().resolves(),
         installHubModule:       sinon.stub().resolves(),
+        // Default: the hub answers. Everything below the config push behaves as
+        // it always has unless a test says the hub is down.
+        isHubAnswering:         sinon.stub().resolves(true),
         applyHubApiKeyFromSidecar: sinon.stub().resolves()
     }, overrides)
 
@@ -55,7 +58,11 @@ function loadPrecheck(overrides) {
         },
         './services/VersionService':   { checkAllRemoteVersions: stubs.checkAllRemoteVersions },
         './services/StatusService':    { getStatus: stubs.getStatus },
-        './services/HubService':       { installHubModule: stubs.installHubModule, updateHub: stubs.updateHub },
+        './services/HubService':       {
+            installHubModule: stubs.installHubModule,
+            updateHub:        stubs.updateHub,
+            isHubAnswering:   stubs.isHubAnswering
+        },
         './services/ExplorerService':  { updateExplorer: stubs.updateExplorer },
         './services/DatabaseService': {
             buildDatabaseModule:   sinon.stub().resolves(),
@@ -223,6 +230,161 @@ describe('preCheck(): hub/explorer config push @regression', function () {
         expect(await precheck.preCheck(false, true)).to.be.true
         expect(updateHub.calledOnce).to.be.true
         expect(updateExplorer.calledOnce).to.be.true
+    })
+})
+
+// A hub that is crash-looping (a rebuild that left it holding the wrong database
+// password is the usual way in) answers nothing, so preCheck's config push spends
+// ten attempts on connection refusals and then aborts. It aborted EVERY command,
+// `update xchain-hub` included, which is the command that rebuilds the hub and
+// ends the crash loop; removing the container by hand was the only way out.
+describe('preCheck(): a hub that is not answering does not wedge its own repair @regression', function () {
+
+    // What a crash-looping hub does to the config push: every attempt refused.
+    const refused = () => sinon.stub().rejects(
+        new Error('There was a problem trying to update a config in the xchain-hub module (connect ECONNREFUSED)'))
+
+    it('lets a repairing command through on a warning, skipping the push', async function () {
+        const updateHub = sinon.stub().resolves()
+        const { precheck, stubs } = loadPrecheck({
+            isHubAnswering: sinon.stub().resolves(false),
+            updateHub
+        })
+        const log = sinon.stub(console, 'log')
+        let result = null
+        try {
+            result = await precheck.preCheck(false, true, null, true)
+        } finally {
+            log.restore()
+        }
+
+        expect(result).to.be.true
+        // Skipped, not retried: the ten attempts three seconds apart are the delay
+        // that made the wedge look like a hang.
+        expect(updateHub.calledOnce).to.be.true
+        expect(updateHub.firstCall.args[0]).to.deep.equal({ skipConfigPush: true })
+        // The explorer is a separate target and is still pushed to.
+        expect(stubs.updateExplorer.calledOnce).to.be.true
+        expect(log.args.some(a => String(a[0]).includes('config push was skipped'))).to.be.true
+    })
+
+    it('still continues when the skipped push leaves updateHub rejecting anyway', async function () {
+        // The network attaches updateHub still makes can fail on their own; a
+        // repairing command must not be aborted by that either, or the wedge is
+        // simply moved one call along.
+        const { precheck } = loadPrecheck({
+            isHubAnswering: sinon.stub().resolves(false),
+            updateHub: sinon.stub().rejects(new Error('xchain-hub -> bitcoin/regtest unreachable'))
+        })
+        const log = sinon.stub(console, 'log')
+        let result = null
+        try {
+            result = await precheck.preCheck(false, true, null, true)
+        } finally {
+            log.restore()
+        }
+        expect(result).to.be.true
+        expect(log.args.some(a => String(a[0]).includes('bitcoin/regtest'))).to.be.true
+    })
+
+    it('a NON-repairing command still aborts against a hub that is not answering', async function () {
+        const updateHub = refused()
+        const { precheck } = loadPrecheck({
+            isHubAnswering: sinon.stub().resolves(false),
+            updateHub
+        })
+        const log = sinon.stub(console, 'log')
+        let threw = null
+        try {
+            await precheck.preCheck(false, true, null, false)
+        } catch (err) {
+            threw = err
+        } finally {
+            log.restore()
+        }
+
+        expect(threw).to.be.an('error')
+        // Loud, and it names the way out instead of leaving the operator to find it.
+        expect(threw.message).to.contain('There was an error trying to update the hub module')
+        expect(threw.message).to.contain('not answering')
+        expect(threw.message).to.contain('update xchain-hub')
+        // The push was attempted: nothing is silenced for a command that needs a hub.
+        expect(updateHub.firstCall.args[0]).to.deep.equal({ skipConfigPush: false })
+    })
+
+    it('a repairing command against a HEALTHY hub still pushes and still fails on a real error', async function () {
+        const updateHub = refused()
+        const { precheck } = loadPrecheck({
+            isHubAnswering: sinon.stub().resolves(true),
+            updateHub
+        })
+        const log = sinon.stub(console, 'log')
+        let threw = null
+        try {
+            await precheck.preCheck(false, true, null, true)
+        } catch (err) {
+            threw = err
+        } finally {
+            log.restore()
+        }
+
+        expect(threw).to.be.an('error')
+        // A hub that answers gets the unchanged message: no repair hint, because
+        // the fault is not that the hub is down.
+        expect(threw.message).to.equal('There was an error trying to update the hub module')
+        expect(updateHub.firstCall.args[0]).to.deep.equal({ skipConfigPush: false })
+    })
+
+    it('treats a liveness probe that throws as "not answering"', async function () {
+        const { precheck } = loadPrecheck({
+            isHubAnswering: sinon.stub().rejects(new Error('no hub config on this host')),
+            updateHub: sinon.stub().resolves()
+        })
+        const log = sinon.stub(console, 'log')
+        let result = null
+        try {
+            result = await precheck.preCheck(false, true, null, true)
+        } finally {
+            log.restore()
+        }
+        expect(result).to.be.true
+        expect(log.args.some(a => String(a[0]).includes('config push was skipped'))).to.be.true
+    })
+
+    it('is not consulted at all for a read-only command that skips the push', async function () {
+        const { precheck, stubs } = loadPrecheck({})
+        await precheck.preCheck(false, false, null, true)
+        expect(stubs.isHubAnswering.called).to.be.false
+        expect(stubs.updateHub.called).to.be.false
+    })
+
+    // The sidecar key must be in process.env before ANYTHING talks to the hub,
+    // and the liveness probe is new traffic on that path: an unhealthy hub is
+    // exactly where an ordering mistake would hide, because the branch is new.
+    it('hydrates the sidecar key before the liveness probe on the unhealthy path', async function () {
+        const saved = process.env.HUB_API_KEY
+        delete process.env.HUB_API_KEY
+        const applyHubApiKeyFromSidecar = sinon.stub().callsFake(async (target) => {
+            target.HUB_API_KEY = 'sidecar-key'
+        })
+        const isHubAnswering = sinon.stub().callsFake(async () => {
+            expect(process.env.HUB_API_KEY).to.equal('sidecar-key')
+            return false
+        })
+        const { precheck } = loadPrecheck({
+            applyHubApiKeyFromSidecar, isHubAnswering, updateHub: sinon.stub().resolves()
+        })
+        const log = sinon.stub(console, 'log')
+        try {
+            await precheck.preCheck(false, true, null, true)
+        } finally {
+            log.restore()
+            if (saved === undefined) delete process.env.HUB_API_KEY
+            else process.env.HUB_API_KEY = saved
+        }
+        expect(applyHubApiKeyFromSidecar.calledOnce).to.be.true
+        expect(isHubAnswering.calledOnce).to.be.true
+        expect(applyHubApiKeyFromSidecar.calledBefore(isHubAnswering)).to.be.true
     })
 })
 

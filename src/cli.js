@@ -20,6 +20,7 @@ const { version }  = require('../package.json')
 const { preCheck } = require('./precheck')
 const { setVerbose } = require('./state')
 const { filterCommandParameters, resolveArgs } = require('./services/ConfigService')
+const { HUB_MODULE_NAME } = require('./config/constants')
 const { redactSecrets } = require('./utils/helpers')
 const {
     installModules,
@@ -97,6 +98,60 @@ function refForPreCheck(commandName, actionCommand) {
     } catch {
         return null
     }
+}
+
+// The verbs that can put the hub container back: they rebuild it, recreate it
+// from its config, replace its image, or remove it so the next precheck
+// reinstalls one. Naming the verb is only half the test; the command must also
+// TARGET the hub, which commandRepairsHub decides below.
+const HUB_TARGETING_COMMANDS = ['install', 'update', 'recreate', 'restart', 'start', 'uninstall']
+
+// Would the command about to run repair the hub?
+//
+// preCheck pushes local config to the hub before every state-changing command.
+// A hub that is crash-looping answers nothing, so that push fails and aborts the
+// command - including `update xchain-hub`, the command that would rebuild it and
+// end the crash loop. The only escape was deleting the container by hand. This
+// tells preCheck which commands may proceed on a warning instead of that abort;
+// everything else still fails loudly against a hub that is down.
+//
+// Deliberately narrow, because the answer buys a skipped config push: the verb
+// must replace or restart container state AND the target must resolve to the hub
+// itself. `stop` is not here (stopping repairs nothing), nor is `reset`, `sync`,
+// `bootstrap`, `exec` or `e2etest` (they read or write through a hub they need
+// working). Targeting is delegated to resolveArgs, the same classifier the
+// actions use, so the two cannot disagree about which positional is the service.
+function commandRepairsHub(commandName, actionCommand) {
+    // `autoheal` exists to restart containers that are unhealthy, the hub
+    // included, and takes no service argument to read.
+    if (commandName === 'autoheal') return true
+    if (!HUB_TARGETING_COMMANDS.includes(commandName)) return false
+
+    let resolved
+    try {
+        resolved = resolveArgs((actionCommand && actionCommand.args) || [], {
+            expectBranch: commandName === 'install' || commandName === 'update',
+            defaultBranch: null
+        })
+    } catch {
+        // An argument shape resolveArgs refuses is not a repair anyone can prove,
+        // and the action reports the refusal itself with better context.
+        return false
+    }
+    if (resolved.service === HUB_MODULE_NAME) return true
+    if (resolved.service !== 'all') return false
+
+    // `all` reaches the hub on exactly two verbs. `update all` folds the shared
+    // services in ahead of the coin stacks (moduleOperations
+    // includeSharedServicesForUpdate), and `uninstall --include-shared` asks for
+    // them by name. Everywhere else `all` expands to the coin stacks plus the
+    // explorer and never touches the hub container, so it must not buy the skip.
+    if (commandName === 'update') return true
+    if (commandName === 'uninstall') {
+        const opts = (actionCommand && typeof actionCommand.opts === 'function') ? actionCommand.opts() : {}
+        return opts.includeShared === true
+    }
+    return false
 }
 
 /**
@@ -266,7 +321,11 @@ async function parseCommand() {
                 // is a ref (`install regtest` names a network, not a branch). A
                 // command that names no ref, or an arg shape resolveArgs refuses,
                 // yields null and the previous default-branch behaviour.
-                refForPreCheck(commandName, actionCommand)
+                refForPreCheck(commandName, actionCommand),
+                // Whether this command could bring a crash-looping hub back, which
+                // is the only thing that lets preCheck's config push degrade to a
+                // warning instead of aborting the command that would fix the hub.
+                commandRepairsHub(commandName, actionCommand)
             )
         } finally {
             // Non-mutating commands hand the lock back as soon as provisioning is
@@ -900,7 +959,10 @@ Notes:
 // refForPreCheck is exported for its unit test: it decides which tree the hub is
 // built from, and the defect it fixes was invisible in every log until a deploy
 // line named the wrong branch.
-module.exports = { parseCommand, installUnhandledRejectionHandler, installUncaughtExceptionHandler, refForPreCheck, maybeSelfUpdateBeforeUpdate }
+// commandRepairsHub is exported for the same reason: it decides which commands
+// survive a hub that is not answering, and getting it wrong either wedges the
+// repair path again or silences a real hub failure.
+module.exports = { parseCommand, installUnhandledRejectionHandler, installUncaughtExceptionHandler, refForPreCheck, commandRepairsHub, maybeSelfUpdateBeforeUpdate }
 
 // Allow running this file directly (`node src/cli.js <cmd>`) as well as via the
 // bin entrypoint `src/index.js`. When cli.js is required as a module (index.js
