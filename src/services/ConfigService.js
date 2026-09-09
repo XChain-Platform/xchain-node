@@ -1531,8 +1531,15 @@ function filterCommandParameters(branch, modules, coins, networks) {
     const SHARED_SERVICES = [HUB_MODULE_NAME, EXPLORER_MODULE_NAME, DB_MODULE_NAME, SYNC_MODULE_NAME]
 
     if (modules === "all") {
-        modules = Object.values(XChainService).filter(m => m !== XChainService.XCHAIN_E2E_TEST)
-        modules.push(NODE_MODULE_NAME)
+        // The coin node leads the per-chain list so `install all` creates it
+        // before the services that poll it. With the node last, a mainnet
+        // install created the decoder four and a half hours before the node
+        // existed (a 151 GiB tracker restore sat between them); the decoder
+        // spent that time logging ENOTFOUND for a name the network did not
+        // carry yet, and the node's own initial sync, the slowest step on the
+        // box, had not even started. Every other command that expands `all`
+        // (update, start, stop, uninstall) tolerates either order.
+        modules = [NODE_MODULE_NAME, ...Object.values(XChainService).filter(m => m !== XChainService.XCHAIN_E2E_TEST)]
         addExplorer = true
     } else if (modules === "explorer") {
         addExplorer = true

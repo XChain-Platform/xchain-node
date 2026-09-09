@@ -131,7 +131,7 @@ function loadNodeService(stubs) {
             createDockerNetwork: sinon.stub().resolves(),
             forceRemoveContainerByName: stubs.forceRemoveContainerByName || sinon.stub().resolves(true),
             // Graceful stop of the previous daemon before the force-remove.
-            stopContainerByName: stubs.stopContainerByName || sinon.stub().resolves(true),
+            stopContainerByName: stubs.stopContainerByName || sinon.stub().resolves({ stopped: true, seconds: 1, killed: false }),
             // Mount-drift guard. Default: no previous container.
             getContainerBindMounts: stubs.getContainerBindMounts || sinon.stub().resolves([])
         },
@@ -852,7 +852,7 @@ describe('NodeService: buildCryptoNode()', function () {
             // restarts at its last flushed block index (16 regtest blocks lost
             // on the v0.21.5.6 litecoind rehearsal, 2026-09-03).
             const stubs = makeNodeServiceStubs()
-            stubs.stopContainerByName       = sinon.stub().resolves(true)
+            stubs.stopContainerByName       = sinon.stub().resolves({ stopped: true, seconds: 4, killed: false })
             stubs.forceRemoveContainerByName = sinon.stub().resolves(true)
             const args = await build(stubs, { envBlocksDir: null })
 
@@ -865,6 +865,68 @@ describe('NodeService: buildCryptoNode()', function () {
             const stopTimeoutIdx = args.indexOf('--stop-timeout')
             expect(stopTimeoutIdx).to.be.greaterThan(-1)
             expect(args[stopTimeoutIdx + 1]).to.equal(String(budget))
+        })
+
+        describe('stop budget and its outcome', function () {
+            // A mainnet bitcoind killed at the budget came back 17000 blocks
+            // lower and re-validated for four hours, and the update said nothing.
+            let savedEnv, logStub, warnStub
+            beforeEach(function () {
+                savedEnv = process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS
+                logStub  = sinon.stub(console, 'log')
+                warnStub = sinon.stub(console, 'warn')
+            })
+            afterEach(function () {
+                if (savedEnv === undefined) delete process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS
+                else process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS = savedEnv
+                logStub.restore()
+                warnStub.restore()
+            })
+
+            it('takes the budget from XCHAIN_NODE_STOP_TIMEOUT_SECONDS and stamps it on the new container', async function () {
+                process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS = '1800'
+                const stubs = makeNodeServiceStubs()
+                stubs.stopContainerByName = sinon.stub().resolves({ stopped: true, seconds: 900, killed: false })
+                const args = await build(stubs, { envBlocksDir: null })
+                expect(stubs.stopContainerByName.firstCall.args[1]).to.equal(1800)
+                expect(args[args.indexOf('--stop-timeout') + 1]).to.equal('1800')
+            })
+
+            it('falls back to the default on a value that is not a whole number of seconds, and says so', async function () {
+                process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS = 'ten minutes'
+                const stubs = makeNodeServiceStubs()
+                stubs.stopContainerByName = sinon.stub().resolves({ stopped: true, seconds: 1, killed: false })
+                await build(stubs, { envBlocksDir: null })
+                const ns = loadNodeService(stubs)
+                expect(stubs.stopContainerByName.firstCall.args[1]).to.equal(ns.DEFAULT_NODE_STOP_TIMEOUT_SECONDS)
+                expect(warnStub.args.some(a => /XCHAIN_NODE_STOP_TIMEOUT_SECONDS=ten minutes/.test(String(a[0])))).to.be.true
+            })
+
+            it('reports a clean stop with the time it took and the budget', async function () {
+                const stubs = makeNodeServiceStubs()
+                stubs.stopContainerByName = sinon.stub().resolves({ stopped: true, seconds: 42, killed: false })
+                await build(stubs, { envBlocksDir: null })
+                expect(logStub.args.some(a => /Stopped the bitcoin mainnet daemon cleanly in 42 s \(budget 600 s\)/.test(String(a[0])))).to.be.true
+                expect(warnStub.args.some(a => /killed/.test(String(a[0])))).to.be.false
+            })
+
+            it('warns when the daemon ran out of budget and was killed, naming the override', async function () {
+                const stubs = makeNodeServiceStubs()
+                stubs.stopContainerByName = sinon.stub().resolves({ stopped: true, seconds: 600, killed: true })
+                await build(stubs, { envBlocksDir: null })
+                const warning = warnStub.args.map(a => String(a[0])).find(l => /was killed/.test(l))
+                expect(warning).to.match(/did not exit within the 600 s budget/)
+                expect(warning).to.match(/re-validate/)
+                expect(warning).to.match(/XCHAIN_NODE_STOP_TIMEOUT_SECONDS/)
+            })
+
+            it('says nothing about the stop when there was no previous daemon', async function () {
+                const stubs = makeNodeServiceStubs()
+                stubs.stopContainerByName = sinon.stub().resolves({ stopped: false, seconds: 0, killed: false })
+                await build(stubs, { envBlocksDir: null })
+                expect(logStub.args.some(a => /daemon cleanly/.test(String(a[0])))).to.be.false
+                expect(warnStub.args.some(a => /was killed/.test(String(a[0])))).to.be.false
+            })
         })
 
         it('treats an existing symlink at the blocks host path as provisioned (no mkdir)', async function () {
