@@ -738,8 +738,14 @@ async function getDefaultConfig(module, coin, network) {
                 // HUB_SYNC_PRICE_GRACE_S / HUB_SYNC_ORACLE_GRACE_S are the pair the regtest mirror wedge already
                 // requires be set to 0 alongside it. A host env value always wins over the
                 // regtest default so an e2e drill can still exercise a nonzero grace.
+                // HUB_SYNC_MATCH_GRACE_S is the fourth: the cross-chain match barrier holds
+                // every block up to 60s while the DOGE match mirror's watermark is frozen,
+                // which on a three-rail regtest venue idle for hours is every block, and
+                // an SDK drive's 120s index wait dies on the second one (measured
+                // 2026-09-09; hub_db_sync.js reads it through the same resolveWatermarkGrace).
                 const hubSyncRegtestGraceVars = [
-                    "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S"
+                    "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S",
+                    "HUB_SYNC_MATCH_GRACE_S"
                 ]
                 for (const varName of hubSyncRegtestGraceVars) {
                     defaultValues[varName] = (process.env[varName] !== undefined && process.env[varName] !== "")

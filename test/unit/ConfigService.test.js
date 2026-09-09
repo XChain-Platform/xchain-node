@@ -952,7 +952,8 @@ describe('ConfigService', function () {
             // failure the regtest mirror wedge records).
             describe('regtest mirror arming', function () {
                 const GRACE_VARS = [
-                    'HUB_SYNC_PRICE_GRACE_S', 'HUB_SYNC_ORACLE_GRACE_S', 'HUB_SYNC_ATTEST_RESPONSE_GRACE_S'
+                    'HUB_SYNC_PRICE_GRACE_S', 'HUB_SYNC_ORACLE_GRACE_S', 'HUB_SYNC_ATTEST_RESPONSE_GRACE_S',
+                    'HUB_SYNC_MATCH_GRACE_S'
                 ]
                 let saved
                 beforeEach(function () {
