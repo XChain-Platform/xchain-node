@@ -348,6 +348,68 @@ async function applyHubApiKeyFromSidecar(target) {
     if (key) target["HUB_API_KEY"] = key
 }
 
+// A command composes the shared hub's config many times, so each deploy-time warning
+// about it is said once per process rather than once per composition.
+const warnedHubConfigKeys = new Set()
+function warnHubConfigOnce(key, message) {
+    if (warnedHubConfigKeys.has(key)) return
+    warnedHubConfigKeys.add(key)
+    console.warn(message)
+}
+
+// The coin/network stacks this deployment runs, from the module registry. Returns []
+// when the registry is unreadable (no pool yet), which the callers treat as "unknown"
+// rather than "none".
+async function getRegisteredCoinStacks() {
+    try {
+        const { db } = require('../state')
+        const rows = await db.getAllModuleContainers(null, null)
+        return (rows || []).filter(r => r && r.coin && r.network
+            && Object.values(Coin).includes(r.coin) && Object.values(Network).includes(r.network))
+    } catch {
+        return []
+    }
+}
+
+// The coin and network tokens of the command being run. A first install registers no
+// coin stack until AFTER preCheck has deployed the shared hub, so the operator's own
+// arguments are the only source the hub's env can be composed from on a fresh host.
+function getCommandCoinsAndNetworks() {
+    const argv = process.argv.slice(2)
+    return {
+        coins:    [...new Set(argv.filter(t => Object.values(Coin).includes(t)))],
+        networks: [...new Set(argv.filter(t => Object.values(Network).includes(t)))]
+    }
+}
+
+// The network a standalone hub should declare: the one every stack of this deployment
+// runs on. Ambiguous (several networks, or none named) leaves it unset, because one
+// hub declaring the wrong network mis-gates the ingest rules it is being set for.
+async function resolveDeploymentHubNetwork() {
+    const registered = new Set((await getRegisteredCoinStacks()).map(r => r.network))
+    const networks = registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
+    if (networks.size === 1) return [...networks][0]
+    if (networks.size > 1) {
+        warnHubConfigOnce("HUB_NETWORK_AMBIGUOUS",
+            "WARNING: HUB_NETWORK is not set and this deployment runs stacks on " +
+            [...networks].sort().join(", ") + ", so the shared hub cannot derive one network. " +
+            "Its network-keyed ingest gates (PRICE batch validation) stay closed until " +
+            "HUB_NETWORK is set in the host env.")
+    }
+    return null
+}
+
+// Whether this deployment runs a BTC indexer for `network`, counting the one the
+// running command is installing right now: the hub is deployed before it exists, and
+// the composed URL names the container that install creates.
+async function hasBitcoinIndexer(network) {
+    const registered = await getRegisteredCoinStacks()
+    if (registered.some(r => r.coin === Coin.BITCOIN && r.network === network
+        && r.module === XChainService.XCHAIN_INDEXER)) return true
+    const command = getCommandCoinsAndNetworks()
+    return command.coins.includes(Coin.BITCOIN) && command.networks.includes(network)
+}
+
 async function getDefaultConfig(module, coin, network) {
     let defaultValues = null
 
@@ -980,7 +1042,8 @@ async function getDefaultConfig(module, coin, network) {
         // anchor (hub.getlatestblock). Sourced from host env so a hub NOT co-located with
         // a BTC indexer (e.g. the master hub box, where the BTC stack lives elsewhere) can
         // point at a reachable indexer. Empty default ⇒ the hub falls back to its configs
-        // table, so co-located standalone/validator installs are unaffected.
+        // table, so co-located standalone/validator installs are unaffected. Left empty
+        // here, it is composed from the co-located BTC indexer further down.
         defaultValues["BTC_INDEXER_API_URL"]      = process.env.BTC_INDEXER_API_URL || ""
 
         // State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a
@@ -1188,6 +1251,32 @@ async function getDefaultConfig(module, coin, network) {
                 "write surface (HUB_ALLOW_UNAUTHENTICATED=true). Anyone who can reach the hub port can drive " +
                 "updateconfig / registervalidator / reportreorg. Set HUB_API_KEY in the host env before " +
                 "exposing this hub beyond a trusted network.")
+        }
+
+        // A hub with no HUB_NETWORK resolves its network to '', which fails every
+        // network-keyed ingest gate closed, so a non-validator install can never
+        // validate an on-chain PRICE batch. Host env still wins; unresolved stays unset.
+        if (!defaultValues["HUB_NETWORK"]) {
+            const deploymentNetwork = await resolveDeploymentHubNetwork()
+            if (deploymentNetwork) defaultValues["HUB_NETWORK"] = deploymentNetwork
+        }
+
+        // Capability snapshots are read off a BTC indexer, and with none reachable the
+        // hub refuses every on-chain PRICE batch for insufficient signer stake. Compose
+        // the co-located one; say so when this deployment has none to compose.
+        if (!defaultValues["BTC_INDEXER_API_URL"] && defaultValues["HUB_NETWORK"]) {
+            const btcNetwork = String(defaultValues["HUB_NETWORK"]).toLowerCase()
+            if (await hasBitcoinIndexer(btcNetwork)) {
+                defaultValues["BTC_INDEXER_API_URL"] = "http://" +
+                    getDockerContainerImageName(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, btcNetwork) + ":3004"
+            } else {
+                warnHubConfigOnce("BTC_INDEXER_MISSING",
+                    "WARNING: this hub has no BTC indexer (BTC_INDEXER_API_URL is not set in the " +
+                    "host env and this deployment runs no bitcoin " + btcNetwork + " stack), so it cannot read " +
+                    "capability snapshots: every on-chain PRICE batch its indexer parses is recorded invalid " +
+                    "for insufficient signer stake. Install a bitcoin " + btcNetwork + " stack, or set " +
+                    "BTC_INDEXER_API_URL to a reachable BTC indexer.")
+            }
         }
 
         // Operator signer for the on-chain DOGE publishers: when the host sets
