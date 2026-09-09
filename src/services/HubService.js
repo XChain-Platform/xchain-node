@@ -309,14 +309,33 @@ async function attachSharedContainer(moduleLabel, containerId, installedCoinsAnd
     }
 }
 
-async function updateHub() {
+// Does the hub answer right now? One request, no retries, no restart attempt.
+//
+// A container that is crash-looping is registered, has an id and reports a
+// status, so every check that reads docker state calls it installed; only a
+// request to its API tells the truth. Callers use this to decide whether the
+// config push below is worth attempting at all, so it must stay cheap: the
+// push itself already spends ten attempts three seconds apart on a hub that is
+// down, which is the delay this is meant to avoid paying twice.
+async function isHubAnswering() {
+    const defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
+    const hubConnector  = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
+    return await hubConnector.ping()
+}
+
+// `skipConfigPush` attaches the shared containers to every coin network but
+// leaves the hub's own config untouched. The attach is a docker operation and
+// works against a container that is not serving; the push is an HTTP call that
+// cannot. Set by a caller that already knows the hub is down and has decided
+// the command may proceed anyway (see preCheck).
+async function updateHub({ skipConfigPush = false } = {}) {
     const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
     const hubContainerId = await db.getModuleContainer(HUB_MODULE_NAME, "", "")
     const failures = []
 
     if (hubContainerId) {
         await attachSharedContainer("xchain-hub", hubContainerId, installedCoinsAndNetworks, failures)
-        await updateHubOrExplorer(HUB_MODULE_NAME)
+        if (!skipConfigPush) await updateHubOrExplorer(HUB_MODULE_NAME)
     }
 
     // Connect xchain-sync container to all chain/network Docker networks (same pattern as hub)
@@ -463,6 +482,7 @@ async function installHubFromResolvedRef(branch, defaultConfig, hubConnector) {
 module.exports = {
     updateHubOrExplorer,
     updateHub,
+    isHubAnswering,
     installHubModule,
     // Exported for the unit suite: the self_sync/hub_url pairing is the whole
     // point of this block and must be pinned without booting a docker install.

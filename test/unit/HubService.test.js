@@ -80,6 +80,96 @@ describe('HubService.updateHub network attachment', function () {
     })
 })
 
+// A hub that is crash-looping answers nothing, so the config push spends ten
+// attempts on connection refusals and then aborts whatever command asked for it.
+// `skipConfigPush` lets a caller that has already established the hub is down
+// keep the half that still works: the shared containers are attached to their
+// coin networks (a docker operation, which does not need the hub serving) while
+// the HTTP push, which cannot succeed, is not attempted at all.
+describe('HubService.updateHub skipConfigPush', function () {
+
+    // A hub row IS present here, unlike the attachment harness above, so the
+    // config push is genuinely on the path. isStatusUpdated false makes
+    // updateHubOrExplorer throw the moment it is entered, which is what tells
+    // these two cases apart.
+    function loadWithHubRow() {
+        const getModuleContainer = sinon.stub()
+        getModuleContainer.withArgs(HUB_MODULE_NAME,  '', '').resolves('hub1234hub1234')
+        getModuleContainer.withArgs(SYNC_MODULE_NAME, '', '').resolves(null)
+        const attach = sinon.stub().resolves(true)
+
+        const svc = proxyquire('../../src/services/HubService', {
+            '../state': {
+                db: { getModuleContainer },
+                isStatusUpdated: () => false,
+                getLastStatus:   () => ({}),
+                isVerbose:       () => false
+            },
+            './StatusService': {
+                getInstalledCoinsAndNetworks: async () => ({ bitcoin: ['regtest'] }),
+                getStatus: async () => {}
+            },
+            './DockerService':  { addContainerToNetwork: attach },
+            './ConfigService':  { getDefaultConfig: async () => ({ HUB_PORT: 10000 }) },
+            '../utils/helpers': { sleep: async () => {} }
+        })
+        return { svc, attach }
+    }
+
+    it('attaches the shared containers but never reaches the config push', async function () {
+        const { svc, attach } = loadWithHubRow()
+        expect(await svc.updateHub({ skipConfigPush: true })).to.be.true
+        sinon.assert.calledWith(attach, 'hub1234hub1234', 'xchain-node-bitcoin-regtest')
+    })
+
+    it('pushes as it always has when not told to skip', async function () {
+        const { svc } = loadWithHubRow()
+        let threw = null
+        try {
+            await svc.updateHub({ skipConfigPush: false })
+        } catch (err) { threw = err }
+        expect(String(threw)).to.contain('The status is not updated')
+    })
+
+    it('defaults to pushing, so no existing caller changes behaviour', async function () {
+        const { svc } = loadWithHubRow()
+        let threw = null
+        try {
+            await svc.updateHub()
+        } catch (err) { threw = err }
+        expect(String(threw)).to.contain('The status is not updated')
+    })
+})
+
+// Only a request to the hub's API can tell a crash-looping container from a
+// healthy one: it is registered, has an id and reports a docker status either way.
+describe('HubService.isHubAnswering', function () {
+
+    function loadWithPing(ping) {
+        return proxyquire('../../src/services/HubService', {
+            './ConfigService': { getDefaultConfig: async () => ({ HUB_PORT: 10000 }) },
+            '../HubConnector.js': class { constructor() { this.ping = ping } }
+        })
+    }
+
+    it('is true when the hub answers a ping', async function () {
+        const svc = loadWithPing(sinon.stub().resolves(true))
+        expect(await svc.isHubAnswering()).to.be.true
+    })
+
+    it('is false when nothing answers', async function () {
+        const svc = loadWithPing(sinon.stub().resolves(false))
+        expect(await svc.isHubAnswering()).to.be.false
+    })
+
+    it('asks once, with no retry loop of its own', async function () {
+        const ping = sinon.stub().resolves(false)
+        const svc = loadWithPing(ping)
+        await svc.isHubAnswering()
+        expect(ping.callCount).to.equal(1)
+    })
+})
+
 // The self_sync flag and the hub URL the explorer's mirror writer follows ship
 // together, from one condition. Delivered by separate conditions (this block over
 // the hub config push, HUB_API_URL as a container env written at install time), an

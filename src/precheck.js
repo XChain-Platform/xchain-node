@@ -25,7 +25,7 @@ const { checkDockerInstalledAndReachable, createDockerNetwork, checkContainerdDa
 const { getDockerNetwork, applyHubApiKeyFromSidecar } = require('./services/ConfigService')
 const { checkAllRemoteVersions }       = require('./services/VersionService')
 const { getStatus }                    = require('./services/StatusService')
-const { installHubModule, updateHub }  = require('./services/HubService')
+const { installHubModule, updateHub, isHubAnswering } = require('./services/HubService')
 const { updateExplorer }               = require('./services/ExplorerService')
 const { buildDatabaseModule, ensureXchainNodeAccess, getDatabaseHostPort, getExternalDbConfig } = require('./services/DatabaseService')
 const { scanAndRegisterModules }       = require('./services/DiscoveryService')
@@ -37,12 +37,37 @@ function createDirectories() {
     if (!fs.existsSync(containersFilesDir))  fs.mkdirSync(containersFilesDir)
 }
 
+// The command about to run cannot be reached until the hub answers, so a hub
+// that is down blocks the very command that would bring it back. Ask once,
+// cheaply, whether it is answering. A guard, not a probe: a HubService without
+// this export (an older stub) reports "answering" and preCheck behaves exactly
+// as it did before, and any failure to even ask counts as not answering,
+// because the config push that follows would fail the same way.
+async function hubAnswersNow() {
+    try {
+        if (typeof isHubAnswering !== 'function') return true
+        return await isHubAnswering()
+    } catch {
+        return false
+    }
+}
+
+// The one line an operator needs when the hub is down and their command was not
+// one that could fix it. Named here so the abort and the warning cannot drift.
+const HUB_REPAIR_HINT =
+    "Repair it with `xchain-node update xchain-hub` (or `xchain-node recreate xchain-hub`); " +
+    "those run even while the hub is down. `docker logs` on the hub container says why it is not starting."
+
 // `moduleRef` is the ref the command being prechecked named (`install <ref> ...`,
 // `update <ref> ...`), or null. It exists solely so the hub provisioned here is
 // staged at the ref the operator asked for: preCheck runs ahead of the action, so
 // without it the one module installed from this file is also the one module no
 // `install <ref>` could influence. See installHubModule.
-async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null) {
+//
+// `repairsHub` says the command about to run rebuilds, recreates, updates or
+// removes the hub container (cli.js commandRepairsHub decides). It only ever
+// relaxes the config push below, and only while the hub is not answering.
+async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false) {
     try {
         if (isVerbose()) console.log("Checking if Docker is installed")
         await checkDockerInstalledAndReachable()
@@ -196,13 +221,37 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     // skip the explorer push would strand a second service on stale config for
     // a fault that has nothing to do with it. The first error is still what the
     // operator sees, and the command still fails.
+    //
+    // A hub that is crash-looping (a rebuild that left it holding the wrong
+    // database password is the usual way in) answers nothing, so the push spends
+    // ten attempts on connection refusals and then aborts the command. It aborted
+    // EVERY command, including the ones that rebuild the hub and end the crash
+    // loop, which left deleting the container by hand as the only way out. So a
+    // command that can repair the hub is let through on a warning while the hub
+    // is not answering: the push is skipped rather than retried, the shared
+    // containers are still attached to their coin networks (a docker operation,
+    // which works on a container that is not serving), and the repair runs. This
+    // never relaxes anything for a hub that IS answering, and a command that
+    // cannot repair one still fails, now naming the command that can.
     if (syncHubConfig) {
+        const hubAnswering = await hubAnswersNow()
+        const skipHubPush  = !hubAnswering && repairsHub
+
         let firstErr = null
-        try { await updateHub() }      catch (err) { firstErr = err }
+        try { await updateHub({ skipConfigPush: skipHubPush }) } catch (err) { firstErr = err }
         try { await updateExplorer() } catch (err) { if (!firstErr) firstErr = err }
+
+        if (skipHubPush) {
+            console.log("Warning: the xchain-hub is not answering, so its config push was skipped. " +
+                "This command can repair the hub, so it continues; the next command that runs against a " +
+                "healthy hub pushes the config.")
+            if (firstErr) console.log(redactSecrets(firstErr))
+            return true
+        }
         if (firstErr) {
             console.log(redactSecrets(firstErr))
-            throw new Error("There was an error trying to update the hub module")
+            throw new Error("There was an error trying to update the hub module" +
+                (hubAnswering ? "" : ". The xchain-hub is not answering. " + HUB_REPAIR_HINT))
         }
     }
 
