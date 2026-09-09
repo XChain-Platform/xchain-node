@@ -321,16 +321,33 @@ async function stopContainer(containerId) {
 
 // Graceful stop by NAME with an explicit shutdown budget, for stateful
 // containers (chain daemons) that must flush before they go. SIGTERM first;
-// docker escalates to SIGKILL only after `timeoutSeconds`. Resolves true when
-// docker reports the stop, false otherwise (already gone, never existed, or
-// daemon unreachable): the caller's subsequent force-remove/run surfaces any
-// real error, so a missing container is not a failure here.
+// docker escalates to SIGKILL only after `timeoutSeconds`. Resolves
+// { stopped, seconds, killed }: `stopped` false when docker did not report
+// the stop (already gone, never existed, or daemon unreachable), which the
+// caller's subsequent force-remove/run surfaces, so a missing container is
+// not a failure here. `killed` is the part the caller must not stay silent
+// about: `docker stop` exits 0 whether the process left on SIGTERM or was
+// killed at the budget, and a killed chain daemon comes back at its last
+// flushed state and re-validates for hours. It is read from the container's
+// exit code after the stop (SIGKILL reports 137), with the elapsed time as a
+// second witness for a docker that does not answer the inspect.
 async function stopContainerByName(name, timeoutSeconds) {
-    return new Promise((resolve) => {
+    const startedAt = Date.now()
+    const stopped = await new Promise((resolve) => {
         execFile('docker', ['stop', '-t', String(timeoutSeconds), name], (error, stdout) => {
             resolve(!error && stdout.trim() === name)
         })
     })
+    const seconds = Math.round((Date.now() - startedAt) / 1000)
+    if (!stopped) return { stopped: false, seconds, killed: false }
+    const exitCode = await new Promise((resolve) => {
+        execFile('docker', ['inspect', '--format', '{{.State.ExitCode}}', name], (error, stdout) => {
+            const code = parseInt(String(stdout || '').trim(), 10)
+            resolve(error || !Number.isFinite(code) ? null : code)
+        })
+    })
+    const killed = exitCode === 137 || (exitCode === null && seconds >= timeoutSeconds)
+    return { stopped: true, seconds, killed }
 }
 
 async function startContainer(containerId) {

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `XCHAIN_NODE_STOP_TIMEOUT_SECONDS` sets the flush budget a coin node daemon gets before docker kills it on update and as the container's own stop timeout; the update prints how long the daemon took to stop and warns when it ran out of budget and was killed.
+- `ps` marks a decoder or tracker whose coin node is not answering as NODE UNREACHABLE, with how long it has been since the node last answered, separately from WAITING FOR NODE.
+
+### Changed
+- `install all` creates the coin node before the services that poll it, so a slow host no longer runs a decoder for hours against a node that does not exist yet.
+
+### Fixed
+- A bootstrap restore now removes `latest.tgz` and its `.sig` from the bootstrap volume once the restore succeeds or is refused for a behind node, instead of leaving a multi-gigabyte archive on disk forever; a failed restore still keeps it for diagnosis.
+
 ## [0.16.2] - 2026-09-09
 
 ### Changed

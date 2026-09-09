@@ -1780,6 +1780,16 @@ describe('ConfigService', function () {
             expect(modules).to.include('node')
         })
 
+        it('lists the coin node before every service under "all", so install creates it first', function () {
+            // Regression: with the node last, a mainnet install created the decoder
+            // hours before the node existed and it logged ENOTFOUND the whole time.
+            for (const network of ['mainnet', 'testnet', 'regtest']) {
+                const modules = filterCommandParameters(null, 'all', 'bitcoin', network)['bitcoin'][network]
+                expect(modules[0]).to.equal('node')
+                expect(modules.filter(m => m === 'node')).to.have.length(1)
+            }
+        })
+
         it('filters regtest-only modules from mainnet', function () {
             const result = filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
             const modules = result['bitcoin']['mainnet']

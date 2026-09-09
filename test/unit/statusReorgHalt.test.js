@@ -25,7 +25,61 @@ const StatusService = proxyquire('../../src/services/StatusService', {
         getLocalModuleVersion: async () => '0', getContainerModuleVersion: async () => '0'
     }
 })
-const { reduceDecoderReorgHalt, describeReorgHaltNote, reduceNodeCatchingUp, describeNodeCatchingUpNote } = StatusService
+const { reduceDecoderReorgHalt, describeReorgHaltNote, reduceNodeCatchingUp, describeNodeCatchingUpNote,
+        reduceNodeUnreachable, describeNodeUnreachableNote, describeDuration } = StatusService
+
+// The same surface carries `node_unreachable` while the service's most recent
+// call to its coin node failed. A decoder on a Pi sat five and a half days with
+// 2099 timeouts and not one answer, restart count 0, "Up 4 days (healthy)":
+// the healthcheck is right not to fail (a restart fixes nothing), so this is
+// the only place an operator sees it, and it must not read as the IBD wait.
+describe('ps: NODE UNREACHABLE surface', function () {
+
+    it('reduces an unreachable payload to since, the last answer and the duration', function () {
+        const r = reduceNodeUnreachable({ status: 'healthy', node_last_ok_at: null,
+            node_unreachable: { since: '2026-09-01T16:47:00Z', last_ok_at: null, seconds: 476400 } })
+        expect(r).to.deep.equal({ since: '2026-09-01T16:47:00Z', last_ok_at: null, seconds: 476400 })
+        const after = reduceNodeUnreachable({ node_unreachable: { since: '2026-09-07T06:29:07Z', last_ok_at: '2026-09-07T06:29:07Z', seconds: 90.7 } })
+        expect(after).to.deep.equal({ since: '2026-09-07T06:29:07Z', last_ok_at: '2026-09-07T06:29:07Z', seconds: 90 })
+    })
+
+    it('reads null, an absent field, an older image and a malformed object as reachable', function () {
+        expect(reduceNodeUnreachable({ status: 'healthy', node_unreachable: null })).to.equal(null)
+        expect(reduceNodeUnreachable({ status: 'healthy' })).to.equal(null)
+        expect(reduceNodeUnreachable({ node_unreachable: true })).to.equal(null)
+        expect(reduceNodeUnreachable({ node_unreachable: { seconds: 5 } })).to.equal(null)
+        expect(reduceNodeUnreachable(null)).to.equal(null)
+    })
+
+    it('tolerates a missing or negative duration', function () {
+        expect(reduceNodeUnreachable({ node_unreachable: { since: 'x' } }).seconds).to.equal(null)
+        expect(reduceNodeUnreachable({ node_unreachable: { since: 'x', seconds: -1 } }).seconds).to.equal(null)
+    })
+
+    it('renders durations the way an operator scans them', function () {
+        expect(describeDuration(45)).to.equal('45s')
+        expect(describeDuration(125)).to.equal('2m')
+        expect(describeDuration(7500)).to.equal('2h 05m')
+        expect(describeDuration(476400)).to.equal('5d 12h')
+        expect(describeDuration(null)).to.equal(null)
+    })
+
+    it('the note says never answered, for how long, that it is not the IBD wait, and where to look', function () {
+        const note = describeNodeUnreachableNote('bitcoin', 'mainnet', 'xchain-decoder',
+            { since: '2026-09-01T16:47:00Z', last_ok_at: null, seconds: 476400 })
+        expect(note).to.match(/^bitcoin\/mainnet xchain-decoder cannot reach its coin node \(5d 12h, since 2026-09-01T16:47:00Z\)/)
+        expect(note).to.match(/NEVER had an answer/)
+        expect(note).to.match(/not the initial-block-download wait/)
+        expect(note).to.match(/bitcoin mainnet node container is running and answering RPC/)
+    })
+
+    it('the note names the last answer when there was one', function () {
+        const note = describeNodeUnreachableNote('dogecoin', 'mainnet', 'xchain-utxo-tracker',
+            { since: '2026-09-07T06:29:07Z', last_ok_at: '2026-09-07T06:29:07Z', seconds: 90 })
+        expect(note).to.match(/last answer was at 2026-09-07T06:29:07Z/)
+        expect(note).to.not.match(/NEVER/)
+    })
+})
 
 // The same surface carries `node_catching_up` while a decoder or tracker waits
 // out a coin node still in initial block download below its own tip (a
