@@ -738,14 +738,18 @@ async function getDefaultConfig(module, coin, network) {
                 // HUB_SYNC_PRICE_GRACE_S / HUB_SYNC_ORACLE_GRACE_S are the pair the regtest mirror wedge already
                 // requires be set to 0 alongside it. A host env value always wins over the
                 // regtest default so an e2e drill can still exercise a nonzero grace.
-                // HUB_SYNC_MATCH_GRACE_S is the fourth: the cross-chain match barrier holds
-                // every block up to 60s while the DOGE match mirror's watermark is frozen,
-                // which on a three-rail regtest venue idle for hours is every block, and
-                // an SDK drive's 120s index wait dies on the second one (measured
-                // 2026-09-09; hub_db_sync.js reads it through the same resolveWatermarkGrace).
+                // The list is EVERY watermark grace hub_db_sync.js resolves, not the three
+                // that first wedged: each mirrored table has its own barrier, and any one
+                // left at its frozen default holds every block up to 60s while that
+                // table's mirror watermark stands still, which on a three-rail regtest
+                // venue idle for hours is every block; an SDK drive's 120s index wait
+                // then dies on the second block. Measured 2026-09-09 on the match
+                // barrier, then again on the anchor-reward attestation barrier once
+                // match was cleared (hub_db_sync.js reads all of them through
+                // resolveWatermarkGrace, regtest-overridable only).
                 const hubSyncRegtestGraceVars = [
                     "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S",
-                    "HUB_SYNC_MATCH_GRACE_S"
+                    "HUB_SYNC_MATCH_GRACE_S", "HUB_SYNC_CALL_GRACE_S", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S"
                 ]
                 for (const varName of hubSyncRegtestGraceVars) {
                     defaultValues[varName] = (process.env[varName] !== undefined && process.env[varName] !== "")
