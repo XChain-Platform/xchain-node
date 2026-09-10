@@ -46,8 +46,8 @@ const { makeBootstrap, listServedBootstrapCombos } = require('./services/Bootstr
 const { listRepublishDue } = require('./services/BootstrapRepublishLedger')
 const { initValidator, getValidatorSettings, isInitialized, getCapabilityConfigHostPath,
         readWallets, publicWalletInfo, getSignerMountDir, COIN_NETWORKS, WALLETS_FILE,
- getRollcallStatus, capabilityDriftReport, capabilityDriftExitCode,
- formatCapabilityDrift } = require('./services/ValidatorService')
+        getRollcallStatus, capabilityDriftReport, capabilityDriftExitCode,
+        formatCapabilityDrift } = require('./services/ValidatorService')
 const { stakeValidator, unstakeValidator } = require('./services/ValidatorStakeService')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 const { acquireCommandLock } = require('./utils/commandLock')
@@ -947,34 +947,34 @@ Notes:
                 }
                 console.log('')
                 console.log('  On-chain membership: xchain-node validator stake   (dry run shows balances and the stake)')
- console.log(' Capability drift : xchain-node validator drift (compares this against the indexer)')
+                console.log('  Capability drift   : xchain-node validator drift   (compares this against the indexer)')
             }
             return process.exit(0)
         })
 
- // The probe half of the mispointed-config-dir defect: what this host RESOLVES
- // as its capability set against what the indexer ANSWERS for the same key.
- // Exits 1 on drift and 2 when the comparison could not be made, so a deploy
- // check can branch on it rather than parse the text.
- validator
- .command('drift')
- .description('Compare this host\'s resolved capability set against the indexer\'s validator sets')
- .option('--pubkey <hex>', 'identity to look up when this host has none (a mispointed config dir resolves standalone)')
- .option('--network <name>', 'network to query: testnet or mainnet (default: this host\'s recorded network)')
- .option('--block <index>', 'settle membership at this block instead of the indexer\'s tip')
- .action(async (opts) => {
- let report
- try {
- report = await capabilityDriftReport(
- { expectPubkey: opts.pubkey, network: opts.network },
- opts.block === undefined ? {} : { blockIndex: Number(opts.block) })
- } catch (e) {
- console.error('\nERROR: ' + e.message + '\n')
- return process.exit(2)
- }
- for (const line of formatCapabilityDrift(report)) console.log(line)
- return process.exit(capabilityDriftExitCode(report))
- })
+    // The probe half of the mispointed-config-dir defect: what this host RESOLVES
+    // as its capability set against what the indexer ANSWERS for the same key.
+    // Exits 1 on drift and 2 when the comparison could not be made, so a deploy
+    // check can branch on it rather than parse the text.
+    validator
+        .command('drift')
+        .description('Compare this host\'s resolved capability set against the indexer\'s validator sets')
+        .option('--pubkey <hex>',    'identity to look up when this host has none (a mispointed config dir resolves standalone)')
+        .option('--network <name>',  'network to query: testnet or mainnet (default: this host\'s recorded network)')
+        .option('--block <index>',   'settle membership at this block instead of the indexer\'s tip')
+        .action(async (opts) => {
+            let report
+            try {
+                report = await capabilityDriftReport(
+                    { expectPubkey: opts.pubkey, network: opts.network },
+                    opts.block === undefined ? {} : { blockIndex: Number(opts.block) })
+            } catch (e) {
+                console.error('\nERROR: ' + e.message + '\n')
+                return process.exit(2)
+            }
+            for (const line of formatCapabilityDrift(report)) console.log(line)
+            return process.exit(capabilityDriftExitCode(report))
+        })
 
     program.parse(process.argv)
 }

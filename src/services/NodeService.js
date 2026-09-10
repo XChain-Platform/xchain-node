@@ -289,7 +289,7 @@ function daemonSupportsBlocksdir(coin) {
 function nodeNetworkSubdir(coin, network) {
     if (network === 'mainnet') return ''
     if (network === 'regtest') return '/regtest'
- return coin === 'dogecoin' ? '/testnet3' : '/testnet4'
+    return coin === 'dogecoin' ? '/testnet3' : '/testnet4'
 }
 
 // Resolve the relocated-blocks root. The env var wins and, when present, is
