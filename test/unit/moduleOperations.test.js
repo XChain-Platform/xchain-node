@@ -46,6 +46,7 @@ function makeStubs() {
         // POSITIVE 'gone', so this default preserves pre-guard behaviour.
         probeContainerPresenceByName: sinon.stub().resolves('exists'),
         stopContainer: sinon.stub().resolves(true),
+        stopContainerByName: sinon.stub().resolves({ stopped: true, seconds: 1, killed: false }),
         startContainer: sinon.stub().resolves(true),
         restartContainer: sinon.stub().resolves(true),
         execContainer: sinon.stub().resolves('exec-output'),
@@ -130,6 +131,7 @@ function loadOperations(stubs, constantsOverrides = null) {
             forceRemoveContainerByName: stubs.forceRemoveContainerByName,
             probeContainerPresenceByName: stubs.probeContainerPresenceByName,
             stopContainer: stubs.stopContainer,
+            stopContainerByName: stubs.stopContainerByName,
             startContainer: stubs.startContainer,
             restartContainer: stubs.restartContainer,
             execContainer: stubs.execContainer,
@@ -814,11 +816,12 @@ describe('moduleOperations', function () {
 
     describe('stopModules()', function () {
 
-        it('looks up container ID and calls stopContainer', async function () {
+        it('looks up the container id and stops it with the service budget, not a bare docker stop', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(stubs.stopContainer.calledWith('container-id-123')).to.be.true
+            expect(stubs.stopContainerByName.calledWith('container-id-123', 30)).to.be.true
+            expect(stubs.stopContainer.called).to.be.false
         })
     })
 
