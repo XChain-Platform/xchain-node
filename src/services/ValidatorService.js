@@ -949,6 +949,253 @@ function validatorModeReport() {
     return { mode: 'standalone', dir: VALIDATOR_DIR, missing: [SETTINGS_FILE, KEY_FILE] }
 }
 
+/* ------------------------------------------------------------------
+ * Capability-drift probe
+ *
+ * What this host RESOLVES as its capability set, against what the indexer
+ * ANSWERS for the same identity. The two are independent: the resolved set
+ * comes from validator.json plus DISABLED_CAPABILITIES in capabilities.json,
+ * while membership is a chain fact only getcapabilityvalidators can settle.
+ * A hub's own effector flags (getanchorstatus active) answer neither question.
+ *
+ * The pairing this exists for: a mispointed config dir resolves standalone
+ * while the staked identity is still in every set on chain, and nothing on the
+ * host contradicts the standalone reading. Handing an expected pubkey in gives
+ * the probe an identity to look up when the directory that held it is gone.
+ * ------------------------------------------------------------------ */
+
+// Capabilities an operator opts into. full_node is deliberately absent: it is a
+// possession-proof tier rather than an opt-in capability, so it is never part of
+// a resolved set and its absence from one is not drift.
+const DRIFT_CAPABILITIES = ['price', 'cross_chain', 'oracle_publish', 'attestation']
+
+// validator.json as written, regardless of enabled/initialized state.
+// getValidatorSettings() answers null for a disabled or half-present install,
+// and both of those still carry the pubkey the indexer is asked about.
+function readSettingsRaw() {
+ try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) } catch { return null }
+}
+
+// Capabilities this host would actually serve: the ones init recorded, minus
+// the ones capabilities.json opts back out of. That file is the hub's own
+// authority, so a capability disabled there is not expected in any set.
+function resolvedCapabilitySet() {
+ const report = validatorModeReport()
+ const settings = report.mode === 'standalone' ? null : readSettingsRaw()
+ let disabled = []
+ try {
+ const caps = JSON.parse(fs.readFileSync(CAPS_FILE, 'utf8'))
+ if (caps && Array.isArray(caps.DISABLED_CAPABILITIES)) disabled = caps.DISABLED_CAPABILITIES
+ } catch { /* no capability config: nothing is opted out */ }
+ const declared = (settings && Array.isArray(settings.capabilities)) ? settings.capabilities : []
+ return {
+ mode: report.mode,
+ dir: report.dir,
+ missing: report.missing,
+ pubkey: (settings && settings.pubkey) || null,
+ network: (settings && settings.network) || null,
+ capabilities: declared.filter(c => !disabled.includes(c)),
+ disabled
+ }
+}
+
+function samePubkey(a, b) {
+ return typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
+}
+
+/**
+ * Ask the indexer which capability sets a pubkey is in at the indexed tip.
+ *
+ * Degrades to an `unavailable` shape per capability rather than throwing: one
+ * capability erroring must not hide the others, and it must never read as a
+ * confident "not in that set". A TRUNCATED set is unavailable for the same
+ * reason: the row cap can hide the very key being looked up, so absence from a
+ * truncated set proves nothing.
+ */
+async function readAnsweredCapabilitySets(pubkey, network, capabilities, deps = {}) {
+ const coins = COIN_NETWORKS[network] || null
+ if (!coins) return { unavailable: true, reason: 'network unknown (' + (network || 'unset') + '); set HUB_NETWORK or re-run validator init' }
+
+ let sdk
+ try {
+ const { XChainSDK } = deps.sdk || loadSdk()
+ const makeSdk = deps.makeSdk || (n => new XChainSDK({ network: n }))
+ sdk = makeSdk(coins.stake)
+ } catch (e) {
+ return { unavailable: true, error: e.message }
+ }
+ if (!sdk || !sdk.explorer || typeof sdk.explorer.getCapabilityValidators !== 'function')
+ return { unavailable: true, reason: 'this indexer does not expose capability validator-set reads yet' }
+
+ let block = deps.blockIndex
+ if (block === undefined || block === null) {
+ try {
+ const status = await sdk.explorer.getStatus()
+ block = Number(status && status.last_block && status.last_block[coins.stake])
+ } catch (e) {
+ return { unavailable: true, error: e.message }
+ }
+ }
+ block = Number(block)
+ if (!Number.isInteger(block) || block < 0)
+ return { unavailable: true, reason: 'the indexer reported no last block for ' + coins.stake }
+
+ const sets = {}
+ for (const capability of capabilities) {
+ try {
+ const r = await sdk.explorer.getCapabilityValidators({ capability, block_index: block })
+ if (!r || r.error) { sets[capability] = { unavailable: true, error: (r && r.error) || 'empty response' }; continue }
+ const rows = Array.isArray(r.validators) ? r.validators : []
+ if (r.truncated === true) {
+ sets[capability] = { unavailable: true, reason: 'the set came back truncated at ' + rows.length + ' rows, so membership cannot be settled from it' }
+ continue
+ }
+ sets[capability] = {
+ unavailable: false,
+ inSet: rows.some(v => samePubkey(v && v.pubkey, pubkey)),
+ count: rows.length
+ }
+ } catch (e) {
+ sets[capability] = { unavailable: true, error: e.message }
+ }
+ }
+ return { unavailable: false, block, coin: coins.stake, sets }
+}
+
+/**
+ * Compare the resolved capability set against the answered one and grade the
+ * difference. Alerts, in the order they are raised:
+ *
+ * resolved-not-validator-but-in-set this host serves as a config oracle
+ * while its identity is in a live set:
+ * the mispointed-config-dir signature.
+ * validator-in-no-set every resolved capability answered
+ * "absent": no stake, an eviction, or a
+ * hub running someone else's key.
+ * capability-missing-from-set a subset is absent (below that
+ * capability's floor, or slashed).
+ * answer-unavailable the indexer could not settle it. A warn,
+ * never a pass: an unread set is not an
+ * absent one, and drift stays null.
+ *
+ * `options.expectPubkey` supplies the identity when the directory that held it
+ * is gone, which is exactly the standalone case worth probing.
+ */
+async function capabilityDriftReport(options = {}, deps = {}) {
+ const resolved = resolvedCapabilitySet()
+ const pubkey = options.expectPubkey || resolved.pubkey
+ const network = options.network || resolved.network || process.env.HUB_NETWORK || null
+ const alerts = []
+ const out = { resolved, pubkey: pubkey || null, expected: !!options.expectPubkey, answered: null, alerts, drift: null }
+
+ if (!pubkey) {
+ alerts.push({
+ level: 'warn', code: 'no-identity',
+ message: 'no validator identity on this host (' + resolved.dir + '), so there is nothing to look up. ' +
+ 'If this host is meant to be a validator, its config dir is mispointed; re-run with the expected pubkey to settle it.'
+ })
+ return out
+ }
+
+ // A standalone host has no recorded capability list, so probe every
+ // capability: the question there is whether the identity is in ANY set.
+ const probeCaps = resolved.capabilities.length ? resolved.capabilities : DRIFT_CAPABILITIES
+ const answered = await readAnsweredCapabilitySets(pubkey, network, probeCaps, deps)
+ out.answered = answered
+
+ if (answered.unavailable) {
+ alerts.push({
+ level: 'warn', code: 'answer-unavailable',
+ message: 'the indexer could not answer which capability sets this key is in (' +
+ (answered.error || answered.reason) + '); membership is unknown, not absent'
+ })
+ return out
+ }
+
+ const readable = probeCaps.filter(c => answered.sets[c] && !answered.sets[c].unavailable)
+ const present = readable.filter(c => answered.sets[c].inSet)
+ const absent = readable.filter(c => !answered.sets[c].inSet)
+ for (const c of probeCaps) {
+ const s = answered.sets[c]
+ if (s && s.unavailable)
+ alerts.push({
+ level: 'warn', code: 'answer-unavailable', capability: c,
+ message: 'the ' + c + ' set could not be read (' + (s.error || s.reason) + '); membership is unknown, not absent'
+ })
+ }
+ if (!readable.length) return out
+
+ if (resolved.mode !== 'validator' && present.length) {
+ alerts.push({
+ level: 'alert', code: 'resolved-not-validator-but-in-set',
+ message: 'this host resolved ' + resolved.mode + ' from ' + resolved.dir + ', yet the indexer has this key in ' +
+ present.join(', ') + ' at block ' + answered.block + '. The hub is running as a config oracle while the ' +
+ 'chain still counts it as a validator: check the config dir it resolved from.'
+ })
+ out.drift = true
+ return out
+ }
+ if (resolved.mode === 'validator' && !present.length) {
+ alerts.push({
+ level: 'alert', code: 'validator-in-no-set',
+ message: 'this host resolved validator mode from ' + resolved.dir + ' with ' + probeCaps.join(', ') +
+ ', but the indexer has this key in NO capability set at block ' + answered.block +
+ '. It signs nothing the federation counts: check the stake, an eviction, and that the hub carries THIS key.'
+ })
+ out.drift = true
+ return out
+ }
+ if (resolved.mode === 'validator' && absent.length) {
+ for (const c of absent)
+ alerts.push({
+ level: 'alert', code: 'capability-missing-from-set', capability: c,
+ message: 'this host serves ' + c + ', but the indexer\'s ' + c + ' set at block ' + answered.block +
+ ' (' + answered.sets[c].count + ' validators) does not contain this key: check that capability\'s MIN_STAKE floor'
+ })
+ out.drift = true
+ return out
+ }
+
+ // Clean only when EVERY probed capability was actually read: an unread one
+ // leaves the comparison unfinished, and a partial pass reported as a clean
+ // one is the reassuring zero this probe exists to avoid.
+ out.drift = readable.length === probeCaps.length ? false : null
+ return out
+}
+
+/**
+ * Exit code for the probe, so a deploy check can branch on it:
+ * 0 resolved and answered agree
+ * 1 they disagree (an alert)
+ * 2 the comparison could not be made (no identity, or an unread indexer)
+ * Two is deliberately not zero: an unanswered probe is not a clean one.
+ */
+function capabilityDriftExitCode(report) {
+ if (report.alerts.some(a => a.level === 'alert')) return 1
+ return report.drift === false ? 0 : 2
+}
+
+// Operator-facing rendering of a drift report, one line per fact.
+function formatCapabilityDrift(report) {
+ const lines = []
+ lines.push(' resolved mode : ' + report.resolved.mode + ' (from ' + report.resolved.dir + ')')
+ lines.push(' identity : ' + (report.pubkey || '(none on this host)') +
+ (report.expected ? ' (supplied, not read from this host)' : ''))
+ lines.push(' resolved caps : ' + (report.resolved.capabilities.join(', ') || '(none recorded)'))
+ if (report.answered && !report.answered.unavailable) {
+ lines.push(' indexer answer: block ' + report.answered.block + ' on ' + report.answered.coin)
+ for (const capability of Object.keys(report.answered.sets)) {
+ const s = report.answered.sets[capability]
+ lines.push(' ' + capability + ' : ' + (s.unavailable
+ ? 'unknown (' + (s.error || s.reason) + ')'
+ : (s.inSet ? 'IN the set' : 'NOT in the set') + ' (' + s.count + ' validators)'))
+ }
+ }
+ for (const a of report.alerts) lines.push(' ' + (a.level === 'alert' ? 'ALERT' : 'WARN ') + ': ' + a.message)
+ if (report.drift === false) lines.push(' No drift: what this host resolves is what the indexer answers.')
+ return lines
+}
+
 // Host path of capabilities.json (the file the operator edits), or null.
 // Migrates a legacy layout first, so this always names the file the hub reads.
 function getCapabilityConfigHostPath() {
@@ -1077,6 +1324,12 @@ module.exports = {
     getValidatorSettings,
     getValidatorEnv,
     validatorModeReport,
+ // Capability-drift probe: resolved capability set vs the indexer's answer.
+ capabilityDriftReport,
+ capabilityDriftExitCode,
+ formatCapabilityDrift,
+ resolvedCapabilitySet,
+ DRIFT_CAPABILITIES,
     getCapabilityConfigHostPath,
     getCapabilityConfigMountDir,
     ensureCapabilityConfigLayout,
