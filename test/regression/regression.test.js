@@ -568,6 +568,7 @@ describe('Regression Suite', function () {
             const moduleOps = proxyquire('../../src/operations/moduleOperations', {
                 '../services/DockerService': {
                     stopContainer: async (id) => { stoppedIds.push(id); return true },
+                    stopContainerByName: async (id) => { stoppedIds.push(id); return { stopped: true, seconds: 1, killed: false } },
                     createDockerNetwork: async () => true,
                     startContainer: async () => true,
                     restartContainer: async () => true,
@@ -637,6 +638,7 @@ describe('Regression Suite', function () {
             const moduleOps = proxyquire('../../src/operations/moduleOperations', {
                 '../services/DockerService': {
                     stopContainer: async (id) => { stoppedIds.push(id); return true },
+                    stopContainerByName: async (id) => { stoppedIds.push(id); return { stopped: true, seconds: 1, killed: false } },
                     createDockerNetwork: async () => true,
                     startContainer: async () => true,
                     restartContainer: async () => true,
