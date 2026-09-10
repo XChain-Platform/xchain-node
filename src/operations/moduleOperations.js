@@ -25,7 +25,8 @@ const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
-const { createDockerNetwork, killContainer, removeContainer, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
+const { createDockerNetwork, killContainer, removeContainer, probeContainerPresenceByName, stopContainer, stopContainerByName, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
+const { stopModuleContainer } = require('../services/StopBudgetService')
 const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, purgeHubCrossChainRows, manualHubCrossChainPurgeStatements, getDatabaseContainerId, pingExternalDatabase } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
@@ -772,7 +773,10 @@ async function stopModules(servicesList) {
                 const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 if (!containerId) continue
                 try {
-                    await stopContainer(containerId)
+                    // With the service's budget, not docker's ten seconds: a bare
+                    // `docker stop` on a container created before the budget was
+                    // stamped on it is a coin flip for a service mid-block.
+                    await stopModuleContainer(stopContainerByName, nextModule, nextCoin, nextNetwork, containerId)
                 } catch (err) {
                     console.log(err)
                 }
