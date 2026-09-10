@@ -1202,61 +1202,61 @@ describe('ConfigService', function () {
 
             })
 
- // LEVELDB_CACHE_BYTES is documented at
- // components/utxo-tracker/configuration.md:41 and LevelUpDb.js reads it from
- // process.env inside the container, but getDefaultConfig never forwarded the
- // host var into the tracker's own config, so an operator exporting it got
- // silence on install/update/recreate.
- describe('LevelDB tuning passthrough (LEVELDB_CACHE_BYTES / LEVELDB_WRITE_BUFFER_BYTES)', function () {
+            // LEVELDB_CACHE_BYTES is documented at
+            // components/utxo-tracker/configuration.md:41 and LevelUpDb.js reads it from
+            // process.env inside the container, but getDefaultConfig never forwarded the
+            // host var into the tracker's own config, so an operator exporting it got
+            // silence on install/update/recreate.
+            describe('LevelDB tuning passthrough (LEVELDB_CACHE_BYTES / LEVELDB_WRITE_BUFFER_BYTES)', function () {
 
- it('passes LEVELDB_CACHE_BYTES and LEVELDB_WRITE_BUFFER_BYTES through from the host env', async function () {
- const prev = {
- cache: process.env.LEVELDB_CACHE_BYTES,
- wbuf: process.env.LEVELDB_WRITE_BUFFER_BYTES
- }
- process.env.LEVELDB_CACHE_BYTES = String(8 * 1024 * 1024 * 1024)
- process.env.LEVELDB_WRITE_BUFFER_BYTES = String(128 * 1024 * 1024)
- try {
- const cs = makeServiceWithConfig('')
- const config = await cs.getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
- expect(config['LEVELDB_CACHE_BYTES']).to.equal(String(8 * 1024 * 1024 * 1024))
- expect(config['LEVELDB_WRITE_BUFFER_BYTES']).to.equal(String(128 * 1024 * 1024))
- } finally {
- for (const [k, v] of [
- ['LEVELDB_CACHE_BYTES', prev.cache],
- ['LEVELDB_WRITE_BUFFER_BYTES', prev.wbuf]
- ]) {
- if (v === undefined) delete process.env[k]
- else process.env[k] = v
- }
- }
- })
+                it('passes LEVELDB_CACHE_BYTES and LEVELDB_WRITE_BUFFER_BYTES through from the host env', async function () {
+                    const prev = {
+                        cache: process.env.LEVELDB_CACHE_BYTES,
+                        wbuf:  process.env.LEVELDB_WRITE_BUFFER_BYTES
+                    }
+                    process.env.LEVELDB_CACHE_BYTES        = String(8 * 1024 * 1024 * 1024)
+                    process.env.LEVELDB_WRITE_BUFFER_BYTES = String(128 * 1024 * 1024)
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const config = await cs.getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
+                        expect(config['LEVELDB_CACHE_BYTES']).to.equal(String(8 * 1024 * 1024 * 1024))
+                        expect(config['LEVELDB_WRITE_BUFFER_BYTES']).to.equal(String(128 * 1024 * 1024))
+                    } finally {
+                        for (const [k, v] of [
+                            ['LEVELDB_CACHE_BYTES', prev.cache],
+                            ['LEVELDB_WRITE_BUFFER_BYTES', prev.wbuf]
+                        ]) {
+                            if (v === undefined) delete process.env[k]
+                            else process.env[k] = v
+                        }
+                    }
+                })
 
- it('emits neither key when the host env carries no LevelDB passthrough values', async function () {
- const cs = makeServiceWithConfig('')
- const config = await cs.getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
- expect(config).to.not.have.property('LEVELDB_CACHE_BYTES')
- expect(config).to.not.have.property('LEVELDB_WRITE_BUFFER_BYTES')
- })
+                it('emits neither key when the host env carries no LevelDB passthrough values', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
+                    expect(config).to.not.have.property('LEVELDB_CACHE_BYTES')
+                    expect(config).to.not.have.property('LEVELDB_WRITE_BUFFER_BYTES')
+                })
 
- // Gated on module === XCHAIN_UTXO_TRACKER; an encoder or decoder config
- // for the same coin/network must never pick this up.
- it('does not leak the LevelDB passthrough onto encoder or decoder configs', async function () {
- const prev = process.env.LEVELDB_CACHE_BYTES
- process.env.LEVELDB_CACHE_BYTES = String(8 * 1024 * 1024 * 1024)
- try {
- const cs = makeServiceWithConfig('')
- const encoderConfig = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
- expect(encoderConfig).to.not.have.property('LEVELDB_CACHE_BYTES')
- const decoderConfig = await cs.getDefaultConfig(XChainService.XCHAIN_DECODER, 'bitcoin', 'mainnet')
- expect(decoderConfig).to.not.have.property('LEVELDB_CACHE_BYTES')
- } finally {
- if (prev === undefined) delete process.env.LEVELDB_CACHE_BYTES
- else process.env.LEVELDB_CACHE_BYTES = prev
- }
- })
+                // Gated on module === XCHAIN_UTXO_TRACKER; an encoder or decoder config
+                // for the same coin/network must never pick this up.
+                it('does not leak the LevelDB passthrough onto encoder or decoder configs', async function () {
+                    const prev = process.env.LEVELDB_CACHE_BYTES
+                    process.env.LEVELDB_CACHE_BYTES = String(8 * 1024 * 1024 * 1024)
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const encoderConfig = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
+                        expect(encoderConfig).to.not.have.property('LEVELDB_CACHE_BYTES')
+                        const decoderConfig = await cs.getDefaultConfig(XChainService.XCHAIN_DECODER, 'bitcoin', 'mainnet')
+                        expect(decoderConfig).to.not.have.property('LEVELDB_CACHE_BYTES')
+                    } finally {
+                        if (prev === undefined) delete process.env.LEVELDB_CACHE_BYTES
+                        else process.env.LEVELDB_CACHE_BYTES = prev
+                    }
+                })
 
- })
+            })
         })
 
         describe('without coin/network (shared service config)', function () {
