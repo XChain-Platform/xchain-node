@@ -283,12 +283,13 @@ function daemonSupportsBlocksdir(coin) {
 
 // The network-specific subdirectory a daemon writes chain data under, relative
 // to the datadir root. Mainnet writes directly under the datadir; testnet and
-// regtest use a subdir. Litecoin moved its testnet to `testnet4`; Bitcoin and
-// Dogecoin use `testnet3`.
+// regtest use a subdir. Bitcoin Core 28+ (pinned v28.1 here, see
+// bitcoin-testnet.conf's testnet4=1) and Litecoin both moved their testnet to
+// `testnet4`; Dogecoin (pinned v1.14.9, testnet=1) still uses `testnet3`.
 function nodeNetworkSubdir(coin, network) {
     if (network === 'mainnet') return ''
     if (network === 'regtest') return '/regtest'
-    return coin === 'litecoin' ? '/testnet4' : '/testnet3'
+ return coin === 'dogecoin' ? '/testnet3' : '/testnet4'
 }
 
 // Resolve the relocated-blocks root. The env var wins and, when present, is

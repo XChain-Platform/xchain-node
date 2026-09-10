@@ -569,6 +569,30 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues["NETWORK"] = coin + "-" + network
         }
 
+ // LevelDB tuning passthrough (xchain-utxo-tracker only). LevelUpDb.js reads
+ // LEVELDB_CACHE_BYTES (documented default 4 GiB, components/utxo-tracker/configuration.md:41)
+ // and LEVELDB_WRITE_BUFFER_BYTES from process.env inside the container, but
+ // getDefaultConfig never forwarded either host var into the tracker's
+ // defaultValues, so an operator exporting LEVELDB_CACHE_BYTES before
+ // install/update got silence: the container never saw it and LevelUpDb fell
+ // back to its in-container default every time. Mirrors hubPassthroughVars /
+ // genesisPassthroughVars: only set, non-empty host vars are injected, so an
+ // unset env leaves the tracker's own default untouched.
+ // Read by name rather than through a loop: the env-var doc-coverage gate can
+ // only see a variable it can name, and a computed process.env[varName] read
+ // widens its blind spot.
+ if (module === XChainService.XCHAIN_UTXO_TRACKER) {
+ const levelDbPassthrough = {
+ LEVELDB_CACHE_BYTES: process.env.LEVELDB_CACHE_BYTES,
+ LEVELDB_WRITE_BUFFER_BYTES: process.env.LEVELDB_WRITE_BUFFER_BYTES
+ }
+ for (const [varName, value] of Object.entries(levelDbPassthrough)) {
+ if (value !== undefined && value !== "") {
+ defaultValues[varName] = value
+ }
+ }
+ }
+
         // e2e-test also derives addresses (test/cryptoHelper.js) and resolves its
         // bitcoinjs network from COIN+NETWORK. initialCheck.test.js reads
         // process.env.COIN and only splits NETWORK when COIN is absent; without COIN

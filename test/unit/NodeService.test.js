@@ -753,6 +753,12 @@ describe('NodeService: buildCryptoNode()', function () {
             expect(mounts(args)).to.include('/bigdisk/litecoin/testnet-txindex:/root/.litecoin/testnet4/indexes/txindex')
         })
 
+ it('bitcoin testnet: relocates txindex under testnet4 (bitcoin-testnet.conf sets testnet4=1)', async function () {
+ const args = await runArgsFor('bitcoin', 'testnet')
+ expect(mounts(args)).to.include('/bigdisk/bitcoin/testnet-txindex:/root/.bitcoin/testnet4/indexes/txindex')
+ expect(args).to.include('-blocksdir=/blocks')
+ })
+
         it('no blocks/txindex mounts when the env var is unset', async function () {
             const args = await runArgsFor('bitcoin', 'mainnet', null)
             expect(mounts(args).some(m => m.includes('/blocks') || m.includes('txindex'))).to.be.false

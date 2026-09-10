@@ -1540,4 +1540,239 @@ describe('ValidatorService', function () {
             })
         })
     })
+
+ // The probe half of the mispointed-config-dir defect: a host's RESOLVED
+ // capability set against what the indexer ANSWERS for the same key. Every
+ // case here is graded on the comparison, never on the mode label alone.
+ describe('capability-drift probe', function () {
+
+ const PUBKEY = 'b'.repeat(64)
+ const OTHER = 'c'.repeat(64)
+
+ // fs shaped as a validator host: validator.json + signing.key present,
+ // and capabilities.json carrying whatever DISABLED_CAPABILITIES is passed.
+ function validatorFs({ settings = makeSettings(PUBKEY, { network: 'testnet' }), disabled = [] } = {}) {
+ return makeFs({
+ existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+ readFileSync: sinon.stub().callsFake(p => {
+ if (p === FAKE_CAPS_FILE) return JSON.stringify({ DISABLED_CAPABILITIES: disabled })
+ if (p === FAKE_KEY_FILE) return makeSeedHex()
+ return JSON.stringify(settings)
+ })
+ })
+ }
+
+ // A fake indexer: `sets` maps capability -> array of {pubkey} rows.
+ // `throwsOn` / `errorOn` / `truncatedOn` bend one capability at a time.
+ function makeIndexerSdk({ sets = {}, throwsOn, errorOn, truncatedOn, noMethod, lastBlock = 900, statusThrows } = {}) {
+ const explorer = {
+ getStatus: statusThrows
+ ? sinon.stub().rejects(new Error(statusThrows))
+ : sinon.stub().resolves({ last_block: { 'bitcoin-testnet': lastBlock } })
+ }
+ if (!noMethod) {
+ explorer.getCapabilityValidators = sinon.stub().callsFake(async ({ capability, block_index }) => {
+ if (capability === throwsOn) throw new Error('ECONNREFUSED')
+ if (capability === errorOn) return { error: 'capability not configured: ' + capability }
+ const validators = sets[capability] || []
+ return {
+ capability, block_index, count: validators.length,
+ truncated: capability === truncatedOn, validators
+ }
+ })
+ }
+ return { explorer }
+ }
+
+ function deps(sdk) { return { makeSdk: () => sdk } }
+
+ it('reports no drift when every resolved capability answers IN the set', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', capabilities: ['price', 'attestation'] })
+ }))
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: PUBKEY }], attestation: [{ pubkey: OTHER }, { pubkey: PUBKEY }] } })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.drift).to.be.false
+ expect(report.alerts).to.deep.equal([])
+ expect(vs.capabilityDriftExitCode(report)).to.equal(0)
+ })
+
+ it('alerts when a host that resolved standalone is still in a live set', async function () {
+ // The defect this row exists for: the config dir lost validator/, the
+ // hub came up as a config oracle, and nothing local contradicts it.
+ const vs = loadValidatorService(makeFs())
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: PUBKEY }], attestation: [{ pubkey: PUBKEY }] } })
+ const report = await vs.capabilityDriftReport({ expectPubkey: PUBKEY, network: 'testnet' }, deps(sdk))
+ expect(report.resolved.mode).to.equal('standalone')
+ expect(report.drift).to.be.true
+ expect(report.alerts[0].code).to.equal('resolved-not-validator-but-in-set')
+ expect(report.alerts[0].level).to.equal('alert')
+ expect(report.alerts[0].message).to.contain(FAKE_VALIDATOR_DIR)
+ expect(vs.capabilityDriftExitCode(report)).to.equal(1)
+ })
+
+ it('does not alert on a standalone host whose key is in no set: that is a real config oracle', async function () {
+ const vs = loadValidatorService(makeFs())
+ const sdk = makeIndexerSdk({ sets: {} })
+ const report = await vs.capabilityDriftReport({ expectPubkey: PUBKEY, network: 'testnet' }, deps(sdk))
+ expect(report.drift).to.be.false
+ expect(report.alerts).to.deep.equal([])
+ expect(vs.capabilityDriftExitCode(report)).to.equal(0)
+ })
+
+ it('alerts when a resolved validator is in NO capability set', async function () {
+ const vs = loadValidatorService(validatorFs())
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: OTHER }] } })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.drift).to.be.true
+ expect(report.alerts.map(a => a.code)).to.deep.equal(['validator-in-no-set'])
+ expect(vs.capabilityDriftExitCode(report)).to.equal(1)
+ })
+
+ it('names each capability the indexer answers absent while this host serves it', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', capabilities: ['price', 'cross_chain', 'attestation'] })
+ }))
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: PUBKEY }], cross_chain: [{ pubkey: OTHER }], attestation: [{ pubkey: PUBKEY }] } })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.drift).to.be.true
+ expect(report.alerts).to.have.length(1)
+ expect(report.alerts[0].code).to.equal('capability-missing-from-set')
+ expect(report.alerts[0].capability).to.equal('cross_chain')
+ expect(vs.capabilityDriftExitCode(report)).to.equal(1)
+ })
+
+ it('never queries a capability the operator opted out of in capabilities.json', async function () {
+ // DISABLED_CAPABILITIES means "qualified but not serving", so absence
+ // from that set is the configured state rather than drift.
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', capabilities: ['price', 'cross_chain'] }),
+ disabled: ['cross_chain']
+ }))
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: PUBKEY }] } })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ const queried = sdk.explorer.getCapabilityValidators.getCalls().map(c => c.args[0].capability)
+ expect(queried).to.deep.equal(['price'])
+ expect(report.drift).to.be.false
+ })
+
+ it('treats a TRUNCATED set as unknown, never as "not in the set"', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', capabilities: ['price'] })
+ }))
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: OTHER }] }, truncatedOn: 'price' })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.answered.sets.price.unavailable).to.be.true
+ expect(report.answered.sets.price).to.not.have.property('inSet')
+ expect(report.drift).to.be.null
+ expect(report.alerts.map(a => a.level)).to.deep.equal(['warn'])
+ expect(vs.capabilityDriftExitCode(report)).to.equal(2)
+ })
+
+ it('one capability erroring does not hide the answer for the others', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', capabilities: ['price', 'attestation'] })
+ }))
+ const sdk = makeIndexerSdk({ sets: { attestation: [{ pubkey: PUBKEY }] }, throwsOn: 'price' })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.answered.sets.price.unavailable).to.be.true
+ expect(report.answered.sets.attestation.inSet).to.be.true
+ // attestation answered IN, so this is not "in no set"; the unread
+ // capability stays a warn and the exit code stays unknown.
+ expect(report.alerts.map(a => a.code)).to.deep.equal(['answer-unavailable'])
+ expect(vs.capabilityDriftExitCode(report)).to.equal(2)
+ })
+
+ it('an indexer error body reads as unknown rather than an empty set', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', capabilities: ['price'] })
+ }))
+ const sdk = makeIndexerSdk({ errorOn: 'price' })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.answered.sets.price.unavailable).to.be.true
+ expect(report.answered.sets.price.error).to.contain('not configured')
+ expect(report.drift).to.be.null
+ expect(vs.capabilityDriftExitCode(report)).to.equal(2)
+ })
+
+ it('degrades to unknown when the indexer predates the capability-set read', async function () {
+ const vs = loadValidatorService(validatorFs())
+ const report = await vs.capabilityDriftReport({}, deps(makeIndexerSdk({ noMethod: true })))
+ expect(report.answered.unavailable).to.be.true
+ expect(report.answered.reason).to.match(/does not expose/)
+ expect(report.alerts.map(a => a.code)).to.deep.equal(['answer-unavailable'])
+ expect(vs.capabilityDriftExitCode(report)).to.equal(2)
+ })
+
+ it('degrades to unknown when the tip read fails, instead of probing a made-up block', async function () {
+ const vs = loadValidatorService(validatorFs())
+ const sdk = makeIndexerSdk({ statusThrows: 'timeout' })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.answered.unavailable).to.be.true
+ expect(sdk.explorer.getCapabilityValidators.called).to.be.false
+ expect(vs.capabilityDriftExitCode(report)).to.equal(2)
+ })
+
+ it('settles membership at the block it was handed, when one is given', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', capabilities: ['price'] })
+ }))
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: PUBKEY }] } })
+ const report = await vs.capabilityDriftReport({}, { makeSdk: () => sdk, blockIndex: 500 })
+ expect(sdk.explorer.getStatus.called).to.be.false
+ expect(sdk.explorer.getCapabilityValidators.firstCall.args[0].block_index).to.equal(500)
+ expect(report.answered.block).to.equal(500)
+ })
+
+ it('says there is nothing to compare, and asks no indexer, when the host has no identity', async function () {
+ const vs = loadValidatorService(makeFs())
+ const sdk = makeIndexerSdk({})
+ const report = await vs.capabilityDriftReport({ network: 'testnet' }, deps(sdk))
+ expect(report.alerts.map(a => a.code)).to.deep.equal(['no-identity'])
+ expect(report.answered).to.be.null
+ expect(sdk.explorer.getStatus.called).to.be.false
+ expect(vs.capabilityDriftExitCode(report)).to.equal(2)
+ })
+
+ it('still compares a DISABLED validator, whose key can be staked and in a set', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', enabled: false, capabilities: ['price'] })
+ }))
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: PUBKEY }] } })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.resolved.mode).to.equal('disabled')
+ expect(report.pubkey).to.equal(PUBKEY)
+ expect(report.alerts[0].code).to.equal('resolved-not-validator-but-in-set')
+ })
+
+ it('matches the answered pubkey case-insensitively', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: 'testnet', capabilities: ['price'] })
+ }))
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: PUBKEY.toUpperCase() }] } })
+ const report = await vs.capabilityDriftReport({}, deps(sdk))
+ expect(report.drift).to.be.false
+ })
+
+ it('degrades to unknown on an unknown network rather than guessing a coin', async function () {
+ const vs = loadValidatorService(validatorFs({
+ settings: makeSettings(PUBKEY, { network: null, capabilities: ['price'] })
+ }))
+ const report = await vs.capabilityDriftReport({}, deps(makeIndexerSdk({})))
+ expect(report.answered.unavailable).to.be.true
+ expect(report.answered.reason).to.match(/network unknown/)
+ expect(vs.capabilityDriftExitCode(report)).to.equal(2)
+ })
+
+ it('renders the resolved side, the answered side and the alert in one report', async function () {
+ const vs = loadValidatorService(makeFs())
+ const sdk = makeIndexerSdk({ sets: { price: [{ pubkey: PUBKEY }] } })
+ const report = await vs.capabilityDriftReport({ expectPubkey: PUBKEY, network: 'testnet' }, deps(sdk))
+ const text = vs.formatCapabilityDrift(report).join('\n')
+ expect(text).to.contain('standalone')
+ expect(text).to.contain(FAKE_VALIDATOR_DIR)
+ expect(text).to.contain('price : IN the set')
+ expect(text).to.contain('ALERT')
+ })
+ })
 })

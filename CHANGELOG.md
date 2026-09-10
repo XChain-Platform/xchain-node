@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `install all` creates the coin node before the services that poll it, so a slow host no longer runs a decoder for hours against a node that does not exist yet.
 
 ### Fixed
+- `LEVELDB_CACHE_BYTES` and `LEVELDB_WRITE_BUFFER_BYTES` exported on the host are now forwarded into the utxo-tracker container instead of being silently dropped.
 - A bootstrap restore now removes `latest.tgz` and its `.sig` from the bootstrap volume once the restore succeeds or is refused for a behind node, instead of leaving a multi-gigabyte archive on disk forever; a failed restore still keeps it for diagnosis.
 
 ## [0.16.3] - 2026-09-09
