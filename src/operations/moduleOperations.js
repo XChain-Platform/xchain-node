@@ -1354,8 +1354,13 @@ async function resetModules(service, coin, network, force = false, withIndexer =
         } catch (err) {
             console.warn('WARNING: clearing the hub price ingest fence failed: ' + (err && err.message ? err.message : err))
             console.warn("  Run on the hub DB before the indexer catches up:")
+            // Network-scoped, matching the statement DatabaseService prints on its
+            // own failure branches. The '' bucket is the legacy/unset scope that
+            // pre-migration rows sit in.
             console.warn("    DELETE FROM price_ingest_watermarks WHERE source_chain = '"
-                + (CoinTickerSymbol[coin] || coin) + "';")
+                + (CoinTickerSymbol[coin] || coin) + "' AND network IN ('"
+                + String(network || '').trim().toLowerCase() + "', '');")
+            console.warn("  Keep the network clause: it is what leaves every OTHER network's fence for this chain in place.")
         }
     }
 

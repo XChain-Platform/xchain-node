@@ -151,6 +151,17 @@ function loadModuleService(stubs, constantsOverride, extraProxies) {
         './HubConsensusEnvGuard': {
             assertNoHubConsensusEnvDrift: sinon.stub().resolves([]),
             isHubConsensusEnvDriftError: () => false
+        },
+        // installModule's decoder/indexer and hub branches lazily require this
+        // for a pre-write drift check. Unstubbed it shells out for real via
+        // listRunningContainerNames (`docker ps --format {{.Names}}`), which
+        // passes fast on a box with no docker (ENOENT) but spawns a real
+        // process and can run past 10s on a CI venue under load.
+        // Stub it here so every ModuleService test is docker-free by default;
+        // tests that assert ON drift behavior override this through extraProxies.
+        './DbCredentialDrift': {
+            assertNoDbCredentialDrift: sinon.stub().resolves([]),
+            assertNoHubDbCredentialDrift: sinon.stub().resolves([])
         }
     }
     if (constantsOverride) {
@@ -199,6 +210,20 @@ describe('ModuleService', function () {
     const RealHubConsensusEnvGuard = require('../../src/services/HubConsensusEnvGuard')
     const realAssertNoHubConsensusEnvDrift = RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift
 
+    // Same venue independence for the DB-credential-drift pre-flight, which
+    // installModule's decoder/indexer and hub branches lazily require.
+    // Unstubbed, listRunningContainerNames shells out to a real
+    // `docker ps --format {{.Names}}` on the host running the suite: fast
+    // (ENOENT) on a box with no docker, but a real subprocess spawn that runs
+    // past a describe's stated budget on a CI venue under load.
+    // loadModuleService now stubs both exports by default; this makes a load
+    // that forgets (or bypasses loadModuleService via proxyquireCallThru)
+    // fail loudly and identically on every box instead of only timing out on
+    // a busy venue.
+    const RealDbCredentialDrift = require('../../src/services/DbCredentialDrift')
+    const realAssertNoDbCredentialDrift = RealDbCredentialDrift.assertNoDbCredentialDrift
+    const realAssertNoHubDbCredentialDrift = RealDbCredentialDrift.assertNoHubDbCredentialDrift
+
     before(function () {
         RealDockerService.getPublishedHostPorts = async function () {
             throw new Error(
@@ -210,11 +235,23 @@ describe('ModuleService', function () {
                 'unit test reached the real hub consensus-env guard: stub HubConsensusEnvGuard.assertNoHubConsensusEnvDrift'
             )
         }
+        RealDbCredentialDrift.assertNoDbCredentialDrift = async function () {
+            throw new Error(
+                'unit test reached the real DB-credential-drift probe: stub DbCredentialDrift.assertNoDbCredentialDrift'
+            )
+        }
+        RealDbCredentialDrift.assertNoHubDbCredentialDrift = async function () {
+            throw new Error(
+                'unit test reached the real DB-credential-drift probe: stub DbCredentialDrift.assertNoHubDbCredentialDrift'
+            )
+        }
     })
 
     after(function () {
         RealDockerService.getPublishedHostPorts = realGetPublishedHostPorts
         RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift = realAssertNoHubConsensusEnvDrift
+        RealDbCredentialDrift.assertNoDbCredentialDrift = realAssertNoDbCredentialDrift
+        RealDbCredentialDrift.assertNoHubDbCredentialDrift = realAssertNoHubDbCredentialDrift
     })
 
     // -------------------------------------------------------------------
@@ -2659,6 +2696,13 @@ describe('ModuleService', function () {
                 './HubConsensusEnvGuard': {
                     assertNoHubConsensusEnvDrift: sinon3.stub().resolves([]),
                     isHubConsensusEnvDriftError: () => false
+                },
+                // Same reasoning as loadModuleService: this hub install also runs
+                // the DB-credential-drift pre-flight, which shells out to
+                // `docker ps` for real unless stubbed.
+                './DbCredentialDrift': {
+                    assertNoDbCredentialDrift: sinon3.stub().resolves([]),
+                    assertNoHubDbCredentialDrift: sinon3.stub().resolves([])
                 }
             })
             // With inspect rejection, containerExistsByName returns false → proceeds with install

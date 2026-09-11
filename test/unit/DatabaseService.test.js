@@ -1947,56 +1947,85 @@ describe('DatabaseService', function () {
             expect(del).to.not.match(/TRUNCATE|DELETE FROM `XChain_Hub`\.price_ingest_watermarks\s*$/)
         })
 
-        // The fence row is keyed by source_chain alone (the hub's table is
-        // `source_chain VARCHAR(10) PRIMARY KEY`, with no network column), so one
-        // row per chain serves every network that hub federates. A reset therefore
-        // cannot scope the DELETE with a WHERE clause; the only thing that can
-        // establish whose fence this is, is the hub's own configured network.
+        // The fence row is keyed (network, source_chain), so the reset's own
+        // network scopes the DELETE and no other network's fence for the chain can be
+        // reached by it. This replaced the HUB_NETWORK guard, which had to REFUSE the
+        // clear whenever a co-located hub named a different network (leaving the reset
+        // stack's price rail down) and could not refuse at all when HUB_NETWORK was unset.
         describe('a hub database shared with another network', function () {
 
-            it('does not touch the fence when the hub federates a different network', async function () {
+            it('scopes the delete to the network being reset, leaving every other network\'s fence', async function () {
                 const stubs = makeStubs()
                 const executed = dockerRunner(stubs, 1)
-                const warn = sinon.stub(console, 'warn')
-                // A regtest stack whose co-located hub serves the live testnet.
+                // A regtest stack whose co-located hub also serves the live testnet.
                 const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub', HUB_NETWORK: 'testnet' })
-                const result = await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest')
-                const lines = warn.getCalls().map(c => String(c.args[0])).join('\n')
-                warn.restore()
-
-                expect(result).to.be.false
-                // The testnet fence survives: nothing at all was issued.
-                expect(executed.some(s => /DELETE FROM/.test(s))).to.be.false
-                expect(lines).to.contain('configured for testnet')
-                expect(lines).to.contain("source_chain = 'BTC'")
-            })
-
-            it('clears it when the hub federates the network being reset', async function () {
-                const stubs = makeStubs()
-                const executed = dockerRunner(stubs, 1)
-                const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub', HUB_NETWORK: 'regtest' })
                 expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest')).to.be.true
+
                 const del = executed.find(s => /^DELETE FROM/.test(s))
                 expect(del).to.contain("source_chain = 'BTC'")
+                // The regtest row goes; the testnet and mainnet rows for BTC are outside
+                // the WHERE clause entirely. That is the whole fix.
+                expect(del).to.contain("network IN ('regtest', '')")
+                expect(del).to.not.contain("'testnet'")
+                expect(del).to.not.contain("'mainnet'")
             })
 
-            it('reads the configured network case- and whitespace-insensitively', async function () {
+            // Drives the ledger's verify criterion: the same chain, cleared on one network,
+            // leaves the other networks' rows addressable and untouched.
+            it('issues a different WHERE clause per network for the same chain', async function () {
+                const clears = {}
+                for (const network of ['regtest', 'testnet', 'mainnet']) {
+                    const stubs = makeStubs()
+                    const executed = dockerRunner(stubs, 1)
+                    const ds = loadDatabaseService(stubs, {}, HUB_CFG)
+                    expect(await ds.clearHubPriceIngestWatermark('bitcoin', network)).to.be.true
+                    clears[network] = executed.find(s => /^DELETE FROM/.test(s))
+                }
+                expect(clears.regtest).to.contain("network IN ('regtest', '')")
+                expect(clears.testnet).to.contain("network IN ('testnet', '')")
+                expect(clears.mainnet).to.contain("network IN ('mainnet', '')")
+                expect(clears.regtest).to.not.equal(clears.testnet)
+                expect(clears.testnet).to.not.equal(clears.mainnet)
+            })
+
+            // The hub folds HUB_NETWORK the same way (db.js normalizeFenceNetwork). If the
+            // two sides disagreed on casing the DELETE would match nothing and still report
+            // success, which is the silent-no-op shape this asserts against.
+            it('folds the reset network case- and whitespace-insensitively, matching the hub', async function () {
                 const stubs = makeStubs()
                 const executed = dockerRunner(stubs, 1)
-                const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub', HUB_NETWORK: '  Regtest ' })
-                expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest')).to.be.true
-                expect(executed.some(s => /^DELETE FROM/.test(s))).to.be.true
+                const ds = loadDatabaseService(stubs, {}, HUB_CFG)
+                expect(await ds.clearHubPriceIngestWatermark('bitcoin', '  RegTest ')).to.be.true
+                const del = executed.find(s => /^DELETE FROM/.test(s))
+                expect(del).to.contain("network IN ('regtest', '')")
             })
 
-            // HUB_NETWORK is a host-env passthrough and is usually absent here. An
-            // absent value contradicts nothing, and refusing on it would make every
-            // ordinary reset a manual step with the price rail down for it.
-            it('clears it as before when the hub config names no network', async function () {
+            // Pre-migration rows, and rows from a hub with HUB_NETWORK unset, sit in the ''
+            // bucket. Clearing them is exactly what shipped before the column existed, so a
+            // reset against a not-yet-backfilled hub still brings the price rail back.
+            it('clears the legacy unset bucket alongside the network row', async function () {
                 const stubs = makeStubs()
                 const executed = dockerRunner(stubs, 1)
                 const ds = loadDatabaseService(stubs, {}, HUB_CFG)
                 expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'testnet')).to.be.true
+                const del = executed.find(s => /^DELETE FROM/.test(s))
+                expect(del).to.match(/network IN \('testnet', ''\)/)
+            })
+
+            // The old guard refused outright. It must not survive: a refusal now leaves the
+            // reset stack's own fence standing and its price rail down for no reason.
+            it('no longer refuses on a hub configured for another network', async function () {
+                const stubs = makeStubs()
+                const executed = dockerRunner(stubs, 1)
+                const warn = sinon.stub(console, 'warn')
+                const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub', HUB_NETWORK: 'mainnet' })
+                const result = await ds.clearHubPriceIngestWatermark('litecoin', 'regtest')
+                const lines = warn.getCalls().map(c => String(c.args[0])).join('\n')
+                warn.restore()
+
+                expect(result).to.be.true
                 expect(executed.some(s => /^DELETE FROM/.test(s))).to.be.true
+                expect(lines).to.not.contain('was NOT cleared')
             })
         })
 
@@ -2010,7 +2039,9 @@ describe('DatabaseService', function () {
             warn.restore()
             expect(result).to.be.false
             expect(executed.some(s => /^DELETE FROM/.test(s))).to.be.false
-            expect(lines).to.contain("DELETE FROM price_ingest_watermarks WHERE source_chain = 'BTC';")
+            // The hand-run statement must carry the network clause too: an unscoped paste
+            // against a shared hub DB drops every network's fence for the chain.
+            expect(lines).to.contain("DELETE FROM price_ingest_watermarks WHERE source_chain = 'BTC' AND network IN ('mainnet', '');")
             expect(lines).to.contain('before the indexer resumes pushing:')
         })
 

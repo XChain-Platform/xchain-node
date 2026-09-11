@@ -969,38 +969,48 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
 
 const PRICE_FENCE_TABLE = 'price_ingest_watermarks'
 
-// Clear the hub's price ingest fence row for one source chain.
+// Clear the hub's price ingest fence row for one source chain ON ONE NETWORK.
 //
-// `price_ingest_watermarks` holds, per source chain, the highest rollback
-// generation whose price retraction the hub has processed. PriceAggregator drops
-// any push at or below that generation whose action_index sits in the retracted
-// range. A reset indexer DB restarts its `push_generations` counter at 0 and,
-// after replay, re-covers the same action indices, so EVERY price push from it
-// matches that condition: the chain's price rail (and the native-fee /
-// XCHAIN-USD path riding on it) stops, and until the hub-side warning landed
-// nothing anywhere named the cause. So the fence row is cleared in the same step
-// that wipes the indexer DB, never left to a runbook line.
+// `price_ingest_watermarks` holds, per (network, source chain), the highest
+// rollback generation whose price retraction the hub has processed.
+// PriceAggregator drops any push at or below that generation whose action_index
+// sits in the retracted range. A reset indexer DB restarts its
+// `push_generations` counter at 0 and, after replay, re-covers the same action
+// indices, so EVERY price push from it matches that condition: the chain's price
+// rail (and the native-fee / XCHAIN-USD path riding on it) stops, and until the
+// hub-side warning landed nothing anywhere named the cause. So the fence row is
+// cleared in the same step that wipes the indexer DB, never left to a runbook
+// line.
 //
-// Returns true when the row was cleared, false when this MariaDB holds no hub DB
-// to clear it in (a stack pushing to a hub elsewhere), or when that hub belongs
-// to another network, in which case the manual statement is printed. Only the
-// calling chain's row is touched: another chain's fence is still protecting that
-// chain's live ingest.
+// The DELETE is scoped by the RESET'S OWN network, which this function is always
+// given, rather than by the hub's HUB_NETWORK, which is a host-env passthrough
+// and often unset. That is what replaced the earlier guard: while the row was
+// keyed by chain alone there was nothing for a WHERE clause to scope on, so a
+// regtest reset beside a hub serving testnet had to be REFUSED (leaving the
+// regtest rail down), and could not be refused at all when HUB_NETWORK was
+// unset. With the network column the clear simply cannot reach another network's
+// row, so it always runs.
+//
+// The legacy '' bucket is included: those are pre-migration rows, or rows from a
+// hub that does not know its own network, and clearing them is exactly the
+// behaviour that shipped before the column existed.
+//
+// Returns true when the delete was issued, false when this MariaDB holds no hub
+// DB to clear it in (a stack pushing to a hub elsewhere), in which case the
+// manual statement is printed. Only the calling chain's row on the calling
+// network is touched: every other chain's fence, and every other network's fence
+// for this chain, is still protecting its live ingest.
 async function clearHubPriceIngestWatermark(coin, network) {
     const ticker = CoinTickerSymbol[coin]
     if (!ticker) {
         throw new Error("clearHubPriceIngestWatermark: unknown coin '" + coin + "'")
     }
+    const fenceNetwork = normalizeFenceNetwork(network)
 
     const cfg = await getDefaultConfig(HUB_MODULE_NAME, null, null)
     const hubDbName = cfg && cfg["HUB_DB_NAME"]
     if (!hubDbName) {
-        warnPriceFenceNotCleared(ticker, "the hub configuration carries no HUB_DB_NAME")
-        return false
-    }
-    const foreignNetwork = hubFenceBelongsToAnotherNetwork(cfg, network)
-    if (foreignNetwork) {
-        warnPriceFenceNotCleared(ticker, foreignNetwork)
+        warnPriceFenceNotCleared(ticker, fenceNetwork, "the hub configuration carries no HUB_DB_NAME")
         return false
     }
     // Same contract as addUserPasswordToDatabase: the DB name is an identifier
@@ -1015,7 +1025,7 @@ async function clearHubPriceIngestWatermark(coin, network) {
     } else {
         const mariadbContainerId = await getDatabaseContainerId()
         if (!mariadbContainerId) {
-            warnPriceFenceNotCleared(ticker, "no MariaDB container was found")
+            warnPriceFenceNotCleared(ticker, fenceNetwork, "no MariaDB container was found")
             return false
         }
         const mariadbRootPassword = await askMariadbRootPassword(coin, network)
@@ -1030,54 +1040,44 @@ async function clearHubPriceIngestWatermark(coin, network) {
         + escapeSqlStringLiteral(hubDbName) + " AND TABLE_NAME = "
         + escapeSqlStringLiteral(PRICE_FENCE_TABLE), "-B -N")
     if (parseInt(String(probe).trim(), 10) !== 1) {
-        warnPriceFenceNotCleared(ticker, "this MariaDB holds no " + hubDbName + "." + PRICE_FENCE_TABLE + " table")
+        warnPriceFenceNotCleared(ticker, fenceNetwork,
+            "this MariaDB holds no " + hubDbName + "." + PRICE_FENCE_TABLE + " table")
         return false
     }
 
     await runner("DELETE FROM `" + hubDbName + "`." + PRICE_FENCE_TABLE
-        + " WHERE source_chain = " + escapeSqlStringLiteral(ticker))
-    console.log(redactSecrets("Cleared the hub price ingest fence for " + ticker + " ("
-        + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted"))
+        + " WHERE source_chain = " + escapeSqlStringLiteral(ticker)
+        + " AND network IN (" + escapeSqlStringLiteral(fenceNetwork) + ", '')")
+    console.log(redactSecrets("Cleared the hub price ingest fence for " + ticker + " on "
+        + (fenceNetwork || "the unset-network (legacy) scope") + " ("
+        + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted."
+        + " Every other network's fence for " + ticker + " is untouched."))
     return true
 }
 
-// Whether the hub database this reset is about to touch belongs to a network
-// other than the one being reset.
-//
-// The fence row is keyed by source_chain ALONE: the hub's table is
-// `source_chain VARCHAR(10) PRIMARY KEY` with no network column, so one row per
-// chain serves every network that hub federates and there is nothing for a
-// WHERE clause to scope on. That makes the reset's own coin/network arguments
-// insufficient: a regtest reset run beside a hub that federates testnet clears
-// the TESTNET fence for that chain, which then admits a stale replay from an
-// orphaned range on a live network. Establish first that the co-located hub
-// really is this stack's.
-//
-// HUB_NETWORK is a host-env passthrough and is often unset here; an unset value
-// contradicts nothing and the clear proceeds exactly as before. Same tolerance
-// hubHoldsAnotherNetwork applies to the cross-chain purge, and the same reason:
-// a guard that refused on absent evidence would turn every ordinary reset into a
-// manual step and the price rail would stay down for it.
-function hubFenceBelongsToAnotherNetwork(cfg, network) {
-    const hubNetwork = (cfg && typeof cfg["HUB_NETWORK"] === 'string')
-        ? cfg["HUB_NETWORK"].trim().toLowerCase()
-        : ''
-    const resetNetwork = String(network || '').trim().toLowerCase()
-    if (hubNetwork === '' || hubNetwork === resetNetwork) return null
-    return "the hub on this MariaDB is configured for " + hubNetwork
-        + ", not " + (resetNetwork || 'the network being reset')
-        + ", and this fence row is keyed by chain alone, so clearing it here would drop that network's fence"
+// The fence's network scope, folded the same way the hub folds it
+// (xchain-hub/src/db.js normalizeFenceNetwork) so a reset and the hub that wrote
+// the row agree on the key. Both sides lowercase and trim; anything else and the
+// reset would delete nothing and report success.
+function normalizeFenceNetwork(network) {
+    return typeof network === 'string' ? network.trim().toLowerCase() : ''
 }
 
 // One wording for every "could not clear it here" branch, so the operator always
-// gets the exact statement to run on whichever DB the hub actually uses.
-function warnPriceFenceNotCleared(ticker, reason) {
+// gets the exact statement to run on whichever DB the hub actually uses. The
+// network clause is part of that statement: without it the hand-run DELETE drops
+// every network's fence for the chain, which is the failure the column was added
+// to remove.
+function warnPriceFenceNotCleared(ticker, fenceNetwork, reason) {
     console.warn(redactSecrets("WARNING: the hub price ingest fence for " + ticker + " was NOT cleared (" + reason + ")."))
     console.warn("  A reset indexer DB restarts its push_generations at 0, and the hub DROPS every")
     console.warn("  price push at or below its recorded retraction generation, taking that chain's price rail")
     console.warn("  and the native-fee / XCHAIN-USD path down with it. Run this on the hub's OWN database")
     console.warn("  before the indexer resumes pushing:")
-    console.warn("    DELETE FROM " + PRICE_FENCE_TABLE + " WHERE source_chain = '" + ticker + "';")
+    console.warn("    DELETE FROM " + PRICE_FENCE_TABLE + " WHERE source_chain = '" + ticker + "'"
+        + " AND network IN ('" + fenceNetwork + "', '');")
+    console.warn("  Keep the network clause: it is what leaves every OTHER network's fence for "
+        + ticker + " in place.")
 }
 
 const CROSS_CHAIN_MATCH_TABLE    = 'cross_chain_matches'

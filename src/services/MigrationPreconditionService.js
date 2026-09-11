@@ -240,16 +240,31 @@ async function defaultReadAppliedMigrations({ database, coin, network }, deps = 
             }
         }
 
-        const tableCount = parseInt(String(await runner(
-            'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ' + literal)).trim(), 10)
+        const rawTableCount = String(await runner(
+            'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ' + literal)).trim()
+        const tableCount = parseInt(rawTableCount, 10)
+        // An unreadable or non-numeric count (empty output, a driver notice, NaN)
+        // is not the same fact as a genuinely empty schema: `!tableCount` is true
+        // for both 0 and NaN, and collapsing them here is exactly the outage this
+        // guard exists to prevent - an unknown migration state waved through as
+        // "empty" instead of refused. Only a real, parseable zero counts as empty.
+        if (Number.isNaN(tableCount)) {
+            return { state: 'unreadable', reason: 'could not read a table count for ' + database + ' (got ' + JSON.stringify(rawTableCount) + ')' }
+        }
         // No tables at all: either the database does not exist yet or it is
         // untouched. A fresh install builds its schema from src/sql, which already
         // carries the post-migration widths, so it cannot be behind.
-        if (!tableCount) return { state: 'empty-database' }
+        if (tableCount === 0) return { state: 'empty-database' }
 
-        const hasLedger = parseInt(String(await runner(
+        const rawHasLedger = String(await runner(
             'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ' + literal +
-            " AND TABLE_NAME = '" + LEDGER_TABLE + "'")).trim(), 10)
+            " AND TABLE_NAME = '" + LEDGER_TABLE + "'")).trim()
+        const hasLedger = parseInt(rawHasLedger, 10)
+        // Same collapse shape applies to the ledger-presence count: an unreadable
+        // or NaN result must refuse, not be read as "no ledger table".
+        if (Number.isNaN(hasLedger)) {
+            return { state: 'unreadable', reason: 'could not read whether ' + database + ' has a ' + LEDGER_TABLE + ' ledger (got ' + JSON.stringify(rawHasLedger) + ')' }
+        }
         // Tables but no ledger: this database predates the migration runner, or is
         // not the database we think it is. Either way its migration state is
         // unknowable, which is the case this guard must not wave through.

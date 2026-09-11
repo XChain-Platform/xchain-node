@@ -193,6 +193,35 @@ describe('MigrationPreconditionService', () => {
             expect(res.reason).to.contain('schema_migrations')
         })
 
+        it('refuses an unreadable table count instead of collapsing it into empty-database', async () => {
+            // A count that fails to parse (a driver notice, an empty batch-mode
+            // reply, garbage) yields NaN. `!NaN` is true just like `!0`, so a naive
+            // falsy check reads an unreadable count as the same "empty database"
+            // verdict as a genuinely empty one - the exact bug this guards against.
+            const res = await readAppliedMigrations(target, {
+                runner: async () => 'ERROR 2013 (HY000): Lost connection to MySQL server'
+            })
+            expect(res.state).to.equal('unreadable')
+            expect(res.reason).to.contain(target.database)
+        })
+
+        it('refuses an empty-string table count instead of reading it as zero', async () => {
+            const res = await readAppliedMigrations(target, { runner: async () => '' })
+            expect(res.state).to.equal('unreadable')
+        })
+
+        it('refuses an unreadable ledger-presence count instead of reading it as "no ledger"', async () => {
+            const res = await readAppliedMigrations(target, {
+                runner: async (sql) => {
+                    if (/TABLE_NAME = 'schema_migrations'/.test(sql)) return 'ERROR: connection reset'
+                    if (/COUNT\(\*\)/.test(sql)) return '40'
+                    return ''
+                }
+            })
+            expect(res.state).to.equal('unreadable')
+            expect(res.reason).to.contain('schema_migrations')
+        })
+
         it('turns a driver failure into unreadable instead of throwing past the guard', async () => {
             // A throw here would escape assertRequiredMigrationsApplied as an opaque
             // driver error, and the operator would read ECONNREFUSED with no idea a
