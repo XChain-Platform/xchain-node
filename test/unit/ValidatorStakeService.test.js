@@ -28,7 +28,11 @@ function makeSdk(chain = {}) {
     const sdk = {
         explorer: {
             getAddress:    sinon.stub().resolves({ balances: { confirmed: chain.coin ?? '0.001', pending: '0' } }),
-            getToken:      sinon.stub().resolves({ mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000 } }),
+            getToken:      chain.tokenMissing
+                ? sinon.stub().rejects(Object.assign(
+                    new Error('Explorer returned HTTP 404 for /RBTC/api/token/XCHAIN'),
+                    { code: 'EXPLORER_HTTP_404', details: { status: 404 } }))
+                : sinon.stub().resolves({ mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000 } }),
             // The whole validator set, which is the method the SDK actually has.
             // Carries an unrelated validator too, so the pubkey filter is exercised
             // rather than "the only row wins".
@@ -280,6 +284,24 @@ describe('ValidatorStakeService', function () {
         it('passes --fee-per-kb through to the encoder', async function () {
             const { calls } = await run({ broadcast: true, feePerKb: '0.0001' }, { xchain: 25000, coin: '0.001' })
             expect(calls.stake[0].enc).to.deep.equal({ feePerKb: 0.0001 })
+        })
+
+        // A freshly reset regtest venue has no XCHAIN token record at all, and the
+        // explorer answers that with a bare HTTP 404 rather than an empty token.
+        // That must not leak through as an unexplained crash: name the missing
+        // token and point at the fix instead of reporting the raw 404.
+        it('names the missing gas token and the bootstrap instead of a raw explorer 404', async function () {
+            let caught = null
+            try {
+                await run({}, { xchain: 0, coin: '0.001', tokenMissing: true })
+            } catch (e) {
+                caught = e
+            }
+            expect(caught, 'stakeValidator should reject, not resolve').to.not.equal(null)
+            expect(caught.message).to.not.include('404')
+            expect(caught.message).to.not.include('Explorer returned HTTP')
+            expect(caught.message).to.include('XCHAIN gas token does not exist')
+            expect(caught.message).to.include('bootstrap')
         })
 
         it('refuses when the address has no coin for fees', async function () {
