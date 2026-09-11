@@ -43,7 +43,10 @@ function makeStubs() {
         getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } }),
         // No published host ports by default → buildAndUp's pre-flight conflict
         // check is a no-op. Conflict tests override this with a populated Map.
-        getPublishedHostPorts: sinon.stub().resolves(new Map())
+        getPublishedHostPorts: sinon.stub().resolves(new Map()),
+        // buildx present by default → buildAndUp's BuildKit probe passes. The
+        // legacy-builder tests override this with a rejection.
+        checkBuildKitAvailable: sinon.stub().resolves(true)
     }
 }
 
@@ -116,7 +119,8 @@ function loadModuleService(stubs, constantsOverride, extraProxies) {
             removeContainer: stubs.removeContainer,
             forceRemoveContainerByName: stubs.forceRemoveContainerByName,
             getStatusFromContainer: stubs.getStatusFromContainer,
-            getPublishedHostPorts: stubs.getPublishedHostPorts
+            getPublishedHostPorts: stubs.getPublishedHostPorts,
+            checkBuildKitAvailable: stubs.checkBuildKitAvailable
         },
         './DatabaseService': {
             setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves()
@@ -1759,6 +1763,57 @@ describe('ModuleService', function () {
             }
         })
 
+        // xchain-hub issue 23: on a buildx-less host the legacy builder died on
+        // the module Dockerfiles' optional COPY glob after the clone and the DB
+        // provisioning had already run. The probe has to refuse BEFORE the
+        // build and name the missing package.
+        it('refuses to build on a host without buildx and never invokes docker build', async function () {
+            const stubs = makeStubs()
+            stubs.checkBuildKitAvailable = sinon.stub().rejects(
+                "Docker's buildx plugin is not installed: sudo apt install docker-buildx-plugin")
+            let buildInvoked = false
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') { buildInvoked = true; cb(null) }
+                else if (args[0] === 'run') { cb(null, 'f'.repeat(64) + '\n') }
+                else { cb(null, '') }
+            })
+            const ms = loadModuleService(stubs)
+            try {
+                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+                expect.fail('Should have rejected without buildx')
+            } catch (err) {
+                expect(String(err)).to.include('Error creating Docker image')
+                expect(String(err)).to.include('docker-buildx-plugin')
+            }
+            expect(buildInvoked).to.be.false
+        })
+
+        it('runs docker build with DOCKER_BUILDKIT=1 even when the host exports DOCKER_BUILDKIT=0', async function () {
+            const stubs = makeStubs()
+            let buildOpts = null
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                let opts = {}, cb
+                if (typeof rest[0] === 'function') { cb = rest[0] } else { opts = rest[0] || {}; cb = rest[1] }
+                if (args[0] === 'build') { buildOpts = opts; cb(null) }
+                else if (args[0] === 'run') { cb(null, 'c'.repeat(64) + '\n') }
+                else { cb(null, '') }
+            })
+            const ms = loadModuleService(stubs)
+            const prior = process.env.DOCKER_BUILDKIT
+            process.env.DOCKER_BUILDKIT = '0'
+            try {
+                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            } finally {
+                if (prior === undefined) delete process.env.DOCKER_BUILDKIT
+                else process.env.DOCKER_BUILDKIT = prior
+            }
+            expect(stubs.checkBuildKitAvailable.calledOnce).to.be.true
+            expect(buildOpts).to.be.an('object')
+            expect(buildOpts.env).to.be.an('object')
+            expect(buildOpts.env.DOCKER_BUILDKIT).to.equal('1')
+        })
+
         it('rejects when docker run fails', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
@@ -1911,7 +1966,7 @@ describe('ModuleService', function () {
                 },
                 './ConfigService': configStub,
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()), checkBuildKitAvailable: sinon3.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './BootstrapService': {
                     utxoTrackerVolumeFreshness: utxoTrackerVolumeFreshnessStub,
@@ -1973,7 +2028,7 @@ describe('ModuleService', function () {
                 },
                 './ConfigService': configStub,
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()), checkBuildKitAvailable: sinon3.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: setDatabaseParametersStub },
                 // Stubbed for the same reason DockerService.getPublishedHostPorts is:
                 // the real guard shells out to `docker inspect` and would read
@@ -2040,7 +2095,7 @@ describe('ModuleService', function () {
                 },
                 './ConfigService': configStub,
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()), checkBuildKitAvailable: sinon3.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves() },
                 './DbCredentialDrift': { assertNoDbCredentialDrift: sinon3.stub().resolves([]) },
                 './BootstrapService': {
@@ -2105,7 +2160,7 @@ describe('ModuleService', function () {
                 },
                 './ConfigService': configStub,
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: killContainerStub, removeContainer: removeContainerStub, forceRemoveContainerByName: forceRemoveContainerByNameStub, getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
+                './DockerService': { killContainer: killContainerStub, removeContainer: removeContainerStub, forceRemoveContainerByName: forceRemoveContainerByNameStub, getPublishedHostPorts: sinon3.stub().resolves(new Map()), checkBuildKitAvailable: sinon3.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: setDatabaseParametersStub, setHubDatabaseParameters: sinon3.stub().resolves() },
                 './DbCredentialDrift': { assertNoDbCredentialDrift: assertNoDbCredentialDriftStub },
                 './BootstrapService': {
@@ -2380,7 +2435,7 @@ describe('ModuleService', function () {
                     })
                 },
                 './StatusService': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()) },
+                './DockerService': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()), checkBuildKitAvailable: sinon3.stub().resolves(true) },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './VersionService': {
                     getLocalNodeVersion: sinon3.stub().resolves(null),
@@ -2594,7 +2649,7 @@ describe('ModuleService', function () {
                 // getPublishedHostPorts must be stubbed: this load calls through, and
                 // HUB_PORT below is published as a host port, so the real probe would
                 // shell out to the host's docker and fail wherever 10000 is taken.
-                './DockerService': { killContainer: stubs.killContainer, stopContainerByName: stubs.stopContainerByName, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName, getPublishedHostPorts: stubs.getPublishedHostPorts },
+                './DockerService': { killContainer: stubs.killContainer, stopContainerByName: stubs.stopContainerByName, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName, getPublishedHostPorts: stubs.getPublishedHostPorts, checkBuildKitAvailable: stubs.checkBuildKitAvailable },
                 './DatabaseService': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './VersionService': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
                 './NodeService': { buildCryptoNode: sinon3.stub().resolves(true), getCryptoNode: sinon3.stub().resolves() },

@@ -33,7 +33,7 @@ const {
     getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
-const { stopContainerByName, removeContainer, getPublishedHostPorts, forceRemoveContainerByName, addContainerToNetwork } = require('./DockerService')
+const { stopContainerByName, removeContainer, getPublishedHostPorts, forceRemoveContainerByName, addContainerToNetwork, checkBuildKitAvailable } = require('./DockerService')
 const { stopModuleContainer, stopTimeoutArgs } = require('./StopBudgetService')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./DatabaseService')
 const { redactSecrets, sleep } = require('../utils/helpers')
@@ -1163,14 +1163,29 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             return
         }
 
-        console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
-            + (sourceLabels.commit ? " from " + sourceLabels.commit.slice(0, 12) + " (" + (sourceLabels.ref || 'detached') + ")" : ""))
-        execFile('docker', ['build', ...buildLabelArgs, '.', '-t', containerPrefix], { cwd: dir }, (error) => {
-            if (error) {
-                reject("Error creating Docker image: " + redactSecrets(error.message))
-                return
-            }
-            createContainer()
+        // The module Dockerfiles only build under BuildKit (see
+        // checkBuildKitAvailable). Refuse before the build rather than let the
+        // legacy builder die on a COPY glob, and pin DOCKER_BUILDKIT=1 for the
+        // build so an exported DOCKER_BUILDKIT=0 on the host cannot route a
+        // buildx-equipped docker back to the legacy builder. Guarded the way
+        // precheck guards its DockerService probes: a stubbed or older
+        // DockerService without this export skips the probe, never the build.
+        const buildKitProbe = typeof checkBuildKitAvailable === 'function'
+            ? checkBuildKitAvailable()
+            : Promise.resolve(true)
+        buildKitProbe.then(() => {
+            console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
+                + (sourceLabels.commit ? " from " + sourceLabels.commit.slice(0, 12) + " (" + (sourceLabels.ref || 'detached') + ")" : ""))
+            const buildEnv = { ...process.env, DOCKER_BUILDKIT: '1' }
+            execFile('docker', ['build', ...buildLabelArgs, '.', '-t', containerPrefix], { cwd: dir, env: buildEnv }, (error) => {
+                if (error) {
+                    reject("Error creating Docker image: " + redactSecrets(error.message))
+                    return
+                }
+                createContainer()
+            })
+        }).catch((err) => {
+            reject("Error creating Docker image: " + err)
         })
     })
 }
