@@ -34,7 +34,10 @@ const {
 // (config/validator/ is gitignored). Tests that WANT a validator stub their own.
 const NO_VALIDATOR = {
     getValidatorSettings: () => null,
-    getValidatorEnv:      () => ({})
+    getValidatorEnv:      () => ({}),
+    // The hub config states which validator mode it resolved and from where, so a
+    // stub that omits this is not a standalone machine, it is a broken module.
+    validatorModeReport:  () => ({ mode: 'standalone', dir: '/tmp/test-xchain-config/validator', missing: [] })
 }
 
 function makeConfigService(fsStub) {
@@ -411,7 +414,12 @@ describe('ConfigService', function () {
                     'fs': fsStub,
                     './ValidatorService': {
                         getValidatorSettings: () => validatorSettings,
-                        getValidatorEnv: () => ({})
+                        getValidatorEnv: () => ({}),
+                        validatorModeReport: () => ({
+                            mode: validatorSettings ? 'validator' : 'standalone',
+                            dir: '/tmp/test-xchain-config/validator',
+                            missing: []
+                        })
                     }
                 })
             }
@@ -952,7 +960,8 @@ describe('ConfigService', function () {
             // failure the regtest mirror wedge records).
             describe('regtest mirror arming', function () {
                 const GRACE_VARS = [
-                    'HUB_SYNC_PRICE_GRACE_S', 'HUB_SYNC_ORACLE_GRACE_S', 'HUB_SYNC_ATTEST_RESPONSE_GRACE_S'
+                    'HUB_SYNC_PRICE_GRACE_S', 'HUB_SYNC_ORACLE_GRACE_S', 'HUB_SYNC_ATTEST_RESPONSE_GRACE_S',
+                    'HUB_SYNC_MATCH_GRACE_S', 'HUB_SYNC_CALL_GRACE_S', 'HUB_SYNC_ANCHOR_ATTEST_GRACE_S'
                 ]
                 let saved
                 beforeEach(function () {
@@ -1192,6 +1201,62 @@ describe('ConfigService', function () {
                 })
 
             })
+
+            // LEVELDB_CACHE_BYTES is documented at
+            // components/utxo-tracker/configuration.md:41 and LevelUpDb.js reads it from
+            // process.env inside the container, but getDefaultConfig never forwarded the
+            // host var into the tracker's own config, so an operator exporting it got
+            // silence on install/update/recreate.
+            describe('LevelDB tuning passthrough (LEVELDB_CACHE_BYTES / LEVELDB_WRITE_BUFFER_BYTES)', function () {
+
+                it('passes LEVELDB_CACHE_BYTES and LEVELDB_WRITE_BUFFER_BYTES through from the host env', async function () {
+                    const prev = {
+                        cache: process.env.LEVELDB_CACHE_BYTES,
+                        wbuf:  process.env.LEVELDB_WRITE_BUFFER_BYTES
+                    }
+                    process.env.LEVELDB_CACHE_BYTES        = String(8 * 1024 * 1024 * 1024)
+                    process.env.LEVELDB_WRITE_BUFFER_BYTES = String(128 * 1024 * 1024)
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const config = await cs.getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
+                        expect(config['LEVELDB_CACHE_BYTES']).to.equal(String(8 * 1024 * 1024 * 1024))
+                        expect(config['LEVELDB_WRITE_BUFFER_BYTES']).to.equal(String(128 * 1024 * 1024))
+                    } finally {
+                        for (const [k, v] of [
+                            ['LEVELDB_CACHE_BYTES', prev.cache],
+                            ['LEVELDB_WRITE_BUFFER_BYTES', prev.wbuf]
+                        ]) {
+                            if (v === undefined) delete process.env[k]
+                            else process.env[k] = v
+                        }
+                    }
+                })
+
+                it('emits neither key when the host env carries no LevelDB passthrough values', async function () {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, 'bitcoin', 'mainnet')
+                    expect(config).to.not.have.property('LEVELDB_CACHE_BYTES')
+                    expect(config).to.not.have.property('LEVELDB_WRITE_BUFFER_BYTES')
+                })
+
+                // Gated on module === XCHAIN_UTXO_TRACKER; an encoder or decoder config
+                // for the same coin/network must never pick this up.
+                it('does not leak the LevelDB passthrough onto encoder or decoder configs', async function () {
+                    const prev = process.env.LEVELDB_CACHE_BYTES
+                    process.env.LEVELDB_CACHE_BYTES = String(8 * 1024 * 1024 * 1024)
+                    try {
+                        const cs = makeServiceWithConfig('')
+                        const encoderConfig = await cs.getDefaultConfig(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
+                        expect(encoderConfig).to.not.have.property('LEVELDB_CACHE_BYTES')
+                        const decoderConfig = await cs.getDefaultConfig(XChainService.XCHAIN_DECODER, 'bitcoin', 'mainnet')
+                        expect(decoderConfig).to.not.have.property('LEVELDB_CACHE_BYTES')
+                    } finally {
+                        if (prev === undefined) delete process.env.LEVELDB_CACHE_BYTES
+                        else process.env.LEVELDB_CACHE_BYTES = prev
+                    }
+                })
+
+            })
         })
 
         describe('without coin/network (shared service config)', function () {
@@ -1346,6 +1411,28 @@ describe('ConfigService', function () {
                 expect(config).to.not.have.property('EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM')
                 expect(config).to.not.have.property('EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM')
                 expect(config).to.not.have.property('EXPLORER_VM_QUERY_RATE_LIMIT_RPM')
+            })
+
+            // The batch routes (POST /balances, POST /coinpay_obligations) share
+            // one limiter knob, passed through the same way as the other eight
+            // (row 55, rate-limits-that-fit-the-wallet D69).
+            it('passes the batch explorer rate limit through from the host env', async function () {
+                const prev = process.env.EXPLORER_BATCH_RATE_LIMIT_RPM
+                process.env.EXPLORER_BATCH_RATE_LIMIT_RPM = '144'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                    expect(config['EXPLORER_BATCH_RATE_LIMIT_RPM']).to.equal('144')
+                } finally {
+                    if (prev === undefined) delete process.env.EXPLORER_BATCH_RATE_LIMIT_RPM
+                    else process.env.EXPLORER_BATCH_RATE_LIMIT_RPM = prev
+                }
+            })
+
+            it('emits no EXPLORER_BATCH_RATE_LIMIT_RPM when the host env carries none', async function () {
+                const cs = makeServiceWithConfig('')
+                const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+                expect(config).to.not.have.property('EXPLORER_BATCH_RATE_LIMIT_RPM')
             })
 
             it('returns EXPLORER_API_PORT_HTTP as 8080', async function () {
@@ -1755,6 +1842,16 @@ describe('ConfigService', function () {
             expect(modules).to.include('xchain-utxo-tracker')
             expect(modules).to.include('xchain-indexer')
             expect(modules).to.include('node')
+        })
+
+        it('lists the coin node before every service under "all", so install creates it first', function () {
+            // Regression: with the node last, a mainnet install created the decoder
+            // hours before the node existed and it logged ENOTFOUND the whole time.
+            for (const network of ['mainnet', 'testnet', 'regtest']) {
+                const modules = filterCommandParameters(null, 'all', 'bitcoin', network)['bitcoin'][network]
+                expect(modules[0]).to.equal('node')
+                expect(modules.filter(m => m === 'node')).to.have.length(1)
+            }
         })
 
         it('filters regtest-only modules from mainnet', function () {

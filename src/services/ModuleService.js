@@ -33,7 +33,8 @@ const {
     getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./ConfigService')
 const { statusChanged, getStatus } = require('./StatusService')
-const { killContainer, removeContainer, getPublishedHostPorts, forceRemoveContainerByName, addContainerToNetwork } = require('./DockerService')
+const { stopContainerByName, removeContainer, getPublishedHostPorts, forceRemoveContainerByName, addContainerToNetwork } = require('./DockerService')
+const { stopModuleContainer, stopTimeoutArgs } = require('./StopBudgetService')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./DatabaseService')
 const { redactSecrets, sleep } = require('../utils/helpers')
 
@@ -1053,9 +1054,12 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         const createContainer = async () => {
             try {
                 if (overwriteContainerId) {
-                    try {
-                        await killContainer(overwriteContainerId)
-                    } catch { /* container may not be running */ }
+                    // SIGTERM with the service's budget, never `docker kill`: the
+                    // decoder and tracker break their loops at a block boundary, and
+                    // a kill lands mid-transaction or mid-rollback on every update.
+                    // A container that is already gone resolves stopped:false and the
+                    // remove below is what tolerates that.
+                    await stopModuleContainer(stopContainerByName, module, coin, network, overwriteContainerId)
                     try {
                         await removeContainer(overwriteContainerId)
                     } catch { /* container may have been removed manually */ }
@@ -1076,6 +1080,9 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 // them, re-running the suite and leaving the container "restarting" so the
                 // subsequent `docker rm` fails. Persistent service containers keep the policy.
                 const restartArgs = onlyExecution ? [] : ['--restart', 'unless-stopped']
+                // The same budget the CLI stops with, stamped on the container so an
+                // operator's plain `docker stop` or `docker restart` honours it too.
+                const stopBudgetArgs = onlyExecution ? [] : stopTimeoutArgs(module)
                 // Healthchecks only apply to persistent service containers. One-shot
                 // execution containers exit immediately after their command; a healthcheck
                 // would fire during the exit window and falsely mark them unhealthy.
@@ -1099,7 +1106,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 // One-shot execution containers exit immediately and need no cap.
                 const logOptArgs = onlyExecution ? [] : ['--log-opt', 'max-size=50m', '--log-opt', 'max-file=4']
                 const runArgs = [
-                    'run', '-d', ...restartArgs, '--name', containerPrefix, '--hostname', containerPrefix,
+                    'run', '-d', ...restartArgs, ...stopBudgetArgs, '--name', containerPrefix, '--hostname', containerPrefix,
                     ...logOptArgs,
                     ...volumeArgs,
                     ...ulimitArgs,
@@ -1387,7 +1394,7 @@ async function uninstallModule(coin, network, module) {
         console.log("Uninstalling " + module + " (" + coin + "/" + network + ")")
         try {
             if (moduleStatus["status"]["State"]["Status"] !== "exited") {
-                await killContainer(moduleStatus["container_id"])
+                await stopModuleContainer(stopContainerByName, module, coin, network, moduleStatus["container_id"])
             }
             await removeContainer(moduleStatus["container_id"])
             await statusChanged()

@@ -33,7 +33,40 @@ const nodeVersion = process.versions.node
 // bitcoind with a large dbcache can take minutes to do it. `docker stop`
 // returns as soon as the process exits, so a wide budget costs nothing on the
 // common path and only matters when the flush is genuinely slow.
-const NODE_STOP_TIMEOUT_SECONDS = 600
+//
+// The default is unmeasured against the slowest box the docs name (a Pi
+// flushing a 3 GB dbcache to a USB SSD), so XCHAIN_NODE_STOP_TIMEOUT_SECONDS
+// overrides it; the stop logs the budget it used and how long the daemon
+// took, and a stop that ran out of budget is reported as the kill it was.
+const DEFAULT_NODE_STOP_TIMEOUT_SECONDS = 600
+const NODE_STOP_TIMEOUT_ENV = 'XCHAIN_NODE_STOP_TIMEOUT_SECONDS'
+
+function nodeStopTimeoutSeconds() {
+    // Read by name, not through the constant: the env-var doc gate scans reads
+    // by name, and a computed read is invisible to it.
+    const raw = process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS
+    if (raw === undefined || String(raw).trim() === '') return DEFAULT_NODE_STOP_TIMEOUT_SECONDS
+    const seconds = parseInt(raw, 10)
+    if (!Number.isFinite(seconds) || seconds < 1 || String(seconds) !== String(raw).trim()) {
+        console.warn(`${NODE_STOP_TIMEOUT_ENV}=${raw} is not a whole number of seconds; using the default ${DEFAULT_NODE_STOP_TIMEOUT_SECONDS}`)
+        return DEFAULT_NODE_STOP_TIMEOUT_SECONDS
+    }
+    return seconds
+}
+
+// What the operator reads after the previous daemon was stopped. Silence was
+// the failure mode: a mainnet bitcoind killed at the budget came back 17000
+// blocks lower and re-validated for four hours, and nothing in the update's
+// output said the stop had not been clean.
+function describeNodeStopOutcome(coin, network, outcome, budgetSeconds) {
+    if (!outcome || !outcome.stopped) return null
+    if (outcome.killed) {
+        return `WARNING: the ${coin} ${network} daemon did not exit within the ${budgetSeconds} s budget and was killed. ` +
+            `It will come back at its last flushed state and re-validate from there, which can take hours on a large dbcache. ` +
+            `Raise ${NODE_STOP_TIMEOUT_ENV} above the time this daemon needs to flush before the next update.`
+    }
+    return `Stopped the ${coin} ${network} daemon cleanly in ${outcome.seconds} s (budget ${budgetSeconds} s).`
+}
 
 const { gitHubDownloader, db, getRemoteModuleVersions } = require('../state')
 const { decompressTarGz }               = require('../utils/helpers')
@@ -250,12 +283,13 @@ function daemonSupportsBlocksdir(coin) {
 
 // The network-specific subdirectory a daemon writes chain data under, relative
 // to the datadir root. Mainnet writes directly under the datadir; testnet and
-// regtest use a subdir. Litecoin moved its testnet to `testnet4`; Bitcoin and
-// Dogecoin use `testnet3`.
+// regtest use a subdir. Bitcoin Core 28+ (pinned v28.1 here, see
+// bitcoin-testnet.conf's testnet4=1) and Litecoin both moved their testnet to
+// `testnet4`; Dogecoin (pinned v1.14.9, testnet=1) still uses `testnet3`.
 function nodeNetworkSubdir(coin, network) {
     if (network === 'mainnet') return ''
     if (network === 'regtest') return '/regtest'
-    return coin === 'litecoin' ? '/testnet4' : '/testnet3'
+    return coin === 'dogecoin' ? '/testnet3' : '/testnet4'
 }
 
 // Resolve the relocated-blocks root. The env var wins and, when present, is
@@ -448,7 +482,13 @@ async function buildCryptoNode(coin, network) {
             // flushed block index. The regtest litecoind rehearsal of the
             // v0.21.5.6 bump lost 16 mined blocks that way (2026-09-03); a
             // mainnet node would face a long replay or a corrupt store instead.
-            await stopContainerByName(containerPrefix, NODE_STOP_TIMEOUT_SECONDS)
+            const stopBudgetSeconds = nodeStopTimeoutSeconds()
+            const stopOutcome = await stopContainerByName(containerPrefix, stopBudgetSeconds)
+            const stopLine = describeNodeStopOutcome(coin, network, stopOutcome, stopBudgetSeconds)
+            if (stopLine) {
+                if (stopOutcome.killed) console.warn(stopLine)
+                else console.log(stopLine)
+            }
 
             // Name-keyed cleanup immediately before `docker run --name`, making
             // (re)creation idempotent against a leftover carcass unregistered by
@@ -478,7 +518,7 @@ async function buildCryptoNode(coin, network) {
                 // Same shutdown budget for an operator's `docker stop`/`restart`
                 // and for dockerd's own shutdown: the default 10 s is far too
                 // short for a chain daemon to flush.
-                '--stop-timeout', String(NODE_STOP_TIMEOUT_SECONDS),
+                '--stop-timeout', String(stopBudgetSeconds),
                 // Cap json-file log growth so a long-running node cannot fill
                 // the host disk, at the same 50m x 4 = 200 MB the module
                 // containers carry (ModuleService.buildAndUp holds the sizing
@@ -683,5 +723,8 @@ module.exports = {
     installNode,
     resolveBlocksDir,
     resolveNodeVersionPin,
-    assertNodeVersionPin
+    assertNodeVersionPin,
+    nodeStopTimeoutSeconds,
+    describeNodeStopOutcome,
+    DEFAULT_NODE_STOP_TIMEOUT_SECONDS
 }

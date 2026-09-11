@@ -25,8 +25,9 @@ const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, filterCommandParameters, getDockerNetwork } = require('../services/ConfigService')
-const { createDockerNetwork, killContainer, removeContainer, probeContainerPresenceByName, stopContainer, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
-const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, getDatabaseContainerId, pingExternalDatabase } = require('../services/DatabaseService')
+const { createDockerNetwork, killContainer, removeContainer, probeContainerPresenceByName, stopContainer, stopContainerByName, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts } = require('../services/DockerService')
+const { stopModuleContainer } = require('../services/StopBudgetService')
+const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, purgeHubCrossChainRows, manualHubCrossChainPurgeStatements, getDatabaseContainerId, pingExternalDatabase } = require('../services/DatabaseService')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/ModuleService')
 const { assertHubNotBehind } = require('../services/SkewGuardService')
 const { assertRequiredMigrationsApplied } = require('../services/MigrationPreconditionService')
@@ -772,7 +773,10 @@ async function stopModules(servicesList) {
                 const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 if (!containerId) continue
                 try {
-                    await stopContainer(containerId)
+                    // With the service's budget, not docker's ten seconds: a bare
+                    // `docker stop` on a container created before the budget was
+                    // stamped on it is a coin flip for a service mid-block.
+                    await stopModuleContainer(stopContainerByName, nextModule, nextCoin, nextNetwork, containerId)
                 } catch (err) {
                     console.log(err)
                 }
@@ -1152,6 +1156,15 @@ async function resetModules(service, coin, network, force = false, withIndexer =
             // this chain's: the operator should see that the reset reaches across.
             targets.push('hub price ingest fence row for this chain (price_ingest_watermarks)')
         }
+        // A regtest chain reset is a RE-GENESIS (the datadir goes, the chain
+        // comes back from block 0), which invalidates every hub row anchored on
+        // the dead chain's blocks. Named for the same reason the price fence is:
+        // it is a change to the HUB's state, not just this chain's, and the
+        // operator should see that the reset reaches across.
+        if (resetNode && network === Network.REGTEST) {
+            targets.push('hub cross-chain relic rows for this network '
+                + '(cross_chain_matches, cross_chain_calls, capability_snapshots)')
+        }
         const confirmed = await confirmDestructiveReset(coin, network, targets)
         if (!confirmed) {
             console.log('Aborted: reset was not confirmed. No data was touched.')
@@ -1343,6 +1356,30 @@ async function resetModules(service, coin, network, force = false, withIndexer =
             console.warn("  Run on the hub DB before the indexer catches up:")
             console.warn("    DELETE FROM price_ingest_watermarks WHERE source_chain = '"
                 + (CoinTickerSymbol[coin] || coin) + "';")
+        }
+    }
+
+    // A re-genesised regtest chain leaves the hub's cross-chain rows behind:
+    // they are keyed by `network` and a BTC-anchored snapshot_block, and nothing
+    // in them names the chain INSTANCE, so the mirror bootstrap hands every
+    // fresh indexer the dead chain's finalized matches and it refuses them at
+    // every block for as long as it runs. Purge them here, while the indexer is
+    // stopped, so the rebuilt mirror never sees them. Regtest only: no other
+    // network has a re-genesis path, and there these rows are live federation
+    // history. Never fatal, like the price fence above: the wipe already
+    // happened, so a failure must not abort the restart pass and leave the stack
+    // down. It is reported loudly instead, with the statements to run by hand.
+    if (resetNode && network === Network.REGTEST) {
+        try {
+            await purgeHubCrossChainRows(coin, network)
+        } catch (err) {
+            console.warn('WARNING: purging the hub cross-chain relic rows failed: '
+                + ((err && err.message) ? err.message : err))
+            console.warn('  A fresh indexer will mirror the dead chain\'s matches back in. Run on the hub DB:')
+            for (const statement of manualHubCrossChainPurgeStatements(CoinTickerSymbol[coin] || coin)) {
+                console.warn('    ' + statement)
+            }
+            console.warn(`  Then restart the hub: xchain-node restart ${HUB_MODULE_NAME}`)
         }
     }
 

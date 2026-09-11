@@ -1328,8 +1328,8 @@ async function downloadBootstrap(coin, network, module, destDir) {
 // rescanning, too costly to leave as one warning mid-log. Reset per run.
 const bootstrapOutcomes = []
 
-function recordBootstrapOutcome(module, status, detail) {
-    bootstrapOutcomes.push({ module, status, detail })
+function recordBootstrapOutcome(module, status, detail, archive) {
+    bootstrapOutcomes.push({ module, status, detail, archive: archive || null })
 }
 
 function resetBootstrapOutcomes() {
@@ -1354,7 +1354,12 @@ function reportBootstrapOutcomes() {
             : o.status === 'disabled' ? 'disabled by XCHAIN_NODE_NO_BOOTSTRAP'
             : o.status === 'wiped-left-down' ? `NOT restored, DATA WIPED, container left stopped: ${o.detail}`
             : `NOT restored: ${o.detail}`
-        console.log(`  ${o.module}: ${line}`)
+        // Short by design: just the archive's disk fate, not its path or reason
+        // again (those are already in the log lines printed during the run).
+        const archiveNote = !o.archive ? ''
+            : o.archive.removed ? ` (archive removed${o.archive.bytes !== null ? `, ${formatGiB(o.archive.bytes)} GiB` : ''})`
+            : ` (archive kept${o.archive.bytes !== null ? `, ${formatGiB(o.archive.bytes)} GiB` : ''})`
+        console.log(`  ${o.module}: ${line}${archiveNote}`)
     }
     if (nodeBehind.length > 0) {
         console.log(
@@ -1394,12 +1399,65 @@ async function assessNodeTipBeforeRestore(coin, network, module, archivePath) {
 
 // A restore that went ahead with the node still below the archive is reported
 // as such, so the summary says what the service is doing now (waiting).
-function recordRestoredOutcome(module, tip) {
+function recordRestoredOutcome(module, tip, archive) {
     if (tip && tip.verdict === 'behind-wait') {
-        recordBootstrapOutcome(module, 'restored-node-behind', tip.detail)
+        recordBootstrapOutcome(module, 'restored-node-behind', tip.detail, archive)
     } else {
-        recordBootstrapOutcome(module, 'restored')
+        recordBootstrapOutcome(module, 'restored', null, archive)
     }
+}
+
+// Bytes -> a short "N.N GiB" string for the archive-disposition log lines.
+function formatGiB(bytes) {
+    return (bytes / 1024 / 1024 / 1024).toFixed(1)
+}
+
+// Size of the just-downloaded archive, or null when it cannot be statted
+// (already gone, or never downloaded). Sizing is cosmetic for the log lines
+// below, so a failure here must never block the removal/keep decision it is
+// only describing.
+async function statBootstrapArchiveBytes(archivePath) {
+    try {
+        return (await fs.promises.stat(archivePath)).size
+    } catch {
+        return null
+    }
+}
+
+// Retire the just-downloaded latest.tgz (+ its detached .sig) once its fate is
+// decided, one way or the other: downloadBootstrap has no skip-if-present check
+// by design (a stale kept copy is exactly what halted fresh testnet installs
+// once) and re-downloads it unconditionally on every run, so a kept copy buys
+// nothing back whether the restore just succeeded or was refused for the node
+// being behind -- either way the next run downloads a fresh one anyway. Never a
+// hard failure: the restore verdict is already settled by the time this runs, so
+// a removal failure here is a disk-hygiene warning, not something that should
+// undo or fail an otherwise-finished run.
+function retireBootstrapArchive(archivePath, bytes, note) {
+    const sigPath = archivePath + BOOTSTRAP_SIG_SUFFIX
+    try {
+        fs.rmSync(archivePath, { force: true })
+        fs.rmSync(sigPath, { force: true })
+    } catch (err) {
+        console.log(`WARNING: could not remove the bootstrap archive ${archivePath} (${err.message}); remove it manually to reclaim its disk space.`)
+        return { removed: false, bytes }
+    }
+    const gib = bytes !== null ? formatGiB(bytes) : '?'
+    console.log(note
+        ? `Bootstrap archive removed (${note}) (${gib} GiB released)`
+        : `Bootstrap archive removed after restore (${gib} GiB released)`)
+    return { removed: true, bytes }
+}
+
+// The archive is left in place only when the restore attempt itself FAILED (as
+// opposed to being cleanly refused before it started): it may be the only
+// evidence left of what a broken restore was working from, worth trading the
+// disk for. Returns null (nothing to report) when the archive was never
+// downloaded in the first place.
+function reportKeptBootstrapArchive(archivePath, bytes) {
+    if (bytes === null) return null
+    console.log(`Bootstrap archive kept after failed restore (${formatGiB(bytes)} GiB at ${archivePath})`)
+    return { removed: false, bytes }
 }
 
 // Opt-in restore over an already-populated service. Off by default because the
@@ -1419,6 +1477,10 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'disabled')
         return false
     }
+    // Tracked outside the try so the catch block can still report on (and keep)
+    // whatever was downloaded before the failure, rather than only on a clean
+    // success.
+    let archivePath = null
     try {
         const defaultConfig = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
         const bootstrapDir  = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"]
@@ -1430,17 +1492,26 @@ async function ensureBootstrapUtxoTracker(coin, network) {
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'none-published')
             return false
         }
-        const tip = await assessNodeTipBeforeRestore(coin, network, XChainService.XCHAIN_UTXO_TRACKER, path.join(bootstrapDir, fileName))
+        archivePath = path.join(bootstrapDir, fileName)
+        const tip = await assessNodeTipBeforeRestore(coin, network, XChainService.XCHAIN_UTXO_TRACKER, archivePath)
         if (tip.refuse) {
-            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'node-behind', tip.detail)
+            // Refused before any restore was attempted, so nothing needs the
+            // archive as evidence; see retireBootstrapArchive for why it goes
+            // anyway rather than waiting around for a re-run.
+            const bytes   = await statBootstrapArchiveBytes(archivePath)
+            const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
+            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'node-behind', tip.detail, archive)
             return false
         }
         await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
         console.log('Bootstrap installed; tracker will continue from the bootstrap height')
-        recordRestoredOutcome(XChainService.XCHAIN_UTXO_TRACKER, tip)
+        const bytes   = await statBootstrapArchiveBytes(archivePath)
+        const archive = retireBootstrapArchive(archivePath, bytes)
+        recordRestoredOutcome(XChainService.XCHAIN_UTXO_TRACKER, tip, archive)
         return true
     } catch (err) {
-        const reason = redactSecrets(err.message)
+        const reason  = redactSecrets(err.message)
+        const archive = archivePath ? reportKeptBootstrapArchive(archivePath, await statBootstrapArchiveBytes(archivePath)) : null
         // A post-wipe abort did NOT leave a scratch-syncing tracker: the store was
         // emptied and the container was left stopped (uuid:7edc76f3), so the old
         // "will sync from scratch" wording described a state that is not on disk.
@@ -1449,11 +1520,11 @@ async function ensureBootstrapUtxoTracker(coin, network) {
                 `WARNING: bootstrap auto-restore failed (${reason}) AFTER the LevelDB volume was wiped: ` +
                 `the tracker store is incomplete and its container was left stopped, not syncing.`
             )
-            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'wiped-left-down', reason)
+            recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'wiped-left-down', reason, archive)
             return false
         }
         console.log(`WARNING: bootstrap auto-restore failed (${reason}): the tracker will sync from scratch`)
-        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'failed', reason)
+        recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'failed', reason, archive)
         return false
     }
 }
@@ -1556,6 +1627,10 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         recordBootstrapOutcome(module, 'disabled')
         return false
     }
+    // Tracked outside the try so the catch block can still report on (and keep)
+    // whatever was downloaded before the failure, rather than only on a clean
+    // success.
+    let archivePath = null
     try {
         const defaultConfig = await getDefaultConfig(module, coin, network)
         const bootstrapDir  = module === XChainService.XCHAIN_DECODER
@@ -1569,19 +1644,28 @@ async function ensureBootstrapMariaDb(coin, network, module) {
             recordBootstrapOutcome(module, 'none-published')
             return false
         }
-        const tip = await assessNodeTipBeforeRestore(coin, network, module, path.join(bootstrapDir, fileName))
+        archivePath = path.join(bootstrapDir, fileName)
+        const tip = await assessNodeTipBeforeRestore(coin, network, module, archivePath)
         if (tip.refuse) {
-            recordBootstrapOutcome(module, 'node-behind', tip.detail)
+            // Refused before any restore was attempted, so nothing needs the
+            // archive as evidence; see retireBootstrapArchive for why it goes
+            // anyway rather than waiting around for a re-run.
+            const bytes   = await statBootstrapArchiveBytes(archivePath)
+            const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
+            recordBootstrapOutcome(module, 'node-behind', tip.detail, archive)
             return false
         }
         await restoreBootstrap(coin, network, module, fileName)
         console.log('Bootstrap installed; the service will continue from the bootstrap height')
-        recordRestoredOutcome(module, tip)
+        const bytes   = await statBootstrapArchiveBytes(archivePath)
+        const archive = retireBootstrapArchive(archivePath, bytes)
+        recordRestoredOutcome(module, tip, archive)
         return true
     } catch (err) {
-        const reason = redactSecrets(err.message)
+        const reason  = redactSecrets(err.message)
+        const archive = archivePath ? reportKeptBootstrapArchive(archivePath, await statBootstrapArchiveBytes(archivePath)) : null
         console.log(`WARNING: bootstrap auto-restore failed (${reason}): the service will sync from scratch`)
-        recordBootstrapOutcome(module, 'failed', reason)
+        recordBootstrapOutcome(module, 'failed', reason, archive)
         return false
     }
 }

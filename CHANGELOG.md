@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.17.0] - 2026-09-10
+
+### Added
+- `XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_<SERVICE>` overrides the SIGTERM budget a service container gets before docker kills it; the decoder and utxo-tracker default to 120 seconds, every other service to 30, and the budget is stamped on the container as its own stop timeout.
+- `XCHAIN_NODE_STOP_TIMEOUT_SECONDS` sets the flush budget a coin node daemon gets before docker kills it on update and as the container's own stop timeout; the update prints how long the daemon took to stop and warns when it ran out of budget and was killed.
+- `ps` marks a decoder or tracker whose coin node is not answering as NODE UNREACHABLE, with how long it has been since the node last answered, separately from WAITING FOR NODE.
+- A hub deploy says which validator mode it resolved and where the answer came from.
+
+### Changed
+- `install all` creates the coin node before the services that poll it, so a slow host no longer runs a decoder for hours against a node that does not exist yet.
+- The go-live gate reads un-armed sentinels in mainnet activation positions rather than substring-matching a single instant, so a real armed flag day is no longer read as a placeholder.
+
+### Fixed
+- `update`, `recreate`, `uninstall` and `stop` send a service container SIGTERM with its budget and report a clean stop or a kill, instead of `docker kill` or docker's bare ten-second stop.
+- `LEVELDB_CACHE_BYTES` and `LEVELDB_WRITE_BUFFER_BYTES` exported on the host are now forwarded into the utxo-tracker container instead of being silently dropped.
+- A bootstrap restore now removes `latest.tgz` and its `.sig` from the bootstrap volume once the restore succeeds or is refused for a behind node, instead of leaving a multi-gigabyte archive on disk forever; a failed restore still keeps it for diagnosis.
+- A crash-looping hub no longer blocks the precheck of the command that would repair it.
+- `reset` refuses to clear a price fence that belongs to another network.
+- A standalone hub is given its network and a BTC indexer to read, so it boots with the config its gates need.
+- Every hub-sync watermark grace, the call and anchor-attest ones included, rides the regtest pass-through, so an armed regtest venue no longer holds every block behind a frozen mirror.
+- A regtest chain-node reset purges the hub's cross-chain relic rows left behind by the dead chain.
+- The validator precheck probes what a host resolves as its capability set against what the indexer answers.
+- The Bitcoin testnet chain subdirectory is `testnet4`; Dogecoin stays on `testnet3`.
+
 ## [0.16.3] - 2026-09-09
 
 ### Changed
@@ -23,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.16.0] - 2026-09-08
 
 ### Added
+- `reset node`/`reset all` on regtest also purges the hub's cross-chain match, call and capability-snapshot rows for the network (leg-scoped for a non-Bitcoin chain), so a re-genesised chain does not hand every fresh indexer matches from the dead one.
+- `EXPLORER_BATCH_RATE_LIMIT_RPM` passes through to the explorer like the other eight rate-limit knobs, so a deployment can size the batch balance route's limit from its host env.
 - Bootstrap archives carry their end height (a `bootstrap.json` member leading the wrapper), and a fresh install compares it with the coin node's tip before restoring: a node still below the archive is reported as WAITING FOR NODE when the service waits it out, and the restore is refused for a service image that would read the lower tip as a reorg.
 - `ps` marks a decoder or tracker that is waiting out a coin node in initial block download as WAITING FOR NODE and explains it under the table.
 - `validator status` says that the `full_node` tier is not active on the network yet, instead of leaving an unearnable capability implied.

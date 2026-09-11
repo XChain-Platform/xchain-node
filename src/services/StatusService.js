@@ -146,6 +146,51 @@ function describeNodeCatchingUpNote(coin, network, module, wait) {
         + ". This is expected after a bootstrap restore next to a fresh node; the service continues on its own once the node passes it."
 }
 
+// The stretch a decoder or tracker publishes while its most recent call to the
+// coin node failed (`node_unreachable`, alongside `node_last_ok_at`), or null
+// when the node answered last, the service has not called it yet, or the
+// payload predates the field. Distinct from WAITING FOR NODE on purpose: a
+// waiting service has an answer from its node and is idle by choice, an
+// unreachable one has no answer at all. A decoder on a slow host once sat
+// five and a half days in this state and every surface read healthy, because
+// the docker healthcheck, correctly, does not fail on an outage a restart
+// cannot fix. Strict on shape: an object with a `since` string.
+function reduceNodeUnreachable(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    const gap = payload.node_unreachable
+    if (!gap || typeof gap !== 'object' || typeof gap.since !== 'string' || !gap.since) return null
+    const seconds = Number(gap.seconds)
+    return {
+        since:      gap.since,
+        last_ok_at: typeof gap.last_ok_at === 'string' && gap.last_ok_at ? gap.last_ok_at : null,
+        seconds:    Number.isFinite(seconds) && seconds >= 0 ? Math.floor(seconds) : null
+    }
+}
+
+// "3d 4h", "2h 05m", "45s": what an operator scans for, not a raw second count.
+function describeDuration(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return null
+    const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600), m = Math.floor((seconds % 3600) / 60)
+    if (d > 0) return d + "d " + h + "h"
+    if (h > 0) return h + "h " + String(m).padStart(2, "0") + "m"
+    if (m > 0) return m + "m"
+    return Math.floor(seconds) + "s"
+}
+
+// The line `ps` prints under the table for a service whose node is not
+// answering: since when, whether it ever answered, and what to look at. Says
+// explicitly that this is not the IBD wait, because from outside the two look
+// the same (a healthy, idle container).
+function describeNodeUnreachableNote(coin, network, module, gap) {
+    const forHowLong = describeDuration(gap.seconds)
+    return coin + "/" + network + " " + module + " cannot reach its coin node"
+        + (forHowLong ? " (" + forHowLong + ", since " + gap.since + ")" : " (since " + gap.since + ")")
+        + (gap.last_ok_at ? ": the last answer was at " + gap.last_ok_at + "." : ": it has NEVER had an answer from the node.")
+        + " This is not the initial-block-download wait; the service has no answer to wait on."
+        + " Check that the " + coin + " " + network + " node container is running and answering RPC"
+        + " (a node mid-sync on slow hardware can time out every call for days), and its logs.";
+}
+
 // The REORG_HALT fields of a decoder health payload, or null for anything that
 // is not a payload. Strict `=== true` on the flag: an older image without the
 // field reads as not halted rather than as a halt.
@@ -328,6 +373,16 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                     nextCoinNetworkModules[nextModule]["node_catching_up"] = wait
                                     notes.push(describeNodeCatchingUpNote(nextCoin, nextCoinNetwork, nextModule, wait))
                                 }
+                                // A node that is not answering at all, which the same
+                                // healthy-and-idle container hides: the service has no
+                                // tip to wait on, so it is neither waiting nor stalled.
+                                const gap = reduceNodeUnreachable(payload)
+                                if (gap) {
+                                    state += " NODE UNREACHABLE"
+                                    isChurning = true
+                                    nextCoinNetworkModules[nextModule]["node_unreachable"] = gap
+                                    notes.push(describeNodeUnreachableNote(nextCoin, nextCoinNetwork, nextModule, gap))
+                                }
                             }
                             const name        = nextModule
                             const rawPorts    = containerStatus["NetworkSettings"]["Ports"] || {}
@@ -461,5 +516,8 @@ module.exports = {
     reduceDecoderReorgHalt,
     describeReorgHaltNote,
     reduceNodeCatchingUp,
-    describeNodeCatchingUpNote
+    describeNodeCatchingUpNote,
+    reduceNodeUnreachable,
+    describeNodeUnreachableNote,
+    describeDuration
 }

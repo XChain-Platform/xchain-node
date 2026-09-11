@@ -41,13 +41,126 @@ class E2EEnv extends TestEnv {
         this.capture = null
         this.http = null
         this._containerCounter = 0
+        // Every host-reaching seam the install path hit, in call order (see
+        // sealLazyRequireSeams). Empty after an install means the seals are not
+        // wired and the real implementations ran against the host instead.
+        this.hostSeamCalls = []
+        this._sealedSeams = []
     }
 
     async setup() {
         await super.setup()
         this.capture = new CommandCapture()
         this.http = new HttpCapture()
+        this.hostSeamCalls = []
+        this.sealBootstrapSeam()
         return this
+    }
+
+    /**
+     * Replace `names` on an already-loaded service's exports object for the
+     * lifetime of this env, recording every call on hostSeamCalls.
+     *
+     * WHY this and not another proxyquire stub map: the install path reaches
+     * several services through a `require` evaluated at CALL time, and
+     * proxyquire only intercepts requires made while the proxied module is
+     * being LOADED. Every runtime require therefore resolves to the real
+     * singleton no matter what createCLI() passes, and a "fully stubbed"
+     * install ends up talking to the host. Patching the exports object closes
+     * exactly those seams while leaving module identity, and every other
+     * function on the module, alone.
+     */
+    _sealSeam(modulePath, replacements) {
+        const self = this
+        const target = require(path.join(ROOT, modulePath))
+        const saved = {}
+        for (const [name, impl] of Object.entries(replacements)) {
+            saved[name] = target[name]
+            target[name] = function (...args) {
+                self.hostSeamCalls.push({ module: path.basename(modulePath), name, args })
+                return impl.apply(this, args)
+            }
+        }
+        this._sealedSeams.push({ target, saved })
+        return target
+    }
+
+    /**
+     * BootstrapService is required at call time by installModule and by
+     * moduleOperations, so the real module runs with the real ConfigService,
+     * DockerService and DatabaseService behind it: a stubbed install issued
+     * `docker inspect`/`docker exec` against whatever containers the HOST has
+     * (a venue carrying a resident regtest stack answers with real ones) and
+     * fetched https://sync.xchain.io over the network, which is the unbounded
+     * latency that pushed a random case in this suite past the mocha ceiling.
+     *
+     * The freshness answers stay the ones a real fresh install would get, so
+     * the install still walks its restore branch; only the restore itself is
+     * a no-op.
+     */
+    sealBootstrapSeam() {
+        const BootstrapService = require(path.join(ROOT, 'src/services/BootstrapService'))
+        this._sealSeam('src/services/BootstrapService', {
+            utxoTrackerVolumeFreshness: async () => BootstrapService.FRESHNESS_EMPTY,
+            mariaDbModuleFreshness:     async () => BootstrapService.FRESHNESS_EMPTY,
+            ensureBootstrapUtxoTracker: async () => false,
+            ensureBootstrapMariaDb:     async () => false,
+            downloadBootstrap:          async () => null
+        })
+    }
+
+    /**
+     * The two remaining call-time seams, sealed once createCLI() has built the
+     * patched ConfigService they have to answer from:
+     *
+     *  - ConfigService.dbPasswordCanRotate runtime-requires DatabaseService,
+     *    whose getDatabaseContainerId runs `docker inspect` on the host. A box
+     *    with a resident xchain-node-database answers yes and the install mints
+     *    generated credentials; a box without one answers no and it uses the
+     *    static defaults. Answer from the harness's own docker routes instead,
+     *    which present a database container on every venue.
+     *  - StatusService.probeServiceHealthPayload runtime-requires
+     *    child_process AND the real ConfigService, then `docker exec`s wget
+     *    into the container. Against the host that reads the resident stack's
+     *    config file and probes its live services. Sealed at
+     *    BootstrapHealthGate.probeServiceStatus, which is the one function that
+     *    reaches the container, and it raises the same "no status probe
+     *    succeeded" a container-less venue raises.
+     */
+    sealLazyRequireSeams(patchedConfigService) {
+        const dbContainerId = 'd'.repeat(64)
+        this._sealSeam('src/services/DatabaseService', {
+            getDatabaseContainerId: async () => dbContainerId
+        })
+        this._sealSeam('src/services/BootstrapHealthGate', {
+            probeServiceStatus: async () => { throw new Error('no status probe succeeded') }
+        })
+        // getDefaultConfig is the one real-ConfigService read those seams (and
+        // any other call-time require of it) make; point it at the copy wired
+        // to this env's temp config dir so no venue's config file is read.
+        this._sealSeam('src/services/ConfigService', {
+            getDefaultConfig: (...args) => patchedConfigService.getDefaultConfig(...args)
+        })
+    }
+
+    /**
+     * Names of the host-reaching seams this install hit, as "Module.fn",
+     * deduplicated and in first-call order.
+     */
+    hostSeamCallNames() {
+        return [...new Set(this.hostSeamCalls.map(c => `${c.module.replace(/\.js$/, '')}.${c.name}`))]
+    }
+
+    restoreHostSeams() {
+        for (const { target, saved } of this._sealedSeams.reverse()) {
+            for (const [name, fn] of Object.entries(saved)) target[name] = fn
+        }
+        this._sealedSeams = []
+    }
+
+    async teardown() {
+        this.restoreHostSeams()
+        return super.teardown()
     }
 
     /**
@@ -216,6 +329,10 @@ class E2EEnv extends TestEnv {
             removeModuleDir: () => {},
             removeModuleTmpDir: () => {}
         })
+
+        // Must happen before the first install: these seals are what keeps the
+        // call-time requires below from reaching the host's docker and config.
+        this.sealLazyRequireSeams(ConfigService)
 
         const execFileStub = capture.createExecFileStub()
         const execFileAsyncStub = capture.createExecFileAsyncStub()

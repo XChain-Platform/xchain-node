@@ -15,6 +15,7 @@ const {
     assertGoLiveReady,
     collectViolations,
     findFlagDayPlaceholders,
+    hasUnarmedMainnetActivation,
     FLAG_DAY_PLACEHOLDER
 } = require('../../src/services/GoLiveGate')
 
@@ -155,13 +156,40 @@ describe('GoLiveGate', () => {
     })
 
     describe('findFlagDayPlaceholders', () => {
-        it('finds the placeholder anywhere under src/ but skips node_modules', () => {
+        it('finds an un-armed mainnet activation anywhere under src/ but skips node_modules', () => {
             const dir = makeModuleDir({
-                'src/deep/activation.js': 'const T = ' + FLAG_DAY_PLACEHOLDER,
-                'src/node_modules/dep.js': 'const T = ' + FLAG_DAY_PLACEHOLDER,
-                'test/outside.js': 'const T = ' + FLAG_DAY_PLACEHOLDER
+                'src/deep/activation.js': 'const X_MAINNET_TIME = ' + FLAG_DAY_PLACEHOLDER,
+                'src/node_modules/dep.js': 'const X_MAINNET_TIME = ' + FLAG_DAY_PLACEHOLDER,
+                'test/outside.js': 'const X_MAINNET_TIME = ' + FLAG_DAY_PLACEHOLDER
             })
             expect(findFlagDayPlaceholders(dir)).to.deep.equal([path.join('src', 'deep', 'activation.js')])
+        })
+
+        // The gate reads activation VALUES, not substrings: the sentinel is only
+        // a violation where a mainnet instant or height actually lives.
+        describe('hasUnarmedMainnetActivation', () => {
+            const cases = [
+                ['addChange literal mainnet time',       "this.addChange('A','0.2.0',9999999999,0,0,0,0,0);",                      true],
+                ['addChange literal mainnet block',      "this.addChange('A','0.2.0',0,0,0,999999999,0,0);",                       true],
+                ['addChange identifier resolved',        "const A_MAINNET_TIME = 9999999999;\nthis.addChange('A','0.2.0',A_MAINNET_TIME,0,0,0,0,0);", true],
+                ['map mainnet key',                      'const A_ACTIVATION = { mainnet: 999999999, testnet: 0 }',                  true],
+                ['map coin-scoped mainnet key',          "const A = { 'BTC:mainnet': 9999999999, 'BTC:testnet': 0 }",               true],
+                ['MAINNET constant',                     'const A_MAINNET_HEIGHT = 999999999',                                       true],
+                ['1798761600 is an ARMED instant',       "this.addChange('CROSS_CHAIN_ROYALTY','0.2.0',1798761600,0,0,0,0,0);",  false],
+                ['sentinel in the testnet position',     "this.addChange('A','0.2.0',0,9999999999,0,0,0,0);",                      false],
+                ['sentinel in a testnet map entry',      'const A = { mainnet: 0, testnet: 9999999999 }',                            false],
+                ['sentinel as a query upper bound',      'let blockCap = blockIndex || 999999999;',                                  false],
+                ['sentinel in a line comment',           '// mainnet: 9999999999 until ruled\nconst A = { mainnet: 0 }',            false],
+                ['sentinel in a block comment',          '/* addChange(x, y, 9999999999) */ const A = { mainnet: 0 }',               false],
+                ['sentinel in a string',                 "log('mainnet sentinel 9999999999 seen')",                                  false],
+                ['an armed real instant',                'const A = { mainnet: 1788825600, testnet: 0 }',                            false],
+                ['an inert null',                        'const A = { mainnet: null, testnet: 0 }',                                  false]
+            ]
+            for (const [label, source, expected] of cases) {
+                it(`${expected ? 'flags' : 'passes'}: ${label}`, () => {
+                    expect(hasUnarmedMainnetActivation(source)).to.equal(expected)
+                })
+            }
         })
 
         it('returns empty for a module with no src dir', () => {

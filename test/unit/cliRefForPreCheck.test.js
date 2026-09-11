@@ -20,9 +20,12 @@
 // a "first positional" reading would install the hub from).
 
 const { expect } = require('chai')
-const { refForPreCheck } = require('../../src/cli')
+const { refForPreCheck, commandRepairsHub } = require('../../src/cli')
 
 const cmd = (args) => ({ args })
+// Commander hands the hook an action command whose opts() carry the flags; only
+// `uninstall --include-shared` is read here.
+const cmdWithOpts = (args, opts) => ({ args, opts: () => opts })
 
 describe('cli refForPreCheck()', function () {
 
@@ -69,5 +72,99 @@ describe('cli refForPreCheck()', function () {
         // action raises that with full context; this helper must not pre-empt it
         // with a stack trace from a precheck hook.
         expect(refForPreCheck('install', cmd(['xchain-node']))).to.equal(null)
+    })
+})
+
+// commandRepairsHub decides which commands survive a hub that is not answering.
+//
+// preCheck pushes local config to the hub before every state-changing command.
+// A crash-looping hub answers nothing, so that push failed after ten attempts
+// and aborted the command - `update xchain-hub` included, which is the command
+// that rebuilds the hub and ends the crash loop. Deleting the container by hand
+// was the only escape. The answer here buys a SKIPPED config push, so it has to
+// be narrow in both directions: too wide silences a real hub failure on a
+// command that needs one working, too narrow wedges the repair path again.
+describe('cli commandRepairsHub()', function () {
+
+    describe('says yes when the command reaches the hub container', function () {
+
+        it('for the hub named outright on every verb that replaces or restarts it', function () {
+            for (const name of ['install', 'update', 'recreate', 'restart', 'start', 'uninstall']) {
+                expect(commandRepairsHub(name, cmd(['xchain-hub']))).to.equal(true, name)
+            }
+        })
+
+        it('through the short alias operators actually type', function () {
+            expect(commandRepairsHub('recreate', cmd(['hub']))).to.equal(true)
+            expect(commandRepairsHub('update', cmd(['hub']))).to.equal(true)
+        })
+
+        it('for `update` with no service, which is the documented whole-node upgrade', function () {
+            // Bare `update` resolves to `all`, and `all` on THIS verb folds the
+            // shared services in hub-first (includeSharedServicesForUpdate).
+            expect(commandRepairsHub('update', cmd([]))).to.equal(true)
+            expect(commandRepairsHub('update', cmd(['all']))).to.equal(true)
+        })
+
+        it('for `update` at a named ref, where the ref is not a service', function () {
+            expect(commandRepairsHub('update', cmd(['xchain-hub', 'v0.16.2']))).to.equal(true)
+            expect(commandRepairsHub('update', cmd(['develop']))).to.equal(true)
+        })
+
+        it('for `uninstall all --include-shared`, the teardown that removes the hub', function () {
+            expect(commandRepairsHub('uninstall', cmdWithOpts(['all'], { includeShared: true }))).to.equal(true)
+        })
+
+        it('for autoheal, whose whole job is restarting containers that are unhealthy', function () {
+            expect(commandRepairsHub('autoheal', cmd([]))).to.equal(true)
+        })
+    })
+
+    describe('says no when the command needs a hub it cannot fix', function () {
+
+        it('for every verb that only reads or writes THROUGH the hub', function () {
+            for (const name of ['ps', 'reset', 'sync', 'bootstrap', 'e2etest', 'exec', 'shell', 'logs',
+                                'tail', 'monitor', 'clear-reorg-halt', 'rollback', 'validator']) {
+                expect(commandRepairsHub(name, cmd(['xchain-hub']))).to.equal(false, name)
+            }
+        })
+
+        it('for `stop`, which takes the hub down rather than bringing it back', function () {
+            expect(commandRepairsHub('stop', cmd(['xchain-hub']))).to.equal(false)
+            expect(commandRepairsHub('stop', cmd(['all']))).to.equal(false)
+        })
+
+        it('when a repairing verb targets some OTHER service', function () {
+            expect(commandRepairsHub('restart', cmd(['xchain-indexer', 'bitcoin', 'regtest']))).to.equal(false)
+            expect(commandRepairsHub('recreate', cmd(['xchain-explorer']))).to.equal(false)
+            expect(commandRepairsHub('update', cmd(['xchain-decoder', 'litecoin']))).to.equal(false)
+            expect(commandRepairsHub('install', cmd(['develop', 'node', 'bitcoin', 'regtest']))).to.equal(false)
+        })
+
+        it('for `all` on the verbs whose expansion leaves the hub out', function () {
+            // filterCommandParameters expands `all` to the coin stacks plus the
+            // explorer; the hub is a shared service and is never in it. Only
+            // `update` adds it back, and it has its own case above.
+            for (const name of ['install', 'recreate', 'restart', 'start']) {
+                expect(commandRepairsHub(name, cmd(['all', 'bitcoin', 'regtest']))).to.equal(false, name)
+            }
+        })
+
+        it('for `uninstall all` without the shared flag, which leaves the hub standing', function () {
+            expect(commandRepairsHub('uninstall', cmdWithOpts(['all'], { includeShared: false }))).to.equal(false)
+            expect(commandRepairsHub('uninstall', cmd(['all']))).to.equal(false)
+        })
+
+        it('when resolveArgs refuses the argument shape', function () {
+            // The action raises that refusal itself with full context; a precheck
+            // hook must not turn an unparsable command into a licence to skip.
+            expect(commandRepairsHub('update', cmd(['xchain-node']))).to.equal(false)
+            expect(commandRepairsHub('restart', cmd(['not-a-service']))).to.equal(false)
+        })
+
+        it('tolerates a missing args array rather than throwing inside the hook', function () {
+            expect(commandRepairsHub('restart', cmd(undefined))).to.equal(false)
+            expect(commandRepairsHub('restart', undefined)).to.equal(false)
+        })
     })
 })

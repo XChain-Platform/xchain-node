@@ -348,6 +348,68 @@ async function applyHubApiKeyFromSidecar(target) {
     if (key) target["HUB_API_KEY"] = key
 }
 
+// A command composes the shared hub's config many times, so each deploy-time warning
+// about it is said once per process rather than once per composition.
+const warnedHubConfigKeys = new Set()
+function warnHubConfigOnce(key, message) {
+    if (warnedHubConfigKeys.has(key)) return
+    warnedHubConfigKeys.add(key)
+    console.warn(message)
+}
+
+// The coin/network stacks this deployment runs, from the module registry. Returns []
+// when the registry is unreadable (no pool yet), which the callers treat as "unknown"
+// rather than "none".
+async function getRegisteredCoinStacks() {
+    try {
+        const { db } = require('../state')
+        const rows = await db.getAllModuleContainers(null, null)
+        return (rows || []).filter(r => r && r.coin && r.network
+            && Object.values(Coin).includes(r.coin) && Object.values(Network).includes(r.network))
+    } catch {
+        return []
+    }
+}
+
+// The coin and network tokens of the command being run. A first install registers no
+// coin stack until AFTER preCheck has deployed the shared hub, so the operator's own
+// arguments are the only source the hub's env can be composed from on a fresh host.
+function getCommandCoinsAndNetworks() {
+    const argv = process.argv.slice(2)
+    return {
+        coins:    [...new Set(argv.filter(t => Object.values(Coin).includes(t)))],
+        networks: [...new Set(argv.filter(t => Object.values(Network).includes(t)))]
+    }
+}
+
+// The network a standalone hub should declare: the one every stack of this deployment
+// runs on. Ambiguous (several networks, or none named) leaves it unset, because one
+// hub declaring the wrong network mis-gates the ingest rules it is being set for.
+async function resolveDeploymentHubNetwork() {
+    const registered = new Set((await getRegisteredCoinStacks()).map(r => r.network))
+    const networks = registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
+    if (networks.size === 1) return [...networks][0]
+    if (networks.size > 1) {
+        warnHubConfigOnce("HUB_NETWORK_AMBIGUOUS",
+            "WARNING: HUB_NETWORK is not set and this deployment runs stacks on " +
+            [...networks].sort().join(", ") + ", so the shared hub cannot derive one network. " +
+            "Its network-keyed ingest gates (PRICE batch validation) stay closed until " +
+            "HUB_NETWORK is set in the host env.")
+    }
+    return null
+}
+
+// Whether this deployment runs a BTC indexer for `network`, counting the one the
+// running command is installing right now: the hub is deployed before it exists, and
+// the composed URL names the container that install creates.
+async function hasBitcoinIndexer(network) {
+    const registered = await getRegisteredCoinStacks()
+    if (registered.some(r => r.coin === Coin.BITCOIN && r.network === network
+        && r.module === XChainService.XCHAIN_INDEXER)) return true
+    const command = getCommandCoinsAndNetworks()
+    return command.coins.includes(Coin.BITCOIN) && command.networks.includes(network)
+}
+
 async function getDefaultConfig(module, coin, network) {
     let defaultValues = null
 
@@ -505,6 +567,30 @@ async function getDefaultConfig(module, coin, network) {
         // indexer/node keep the bare network (protocol-change matching / bitcoind conf).
         if (module === XChainService.XCHAIN_ENCODER || module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_UTXO_TRACKER) {
             defaultValues["NETWORK"] = coin + "-" + network
+        }
+
+        // LevelDB tuning passthrough (xchain-utxo-tracker only). LevelUpDb.js reads
+        // LEVELDB_CACHE_BYTES (documented default 4 GiB, components/utxo-tracker/configuration.md:41)
+        // and LEVELDB_WRITE_BUFFER_BYTES from process.env inside the container, but
+        // getDefaultConfig never forwarded either host var into the tracker's
+        // defaultValues, so an operator exporting LEVELDB_CACHE_BYTES before
+        // install/update got silence: the container never saw it and LevelUpDb fell
+        // back to its in-container default every time. Mirrors hubPassthroughVars /
+        // genesisPassthroughVars: only set, non-empty host vars are injected, so an
+        // unset env leaves the tracker's own default untouched.
+        // Read by name rather than through a loop: the env-var doc-coverage gate can
+        // only see a variable it can name, and a computed process.env[varName] read
+        // widens its blind spot.
+        if (module === XChainService.XCHAIN_UTXO_TRACKER) {
+            const levelDbPassthrough = {
+                LEVELDB_CACHE_BYTES:        process.env.LEVELDB_CACHE_BYTES,
+                LEVELDB_WRITE_BUFFER_BYTES: process.env.LEVELDB_WRITE_BUFFER_BYTES
+            }
+            for (const [varName, value] of Object.entries(levelDbPassthrough)) {
+                if (value !== undefined && value !== "") {
+                    defaultValues[varName] = value
+                }
+            }
         }
 
         // e2e-test also derives addresses (test/cryptoHelper.js) and resolves its
@@ -738,8 +824,18 @@ async function getDefaultConfig(module, coin, network) {
                 // HUB_SYNC_PRICE_GRACE_S / HUB_SYNC_ORACLE_GRACE_S are the pair the regtest mirror wedge already
                 // requires be set to 0 alongside it. A host env value always wins over the
                 // regtest default so an e2e drill can still exercise a nonzero grace.
+                // The list is EVERY watermark grace hub_db_sync.js resolves, not the three
+                // that first wedged: each mirrored table has its own barrier, and any one
+                // left at its frozen default holds every block up to 60s while that
+                // table's mirror watermark stands still, which on a three-rail regtest
+                // venue idle for hours is every block; an SDK drive's 120s index wait
+                // then dies on the second block. Measured 2026-09-09 on the match
+                // barrier, then again on the anchor-reward attestation barrier once
+                // match was cleared (hub_db_sync.js reads all of them through
+                // resolveWatermarkGrace, regtest-overridable only).
                 const hubSyncRegtestGraceVars = [
-                    "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S"
+                    "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S",
+                    "HUB_SYNC_MATCH_GRACE_S", "HUB_SYNC_CALL_GRACE_S", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S"
                 ]
                 for (const varName of hubSyncRegtestGraceVars) {
                     defaultValues[varName] = (process.env[varName] !== undefined && process.env[varName] !== "")
@@ -859,13 +955,13 @@ async function getDefaultConfig(module, coin, network) {
             // Serving limits, same host-env injection point as the knobs above,
             // because every one of these defaults is tuned for a PUBLIC explorer
             // and is wrong for a private venue:
-            //   EXPLORER_*RATE_LIMIT_RPM - the eight request budgets, per IP: the
-            //     app-wide cap, the quote/pre-flight caps, and the five per-route
+            //   EXPLORER_*RATE_LIMIT_RPM - the nine request budgets, per IP: the
+            //     app-wide cap, the quote/pre-flight caps, and the six per-route
             //     caps (checkpoint-list, checkpoint-verify, action-proof,
-            //     validator-set-proof, vm-query). A dev box reaches the explorer
+            //     validator-set-proof, vm-query, batch). A dev box reaches the explorer
             //     through one tunnel, so every browser and every test run shares a
             //     single bucket, and a browser-driven suite sustains far more than
-            //     any one of these caps on its own. All eight are now reachable
+            //     any one of these caps on its own. All nine are now reachable
             //     from the host env; the five per-route caps were unreachable on a
             //     node-managed explorer (the regtest venue), which could raise only
             //     the app-wide and fee-quote caps before this change.
@@ -890,7 +986,8 @@ async function getDefaultConfig(module, coin, network) {
                 "EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM",
                 "EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM",
                 "EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM",
-                "EXPLORER_VM_QUERY_RATE_LIMIT_RPM"
+                "EXPLORER_VM_QUERY_RATE_LIMIT_RPM",
+                "EXPLORER_BATCH_RATE_LIMIT_RPM"
             ]) {
                 const value = {
                     EXPLORER_RATE_LIMIT_RPM:                   process.env.EXPLORER_RATE_LIMIT_RPM,
@@ -900,6 +997,7 @@ async function getDefaultConfig(module, coin, network) {
                     EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM:   process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM,
                     EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM: process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM,
                     EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM:      process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM,
+                    EXPLORER_BATCH_RATE_LIMIT_RPM:             process.env.EXPLORER_BATCH_RATE_LIMIT_RPM,
                     EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM: process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM,
                     EXPLORER_VM_QUERY_RATE_LIMIT_RPM:          process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM
                 }[key]
@@ -968,7 +1066,8 @@ async function getDefaultConfig(module, coin, network) {
         // anchor (hub.getlatestblock). Sourced from host env so a hub NOT co-located with
         // a BTC indexer (e.g. the master hub box, where the BTC stack lives elsewhere) can
         // point at a reachable indexer. Empty default ⇒ the hub falls back to its configs
-        // table, so co-located standalone/validator installs are unaffected.
+        // table, so co-located standalone/validator installs are unaffected. Left empty
+        // here, it is composed from the co-located BTC indexer further down.
         defaultValues["BTC_INDEXER_API_URL"]      = process.env.BTC_INDEXER_API_URL || ""
 
         // State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a
@@ -1178,6 +1277,32 @@ async function getDefaultConfig(module, coin, network) {
                 "exposing this hub beyond a trusted network.")
         }
 
+        // A hub with no HUB_NETWORK resolves its network to '', which fails every
+        // network-keyed ingest gate closed, so a non-validator install can never
+        // validate an on-chain PRICE batch. Host env still wins; unresolved stays unset.
+        if (!defaultValues["HUB_NETWORK"]) {
+            const deploymentNetwork = await resolveDeploymentHubNetwork()
+            if (deploymentNetwork) defaultValues["HUB_NETWORK"] = deploymentNetwork
+        }
+
+        // Capability snapshots are read off a BTC indexer, and with none reachable the
+        // hub refuses every on-chain PRICE batch for insufficient signer stake. Compose
+        // the co-located one; say so when this deployment has none to compose.
+        if (!defaultValues["BTC_INDEXER_API_URL"] && defaultValues["HUB_NETWORK"]) {
+            const btcNetwork = String(defaultValues["HUB_NETWORK"]).toLowerCase()
+            if (await hasBitcoinIndexer(btcNetwork)) {
+                defaultValues["BTC_INDEXER_API_URL"] = "http://" +
+                    getDockerContainerImageName(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, btcNetwork) + ":3004"
+            } else {
+                warnHubConfigOnce("BTC_INDEXER_MISSING",
+                    "WARNING: this hub has no BTC indexer (BTC_INDEXER_API_URL is not set in the " +
+                    "host env and this deployment runs no bitcoin " + btcNetwork + " stack), so it cannot read " +
+                    "capability snapshots: every on-chain PRICE batch its indexer parses is recorded invalid " +
+                    "for insufficient signer stake. Install a bitcoin " + btcNetwork + " stack, or set " +
+                    "BTC_INDEXER_API_URL to a reachable BTC indexer.")
+            }
+        }
+
         // Operator signer for the on-chain DOGE publishers: when the host sets
         // XCHAIN_NODE_HUB_SIGNER_DIR, ModuleService mounts that directory
         // read-only at /XChainHub/operator-signer and the hub loads
@@ -1191,8 +1316,31 @@ async function getDefaultConfig(module, coin, network) {
         // P2P / signing-key / capability-config env so the hub starts as a full
         // validator. Returns {} (no change) for a standalone node, so the standalone
         // install path is unaffected.
-        const { getValidatorEnv } = require('./ValidatorService')
+        const { getValidatorEnv, validatorModeReport } = require('./ValidatorService')
         Object.assign(defaultValues, getValidatorEnv())
+
+        // State the resolved mode and the directory it came from: an empty validator
+        // env means standalone, disabled, or a configDir carrying no validator/, and
+        // a deploy cannot tell those apart. A statement, never a refusal.
+        const validator = validatorModeReport()
+        if (validator.mode === 'validator') {
+            console.log("xchain-node: this hub deploys in VALIDATOR mode, from " + validator.dir)
+        } else if (validator.mode === 'incomplete') {
+            warnHubConfigOnce("VALIDATOR_STATE_INCOMPLETE",
+                "WARNING: the validator state under " + validator.dir + " is HALF PRESENT (missing " +
+                validator.missing.join(", ") + "), so this hub deploys STANDALONE: no P2P_VALIDATOR_ADDR, " +
+                "no SIGNING_PRIVKEY_HEX, no capability mount, and its anchor publisher will never run. " +
+                "Half a validator state is never a standalone node, so this is a broken install rather " +
+                "than a choice: restore the missing file, or point XCHAIN_NODE_CONFIG_DIR at the config " +
+                "directory that holds the complete set.")
+        } else if (validator.mode === 'disabled') {
+            console.log("xchain-node: this hub deploys STANDALONE because the validator state at " +
+                validator.dir + " records enabled:false.")
+        } else {
+            console.log("xchain-node: this hub deploys STANDALONE (no validator state under " +
+                validator.dir + "). If this host IS meant to be a validator, XCHAIN_NODE_CONFIG_DIR is " +
+                "resolving to the wrong config directory and the real one holds validator/.")
+        }
     }
 
     // Read the config file for this coin/network pair. Non-secret operator overrides live
@@ -1430,8 +1578,15 @@ function filterCommandParameters(branch, modules, coins, networks) {
     const SHARED_SERVICES = [HUB_MODULE_NAME, EXPLORER_MODULE_NAME, DB_MODULE_NAME, SYNC_MODULE_NAME]
 
     if (modules === "all") {
-        modules = Object.values(XChainService).filter(m => m !== XChainService.XCHAIN_E2E_TEST)
-        modules.push(NODE_MODULE_NAME)
+        // The coin node leads the per-chain list so `install all` creates it
+        // before the services that poll it. With the node last, a mainnet
+        // install created the decoder four and a half hours before the node
+        // existed (a 151 GiB tracker restore sat between them); the decoder
+        // spent that time logging ENOTFOUND for a name the network did not
+        // carry yet, and the node's own initial sync, the slowest step on the
+        // box, had not even started. Every other command that expands `all`
+        // (update, start, stop, uninstall) tolerates either order.
+        modules = [NODE_MODULE_NAME, ...Object.values(XChainService).filter(m => m !== XChainService.XCHAIN_E2E_TEST)]
         addExplorer = true
     } else if (modules === "explorer") {
         addExplorer = true
