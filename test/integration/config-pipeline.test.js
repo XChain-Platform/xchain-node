@@ -64,7 +64,9 @@ describe('Integration: Config Pipeline', function () {
             // encoder/decoder/utxo-tracker coin-prefix NETWORK (see f744334), e.g. "bitcoin-mainnet"
             expect(config['NETWORK']).to.equal('bitcoin-mainnet')
             expect(config['NODE_PORT']).to.equal(8332)
-            expect(config['NODE_URL']).to.equal('node')
+            // The coin-scoped container name, not the bare `node` alias (ambiguous
+            // from a container that also sits on a sibling coin's network).
+            expect(config['NODE_URL']).to.equal('xchain-node-bitcoin-mainnet-node')
             expect(config['ENCODER_API_PORT']).to.equal(3003)
             expect(config['DECODER_API_PORT']).to.equal(3002)
             expect(config['UTXO_TRACKER_API_PORT']).to.equal(3001)

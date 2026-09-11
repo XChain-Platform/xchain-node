@@ -388,6 +388,30 @@ describe('ConfigService', function () {
                 expect(config['NODE_PORT']).to.equal(18444)
             })
 
+            // NODE_URL must be the coin node's container name, not the bare `node`
+            // network alias. The indexer joins its sibling coins' docker networks and
+            // the hub joins every stack, and every coin node carries the alias `node`,
+            // so from those containers `node` resolves to whichever sibling network
+            // sorts first: a dogecoin stack's credentials then reach the bitcoin node
+            // and get HTTP 401 (regtest measurement and a testnet operator report,
+            // 2026-09-11). A container name is unique per coin/network and resolves
+            // on any network both containers hold.
+            it('NODE_URL is the coin-scoped node container name, distinct per coin', async function () {
+                const cs = makeServiceWithConfig('')
+                const doge = await cs.getDefaultConfig('xchain-indexer', 'dogecoin', 'testnet')
+                const btc  = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'testnet')
+                expect(doge['NODE_URL']).to.equal('xchain-node-dogecoin-testnet-node')
+                expect(btc['NODE_URL']).to.equal('xchain-node-bitcoin-testnet-node')
+                expect(doge['NODE_URL']).to.not.equal(btc['NODE_URL'])
+                expect(doge['NODE_URL']).to.not.equal(NODE_MODULE_NAME)
+            })
+
+            it('an operator NODE_URL override in the config file still wins over the default', async function () {
+                const cs = makeServiceWithConfig('NODE_URL=doge-node.internal\n')
+                const config = await cs.getDefaultConfig('xchain-indexer', 'dogecoin', 'testnet')
+                expect(config['NODE_URL']).to.equal('doge-node.internal')
+            })
+
             it('generates random NODE_USER and NODE_PASSWORD when absent from config file', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')

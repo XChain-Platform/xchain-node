@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The generated `NODE_URL` is now the coin node's container name instead of the shared `node` alias, which resolved to the bitcoin node from the indexer and hub containers and answered a dogecoin or litecoin stack's RPC credentials with 401.
+
 ## [0.17.0] - 2026-09-10
 
 ### Added
