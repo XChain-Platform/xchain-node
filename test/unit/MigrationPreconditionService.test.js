@@ -152,6 +152,22 @@ describe('MigrationPreconditionService', () => {
             if (!fs.existsSync(indexerMigrations)) return this.skip()
             expect(listDeployPreconditionMigrations(indexerMigrations)).to.include(GATED)
         })
+
+        it('reads the REAL indexer tree and finds the bridge-tables migration', function () {
+            // The bridge build lands `2026-09-12-bridge-tables.sql` (mode=manual,
+            // deploy-precondition=required) beside the token-bridge-fields migration
+            // (mode=auto, no precondition). Nothing in xchain-node had to change for
+            // either to be covered: this guard is a directory scan of whatever the
+            // target tree carries, so a new deploy-precondition migration is wired in
+            // the moment it lands on the indexer, no xchain-node release required
+            // (the same "no coupled release" property MigrationPreconditionService's
+            // header describes for the contract as a whole). This test is the proof.
+            const indexerMigrations = path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'sql', 'migrations')
+            if (!fs.existsSync(indexerMigrations)) return this.skip()
+            const required = listDeployPreconditionMigrations(indexerMigrations)
+            expect(required).to.include('2026-09-12-bridge-tables.sql')
+            expect(required).to.not.include('2026-09-12-token-bridge-fields.sql')
+        })
     })
 
     describe('readAppliedMigrations', () => {
