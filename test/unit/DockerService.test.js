@@ -80,6 +80,35 @@ describe('DockerService', function () {
             }
         })
 
+        it('checkBuildKitAvailable resolves when docker buildx version succeeds', async function () {
+            const stubs = makeStubs()
+            const seen = []
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                seen.push([cmd, ...args].join(' '))
+                cb(null, 'github.com/docker/buildx v0.17.1 abc1234\n')
+            })
+            const ds = loadDockerService(stubs)
+            expect(await ds.checkBuildKitAvailable()).to.be.true
+            expect(seen).to.deep.equal(['docker buildx version'])
+        })
+
+        it('checkBuildKitAvailable rejects with the install hint when buildx is missing', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                cb(new Error("docker: 'buildx' is not a docker command."))
+            })
+            const ds = loadDockerService(stubs)
+            try {
+                await ds.checkBuildKitAvailable()
+                expect.fail('should have rejected')
+            } catch (err) {
+                expect(err).to.include('docker-buildx-plugin')
+                expect(err).to.include('legacy builder')
+            }
+        })
+
         it('rejects when docker --version returns unexpected format', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {

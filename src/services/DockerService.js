@@ -47,6 +47,30 @@ async function checkDockerInstalledAndReachable() {
     })
 }
 
+// Every xchain service Dockerfile carries an optional COPY written as a glob
+// (`COPY ./.en[v] ...`, and the explorer's `COPY ./xchain-v[m] ...`). BuildKit
+// treats a glob that matches nothing as a no-op; Docker's legacy builder
+// rejects it with "COPY failed: no source files were specified". A host whose
+// `docker build` falls to the legacy builder (Ubuntu's `docker.io` package
+// ships no buildx plugin; so does an exported DOCKER_BUILDKIT=0) therefore
+// fails every module install after the clone and the DB provisioning have
+// already run (xchain-hub issue 23, a fresh Ubuntu 24.04 validator). Probe
+// for buildx before the build so the failure names the missing package
+// instead of a COPY line inside a module the operator did not write.
+async function checkBuildKitAvailable() {
+    return new Promise((resolve, reject) => {
+        execFile('docker', ['buildx', 'version'], (error) => {
+            if (error) {
+                reject("Docker's buildx plugin is not installed, so `docker build` would fall back to the "
+                    + "legacy builder, which cannot build the xchain module images. Install it and retry: "
+                    + "`sudo apt install docker-buildx-plugin` (see INSTALL.md, \"Install docker engine\").")
+                return
+            }
+            resolve(true)
+        })
+    })
+}
+
 // When an operator relocates Docker's data-root off the root
 // filesystem (the common "move Docker to a big NVMe/HDD" recipe: set
 // `"data-root": "/misc/docker"` in /etc/docker/daemon.json), Docker's own
@@ -622,6 +646,7 @@ async function saveContainerLogs(containerId, filePath) {
 
 module.exports = {
     checkDockerInstalledAndReachable,
+    checkBuildKitAvailable,
     checkContainerdDataRootRelocation,
     getStatusFromContainer,
     getDockerNetworkInspect,

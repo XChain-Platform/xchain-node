@@ -416,7 +416,16 @@ async function getDefaultConfig(module, coin, network) {
     if (coin && network) {
         defaultValues = {
             "NETWORK":   network,
-            "NODE_URL":  NODE_MODULE_NAME,
+            // The coin node's CONTAINER NAME, never the bare `node` alias every coin
+            // node also carries. The indexer joins its sibling coins' networks for
+            // cross-chain reads (ModuleService.crossChainNetworksFor) and the hub
+            // joins every stack, so from either container docker DNS answers `node`
+            // with whichever sibling network sorts first (bitcoin), and a dogecoin
+            // stack's RPC credentials then hit the bitcoin node: HTTP 401 by name,
+            // 200 by IP. Measured on regtest 2026-09-11 and reported by a testnet
+            // operator the same day. The container name resolves on any shared
+            // network and is unique per coin/network, like every other *_URL here.
+            "NODE_URL":  getDockerContainerImageName(NODE_MODULE_NAME, coin, network),
             "NODE_PORT": (network === Network.MAINNET ? 8332 : (network === Network.TESTNET ? 18332 : 18444)),
             "NODE_USER": "rpc",
             "NODE_PASSWORD": "rpc",

@@ -114,6 +114,26 @@ function num(x) {
     return Number.isFinite(n) ? n : 0
 }
 
+// getToken() throws a raw HTTP error when the tick has no token record at
+// all, which is exactly the state a freshly reset regtest venue is in (a
+// reset does not reissue XCHAIN). Left uncaught that surfaces as an
+// unexplained "Explorer returned HTTP 404 for /.../token/XCHAIN" - name the
+// missing token and point at the fix instead of letting the 404 leak through.
+async function getStakeToken(sdk) {
+    try {
+        return await sdk.explorer.getToken(STAKE_TICK)
+    } catch (e) {
+        const status = e && e.details ? e.details.status : undefined
+        if (status === 404 || (e && e.code === 'EXPLORER_HTTP_404')) {
+            throw fail('the ' + STAKE_TICK + ' gas token does not exist on this venue. A regtest reset ' +
+                'does not reissue it, so nothing here can stake, mint, or price a transaction until it ' +
+                'is seeded. Run this venue\'s gas-token bootstrap (the same ISSUE the e2e harness runs) ' +
+                'before staking.')
+        }
+        throw e
+    }
+}
+
 // Read everything the plan needs from the explorer. Split out so the
 // broadcast path and the tests share one shape.
 async function readChainState(sdk, address, pubkey) {
@@ -125,7 +145,7 @@ async function readChainState(sdk, address, pubkey) {
     const row  = ((bals && bals.data) || []).find(b => b && b.tick === STAKE_TICK)
     const tokenBal = num(row && row.amount)
 
-    const token = await sdk.explorer.getToken(STAKE_TICK)
+    const token = await getStakeToken(sdk)
     const mints = (token && token.mints) || {}
 
     // An existing stake on this pubkey means v1 would be rejected (the indexer

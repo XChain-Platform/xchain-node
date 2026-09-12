@@ -284,7 +284,9 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
         // current contract, not the pre-f9f5e67 2/2.
         'install':     { required: 0, optional: 4 },
         'uninstall':   { required: 1, optional: 2 },
-        'update':      { required: 1, optional: 3 },
+        // bf4d32a: a bare `xchain-node update` means `update all`, so every
+        // positional (service, chain, network, ref) is optional.
+        'update':      { required: 0, optional: 4 },
         'ps':          { required: 0, optional: 0 },
         'start':       { required: 1, optional: 2 },
         'stop':        { required: 1, optional: 2 },
@@ -499,6 +501,13 @@ describe('S-SMOKE-004 – Constants and Enum Integrity', function () {
     })
 })
 
+// The per-coin/network main config files are operator-authored and untracked
+// (7c03f7a stopped tracking them; ConfigService falls back to defaults when one
+// is absent), so this suite checks whichever of the nine exist on this machine
+// and marks the rest pending instead of failing a checkout that never ran an
+// install for that coin/network. Comment lines are allowed: the reader skips
+// any line without a KEY= prefix, and the restored regtest files open with a
+// comment block explaining where the credentials live.
 describe('S-SMOKE-005 – Config Template File Integrity', function () {
 
     const configDir = path.join(ROOT, 'config')
@@ -517,18 +526,20 @@ describe('S-SMOKE-005 – Config Template File Integrity', function () {
 
                 before(function () {
                     const filePath = path.join(configDir, fileName)
-                    expect(fs.existsSync(filePath), `${fileName} does not exist`).to.be.true
+                    if (!fs.existsSync(filePath)) this.skip()
                     content = fs.readFileSync(filePath, 'utf8')
-                    lines = content.split('\n').filter(l => l.trim() !== '')
+                    lines = content.split('\n')
+                        .filter(l => l.trim() !== '' && !l.trim().startsWith('#'))
                 })
 
                 it('is non-empty', function () {
                     expect(content.trim()).to.not.be.empty
                 })
 
-                it('all lines match KEY=VALUE format', function () {
+                it('all non-comment lines match KEY=VALUE format', function () {
                     for (const line of lines) {
-                        expect(line, `malformed line: "${line}"`).to.match(/^[A-Z_]+=.+$/)
+                        // Name the key, never the value: a legacy file may still hold a credential.
+                        expect(line, `malformed line starting "${line.split('=')[0]}"`).to.match(/^[A-Z][A-Z0-9_]*=.+$/)
                     }
                 })
 
@@ -556,10 +567,15 @@ describe('S-SMOKE-006 – Config Composition', function () {
     it('getDefaultConfig returns populated config for bitcoin/mainnet', async function () {
         const config = await ConfigService.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
 
-        // From template file
+        // NETWORK is computed (coin-prefixed for the decoder), so it holds with or
+        // without an operator file. NODE_EXPOSED_PORT and DUST_AMOUNT only ever come
+        // from the untracked config/bitcoin-mainnet file, so they are asserted only
+        // where that file exists (see S-SMOKE-005 for why it may not).
         expect(config).to.have.property('NETWORK', 'bitcoin-mainnet')
-        expect(config).to.have.property('NODE_EXPOSED_PORT')
-        expect(config).to.have.property('DUST_AMOUNT')
+        if (fs.existsSync(path.join(ROOT, 'config', 'bitcoin-mainnet'))) {
+            expect(config).to.have.property('NODE_EXPOSED_PORT')
+            expect(config).to.have.property('DUST_AMOUNT')
+        }
 
         // From computed defaults
         expect(config).to.have.property('DECODER_DB_NAME').that.includes('BTC')

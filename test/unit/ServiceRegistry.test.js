@@ -34,6 +34,20 @@ function loadModuleService() {
         // ModuleService only pulls ValidatorService in lazily (hub caps), and
         // its top-level requires resolve fine without a live DB when we don't
         // call installModule. buildModuleDockerArgs itself has no side effects.
+        //
+        // ValidatorService is stubbed to a machine with NO validator state. Left
+        // unstubbed, the lazy require reads config/validator/ off the REAL
+        // filesystem, and on any box that has run `validator init` the hub
+        // volume assertions below then see that machine's signer mount (the
+        // "no static volumes when unconfigured" case failed exactly that way on
+        // an operator checkout, 2026-09-11) while CI, which has no such
+        // directory, passes. Tests that WANT a mount stub their own.
+        './ValidatorService': {
+            getCapabilityConfigMountDir: () => null,
+            getSignerMountDir: () => null,
+            CAPS_CONTAINER_DIR: '/validator',
+            SIGNER_CONTAINER_DIR: '/XChainHub/operator-signer'
+        },
         './ConfigService': {
             getModuleDir: (m) => '/modules/' + m,
             getModuleTmpDir: (m) => '/tmp/' + m,

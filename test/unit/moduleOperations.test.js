@@ -2332,6 +2332,27 @@ describe('moduleOperations', function () {
             expect(lines).to.contain("source_chain = 'BTC'")
         })
 
+        it('scopes the hand-run fence statement to the reset network, plus the legacy bucket', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            stubs.clearHubPriceIngestWatermark.rejects(new Error('hub DB unreachable'))
+            const warn = sinon.stub(console, 'warn')
+            const ops = loadOperations(stubs)
+            const clock = sinon.useFakeTimers()
+            const promise = ops.resetModules('xchain-indexer', 'bitcoin', 'regtest', true)
+            await clock.tickAsync(6000)
+            clock.restore()
+            await promise
+            const lines = warn.getCalls().map(c => String(c.args[0])).join('\n')
+            warn.restore()
+            // A statement an operator pastes must not be the chain-keyed one: run on a
+            // hub federating several networks it drops testnet's and mainnet's fence
+            // for BTC as well, which is the exact defect the network column removed.
+            expect(lines).to.contain(
+                "DELETE FROM price_ingest_watermarks WHERE source_chain = 'BTC' AND network IN ('regtest', '');")
+            expect(lines).to.not.contain("source_chain = 'BTC';")
+        })
+
         it('resets node data when nodeDataPath exists', async function () {
             const stubs = makeStubs()
             stubs.fs.existsSync.returns(true) // nodeDataPath exists

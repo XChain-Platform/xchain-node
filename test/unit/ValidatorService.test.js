@@ -181,6 +181,18 @@ describe('ValidatorService', function () {
 
     describe('initValidator()', function () {
 
+        // Wallet generation loads the XChain SDK lazily (ValidatorService.loadSdk),
+        // and the SDK drags in the secp256k1 and bitcoinjs stack. Whichever test
+        // first touches it pays that module-load cost inside its own 2 s mocha
+        // budget, which is fine on an idle box and a timeout on a loaded one (the
+        // first-run test below flaked that way under the full suite, 2026-09-11).
+        // Load it once here, outside any timed test, so the tests time behaviour
+        // rather than disk.
+        before(function () {
+            this.timeout(30000)
+            require('@dankest-llc/xchain-sdk')
+        })
+
         it('writes key, settings, and capabilities files on first run', async function () {
             const fs = makeFs()  // existsSync always false → not initialized
             const vs = loadValidatorService(fs)
