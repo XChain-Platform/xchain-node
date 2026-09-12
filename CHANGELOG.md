@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Bumped the `@dankest-llc/xchain-sdk` dependency from 0.11.1 to 0.18.0.
+
 ## [0.18.0] - 2026-09-11
 
 ### Fixed
