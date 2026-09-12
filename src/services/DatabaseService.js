@@ -1045,14 +1045,75 @@ async function clearHubPriceIngestWatermark(coin, network) {
         return false
     }
 
-    await runner("DELETE FROM `" + hubDbName + "`." + PRICE_FENCE_TABLE
+    const chainOnlyDelete = "DELETE FROM `" + hubDbName + "`." + PRICE_FENCE_TABLE
         + " WHERE source_chain = " + escapeSqlStringLiteral(ticker)
-        + " AND network IN (" + escapeSqlStringLiteral(fenceNetwork) + ", '')")
+
+    // The network-scoped clause is the one to run whenever the hub can answer it.
+    // A hub older than the `network` column cannot: it rejects the statement with
+    // ER_BAD_FIELD_ERROR and, before this fallback, the reset printed "clearing
+    // the fence failed" and left the rebuilt indexer's price rail dead. The
+    // pre-column fence is keyed by source_chain alone, so on that hub the
+    // chain-only DELETE is not merely a wider shot: it is the EXACT statement the
+    // chain-keyed schema supports, and it reaches exactly the one row that is
+    // fencing this chain. It is entered only for the missing `network` column,
+    // never for any other SQL failure, because on a hub that does scope by
+    // network the same statement would drop the live networks' fences too.
+    let networkScoped = true
+    try {
+        await runner(chainOnlyDelete
+            + " AND network IN (" + escapeSqlStringLiteral(fenceNetwork) + ", '')")
+    } catch (err) {
+        if (!isMissingFenceNetworkColumnError(err)) throw err
+        networkScoped = false
+        warnPriceFenceNetworkColumnMissing(ticker, hubDbName)
+        await runner(chainOnlyDelete)
+    }
+
     console.log(redactSecrets("Cleared the hub price ingest fence for " + ticker + " on "
-        + (fenceNetwork || "the unset-network (legacy) scope") + " ("
-        + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted."
-        + " Every other network's fence for " + ticker + " is untouched."))
+        + (networkScoped ? (fenceNetwork || "the unset-network (legacy) scope")
+                         : "every network this hub holds (it has no " + FENCE_NETWORK_COLUMN + " column)")
+        + " (" + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted."
+        + (networkScoped ? " Every other network's fence for " + ticker + " is untouched." : "")))
     return true
+}
+
+const FENCE_NETWORK_COLUMN = 'network'
+
+// The hub release whose schema carries price_ingest_watermarks.network, and so
+// the floor below which the network-scoped DELETE cannot be issued at all.
+// Measured from the tags: v0.17.0's src/sql/price_ingest_watermarks.sql still
+// keys on source_chain alone, v0.18.0's keys on (network, source_chain).
+const FENCE_NETWORK_COLUMN_HUB_FLOOR = 'v0.18.0'
+
+// True only for "Unknown column 'network'", the one failure the chain-only
+// fallback is allowed to answer. MariaDB reports it as ER_BAD_FIELD_ERROR
+// (errno 1054) and the two runners surface it differently: the native driver
+// sets err.code/err.errno, while the docker path sets err.code to the client's
+// numeric EXIT code and carries the text in err.message, so the column name in
+// the message is what both shapes have in common and what is matched. Any other
+// unknown column is a different fault and must keep propagating.
+function isMissingFenceNetworkColumnError(err) {
+    if (!err) return false
+    const text = String((err.sqlMessage || '') + ' ' + (err.message || ''))
+    const badField = err.code === 'ER_BAD_FIELD_ERROR' || err.errno === 1054
+        || /\b1054\b/.test(text) || /unknown column/i.test(text)
+    if (!badField) return false
+    return new RegExp("unknown column\\s+['\"`]?" + FENCE_NETWORK_COLUMN + "['\"`]?", 'i').test(text)
+}
+
+// Said once, at the moment the fallback is taken, because the operator's next
+// question is always "why did my other networks' fences go". Names the column
+// and the hub release that carries it so the fix is a hub upgrade plus the
+// fleet migration, not a guess.
+function warnPriceFenceNetworkColumnMissing(ticker, hubDbName) {
+    console.warn("WARNING: " + hubDbName + "." + PRICE_FENCE_TABLE + " has no `" + FENCE_NETWORK_COLUMN
+        + "` column, so the network-scoped clear could not run.")
+    console.warn("  That column (and the (network, source_chain) key) arrives with xchain-hub "
+        + FENCE_NETWORK_COLUMN_HUB_FLOOR + "; this hub is older.")
+    console.warn("  Falling back to the chain-only delete: DELETE FROM " + PRICE_FENCE_TABLE
+        + " WHERE source_chain = '" + ticker + "'")
+    console.warn("  On this pre-" + FENCE_NETWORK_COLUMN_HUB_FLOOR + " schema the fence is keyed by chain alone, so that is"
+        + " the whole row. Once the hub is upgraded and the fleet migration has run, the clear scopes to one network again.")
 }
 
 // The fence's network scope, folded the same way the hub folds it

@@ -29,6 +29,43 @@ const {
 const { getStatusFromContainer }         = require('./DockerService')
 const { checkRemoteNodeVersion }         = require('./VersionService')
 const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./VersionService')
+const { redactSecrets }                  = require('../utils/helpers')
+
+// The remote node version is ADVISORY: it fills one column of the status table
+// and gates nothing. checkRemoteNodeVersion reaches the GitHub releases API, so
+// a 403 rate limit (measured on a validator host 2026-09-12) or an unreachable
+// network rejects it, so both call sites below swallow that rejection. An
+// escaping rejection travels through getStatus into precheck, which aborts the
+// whole command: `update` refuses to deploy, modules override or not, and
+// `status` refuses to print a table it already has every other column for.
+// precheck degrades the module-version sweep (checkAllRemoteVersions) exactly
+// this way; this is the per-coin half.
+//
+// One warning per status pass, not one per coin: a three-coin host would
+// otherwise print the same GitHub failure three times. The flag is cleared at
+// the top of loadInstalledModules, which every getStatus pass runs before the
+// per-coin loop reaches the second call site.
+let remoteVersionWarned = false
+
+async function checkRemoteNodeVersionAdvisory(coin, network) {
+    try {
+        await checkRemoteNodeVersion(coin, network)
+        return true
+    } catch (err) {
+        if (!remoteVersionWarned) {
+            remoteVersionWarned = true
+            // The message, not the stack: this is an advisory line an operator
+            // reads mid-deploy, and the precheck sweep's equivalent warning is
+            // one line too. redactSecrets still runs over it (a credentialed URL
+            // can reach an axios message).
+            console.log("Warning: couldn't fetch the remote node version"
+                + (coin ? " for " + coin : "")
+                + " (GitHub unreachable or rate-limited); continuing without version check: "
+                + redactSecrets((err && err.message) ? err.message : err))
+        }
+        return false
+    }
+}
 
 // Distinguish a `docker inspect` failure that means the container is genuinely
 // gone (safe to reconcile out of the persistent registry) from a transient one
@@ -80,7 +117,8 @@ async function getInstalledCoinsAndNetworks() {
 }
 
 async function loadInstalledModules(coin, network, checkVersions = false) {
-    if (checkVersions) await checkRemoteNodeVersion(coin, network)
+    remoteVersionWarned = false
+    if (checkVersions) await checkRemoteNodeVersionAdvisory(coin, network)
     const modules = await db.getAllModuleContainers(coin, network)
 
     for (const nextModule of modules) {
@@ -242,7 +280,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
     if (Object.keys(installedModules).length > 0) {
         for (const nextCoin in installedModules) {
             if (checkVersions && !(NODE_MODULE_NAME + SEP + nextCoin in remoteModuleVersions)) {
-                await checkRemoteNodeVersion(nextCoin)
+                await checkRemoteNodeVersionAdvisory(nextCoin)
             }
 
             const nextCoinNetworks = installedModules[nextCoin]

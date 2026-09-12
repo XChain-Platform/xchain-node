@@ -808,3 +808,123 @@ describe('StatusService: getStatus() commit column', function () {
         expect(capturedOutput).to.not.include(checkoutCommit.slice(0, 12))
     })
 })
+
+// The remote node version is advisory: it fills one column. It is fetched from
+// the GitHub releases API, which answers 403 once an unauthenticated host
+// crosses its rate limit (measured on a validator host 2026-09-12). A rejection
+// escaping either checkRemoteNodeVersion call site reaches precheck, which
+// aborts the command outright: `update` refuses to deploy and `status` refuses
+// to print the table it already has every other column for.
+describe('StatusService: the advisory remote-version check never aborts the command', function () {
+
+    // The shape the GitHub client actually throws on a rate limit.
+    function rateLimited() {
+        const err = new Error('GitHub API rate limit exceeded (HTTP 403); resets at 17:07Z')
+        err.status = 403
+        return err
+    }
+
+    function stateWithCoins(rows) {
+        const installedModulesObj = {}
+        return makeStateStub({
+            isStatusUpdated: sinon.stub().returns(false),
+            getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+            resetInstalledModules: sinon.stub().callsFake(() => {
+                for (const k of Object.keys(installedModulesObj)) delete installedModulesObj[k]
+            }),
+            db: {
+                isReady: sinon.stub().returns(true),
+                getAllModuleContainers: sinon.stub().resolves(rows)
+            }
+        })
+    }
+
+    it('loadInstalledModules still registers containers when the version check is rate-limited', async function () {
+        const installedModulesObj = {}
+        const state = makeStateStub({
+            getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+            db: {
+                isReady: sinon.stub().returns(true),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'ppp' }
+                ])
+            }
+        })
+        const log = sinon.stub(console, 'log')
+        let threw = null
+        try {
+            const ss = loadStatusService(state, {
+                checkRemoteNodeVersion: sinon.stub().rejects(rateLimited())
+            })
+            await ss.loadInstalledModules('bitcoin', 'mainnet', true)
+        } catch (err) { threw = err } finally { log.restore() }
+
+        expect(threw).to.equal(null)
+        // The work the caller actually asked for still happened.
+        expect(installedModulesObj.bitcoin.mainnet['xchain-encoder'].container_id).to.equal('ppp')
+        const lines = log.getCalls().map(c => String(c.args[0])).join('\n')
+        expect(lines).to.contain('continuing without version check')
+    })
+
+    it('getStatus completes and returns the table when the per-coin version check is rate-limited', async function () {
+        const state = stateWithCoins([
+            { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'qqq' }
+        ])
+        const log = sinon.stub(console, 'log')
+        let threw = null
+        let result = null
+        try {
+            const ss = loadStatusService(state, {
+                checkRemoteNodeVersion: sinon.stub().rejects(rateLimited()),
+                getStatusFromContainer: sinon.stub().resolves(makeContainerStatus('running'))
+            })
+            result = await ss.getStatus(null, null, false, true)
+        } catch (err) { threw = err } finally { log.restore() }
+
+        expect(threw).to.equal(null)
+        expect(result).to.have.property('bitcoin')
+        expect(result.bitcoin.mainnet['xchain-encoder'].status).to.exist
+    })
+
+    // A three-coin host must not print the same GitHub failure three times: the
+    // warning is one line per status pass, and every coin is still attempted.
+    it('warns once per pass while still attempting every coin', async function () {
+        const state = stateWithCoins([
+            { module: 'xchain-encoder', coin: 'bitcoin',  network: 'mainnet', container_id: 'r1' },
+            { module: 'xchain-encoder', coin: 'dogecoin', network: 'mainnet', container_id: 'r2' },
+            { module: 'xchain-encoder', coin: 'litecoin', network: 'mainnet', container_id: 'r3' }
+        ])
+        const checkRemote = sinon.stub().rejects(rateLimited())
+        const log = sinon.stub(console, 'log')
+        try {
+            const ss = loadStatusService(state, {
+                checkRemoteNodeVersion: checkRemote,
+                getStatusFromContainer: sinon.stub().resolves(makeContainerStatus('running'))
+            })
+            await ss.getStatus(null, null, false, true)
+        } finally { log.restore() }
+
+        // One pass-level call plus one per coin: nothing was skipped because an
+        // earlier coin failed.
+        expect(checkRemote.callCount).to.equal(4)
+        const warnings = log.getCalls()
+            .map(c => String(c.args[0]))
+            .filter(l => l.includes('continuing without version check'))
+        expect(warnings).to.have.length(1)
+    })
+
+    // The degrade must not become a silent swallow of the working case: when
+    // GitHub answers, the remote version still reaches the table.
+    it('still fills the remote version column when GitHub answers', async function () {
+        const state = stateWithCoins([
+            { module: 'node', coin: 'bitcoin', network: 'mainnet', container_id: 's1' }
+        ])
+        state.getRemoteModuleVersions = sinon.stub().returns({ 'node-bitcoin': { tag_name: 'v28.1' } })
+        const ss = loadStatusService(state, {
+            checkRemoteNodeVersion: sinon.stub().resolves(),
+            getStatusFromContainer: sinon.stub().resolves(makeContainerStatus('running'))
+        })
+        const result = await ss.getStatus(null, null, false, true)
+        expect(result.bitcoin.mainnet['node'].remote_version).to.equal('28.1')
+    })
+})
