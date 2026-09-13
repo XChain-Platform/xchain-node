@@ -18,15 +18,15 @@
  * deletes a file because no runtime path inside the repo reaches it will delete
  * a module another service requires by relative path out of this checkout, and
  * nothing here fails: the break lands in the sibling's CI, later, attributed to
- * the sibling. Several indexer modules are exactly that shape. A file with no
- * caller in this repo is therefore a CANDIDATE for deletion, and the sibling
- * sweep is what turns a candidate into a verdict.
+ * the sibling. A file with no caller in this repo is therefore a CANDIDATE for
+ * deletion, and the sibling sweep is what turns a candidate into a verdict.
  *
  * THE FOUR REACHES, kept apart because they carry different weight:
  *
- *   runtime   the require closure of what the service actually starts:
- *             the Dockerfile CMD, and every `node <file>` an npm script runs.
- *             A file outside this closure cannot execute in production.
+ *   runtime   the require closure of what the service actually starts: the
+ *             package's `bin` map and `main`, the Dockerfile CMD where there
+ *             is one, and every `node <file>` an npm script runs. A file
+ *             outside this closure cannot execute in production.
  *   tooling   the closure of bin/, scripts/ and tools/: operator commands,
  *             verifiers, benchmarks. Real callers, not production ones.
  *   test      the closure of test/. A file reached only from here exists to
@@ -74,6 +74,9 @@ const { execFileSync } = require('child_process');
 const { buildReferenceMap, platformToolingDirs } = require('./sibling-reference-map.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
+
+// The checkout this tool is reading, by its own package name.
+const OWN_REPO_NAME = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')).name;
 
 // The twin-copier script, by name only. Which directory of the surrounding tree
 // holds the platform's tooling is that tree's business, so the sweep finds the
@@ -125,39 +128,14 @@ function toolingSweepDirs(siblingsRoot) {
  * reader can check the claim instead of trusting the table.
  */
 const DYNAMIC_EDGES = [
-    {
-        from: 'src/consensus_rules_digest.js',
-        // loadGateValues requires './<module>.js' for every SHARED_GATES row, so
-        // the gate carriers are held by the digest and not by any literal. The
-        // list is read from the module rather than restated, because a restated
-        // copy is a second registry that drifts.
-        toList: () => {
-            const { SHARED_GATES } = require('../src/consensus_rules_digest.js');
-            return SHARED_GATES.map(([mod]) => `src/${mod}.js`);
-        },
-        why: 'the consensus-rules digest requires every SHARED_GATES module by computed path',
-    },
-    {
-        from: 'src/db/index.js',
-        // The mixin install loop calls require(file) over its MIXIN_FILES rows, so
-        // not one literal in the file names a mixin and all of src/db/ reads
-        // unreachable without this edge. The list is read out of the declaration
-        // rather than restated here, because a restated copy is a second registry
-        // that drifts away from the one the loop actually walks.
-        toList: () => {
-            const declared = fs.readFileSync(path.join(REPO_ROOT, 'src/db/index.js'), 'utf8');
-            const block = /const MIXIN_FILES = \[([\s\S]*?)\];/.exec(declared);
-            if (!block) {
-                throw new Error('src/db/index.js no longer declares MIXIN_FILES: the mixin edge cannot be read');
-            }
-            const rows = Array.from(block[1].matchAll(/(['"])([^'"]+)\1/g))
-                .map((m) => resolveRequire('src/db/index.js', m[2]))
-                .filter(Boolean);
-            if (!rows.length) throw new Error('MIXIN_FILES declares no resolvable mixin: the edge is stale');
-            return rows;
-        },
-        why: 'the Database mixin install loop requires every MIXIN_FILES row by computed path',
-    },
+    // EMPTY, and measured rather than assumed. All four computed-require forms
+    // were swept across src test bin scripts here: every hit is in test/ or
+    // bin/, and not one src/ file builds a require path at runtime. The two
+    // edges the sibling this tool came from declares (a gate digest and a db
+    // mixin loop) name files that do not exist in this repo, so carrying them
+    // would be a list nobody can check. A new computed require added under
+    // src/ shows up as a file that suddenly reads unreachable, which is the
+    // signal to add its edge here with the site that builds it.
 ];
 
 const SOURCE_EXT = ['.js'];
@@ -238,9 +216,11 @@ function closure(entries, fileSet) {
 }
 
 /**
- * What the service starts. Two sources, both read rather than assumed: the
- * Dockerfile's exec-form CMD or ENTRYPOINT, and every `node <file>` in an npm
- * script (`npm run migrate` is as much a production path as the API server).
+ * What the service starts. Four sources, all read rather than assumed: the
+ * package's `bin` map and `main`, which is how a CLI installed from npm is
+ * actually entered and the only runtime root this repo has; the Dockerfile's
+ * exec-form CMD or ENTRYPOINT; and every `node <file>` in an npm script
+ * (`npm run publish-bootstraps` is as much a production path as the CLI).
  */
 function runtimeEntries(fileSet) {
     const entries = new Set();
@@ -257,6 +237,16 @@ function runtimeEntries(fileSet) {
     }
 
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+
+    // A published CLI is entered through `bin`, never through a Dockerfile, so
+    // this is the root that holds nearly the whole tree here.
+    const binMap = typeof pkg.bin === 'string' ? { [pkg.name]: pkg.bin } : (pkg.bin || {});
+    for (const target of [...Object.values(binMap), pkg.main]) {
+        if (typeof target !== 'string') continue;
+        const rel = target.replace(/^\.\//, '');
+        if (fileSet.has(rel)) entries.add(rel);
+    }
+
     for (const [name, script] of Object.entries(pkg.scripts || {})) {
         if (name.startsWith('test') || name === 'ci' || name === 'coverage') continue;
         // Token walk rather than one regex: the argument between `node` and the
@@ -290,7 +280,10 @@ function twinCopies(sources, siblingsRoot) {
     let repos = [];
     try {
         repos = fs.readdirSync(siblingsRoot, { withFileTypes: true })
-            .filter((e) => e.name.startsWith('xchain-') && e.name !== 'xchain-indexer')
+            // This repo's own name comes from package.json rather than a
+            // literal, so a copy of this tool in another checkout does not
+            // silently compare that checkout against itself.
+            .filter((e) => e.name.startsWith('xchain-') && e.name !== OWN_REPO_NAME)
             .map((e) => e.name)
             .sort();
     } catch (e) {
@@ -349,28 +342,28 @@ function analyse(opts) {
     const files = {};
     for (const rel of sources) {
         const sibling = siblings.paths[rel];
-        const reachableFromIndexerRuntime = runtime.has(rel);
+        const reachableFromRuntime = runtime.has(rel);
         const reachableFromTooling = tooling.has(rel);
         const reachableFromTests = tested.has(rel);
         files[rel] = {
-            reachableFromIndexerRuntime,
+            reachableFromRuntime,
             reachableFromTooling,
             reachableFromTests,
             referencedBySiblings: sibling ? sibling.referrers.map((r) => `${r.file}:${r.line} (${r.kind})`) : [],
             siblingLoadCount: sibling ? sibling.referrers.filter((r) => r.kind !== 'text').length : 0,
             twinCopies: twins[rel] || [],
             requiredByInRepo: back[rel] || [],
-            testOnly: !reachableFromIndexerRuntime && !reachableFromTooling && reachableFromTests,
+            testOnly: !reachableFromRuntime && !reachableFromTooling && reachableFromTests,
             // Tests are deliberately not a reason to keep a file: CODE-STYLE
             // reads a suite over an otherwise unreachable module as evidence the
             // module is dead, and the suite is deleted with it. Everything else
             // that can hold a file counts.
-            unreferencedAcrossPlatform: !reachableFromIndexerRuntime && !reachableFromTooling
+            unreferencedAcrossPlatform: !reachableFromRuntime && !reachableFromTooling
                 && !sibling && !twins[rel] && !(back[rel] || []).length,
         };
     }
 
-    const notRuntime = sources.filter((f) => !files[f].reachableFromIndexerRuntime);
+    const notRuntime = sources.filter((f) => !files[f].reachableFromRuntime);
     return {
         summary: {
             sourceFiles: sources.length,
@@ -378,8 +371,8 @@ function analyse(opts) {
             toolingEntryPoints: toolingEntryList.length,
             testEntryPoints: testEntryList.length,
             dynamicEdgesDeclared: DYNAMIC_EDGES.length,
-            reachableFromIndexerRuntime: sources.length - notRuntime.length,
-            notReachableFromIndexerRuntime: notRuntime.length,
+            reachableFromRuntime: sources.length - notRuntime.length,
+            notReachableFromRuntime: notRuntime.length,
             testOnly: sources.filter((f) => files[f].testOnly).length,
             unreferencedAcrossPlatform: sources.filter((f) => files[f].unreferencedAcrossPlatform).length,
             siblingRepos: siblings.siblingRepos,
@@ -417,8 +410,8 @@ function main() {
     console.log(`tooling entry points:                ${s.toolingEntryPoints}`);
     console.log(`test entry points:                   ${s.testEntryPoints}`);
     console.log(`declared dynamic edges:              ${s.dynamicEdgesDeclared}`);
-    console.log(`reachable from indexer runtime:      ${s.reachableFromIndexerRuntime}`);
-    console.log(`NOT reachable from indexer runtime:  ${s.notReachableFromIndexerRuntime}`);
+    console.log(`reachable from this repo runtime:   ${s.reachableFromRuntime}`);
+    console.log(`NOT reachable from that runtime:    ${s.notReachableFromRuntime}`);
     console.log(`test-only:                           ${s.testOnly}`);
     console.log(`unreferenced across the platform:    ${s.unreferencedAcrossPlatform}`);
     console.log('');
