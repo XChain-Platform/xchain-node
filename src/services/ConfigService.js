@@ -829,7 +829,7 @@ async function getDefaultConfig(module, coin, network) {
             if (network === Network.REGTEST) {
                 // The three barrier graces the armed regtest mirror must clear to avoid the
                 // wedge above. HUB_SYNC_ATTEST_RESPONSE_GRACE_S is the passthrough this row
-                // adds (xchain-indexer/src/hub_db_sync.js:615 reads it via resolveWatermarkGrace);
+                // adds (xchain-indexer/src/hub/hub_db_sync.js:615 reads it via resolveWatermarkGrace);
                 // HUB_SYNC_PRICE_GRACE_S / HUB_SYNC_ORACLE_GRACE_S are the pair the regtest mirror wedge already
                 // requires be set to 0 alongside it. A host env value always wins over the
                 // regtest default so an e2e drill can still exercise a nonzero grace.
