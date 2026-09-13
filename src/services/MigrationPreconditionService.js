@@ -56,6 +56,8 @@ const fs   = require('fs')
 const path = require('path')
 
 const { XChainService, EXTERNAL_DB } = require('../config/constants')
+const { tableCountSql, tableExistsSql } = require('../db/information_schema')
+const { appliedMigrationsSql } = require('../db/migrations')
 const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName } = require('./ConfigService')
 
 // Only these modules ship a migrations directory, so everything else skips the
@@ -240,8 +242,7 @@ async function defaultReadAppliedMigrations({ database, coin, network }, deps = 
             }
         }
 
-        const rawTableCount = String(await runner(
-            'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ' + literal)).trim()
+        const rawTableCount = String(await runner(tableCountSql(literal))).trim()
         const tableCount = parseInt(rawTableCount, 10)
         // An unreadable or non-numeric count (empty output, a driver notice, NaN)
         // is not the same fact as a genuinely empty schema: `!tableCount` is true
@@ -257,8 +258,7 @@ async function defaultReadAppliedMigrations({ database, coin, network }, deps = 
         if (tableCount === 0) return { state: 'empty-database' }
 
         const rawHasLedger = String(await runner(
-            'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ' + literal +
-            " AND TABLE_NAME = '" + LEDGER_TABLE + "'")).trim()
+            tableExistsSql(literal, "'" + LEDGER_TABLE + "'"))).trim()
         const hasLedger = parseInt(rawHasLedger, 10)
         // Same collapse shape applies to the ledger-presence count: an unreadable
         // or NaN result must refuse, not be read as "no ledger table".
@@ -272,7 +272,7 @@ async function defaultReadAppliedMigrations({ database, coin, network }, deps = 
             return { state: 'unreadable', reason: database + ' holds ' + tableCount + ' table(s) but no ' + LEDGER_TABLE + ' ledger' }
         }
 
-        const out = String(await runner('SELECT name FROM `' + database + '`.' + LEDGER_TABLE))
+        const out = String(await runner(appliedMigrationsSql(database, LEDGER_TABLE)))
         const applied = new Set(out.split('\n').map(s => s.trim()).filter(Boolean))
         return { state: 'ledger', applied }
     } catch (err) {

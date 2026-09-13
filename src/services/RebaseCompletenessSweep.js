@@ -69,6 +69,8 @@
 
 'use strict';
 
+const { createTimeSql, SESSION_UTC_SQL } = require('../db/information_schema');
+
 const BATCH_TAG = 'XC-637';
 
 // Verdict codes, kept stable so the deploy report can cite them.
@@ -223,33 +225,6 @@ async function sweepFleet(config, opts) {
         }
     };
 }
-
-/**
- * The information_schema read, as its own function so the CLI and tests share one shape.
- *
- * CREATE_TIME is returned as UNIX_TIMESTAMP, computed BY THE SERVER, and the caller must
- * pin the session to `time_zone = '+00:00'` first. That is not fussiness; the naive form
- * of this query silently passes survivors, which a real run proved:
- *
- *   MariaDB returns CREATE_TIME as a zone-less DATETIME in the SESSION time zone. The
- *   driver then builds a JS Date by interpreting those digits in the CLIENT's LOCAL zone.
- *   On a host at UTC-7 a table created at 23:26:38 UTC came back as 06:26:38 the next day
- *   UTC, i.e. seven hours in the future, so a table that predated the window compared as
- *   fresh and the sweep reported PASS on a store that had not rebased at all.
- *
- * Asking the server for epoch seconds under a pinned UTC session removes every zone from
- * the path: no driver conversion, no client locale, and nothing left for this module to
- * guess. The failure direction is what makes it worth the ceremony - the naive version
- * does not error, it certifies a fork.
- */
-function createTimeSql(tableCount) {
-    return 'SELECT TABLE_NAME AS table_name, UNIX_TIMESTAMP(CREATE_TIME) AS create_time '
-         + 'FROM information_schema.TABLES '
-         + 'WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (' + new Array(tableCount).fill('?').join(', ') + ')';
-}
-
-/** The session pin the read above depends on. Run it on the same connection, first. */
-const SESSION_UTC_SQL = "SET SESSION time_zone = '+00:00'";
 
 /** Human-readable report body; the CLI prints this and the deploy report can paste it. */
 function formatReport(sweep) {

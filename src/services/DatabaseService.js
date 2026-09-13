@@ -30,6 +30,18 @@ const { db, getDbRootPassword, setDbRootPassword } = require('../state')
 const { sleep, redactSecrets }    = require('../utils/helpers')
 const { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../utils/sqlSafety')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
+const { PING_SQL } = require('../db/connectivity')
+const { schemaExistsSql, tableExistsSql, tablesExistSql } = require('../db/information_schema')
+const {
+    PRICE_FENCE_TABLE, FENCE_NETWORK_COLUMN, clearChainFenceSql, clearNetworkFenceSql,
+    manualClearStatement
+} = require('../db/price_fence')
+const {
+    CROSS_CHAIN_MATCH_TABLE, CROSS_CHAIN_CALL_TABLE, CAPABILITY_SNAPSHOT_TABLE,
+    purgeAllMatchesSql, purgeAllCallsSql, purgeChainMatchesSql, purgeChainCallsSql,
+    purgeCapabilitySnapshotsSql, foreignNetworkMatchCountSql,
+    manualPurgeStatements, manualSnapshotPurgeStatement
+} = require('../db/cross_chain')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort } = require('./ConfigService')
 const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName } = require('./DockerService')
 const { assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError } = require('./DbCredentialDrift')
@@ -144,7 +156,7 @@ async function checkIfDatabaseIsReady(user, userPassword, database = null, { tri
         try {
             const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', user], { interactive: true })
             if (database) args.push('-D', database)
-            args.push('-e', 'SELECT 1')
+            args.push('-e', PING_SQL)
             await execFileAsync('docker', args, { env: mariadbEnv(userPassword) })
             return true
         } catch {
@@ -259,7 +271,7 @@ async function _pingMariaDb({ host, port, root_user, root_password }) {
         connectTimeout: 5_000
     })
     try {
-        await conn.query("SELECT 1")
+        await conn.query(PING_SQL)
     } finally {
         try { await conn.end() } catch {}
     }
@@ -587,7 +599,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             const mariadbContainerId = await getDatabaseContainerId()
 
             const dbCount = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
-                "SELECT COUNT(SCHEMA_NAME) FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '" + databaseName + "'", "-B -N"
+                schemaExistsSql(databaseName), "-B -N"
             )
             if (dbCount == 0) {
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
@@ -709,7 +721,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
         const externalCfg = await getExternalDbConfig()
         try {
             const dbCount = await executeNativeMariaDbCommand(externalCfg,
-                "SELECT COUNT(SCHEMA_NAME) FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '" + databaseName + "'", "-B -N"
+                schemaExistsSql(databaseName), "-B -N"
             )
             if (dbCount == 0) {
                 await executeNativeMariaDbCommand(externalCfg,
@@ -977,7 +989,6 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
     }
 }
 
-const PRICE_FENCE_TABLE = 'price_ingest_watermarks'
 
 // Clear the hub's price ingest fence row for one source chain ON ONE NETWORK.
 //
@@ -1046,17 +1057,14 @@ async function clearHubPriceIngestWatermark(coin, network) {
     // common prod shape) has no table here, and that case must print the manual
     // statement instead of being indistinguishable from a failed delete.
     const probe = await runner(
-        "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = "
-        + escapeSqlStringLiteral(hubDbName) + " AND TABLE_NAME = "
-        + escapeSqlStringLiteral(PRICE_FENCE_TABLE), "-B -N")
+        tableExistsSql(escapeSqlStringLiteral(hubDbName), escapeSqlStringLiteral(PRICE_FENCE_TABLE)), "-B -N")
     if (parseInt(String(probe).trim(), 10) !== 1) {
         warnPriceFenceNotCleared(ticker, fenceNetwork,
             "this MariaDB holds no " + hubDbName + "." + PRICE_FENCE_TABLE + " table")
         return false
     }
 
-    const chainOnlyDelete = "DELETE FROM `" + hubDbName + "`." + PRICE_FENCE_TABLE
-        + " WHERE source_chain = " + escapeSqlStringLiteral(ticker)
+    const chainOnlyDelete = clearChainFenceSql(hubDbName, ticker)
 
     // The network-scoped clause is the one to run whenever the hub can answer it.
     // A hub older than the `network` column cannot: it rejects the statement with
@@ -1070,8 +1078,7 @@ async function clearHubPriceIngestWatermark(coin, network) {
     // network the same statement would drop the live networks' fences too.
     let networkScoped = true
     try {
-        await runner(chainOnlyDelete
-            + " AND network IN (" + escapeSqlStringLiteral(fenceNetwork) + ", '')")
+        await runner(clearNetworkFenceSql(hubDbName, ticker, fenceNetwork))
     } catch (err) {
         if (!isMissingFenceNetworkColumnError(err)) throw err
         networkScoped = false
@@ -1087,7 +1094,6 @@ async function clearHubPriceIngestWatermark(coin, network) {
     return true
 }
 
-const FENCE_NETWORK_COLUMN = 'network'
 
 // The hub release whose schema carries price_ingest_watermarks.network, and so
 // the floor below which the network-scoped DELETE cannot be issued at all.
@@ -1145,15 +1151,11 @@ function warnPriceFenceNotCleared(ticker, fenceNetwork, reason) {
     console.warn("  price push at or below its recorded retraction generation, taking that chain's price rail")
     console.warn("  and the native-fee / XCHAIN-USD path down with it. Run this on the hub's OWN database")
     console.warn("  before the indexer resumes pushing:")
-    console.warn("    DELETE FROM " + PRICE_FENCE_TABLE + " WHERE source_chain = '" + ticker + "'"
-        + " AND network IN ('" + fenceNetwork + "', '');")
+    console.warn("    " + manualClearStatement(ticker, fenceNetwork))
     console.warn("  Keep the network clause: it is what leaves every OTHER network's fence for "
         + ticker + " in place.")
 }
 
-const CROSS_CHAIN_MATCH_TABLE    = 'cross_chain_matches'
-const CROSS_CHAIN_CALL_TABLE     = 'cross_chain_calls'
-const CAPABILITY_SNAPSHOT_TABLE  = 'capability_snapshots'
 
 // The chain every cross-chain row's snapshot_block is anchored on, so its
 // re-genesis invalidates the whole set rather than just the legs touching it.
@@ -1223,35 +1225,25 @@ async function purgeHubCrossChainRows(coin, network) {
         ? [CROSS_CHAIN_MATCH_TABLE, CROSS_CHAIN_CALL_TABLE, CAPABILITY_SNAPSHOT_TABLE]
         : [CROSS_CHAIN_MATCH_TABLE, CROSS_CHAIN_CALL_TABLE]
     const probe = await runner(
-        "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = "
-        + escapeSqlStringLiteral(hubDbName) + " AND TABLE_NAME IN ("
-        + requiredTables.map(escapeSqlStringLiteral).join(", ") + ")", "-B -N")
+        tablesExistSql(escapeSqlStringLiteral(hubDbName), requiredTables), "-B -N")
     if (parseInt(String(probe).trim(), 10) !== requiredTables.length) {
         warnHubCrossChainRowsNotPurged(ticker,
             "this MariaDB holds no " + hubDbName + " cross-chain tables")
         return false
     }
 
-    const networkLiteral = escapeSqlStringLiteral(PURGEABLE_NETWORK)
-    const tickerLiteral  = escapeSqlStringLiteral(ticker)
-    const qualify = (table) => "`" + hubDbName + "`." + table
-
     if (ticker === ANCHOR_CHAIN_TICKER) {
-        await runner("DELETE FROM " + qualify(CROSS_CHAIN_MATCH_TABLE) + " WHERE network = " + networkLiteral)
-        await runner("DELETE FROM " + qualify(CROSS_CHAIN_CALL_TABLE) + " WHERE network = " + networkLiteral)
+        await runner(purgeAllMatchesSql(hubDbName, PURGEABLE_NETWORK))
+        await runner(purgeAllCallsSql(hubDbName, PURGEABLE_NETWORK))
         const foreignHub = await hubHoldsAnotherNetwork(runner, cfg, hubDbName)
         if (foreignHub) warnCapabilitySnapshotsKept(foreignHub)
-        else await runner("DELETE FROM " + qualify(CAPABILITY_SNAPSHOT_TABLE))
+        else await runner(purgeCapabilitySnapshotsSql(hubDbName))
     } else {
         // A non-Bitcoin re-genesis kills only the legs that touch that chain: a
         // match between two OTHER chains is still valid, and the snapshots are
         // anchored on Bitcoin blocks that did not move, so both stay.
-        await runner("DELETE FROM " + qualify(CROSS_CHAIN_MATCH_TABLE)
-            + " WHERE network = " + networkLiteral
-            + " AND (a_chain = " + tickerLiteral + " OR b_chain = " + tickerLiteral + ")")
-        await runner("DELETE FROM " + qualify(CROSS_CHAIN_CALL_TABLE)
-            + " WHERE network = " + networkLiteral
-            + " AND (source_chain = " + tickerLiteral + " OR target_chain = " + tickerLiteral + ")")
+        await runner(purgeChainMatchesSql(hubDbName, PURGEABLE_NETWORK, ticker))
+        await runner(purgeChainCallsSql(hubDbName, PURGEABLE_NETWORK, ticker))
     }
 
     console.log(redactSecrets("Purged the hub's " + PURGEABLE_NETWORK + " cross-chain relic rows for "
@@ -1277,8 +1269,7 @@ async function hubHoldsAnotherNetwork(runner, cfg, hubDbName) {
     if (hubNetwork !== '' && hubNetwork !== PURGEABLE_NETWORK) {
         return "the hub on this MariaDB is configured for " + hubNetwork
     }
-    const foreign = await runner("SELECT COUNT(*) FROM `" + hubDbName + "`." + CROSS_CHAIN_MATCH_TABLE
-        + " WHERE network <> " + escapeSqlStringLiteral(PURGEABLE_NETWORK), "-B -N")
+    const foreign = await runner(foreignNetworkMatchCountSql(hubDbName, PURGEABLE_NETWORK), "-B -N")
     if (parseInt(String(foreign).trim(), 10) > 0) {
         return "this hub database also holds cross-chain rows for another network"
     }
@@ -1306,25 +1297,14 @@ function warnCapabilitySnapshotsKept(reason) {
     console.warn("  That table carries no network column, so purging it from here could take another")
     console.warn("  network's validator sets with it. The re-genesised chain's matches and calls WERE")
     console.warn("  purged. If this hub really is the regtest one, run on its own database:")
-    console.warn("    DELETE FROM " + CAPABILITY_SNAPSHOT_TABLE + ";")
+    console.warn("    " + manualSnapshotPurgeStatement())
 }
 
 // The by-hand form of what purgeHubCrossChainRows issues, shared by the warning
-// above and the reset's never-fatal catch.
+// above and the reset's never-fatal catch. The statements themselves live with
+// the tables they name, in the db home.
 function manualHubCrossChainPurgeStatements(ticker) {
-    if (ticker === ANCHOR_CHAIN_TICKER) {
-        return [
-            "DELETE FROM " + CROSS_CHAIN_MATCH_TABLE + " WHERE network = '" + PURGEABLE_NETWORK + "';",
-            "DELETE FROM " + CROSS_CHAIN_CALL_TABLE + " WHERE network = '" + PURGEABLE_NETWORK + "';",
-            "DELETE FROM " + CAPABILITY_SNAPSHOT_TABLE + ";"
-        ]
-    }
-    return [
-        "DELETE FROM " + CROSS_CHAIN_MATCH_TABLE + " WHERE network = '" + PURGEABLE_NETWORK
-            + "' AND (a_chain = '" + ticker + "' OR b_chain = '" + ticker + "');",
-        "DELETE FROM " + CROSS_CHAIN_CALL_TABLE + " WHERE network = '" + PURGEABLE_NETWORK
-            + "' AND (source_chain = '" + ticker + "' OR target_chain = '" + ticker + "');"
-    ]
+    return manualPurgeStatements(ticker, PURGEABLE_NETWORK, ANCHOR_CHAIN_TICKER)
 }
 
 async function buildDatabaseModule(coin, network) {
@@ -1556,7 +1536,7 @@ async function ensureXchainNodeAccess() {
                     user: existing.user, password: existing.password, database: XCHAIN_NODE_DB,
                     connectTimeout: 5_000
                 })
-                await conn.query("SELECT 1")
+                await conn.query(PING_SQL)
                 await conn.end()
                 return existing
             } catch {

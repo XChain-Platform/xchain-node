@@ -50,6 +50,8 @@
 
 'use strict';
 
+const { payloadScanSql, payloadCorpusSql } = require('../db/transactions');
+
 // Fields after the action name in FILE format 0, pre-PC-29.
 const FILE_V0_FIELD_COUNT = 8;
 
@@ -121,40 +123,6 @@ function scanRows(rows) {
 }
 
 /**
- * The decoder read. Keyset-paged on tx_index so a full mainnet scan streams rather than
- * loading every FILE transaction at once, and ordered so a resumed scan is deterministic.
- *
- * `data LIKE 'FILE|%' OR data LIKE 'BATCH|%'` is the widest useful filter: a FILE can
- * only reach the chain as a top-level FILE or inside a BATCH, and anything else cannot
- * dispatch as one. It is a filter on the RAW payload, never on parsed params, which is
- * the distinction this whole tool turns on.
- */
-function scanSql(limit) {
-    return 'SELECT t.tx_index, t.block_index, it.hash AS hash, t.data '
-         + 'FROM transactions t '
-         + 'LEFT JOIN index_transactions it ON it.id = t.tx_hash_id '
-         + 'WHERE t.tx_index > ? AND (t.data LIKE ' + "'FILE|%'" + ' OR t.data LIKE ' + "'BATCH|%'" + ') '
-         + 'ORDER BY t.tx_index ASC LIMIT ' + Number(limit);
-}
-
-/**
- * The size of the corpus the filtered scan ran against. Reported alongside the
- * scan, because "0 hits" over 0 rows and "0 hits" over 40k rows are different
- * facts and only one of them is a scan.
- *
- * This was not theoretical. The first fleet-wide run (2026-07-29) printed the
- * confident CLEAN verdict for nine of ten stores whose `transactions` table is
- * EMPTY, and the report gave the reader nothing to tell that apart from a real
- * scan. The verdict was true in both cases; the evidence behind it was not
- * comparable, and a gate that reads identically either way trains people to
- * skim it.
- */
-function corpusSql() {
-    return 'SELECT COUNT(*) AS payload_rows FROM transactions '
-         + 'WHERE data IS NOT NULL AND data <> ' + "''";
-}
-
-/**
  * Human-readable gate result for the deploy report.
  *
  * `corpus` is the payload-bearing row count from corpusSql(), or null when it
@@ -200,5 +168,8 @@ function formatReport(scan, label, corpus) {
 }
 
 module.exports = {
-    FILE_V0_FIELD_COUNT, splitCommands, inspectCommand, scanRows, scanSql, corpusSql, formatReport
+    FILE_V0_FIELD_COUNT, splitCommands, inspectCommand, scanRows, formatReport,
+    // The two statements live in the db home; re-exported here so the scan
+    // stays one object to a caller.
+    scanSql: payloadScanSql, corpusSql: payloadCorpusSql
 };

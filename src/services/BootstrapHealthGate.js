@@ -55,6 +55,10 @@ const { XChainService, EXTERNAL_DB } = require('../config/constants')
 const { db } = require('../state')
 const { getDefaultConfig, getModuleDatabaseName } = require('./ConfigService')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/dockerMariadb')
+const {
+    markerTablesSql, liveReorgHaltCountSql, liveSyncHaltCountSql,
+    eventsWatermarkSql, syncHaltWatermarkSql, reorgHaltsSinceSql, syncHaltsSinceSql
+} = require('../db/halt_markers')
 
 // A container that restarted recently is treated as crash-looping. Docker's
 // RestartCount is cumulative for the container's life, so it only means
@@ -413,10 +417,7 @@ async function readHaltMarkers(coin, network, module, deps, since) {
         // Counting information_schema rows (rather than querying the table directly)
         // keeps an absent table answerable as a 0 instead of an error; deciding what
         // that 0 means is this function's job below, and it is not always "clean".
-        const query =
-            `SELECT ` +
-            `(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${name}' AND TABLE_NAME='events'), ` +
-            `(SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${name}' AND TABLE_NAME='sync_halt');`
+        const query = markerTablesSql(name)
 
         // Two tokens, each 0 or 1: TABLE_SCHEMA + TABLE_NAME is unique in
         // information_schema.TABLES, so any other value means the output is not the
@@ -441,15 +442,11 @@ async function readHaltMarkers(coin, network, module, deps, since) {
         // (audited in the decoder's events table) and no longer disqualifies the
         // database. The halt row itself is never deleted, so a plain count would
         // refuse a cleared database forever.
-        found.reorgHalt = await readCount(
-            `SELECT COUNT(*) FROM \`${name}\`.events WHERE code='REORG_HALT' ` +
-            `AND id > COALESCE((SELECT MAX(id) FROM \`${name}\`.events WHERE code='REORG_HALT_CLEARED'), 0);`,
-            'REORG_HALT marker')
+        found.reorgHalt = await readCount(liveReorgHaltCountSql(name), 'REORG_HALT marker')
         // sync_halt IS optional: xchain-sync provisions it only where it runs, so an
         // absent table here is a genuine "no such marker", not an unread database.
         if (hasSyncHalt > 0)
-            found.syncHalt = await readCount(
-                `SELECT COUNT(*) FROM \`${name}\`.sync_halt WHERE cleared_at IS NULL;`, 'sync_halt marker')
+            found.syncHalt = await readCount(liveSyncHaltCountSql(name), 'sync_halt marker')
 
         // The dump window watermark. Both marker tables are append-only and
         // id-ordered (decoder events: AUTO_INCREMENT, a clear is a NEW row, halt rows
@@ -458,11 +455,9 @@ async function readHaltMarkers(coin, network, module, deps, since) {
         // the pre-flight reading" answerable with a MAX(id) taken then and a count
         // taken now. null means the table did not exist at this reading.
         found.watermark = {
-            events: await readCount(`SELECT COALESCE(MAX(id),0) FROM \`${name}\`.events;`,
-                `events watermark for ${name}`),
+            events: await readCount(eventsWatermarkSql(name), `events watermark for ${name}`),
             syncHalt: hasSyncHalt > 0
-                ? await readCount(`SELECT COALESCE(MAX(id),0) FROM \`${name}\`.sync_halt;`,
-                    `sync_halt watermark for ${name}`)
+                ? await readCount(syncHaltWatermarkSql(name), `sync_halt watermark for ${name}`)
                 : null
         }
 
@@ -482,8 +477,7 @@ async function readHaltMarkers(coin, network, module, deps, since) {
             // a different database probed): we could not tell, so we refuse.
             raised.unreadable.push(`${name}.events`)
         } else {
-            raised.reorgHalt = await readCount(
-                `SELECT COUNT(*) FROM \`${name}\`.events WHERE code='REORG_HALT' AND id > ${priorEvents};`,
+            raised.reorgHalt = await readCount(reorgHaltsSinceSql(name, priorEvents),
                 `REORG_HALT dump-window probe for ${name}`)
         }
         const priorSyncHalt = assertWatermark(since.syncHalt, `${name}.sync_halt`)
@@ -497,7 +491,7 @@ async function readHaltMarkers(coin, network, module, deps, since) {
             // priorSyncHalt null means the table did not exist at the earlier reading,
             // so every row in it now was written inside the window.
             raised.syncHalt = await readCount(
-                `SELECT COUNT(*) FROM \`${name}\`.sync_halt WHERE id > ${priorSyncHalt === null ? 0 : priorSyncHalt};`,
+                syncHaltsSinceSql(name, priorSyncHalt === null ? 0 : priorSyncHalt),
                 `sync_halt dump-window probe for ${name}`)
         }
         found.raisedInWindow = raised

@@ -27,6 +27,8 @@ const { PassThrough } = require('stream')
 const execFileAsync   = promisify(execFile)
 
 const { XChainService, DB_MODULE_NAME, SEP, tmpDir, BOOTSTRAP_BASE_URL, EXTERNAL_DB } = require('../config/constants')
+const { schemaSizeSql, tableExistsSql }               = require('../db/information_schema')
+const { tipHeightSql, rowCountSql }                   = require('../db/blocks')
 const { db }                                          = require('../state')
 const { getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
@@ -809,7 +811,7 @@ async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = 
 
     let totalBytes = 0
     try {
-        const sizeQuery = `SELECT SUM(DATA_LENGTH + INDEX_LENGTH) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}'`
+        const sizeQuery = schemaSizeSql(dbName)
         let sizeOut
         if (EXTERNAL_DB) {
             sizeOut = await executeNativeMariaDbCommand(externalCfg, sizeQuery, '-BN')
@@ -916,7 +918,7 @@ async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = 
 // cannot be read. Both schemas carry the column; the indexer's rows can be
 // sparse but its highest index is still the height the dump reaches.
 async function readMariaDbTipHeight(dbName, { dbContainerId, rootPassword, externalCfg }) {
-    const query = `SELECT MAX(block_index) FROM \`${dbName}\`.blocks`
+    const query = tipHeightSql(dbName)
     try {
         let out
         if (EXTERNAL_DB) {
@@ -1585,11 +1587,11 @@ async function mariaDbModuleFreshness(coin, network, module) {
     if (EXTERNAL_DB) {
         try {
             const externalCfg = await getExternalDbConfig()
-            const existsQuery = `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}' AND TABLE_NAME = 'blocks'`
+            const existsQuery = tableExistsSql(`'${dbName}'`, "'blocks'")
             const tables = countOf(await executeNativeMariaDbCommand(externalCfg, existsQuery, '-BN'))
             if (tables === null) throw new Error(`unparseable table count for ${dbName}.blocks`)
             if (tables === 0) return FRESHNESS_EMPTY
-            const countQuery = `SELECT COUNT(*) FROM \`${dbName}\`.blocks`
+            const countQuery = rowCountSql(dbName)
             const rows = countOf(await executeNativeMariaDbCommand(externalCfg, countQuery, '-BN'))
             if (rows === null) throw new Error(`unparseable row count for ${dbName}.blocks`)
             return rows > 0 ? FRESHNESS_POPULATED : FRESHNESS_EMPTY
@@ -1642,7 +1644,7 @@ async function mariaDbModuleFreshness(coin, network, module) {
 
     try {
         // Does the `blocks` table exist? (DB or table absent means fresh)
-        const existsQuery = `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '${dbName}' AND TABLE_NAME = 'blocks'`
+        const existsQuery = tableExistsSql(`'${dbName}'`, "'blocks'")
         const { stdout: tblOut } = await execFileAsync(
             'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', existsQuery, 'information_schema']),
             { env: mariadbEnv(rootPassword) }
@@ -1652,7 +1654,7 @@ async function mariaDbModuleFreshness(coin, network, module) {
         if (tables === 0) return FRESHNESS_EMPTY
 
         // Table exists: does it hold any rows?
-        const countQuery = `SELECT COUNT(*) FROM \`${dbName}\`.blocks`
+        const countQuery = rowCountSql(dbName)
         const { stdout: cntOut } = await execFileAsync(
             'docker', dockerMariadbArgs(dbContainerId, ['mariadb', '-u', 'root', '-BN', '-e', countQuery]),
             { env: mariadbEnv(rootPassword) }
