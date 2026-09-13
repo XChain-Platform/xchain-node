@@ -2,13 +2,13 @@
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.json",
   "mutate": [
     "src/cli.js",
-    "src/config/constants.js",
-    "src/services/ConfigService.js",
-    "src/services/ModuleService.js",
-    "src/services/DockerService.js",
-    "src/services/DatabaseService.js",
-    "src/services/BootstrapService.js",
-    "src/services/StatusService.js"
+    "src/config/index.js",
+    "src/services/config_service.js",
+    "src/services/module_service.js",
+    "src/services/docker_service.js",
+    "src/services/database_service.js",
+    "src/services/bootstrap_service.js",
+    "src/services/status_service.js"
   ],
   "testRunner": "mocha",
   "mochaOptions": {
