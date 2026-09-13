@@ -18,6 +18,26 @@
  * 
  ********************************************************************/
 
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ *
+ * XChain Node - Github Downloader Class
+ * 
+ * This file handles downloading and managing files from github repos
+ * 
+ ********************************************************************/
+
+// Load required libraries
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -88,6 +108,9 @@ class GitHubDownloader {
     }
   }
 
+  /**
+   * Gets all releases from a repository using github api
+   */
   async getReleases(owner, repoName) {
     try {
       const response = await axios.get(
@@ -109,9 +132,11 @@ class GitHubDownloader {
     const releases = await this.getReleases(owner, repoName);
     const repoKey = `${owner}/${repoName}`;
 
+    // Reorders releases by date (most recent first)
     releases.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
 
     if (verifyHash) {
+      // Gets the most recent version with an entry in the hashes file
       for (const release of releases) {
         if (this.hasHash(repoKey, release.tag_name)) {
           return release;
@@ -120,9 +145,13 @@ class GitHubDownloader {
       throw new Error(`Couldn't find a version of ${repoKey} with an entry in the hashes file`);
     }
 
+    // If verifyHash is false, then just return the first one (most recent)
     return releases[0];
   }
 
+  /**
+   * Downloads a specific version of a repository from GitHub
+   */
   async downloadRepoVersion(owner, repoName, version, options = {}) {
     const {
       outputPath = './downloads',
@@ -142,6 +171,7 @@ class GitHubDownloader {
     // tree intact when the download or hash check fails.
     const stagingPath = fullOutputPath + '.staging';
 
+    // Gets the specific release info
     const release = await this.getReleaseByTag(owner, repoName, version);
 
     if (verifyHash && !this.hasHash(repoKey, version)) {
@@ -168,6 +198,9 @@ class GitHubDownloader {
     }
   }
 
+  /**
+   * Gets a specific tag release
+   */
   async getReleaseByTag(owner, repoName, tag) {
     try {
       const response = await axios.get(
@@ -216,10 +249,12 @@ class GitHubDownloader {
 
       await pipeline(response.data, fs.createWriteStream(downloadPath));
 
+      // Verifies the download has the same hash as the entry in the hashes file
       if (verifyHash) {
         await this.verifyRepositoryHash(repoKey, version, downloadPath);
       }
 
+      // Extracts files by extension
       if (fileExtension === 'gz' || fileExtension === 'tgz') {
         // Refuse archives whose member paths could escape outputPath (absolute
         // paths or '..' segments). Checked explicitly so safety doesn't depend
@@ -244,6 +279,7 @@ class GitHubDownloader {
         logger.warn(`Unrecognized file extension: ${fileExtension}. Will not extract.`);
       }
 
+      // Handles directories structure after extracting the files
       const extractedDirs = fs.readdirSync(outputPath).filter(f =>
         fs.statSync(path.join(outputPath, f)).isDirectory()
       );
@@ -327,12 +363,18 @@ class GitHubDownloader {
     logger.info(`✅ Tarball hash verified for ${repoKey}@${version} (${resolvedArch})`);
   }
 
+  /**
+   * Calculates the SHA-256 hash of a single file's bytes.
+   */
   async calculateFileHash(filePath) {
     const hash = crypto.createHash('sha256');
     hash.update(fs.readFileSync(filePath));
     return hash.digest('hex');
   }
 
+  /**
+   * Calculates SHA-256 hash for directory contents
+   */
   async calculateDirectoryHash(dirPath) {
     const hash = crypto.createHash('sha256');
     const files = this.getAllFiles(dirPath).sort();
@@ -350,11 +392,13 @@ class GitHubDownloader {
   // are silently skipped.
   getAllFiles(dirPath) {
   try {
+    // Verify if dirPath is a file or a directory
     const stats = fs.statSync(dirPath);
     if (stats.isFile()) {
       return [dirPath];
     }
 
+    // If it's a directory then scans all files and returns them in an array
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
     const files = [];
 
@@ -366,6 +410,7 @@ class GitHubDownloader {
       } else if (entry.isFile()) {
         files.push(fullPath);
       }
+      // Ignora sockets, enlaces simbólicos, etc.
     }
 
     return files;

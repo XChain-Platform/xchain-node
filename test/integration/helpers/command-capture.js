@@ -33,6 +33,10 @@ class CommandCapture {
         this._defaultResponse = { stdout: '', stderr: '' }
     }
 
+    /**
+     * Register a pattern-based response route.
+     * Returns a builder with .returns({ stdout, stderr, error })
+     */
     when(pattern) {
         const route = { pattern, response: { stdout: '', stderr: '' }, dynamic: null }
         this._routes.push(route)
@@ -50,11 +54,17 @@ class CommandCapture {
         }
     }
 
+    /**
+     * Set the default response for unmatched commands.
+     */
     setDefault(response) {
         this._defaultResponse = response
         return this
     }
 
+    /**
+     * Find the matching route for a command string.
+     */
     _matchRoute(command) {
         for (const route of this._routes) {
             let matches = false
@@ -100,10 +110,14 @@ class CommandCapture {
                 })
             }
 
+            // Return a minimal ChildProcess-like object
             return { kill: () => {}, on: () => {} }
         }
     }
 
+    /**
+     * Create a stub for promisified execFile (util.promisify(execFile)).
+     */
     createExecFileAsyncStub() {
         const self = this
         return async function execFileAsyncStub(command, args, options) {
@@ -132,6 +146,10 @@ class CommandCapture {
         return this.createExecFileAsyncStub()
     }
 
+    /**
+     * Create a stub for child_process.spawn.
+     * Returns a minimal object with stdout/stderr event emitters.
+     */
     createSpawnStub() {
         const self = this
         return function spawnStub(command, args, options) {
@@ -149,6 +167,9 @@ class CommandCapture {
         }
     }
 
+    /**
+     * Create a stub for child_process.spawnSync.
+     */
     createSpawnSyncStub() {
         const self = this
         return function spawnSyncStub(command, args, options) {
@@ -158,6 +179,7 @@ class CommandCapture {
         }
     }
 
+    // --- Query methods ---
     history() {
         return this._history
     }
@@ -191,6 +213,9 @@ class CommandCapture {
         }
     }
 
+    /**
+     * Assert a command was called and its string contains all specified flags/fragments.
+     */
     assertCommandContains(pattern, fragments) {
         const matches = this.assertCalled(pattern)
         const cmd = matches[0].command

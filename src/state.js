@@ -23,6 +23,7 @@ const GitHubDownloader  = require('./services/github_downloader.js')
 const db              = new MariaDbStore()
 const gitHubDownloader = new GitHubDownloader(srcDir + "/github_hashes.json")
 
+// --- Mutable shared state ---
 let dbRootPassword    = null
 let installedModules  = {}
 let remoteModuleVersions = {}

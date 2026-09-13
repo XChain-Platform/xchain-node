@@ -38,6 +38,7 @@ function degraded503Error(body) {
 
 describe('HubConnector', function () {
 
+    // Constructor
     describe('constructor', function () {
 
         it('builds urls array with http://<host>:<port> from host+port args', function () {
@@ -62,6 +63,7 @@ describe('HubConnector', function () {
         })
     })
 
+    // ping()
     describe('ping()', function () {
 
         it('returns true when response contains a result', async function () {
@@ -128,6 +130,7 @@ describe('HubConnector', function () {
         })
     })
 
+    // _call(): degraded-response handling
     describe('_call()', function () {
 
         it('surfaces the JSON-RPC body of a 503 "degraded" response instead of discarding it', async function () {
@@ -160,6 +163,7 @@ describe('HubConnector', function () {
         })
     })
 
+    // updateConfig()
     describe('updateConfig()', function () {
 
         it('returns true when response contains a result', async function () {

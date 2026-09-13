@@ -16,6 +16,7 @@ const proxyquire = require('proxyquire').noCallThru()
 const { Readable } = require('stream')
 const path       = require('path')
 
+// Helpers
 function makeConfigService(fsStub, readlineOverride) {
     const constants = require('../../src/config/index')
     const stubs = {
@@ -38,6 +39,7 @@ describe('Chaos: Config Resilience', function () {
         sinon.restore()
     })
 
+    // Experiment 1: Config file missing (FS-01)
     describe('Experiment 1: Config file missing', function () {
 
         it('falls back to hardcoded defaults when config file does not exist', async function () {
@@ -71,6 +73,7 @@ describe('Chaos: Config Resilience', function () {
             const cs = makeConfigService(fsStub)
             sinon.stub(console, 'warn')
 
+            // These should NOT throw path traversal
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
 
             const requiredKeys = [
@@ -84,6 +87,7 @@ describe('Chaos: Config Resilience', function () {
         })
     })
 
+    // Experiment 1b: Config file unreadable (FS-02)
     describe('Experiment 1b: Config file unreadable (permission denied)', function () {
 
         it('propagates stream error when config file cannot be read', async function () {
@@ -107,6 +111,7 @@ describe('Chaos: Config Resilience', function () {
         })
     })
 
+    // Experiment 2: Malformed config content (FS-03)
     describe('Experiment 2: Malformed config content', function () {
 
         it('skips lines without = delimiter', async function () {
@@ -121,6 +126,7 @@ describe('Chaos: Config Resilience', function () {
             const cs = makeConfigService(fsStub)
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
 
+            // All defaults should still be present
             expect(config).to.have.property('NODE_PORT', '9999')
             expect(config).to.not.have.property('THIS_LINE_HAS_NO_EQUALS')
             expect(config).to.not.have.property('ANOTHER_BAD_LINE')
@@ -137,6 +143,7 @@ describe('Chaos: Config Resilience', function () {
             const cs = makeConfigService(fsStub)
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
 
+            // Should fall back to all defaults
             expect(config).to.have.property('NETWORK')
             expect(config).to.have.property('NODE_PORT', 8332)
         })
@@ -202,6 +209,7 @@ describe('Chaos: Config Resilience', function () {
         })
     })
 
+    // Experiment 12: Config path traversal (FS-09)
     describe('Experiment 12: Config path traversal', function () {
 
         it('blocks basic path traversal with ../', async function () {
@@ -254,6 +262,7 @@ describe('Chaos: Config Resilience', function () {
         })
     })
 
+    // Experiment: resolveArgs chaos (ARG-01 through ARG-06)
     describe('Experiment: Argument parsing resilience', function () {
 
         it('handles empty args array', function () {
@@ -319,11 +328,13 @@ describe('Chaos: Config Resilience', function () {
         it('handles extremely long argument strings without crashing', function () {
             const cs = makeConfigService()
             const longArg = 'a'.repeat(10000)
+            // Should not throw or hang; just treated as unknown arg
             const result = cs.resolveArgs([longArg])
             expect(result.service).to.equal('all')
         })
     })
 
+    // Experiment: validatePort chaos
     describe('Experiment: Port validation under chaos', function () {
 
         it('rejects port 0', function () {
@@ -370,6 +381,7 @@ describe('Chaos: Config Resilience', function () {
         })
     })
 
+    // Experiment: getDefaultConfig with no coin/network (shared modules)
     describe('Experiment: Shared module config (no coin/network)', function () {
 
         it('returns shared defaults when coin and network are null', async function () {

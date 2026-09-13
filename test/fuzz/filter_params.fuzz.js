@@ -21,6 +21,7 @@ const { filterCommandParameters } = require('../../src/services/config_service')
 
 describe('Fuzz: filterCommandParameters()', function () {
 
+    // --- Invalid module names ---
     const invalidModulesString = [
         'nonexistent-service',
         '',
@@ -47,6 +48,7 @@ describe('Fuzz: filterCommandParameters()', function () {
         expect(() => filterCommandParameters(null, undefined, 'bitcoin', 'mainnet')).to.throw()
     })
 
+    // --- Invalid coin names ---
     const invalidCoins = [
         'ethereum',
         'BITCOIN',
@@ -63,6 +65,7 @@ describe('Fuzz: filterCommandParameters()', function () {
         })
     }
 
+    // --- Invalid network names ---
     const invalidNetworks = [
         'devnet',
         'MAINNET',
@@ -78,6 +81,7 @@ describe('Fuzz: filterCommandParameters()', function () {
         })
     }
 
+    // --- "all" expansion correctness ---
     it('"all" modules includes every non-e2e service plus node', function () {
         const result = filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
         const modules = result['bitcoin']['mainnet']
@@ -108,6 +112,7 @@ describe('Fuzz: filterCommandParameters()', function () {
         expect(networks).to.include('regtest')
     })
 
+    // --- Regtest module filtering ---
     it('regtest-only modules excluded from all non-regtest networks', function () {
         const result = filterCommandParameters(null, 'all', 'all', 'all')
         for (const coin of Object.values(Coin)) {
@@ -136,6 +141,7 @@ describe('Fuzz: filterCommandParameters()', function () {
         }
     })
 
+    // --- Explorer special handling ---
     it('"all" modules adds explorer under empty coin/network keys', function () {
         const result = filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
         expect(result['']).to.exist
@@ -146,6 +152,7 @@ describe('Fuzz: filterCommandParameters()', function () {
         const result = filterCommandParameters(null, 'explorer', 'bitcoin', 'mainnet')
         expect(result['']).to.exist
         expect(result['']['']).to.deep.equal([EXPLORER_MODULE_NAME])
+        // No coin-specific entries
         expect(result).to.not.have.property('bitcoin')
     })
 
@@ -153,6 +160,10 @@ describe('Fuzz: filterCommandParameters()', function () {
     // `update xchain-hub` must resolve there, not fan out across real coins
     // (where it matches no container and silently no-ops).
 
+    // --- Shared-service routing (hub / explorer / db / sync) ---
+    // Shared services register under a single empty coin+network key. A bare
+    // `update xchain-hub` must resolve there, not fan out across real coins
+    // (where it matches no container and silently no-ops).
     for (const shared of [HUB_MODULE_NAME, EXPLORER_MODULE_NAME, DB_MODULE_NAME, SYNC_MODULE_NAME]) {
         it(`explicitly-named shared service "${shared}" routes under empty coin/network only`, function () {
             const result = filterCommandParameters(null, shared, 'all', 'all')
@@ -166,6 +177,7 @@ describe('Fuzz: filterCommandParameters()', function () {
         })
     }
 
+    // --- Combinatorial explosion check ---
     it('all x all x all produces bounded output', function () {
         const result = filterCommandParameters(null, 'all', 'all', 'all')
         const coins = Object.values(Coin)
@@ -176,6 +188,7 @@ describe('Fuzz: filterCommandParameters()', function () {
                 totalModuleSlots += result[coin][network].length
             }
         }
+        // Explorer slot
         if (result[''] && result['']['']) {
             totalModuleSlots += result[''][''].length
         }

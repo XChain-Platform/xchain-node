@@ -99,6 +99,7 @@ function captureDockerRunCmd(stubs) {
 
 describe('Fuzz: Docker Command Construction', function () {
 
+    // --- docker run structure ---
     it('docker run starts with "docker run -d"', async function () {
         const stubs = makeStubs()
         const getCmd = captureDockerRunCmd(stubs)
@@ -133,6 +134,7 @@ describe('Fuzz: Docker Command Construction', function () {
 
     // env vars are passed as raw array elements; execFile needs no shell quoting.
 
+    // --- env vars are passed as raw array elements (no shell quoting with execFile) ---
     it('every -e flag is followed by a raw KEY=value pair', async function () {
         const stubs = makeStubs({
             'KEY1': 'val1',
@@ -151,6 +153,7 @@ describe('Fuzz: Docker Command Construction', function () {
         expect(cmd).to.include('-e KEY3=val3')
     })
 
+    // --- Malicious env var keys ---
     it('env var key with equals sign does not break quoting', async function () {
         const stubs = makeStubs({
             'EVIL=KEY': 'value',
@@ -161,9 +164,11 @@ describe('Fuzz: Docker Command Construction', function () {
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const cmd = getCmd()
+        // The command should still be constructable without crashing
         expect(cmd).to.exist
     })
 
+    // --- git clone command structure ---
     describe('git clone command', function () {
         it('includes correct git URL from modulesUrls', async function () {
             const stubs = makeStubs()
@@ -208,6 +213,7 @@ describe('Fuzz: Docker Command Construction', function () {
         })
     })
 
+    // --- Module-specific port/volume lines ---
     describe('module-specific Docker configuration', function () {
 
         it('decoder includes bootstrap volume mount', async function () {
@@ -248,6 +254,7 @@ describe('Fuzz: Docker Command Construction', function () {
         })
     })
 
+    // --- dockerCmd passthrough ---
     it('appends dockerCmd args to docker run when provided', async function () {
         const stubs = makeStubs()
         const getCmd = captureDockerRunCmd(stubs)

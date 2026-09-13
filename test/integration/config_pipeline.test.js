@@ -52,6 +52,7 @@ describe('Integration: Config Pipeline', function () {
         await env.teardown()
     })
 
+    // filterCommandParameters -> getDefaultConfig integration
     describe('CLI params -> filterCommandParameters -> getDefaultConfig', function () {
 
         it('single encoder on bitcoin/mainnet produces correct full config', async function () {
@@ -113,6 +114,7 @@ describe('Integration: Config Pipeline', function () {
                     expect(serviceList[coin]).to.have.property(network)
                     const modules = serviceList[coin][network]
 
+                    // Core modules always present
                     expect(modules).to.include('xchain-encoder')
                     expect(modules).to.include('xchain-decoder')
                     expect(modules).to.include('xchain-utxo-tracker')
@@ -129,6 +131,7 @@ describe('Integration: Config Pipeline', function () {
                 }
             }
 
+            // Explorer is added as shared service
             expect(serviceList['']).to.exist
             expect(serviceList['']['']).to.include('xchain-explorer')
         })
@@ -148,6 +151,7 @@ describe('Integration: Config Pipeline', function () {
         })
     })
 
+    // Config file overrides
     describe('config file override propagation', function () {
 
         it('config file values override defaults', async function () {
@@ -159,6 +163,7 @@ describe('Integration: Config Pipeline', function () {
             expect(config['ENCODER_API_PORT']).to.equal('4003')
             expect(config['UTXO_TRACKER_PORT']).to.equal('9001')
 
+            // Non-overridden defaults preserved
             expect(config['DECODER_API_PORT']).to.equal(3002)
             expect(config['NODE_PORT']).to.equal(8332)
         })
@@ -195,6 +200,7 @@ describe('Integration: Config Pipeline', function () {
         })
     })
 
+    // Config values per coin/network combination
     describe('config correctness across all coin/network combos', function () {
 
         const expectedPorts = {
@@ -212,11 +218,14 @@ describe('Integration: Config Pipeline', function () {
 
                     expect(config['NODE_PORT']).to.equal(expectedPorts[network])
                     expect(config['INDEXER_COIN']).to.equal(CoinTickerSymbol[coin])
+                    // decoder coin-prefixes NETWORK (see f744334), e.g. "dogecoin-mainnet"
                     expect(config['NETWORK']).to.equal(`${coin}-${network}`)
 
+                    // UTXO tracker URL includes coin/network
                     const expectedUtxoUrl = ConfigService.getDockerContainerImageName(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
                     expect(config['UTXO_TRACKER_URL']).to.equal(expectedUtxoUrl)
 
+                    // Decoder DB name follows pattern
                     const ticker = CoinTickerSymbol[coin]
                     const netCap = network.charAt(0).toUpperCase() + network.slice(1)
                     expect(config['DECODER_DB_NAME']).to.equal(`XChain_${ticker}_${netCap}_Decoder`)
@@ -225,6 +234,7 @@ describe('Integration: Config Pipeline', function () {
         }
     })
 
+    // Docker image naming consistency
     describe('Docker image naming', function () {
 
         it('coin-specific modules include coin and network in image name', function () {

@@ -33,6 +33,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
         await env.teardown()
     })
 
+    // E2E-050: Reset stops containers, clears data, restarts
     describe('E2E-050: Reset lifecycle (stop → clear → restart)', function () {
 
         it('stops and then restarts the specified module', async function () {
@@ -49,6 +50,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
 
             await cli.moduleOps.resetModules('xchain-decoder', 'bitcoin', 'regtest')
 
+            // Should have called docker stop for the decoder
             const stopCmds = env.capture.findCommands(/docker stop/)
             expect(stopCmds.length).to.be.greaterThanOrEqual(1)
             const stoppedDecoder = stopCmds.some(c => c.command.includes(decoderId))
@@ -76,6 +78,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
         })
     })
 
+    // E2E-051: Reset decoder triggers database DROP/CREATE
     describe('E2E-051: Reset decoder resets database', function () {
 
         it('executes DROP DATABASE and CREATE DATABASE for decoder DB', async function () {
@@ -89,6 +92,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
 
             await cli.moduleOps.resetModules('xchain-decoder', 'bitcoin', 'regtest')
 
+            // Should have executed a docker exec mariadb command with DROP DATABASE
             const execCmds = env.capture.findCommands(/docker exec/)
             const hasDropCreate = execCmds.some(c =>
                 c.command.includes('DROP DATABASE') && c.command.includes('CREATE DATABASE')
@@ -97,6 +101,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
         })
     })
 
+    // E2E-052: Reset all stops multiple services
     describe('E2E-052: Reset all stops multiple modules', function () {
 
         it('stops node, utxo-tracker, decoder, indexer, and regtest-miner', async function () {
@@ -106,6 +111,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
+            // Get all container IDs
             const nodeId = await env.getModule('node', 'bitcoin', 'regtest')
             const utxoId = await env.getModule('xchain-utxo-tracker', 'bitcoin', 'regtest')
             const decoderId = await env.getModule('xchain-decoder', 'bitcoin', 'regtest')
@@ -117,8 +123,11 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
 
             const stopCmds = env.capture.findCommands(/docker stop/)
 
+            // Multiple modules should have been stopped
             expect(stopCmds.length).to.be.greaterThanOrEqual(3)
 
+            // Should also have restarted them
+            // Should have called docker start to restart
             const startCmds = env.capture.findCommands(/docker start/)
             expect(startCmds.length).to.be.greaterThanOrEqual(3)
         })

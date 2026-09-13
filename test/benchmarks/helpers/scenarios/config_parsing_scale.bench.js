@@ -28,6 +28,7 @@ const LINE_COUNTS = [10, 50, 100, 500]
 
 function generateConfigContent(lineCount) {
     const lines = []
+    // Start with realistic overrides
     lines.push('NETWORK=bitcoin-regtest')
     lines.push('NODE_EXPOSED_PORT=3020')
     lines.push('UTXO_TRACKER_PORT=3021')
@@ -37,6 +38,7 @@ function generateConfigContent(lineCount) {
     lines.push('REGTEST_MINER_PORT=3025')
     lines.push('DUST_AMOUNT=546')
 
+    // Pad with additional synthetic overrides
     for (let i = lines.length; i < lineCount; i++) {
         lines.push(`CUSTOM_VAR_${i}=value_${i}`)
     }
@@ -58,6 +60,7 @@ module.exports = {
             const label = `${lineCount}-lines`
             const content = generateConfigContent(lineCount)
 
+            // Build a ConfigService with this specific content
             const fsStub = {
                 existsSync: () => true,
                 createReadStream: () => Readable.from(content),
@@ -67,6 +70,7 @@ module.exports = {
 
             const ConfigService = proxyquire('../../../../src/services/config_service', { fs: fsStub })
 
+            // Warm up
             for (let i = 0; i < 5; i++) {
                 await ConfigService.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
             }

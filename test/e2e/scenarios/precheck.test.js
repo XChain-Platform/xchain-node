@@ -39,6 +39,9 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
         await env.teardown()
     })
 
+    /**
+     * Create a preCheck function wired with our stubs.
+     */
     function makePreCheck(capture, overrides = {}) {
         const execFileStub = capture.createExecFileStub()
 
@@ -91,6 +94,7 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
         return precheck
     }
 
+    // E2E-030: PreCheck creates directories and inits LevelDB
     describe('E2E-030: Directory creation and LevelDB init', function () {
 
         it('creates data, modules, tmp, and containers_files directories', async function () {
@@ -108,6 +112,7 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
         })
     })
 
+    // E2E-031: PreCheck verifies Docker
     describe('E2E-031: Docker verification', function () {
 
         it('calls docker --version and docker ps during precheck', async function () {
@@ -121,6 +126,7 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
         })
     })
 
+    // E2E-032: PreCheck installs hub if not running
     describe('E2E-032: Hub auto-install', function () {
 
         it('calls installHubModule during precheck', async function () {
@@ -140,11 +146,14 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
         })
     })
 
+    // E2E-033: PreCheck with Docker unreachable
     describe('E2E-033: Docker unreachable throws descriptive error', function () {
 
         it('throws when docker --version fails', async function () {
             const capture = new CommandCapture()
 
+            // docker --version succeeds
+            // docker --version fails
             capture.when(/docker --version/).returns({
                 error: new Error('command not found: docker'),
                 stdout: '',
@@ -168,6 +177,7 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
                 stdout: 'Docker version 24.0.0, build abc123'
             })
 
+            // docker ps fails
             capture.when(/docker ps/).returns({
                 error: new Error('Cannot connect to Docker daemon'),
                 stdout: '',
@@ -185,6 +195,7 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
         })
     })
 
+    // E2E-034: PreCheck creates base Docker network
     describe('E2E-034: Base Docker network creation', function () {
 
         it('creates the xchain-node base network', async function () {

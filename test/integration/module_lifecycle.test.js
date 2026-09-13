@@ -31,6 +31,9 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         await env.teardown()
     })
 
+    // ---------------------------------------------------------------
+    // Direct LevelDB operations via state.db
+    // ---------------------------------------------------------------
     describe('LevelDB key format and CRUD', function () {
         const state = require('../../src/state')
 
@@ -68,10 +71,12 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             await state.db.setModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', id2)
             await state.db.setModuleContainer('xchain-encoder', 'litecoin', 'mainnet', id3)
 
+            // Filter by bitcoin/mainnet
             const btcModules = await state.db.getAllModuleContainers('bitcoin', 'mainnet')
             expect(btcModules).to.have.length(2)
             expect(btcModules.map(m => m.module)).to.include.members(['xchain-encoder', 'xchain-decoder'])
 
+            // Get all (null/null)
             const allModules = await state.db.getAllModuleContainers(null, null)
             expect(allModules).to.have.length(3)
         })
@@ -102,6 +107,9 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
     })
 
+    // ---------------------------------------------------------------
+    // Multiple modules maintain separate state
+    // ---------------------------------------------------------------
     describe('multi-module state isolation', function () {
         const state = require('../../src/state')
 
@@ -114,10 +122,13 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             await state.db.setModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', decId)
             await state.db.setModuleContainer('xchain-indexer', 'bitcoin', 'mainnet', idxId)
 
+            // Others still intact
+            // Verify each
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(encId)
             expect(await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')).to.equal(decId)
             expect(await state.db.getModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')).to.equal(idxId)
 
+            // Remove one
             await state.db.deleteModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
 
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(encId)
@@ -140,6 +151,9 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
     })
 
+    // ---------------------------------------------------------------
+    // moduleOperations -> LevelDB interaction (start/stop/restart)
+    // ---------------------------------------------------------------
     describe('moduleOperations uses LevelDB for container lookups', function () {
 
         it('startModules reads container IDs from LevelDB and calls docker start', async function () {

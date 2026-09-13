@@ -36,20 +36,25 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
         await env.teardown()
     })
 
+    // E2E-001: Install all services for bitcoin/regtest
     describe('E2E-001: Full install all services for bitcoin/regtest', function () {
 
         it('creates Docker network, builds and runs all modules, stores IDs in LevelDB', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
 
+            // Install first
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
+            // Docker network checked/created for bitcoin-regtest
             env.capture.assertCalled(/docker network inspect/)
 
+            // Docker build called for each module
             const buildCmds = env.capture.findCommands(/docker build/)
             expect(buildCmds.length).to.be.greaterThanOrEqual(5) // encoder, decoder, utxo-tracker, indexer, regtest-miner
 
+            // Docker run called for each module
             const runCmds = env.capture.findCommands(/docker run/)
             expect(runCmds.length).to.be.greaterThanOrEqual(5)
 
@@ -61,6 +66,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             expect(moduleNames).to.include('xchain-indexer')
             expect(moduleNames).to.include('xchain-regtest-miner')
 
+            // Each stored container ID is 64 chars
             for (const mod of modules) {
                 if (mod.module === 'database') continue // database uses empty coin/network
                 expect(mod.container_id).to.have.lengthOf(64)
@@ -74,6 +80,8 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
+            // Get all stored container IDs
+            // LevelDB has entries for all coin-specific modules
             const modules = await env.getAllModules()
             const btcModules = modules.filter(m => m.coin === 'bitcoin' && m.network === 'regtest')
             expect(btcModules.length).to.be.greaterThanOrEqual(5)
@@ -123,6 +131,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
         })
     })
 
+    // E2E-002: Stop all services
     describe('E2E-002: Stop all services', function () {
 
         it('calls docker stop for each container stored in LevelDB', async function () {
@@ -135,13 +144,16 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const modules = await env.getAllModules()
             const containerIds = modules.map(m => m.container_id)
 
+            // Reset capture to only track stop commands
             env.capture.reset()
 
+            // Stop
             await cli.moduleOps.stopModules(serviceList)
 
             const stopCmds = env.capture.findCommands(/docker stop/)
             expect(stopCmds.length).to.be.greaterThanOrEqual(5)
 
+            // Each stop should reference a container ID from LevelDB
             for (const cmd of stopCmds) {
                 const stoppedId = cmd.command.split(/\s+/).pop()
                 expect(containerIds, `stopped ID ${stoppedId} not in LevelDB`).to.include(stoppedId)
@@ -164,6 +176,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
         })
     })
 
+    // E2E-003: Start all services
     describe('E2E-003: Start all services', function () {
 
         it('calls docker start for each container stored in LevelDB', async function () {
@@ -189,6 +202,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
         })
     })
 
+    // E2E-004: Uninstall all services
     describe('E2E-004: Uninstall all services', function () {
 
         it('removes coin-specific LevelDB entries after uninstall', async function () {
@@ -221,6 +235,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
+            // Uninstall without includeShared
             await cli.moduleOps.uninstallModules(serviceList, false)
 
             const dbEntry = await env.getModule('database', '', '')
@@ -228,6 +243,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
         })
     })
 
+    // E2E-005: Selective install (decoder only)
     describe('E2E-005: Selective install (decoder only)', function () {
 
         it('installs only decoder, database, hub, and explorer', async function () {
@@ -237,19 +253,26 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const serviceList = filterCommandParameters(null, 'xchain-decoder', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
+            // Decoder should be in LevelDB
             const decoderEntry = await env.getModule('xchain-decoder', 'bitcoin', 'regtest')
             expect(decoderEntry).to.not.be.null
             expect(decoderEntry).to.have.lengthOf(64)
 
+            // Database should be installed (shared dependency)
+            // Database entry should still exist (shared service)
             const dbEntry = await env.getModule('database', '', '')
             expect(dbEntry).to.not.be.null
 
+            // Encoder should NOT be installed
+            // LevelDB entries for coin-specific modules should be removed
             const encoderEntry = await env.getModule('xchain-encoder', 'bitcoin', 'regtest')
             expect(encoderEntry).to.be.null
 
+            // Indexer should NOT be installed
             const indexerEntry = await env.getModule('xchain-indexer', 'bitcoin', 'regtest')
             expect(indexerEntry).to.be.null
 
+            // UTXO tracker should NOT be installed
             const utxoEntry = await env.getModule('xchain-utxo-tracker', 'bitcoin', 'regtest')
             expect(utxoEntry).to.be.null
         })
@@ -272,6 +295,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
         })
     })
 
+    // E2E-006: Full lifecycle sequence (install → stop → start → uninstall)
     describe('E2E-006: Full lifecycle sequence', function () {
 
         it('install → stop → start → uninstall all succeed in sequence', async function () {
@@ -280,18 +304,22 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
 
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
 
+            // Install
             const installResult = await cli.moduleOps.installModules(serviceList, 'master')
             expect(installResult).to.be.true
 
             const modulesAfterInstall = await env.getAllModules()
             expect(modulesAfterInstall.length).to.be.greaterThanOrEqual(5)
 
+            // Stop
             const stopResult = await cli.moduleOps.stopModules(serviceList)
             expect(stopResult).to.be.true
 
+            // Start
             const startResult = await cli.moduleOps.startModules(serviceList)
             expect(startResult).to.be.true
 
+            // Container IDs unchanged after stop/start
             const modulesAfterRestart = await env.getAllModules()
             expect(modulesAfterRestart).to.have.lengthOf(modulesAfterInstall.length)
 
@@ -303,6 +331,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
                 expect(afterRestart.container_id).to.equal(mod.container_id)
             }
 
+            // Uninstall
             const uninstallResult = await cli.moduleOps.uninstallModules(serviceList)
             expect(uninstallResult).to.be.true
         })

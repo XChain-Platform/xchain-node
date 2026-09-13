@@ -55,6 +55,7 @@ describe('Integration: Docker Network Management', function () {
         })
     }
 
+    // createDockerNetwork
     describe('createDockerNetwork', function () {
 
         it('creates network when it does not exist', async function () {
@@ -95,6 +96,7 @@ describe('Integration: Docker Network Management', function () {
         })
     })
 
+    // addContainerToNetwork
     describe('addContainerToNetwork', function () {
 
         it('connects container when not already on network', async function () {
@@ -142,6 +144,7 @@ describe('Integration: Docker Network Management', function () {
         })
     })
 
+    // Container lifecycle commands
     describe('container lifecycle commands', function () {
 
         it('startContainer calls docker start with correct ID', async function () {
@@ -214,6 +217,7 @@ describe('Integration: Docker Network Management', function () {
         })
     })
 
+    // checkDockerInstalledAndReachable
     describe('checkDockerInstalledAndReachable', function () {
 
         it('resolves when docker --version and docker ps succeed', async function () {
@@ -251,6 +255,7 @@ describe('Integration: Docker Network Management', function () {
         })
     })
 
+    // getStatusFromContainer
     describe('getStatusFromContainer', function () {
 
         it('parses docker inspect JSON and returns first element', async function () {

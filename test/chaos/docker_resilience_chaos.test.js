@@ -14,6 +14,7 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
+// Helpers
 function makeStubs() {
     return {
         execFile: sinon.stub(),
@@ -108,6 +109,7 @@ describe('Chaos: Docker Resilience', function () {
         sinon.restore()
     })
 
+    // Experiment 3: Docker daemon unavailable (CMD-01, CMD-02)
     describe('Experiment 3: Docker daemon unavailable', function () {
 
         it('rejects when docker binary is not found (ENOENT)', async function () {
@@ -185,6 +187,7 @@ describe('Chaos: Docker Resilience', function () {
         })
     })
 
+    // Experiment 4: Docker build/run failures (CMD-03, CMD-04)
     describe('Experiment 4: Docker build failure', function () {
 
         it('rejects with error message when docker build fails', async function () {
@@ -372,6 +375,7 @@ describe('Chaos: Docker Resilience', function () {
         })
     })
 
+    // Experiment 4c: LevelDB insert failure after successful run
     describe('Experiment 4c: State storage failure after successful docker run', function () {
 
         it('rejects when LevelDB insert returns false', async function () {
@@ -404,6 +408,7 @@ describe('Chaos: Docker Resilience', function () {
         })
     })
 
+    // Experiment: Docker network creation failures (CMD-06)
     describe('Experiment: Docker network creation failure', function () {
 
         it('rejects when network create command fails', async function () {
@@ -433,6 +438,7 @@ describe('Chaos: Docker Resilience', function () {
         })
     })
 
+    // Experiment: Docker inspect returns invalid JSON (CMD-07)
     describe('Experiment: Docker inspect with invalid JSON', function () {
 
         it('throws when docker inspect returns malformed JSON', async function () {
@@ -447,6 +453,7 @@ describe('Chaos: Docker Resilience', function () {
                 await ds.getStatusFromContainer('abc123')
                 expect.fail('should have thrown')
             } catch (err) {
+                // JSON.parse throws SyntaxError, which should propagate
                 expect(err).to.be.an.instanceOf(SyntaxError)
             }
         })
@@ -469,6 +476,7 @@ describe('Chaos: Docker Resilience', function () {
         })
     })
 
+    // Experiment: Container operations on non-existent containers
     describe('Experiment: Operations on non-existent containers', function () {
 
         it('rejects when stopping a non-existent container', async function () {
@@ -537,6 +545,7 @@ describe('Chaos: Docker Resilience', function () {
         })
     })
 
+    // Experiment: Docker exec failure (CMD-05)
     describe('Experiment: Docker exec failure', function () {
 
         it('rejects when exec fails on frozen container', async function () {
@@ -557,6 +566,7 @@ describe('Chaos: Docker Resilience', function () {
         })
     })
 
+    // Experiment: stringToDockerContainerFile with broken spawn
     describe('Experiment: File write to container failure', function () {
 
         it('rejects when spawn child exits with non-zero code', async function () {
@@ -601,6 +611,7 @@ describe('Chaos: Docker Resilience', function () {
         })
     })
 
+    // Experiment: Port validation in buildAndUp
     describe('Experiment: Invalid port in config during buildAndUp', function () {
 
         it('rejects when config has invalid port value', async function () {

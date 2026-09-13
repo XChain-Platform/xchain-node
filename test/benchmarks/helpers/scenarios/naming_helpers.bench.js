@@ -40,6 +40,7 @@ module.exports = {
 
         metrics.start()
 
+        // getDockerContainerImageName (all combos)
         {
             const label = 'docker-image-name'
             const combos = []
@@ -73,6 +74,7 @@ module.exports = {
             }
         }
 
+        // getDockerNetwork
         {
             const label = 'docker-network'
 
@@ -102,6 +104,7 @@ module.exports = {
             }
         }
 
+        // getModuleDatabaseName
         {
             const label = 'database-name'
             const dbModules = ['xchain-decoder', 'xchain-indexer']
@@ -132,6 +135,7 @@ module.exports = {
             }
         }
 
+        // validatePort
         {
             const label = 'validate-port'
             const testPorts = [

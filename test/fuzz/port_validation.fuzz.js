@@ -17,8 +17,10 @@ const proxyquire = require('proxyquire').noCallThru()
 const { XChainService } = require('../../src/config')
 const { validatePort } = require('../../src/services/config_service')
 
+// validatePort() unit tests
 describe('Fuzz: validatePort()', function () {
 
+    // --- Valid ports ---
     const validPorts = [1, 80, 443, 3000, 3306, 8080, 8332, 8443, 18080, 65535]
 
     for (const port of validPorts) {
@@ -39,6 +41,7 @@ describe('Fuzz: validatePort()', function () {
         expect(validatePort('65535')).to.be.true
     })
 
+    // --- Invalid ports ---
     const invalidPorts = [
         ['zero',              0],
         ['negative',          -1],
@@ -73,6 +76,7 @@ describe('Fuzz: validatePort()', function () {
     }
 })
 
+// Port validation in buildAndUp()
 describe('Fuzz: Port Validation in buildAndUp()', function () {
 
     function loadModuleService(envVars) {

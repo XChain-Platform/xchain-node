@@ -72,6 +72,10 @@ function makeStubs(envVars) {
     }
 }
 
+/**
+ * Captures the args array from the `docker run` execFile call.
+ * Returns a getter for the full reconstructed command string and the raw args.
+ */
 function captureDockerRunArgs(stubs) {
     let runArgs = null
     let runCmd = null
@@ -97,6 +101,11 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
     // execFile passes each env var as two raw array elements ('-e', 'KEY=value'),
     // never through a shell, so no escaping or quoting is needed or performed.
 
+    // With execFile, env vars are passed as raw array elements; no shell escaping is needed.
+    // Each env var is passed as two separate args: '-e', 'KEY=value'
+    // The values are NOT shell-quoted or escaped.
+
+    // --- Values with shell metacharacters pass through raw ---
     const rawPassthroughInputs = [
         ['double quote',           'val"injection'],
         ['backslash',              'val\\injection'],
@@ -117,6 +126,7 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
             const args = getArgs()
             expect(args).to.exist
 
+            // Find the -e flag followed by the TEST_KEY=<value> arg
             const eIndex = args.indexOf('-e')
             let found = false
             for (let i = 0; i < args.length; i++) {
@@ -131,6 +141,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         })
     }
 
+    // --- Newline / carriage return values are passed as raw strings ---
+    // With execFile there is no shell to interpret them, so they are safe
     it('newline characters are passed raw (safe with execFile)', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'safe_value\n-v /:/host:ro',
@@ -143,6 +155,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         const args = getArgs()
         expect(args).to.exist
 
+        // The newline is safe with execFile; no flag injection possible.
+        // Verify the value is in the args array as a single element
         const envArg = args.find(a => a.startsWith('EVIL_KEY='))
         expect(envArg).to.exist
         expect(envArg).to.equal('EVIL_KEY=safe_value\n-v /:/host:ro')
@@ -179,9 +193,11 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
 
         const envArg = args.find(a => a.startsWith('EVIL_KEY='))
         expect(envArg).to.exist
+        // The value is a single array element; no command injection possible
         expect(envArg).to.equal('EVIL_KEY=value\r\n--privileged')
     })
 
+    // --- Null byte and binary data ---
     it('handles null byte in env var value', async function () {
         const stubs = makeStubs({
             'TEST': 'safe\x00malicious',
@@ -195,6 +211,7 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         expect(args).to.exist
     })
 
+    // --- Extreme lengths ---
     it('handles extremely long env var value without crashing', async function () {
         const stubs = makeStubs({
             'TEST': 'A'.repeat(100000),
@@ -228,6 +245,7 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         expect(envArg).to.exist
     })
 
+    // --- Type coercion ---
     it('handles numeric env var value', async function () {
         const stubs = makeStubs({
             'PORT': 8332,
@@ -292,6 +310,7 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         expect(envArg).to.exist
     })
 
+    // --- Unicode / special encoding ---
     it('handles unicode characters in env var value', async function () {
         const stubs = makeStubs({
             'TEST': '\u{1F4A9} bitcoin‏',
@@ -305,6 +324,7 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         expect(args).to.exist
     })
 
+    // --- Comprehensive: all dangerous chars in one value ---
     it('passes all dangerous shell characters raw in a single value (safe with execFile)', async function () {
         const combined = 'a"b\\c$d`e\nf\rg'
         const stubs = makeStubs({
@@ -318,6 +338,7 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         const args = getArgs()
         expect(args).to.exist
 
+        // With execFile, the value is a single array element; no shell interpretation occurs
         const envArg = args.find(a => a.startsWith('COMBINED='))
         expect(envArg).to.exist
         expect(envArg).to.equal('COMBINED=' + combined)

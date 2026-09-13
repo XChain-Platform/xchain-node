@@ -16,6 +16,7 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const { modulesUrls } = require('../../src/config')
 
+// Helpers
 function makeStubs() {
     return {
         execFile: sinon.stub(),
@@ -74,6 +75,7 @@ describe('Chaos: Git Clone Resilience', function () {
         sinon.restore()
     })
 
+    // Experiment 7: Git clone failures (CMD-08)
     describe('Experiment 7: Network failure during git clone', function () {
 
         it('rejects with error message when clone fails with network error', async function () {
@@ -134,6 +136,8 @@ describe('Chaos: Git Clone Resilience', function () {
                 expect(err).to.include('not found')
                 expect(cloneAttempts).to.equal(1)
             }
+            // removeModuleTmpDir and createModuleTmpDir should be called
+            // (stubbed in loadModuleService via ConfigService)
         })
 
         it('does not fall back when error is not branch-related', async function () {

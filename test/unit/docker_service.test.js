@@ -14,6 +14,7 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
+// Helpers
 function makeStubs() {
     return {
         execFile: sinon.stub(),
@@ -48,6 +49,7 @@ function loadDockerService(stubs, fsStub) {
 
 describe('DockerService', function () {
 
+    // checkDockerInstalledAndReachable
     describe('checkDockerInstalledAndReachable()', function () {
 
         it('resolves true when docker --version and docker ps succeed', async function () {
@@ -148,6 +150,7 @@ describe('DockerService', function () {
         })
     })
 
+    // checkContainerdDataRootRelocation 
     describe('checkContainerdDataRootRelocation()', function () {
 
         // Helper: stub `docker info` to return a data-root, and fs.statSync to
@@ -240,6 +243,7 @@ describe('DockerService', function () {
         })
     })
 
+    // Container lifecycle commands
     describe('startContainer()', function () {
         it('runs docker start <containerId>', async function () {
             const stubs = makeStubs()
@@ -507,6 +511,7 @@ describe('DockerService', function () {
         })
     })
 
+    // getStatusFromContainer
     describe('getStatusFromContainer()', function () {
         it('runs docker inspect and returns parsed JSON', async function () {
             const stubs = makeStubs()
@@ -538,6 +543,7 @@ describe('DockerService', function () {
         })
     })
 
+    // Network operations
     describe('createDockerNetwork()', function () {
         it('creates network when inspect fails (network does not exist)', async function () {
             const stubs = makeStubs()
@@ -588,6 +594,7 @@ describe('DockerService', function () {
         })
     })
 
+    // Container interaction
     describe('execContainer()', function () {
         it('runs docker exec -i <containerId> <commandArgs>', async function () {
             const stubs = makeStubs()
@@ -649,6 +656,7 @@ describe('DockerService', function () {
         })
     })
 
+    // File transfer
     describe('getDockerContainerFileData()', function () {
         it('runs docker cp and reads the copied file', async function () {
             const stubs = makeStubs()
@@ -683,6 +691,7 @@ describe('DockerService', function () {
         })
     })
 
+    // startDockerMonitor
     describe('startDockerMonitor()', function () {
         it('rejects when containerIds is empty', async function () {
             const stubs = makeStubs()
@@ -707,6 +716,7 @@ describe('DockerService', function () {
         })
     })
 
+    // addContainerToNetwork
     describe('addContainerToNetwork()', function () {
 
         it('connects container when not already in network', async function () {
@@ -749,6 +759,7 @@ describe('DockerService', function () {
             const ds = loadDockerService(stubs)
             const result = await ds.addContainerToNetwork('abc123', 'mynet')
             expect(result).to.be.true
+            // Should NOT have called network connect
             expect(stubs.execFile.getCalls().some(c => c.args[1] && c.args[1][1] === 'connect')).to.be.false
         })
 
@@ -776,6 +787,7 @@ describe('DockerService', function () {
         })
     })
 
+    // getPublishedHostPorts
     describe('getPublishedHostPorts()', function () {
 
         function stubPs(stubs, output) {
@@ -848,6 +860,7 @@ describe('DockerService', function () {
         })
     })
 
+    // waitContainer
     describe('waitContainer()', function () {
 
         it('runs docker wait and returns parsed exit code', async function () {
@@ -890,6 +903,7 @@ describe('DockerService', function () {
         })
     })
 
+    // stringToDockerContainerFile
     describe('stringToDockerContainerFile()', function () {
 
         it('resolves true when tee exits with code 0', async function () {
@@ -971,6 +985,7 @@ describe('DockerService', function () {
         })
     })
 
+    // saveContainerLogs
     describe('saveContainerLogs()', function () {
 
         it('spawns docker logs and pipes to file, resolves when output finishes', async function () {
@@ -992,6 +1007,7 @@ describe('DockerService', function () {
                 readFileSync: sinon.stub()
             }
 
+            // Create a child process that emits close
             const stdoutStream = new Readable({ read() {} })
             const stderrStream = new Readable({ read() {} })
             const child = new EventEmitter()
@@ -1052,6 +1068,7 @@ describe('DockerService', function () {
         })
     })
 
+    // restartContainer: error branch
     describe('restartContainer(): error branches', function () {
 
         it('rejects when stdout does not match container ID', async function () {
@@ -1085,6 +1102,7 @@ describe('DockerService', function () {
         })
     })
 
+    // killContainer: error branches
     describe('killContainer(): error branches', function () {
 
         it('rejects when stdout does not match container ID', async function () {
@@ -1118,6 +1136,7 @@ describe('DockerService', function () {
         })
     })
 
+    // execContainer: error branch
     describe('execContainer(): error branch', function () {
 
         it('rejects when docker exec fails', async function () {
@@ -1136,6 +1155,7 @@ describe('DockerService', function () {
         })
     })
 
+    // getDockerContainerFileData: error branch
     describe('getDockerContainerFileData(): error branch', function () {
 
         it('rejects when docker cp fails', async function () {
@@ -1154,6 +1174,7 @@ describe('DockerService', function () {
         })
     })
 
+    // getDockerContainerFileCat: error branch
     describe('getDockerContainerFileCat(): error branch', function () {
 
         it('rejects when docker exec cat fails', async function () {
@@ -1172,6 +1193,7 @@ describe('DockerService', function () {
         })
     })
 
+    // createDockerNetwork: network create failure
     describe('createDockerNetwork(): network create failure', function () {
 
         it('rejects false when network create fails', async function () {
@@ -1193,6 +1215,7 @@ describe('DockerService', function () {
         })
     })
 
+    // getDockerNetworkInspect: error branch
     describe('getDockerNetworkInspect(): error branch', function () {
 
         it('rejects when docker network inspect fails', async function () {
@@ -1211,6 +1234,7 @@ describe('DockerService', function () {
         })
     })
 
+    // stopContainer: error branches
     describe('stopContainer(): error branches', function () {
 
         it('rejects on exec error', async function () {
@@ -1229,6 +1253,7 @@ describe('DockerService', function () {
         })
     })
 
+    // logContainer: TTY + keypress branches
     describe('logContainer(): TTY keypress branches', function () {
 
         it('sets up stdin raw mode and keypress handler when follow=true and isTTY=true', async function () {
@@ -1249,11 +1274,13 @@ describe('DockerService', function () {
             const ds = loadDockerService(stubs)
             const promise = ds.logContainer('abc123', true)
 
+            // Verify raw mode was set
             expect(process.stdin.setRawMode.calledWith(true)).to.be.true
 
             child.emit('close')
             await promise
 
+            // Verify raw mode was unset on close
             expect(process.stdin.setRawMode.calledWith(false)).to.be.true
 
             process.stdin.isTTY = originalIsTTY
@@ -1320,6 +1347,7 @@ describe('DockerService', function () {
         })
     })
 
+    // startDockerMonitor: with containers (blessed UI)
     describe('startDockerMonitor(): with containers', function () {
 
         it('sets up blessed UI, spawns docker logs for each container, resolves on q key', async function () {
@@ -1327,6 +1355,7 @@ describe('DockerService', function () {
             const EventEmitter = require('events')
             const { Readable } = require('stream')
 
+            // Set up mock children for docker logs spawn
             let keyHandler = null
             const mockScreen = {
                 key: sinon.stub().callsFake((keys, handler) => { keyHandler = handler }),
@@ -1367,6 +1396,7 @@ describe('DockerService', function () {
             ]
             const promise = ds.startDockerMonitor(containers, true)
 
+            // Verify blessed UI was set up
             expect(blessedStub.screen.calledOnce).to.be.true
             expect(blessedStub.log.called).to.be.true
             expect(stubs.spawn.called).to.be.true

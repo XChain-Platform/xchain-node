@@ -39,6 +39,7 @@ describe('Integration: Multi-Module Orchestration', function () {
         await env.teardown()
     })
 
+    // installModules
     describe('installModules orchestration', function () {
 
         it('creates Docker network and database before installing modules', async function () {
@@ -75,6 +76,7 @@ describe('Integration: Multi-Module Orchestration', function () {
                 }
             })
 
+            // Only shared services (explorer)
             const serviceList = {
                 'bitcoin': { 'mainnet': ['xchain-encoder', 'xchain-decoder'] }
             }
@@ -83,7 +85,9 @@ describe('Integration: Multi-Module Orchestration', function () {
 
             // Order matters: network, then database, then modules.
             expect(callOrder[0]).to.equal('network:xchain-node-bitcoin-mainnet')
+            // Database built second
             expect(callOrder[1]).to.equal('database:bitcoin-mainnet')
+            // Then modules installed
             expect(callOrder[2]).to.equal('install:xchain-encoder:bitcoin-mainnet')
             expect(callOrder[3]).to.equal('install:xchain-decoder:bitcoin-mainnet')
         })
@@ -161,10 +165,12 @@ describe('Integration: Multi-Module Orchestration', function () {
 
             await moduleOps.installModules(serviceList)
 
+            // Database should NOT be called for empty coin/network
             expect(databaseCalled).to.be.false
         })
     })
 
+    // updateModules
     describe('updateModules orchestration', function () {
 
         it('reads old container ID from LevelDB and passes it to installModule', async function () {
@@ -250,9 +256,11 @@ describe('Integration: Multi-Module Orchestration', function () {
         })
     })
 
+    // uninstallModules
     describe('uninstallModules orchestration', function () {
 
         it('calls uninstallModule for each service in the list', async function () {
+            // Modules must exist in LevelDB for uninstall to proceed
             await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('1'))
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('2'))
             await env.insertModule('xchain-indexer', 'dogecoin', 'testnet', TestEnv.fakeContainerId('3'))
@@ -351,11 +359,13 @@ describe('Integration: Multi-Module Orchestration', function () {
 
             expect(thrown, 'a failed uninstall must reject, not report success').to.not.equal(null)
             expect(thrown.message).to.match(/uninstall failed for 1 module/)
+            // Should still continue past the failure
             expect(uninstalled).to.deep.equal(['xchain-encoder', 'xchain-indexer'])
             expect(failCount).to.equal(1)
         })
     })
 
+    // Full filterCommandParameters -> installModules pipeline
     describe('filterCommandParameters -> installModules end-to-end', function () {
 
         it('"all bitcoin mainnet" installs correct set in correct order', async function () {
@@ -396,13 +406,16 @@ describe('Integration: Multi-Module Orchestration', function () {
             expect(networkCreated).to.be.true
             expect(databaseCreated).to.be.true
 
+            // Core modules should be installed
             expect(installed).to.include('xchain-encoder')
             expect(installed).to.include('xchain-decoder')
             expect(installed).to.include('xchain-utxo-tracker')
             expect(installed).to.include('xchain-indexer')
             expect(installed).to.include('node')
+            // Explorer (shared) should be installed too
             expect(installed).to.include(EXPLORER_MODULE_NAME)
 
+            // Regtest modules should NOT be installed on mainnet
             expect(installed).to.not.include('xchain-regtest-miner')
             expect(installed).to.not.include('xchain-e2e-test')
         })
