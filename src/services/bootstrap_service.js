@@ -39,6 +39,7 @@ const { dockerMariadbArgs, mariadbEnv }               = require('../utils/docker
 const { assertBootstrapSourceHealthy }                = require('./bootstrap_health_gate')
 const { recordBootstrapPublished }                    = require('./bootstrap_republish_ledger')
 const { declareEncoderMaintenance, clearEncoderMaintenance } = require('./encoder_maintenance_window')
+const config = require('../config');
 
 // Bootstrap signing (supply-chain integrity):
 //
@@ -93,7 +94,7 @@ class BootstrapIntegrityError extends Error {
 }
 
 function loadBootstrapPublicKey() {
-    const override = process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY
+    const override = config.XCHAIN_NODE_BOOTSTRAP_PUBKEY
     const pubkeyPath = override || DEFAULT_BOOTSTRAP_PUBKEY_PATH
     // The pinned key is the whole trust anchor. Swapping it via env silently
     // moves the trust root to a non-pinned key, so make it as loud as the
@@ -134,7 +135,7 @@ async function checkBootstrapSignature(archivePath) {
     // Fail closed by default. Opt out only with an explicit falsy value
     // (XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0/false/no); e.g. for a self-hosted
     // bootstrap source that publishes no signatures.
-    const optOut        = /^(0|false|no)$/i.test(process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP || '')
+    const optOut        = /^(0|false|no)$/i.test(config.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP)
     const requireSigned = !optOut
     const sigPath       = archivePath + BOOTSTRAP_SIG_SUFFIX
     const publicKey     = loadBootstrapPublicKey()
@@ -159,7 +160,7 @@ async function checkBootstrapSignature(archivePath) {
 // Best-effort from the creator's perspective only in the sense that a missing
 // env var skips signing; a configured-but-broken key fails the create loudly.
 async function maybeSignBootstrap(finalOutput) {
-    const keyPath = process.env.XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY
+    const keyPath = config.XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY
     if (!keyPath) {
         console.log('NOTE: XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY not set; bootstrap is unsigned. Consumers cannot verify provenance.')
         return null
@@ -1491,7 +1492,7 @@ function reportKeptBootstrapArchive(archivePath, bytes) {
 // restore wipes the data directory; needed because a failed restore leaves a
 // service scratch-syncing, which reads as populated to every later run.
 function forceBootstrapRequested() {
-    const v = process.env.XCHAIN_NODE_FORCE_BOOTSTRAP
+    const v = config.XCHAIN_NODE_FORCE_BOOTSTRAP
     return v !== undefined && v !== '' && v !== '0'
 }
 
@@ -1499,7 +1500,7 @@ function forceBootstrapRequested() {
 // it. Best-effort: any failure (no bootstrap published, download/restore error)
 // logs a warning and returns so the install proceeds with a normal sync.
 async function ensureBootstrapUtxoTracker(coin, network) {
-    if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
+    if (config.XCHAIN_NODE_NO_BOOTSTRAP) {
         console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
         recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'disabled')
         return false
@@ -1673,7 +1674,7 @@ async function mariaDbModuleFreshness(coin, network, module) {
 // (none published, download/restore error) logs a warning and returns so the
 // install proceeds with a normal sync from scratch.
 async function ensureBootstrapMariaDb(coin, network, module) {
-    if (process.env.XCHAIN_NODE_NO_BOOTSTRAP) {
+    if (config.XCHAIN_NODE_NO_BOOTSTRAP) {
         console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
         recordBootstrapOutcome(module, 'disabled')
         return false

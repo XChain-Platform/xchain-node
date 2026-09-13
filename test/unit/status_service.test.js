@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -54,13 +55,13 @@ function loadStatusService(state, overrides = {}) {
     const getModuleBranchStub         = overrides.getModuleBranch || sinon.stub().resolves('master')
 
     return proxyquire('../../src/services/status_service', {
-        '../config/index': {
+        '../config': configStub({
             NODE_MODULE_NAME: 'node',
             SEP:              '-',
             Coin:    { BITCOIN: 'bitcoin', DOGECOIN: 'dogecoin', LITECOIN: 'litecoin' },
             Network: { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' },
             XChainService: { XCHAIN_DECODER: 'xchain-decoder' }
-        },
+        }),
         '../state': state,
         './docker_service': {
             getStatusFromContainer: getStatusFromContainerStub

@@ -37,6 +37,7 @@ const { stopContainerByName, removeContainer, getPublishedHostPorts, forceRemove
 const { stopModuleContainer, stopTimeoutArgs } = require('./stop_budget_service')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./database_service')
 const { redactSecrets, sleep } = require('../utils/helpers')
+const config = require('../config');
 
 // Sibling directories used to make a rewrite-clone atomic-ish (see cloneGit).
 // Both live beside the module checkout inside the modules dir, so the two
@@ -751,7 +752,7 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
             // node_modules and key file, so the whole directory is mounted
             // read-only; ConfigService sets HUB_SIGNER_MODULE to the matching
             // in-container path. No-op when unconfigured.
-            if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR && fs.existsSync(process.env.XCHAIN_NODE_HUB_SIGNER_DIR)) {
+            if (config.XCHAIN_NODE_HUB_SIGNER_DIR && fs.existsSync(config.XCHAIN_NODE_HUB_SIGNER_DIR)) {
                 volumeArgs.push('-v', `${process.env.XCHAIN_NODE_HUB_SIGNER_DIR}:/XChainHub/operator-signer:ro`)
             } else {
                 // The signer `validator init` wrote. Its signer.js requires the

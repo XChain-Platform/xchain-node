@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -62,9 +63,9 @@ function loadExplorerService(stubs) {
         })
 
     return proxyquire('../../src/services/explorer_service', {
-        '../config/index': {
+        '../config': configStub({
             EXPLORER_MODULE_NAME: 'xchain-explorer'
-        },
+        }),
         '../state': {
             db:              stubs.db,
             getLastStatus:   stubs.getLastStatus,
@@ -487,7 +488,7 @@ describe('ExplorerService: installExplorerModule() updateExplorer error in loop'
         }
 
         const es = proxyquire('../../src/services/explorer_service', {
-            '../config/index': { EXPLORER_MODULE_NAME: 'xchain-explorer' },
+            '../config': configStub({ EXPLORER_MODULE_NAME: 'xchain-explorer' }),
             '../state': {
                 db: stubs.db,
                 getLastStatus: stubs.getLastStatus,

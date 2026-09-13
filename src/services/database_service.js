@@ -46,6 +46,7 @@ const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModu
 const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName } = require('./docker_service')
 const { assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError } = require('./db_credential_drift')
 const { statusChanged }           = require('./status_service')
+const config = require('../config');
 const {
     XCHAIN_NODE_DB, getOsUserDbName, generatePassword,
     hasCredentials, loadCredentials, saveCredentials,
@@ -190,15 +191,15 @@ function resolveExternalDbPort(raw) {
 
 async function getExternalDbConfig() {
     // Fast path: env vars supply everything for headless flows
-    if (process.env.XCHAIN_NODE_EXTERNAL_DB_HOST
-        && process.env.XCHAIN_NODE_EXTERNAL_DB_PORT
-        && process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER
-        && process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD) {
+    if (config.XCHAIN_NODE_EXTERNAL_DB_HOST
+        && config.XCHAIN_NODE_EXTERNAL_DB_PORT
+        && config.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER
+        && config.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD) {
         return {
-            host:          process.env.XCHAIN_NODE_EXTERNAL_DB_HOST,
-            port:          resolveExternalDbPort(process.env.XCHAIN_NODE_EXTERNAL_DB_PORT),
-            root_user:     process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER,
-            root_password: process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD
+            host:          config.XCHAIN_NODE_EXTERNAL_DB_HOST,
+            port:          resolveExternalDbPort(config.XCHAIN_NODE_EXTERNAL_DB_PORT),
+            root_user:     config.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER,
+            root_password: config.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD
         }
     }
 
@@ -397,8 +398,8 @@ async function askMariadbRootPassword(coin, network) {
 
     const dbContainerId = await checkIfDatabaseModuleExists(coin, network)
 
-    if (process.env.XCHAIN_NODE_DB_ROOT_PASSWORD) {
-        const envPassword = process.env.XCHAIN_NODE_DB_ROOT_PASSWORD
+    if (config.XCHAIN_NODE_DB_ROOT_PASSWORD) {
+        const envPassword = config.XCHAIN_NODE_DB_ROOT_PASSWORD
         if (!dbContainerId) {
             // No running container to verify against yet (fresh install): the
             // env override becomes the password the container is created with,
@@ -1378,7 +1379,7 @@ async function buildDatabaseModule(coin, network) {
         // under Docker's data-root (often a bulk/HDD disk). Unset = unchanged
         // behaviour. Set XCHAIN_NODE_DB_DATA_DIR=/var/lib/mysql to keep the DB
         // on a dedicated NVMe volume.
-        if (process.env.XCHAIN_NODE_DB_DATA_DIR) {
+        if (config.XCHAIN_NODE_DB_DATA_DIR) {
             runArgs.push('-v', `${process.env.XCHAIN_NODE_DB_DATA_DIR}:/var/lib/mysql`)
         }
         // Pass the root password through docker's OWN environment via a bare
@@ -1416,7 +1417,7 @@ async function buildDatabaseModule(coin, network) {
         // "Can't connect to mariadb" errors - audit F-9). Default to the prod-standard
         // 1000; XCHAIN_NODE_DB_MAX_CONNECTIONS above still overrides, and idle threads
         // are cheap enough that single-chain installs are unaffected.
-        if (!process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS) {
+        if (!config.XCHAIN_NODE_DB_MAX_CONNECTIONS) {
             runArgs.push('--max-connections=1000')
         }
 

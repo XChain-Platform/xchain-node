@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
@@ -75,9 +76,9 @@ function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub(),
     return proxyquire('../../src/services/validator_service', {
         'fs': fsStub,
         './config_service': { ensureHubApiKey, readHubApiKey },
-        '../config/index': {
+        '../config': configStub({
             configDir: FAKE_CONFIG_DIR
-        }
+        })
     })
 }
 

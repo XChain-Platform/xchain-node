@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai')
+const { configStub } = require('../helpers/config_stub');
 const proxyquire = require('proxyquire').noCallThru()
 
 /**
@@ -421,7 +422,7 @@ describe('MariaDbStore registry scoping by NODE_PREFIX', function () {
         // stubbed mixin handed to the store. Stubbing constants at the store
         // reaches nothing: proxyquire only intercepts a module's own requires.
         const modules = proxyquire('../../src/db/modules', {
-            '../config/index': Object.assign({}, constants, { NODE_PREFIX: prefix })
+            '../config/index': configStub({ NODE_PREFIX: prefix })
         })
         const MariaDbStore = proxyquire('../../src/db', {
             'mariadb': { createPool: () => pool },

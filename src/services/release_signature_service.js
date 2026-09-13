@@ -54,6 +54,7 @@ const os       = require('os')
 const path     = require('path')
 const crypto   = require('crypto')
 const { execFileSync, spawnSync } = require('child_process')
+const config = require('../config');
 
 // The XChain Platform release key: RSA 4096, created 2026-07-23, expires
 // 2036-07-20. NOT the wallet's keys - the wallet signs its tags and its release
@@ -79,11 +80,11 @@ class ReleaseIntegrityError extends Error {
 }
 
 function signatureCheckDisabled() {
-    return /^(0|false|no)$/i.test(process.env.XCHAIN_NODE_REQUIRE_SIGNED_RELEASE || '')
+    return /^(0|false|no)$/i.test(config.XCHAIN_NODE_REQUIRE_SIGNED_RELEASE)
 }
 
 function gpgBinary() {
-    return process.env.XCHAIN_NODE_GPG_BIN || 'gpg'
+    return config.XCHAIN_NODE_GPG_BIN
 }
 
 function normalizeFingerprint(value) {

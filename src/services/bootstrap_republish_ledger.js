@@ -53,6 +53,7 @@ const os   = require('os')
 const path = require('path')
 
 const { XChainService, Coin, Network } = require('../config')
+const config = require('../config');
 
 const LEDGER_DIR_NAME  = '.xchain-node'
 const LEDGER_FILE_NAME = 'bootstrap-reindex.json'
@@ -69,7 +70,7 @@ const BOOTSTRAPPED_SERVICES = [
 function getReindexLedgerPath() {
     // XCHAIN_NODE_REINDEX_LEDGER_DIR is a test/ops override; the default matches
     // the CredentialsService per-user directory.
-    const dir = process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR || path.join(os.homedir(), LEDGER_DIR_NAME)
+    const dir = config.XCHAIN_NODE_REINDEX_LEDGER_DIR || path.join(os.homedir(), LEDGER_DIR_NAME)
     return path.join(dir, LEDGER_FILE_NAME)
 }
 

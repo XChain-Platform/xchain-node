@@ -18,6 +18,7 @@
 //      publish or leave a tracker down.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -40,7 +41,7 @@ function load({ containerId = ENCODER_CONTAINER, writeErr = null, execErr = null
             : sinon.stub().resolves('')
     }
     const mod = proxyquire('../../src/services/encoder_maintenance_window', {
-        '../config/index': { XChainService },
+        '../config': configStub({ XChainService }),
         '../state': { db: { getModuleContainer: stubs.getModuleContainer } },
         './docker_service': {
             stringToDockerContainerFile: stubs.stringToDockerContainerFile,

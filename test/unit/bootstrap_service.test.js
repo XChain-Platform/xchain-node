@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { PassThrough, EventEmitter } = require('stream')
@@ -273,12 +274,12 @@ function loadBootstrapService(stubs) {
             spawn:    stubs.spawn || sinon.stub()
         },
         '../state':               { db: stubs.db },
-        '../config/index': {
+        '../config': configStub({
             XChainService,
             SEP,
             BOOTSTRAP_BASE_URL,
             tmpDir: '/tmp/xchain-test'
-        },
+        }),
         './config_service':   {
             getDefaultConfig:         stubs.configService.getDefaultConfig,
             getModuleDatabaseName:    stubs.configService.getModuleDatabaseName,

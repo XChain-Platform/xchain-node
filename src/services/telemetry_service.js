@@ -38,6 +38,7 @@ const { execFile } = require('child_process')
 
 const { version: nodeVersion } = require('../../package.json')
 const TelemetryConnector = require('./telemetry_connector')
+const config = require('../config');
 
 const PREF_DIR_NAME  = '.xchain-node'
 const PREF_FILE_NAME = 'telemetry.json'
@@ -67,7 +68,7 @@ function savePref(pref) {
 // Resolve the opt-out decision across flag > env > persisted preference > default.
 function isOptedOut(cliOptOut, pref) {
     if (cliOptOut === true) return true
-    const env = (process.env.XCHAIN_NODE_NO_TELEMETRY || '').toLowerCase()
+    const env = (config.XCHAIN_NODE_NO_TELEMETRY).toLowerCase()
     if (env === '1' || env === 'true' || env === 'yes') return true
     if (pref && pref.optOut === true) return true
     return false

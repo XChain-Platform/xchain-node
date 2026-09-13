@@ -19,6 +19,7 @@
  ********************************************************************/
 
 const axios = require('axios')
+const config = require('../config');
 
 const DEFAULT_TELEMETRY_URL = 'https://hub.xchain.io/telemetry'
 
@@ -27,7 +28,7 @@ class TelemetryConnector {
     // url defaults to the central hub; XCHAIN_NODE_TELEMETRY_URL overrides it
     // (used in tests / self-hosted collectors).
     constructor(url) {
-        this.url = url || process.env.XCHAIN_NODE_TELEMETRY_URL || DEFAULT_TELEMETRY_URL
+        this.url = url || config.XCHAIN_NODE_TELEMETRY_URL || DEFAULT_TELEMETRY_URL
     }
 
     // Fire one telemetry ping. Returns true on a 2xx, false on any error.

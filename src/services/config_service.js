@@ -32,6 +32,7 @@ const {
     preferredSecretEnvName, foldSecretEnvAliases, readSecretHostEnv, deprecatedSecretEnvNames
 } = require('../config/secret_env')
 const { getCoinConfigByFullName } = require('../coins')
+const config = require('../config');
 
 function getModuleDir(module) {
     return moduleDir + "/" + module
@@ -538,8 +539,8 @@ async function getDefaultConfig(module, coin, network) {
             const encoderPassthroughVars = ["ENCODER_TRUST_PROXY", "ENCODER_RATE_LIMIT_RPM"]
             for (const key of encoderPassthroughVars) {
                 const value = {
-                    ENCODER_TRUST_PROXY:    process.env.ENCODER_TRUST_PROXY,
-                    ENCODER_RATE_LIMIT_RPM: process.env.ENCODER_RATE_LIMIT_RPM
+                    ENCODER_TRUST_PROXY:    config.ENCODER_TRUST_PROXY,
+                    ENCODER_RATE_LIMIT_RPM: config.ENCODER_RATE_LIMIT_RPM
                 }[key]
                 if (value === undefined || value === "") continue
                 defaultValues[key] = value
@@ -558,8 +559,8 @@ async function getDefaultConfig(module, coin, network) {
         // Injected as a default, so a value in the <coin>-<network> config file still wins.
         const feeDestEnvName = 'XCHAIN_FEE_DESTINATION_' + CoinTickerSymbol[coin] + '_' + network.toUpperCase()
         const registryFeeDestination = getCoinConfigByFullName(coin, network).addresses.FEE_DESTINATION
-        const feeDestination = (network !== Network.MAINNET && !process.env[feeDestEnvName] && process.env.FEE_DESTINATION)
-            ? process.env.FEE_DESTINATION
+        const feeDestination = (network !== Network.MAINNET && !process.env[feeDestEnvName] && config.FEE_DESTINATION)
+            ? config.FEE_DESTINATION
             : registryFeeDestination
         if (feeDestination) {
             defaultValues['FEE_DESTINATION'] = feeDestination
@@ -592,8 +593,8 @@ async function getDefaultConfig(module, coin, network) {
         // widens its blind spot.
         if (module === XChainService.XCHAIN_UTXO_TRACKER) {
             const levelDbPassthrough = {
-                LEVELDB_CACHE_BYTES:        process.env.LEVELDB_CACHE_BYTES,
-                LEVELDB_WRITE_BUFFER_BYTES: process.env.LEVELDB_WRITE_BUFFER_BYTES
+                LEVELDB_CACHE_BYTES:        config.LEVELDB_CACHE_BYTES,
+                LEVELDB_WRITE_BUFFER_BYTES: config.LEVELDB_WRITE_BUFFER_BYTES
             }
             for (const [varName, value] of Object.entries(levelDbPassthrough)) {
                 if (value !== undefined && value !== "") {
@@ -768,8 +769,8 @@ async function getDefaultConfig(module, coin, network) {
             // shared hub sidecar so an indexer co-located with a validator hub picks up the
             // key `validator init` generated. Neither set leaves the indexer sending no key
             // (keyless, the prior default).
-            if (process.env.HUB_API_KEY !== undefined && process.env.HUB_API_KEY !== "") {
-                defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
+            if (config.HUB_API_KEY !== undefined && config.HUB_API_KEY !== "") {
+                defaultValues.HUB_API_KEY = config.HUB_API_KEY
             }
             await applyHubApiKeyFromSidecar(defaultValues)
 
@@ -777,8 +778,8 @@ async function getDefaultConfig(module, coin, network) {
             // capability snapshots) with <COIN>_INDEXER_API_KEY; the indexer fails closed unless its
             // INDEXER_API_KEY matches. Source from host env so it persists across `update`, mirroring
             // HUB_API_KEY above. Unset leaves the indexer fail-closed (keyless reads rejected).
-            if (process.env.INDEXER_API_KEY !== undefined && process.env.INDEXER_API_KEY !== "") {
-                defaultValues.INDEXER_API_KEY = process.env.INDEXER_API_KEY
+            if (config.INDEXER_API_KEY !== undefined && config.INDEXER_API_KEY !== "") {
+                defaultValues.INDEXER_API_KEY = config.INDEXER_API_KEY
             } else if (network === Network.REGTEST) {
                 // With no key configured the indexer fails closed: every gated method
                 // (feequotedryrun, the federation reads the staking e2e family asserts
@@ -893,8 +894,8 @@ async function getDefaultConfig(module, coin, network) {
         // standing shared hub's 10000, which had no override at all and so could only
         // be tested by tearing the shared hub down or standing up a whole separate
         // Docker daemon.
-        if (process.env.HUB_PORT !== undefined && process.env.HUB_PORT !== "") {
-            defaultValues.HUB_PORT = process.env.HUB_PORT
+        if (config.HUB_PORT_OVERRIDE !== undefined && config.HUB_PORT_OVERRIDE !== "") {
+            defaultValues.HUB_PORT = config.HUB_PORT_OVERRIDE
         }
 
         // Allow the operator to override the explorer's published HOST ports via host
@@ -917,8 +918,8 @@ async function getDefaultConfig(module, coin, network) {
         // operator opt out via host env (ALLOW_NO_COLOCATED_HUB_DB=1): the hub-mirrored
         // endpoints then fail loud per-request instead of blocking startup. Unset on
         // mainnet/testnet so the missing-DB guard still catches a real misconfiguration.
-        if (process.env.ALLOW_NO_COLOCATED_HUB_DB !== undefined && process.env.ALLOW_NO_COLOCATED_HUB_DB !== "") {
-            defaultValues.ALLOW_NO_COLOCATED_HUB_DB = process.env.ALLOW_NO_COLOCATED_HUB_DB
+        if (config.ALLOW_NO_COLOCATED_HUB_DB !== undefined && config.ALLOW_NO_COLOCATED_HUB_DB !== "") {
+            defaultValues.ALLOW_NO_COLOCATED_HUB_DB = config.ALLOW_NO_COLOCATED_HUB_DB
         }
 
         // Shared services that call the hub as clients (the sync server's config
@@ -928,8 +929,8 @@ async function getDefaultConfig(module, coin, network) {
         // persists across `update`, then from the shared hub sidecar, mirroring the
         // indexer's passthrough above. Neither set keeps the prior keyless behavior
         // (fine against a keyless hub).
-        if (process.env.HUB_API_KEY !== undefined && process.env.HUB_API_KEY !== "") {
-            defaultValues.HUB_API_KEY = process.env.HUB_API_KEY
+        if (config.HUB_API_KEY !== undefined && config.HUB_API_KEY !== "") {
+            defaultValues.HUB_API_KEY = config.HUB_API_KEY
         }
         await applyHubApiKeyFromSidecar(defaultValues)
 
@@ -965,8 +966,8 @@ async function getDefaultConfig(module, coin, network) {
             // existed left the explorer self-syncing with nowhere to sync from.
             // Kept for the explorer's other hub reads (HubOperationalCache) and as
             // the fallback for hand-written config.json deployments.
-            if (process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && process.env.EXPLORER_CHECKPOINT_SELF_SYNC !== "") {
-                defaultValues.HUB_API_URL = process.env.HUB_API_URL ||
+            if (config.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && config.EXPLORER_CHECKPOINT_SELF_SYNC !== "") {
+                defaultValues.HUB_API_URL = config.HUB_API_URL ||
                     ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" + defaultValues.HUB_PORT)
             }
 
@@ -975,8 +976,8 @@ async function getDefaultConfig(module, coin, network) {
             // truthy value, so pass the host env through verbatim rather than
             // coercing it. Sourced from host env so it persists across `update`/
             // `recreate`, mirroring the other explorer passthroughs here.
-            if (process.env.EXPLORER_VM_QUERY_ENABLED !== undefined && process.env.EXPLORER_VM_QUERY_ENABLED !== "") {
-                defaultValues.EXPLORER_VM_QUERY_ENABLED = process.env.EXPLORER_VM_QUERY_ENABLED
+            if (config.EXPLORER_VM_QUERY_ENABLED !== undefined && config.EXPLORER_VM_QUERY_ENABLED !== "") {
+                defaultValues.EXPLORER_VM_QUERY_ENABLED = config.EXPLORER_VM_QUERY_ENABLED
             }
 
             // Serving limits, same host-env injection point as the knobs above,
@@ -1017,16 +1018,16 @@ async function getDefaultConfig(module, coin, network) {
                 "EXPLORER_BATCH_RATE_LIMIT_RPM"
             ]) {
                 const value = {
-                    EXPLORER_RATE_LIMIT_RPM:                   process.env.EXPLORER_RATE_LIMIT_RPM,
-                    EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM:         process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM,
-                    EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM:    process.env.EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM,
-                    EXPLORER_TIP_MAX_AGE_S:                    process.env.EXPLORER_TIP_MAX_AGE_S,
-                    EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM:   process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM,
-                    EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM: process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM,
-                    EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM:      process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM,
-                    EXPLORER_BATCH_RATE_LIMIT_RPM:             process.env.EXPLORER_BATCH_RATE_LIMIT_RPM,
-                    EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM: process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM,
-                    EXPLORER_VM_QUERY_RATE_LIMIT_RPM:          process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM
+                    EXPLORER_RATE_LIMIT_RPM:                   config.EXPLORER_RATE_LIMIT_RPM,
+                    EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM:         config.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM,
+                    EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM:    config.EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM,
+                    EXPLORER_TIP_MAX_AGE_S:                    config.EXPLORER_TIP_MAX_AGE_S,
+                    EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM:   config.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM,
+                    EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM: config.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM,
+                    EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM:      config.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM,
+                    EXPLORER_BATCH_RATE_LIMIT_RPM:             config.EXPLORER_BATCH_RATE_LIMIT_RPM,
+                    EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM: config.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM,
+                    EXPLORER_VM_QUERY_RATE_LIMIT_RPM:          config.EXPLORER_VM_QUERY_RATE_LIMIT_RPM
                 }[key]
                 if (value === undefined || value === "") continue
                 defaultValues[key] = value
@@ -1081,13 +1082,13 @@ async function getDefaultConfig(module, coin, network) {
     // country/region but leaves ip_hash null. The hub is a shared service (no per
     // coin/network config file), so the host env is the injection point.
     if (module === HUB_MODULE_NAME) {
-        defaultValues["TELEMETRY_ENABLED"]        = process.env.TELEMETRY_ENABLED || "true"
-        defaultValues["TELEMETRY_RETENTION_DAYS"] = process.env.TELEMETRY_RETENTION_DAYS || 90
-        defaultValues["TELEMETRY_IP_SALT"]        = process.env.TELEMETRY_IP_SALT || ""
+        defaultValues["TELEMETRY_ENABLED"]        = config.TELEMETRY_ENABLED
+        defaultValues["TELEMETRY_RETENTION_DAYS"] = config.TELEMETRY_RETENTION_DAYS
+        defaultValues["TELEMETRY_IP_SALT"]        = config.TELEMETRY_IP_SALT
         // Gate for the per-install detail endpoint (GET /telemetry/operators). Like the
         // salt, sourced from host env so the secret stays out of source/config files;
         // unset leaves the endpoint fail-closed (401 for everyone).
-        defaultValues["TELEMETRY_ADMIN_KEY"]      = process.env.TELEMETRY_ADMIN_KEY || ""
+        defaultValues["TELEMETRY_ADMIN_KEY"]      = config.TELEMETRY_ADMIN_KEY
 
         // BTC indexer JSON-RPC URL for the validator-mode price oracle's block-height
         // anchor (hub.getlatestblock). Sourced from host env so a hub NOT co-located with
@@ -1095,7 +1096,7 @@ async function getDefaultConfig(module, coin, network) {
         // point at a reachable indexer. Empty default ⇒ the hub falls back to its configs
         // table, so co-located standalone/validator installs are unaffected. Left empty
         // here, it is composed from the co-located BTC indexer further down.
-        defaultValues["BTC_INDEXER_API_URL"]      = process.env.BTC_INDEXER_API_URL || ""
+        defaultValues["BTC_INDEXER_API_URL"]      = config.BTC_INDEXER_API_URL
 
         // State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a
         // shared service (no per coin/network config file), so like the telemetry
@@ -1335,7 +1336,7 @@ async function getDefaultConfig(module, coin, network) {
         // read-only at /XChainHub/operator-signer and the hub loads
         // <dir>/signer.js via HUB_SIGNER_MODULE (see xchain-hub
         // examples/doge-signer.example.js for the module contract).
-        if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR) {
+        if (config.XCHAIN_NODE_HUB_SIGNER_DIR) {
             defaultValues["HUB_SIGNER_MODULE"] = "/XChainHub/operator-signer/signer.js"
         }
 

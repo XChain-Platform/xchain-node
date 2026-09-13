@@ -59,6 +59,7 @@ const { XChainService, EXTERNAL_DB } = require('../config')
 const { tableCountSql, tableExistsSql } = require('../db/information_schema')
 const { appliedMigrationsSql } = require('../db/migrations')
 const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName } = require('./config_service')
+const config = require('../config');
 
 // Only these modules ship a migrations directory, so everything else skips the
 // guard entirely and costs the update path nothing.
@@ -76,7 +77,7 @@ function guardSkipped() {
     // and a computed read is invisible to it, so a bracket read here is
     // undocumentable configuration by construction. SKIP_ENV stays as the name
     // used in messages.
-    const v = process.env.XCHAIN_NODE_SKIP_MIGRATION_PRECONDITION
+    const v = config.XCHAIN_NODE_SKIP_MIGRATION_PRECONDITION
     return v === '1' || v === 'true' || v === 'yes'
 }
 

@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const fs         = require('fs')
+const { configStub } = require('../helpers/config_stub');
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
@@ -67,7 +68,7 @@ describe('Integration: Docker Command Construction', function () {
             return { stdout: '' }
         })
 
-        const patchedConstants = Object.assign({}, require('../../src/config'), {
+        const patchedConstants = configStub({
             configDir: env.configDir,
             moduleDir: env.moduleDir,
             dataDir: env.dataDir

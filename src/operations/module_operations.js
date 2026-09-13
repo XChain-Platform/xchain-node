@@ -33,6 +33,7 @@ const { assertHubNotBehind } = require('../services/skew_guard_service')
 const { assertRequiredMigrationsApplied } = require('../services/migration_precondition_service')
 const { statusChanged } = require('../services/status_service')
 const { reindexAffectedModules, recordReindex } = require('../services/bootstrap_republish_ledger')
+const config = require('../config');
 
 // Resolve the operator's single ref slot into an install target and publish it
 // for the duration of the run, so every module clone and every bundled-library
@@ -170,7 +171,7 @@ async function syncSharedServicesAfterInstall(outcome) {
 
 // Opt-out for callers that knowingly accept a stack whose explorer serves no coins.
 function allowDegradedExplorer() {
-    return ['1', 'true', 'yes'].includes(String(process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER || '').toLowerCase())
+    return ['1', 'true', 'yes'].includes(String(config.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER).toLowerCase())
 }
 
 /**
@@ -1136,7 +1137,7 @@ async function resetModules(service, coin, network, force = false, withIndexer =
         } else if (registryReadable && !nodeInstalled) {
             console.log(`No ${NODE_MODULE_NAME} container is installed for ${coin} ${network}; there is no node data to clear.`)
         } else {
-            const envState = process.env.XCHAIN_NODE_DATA_DIR && process.env.XCHAIN_NODE_DATA_DIR.trim() !== ''
+            const envState = config.XCHAIN_NODE_DATA_DIR && config.XCHAIN_NODE_DATA_DIR.trim() !== ''
                 ? `set to ${process.env.XCHAIN_NODE_DATA_DIR}`
                 : 'UNSET in this shell (non-interactive shells do not source the profile)'
             console.log(`Aborted: cannot resolve the ${coin} ${network} node datadir. No data was touched.`)

@@ -56,6 +56,7 @@ const { db } = require('../state')
 const { getDefaultConfig, getModuleDatabaseName } = require('./config_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
 const databaseService = require('./database_service');
+const config = require('../config');
 const {
     markerTablesSql, liveReorgHaltCountSql, liveSyncHaltCountSql,
     eventsWatermarkSql, syncHaltWatermarkSql, reorgHaltsSinceSql, syncHaltsSinceSql
@@ -89,7 +90,7 @@ const MODULE_API_PORT_KEY = {
 const MARIADB_MODULES = new Set([XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER])
 
 function gateSkipped() {
-    const raw = String(process.env.XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE || '').trim().toLowerCase()
+    const raw = String(config.XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE).trim().toLowerCase()
     return raw === '1' || raw === 'true' || raw === 'yes'
 }
 

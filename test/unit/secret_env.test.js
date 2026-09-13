@@ -20,6 +20,7 @@
 // credential it was supposed to have rotated away from.
 
 const { expect } = require('chai')
+const { configStub } = require('../helpers/config_stub')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const fs         = require('fs')
@@ -60,7 +61,7 @@ function makeMemoryConfigService(initialFiles = {}, { dbContainerId = null, exte
             getDatabaseContainerId: async () => dbContainerId,
             getExternalDbConfig: async () => ({ host: '172.18.0.1', port: 3307, root_user: 'root', root_password: 'x' })
         },
-        '../config/index': { ...require('../../src/config'), EXTERNAL_DB: externalDb }
+        '../config': configStub({ ...require('../../src/config'), EXTERNAL_DB: externalDb })
     })
     return { cs, files }
 }

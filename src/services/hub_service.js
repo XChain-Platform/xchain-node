@@ -75,7 +75,7 @@ function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
 // to it for hand-written config.json deployments.
 function buildCheckpointConfig(defaultConfigCoinNetwork) {
     return {
-        hub_url: process.env.HUB_API_URL ||
+        hub_url: config.HUB_API_URL ||
             ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" +
              defaultConfigCoinNetwork.HUB_PORT),
         db_host:   defaultConfigCoinNetwork.INDEXER_DB_HOST,
@@ -137,6 +137,7 @@ const { addUserPasswordToDatabase, getExternalDbConfig } = require('./database_s
 // tolerant of a missing container, which is exactly the posture wanted here.
 const { readContainerEnv, assertNoHubDbCredentialDrift } = require('./db_credential_drift')
 const HubConnector                             = require('./hub_connector.js')
+const config = require('../config');
 
 async function updateHubOrExplorer(module) {
     if (![HUB_MODULE_NAME, EXPLORER_MODULE_NAME].includes(module)) {

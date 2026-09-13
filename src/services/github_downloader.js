@@ -26,6 +26,7 @@ const { spawnSync } = require('child_process');
 const { assertSafeArchiveMemberNames } = require('../utils/helpers');
 const util = require('util');
 const stream = require('stream');
+const config = require('../config');
 const pipeline = util.promisify(stream.pipeline);
 
 // Map Node's process.arch to the substring used in GitHub release asset names
@@ -46,7 +47,7 @@ function getHostArch() {
 // follow a redirect to S3, which rejects requests carrying an extra Authorization header.
 function githubApiHeaders() {
     const headers = { 'User-Agent': 'GitHubDownloader' };
-    const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    const token = config.GITHUB_TOKEN || config.GH_TOKEN;
     if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
 }

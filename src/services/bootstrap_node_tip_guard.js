@@ -54,6 +54,7 @@ const execFileAsync = promisify(execFile)
 
 const { XChainService, NODE_MODULE_NAME } = require('../config')
 const gate = require('./bootstrap_health_gate');
+const config = require('../config');
 
 // How each coin image's CLI reaches its daemon. Mirrors the HEALTHCHECK line
 // in crypto_nodes/<coin>/Dockerfile, which is the same call and the proof the
@@ -82,7 +83,7 @@ const VERDICT = Object.freeze({
 })
 
 function guardSkipped() {
-    const raw = String(process.env.XCHAIN_NODE_SKIP_NODE_TIP_GUARD || '').trim().toLowerCase()
+    const raw = String(config.XCHAIN_NODE_SKIP_NODE_TIP_GUARD).trim().toLowerCase()
     return raw === '1' || raw === 'true' || raw === 'yes'
 }
 

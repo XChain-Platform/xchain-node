@@ -18,6 +18,7 @@
 // (uuid:52c5b5f1, the bug ensureDatabasePool already guards against).
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const cs = require('../../src/services/config_service');
@@ -42,10 +43,10 @@ function loadPrecheck(overrides) {
 
     const precheck = proxyquire('../../src/precheck.js', {
         'fs': { existsSync: () => true, mkdirSync: () => {} },
-        './config/index': {
+        './config': configStub({
             dataDir: '/tmp/x', moduleDir: '/tmp/x', tmpDir: '/tmp/x', containersFilesDir: '/tmp/x',
             EXTERNAL_DB: stubs.externalDb
-        },
+        }),
         './state': { db: { createDatabase: stubs.createDatabase }, isVerbose: () => false },
         './utils/helpers': { redactSecrets: (e) => e },
         './services/docker_service': {

@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub');
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
@@ -210,7 +211,7 @@ describe('ConfigService', function () {
         })
 
         it('prefixes the name under a non-default NODE_PREFIX', function () {
-            const stubbedConstants = Object.assign({}, require('../../src/config'), { NODE_PREFIX: 'xchain-fed' })
+            const stubbedConstants = configStub({ NODE_PREFIX: 'xchain-fed' })
             const { getUtxoTrackerVolumeName: getName } = proxyquire('../../src/services/config_service', {
                 '../config/index': stubbedConstants
             })
@@ -497,7 +498,7 @@ describe('ConfigService', function () {
                         getDatabaseContainerId: async () => dbContainerId,
                         getExternalDbConfig: async () => ({ host: '172.18.0.1', port: 3307, root_user: 'root', root_password: 'x' })
                     },
-                    '../config/index': { ...require('../../src/config'), EXTERNAL_DB: externalDb }
+                    '../config': configStub({ ...require('../../src/config'), EXTERNAL_DB: externalDb })
                 })
                 return { cs, files }
             }
@@ -1740,7 +1741,7 @@ describe('ConfigService', function () {
 
         function serviceWithConfigDir(d) {
             return proxyquire('../../src/services/config_service', {
-                '../config/index': { ...require('../../src/config'), configDir: d }
+                '../config': configStub({ ...require('../../src/config'), configDir: d })
             })
         }
 

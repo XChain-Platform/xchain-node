@@ -21,6 +21,7 @@
 // the checkout survives. Stubs cover only the Docker/DB/state collaborators.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub');
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const fs         = require('fs')
@@ -51,7 +52,7 @@ function makeRemote(dir) {
 function loadModuleService(modulesDir, tmpDir, remote) {
     return proxyquire('../../src/services/module_service', {
         'fs': fs,
-        '../config/index': Object.assign({}, realConstants, {
+        '../config/index': configStub({
             modulesUrls: Object.assign({}, realConstants.modulesUrls, { [MODULE]: remote })
         }),
         '../state': {

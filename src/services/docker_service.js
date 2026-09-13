@@ -23,6 +23,7 @@ const blessed     = require('blessed')
 const MAX_CONTAINERS = 6
 
 const { containersFilesDir }     = require('../config')
+const config = require('../config');
 
 async function checkDockerInstalledAndReachable() {
     return new Promise((resolve, reject) => {
@@ -100,7 +101,7 @@ async function checkContainerdDataRootRelocation() {
             // Default containerd root on Debian/Ubuntu Docker installs; overridable
             // for non-standard installs (or to silence a false positive when
             // containerd was already relocated to a path we can't infer).
-            const containerdRoot = process.env.XCHAIN_NODE_CONTAINERD_ROOT || '/var/lib/containerd'
+            const containerdRoot = config.XCHAIN_NODE_CONTAINERD_ROOT
             try {
                 const rootDev = fs.statSync('/').dev
                 let dockerRootDev

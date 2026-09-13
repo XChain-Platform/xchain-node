@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub');
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const releaseManifest = require('../../src/services/release_manifest_service');
@@ -113,7 +114,7 @@ function makeStubs() {
 function loadOperations(stubs, constantsOverrides = null) {
     return proxyquire('../../src/operations/module_operations', {
         '../config/index': constantsOverrides
-            ? Object.assign({}, require('../../src/config'), constantsOverrides)
+            ? configStub(constantsOverrides)
             : require('../../src/config'),
         '../state': {
             db: stubs.db,

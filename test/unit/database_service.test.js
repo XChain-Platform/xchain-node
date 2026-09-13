@@ -14,6 +14,7 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { EventEmitter } = require('events')
+const { configStub } = require('../helpers/config_stub')
 
 const VALID_CONTAINER_ID = 'a'.repeat(64)
 
@@ -128,7 +129,10 @@ function makeStubs(overrides = {}) {
 // configServiceOverrides replaces individual ConfigService exports (getModuleDatabaseName
 // for the identifier-allowlist cases), applied last so it wins over the defaults below.
 function loadDatabaseService(stubs, constants = {}, configValues = {}, configServiceOverrides = {}) {
-    const defaultConstants = {
+    // Built from the REAL config home, not from nothing: this stub is
+    // noCallThru, and every environment name it does not carry would read
+    // undefined inside the service under test.
+    const defaultConstants = configStub({
         DB_MODULE_NAME: 'database',
         HUB_MODULE_NAME: 'xchain-hub',
         XChainService: {
@@ -148,7 +152,7 @@ function loadDatabaseService(stubs, constants = {}, configValues = {}, configSer
         // lands in the docker run args as an undefined element.
         DEPENDENCY_HEALTH_START_PERIOD: require('../../src/config').DEPENDENCY_HEALTH_START_PERIOD,
         ...constants
-    }
+    })
 
     return proxyquire('../../src/services/database_service', {
         'child_process': { execFile: stubs.execFile, spawn: stubs.spawn },

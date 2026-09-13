@@ -68,6 +68,7 @@ const fs   = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { configDir } = require('../config')
+const config = require('../config')
 const { ensureHubApiKey, readHubApiKey } = require('./config_service')
 
 const VALIDATOR_DIR   = path.join(configDir, 'validator')
@@ -396,7 +397,7 @@ function writeSignerDir(network, doge) {
         '# The public XChain encoder is the default; point it at your own if you run one.',
         'DOGE_NETWORK=' + coins.doge,
         'DOGE_ADDRESS=' + doge.address,
-        'DOGE_ENCODER_URL=' + (process.env.DOGE_ENCODER_URL || (PUBLIC_ENCODER_BASE + coins.dogeCoin)),
+        'DOGE_ENCODER_URL=' + (config.DOGE_ENCODER_URL || (PUBLIC_ENCODER_BASE + coins.dogeCoin)),
         'DOGE_WIF=' + doge.wif,
         ''
     ].join('\n')
@@ -423,7 +424,7 @@ function ensureSignerModulesMountpoint() {
 // resolved from a node_modules mounted BESIDE it (ModuleService mounts this
 // package's own node_modules there), so init never has to run npm.
 function getSignerMountDir() {
-    if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR) return null
+    if (config.XCHAIN_NODE_HUB_SIGNER_DIR) return null
     if (!signerDirExists()) return null
     ensureSignerModulesMountpoint()
     return SIGNER_DIR
@@ -434,7 +435,7 @@ function getSignerMountDir() {
 // written it. Null when neither is configured. Used for the roll-call
 // broadcast check below, which reads this path rather than the mount dir.
 function getActiveSignerFile() {
-    if (process.env.XCHAIN_NODE_HUB_SIGNER_DIR) return path.join(process.env.XCHAIN_NODE_HUB_SIGNER_DIR, 'signer.js')
+    if (config.XCHAIN_NODE_HUB_SIGNER_DIR) return path.join(config.XCHAIN_NODE_HUB_SIGNER_DIR, 'signer.js')
     return signerDirExists() ? SIGNER_FILE : null
 }
 
@@ -920,9 +921,9 @@ function getValidatorEnv() {
     const w = publicWalletInfo(readWallets())
     if (w && w.dogeAddress) {
         const coins = COIN_NETWORKS[w.network || s.network] || null
-        env.DOGE_ADDRESS    = process.env.DOGE_ADDRESS    || w.dogeAddress
-        env.DOGE_PUBKEY_HEX = process.env.DOGE_PUBKEY_HEX || w.dogePubkeyHex
-        env.DOGE_ENCODER_URL = process.env.DOGE_ENCODER_URL
+        env.DOGE_ADDRESS    = config.DOGE_ADDRESS    || w.dogeAddress
+        env.DOGE_PUBKEY_HEX = config.DOGE_PUBKEY_HEX || w.dogePubkeyHex
+        env.DOGE_ENCODER_URL = config.DOGE_ENCODER_URL
             || (coins ? PUBLIC_ENCODER_BASE + coins.dogeCoin : '')
         if (!env.DOGE_ENCODER_URL) delete env.DOGE_ENCODER_URL
     }

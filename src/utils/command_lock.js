@@ -47,6 +47,7 @@ const crypto = require('crypto')
 const fs     = require('fs')
 const os     = require('os')
 const path   = require('path')
+const config = require('../config');
 
 const LOCK_DIR_NAME  = '.xchain-node'
 const LOCK_FILE_NAME = 'command.lock'
@@ -61,7 +62,7 @@ const RECLAIM_POLL_MS      = 5
 function getLockFilePath() {
     // XCHAIN_NODE_LOCK_DIR is a test/ops override; default matches the
     // CredentialsService per-user directory.
-    const dir = process.env.XCHAIN_NODE_LOCK_DIR || path.join(os.homedir(), LOCK_DIR_NAME)
+    const dir = config.XCHAIN_NODE_LOCK_DIR || path.join(os.homedir(), LOCK_DIR_NAME)
     return path.join(dir, LOCK_FILE_NAME)
 }
 

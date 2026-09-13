@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -377,12 +378,12 @@ describe('Chaos: Process Resilience', function () {
             const createDb = sinon.stub()
 
             const precheck = proxyquire('../../src/precheck', {
-                './config/index': {
+                './config': configStub({
                     dataDir: '/tmp/test-data',
                     moduleDir: '/tmp/test-modules',
                     tmpDir: '/tmp/test-tmp',
                     containersFilesDir: '/tmp/test-containers'
-                },
+                }),
                 './state': {
                     db: { createDatabase: createDb },
                     isVerbose: () => false
@@ -420,12 +421,12 @@ describe('Chaos: Process Resilience', function () {
             }
 
             const precheck = proxyquire('../../src/precheck', {
-                './config/index': {
+                './config': configStub({
                     dataDir: '/tmp/test-data',
                     moduleDir: '/tmp/test-modules',
                     tmpDir: '/tmp/test-tmp',
                     containersFilesDir: '/tmp/test-containers'
-                },
+                }),
                 './state': { db: { createDatabase: sinon.stub() }, isVerbose: () => false },
                 './services/docker_service': {
                     checkDockerInstalledAndReachable: sinon.stub(),
@@ -445,12 +446,12 @@ describe('Chaos: Process Resilience', function () {
 
         it('Network creation failure throws with descriptive message', async function () {
             const precheck = proxyquire('../../src/precheck', {
-                './config/index': {
+                './config': configStub({
                     dataDir: '/tmp/test-data',
                     moduleDir: '/tmp/test-modules',
                     tmpDir: '/tmp/test-tmp',
                     containersFilesDir: '/tmp/test-containers'
-                },
+                }),
                 './state': {
                     db: { createDatabase: sinon.stub().resolves() },
                     isVerbose: () => false
@@ -480,12 +481,12 @@ describe('Chaos: Process Resilience', function () {
 
         it('Hub install failure throws with descriptive message', async function () {
             const precheck = proxyquire('../../src/precheck', {
-                './config/index': {
+                './config': configStub({
                     dataDir: '/tmp/test-data',
                     moduleDir: '/tmp/test-modules',
                     tmpDir: '/tmp/test-tmp',
                     containersFilesDir: '/tmp/test-containers'
-                },
+                }),
                 './state': {
                     db: { createDatabase: sinon.stub().resolves() },
                     isVerbose: () => false

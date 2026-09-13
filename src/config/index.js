@@ -360,6 +360,85 @@ const containersFilesDir = path.join(tmpDir, "containers_files")
 const BOOTSTRAP_BASE_URL     = process.env.XCHAIN_NODE_BOOTSTRAP_BASE_URL || "https://sync.xchain.io/bootstraps"
 
 module.exports = {
+    // codemod:env-entries
+    // HUB_PORT is the ONE environment name that collides with a constant of
+    // its own name above. The constant is the default port this CLI publishes;
+    // the variable is a host operator overriding it for a second co-located
+    // install. They are different facts, so the override carries its own name
+    // and a read site asks for the one it means.
+    get HUB_PORT_OVERRIDE() { return process.env.HUB_PORT },
+    // Every entry below is a GETTER, not a value, and that is the whole point:
+    // the reads these replaced happened when the caller ran, not when this file
+    // loaded. A container's environment is composed and read at command time,
+    // so snapshotting it here would silently answer with whatever was set when
+    // the process started and miss anything set since.
+    get ALLOW_NO_COLOCATED_HUB_DB() { return process.env.ALLOW_NO_COLOCATED_HUB_DB },
+    get BTC_INDEXER_API_URL() { return process.env.BTC_INDEXER_API_URL || "" },
+    get DOGE_ADDRESS() { return process.env.DOGE_ADDRESS },
+    get DOGE_ENCODER_URL() { return process.env.DOGE_ENCODER_URL },
+    get DOGE_PUBKEY_HEX() { return process.env.DOGE_PUBKEY_HEX },
+    get ENCODER_RATE_LIMIT_RPM() { return process.env.ENCODER_RATE_LIMIT_RPM },
+    get ENCODER_TRUST_PROXY() { return process.env.ENCODER_TRUST_PROXY },
+    get EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM() { return process.env.EXPLORER_ACTION_PROOF_RATE_LIMIT_RPM },
+    get EXPLORER_BATCH_RATE_LIMIT_RPM() { return process.env.EXPLORER_BATCH_RATE_LIMIT_RPM },
+    get EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM() { return process.env.EXPLORER_CHECKPOINT_LIST_RATE_LIMIT_RPM },
+    get EXPLORER_CHECKPOINT_SELF_SYNC() { return process.env.EXPLORER_CHECKPOINT_SELF_SYNC },
+    get EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM() { return process.env.EXPLORER_CHECKPOINT_VERIFY_RATE_LIMIT_RPM },
+    get EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM() { return process.env.EXPLORER_FEE_QUOTE_RATE_LIMIT_RPM },
+    get EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM() { return process.env.EXPLORER_PREFLIGHT_POST_RATE_LIMIT_RPM },
+    get EXPLORER_RATE_LIMIT_RPM() { return process.env.EXPLORER_RATE_LIMIT_RPM },
+    get EXPLORER_TIP_MAX_AGE_S() { return process.env.EXPLORER_TIP_MAX_AGE_S },
+    get EXPLORER_URL() { return process.env.EXPLORER_URL },
+    get EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM() { return process.env.EXPLORER_VALIDATOR_SET_PROOF_RATE_LIMIT_RPM },
+    get EXPLORER_VM_QUERY_ENABLED() { return process.env.EXPLORER_VM_QUERY_ENABLED },
+    get EXPLORER_VM_QUERY_RATE_LIMIT_RPM() { return process.env.EXPLORER_VM_QUERY_RATE_LIMIT_RPM },
+    get FEE_DESTINATION() { return process.env.FEE_DESTINATION },
+    get GH_TOKEN() { return process.env.GH_TOKEN },
+    get GITHUB_TOKEN() { return process.env.GITHUB_TOKEN },
+    get HUB_API_KEY() { return process.env.HUB_API_KEY },
+    get HUB_API_URL() { return process.env.HUB_API_URL },
+    get HUB_PORT() { return process.env.HUB_PORT },
+    get INDEXER_API_KEY() { return process.env.INDEXER_API_KEY },
+    get LEVELDB_CACHE_BYTES() { return process.env.LEVELDB_CACHE_BYTES },
+    get LEVELDB_WRITE_BUFFER_BYTES() { return process.env.LEVELDB_WRITE_BUFFER_BYTES },
+    get TELEMETRY_ADMIN_KEY() { return process.env.TELEMETRY_ADMIN_KEY || "" },
+    get TELEMETRY_ENABLED() { return process.env.TELEMETRY_ENABLED || "true" },
+    get TELEMETRY_IP_SALT() { return process.env.TELEMETRY_IP_SALT || "" },
+    get TELEMETRY_RETENTION_DAYS() { return process.env.TELEMETRY_RETENTION_DAYS || 90 },
+    get XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER() { return process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER || '' },
+    get XCHAIN_NODE_AUTOHEAL_STATE_DIR() { return process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR },
+    get XCHAIN_NODE_BLOCKS_DIR() { return process.env.XCHAIN_NODE_BLOCKS_DIR },
+    get XCHAIN_NODE_BOOTSTRAP_PUBKEY() { return process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY },
+    get XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY() { return process.env.XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY },
+    get XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE() { return process.env.XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE || '' },
+    get XCHAIN_NODE_CONTAINERD_ROOT() { return process.env.XCHAIN_NODE_CONTAINERD_ROOT || '/var/lib/containerd' },
+    get XCHAIN_NODE_DATA_DIR() { return process.env.XCHAIN_NODE_DATA_DIR },
+    get XCHAIN_NODE_DB_DATA_DIR() { return process.env.XCHAIN_NODE_DB_DATA_DIR },
+    get XCHAIN_NODE_DB_MAX_CONNECTIONS() { return process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS },
+    get XCHAIN_NODE_DB_ROOT_PASSWORD() { return process.env.XCHAIN_NODE_DB_ROOT_PASSWORD },
+    get XCHAIN_NODE_EXTERNAL_DB_HOST() { return process.env.XCHAIN_NODE_EXTERNAL_DB_HOST },
+    get XCHAIN_NODE_EXTERNAL_DB_PORT() { return process.env.XCHAIN_NODE_EXTERNAL_DB_PORT },
+    get XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD() { return process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD },
+    get XCHAIN_NODE_EXTERNAL_DB_ROOT_USER() { return process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER },
+    get XCHAIN_NODE_FORCE_BOOTSTRAP() { return process.env.XCHAIN_NODE_FORCE_BOOTSTRAP },
+    get XCHAIN_NODE_GPG_BIN() { return process.env.XCHAIN_NODE_GPG_BIN || 'gpg' },
+    get XCHAIN_NODE_HUB_SIGNER_DIR() { return process.env.XCHAIN_NODE_HUB_SIGNER_DIR },
+    get XCHAIN_NODE_LOCK_DIR() { return process.env.XCHAIN_NODE_LOCK_DIR },
+    get XCHAIN_NODE_NO_BOOTSTRAP() { return process.env.XCHAIN_NODE_NO_BOOTSTRAP },
+    get XCHAIN_NODE_NO_TELEMETRY() { return process.env.XCHAIN_NODE_NO_TELEMETRY || '' },
+    get XCHAIN_NODE_REINDEX_LEDGER_DIR() { return process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR },
+    get XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP() { return process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP || '' },
+    get XCHAIN_NODE_REQUIRE_SIGNED_RELEASE() { return process.env.XCHAIN_NODE_REQUIRE_SIGNED_RELEASE || '' },
+    get XCHAIN_NODE_SKIP_MIGRATION_PRECONDITION() { return process.env.XCHAIN_NODE_SKIP_MIGRATION_PRECONDITION },
+    get XCHAIN_NODE_SKIP_NODE_TIP_GUARD() { return process.env.XCHAIN_NODE_SKIP_NODE_TIP_GUARD || '' },
+    get XCHAIN_NODE_STAKE_WIF() { return process.env.XCHAIN_NODE_STAKE_WIF },
+    get XCHAIN_NODE_STOP_TIMEOUT_SECONDS() { return process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS },
+    get XCHAIN_NODE_TELEMETRY_URL() { return process.env.XCHAIN_NODE_TELEMETRY_URL },
+    // Below this line, one entry per environment variable this service reads.
+    // They are passed straight through rather than parsed, because almost all
+    // of them are composed into a container's environment and the container is
+    // what gives them meaning; a name that needs coercion or a default gets a
+    // named constant above instead, where the decision is visible.
     NODE_PREFIX,
     DEFAULT_NODE_PREFIX,
     NODE_MODULE_NAME,

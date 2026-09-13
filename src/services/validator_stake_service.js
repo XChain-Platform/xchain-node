@@ -34,6 +34,7 @@ const {
     COIN_NETWORKS, WALLETS_FILE
 } = require('./validator_service')
 const { getCoinConfigByFullName } = require('../coins')
+const config = require('../config');
 
 const STAKE_TICK = 'XCHAIN'
 // One stake that clears every capability floor at once (llm attestation
@@ -103,7 +104,7 @@ function fail(msg) {
 // The stake WIF: wallets.env first, then the env var, then a hidden prompt.
 function resolveStakeWif(wallets) {
     if (wallets && wallets.STAKE_WIF_SECRET) return wallets.STAKE_WIF_SECRET
-    if (process.env.XCHAIN_NODE_STAKE_WIF) return process.env.XCHAIN_NODE_STAKE_WIF
+    if (config.XCHAIN_NODE_STAKE_WIF) return config.XCHAIN_NODE_STAKE_WIF
     const typed = promptSecret('WIF for the stake wallet (input hidden): ')
     if (!typed) throw fail('no stake wallet. Run `xchain-node validator init`, or set XCHAIN_NODE_STAKE_WIF.')
     return typed
@@ -194,7 +195,7 @@ function planMints(network, tokenBal, amount, mintMax, mintAddressMax) {
 }
 
 function explorerUrl(coins, pathPart) {
-    return (process.env.EXPLORER_URL || PUBLIC_EXPLORER).replace(/\/$/, '') + '/' + coins.stakeCoin + '/' + pathPart
+    return (config.EXPLORER_URL || PUBLIC_EXPLORER).replace(/\/$/, '') + '/' + coins.stakeCoin + '/' + pathPart
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))

@@ -17,6 +17,7 @@
 // documented upgrade command.
 
 const fs   = require('fs')
+const { configStub } = require('../helpers/config_stub')
 const os   = require('os')
 const path = require('path')
 const sinon      = require('sinon')
@@ -25,7 +26,7 @@ const proxyquire = require('proxyquire').noCallThru()
 
 function load(dataDir, moduleDir, getModuleBranch) {
     return proxyquire('../../src/services/install_target_service', {
-        '../config/index': { dataDir, moduleDir },
+        '../config': configStub({ dataDir, moduleDir }),
         './module_service': { getModuleBranch }
     })
 }

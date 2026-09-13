@@ -19,6 +19,7 @@
  ********************************************************************/
 
 const axios = require('axios');
+const config = require('../config');
 
 class HubConnector {
 
@@ -59,7 +60,7 @@ class HubConnector {
                 // via x-api-key or its config push 401s. Read methods ignore it, so sending
                 // it unconditionally is safe; an unset key leaves the header off (keyless).
                 let headers = {};
-                if(process.env.HUB_API_KEY) headers['x-api-key'] = process.env.HUB_API_KEY;
+                if(config.HUB_API_KEY) headers['x-api-key'] = config.HUB_API_KEY;
                 let response = await axios.post(url, data, { timeout, headers });
                 if(response.data && response.data.result !== undefined){
                     this._lastGoodIdx = idx;

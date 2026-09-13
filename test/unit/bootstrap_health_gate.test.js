@@ -14,6 +14,7 @@
 // became the fleet's newest "good" decoder bootstrap. These tests pin the refusals.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -44,10 +45,10 @@ function nativeHelperStub(nativeResolves) {
 
 function loadGate({ external = false, nativeResolves = null } = {}) {
     return proxyquire('../../src/services/bootstrap_health_gate', {
-        '../config/index': {
+        '../config': configStub({
             XChainService,
             EXTERNAL_DB: external
-        },
+        }),
         '../state': { db: { getModuleContainer: sinon.stub().resolves(SVC_CONTAINER) } },
         './config_service': {
             getDefaultConfig: sinon.stub().resolves({

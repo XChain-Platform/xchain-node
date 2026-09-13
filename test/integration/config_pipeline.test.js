@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub');
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
@@ -36,7 +37,7 @@ describe('Integration: Config Pipeline', function () {
         // Proxyquire ConfigService with overridden constants so configDir/moduleDir
         // point to our temp directories. This is necessary because ConfigService
         // destructures constants at require-time.
-        const patchedConstants = Object.assign({}, require('../../src/config'), {
+        const patchedConstants = configStub({
             configDir: env.configDir,
             moduleDir: env.moduleDir,
             dataDir: env.dataDir

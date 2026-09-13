@@ -24,6 +24,7 @@
 // branch it was told to deploy.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub');
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -114,7 +115,7 @@ function load({ heads = [TIP], tip = TIP, sourceUrl = null, gitAsyncExtra = null
     }
 
     if (sourceUrl) {
-        proxies['../config'] = Object.assign({}, realConstants, {
+        proxies['../config'] = configStub({
             modulesUrls: Object.assign({}, realConstants.modulesUrls, { [MODULE]: sourceUrl })
         })
     }

@@ -44,7 +44,7 @@ const NODE_STOP_TIMEOUT_ENV = 'XCHAIN_NODE_STOP_TIMEOUT_SECONDS'
 function nodeStopTimeoutSeconds() {
     // Read by name, not through the constant: the env-var doc gate scans reads
     // by name, and a computed read is invisible to it.
-    const raw = process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS
+    const raw = config.XCHAIN_NODE_STOP_TIMEOUT_SECONDS
     if (raw === undefined || String(raw).trim() === '') return DEFAULT_NODE_STOP_TIMEOUT_SECONDS
     const seconds = parseInt(raw, 10)
     if (!Number.isFinite(seconds) || seconds < 1 || String(seconds) !== String(raw).trim()) {
@@ -82,6 +82,7 @@ const bundledCryptoNodesDir = path.join(__dirname, '../../crypto_nodes')
 const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('./config_service')
 const { statusChanged }                 = require('./status_service')
 const { checkRemoteNodeVersion }        = require('./version_service')
+const config = require('../config');
 
 // Enumerate a host's mirror addresses so a failover can dial one of them.
 // Pinning the address changes nothing else: URL, SNI and certificate checks
@@ -302,7 +303,7 @@ async function resolveBlocksDir() {
     const { configDir } = require('../config')
     const { readSidecarValue, upsertSidecarValues } = require('./config_service')
     const sidecarPath = path.resolve(configDir, 'node.local')
-    const envValue = process.env.XCHAIN_NODE_BLOCKS_DIR
+    const envValue = config.XCHAIN_NODE_BLOCKS_DIR
     if (envValue && envValue.trim() !== '') {
         const value = envValue.trim()
         try {

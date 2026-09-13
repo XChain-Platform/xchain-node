@@ -16,6 +16,7 @@
 // to put the previous commit back.
 
 const fs   = require('fs')
+const { configStub } = require('../helpers/config_stub')
 const os   = require('os')
 const path = require('path')
 const sinon      = require('sinon')
@@ -24,7 +25,7 @@ const proxyquire = require('proxyquire').noCallThru()
 
 function load(dataDir) {
     return proxyquire('../../src/services/self_update_service', {
-        '../config/index': { dataDir }
+        '../config': configStub({ dataDir })
     })
 }
 

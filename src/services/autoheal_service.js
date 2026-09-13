@@ -63,6 +63,7 @@ const path = require('path')
 const { db } = require('../state')
 const { getStatusFromContainer, restartContainer } = require('./docker_service')
 const { SERVICE_HEALTHCHECK } = require('./module_service')
+const config = require('../config');
 
 // A container must be continuously unhealthy for at least this long before
 // a restart is considered (on top of Docker's own retries budget).
@@ -89,8 +90,8 @@ const STATE_FILE_NAME = 'autoheal-state.json'
 function getStateFilePath() {
     // XCHAIN_NODE_AUTOHEAL_STATE_DIR is a test/ops override; the default
     // matches the per-user dir used by credentials.json and command.lock.
-    const dir = process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR ||
-                process.env.XCHAIN_NODE_LOCK_DIR ||
+    const dir = config.XCHAIN_NODE_AUTOHEAL_STATE_DIR ||
+                config.XCHAIN_NODE_LOCK_DIR ||
                 path.join(os.homedir(), STATE_DIR_NAME)
     return path.join(dir, STATE_FILE_NAME)
 }

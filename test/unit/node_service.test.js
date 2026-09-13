@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { EventEmitter } = require('events')
@@ -86,7 +87,7 @@ function loadNodeService(stubs) {
             getRemoteModuleVersions: stubs.getRemoteModuleVersions || (() => ({}))
         },
         '../utils/helpers': { decompressTarGz: stubs.decompressTarGz },
-        '../config/index': {
+        '../config': configStub({
             NODE_MODULE_NAME:       'node',
             NODE_VERSION_FILE_NAME: '__VERSION__.txt',
             SEP:                    '-',
@@ -104,7 +105,7 @@ function loadNodeService(stubs) {
             dataDir:        '/data',
             configDir:      '/config',
             path:           require('path')
-        },
+        }),
         './config_service': {
             getDockerContainerImageName: stubs.getDockerContainerImageName,
             getDockerNetwork:            stubs.getDockerNetwork,
@@ -1208,7 +1209,7 @@ describe('NodeService: installNode()', function () {
                 getRemoteModuleVersions: () => ({})
             },
             '../utils/helpers': { decompressTarGz: stubs.decompressTarGz },
-            '../config/index': {
+            '../config': configStub({
                 NODE_MODULE_NAME:       'node',
                 NODE_VERSION_FILE_NAME: '__VERSION__.txt',
                 SEP:                    '-',
@@ -1226,7 +1227,7 @@ describe('NodeService: installNode()', function () {
                 dataDir:        '/data',
                 configDir:      '/config',
                 path:           require('path')
-            },
+            }),
             './config_service': {
                 getDockerContainerImageName: stubs.getDockerContainerImageName,
                 getDockerNetwork:            stubs.getDockerNetwork,
@@ -1285,13 +1286,13 @@ describe('NodeService: installNode()', function () {
             'semver': require('semver'),
             '../state': { db: stubs.db, gitHubDownloader: stubs.gitHubDownloader, getRemoteModuleVersions: () => ({}) },
             '../utils/helpers': { decompressTarGz: stubs.decompressTarGz },
-            '../config/index': {
+            '../config': configStub({
                 NODE_MODULE_NAME: 'node', NODE_VERSION_FILE_NAME: '__VERSION__.txt', SEP: '-',
                 Coin:    { BITCOIN: 'bitcoin', DOGECOIN: 'dogecoin', LITECOIN: 'litecoin' },
                 Network: { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' },
                 XChainService: { XCHAIN_ENCODER: 'xchain-encoder', XCHAIN_DECODER: 'xchain-decoder', XCHAIN_UTXO_TRACKER: 'xchain-utxo-tracker', XCHAIN_REGTEST_MINER: 'xchain-regtest-miner', XCHAIN_INDEXER: 'xchain-indexer', XCHAIN_E2E_TEST: 'xchain-e2e-test' },
                 cryptoNodesDir: '/crypto_nodes', dataDir: '/data', configDir: '/config', path: require('path')
-            },
+            }),
             './config_service':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true, readSidecarValue: sinon.stub().resolves(undefined), upsertSidecarValues: sinon.stub() },
             './status_service':  { statusChanged: stubs.statusChanged },
             './version_service': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },
@@ -1322,13 +1323,13 @@ describe('NodeService: installNode()', function () {
             'semver': require('semver'),
             '../state': { db: stubs.db, gitHubDownloader: stubs.gitHubDownloader, getRemoteModuleVersions: () => ({}) },
             '../utils/helpers': { decompressTarGz: stubs.decompressTarGz },
-            '../config/index': {
+            '../config': configStub({
                 NODE_MODULE_NAME: 'node', NODE_VERSION_FILE_NAME: '__VERSION__.txt', SEP: '-',
                 Coin:    { BITCOIN: 'bitcoin', DOGECOIN: 'dogecoin', LITECOIN: 'litecoin' },
                 Network: { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' },
                 XChainService: { XCHAIN_ENCODER: 'xchain-encoder', XCHAIN_DECODER: 'xchain-decoder', XCHAIN_UTXO_TRACKER: 'xchain-utxo-tracker', XCHAIN_REGTEST_MINER: 'xchain-regtest-miner', XCHAIN_INDEXER: 'xchain-indexer', XCHAIN_E2E_TEST: 'xchain-e2e-test' },
                 cryptoNodesDir: '/crypto_nodes', dataDir: '/data', configDir: '/config', path: require('path')
-            },
+            }),
             './config_service':  { getDockerContainerImageName: stubs.getDockerContainerImageName, getDockerNetwork: stubs.getDockerNetwork, getDefaultConfig: stubs.getDefaultConfig, validatePort: () => true, readSidecarValue: sinon.stub().resolves(undefined), upsertSidecarValues: sinon.stub() },
             './status_service':  { statusChanged: stubs.statusChanged },
             './version_service': { checkRemoteNodeVersion: stubs.checkRemoteNodeVersion, getLocalNodeVersion: sinon.stub().resolves('27.0'), getContainerNodeVersion: sinon.stub().resolves('27.0'), getLocalModuleVersion: sinon.stub().resolves('1.0.0'), getContainerModuleVersion: sinon.stub().resolves('1.0.0') },

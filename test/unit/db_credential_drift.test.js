@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
+const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -23,10 +24,10 @@ const HUB_USER = 'xchain_hub'
 
 function load() {
     return proxyquire('../../src/services/db_credential_drift', {
-        '../config/index': {
+        '../config': configStub({
             XChainService: { XCHAIN_DECODER: DECODER, XCHAIN_INDEXER: INDEXER },
             HUB_MODULE_NAME: HUB
-        },
+        }),
         './config_service': {
             getDockerContainerImageName: (mod, coin, net) => `xchain-node-${coin}-${net}-${mod}`
         }
