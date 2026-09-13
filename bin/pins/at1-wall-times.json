@@ -1,0 +1,17 @@
+{
+  "note": "Wall times for the unit tier that runs after every structural step. Recorded once when the suite titles were pinned, so a later session can tell a slow suite from a hung one, and so the tier can leave the per-step checks if it ever crosses five minutes.",
+  "measuredOn": "2026-09-13",
+  "node": "v22",
+  "scripts": {
+    "test": {
+      "command": "npm test",
+      "files": 70,
+      "titles": 2322,
+      "passing": 2317,
+      "pending": 5,
+      "failing": 0,
+      "mochaReportedSeconds": 29,
+      "wallSeconds": 30
+    }
+  }
+}

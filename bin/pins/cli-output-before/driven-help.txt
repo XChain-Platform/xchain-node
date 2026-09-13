@@ -1,0 +1,597 @@
+===== xchain-node --help =====
+Usage: xchain-node [options] [command]
+
+Options:
+  -V, --version                                             Shows xchain-node version
+  -v, --verbose                                             Print precheck progress messages
+  -i, --interactive                                         Interactive mode
+  --no-bootstrap                                            Do not download bootstrap files (full parse)
+  --no-explorer                                             Do not install xchain-explorer
+  --no-telemetry                                            Disable anonymous usage telemetry (see Privacy & Telemetry docs)
+  -h, --help                                                display help for command
+
+Commands:
+  install [ref] [service] [chain] [network]                 Installs XChain services
+  uninstall [options] <service> [chain] [network]           Uninstall XChain services
+  update [service] [chain] [network] [ref]                  Update XChain services (and the CLI itself) to the latest release, or to a named release or branch
+  recreate <service> [chain] [network]                      Recreate a service container from the current config, reusing its existing image (no rebuild, no re-clone)
+  ps                                                        List installed XChain services and status
+  bootstrap-combos                                          List served <service>:<coin>:<network> combos, one per line (scriptable)
+  bootstrap-republish-due [options]                         List combos whose published bootstrap predates their last reindex (scriptable)
+  sync                                                      Scan Docker for xchain-node containers and register any missing in the database
+  start <service> [chain] [network]                         Start XChain service
+  stop <service> [chain] [network]                          Stop XChain service
+  restart <service> [chain] [network]                       Restart XChain service
+  autoheal [options]                                        Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe
+  tail [service] [chain] [network]                          Tail XChain service logs
+  logs [service] [chain] [network]                          Display full XChain service logs
+  monitor [service] [chain] [network]                       Display service logs in split spaces on the screen
+  tailmonitor [service] [chain] [network]                   Display service logs in split spaces on the screen (follow)
+  exec <service> <chain> <network> <command>                Execute command on XChain service container
+  clear-reorg-halt [options] <chain> <network>              Clear a decoder's durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table
+  shell <service> <chain> <network>                         Shell into a XChain service container
+  e2etest [options] <chain> [testName]                      Run E2E tests on a regtest network
+  reset [options] <service> <chain> <network>               Reset data for a specific service or all services of a coin/network
+  rollback <block_index> <service> <chain> <network>        NOT IMPLEMENTED - prints the reset + bootstrap restore path for recovering a service to a block_index
+  bootstrap [options] <action> <service> <chain> <network>  Create / Restore XChain service bootstraps
+  validator                                                 Validator-mode setup for the xchain-hub (key generation + config)
+
+===== xchain-node autoheal --help =====
+Usage: xchain-node autoheal [options]
+
+Restart containers stuck in the Docker "unhealthy" state (opt-in per service);
+one-shot, cron/timer safe
+
+Options:
+  --dry-run   report restart candidates without acting
+  -h, --help  display help for command
+
+===== xchain-node bootstrap --help =====
+Usage: xchain-node bootstrap [options] <action> <service> <chain> <network>
+
+Create / Restore XChain service bootstraps
+
+Arguments:
+  action         (create, restore)
+  service        (xchain-decoder, xchain-utxo-tracker, xchain-indexer,
+                 xchain-hub)
+  chain          (bitcoin, litecoin, dogecoin)
+  network        (mainnet, testnet, regtest)
+
+Options:
+  --latest       restore the newest bootstrap without prompting (scriptable)
+  --file <name>  restore this exact bootstrap archive without prompting
+  -h, --help     display help for command
+
+Notes:
+    bootstrap create  - generates a bootstrap file
+    bootstrap restore - restores a bootstrap file
+
+    restore prompts only on a TTY. With --latest, --file, or no TTY it
+    resolves non-interactively, so a script cannot wedge on an unanswerable
+    menu while holding the command lock.
+
+===== xchain-node bootstrap-combos --help =====
+Usage: xchain-node bootstrap-combos [options]
+
+List served <service>:<coin>:<network> combos, one per line (scriptable)
+
+Options:
+  -h, --help  display help for command
+
+Reads the module registry, not live containers, so a STOPPED or crash-looping
+combo is still listed. scripts/publish-bootstraps.sh --all builds its plan from
+this: detecting from `docker ps` dropped stopped combos before the source-health
+gate could report them, so the cron exited 0 while a consumer archive went stale.
+
+===== xchain-node bootstrap-republish-due --help =====
+Usage: xchain-node bootstrap-republish-due [options]
+
+List combos whose published bootstrap predates their last reindex (scriptable)
+
+Options:
+  --json      emit the full records (reindexedAt, publishedAt, reason) instead
+              of bare combos
+  -h, --help  display help for command
+
+A reset wipes a store and rebuilds it on a NEW lineage, so every bootstrap
+already published for that combo describes the old one: a fresh install that
+takes it restores pre-reindex state and halts. Nothing forced a republish, and
+no age check catches it, because the stale-lineage archive is hours old and
+simply wrong.
+
+`reset` records the combos it wiped, `bootstrap create` records what it
+re-derived, and this lists the difference. scripts/publish-bootstraps.sh reads
+it to pull due combos into its plan even when the schedule or the tracker
+opt-in would have skipped them.
+
+===== xchain-node clear-reorg-halt --help =====
+Usage: xchain-node clear-reorg-halt [options] <chain> <network>
+
+Clear a decoder's durable REORG_HALT marker after verifying the database is
+intact; the reason is recorded in its events table
+
+Arguments:
+  chain            (bitcoin, litecoin, dogecoin)
+  network          (mainnet, testnet, regtest)
+
+Options:
+  --reason <text>  Why this database is known good (recorded with the clear)
+  --force          Clear a database that has held dispenser state; you have
+                   compared its dispensers table against a known-good replica
+  --dry-run        Run the checks and report the verdict without writing the
+                   clear
+  -h, --help       display help for command
+
+===== xchain-node drift --help =====
+Usage: xchain-node [options] [command]
+
+Options:
+  -V, --version                                             Shows xchain-node version
+  -v, --verbose                                             Print precheck progress messages
+  -i, --interactive                                         Interactive mode
+  --no-bootstrap                                            Do not download bootstrap files (full parse)
+  --no-explorer                                             Do not install xchain-explorer
+  --no-telemetry                                            Disable anonymous usage telemetry (see Privacy & Telemetry docs)
+  -h, --help                                                display help for command
+
+Commands:
+  install [ref] [service] [chain] [network]                 Installs XChain services
+  uninstall [options] <service> [chain] [network]           Uninstall XChain services
+  update [service] [chain] [network] [ref]                  Update XChain services (and the CLI itself) to the latest release, or to a named release or branch
+  recreate <service> [chain] [network]                      Recreate a service container from the current config, reusing its existing image (no rebuild, no re-clone)
+  ps                                                        List installed XChain services and status
+  bootstrap-combos                                          List served <service>:<coin>:<network> combos, one per line (scriptable)
+  bootstrap-republish-due [options]                         List combos whose published bootstrap predates their last reindex (scriptable)
+  sync                                                      Scan Docker for xchain-node containers and register any missing in the database
+  start <service> [chain] [network]                         Start XChain service
+  stop <service> [chain] [network]                          Stop XChain service
+  restart <service> [chain] [network]                       Restart XChain service
+  autoheal [options]                                        Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe
+  tail [service] [chain] [network]                          Tail XChain service logs
+  logs [service] [chain] [network]                          Display full XChain service logs
+  monitor [service] [chain] [network]                       Display service logs in split spaces on the screen
+  tailmonitor [service] [chain] [network]                   Display service logs in split spaces on the screen (follow)
+  exec <service> <chain> <network> <command>                Execute command on XChain service container
+  clear-reorg-halt [options] <chain> <network>              Clear a decoder's durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table
+  shell <service> <chain> <network>                         Shell into a XChain service container
+  e2etest [options] <chain> [testName]                      Run E2E tests on a regtest network
+  reset [options] <service> <chain> <network>               Reset data for a specific service or all services of a coin/network
+  rollback <block_index> <service> <chain> <network>        NOT IMPLEMENTED - prints the reset + bootstrap restore path for recovering a service to a block_index
+  bootstrap [options] <action> <service> <chain> <network>  Create / Restore XChain service bootstraps
+  validator                                                 Validator-mode setup for the xchain-hub (key generation + config)
+
+===== xchain-node e2etest --help =====
+Usage: xchain-node e2etest [options] <chain> [testName]
+
+Run E2E tests on a regtest network
+
+Arguments:
+  chain                 (bitcoin, litecoin, dogecoin)
+  testName              optional test file name (e.g. "order", "issue"); runs
+                        only that suite
+
+Options:
+  --grep <pattern>      only run tests matching this pattern (passed to mocha
+                        --grep)
+  --script <npmScript>  run a specific e2e npm script (e.g. test:security)
+                        instead of the default suite
+  --ref <ref>           clone the e2e-test suite at this ref (match the ref the
+                        stack was installed at)
+  -h, --help            display help for command
+
+===== xchain-node exec --help =====
+Usage: xchain-node exec [options] <service> <chain> <network> <command>
+
+Execute command on XChain service container
+
+Arguments:
+  service     (node, database, xchain-hub, xchain-encoder, xchain-decoder,
+              xchain-utxo-tracker, xchain-indexer, xchain-explorer)
+  chain       (bitcoin, litecoin, dogecoin)
+  network     (mainnet, testnet, regtest)
+  command     The shell command to execute
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node init --help =====
+Usage: xchain-node [options] [command]
+
+Options:
+  -V, --version                                             Shows xchain-node version
+  -v, --verbose                                             Print precheck progress messages
+  -i, --interactive                                         Interactive mode
+  --no-bootstrap                                            Do not download bootstrap files (full parse)
+  --no-explorer                                             Do not install xchain-explorer
+  --no-telemetry                                            Disable anonymous usage telemetry (see Privacy & Telemetry docs)
+  -h, --help                                                display help for command
+
+Commands:
+  install [ref] [service] [chain] [network]                 Installs XChain services
+  uninstall [options] <service> [chain] [network]           Uninstall XChain services
+  update [service] [chain] [network] [ref]                  Update XChain services (and the CLI itself) to the latest release, or to a named release or branch
+  recreate <service> [chain] [network]                      Recreate a service container from the current config, reusing its existing image (no rebuild, no re-clone)
+  ps                                                        List installed XChain services and status
+  bootstrap-combos                                          List served <service>:<coin>:<network> combos, one per line (scriptable)
+  bootstrap-republish-due [options]                         List combos whose published bootstrap predates their last reindex (scriptable)
+  sync                                                      Scan Docker for xchain-node containers and register any missing in the database
+  start <service> [chain] [network]                         Start XChain service
+  stop <service> [chain] [network]                          Stop XChain service
+  restart <service> [chain] [network]                       Restart XChain service
+  autoheal [options]                                        Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe
+  tail [service] [chain] [network]                          Tail XChain service logs
+  logs [service] [chain] [network]                          Display full XChain service logs
+  monitor [service] [chain] [network]                       Display service logs in split spaces on the screen
+  tailmonitor [service] [chain] [network]                   Display service logs in split spaces on the screen (follow)
+  exec <service> <chain> <network> <command>                Execute command on XChain service container
+  clear-reorg-halt [options] <chain> <network>              Clear a decoder's durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table
+  shell <service> <chain> <network>                         Shell into a XChain service container
+  e2etest [options] <chain> [testName]                      Run E2E tests on a regtest network
+  reset [options] <service> <chain> <network>               Reset data for a specific service or all services of a coin/network
+  rollback <block_index> <service> <chain> <network>        NOT IMPLEMENTED - prints the reset + bootstrap restore path for recovering a service to a block_index
+  bootstrap [options] <action> <service> <chain> <network>  Create / Restore XChain service bootstraps
+  validator                                                 Validator-mode setup for the xchain-hub (key generation + config)
+
+===== xchain-node install --help =====
+Usage: xchain-node install [options] [ref] [service] [chain] [network]
+
+Installs XChain services
+
+Arguments:
+  ref         (a release like v0.9.0, or a branch like master/develop; omit for
+              the latest release)
+  service     (node, xchain-encoder, xchain-decoder, xchain-utxo-tracker,
+              xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node logs --help =====
+Usage: xchain-node logs [options] [service] [chain] [network]
+
+Display full XChain service logs
+
+Arguments:
+  service     (node, database, xchain-hub, xchain-encoder, xchain-decoder,
+              xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node monitor --help =====
+Usage: xchain-node monitor [options] [service] [chain] [network]
+
+Display service logs in split spaces on the screen
+
+Arguments:
+  service     (node, database, xchain-hub, xchain-encoder, xchain-decoder,
+              xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node ps --help =====
+Usage: xchain-node ps [options]
+
+List installed XChain services and status
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node recreate --help =====
+Usage: xchain-node recreate [options] <service> [chain] [network]
+
+Recreate a service container from the current config, reusing its existing image
+(no rebuild, no re-clone)
+
+Arguments:
+  service     (xchain-encoder, xchain-decoder, xchain-utxo-tracker,
+              xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node reset --help =====
+Usage: xchain-node reset [options] <service> <chain> <network>
+
+Reset data for a specific service or all services of a coin/network
+
+Arguments:
+  service         (node, xchain-utxo-tracker, xchain-decoder, xchain-indexer,
+                  all)
+  chain           (bitcoin, litecoin, dogecoin)
+  network         (mainnet, testnet, regtest)
+
+Options:
+  --yes           Skip the destructive-reset confirmation prompt (for
+                  CI/scripted resets)
+  --with-indexer  Reset xchain-indexer alongside xchain-decoder; the pair is
+                  only coherent when both move together
+  -h, --help      display help for command
+
+===== xchain-node restart --help =====
+Usage: xchain-node restart [options] <service> [chain] [network]
+
+Restart XChain service
+
+Arguments:
+  service     (node, xchain-encoder, xchain-decoder, xchain-utxo-tracker,
+              xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node rollback --help =====
+Usage: xchain-node rollback [options] <block_index> <service> <chain> <network>
+
+NOT IMPLEMENTED - prints the reset + bootstrap restore path for recovering a
+service to a block_index
+
+Arguments:
+  block_index  The index of the last known good block
+  service      (xchain-decoder, xchain-utxo-tracker, xchain-indexer, all)
+  chain        (bitcoin, litecoin, dogecoin)
+  network      (mainnet, testnet, regtest)
+
+Options:
+  -h, --help   display help for command
+
+===== xchain-node shell --help =====
+Usage: xchain-node shell [options] <service> <chain> <network>
+
+Shell into a XChain service container
+
+Arguments:
+  service     (node, database, xchain-hub, xchain-encoder, xchain-decoder,
+              xchain-utxo-tracker, xchain-indexer, xchain-explorer)
+  chain       (bitcoin, litecoin, dogecoin)
+  network     (mainnet, testnet, regtest)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node stake --help =====
+Usage: xchain-node [options] [command]
+
+Options:
+  -V, --version                                             Shows xchain-node version
+  -v, --verbose                                             Print precheck progress messages
+  -i, --interactive                                         Interactive mode
+  --no-bootstrap                                            Do not download bootstrap files (full parse)
+  --no-explorer                                             Do not install xchain-explorer
+  --no-telemetry                                            Disable anonymous usage telemetry (see Privacy & Telemetry docs)
+  -h, --help                                                display help for command
+
+Commands:
+  install [ref] [service] [chain] [network]                 Installs XChain services
+  uninstall [options] <service> [chain] [network]           Uninstall XChain services
+  update [service] [chain] [network] [ref]                  Update XChain services (and the CLI itself) to the latest release, or to a named release or branch
+  recreate <service> [chain] [network]                      Recreate a service container from the current config, reusing its existing image (no rebuild, no re-clone)
+  ps                                                        List installed XChain services and status
+  bootstrap-combos                                          List served <service>:<coin>:<network> combos, one per line (scriptable)
+  bootstrap-republish-due [options]                         List combos whose published bootstrap predates their last reindex (scriptable)
+  sync                                                      Scan Docker for xchain-node containers and register any missing in the database
+  start <service> [chain] [network]                         Start XChain service
+  stop <service> [chain] [network]                          Stop XChain service
+  restart <service> [chain] [network]                       Restart XChain service
+  autoheal [options]                                        Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe
+  tail [service] [chain] [network]                          Tail XChain service logs
+  logs [service] [chain] [network]                          Display full XChain service logs
+  monitor [service] [chain] [network]                       Display service logs in split spaces on the screen
+  tailmonitor [service] [chain] [network]                   Display service logs in split spaces on the screen (follow)
+  exec <service> <chain> <network> <command>                Execute command on XChain service container
+  clear-reorg-halt [options] <chain> <network>              Clear a decoder's durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table
+  shell <service> <chain> <network>                         Shell into a XChain service container
+  e2etest [options] <chain> [testName]                      Run E2E tests on a regtest network
+  reset [options] <service> <chain> <network>               Reset data for a specific service or all services of a coin/network
+  rollback <block_index> <service> <chain> <network>        NOT IMPLEMENTED - prints the reset + bootstrap restore path for recovering a service to a block_index
+  bootstrap [options] <action> <service> <chain> <network>  Create / Restore XChain service bootstraps
+  validator                                                 Validator-mode setup for the xchain-hub (key generation + config)
+
+===== xchain-node start --help =====
+Usage: xchain-node start [options] <service> [chain] [network]
+
+Start XChain service
+
+Arguments:
+  service     (node, xchain-encoder, xchain-decoder, xchain-utxo-tracker,
+              xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node status --help =====
+Usage: xchain-node [options] [command]
+
+Options:
+  -V, --version                                             Shows xchain-node version
+  -v, --verbose                                             Print precheck progress messages
+  -i, --interactive                                         Interactive mode
+  --no-bootstrap                                            Do not download bootstrap files (full parse)
+  --no-explorer                                             Do not install xchain-explorer
+  --no-telemetry                                            Disable anonymous usage telemetry (see Privacy & Telemetry docs)
+  -h, --help                                                display help for command
+
+Commands:
+  install [ref] [service] [chain] [network]                 Installs XChain services
+  uninstall [options] <service> [chain] [network]           Uninstall XChain services
+  update [service] [chain] [network] [ref]                  Update XChain services (and the CLI itself) to the latest release, or to a named release or branch
+  recreate <service> [chain] [network]                      Recreate a service container from the current config, reusing its existing image (no rebuild, no re-clone)
+  ps                                                        List installed XChain services and status
+  bootstrap-combos                                          List served <service>:<coin>:<network> combos, one per line (scriptable)
+  bootstrap-republish-due [options]                         List combos whose published bootstrap predates their last reindex (scriptable)
+  sync                                                      Scan Docker for xchain-node containers and register any missing in the database
+  start <service> [chain] [network]                         Start XChain service
+  stop <service> [chain] [network]                          Stop XChain service
+  restart <service> [chain] [network]                       Restart XChain service
+  autoheal [options]                                        Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe
+  tail [service] [chain] [network]                          Tail XChain service logs
+  logs [service] [chain] [network]                          Display full XChain service logs
+  monitor [service] [chain] [network]                       Display service logs in split spaces on the screen
+  tailmonitor [service] [chain] [network]                   Display service logs in split spaces on the screen (follow)
+  exec <service> <chain> <network> <command>                Execute command on XChain service container
+  clear-reorg-halt [options] <chain> <network>              Clear a decoder's durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table
+  shell <service> <chain> <network>                         Shell into a XChain service container
+  e2etest [options] <chain> [testName]                      Run E2E tests on a regtest network
+  reset [options] <service> <chain> <network>               Reset data for a specific service or all services of a coin/network
+  rollback <block_index> <service> <chain> <network>        NOT IMPLEMENTED - prints the reset + bootstrap restore path for recovering a service to a block_index
+  bootstrap [options] <action> <service> <chain> <network>  Create / Restore XChain service bootstraps
+  validator                                                 Validator-mode setup for the xchain-hub (key generation + config)
+
+===== xchain-node stop --help =====
+Usage: xchain-node stop [options] <service> [chain] [network]
+
+Stop XChain service
+
+Arguments:
+  service     (node, xchain-encoder, xchain-decoder, xchain-utxo-tracker,
+              xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node sync --help =====
+Usage: xchain-node sync [options]
+
+Scan Docker for xchain-node containers and register any missing in the database
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node tail --help =====
+Usage: xchain-node tail [options] [service] [chain] [network]
+
+Tail XChain service logs
+
+Arguments:
+  service     (node, database, xchain-hub, xchain-encoder, xchain-decoder,
+              xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node tailmonitor --help =====
+Usage: xchain-node tailmonitor [options] [service] [chain] [network]
+
+Display service logs in split spaces on the screen (follow)
+
+Arguments:
+  service     (node, database, xchain-hub, xchain-encoder, xchain-decoder,
+              xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node uninstall --help =====
+Usage: xchain-node uninstall [options] <service> [chain] [network]
+
+Uninstall XChain services
+
+Arguments:
+  service           (node, xchain-encoder, xchain-decoder, xchain-utxo-tracker,
+                    xchain-indexer, xchain-explorer, all)
+  chain             (bitcoin, litecoin, dogecoin, all)
+  network           (mainnet, testnet, regtest, all)
+
+Options:
+  --include-shared  Also uninstall shared services (database, xchain-hub,
+                    xchain-explorer, xchain-sync)
+  -h, --help        display help for command
+
+===== xchain-node unstake --help =====
+Usage: xchain-node [options] [command]
+
+Options:
+  -V, --version                                             Shows xchain-node version
+  -v, --verbose                                             Print precheck progress messages
+  -i, --interactive                                         Interactive mode
+  --no-bootstrap                                            Do not download bootstrap files (full parse)
+  --no-explorer                                             Do not install xchain-explorer
+  --no-telemetry                                            Disable anonymous usage telemetry (see Privacy & Telemetry docs)
+  -h, --help                                                display help for command
+
+Commands:
+  install [ref] [service] [chain] [network]                 Installs XChain services
+  uninstall [options] <service> [chain] [network]           Uninstall XChain services
+  update [service] [chain] [network] [ref]                  Update XChain services (and the CLI itself) to the latest release, or to a named release or branch
+  recreate <service> [chain] [network]                      Recreate a service container from the current config, reusing its existing image (no rebuild, no re-clone)
+  ps                                                        List installed XChain services and status
+  bootstrap-combos                                          List served <service>:<coin>:<network> combos, one per line (scriptable)
+  bootstrap-republish-due [options]                         List combos whose published bootstrap predates their last reindex (scriptable)
+  sync                                                      Scan Docker for xchain-node containers and register any missing in the database
+  start <service> [chain] [network]                         Start XChain service
+  stop <service> [chain] [network]                          Stop XChain service
+  restart <service> [chain] [network]                       Restart XChain service
+  autoheal [options]                                        Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe
+  tail [service] [chain] [network]                          Tail XChain service logs
+  logs [service] [chain] [network]                          Display full XChain service logs
+  monitor [service] [chain] [network]                       Display service logs in split spaces on the screen
+  tailmonitor [service] [chain] [network]                   Display service logs in split spaces on the screen (follow)
+  exec <service> <chain> <network> <command>                Execute command on XChain service container
+  clear-reorg-halt [options] <chain> <network>              Clear a decoder's durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table
+  shell <service> <chain> <network>                         Shell into a XChain service container
+  e2etest [options] <chain> [testName]                      Run E2E tests on a regtest network
+  reset [options] <service> <chain> <network>               Reset data for a specific service or all services of a coin/network
+  rollback <block_index> <service> <chain> <network>        NOT IMPLEMENTED - prints the reset + bootstrap restore path for recovering a service to a block_index
+  bootstrap [options] <action> <service> <chain> <network>  Create / Restore XChain service bootstraps
+  validator                                                 Validator-mode setup for the xchain-hub (key generation + config)
+
+===== xchain-node update --help =====
+Usage: xchain-node update [options] [service] [chain] [network] [ref]
+
+Update XChain services (and the CLI itself) to the latest release, or to a named
+release or branch
+
+Arguments:
+  service     (node, xchain-hub, xchain-sync, xchain-encoder, xchain-decoder,
+              xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)
+  chain       (bitcoin, litecoin, dogecoin, all)
+  network     (mainnet, testnet, regtest, all)
+  ref         (a release like v0.9.0 for a pinned update, or any branch name; a
+              branch is resolved on the module's remote, so push it first, or
+              point the module at a local path with
+              XCHAIN_NODE_MODULES_URLS_OVERRIDE. Omit to move a release node to
+              the latest release, or a branch node to its newest commits)
+
+Options:
+  -h, --help  display help for command
+
+===== xchain-node validator --help =====
+Usage: xchain-node validator [options] [command]
+
+Validator-mode setup for the xchain-hub (key generation + config)
+
+Options:
+  -h, --help         display help for command
+
+Commands:
+  init [options]     Generate a validator signing key + config so the hub runs
+                     in validator mode
+  stake [options]    Mint XCHAIN if short (testnet) and broadcast the STAKE
+                     naming this validator's pubkey; dry run without --broadcast
+  unstake [options]  Withdraw this validator's stake and leave the active set;
+                     dry run without --broadcast
+  status             Show this node's validator configuration (pubkey, wallets,
+                     peers, capabilities)
+  drift [options]    Compare this host's resolved capability set against the
+                     indexer's validator sets
+  help [command]     display help for command
