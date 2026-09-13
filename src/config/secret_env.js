@@ -14,20 +14,21 @@
  *
  * XChain Node - Redaction-safe names for secret-bearing config keys
  *
- * Automatic secret redaction (terminals, CI logs, assistant transcripts) keys
- * on the variable NAME and matches the `_SECRET` / `_KEY` / `_TOKEN` forms.
- * `NODE_PASSWORD`, `DECODER_DB_PASS` and `INDEXER_DB_PASS` match none of them,
- * so a read of a `config/<coin>-<network>.local` sidecar prints the credential
- * in full; that is how a regtest hub DB password once reached a transcript
- * with nobody echoing it. xchain-hub solved its own half of this in
- * `xchain-hub/src/secret-env.js`; this is the xchain-node half, covering the
- * sidecar keys the node itself owns and composes into every container env.
- * Until it existed, renaming a key on a running stack broke that stack, so the
- * rename could not be rolled out at all.
+ * Automatic secret redaction, in terminals, CI logs and assistant transcripts,
+ * keys on the variable NAME and matches the `_SECRET` / `_KEY` / `_TOKEN`
+ * forms. `NODE_PASSWORD`, `DECODER_DB_PASS` and `INDEXER_DB_PASS` match none of
+ * them, so every read of a `config/<coin>-<network>.local` sidecar prints the
+ * credential in full. That is how a credential reaches a transcript with
+ * nobody echoing it: the name simply does not trip the filter.
  *
- * This module lets every secret-bearing config key be supplied under a
- * redaction-safe `_SECRET` name, keeping the historical name as a deprecated
- * fallback so no existing install breaks on upgrade:
+ * xchain-hub solved its own half in `xchain-hub/src/secret-env.js`. This is the
+ * xchain-node half: the sidecar keys the node itself owns and composes into
+ * every container env. Without it, renaming a key on a running stack breaks
+ * that stack, so the rename cannot be rolled out at all.
+ *
+ * What this module does: lets every secret-bearing config key be supplied under
+ * a redaction-safe `_SECRET` name, keeping the historical name as a deprecated
+ * fallback so no existing install breaks on upgrade.
  *
  *   NODE_SECRET        (preferred)  ->  NODE_PASSWORD     (legacy, honoured)
  *   DECODER_DB_SECRET  (preferred)  ->  DECODER_DB_PASS   (legacy, honoured)
