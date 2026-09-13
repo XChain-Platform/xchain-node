@@ -1073,8 +1073,20 @@ async function resetModules(service, coin, network, force = false, withIndexer =
     if (resetDecoder && !resetIndexer) {
         let indexerInstalled = null
         try {
-            indexerInstalled = await db.getModuleContainer(XChainService.XCHAIN_INDEXER, coin, network)
-        } catch { /* registry unreadable: fall through, nothing to strand that we can prove */ }
+            // Strict read: getModuleContainer answers null on a SQL error and on an
+            // unopened pool as well as on a genuine miss, so a registry blip read as
+            // "no indexer installed" and waved through the one wipe this guard exists
+            // to stop (uuid:7cbafa08). A lookup that FAILS is not evidence of absence.
+            // Only an empty result set still means "not installed", which stays allowed.
+            indexerInstalled = await db.getModuleContainerStrict(XChainService.XCHAIN_INDEXER, coin, network)
+        } catch (err) {
+            // abortBeforeAnyWipe is declared further down this function and nothing has
+            // been stopped yet, so the plain refusal is the correct shape here.
+            console.log(`Aborted: cannot read the ${XChainService.XCHAIN_INDEXER} registry row `
+                + `(${failureReason(err)}), so it is not known whether resetting `
+                + `${XChainService.XCHAIN_DECODER} alone would strand it. No data was touched.`)
+            return false
+        }
         if (indexerInstalled) {
             console.log(`Aborted: resetting ${XChainService.XCHAIN_DECODER} alone would leave `
                 + `${XChainService.XCHAIN_INDEXER} incoherent. No data was touched.`)

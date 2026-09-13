@@ -56,6 +56,16 @@ async function getDatabaseContainerId() {
     }
 }
 
+// Tri-state presence of the MariaDB container: 'exists' | 'gone' | 'unknown'.
+// getDatabaseContainerId() above answers null for BOTH "no such container" and
+// "the inspect failed", which is fine for a read that degrades gracefully and
+// wrong for a caller about to authorise a destructive path. Those callers ask
+// here, where only docker SAYING "no such container" counts as absence
+// (uuid:7037604f).
+async function getDatabaseContainerPresence() {
+    return probeContainerPresenceByName(getDockerContainerImageName(DB_MODULE_NAME, "", ""))
+}
+
 async function getDatabaseHostPort() {
     try {
         const containerName = getDockerContainerImageName(DB_MODULE_NAME, "", "")
@@ -1646,6 +1656,7 @@ module.exports = {
     purgeHubCrossChainRows,
     manualHubCrossChainPurgeStatements,
     getDatabaseContainerId,
+    getDatabaseContainerPresence,
     getDatabaseHostPort,
     ensureDatabasePool,
     ensureXchainNodeAccess

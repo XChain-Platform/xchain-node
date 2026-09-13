@@ -137,16 +137,23 @@ function makeStubs(overrides = {}) {
     }
 
     const databaseServiceStub = {
-        getDatabaseContainerId:   sinon.stub().resolves(FAKE_DB_CONTAINER),
-        ensureDatabasePool:       sinon.stub().resolves(),
-        askMariadbRootPassword:   sinon.stub().resolves('rootpass')
+        getDatabaseContainerId:       sinon.stub().resolves(FAKE_DB_CONTAINER),
+        getDatabaseContainerPresence: sinon.stub().resolves('exists'),
+        ensureDatabasePool:           sinon.stub().resolves(),
+        askMariadbRootPassword:       sinon.stub().resolves('rootpass')
     }
 
     // The source health gate. These suites exercise create MECHANICS, so the
     // gate is stubbed open here; the gate's own policy (and the fact that
     // makeBootstrap consults it at all) is covered in BootstrapHealthGate.test.js.
+    // The watermark is part of the gate's real return shape: the post-dump call needs
+    // the pre-flight reading to bound the dump window, and the plumbing that carries
+    // it between the two calls is BootstrapService's own.
     const healthGateStub = {
-        assertBootstrapSourceHealthy: sinon.stub().resolves({ skipped: false, reasons: [] })
+        assertBootstrapSourceHealthy: sinon.stub().resolves({
+            skipped: false, reasons: [],
+            watermark: { own: { events: 100, syncHalt: 50 }, upstream: null }
+        })
     }
 
     // The reindex -> forced-republish ledger. Stubbed so a create in these
@@ -281,9 +288,10 @@ function loadBootstrapService(stubs) {
             startContainer: stubs.dockerService.startContainer
         },
         './DatabaseService': {
-            getDatabaseContainerId:  stubs.databaseService.getDatabaseContainerId,
-            ensureDatabasePool:      stubs.databaseService.ensureDatabasePool,
-            askMariadbRootPassword:  stubs.databaseService.askMariadbRootPassword
+            getDatabaseContainerId:       stubs.databaseService.getDatabaseContainerId,
+            getDatabaseContainerPresence: stubs.databaseService.getDatabaseContainerPresence,
+            ensureDatabasePool:           stubs.databaseService.ensureDatabasePool,
+            askMariadbRootPassword:       stubs.databaseService.askMariadbRootPassword
         },
         './BootstrapHealthGate': {
             assertBootstrapSourceHealthy: stubs.healthGate.assertBootstrapSourceHealthy
@@ -535,6 +543,40 @@ describe('BootstrapService', function () {
             const bs = loadBootstrapService(stubs)
             const result = await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
             expect(result).to.equal('unknown')
+        })
+
+        // The decisive assertion for this probe is about the SHELL, and no stub
+        // can make it: the test above stubs a REJECTED exec, which is the one
+        // shape a failed `ls` never produced. `ls -A /data 2>/dev/null | head -1`
+        // exits with head's status, so a failed listing resolved with exit 0 and
+        // empty stdout, and empty stdout is read as a confirmed-empty volume. So
+        // run the string the module actually hands the container through a real
+        // shell and require it to fail when the listing fails.
+        it('uses a listing command that exits non-zero when the listing fails', async function () {
+            const os = require('os')
+            const { spawnSync } = require('child_process')
+            const stubs = makeStubs()
+            let lastArgs = null
+            stubs.execFile = sinon.stub().callsFake((...args) => {
+                lastArgs = args[1]
+                return Promise.resolve({ stdout: '' })
+            })
+            const bs = loadBootstrapService(stubs)
+            await bs.utxoTrackerVolumeFreshness(COIN, NETWORK)
+
+            // The constant under test is the one the probe really passes.
+            expect(lastArgs).to.include(bs.UTXO_TRACKER_LISTING_COMMAND)
+
+            const failed = spawnSync('/bin/sh',
+                ['-c', bs.UTXO_TRACKER_LISTING_COMMAND.replace('/data', '/nonexistent-xchain-freshness-probe')],
+                { encoding: 'utf8' })
+            expect(failed.status).to.not.equal(0)
+
+            // A healthy directory must still succeed, or every probe answers unknown.
+            const healthy = spawnSync('/bin/sh',
+                ['-c', bs.UTXO_TRACKER_LISTING_COMMAND.replace('/data', os.tmpdir())],
+                { encoding: 'utf8' })
+            expect(healthy.status).to.equal(0)
         })
     })
 
@@ -1569,13 +1611,44 @@ describe('BootstrapService', function () {
         })
 
         // No DB container at all is a real fresh install, and must stay one or
-        // first installs stop bootstrapping.
-        it('reports empty when getDatabaseContainerId returns null', async function () {
+        // first installs stop bootstrapping. Only docker SAYING so counts.
+        it('reports empty when docker says the database container is gone', async function () {
             const stubs = makeStubs()
+            stubs.databaseService.getDatabaseContainerPresence.resolves('gone')
             stubs.databaseService.getDatabaseContainerId.resolves(null)
             const bs = loadBootstrapService(stubs)
             const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
             expect(result).to.equal('empty')
+        })
+
+        // The failure this whole block exists for: an inspect that cannot answer
+        // must report "unknown", since a null reads as "fresh install".
+        it('reports unknown when the container presence probe cannot answer', async function () {
+            const stubs = makeStubs()
+            stubs.databaseService.getDatabaseContainerPresence.resolves('unknown')
+            stubs.databaseService.getDatabaseContainerId.resolves(null)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
+        })
+
+        it('reports unknown when the container presence probe throws', async function () {
+            const stubs = makeStubs()
+            stubs.databaseService.getDatabaseContainerPresence.rejects(new Error('daemon unreachable'))
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
+        })
+
+        // A container docker just confirmed cannot also be an absence: a null id
+        // here is an unparseable or failed lookup, never a fresh install.
+        it('reports unknown when the container exists but its id will not resolve', async function () {
+            const stubs = makeStubs()
+            stubs.databaseService.getDatabaseContainerPresence.resolves('exists')
+            stubs.databaseService.getDatabaseContainerId.resolves(null)
+            const bs = loadBootstrapService(stubs)
+            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+            expect(result).to.equal('unknown')
         })
 
         it('reports unknown when askMariadbRootPassword throws', async function () {
@@ -2813,6 +2886,16 @@ describe('BootstrapService', function () {
             // producers stay live for the whole dump, so one reading before it
             // cannot speak for the bytes that ship.
             expect(stubs.healthGate.assertBootstrapSourceHealthy.callCount).to.equal(2)
+
+            // And the second reading is BOUNDED by the first: without the pre-flight
+            // watermark the post-dump call only sees live rows, so a halt raised after
+            // the --single-transaction snapshot point and cleared before the dump
+            // finished is captured in the archive while both readings look clean.
+            const preflightCall = stubs.healthGate.assertBootstrapSourceHealthy.firstCall
+            const postDumpCall  = stubs.healthGate.assertBootstrapSourceHealthy.secondCall
+            expect((preflightCall.args[3] || {}).since, 'the first reading defines the window').to.be.undefined
+            expect(postDumpCall.args[3].since, 'the post-dump reading must carry the pre-flight watermark')
+                .to.deep.equal((await preflightCall.returnValue).watermark)
 
             // The archive carries its end height (MAX(block_index) of the
             // dumped blocks table, here whatever the execFile stub answers) as a

@@ -1137,6 +1137,22 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                                     // recreate all funnel through here, and each of them replaces
                                     // the container that held any hand-applied membership.
                                     await attachCrossChainNetworks(module, coin, network, containerId)
+                                    // The hub's DB grant must exist before anything requires
+                                    // the replacement hub to ANSWER. statusChanged() below
+                                    // pushes config over the hub's HTTP API and rethrows on
+                                    // failure, and a hub started on a HUB_DB_PASS that MariaDB
+                                    // never received cannot authenticate, cannot serve that
+                                    // push, and so never reaches the rotation its callers run
+                                    // after buildAndUp resolves - ModuleService installModule
+                                    // and moduleOperations recreateModules both (uuid:c466af19).
+                                    // Rotating here lands the ALTER milliseconds after
+                                    // `docker run` instead of behind a health check the
+                                    // missing grant makes impossible. It stays out in front of
+                                    // the container create on purpose: rotating the shared
+                                    // account before the build would lock the OUTGOING hub out
+                                    // for the whole clone-and-build window. The later calls
+                                    // remain, idempotent (CREATE USER IF NOT EXISTS + ALTER).
+                                    if (module === HUB_MODULE_NAME) await setHubDatabaseParameters()
                                     await statusChanged()
                                     resolve(containerId)
                                 } else {

@@ -91,8 +91,18 @@ function makeRunner({
     // null, that database answers exactly as the gated one does; set it to express
     // the scenario the gate exists for and a single-database fake cannot reach:
     // decoder dirty, indexer clean. Accepts { tables, reorgHaltRows, syncHaltRows,
+    // eventsWatermark, syncHaltWatermark, reorgHaltWindowRows, syncHaltWindowRows,
     // throws }.
-    decoder       = null
+    decoder       = null,
+    // MAX(id) of each marker table: the dump-window watermark. The gate takes one
+    // before the dump and hands it back as `since` after it, so these two plus the
+    // *WindowRows below are what a halt raised (and possibly cleared) mid-dump
+    // looks like to the probe.
+    eventsWatermark     = '100',
+    syncHaltWatermark   = '50',
+    // Rows ABOVE the handed-in watermark, i.e. raised inside the dump window.
+    reorgHaltWindowRows = '0',
+    syncHaltWindowRows  = '0'
 } = {}) {
     return sinon.stub().callsFake(async (cmd, args) => {
         if (args[0] === 'inspect') {
@@ -112,17 +122,28 @@ function makeRunner({
         if (up && up.throws) throw up.throws
         const pick = (key, fallback) => (up && up[key] !== undefined) ? up[key] : fallback
         if (/information_schema\.TABLES/.test(sql)) return { stdout: pick('tables', tables) }
+        // Watermark and dump-window queries first: both mention the table names the
+        // live-marker branches below match on.
+        if (/COALESCE\(MAX\(id\),0\) FROM `[^`]+`\.events/.test(sql))
+            return { stdout: pick('eventsWatermark', eventsWatermark) }
+        if (/COALESCE\(MAX\(id\),0\) FROM `[^`]+`\.sync_halt/.test(sql))
+            return { stdout: pick('syncHaltWatermark', syncHaltWatermark) }
+        if (/code='REORG_HALT' AND id > \d+/.test(sql))
+            return { stdout: pick('reorgHaltWindowRows', reorgHaltWindowRows) }
+        if (/sync_halt WHERE id > \d+/.test(sql))
+            return { stdout: pick('syncHaltWindowRows', syncHaltWindowRows) }
         if (/REORG_HALT/.test(sql)) return { stdout: pick('reorgHaltRows', reorgHaltRows) }
         if (/sync_halt/.test(sql)) return { stdout: pick('syncHaltRows', syncHaltRows) }
         return { stdout: '' }
     })
 }
 
-function callGate(gate, { module = XChainService.XCHAIN_DECODER, runner, container = SVC_CONTAINER, now } = {}) {
+function callGate(gate, { module = XChainService.XCHAIN_DECODER, runner, container = SVC_CONTAINER, now, since } = {}) {
     return gate.assertBootstrapSourceHealthy(COIN, NETWORK, module, {
         runner,
         getModuleContainer: sinon.stub().resolves(container),
-        now: now || Date.parse('2026-07-27T00:00:00.000Z')
+        now: now || Date.parse('2026-07-27T00:00:00.000Z'),
+        since: since === undefined ? null : since
     })
 }
 
@@ -173,6 +194,94 @@ describe('BootstrapHealthGate', function () {
             const gate = loadGate()
             const res = await callGate(gate, { runner: makeRunner() })
             expect(res.skipped).to.equal(false)
+        })
+
+        // The dump is taken with --single-transaction, so the archive IS the snapshot
+        // at the moment mariadb-dump started. Both gate readings look at LIVE rows, so
+        // a halt raised after the pre-flight reading and cleared before the post-dump
+        // one is captured in the bytes that ship while both readings report clean.
+        // The marker tables are append-only and id-ordered, so a MAX(id) taken at the
+        // pre-flight reading bounds the window and makes that halt answerable.
+        describe('dump-window watermark', function () {
+
+            it('hands the caller a watermark for both marker tables', async function () {
+                const gate = loadGate()
+                const res = await callGate(gate, { runner: makeRunner({ eventsWatermark: '412', syncHaltWatermark: '7' }) })
+                expect(res.watermark.own).to.deep.equal({ events: 412, syncHalt: 7 })
+                expect(res.watermark.upstream).to.equal(null)
+            })
+
+            it('reports a null sync_halt watermark when the table does not exist', async function () {
+                const gate = loadGate()
+                const res = await callGate(gate, { runner: makeRunner({ tables: '1\t0', eventsWatermark: '9' }) })
+                expect(res.watermark.own).to.deep.equal({ events: 9, syncHalt: null })
+            })
+
+            it('passes when nothing was raised inside the window', async function () {
+                const gate = loadGate()
+                const res = await callGate(gate, {
+                    runner: makeRunner(), since: { own: { events: 100, syncHalt: 50 }, upstream: null }
+                })
+                expect(res.skipped).to.equal(false)
+            })
+
+            // The reported race: live counts are clean at BOTH readings, because the
+            // halt was cleared before the second one, yet a REORG_HALT row sits above
+            // the pre-flight watermark.
+            it('REFUSES a halt raised and cleared while the dump was streaming', async function () {
+                const gate = loadGate()
+                const runner = makeRunner({ reorgHaltRows: '0', syncHaltRows: '0', reorgHaltWindowRows: '1' })
+                const err = await refusal(callGate(gate, {
+                    runner, since: { own: { events: 100, syncHalt: 50 }, upstream: null }
+                }))
+                expect(err.name).to.equal('BootstrapSourceUnhealthyError')
+                expect(err.message).to.match(/raised while the dump was streaming/)
+                expect(err.message).to.match(/Re-run the publish/)
+            })
+
+            it('REFUSES a sync_halt raised inside the window even though it is cleared now', async function () {
+                const gate = loadGate()
+                const err = await refusal(callGate(gate, {
+                    runner: makeRunner({ syncHaltRows: '0', syncHaltWindowRows: '2' }),
+                    since:  { own: { events: 100, syncHalt: 50 }, upstream: null }
+                }))
+                expect(err.message).to.match(/divergence halt .* was raised while the dump was streaming/)
+            })
+
+            // A sequence that went backwards means the table was recreated or a
+            // different database was probed, so the window cannot be read at all.
+            // "Could not tell" is a refusal here, as everywhere else in this gate.
+            it('REFUSES when the id sequence went backwards', async function () {
+                const gate = loadGate()
+                const err = await refusal(callGate(gate, {
+                    runner: makeRunner({ eventsWatermark: '5' }),
+                    since:  { own: { events: 100, syncHalt: 50 }, upstream: null }
+                }))
+                expect(err.message).to.match(/could not tell whether a halt was raised/)
+                expect(err.message).to.match(/\.events id sequence/)
+            })
+
+            it('REFUSES an unusable watermark rather than trusting it', async function () {
+                const gate = loadGate()
+                for (const bad of ['100', 1.5, -1]) {
+                    const err = await refusal(callGate(gate, {
+                        runner: makeRunner(), since: { own: { events: bad, syncHalt: 50 }, upstream: null }
+                    }))
+                    expect(err.message, JSON.stringify(bad)).to.match(/refusing an unusable .* watermark/)
+                }
+            })
+
+            // The indexer case: the disqualifying REORG_HALT lives in the PAIRED
+            // decoder database, so the window check has to reach it too.
+            it('REFUSES a halt raised inside the window in the paired decoder database', async function () {
+                const gate = loadGate()
+                const err = await refusal(callGate(gate, {
+                    module: XChainService.XCHAIN_INDEXER,
+                    runner: makeRunner({ decoder: { reorgHaltWindowRows: '1' } }),
+                    since:  { own: { events: 100, syncHalt: 50 }, upstream: { events: 100, syncHalt: 50 } }
+                }))
+                expect(err.message).to.match(/raised while the dump was streaming/)
+            })
         })
 
         it('skips the sync_halt query on a schema that has no sync_halt table', async function () {
@@ -608,6 +717,30 @@ describe('BootstrapHealthGate', function () {
             expect(reasons[0]).to.match(/negative lag \(-100\)/)
             expect(reasons[0]).to.not.match(/blocks behind/)
             expect(gate.evaluateStatusPayload({ status: 'healthy', lag_blocks: -1 }).join(' ')).to.match(/negative lag_blocks/)
+        })
+
+        // Number('') / Number(' ') / Number(false) / Number([]) are all 0, so a
+        // coerce-then-isFinite check read each of these as "0 blocks behind" and
+        // certified an unknown position as caught up. A gate whose contract is
+        // fail-closed parsing has to refuse the shape before it compares it.
+        it('REFUSES a lag that is not a number, rather than coercing it to zero', function () {
+            const gate = loadGate()
+            for (const bad of ['', '   ', false, true, [], [0], {}, 'soon', '12abc', NaN, Infinity]) {
+                const reasons = gate.evaluateStatusPayload({ status: 'healthy', lag_blocks: bad })
+                expect(reasons, `lag_blocks=${JSON.stringify(bad)}`).to.have.lengthOf(1)
+                expect(reasons[0], `lag_blocks=${JSON.stringify(bad)}`).to.match(/unreadable lag_blocks/)
+            }
+            // A refusal must NAME what it refused; raw interpolation renders [] as
+            // an empty string and {} as [object Object].
+            expect(gate.evaluateStatusPayload({ lag_blocks: [] })[0]).to.not.match(/\[object Object\]|\(\)/)
+        })
+
+        it('still accepts the two shapes a producer legitimately emits', function () {
+            const gate = loadGate()
+            expect(gate.evaluateStatusPayload({ status: 'ok', db: true, lag_blocks: 0 })).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({ status: 'ok', db: true, lag_blocks: 3 })).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({ status: 'ok', db: true, lag_blocks: '3' })).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({ status: 'ok', db: true, lag_blocks: ' 3 ' })).to.deep.equal([])
         })
 
         it('formats a block-fetch desync object instead of printing [object Object]', function () {

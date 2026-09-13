@@ -32,8 +32,13 @@
  * restart of a container that never recovers DOUBLES the wait, up to a
  * ceiling. So a wedge a restart does not clear costs one restart per
  * cooldown, then per 2x, 4x, 8x... rather than one per cooldown forever.
- * The counter resets the moment the container reports healthy, so a
- * transient wedge always starts again from the base cooldown.
+ * The counter is dropped on evidence the container RECOVERED: an observed
+ * `healthy`, or a retained passing probe that landed more than the restart
+ * probation window after the last autoheal restart. A pass inside that
+ * window is the restart's own artifact and is not recovery. So a transient
+ * wedge always starts again from the base cooldown, including when the
+ * recovery fell entirely between two passes and only the probe log ever
+ * witnessed it.
  *
  * Deliberately no attempt CAP and no terminal suppression: this is a
  * watchdog on node containers, and a cap that stops retrying can leave a
@@ -68,6 +73,15 @@ const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000
 // Upper bound on the doubled cooldown, so a long-wedged container settles at one
 // restart every six hours rather than growing to a wait no operator would outlive.
 const DEFAULT_COOLDOWN_CEILING_MS = 6 * 60 * 60 * 1000
+// A passing probe landing inside this window after an autoheal restart is that
+// restart's own artifact, not evidence the wedge cleared. Every service opted
+// into autoheal in SERVICE_HEALTHCHECK (decoder, encoder, indexer) probes at a
+// 15s interval with 3 retries behind a 60s start period, so Docker can
+// legitimately report `starting` or a first fresh pass for ~105s after a
+// restart; 150s leaves margin. An operator who widens a service's start period
+// via XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE> should widen
+// XCHAIN_NODE_AUTOHEAL_PROBATION_MS to match.
+const DEFAULT_RESTART_PROBATION_MS = 150 * 1000
 
 const STATE_DIR_NAME  = '.xchain-node'
 const STATE_FILE_NAME = 'autoheal-state.json'
@@ -184,6 +198,17 @@ function getLastHealthyProbeMs(health) {
     return null
 }
 
+// Whether a retained passing probe is evidence of a RECOVERY rather than an
+// artifact of the restart autoheal itself issued. A pass qualifies when there
+// is no autoheal restart to attribute it to, or when it landed more than the
+// probation window after that restart. Pure, so both sides of the rule are
+// unit-testable without driving a whole pass.
+function isRecoveryEstablished(lastHealthyMs, lastRestartMs, probationMs) {
+    if (!Number.isFinite(lastHealthyMs)) return false
+    if (!Number.isFinite(lastRestartMs)) return true
+    return lastHealthyMs > lastRestartMs + probationMs
+}
+
 // One autoheal pass over the module registry. Never throws for a single bad
 // container (a vanished container id must not abort the whole sweep).
 // Returns { candidates, restarted, failed, skipped } where each array holds
@@ -192,6 +217,7 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
     const graceMs    = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_GRACE_MS', DEFAULT_GRACE_MS)
     const cooldownMs = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS', DEFAULT_COOLDOWN_MS)
     const ceilingMs  = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS', DEFAULT_COOLDOWN_CEILING_MS)
+    const probationMs = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_PROBATION_MS', DEFAULT_RESTART_PROBATION_MS)
     const stateFile  = getStateFilePath()
     const state      = readState(stateFile)
 
@@ -261,7 +287,8 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
                 delete state.unhealthySince[containerId]
                 onsetChanged = true
             }
-            // Drop the attempt count only on an OBSERVED `healthy`, so a container
+            // On THIS branch drop the attempt count only on an OBSERVED `healthy`,
+            // never on a bare `!== unhealthy`, so a container
             // that DID recover starts its next episode at the base cooldown. Backing
             // off is a response to a wedge restarts are not clearing; a recovery is
             // the evidence they cleared it, and `!== 'unhealthy'` is not that
@@ -303,13 +330,33 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         // ordinary case: absence of a pass is not evidence of one.
         let since = state.unhealthySince[containerId]
         const lastHealthy = getLastHealthyProbeMs(health)
+        let onsetReseeded = false
         if (typeof since !== 'number' || !Number.isFinite(since)) {
             since = Math.min(now, derived)
             state.unhealthySince[containerId] = since
             onsetChanged = true
+            onsetReseeded = true
         } else if (typeof lastHealthy === 'number' && lastHealthy > since) {
             since = Math.min(now, derived)
             state.unhealthySince[containerId] = since
+            onsetChanged = true
+            onsetReseeded = true
+        }
+
+        // The attempt count means "restarts since this container was last
+        // healthy", so a reseeded onset and a surviving count are two halves of
+        // one rule pulled apart: the `!== unhealthy` branch above never sees a
+        // recovery that fell between two passes, and the NEW episode then
+        // inherits the old one's doubled cooldown. At the 6h ceiling that
+        // suppresses a fresh wedge for six hours after the probes proved the
+        // last one cleared. Drop the count on the same evidence that reseeded
+        // the onset, but only when the pass OUTLASTED the restart's probation:
+        // inside that window a pass is the restart's own artifact, which is the
+        // rule the observed-healthy branch and the not-running guard defend.
+        // Absence of a pass still changes nothing, here as there.
+        if (onsetReseeded && state.restartCount[containerId] !== undefined &&
+            isRecoveryEstablished(lastHealthy, state.restarts[containerId], probationMs)) {
+            delete state.restartCount[containerId]
             onsetChanged = true
         }
 
@@ -376,7 +423,9 @@ module.exports = {
     runAutoheal,
     getUnhealthySinceMs,
     getLastHealthyProbeMs,
+    isRecoveryEstablished,
     restartBackoffMs,
     DEFAULT_COOLDOWN_MS,
-    DEFAULT_COOLDOWN_CEILING_MS
+    DEFAULT_COOLDOWN_CEILING_MS,
+    DEFAULT_RESTART_PROBATION_MS
 }

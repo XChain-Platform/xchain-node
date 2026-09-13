@@ -359,6 +359,90 @@ describe('AutohealService', () => {
         expect(state.unhealthySince).to.not.have.property('st1')
     })
 
+    // A recovery-then-relapse that falls entirely between two passes reseeds the
+    // episode onset, and the attempt count has to reset with it: a NEW episode that
+    // inherits the old one's doubled cooldown sits at the ceiling, six hours of
+    // suppression after the probes have proved the wedge cleared.
+    it('drops the earned backoff when retained probes show a recovery past the restart probation', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'rec1')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2 -> next wait doubles
+        expect(stubs.restartContainer.callCount).to.equal(2)
+
+        // A pass 7 minutes after restart #2, far outside the 150s probation, then a
+        // fresh failing run: the container recovered and relapsed between passes.
+        const t3 = NOW + 22 * 60000
+        stubs.getStatusFromContainer.resolves(inspectStatus('unhealthy', [
+            recordedProbe(NOW + 18 * 60000, 0),
+            recordedProbe(NOW + 21 * 60000, 1),
+            recordedProbe(t3 - 15000, 1),
+            recordedProbe(t3, 1)
+        ]))
+        const reseeded = await service.runAutoheal({ now: t3 })
+        expect(reseeded.skipped[0].reason).to.equal('inside grace window')
+
+        const cleared = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(cleared.restartCount, 'a proven recovery ends the episode the backoff belonged to')
+            .to.not.have.property('rec1')
+
+        // 14 minutes after restart #2: past the BASE cooldown, inside the doubled
+        // one. With the count dropped the new episode is restarted; had it survived,
+        // the 20-minute window would still be blocking.
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW + 25 * 60000))
+        const resumed = await service.runAutoheal({ now: NOW + 25 * 60000 })
+        expect(resumed.restarted, 'the new episode must start at the base cooldown').to.have.length(1)
+        expect(stubs.restartContainer.callCount).to.equal(3)
+    })
+
+    // The other side of the same rule: a pass inside Docker's post-restart
+    // probation is the restart's own artifact, so it must NOT reset a backoff a
+    // real wedge earned. Without this gate the doubling collapses to base-cooldown
+    // churn for exactly the flapping container it exists to bound.
+    it('keeps the earned backoff when the only retained pass falls inside restart probation', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'rec2')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2 -> next wait doubles
+        expect(stubs.restartContainer.callCount).to.equal(2)
+
+        // The pass landed 60s after restart #2, inside the 150s probation window.
+        const t3 = NOW + 22 * 60000
+        stubs.getStatusFromContainer.resolves(inspectStatus('unhealthy', [
+            recordedProbe(NOW + 12 * 60000, 0),
+            recordedProbe(NOW + 21 * 60000, 1),
+            recordedProbe(t3 - 15000, 1),
+            recordedProbe(t3, 1)
+        ]))
+        await service.runAutoheal({ now: t3 })
+
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.rec2, 'a probation pass is not recovery').to.equal(2)
+        expect(state.unhealthySince.rec2, 'the onset is still reseeded on the same evidence')
+            .to.equal(NOW + 21 * 60000)
+
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW + 25 * 60000))
+        const throttled = await service.runAutoheal({ now: NOW + 25 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+    })
+
+    it('rates a pass as recovery only when no restart can claim it or it outlasted probation', () => {
+        const probation = service.DEFAULT_RESTART_PROBATION_MS
+        expect(probation).to.equal(150 * 1000)
+        // No autoheal restart to attribute the pass to: it is recovery outright.
+        expect(service.isRecoveryEstablished(NOW, undefined, probation)).to.equal(true)
+        expect(service.isRecoveryEstablished(NOW, NOW - probation - 1, probation)).to.equal(true)
+        // Exactly at the boundary is still inside probation: the test is strict.
+        expect(service.isRecoveryEstablished(NOW, NOW - probation, probation)).to.equal(false)
+        expect(service.isRecoveryEstablished(NOW, NOW - 1000, probation)).to.equal(false)
+        // Absence of a pass is not evidence of one.
+        expect(service.isRecoveryEstablished(null, undefined, probation)).to.equal(false)
+        expect(service.isRecoveryEstablished(NaN, undefined, probation)).to.equal(false)
+    })
+
     it('caps the doubled cooldown at the ceiling instead of growing without bound', () => {
         const base = service.DEFAULT_COOLDOWN_MS
         const ceiling = service.DEFAULT_COOLDOWN_CEILING_MS

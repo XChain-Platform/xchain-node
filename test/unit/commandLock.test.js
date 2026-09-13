@@ -90,6 +90,96 @@ describe('commandLock', () => {
         assert.strictEqual(holder.pid, process.pid + 1, 'successor lock must survive our release')
     })
 
+    // Stale reclamation, the half exclusive creation does not serialize on its
+    // own: two invocations can read the same dead holder, and the second then
+    // deletes the LIVE lock the first just made and acquires too (uuid:b5127aa1).
+    describe('stale reclamation is serialized', () => {
+
+        function findDeadPid() {
+            let deadPid = 999999
+            while (isPidAlive(deadPid)) deadPid--
+            return deadPid
+        }
+
+        it('a contender acting on a stale observation cannot delete a successor lock', () => {
+            const lockFile = getLockFilePath()
+            const deadPid  = findDeadPid()
+            fs.writeFileSync(lockFile, JSON.stringify({ pid: deadPid, command: 'install' }) + '\n')
+
+            // Pin the interleaving at the exact point it happens in the wild: the
+            // liveness probe sits between our read of the stale holder and our
+            // unlink, so a contender that wins the reclaim there leaves us holding
+            // an observation of a file that no longer exists at that path.
+            const realKill = process.kill
+            let swapped = false
+            process.kill = function (targetPid, signal) {
+                if (!swapped && targetPid === deadPid && signal === 0) {
+                    swapped = true
+                    fs.unlinkSync(lockFile)
+                    fs.writeFileSync(lockFile, JSON.stringify({
+                        pid: process.pid, nonce: 'the-successor', command: 'update'
+                    }) + '\n')
+                }
+                return realKill.call(process, targetPid, signal)
+            }
+            try {
+                assert.throws(() => acquireCommandLock({ command: 'reset' }), /command lock/)
+            } finally {
+                process.kill = realKill
+            }
+
+            const holder = JSON.parse(fs.readFileSync(lockFile, 'utf8'))
+            assert.strictEqual(holder.nonce, 'the-successor', "the successor's lock must survive")
+            assert.ok(swapped, 'the interleaving must actually have been driven')
+        })
+
+        it('leaves no reclaim marker behind after a successful steal', () => {
+            fs.writeFileSync(getLockFilePath(), JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
+            const release = acquireCommandLock({ command: 'update' })
+            assert.deepStrictEqual(fs.readdirSync(tmpDir), ['command.lock'])
+            release()
+        })
+
+        it('a reclaim marker held by a LIVE pid stops the steal instead of racing it', () => {
+            const lockFile = getLockFilePath()
+            fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
+            const before = fs.statSync(lockFile).ino
+            fs.writeFileSync(lockFile + '.reclaim', JSON.stringify({ pid: process.pid, nonce: 'other' }) + '\n')
+
+            assert.throws(() => acquireCommandLock({ command: 'reset' }), /lost the race/)
+            // The stale lock is untouched: only the marker's owner may remove it.
+            assert.strictEqual(fs.statSync(lockFile).ino, before)
+            fs.unlinkSync(lockFile + '.reclaim')
+        })
+
+        it('a reclaim marker abandoned by a dead pid does not deadlock acquisition', () => {
+            const lockFile = getLockFilePath()
+            fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
+            fs.writeFileSync(lockFile + '.reclaim', JSON.stringify({ pid: findDeadPid(), nonce: 'crashed' }) + '\n')
+
+            const release = acquireCommandLock({ command: 'update' })
+            assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).pid, process.pid)
+            assert.ok(!fs.existsSync(lockFile + '.reclaim'))
+            release()
+        })
+
+        it('release keeps a successor lock that reuses our pid under a different nonce', () => {
+            const lockFile = getLockFilePath()
+            const release  = acquireCommandLock({ command: 'install' })
+            const ours     = JSON.parse(fs.readFileSync(lockFile, 'utf8'))
+            assert.ok(ours.nonce, 'the payload must carry a nonce')
+            // Same pid, different acquisition: a recycled pid looks exactly like this.
+            fs.writeFileSync(lockFile, JSON.stringify({
+                pid: process.pid, nonce: ours.nonce + '-other', command: 'update'
+            }) + '\n')
+            release()
+            assert.strictEqual(
+                JSON.parse(fs.readFileSync(lockFile, 'utf8')).command, 'update',
+                'a successor under a recycled pid must survive our release'
+            )
+        })
+    })
+
     it('release is idempotent', () => {
         const release = acquireCommandLock({ command: 'install' })
         release()

@@ -608,6 +608,83 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
+    // buildAndUp: the hub grant is rotated before the health-dependent push
+    // -------------------------------------------------------------------
+
+    // statusChanged() pushes config over the hub's HTTP API and rethrows on failure.
+    // A hub restarted on a rotated HUB_DB_PASS that MariaDB never received cannot
+    // authenticate, so it cannot serve that push, so buildAndUp rejects and the
+    // rotation its callers run AFTER buildAndUp resolves is never reached: the
+    // operator is left with a crash-looping hub (uuid:c466af19).
+    describe('buildAndUp() hub credential ordering', function () {
+
+        function hubStubs() {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') cb(null)
+                else if (args[0] === 'run') cb(null, 'f'.repeat(64) + '\n')
+                else cb(null, '')
+            })
+            return stubs
+        }
+
+        function withDbStub(stubs, setHubDatabaseParameters) {
+            return loadModuleService(stubs, null, {
+                './DatabaseService': {
+                    setDatabaseParameters: sinon.stub().resolves(),
+                    setHubDatabaseParameters
+                }
+            })
+        }
+
+        it('rotates the hub grant BEFORE the config push that needs the hub to answer', async function () {
+            const stubs = hubStubs()
+            const setHub = sinon.stub().resolves()
+            const ms = withDbStub(stubs, setHub)
+            await ms.buildAndUp('xchain-hub', null, null)
+            expect(setHub.calledOnce).to.be.true
+            expect(setHub.firstCall.calledBefore(stubs.statusChanged.firstCall)).to.be.true
+        })
+
+        it('rotates the grant even when the config push then fails', async function () {
+            const stubs = hubStubs()
+            stubs.statusChanged.rejects(new Error('hub did not answer the config push'))
+            const setHub = sinon.stub().resolves()
+            const ms = withDbStub(stubs, setHub)
+            let threw = false
+            try {
+                await ms.buildAndUp('xchain-hub', null, null)
+            } catch (err) {
+                threw = true
+                expect(String((err && err.message) || err)).to.contain('config push')
+            }
+            expect(threw, 'the push failure must still reach the caller').to.be.true
+            // The point of the fix: the account is already correct even though the
+            // command failed, so the restarting hub authenticates instead of
+            // crash-looping on ER_ACCESS_DENIED with no way back.
+            expect(setHub.calledOnce).to.be.true
+        })
+
+        it('does not touch the hub account for any other module', async function () {
+            const stubs = hubStubs()
+            const setHub = sinon.stub().resolves()
+            const ms = withDbStub(stubs, setHub)
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(setHub.called).to.be.false
+        })
+
+        it('does not touch the hub account for a one-shot execution container', async function () {
+            const stubs = hubStubs()
+            const setHub = sinon.stub().resolves()
+            const ms = withDbStub(stubs, setHub)
+            await ms.buildAndUp('xchain-hub', null, null, null, true)
+            expect(setHub.called).to.be.false
+            expect(stubs.statusChanged.called).to.be.false
+        })
+    })
+
+    // -------------------------------------------------------------------
     // buildAndUp: reuseImage
     // -------------------------------------------------------------------
 

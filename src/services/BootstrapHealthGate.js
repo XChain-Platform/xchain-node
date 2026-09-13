@@ -251,19 +251,47 @@ function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}
             'so its position could not be verified')
     } else {
         const lag = payload[reported]
+        const value = strictLagValue(lag)
         if (lag === null || lag === undefined)
             reasons.push(`the service cannot report how far behind it is (${reported} is null)`)
-        else if (!Number.isFinite(Number(lag)))
-            reasons.push(`the service reported an unreadable ${reported} (${lag})`)
-        else if (Number(lag) < 0)
-            reasons.push(`the service reported a negative ${reported} (${Number(lag)}): its committed tip sits above ` +
+        else if (value === null)
+            reasons.push(`the service reported an unreadable ${reported} (${renderLag(lag)})`)
+        else if (value < 0)
+            reasons.push(`the service reported a negative ${reported} (${value}): its committed tip sits above ` +
                 'its upstream node\'s, so the data it would export may reference blocks the node no longer recognizes')
-        else if (Number(lag) > maxLag)
-            reasons.push(`the service is ${Number(lag)} blocks behind its upstream tip (limit ${maxLag}; ` +
+        else if (value > maxLag)
+            reasons.push(`the service is ${value} blocks behind its upstream tip (limit ${maxLag}; ` +
                 'override with XCHAIN_NODE_BOOTSTRAP_MAX_LAG_BLOCKS)')
     }
 
     return reasons
+}
+
+// Read a lag field by SHAPE, before any comparison. Number() answers 0 for '',
+// ' ', false and [], so coercing first and testing Number.isFinite afterwards let
+// each of those certify an unknown position as caught up: the gate's own
+// fail-closed parsing contract collapsed into "we could not tell = no lag".
+// A number is a lag; so is a string a producer spelled one in (every in-repo
+// producer emits number-or-null, but a drifted or older image may not). Anything
+// else is unreadable, which is a refusal. Returns null for "not a lag value".
+function strictLagValue(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null
+    if (typeof value === 'string') {
+        const trimmed = value.trim()
+        if (trimmed === '') return null
+        const parsed = Number(trimmed)
+        return Number.isFinite(parsed) ? parsed : null
+    }
+    return null
+}
+
+// Name the rejected value in the refusal reason. Interpolating it raw renders []
+// as an empty string and an object as "[object Object]", which reads as if the
+// probe found nothing rather than something it refused.
+function renderLag(value) {
+    if (typeof value === 'string') return JSON.stringify(value)
+    if (typeof value === 'object') { try { return JSON.stringify(value) } catch (_) { return String(value) } }
+    return String(value)
 }
 
 // The tracker publishes block_fetch_desync as {height, failures, lastError,
@@ -320,7 +348,7 @@ async function probeServiceStatus(containerId, port, runner) {
 // the running image being new enough to report the marker on its health
 // surface: read the marker rows straight out of the database being dumped - and,
 // for an indexer source, out of the paired decoder database that owns them.
-async function readHaltMarkers(coin, network, module, deps) {
+async function readHaltMarkers(coin, network, module, deps, since) {
     const {
         runner,
         getDatabaseContainerId,
@@ -328,6 +356,17 @@ async function readHaltMarkers(coin, network, module, deps) {
         getExternalDbConfig,
         executeNativeMariaDbCommand
     } = deps
+
+    // A watermark is interpolated into SQL below, and it comes back through a caller
+    // chain rather than straight from parseCountTokens, so assert the shape rather
+    // than trust it. null means "nothing recorded", which the caller reads as
+    // "we could not tell" and refuses on.
+    const assertWatermark = (value, what) => {
+        if (value === undefined || value === null) return null
+        if (!Number.isInteger(value) || value < 0)
+            throw new Error(`refusing an unusable ${what} watermark: ${JSON.stringify(value)}`)
+        return value
+    }
 
     // The names are derived from coin/network internally, never operator input, but
     // they are interpolated into SQL below; assert the shape rather than trust it.
@@ -367,7 +406,9 @@ async function readHaltMarkers(coin, network, module, deps) {
 
     // Probe ONE database for both durable markers. Every failure shape throws, and
     // the caller turns a throw into a refusal reason: that is the whole contract.
-    const probeDatabase = async (name) => {
+    // `since` is a watermark this same function returned at an earlier reading; when
+    // it is given the probe additionally reports what was RAISED between the two.
+    const probeDatabase = async (name, since) => {
         // One round trip: which marker tables exist, and how many live rows each has.
         // Counting information_schema rows (rather than querying the table directly)
         // keeps an absent table answerable as a 0 instead of an error; deciding what
@@ -409,10 +450,61 @@ async function readHaltMarkers(coin, network, module, deps) {
         if (hasSyncHalt > 0)
             found.syncHalt = await readCount(
                 `SELECT COUNT(*) FROM \`${name}\`.sync_halt WHERE cleared_at IS NULL;`, 'sync_halt marker')
+
+        // The dump window watermark. Both marker tables are append-only and
+        // id-ordered (decoder events: AUTO_INCREMENT, a clear is a NEW row, halt rows
+        // are never deleted; sync_halt: AUTO_INCREMENT, a clear sets cleared_at and
+        // the row stays), which is what makes "did a halt occur at ANY point since
+        // the pre-flight reading" answerable with a MAX(id) taken then and a count
+        // taken now. null means the table did not exist at this reading.
+        found.watermark = {
+            events: await readCount(`SELECT COALESCE(MAX(id),0) FROM \`${name}\`.events;`,
+                `events watermark for ${name}`),
+            syncHalt: hasSyncHalt > 0
+                ? await readCount(`SELECT COALESCE(MAX(id),0) FROM \`${name}\`.sync_halt;`,
+                    `sync_halt watermark for ${name}`)
+                : null
+        }
+
+        // Nothing recorded from an earlier reading: this call is the reading.
+        if (!since) return found
+
+        // What happened between that reading and this one. A marker RAISED anywhere
+        // in the window disqualifies the archive even if it was cleared before this
+        // reading, because the --single-transaction snapshot sits inside the window
+        // and live state cannot say which side of it the halt landed on. Conservative
+        // by construction: a halt raised after the snapshot point also refuses, and
+        // publishing nothing beats publishing unverified.
+        const raised = { reorgHalt: 0, syncHalt: 0, unreadable: [] }
+        const priorEvents = assertWatermark(since.events, `${name}.events`)
+        if (priorEvents === null || found.watermark.events < priorEvents) {
+            // No recorded watermark, or the sequence went backwards (table recreated,
+            // a different database probed): we could not tell, so we refuse.
+            raised.unreadable.push(`${name}.events`)
+        } else {
+            raised.reorgHalt = await readCount(
+                `SELECT COUNT(*) FROM \`${name}\`.events WHERE code='REORG_HALT' AND id > ${priorEvents};`,
+                `REORG_HALT dump-window probe for ${name}`)
+        }
+        const priorSyncHalt = assertWatermark(since.syncHalt, `${name}.sync_halt`)
+        if (hasSyncHalt === 0) {
+            // The table is gone now. If it was there at the earlier reading, something
+            // dropped it mid-window and we cannot speak for the rows it held.
+            if (priorSyncHalt !== null) raised.unreadable.push(`${name}.sync_halt`)
+        } else if (found.watermark.syncHalt < (priorSyncHalt === null ? 0 : priorSyncHalt)) {
+            raised.unreadable.push(`${name}.sync_halt`)
+        } else {
+            // priorSyncHalt null means the table did not exist at the earlier reading,
+            // so every row in it now was written inside the window.
+            raised.syncHalt = await readCount(
+                `SELECT COUNT(*) FROM \`${name}\`.sync_halt WHERE id > ${priorSyncHalt === null ? 0 : priorSyncHalt};`,
+                `sync_halt dump-window probe for ${name}`)
+        }
+        found.raisedInWindow = raised
         return found
     }
 
-    const markers = await probeDatabase(dbName)
+    const markers = await probeDatabase(dbName, since && since.own)
 
     // An xchain-indexer database structurally CANNOT carry the REORG_HALT marker, so
     // the probe above is a guaranteed zero for an indexer source and this backstop had
@@ -429,7 +521,7 @@ async function readHaltMarkers(coin, network, module, deps) {
         const decoderDbName = assertDbName(getModuleDatabaseName(XChainService.XCHAIN_DECODER, coin, network))
         let upstream
         try {
-            upstream = await probeDatabase(decoderDbName)
+            upstream = await probeDatabase(decoderDbName, since && since.upstream)
         } catch (err) {
             // Name the database that actually failed: the caller's wrapper names the
             // GATED module, which would otherwise blame the indexer for the decoder.
@@ -462,7 +554,14 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
         askMariadbRootPassword,
         getExternalDbConfig,
         executeNativeMariaDbCommand,
-        now = Date.now()
+        now = Date.now(),
+        // A watermark returned by an EARLIER call to this gate. Given it, the marker
+        // probe also refuses when a halt was raised anywhere between that call and
+        // this one, which is the window the post-dump reading cannot otherwise see:
+        // the archive is the --single-transaction snapshot taken inside it, so a halt
+        // that arrived and was cleared while mariadb-dump streamed is captured in the
+        // bytes that ship while both live readings look clean.
+        since = null
     } = deps
     // Required late so the DatabaseService <-> BootstrapService require cycle
     // stays exactly as it was before this gate existed.
@@ -476,6 +575,9 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
     }
 
     const reasons = []
+    // Filled in by the marker probe below and handed back to the caller, which passes
+    // it to the post-dump call as `since`.
+    let watermark = null
 
     // 1. Container state.
     let containerId = null
@@ -522,7 +624,13 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
     // surface does not report it.
     if (MARIADB_MODULES.has(module)) {
         try {
-            const markers = await readHaltMarkers(coin, network, module, dbDeps)
+            const markers = await readHaltMarkers(coin, network, module, dbDeps, since)
+            watermark = {
+                own: markers.watermark,
+                upstream: markers.upstream ? markers.upstream.watermark : null
+            }
+            reasons.push(...windowReasons(markers.raisedInWindow))
+            if (markers.upstream) reasons.push(...windowReasons(markers.upstream.raisedInWindow))
             if (markers.reorgHalt > 0)
                 reasons.push("the database carries a durable REORG_HALT marker (events.code='REORG_HALT'): " +
                     'this decoder aborted mid-rollback and will halt at its next reorg. Restoring this archive ' +
@@ -552,7 +660,27 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
     if (reasons.length > 0) throw new BootstrapSourceUnhealthyError(label, reasons)
 
     console.log(`Bootstrap source health gate: ${label} is healthy, no halt markers, within the lag limit.`)
-    return { skipped: false, reasons: [] }
+    return { skipped: false, reasons: [], watermark }
+}
+
+// Turn a probe's dump-window report into refusal reasons. Written for an operator:
+// the archive is discarded because a halt existed while the dump was streaming, and
+// the fix is to re-run the publish once the source has settled.
+function windowReasons(raised) {
+    if (!raised) return []
+    const out = []
+    if (raised.reorgHalt > 0)
+        out.push("a REORG_HALT marker (events.code='REORG_HALT') was raised while the dump was streaming. " +
+            'The archive is the snapshot taken inside that window, so it may carry the halt even though the ' +
+            'database looks clean now. Re-run the publish once the source has settled.')
+    if (raised.syncHalt > 0)
+        out.push('an xchain-sync divergence halt (a sync_halt row) was raised while the dump was streaming, ' +
+            'so the archive may carry it even though the row is cleared now. Re-run the publish once the ' +
+            'source has settled.')
+    for (const table of raised.unreadable || [])
+        out.push(`could not tell whether a halt was raised while the dump was streaming: the ${table} id ` +
+            'sequence does not line up with the reading taken before the dump. Re-run the publish.')
+    return out
 }
 
 module.exports = {

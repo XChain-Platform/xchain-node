@@ -2089,6 +2089,10 @@ describe('moduleOperations', function () {
         it('leaves the fence alone on a decoder-only reset (that chain keeps pushing prices)', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+            // The coupling guard reads strictly, so "no indexer installed" is the
+            // strict stub's answer; both are set so the fixture states one thing.
+            stubs.db.getModuleContainerStrict.callsFake(async (module) =>
+                module === 'xchain-indexer' ? null : 'container-id-123')
             stubs.db.getModuleContainer.callsFake(async (module) =>
                 module === 'xchain-indexer' ? null : 'container-id-123')
             const ops = loadOperations(stubs)
@@ -2270,6 +2274,10 @@ describe('moduleOperations', function () {
             it('allows a decoder-only reset when no indexer is installed to strand', async function () {
                 const stubs = makeStubs()
                 stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                // The coupling guard reads STRICTLY now, so the "absent" answer has to
+                // come from the strict stub; the swallowing one no longer decides it.
+                stubs.db.getModuleContainerStrict.callsFake(async (module) =>
+                    module === 'xchain-indexer' ? null : 'container-id-123')
                 stubs.db.getModuleContainer.callsFake(async (module) =>
                     module === 'xchain-indexer' ? null : 'container-id-123')
                 const ops = loadOperations(stubs)
@@ -2280,6 +2288,46 @@ describe('moduleOperations', function () {
 
                 expect(await promise).to.be.true
                 expect(stubs.resetDatabases.firstCall.args[2]).to.deep.equal(['xchain-decoder'])
+            })
+
+            // A registry read that FAILED is not evidence the indexer is absent: the
+            // swallowing read this replaced answered null on any SQL error, so a blip
+            // let a decoder-only reset DROP the decoder database while an installed
+            // indexer kept its now-dangling decoder-event cursor (uuid:7cbafa08).
+            it('aborts the decoder-only reset when the indexer registry row cannot be read', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                stubs.db.getModuleContainerStrict.callsFake(async (module) => {
+                    if (module === 'xchain-indexer') throw new Error('ER_LOCK_WAIT_TIMEOUT')
+                    return 'container-id-123'
+                })
+                // The swallowing read answers "absent" for the indexer, which is exactly
+                // what the old guard believed: with the pre-fix source this test runs the
+                // whole reset and resetDatabases fires. That is the negative control.
+                stubs.db.getModuleContainer.callsFake(async (module) =>
+                    module === 'xchain-indexer' ? null : 'container-id-123')
+                const logged = []
+                const log = sinon.stub(console, 'log').callsFake((...a) => logged.push(a.join(' ')))
+                let result
+                try {
+                    const ops = loadOperations(stubs)
+                    result = await ops.resetModules('xchain-decoder', 'bitcoin', 'mainnet', true)
+                } finally {
+                    log.restore()
+                }
+
+                expect(result).to.be.false
+                // The guard consulted the STRICT read. A decoder-only reset never puts
+                // the indexer in modulesToStop, so nothing else in this path asks for
+                // that row: this call exists only because the guard is strict now.
+                expect(stubs.db.getModuleContainerStrict.calledWith('xchain-indexer', 'bitcoin', 'mainnet')).to.be.true
+                // Refused BEFORE anything destructive, and before anything was stopped.
+                expect(stubs.resetDatabases.called).to.be.false
+                expect(stubs.stopContainer.called).to.be.false
+                const text = logged.join('\n')
+                expect(text).to.contain('cannot read the xchain-indexer registry row')
+                expect(text).to.contain('ER_LOCK_WAIT_TIMEOUT')
+                expect(text).to.contain('No data was touched')
             })
 
             // Asymmetric by design: the indexer re-derives from an intact decoder,

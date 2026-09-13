@@ -30,7 +30,7 @@ const { XChainService, DB_MODULE_NAME, SEP, tmpDir, BOOTSTRAP_BASE_URL, EXTERNAL
 const { db }                                          = require('../state')
 const { getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = require('./ConfigService')
 const { stopContainer, startContainer }               = require('./DockerService')
-const { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('./DatabaseService')
+const { getDatabaseContainerId, getDatabaseContainerPresence, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('./DatabaseService')
 const { assertSafeArchiveMemberNames, redactSecrets } = require('../utils/helpers')
 const { buildBootstrapMeta, writeBootstrapMeta } = require('./BootstrapArchiveMeta')
 const { dockerMariadbArgs, mariadbEnv }               = require('../utils/dockerMariadb')
@@ -436,11 +436,14 @@ async function makeBootstrap(coin, network, module) {
     // `bootstrap restore --latest`; publishing an unverified snapshot silently
     // replaces the last good archive. The unsupported-module throw above stays
     // first so an unknown module still fails on its own message.
-    await assertBootstrapSourceHealthy(coin, network, module)
+    // Keep the reading. It carries the marker-table watermark the post-dump gate
+    // needs in order to see a halt that was raised and then cleared while the dump
+    // was streaming, which no live reading taken afterwards can report.
+    const preflight = await assertBootstrapSourceHealthy(coin, network, module)
 
     const result = module === XChainService.XCHAIN_UTXO_TRACKER
         ? await makeBootstrapUtxoTracker(coin, network)
-        : await makeBootstrapMariaDb(coin, network, module)
+        : await makeBootstrapMariaDb(coin, network, module, preflight && preflight.watermark)
 
     // A fresh archive is a fresh LINEAGE, so it clears any republish this
     // combo was owed after a reset (see BootstrapRepublishLedger). Recorded on
@@ -774,7 +777,9 @@ async function makeBootstrapUtxoTracker(coin, network) {
     return true
 }
 
-async function makeBootstrapMariaDb(coin, network, module) {
+// `preflightWatermark` is the marker-table reading the pre-flight gate took before
+// this dump started; the post-dump gate needs it to bound the dump window.
+async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = null) {
     const { askMariadbRootPassword } = require('./DatabaseService')
 
     const defaultConfig = await getDefaultConfig(module, coin, network)
@@ -860,16 +865,23 @@ async function makeBootstrapMariaDb(coin, network, module) {
     // marker the gate exists to refuse, signed, as the newest (and therefore
     // default) file in the served directory.
     //
-    // Deliberately conservative rather than exact: the reading is taken after the
-    // --single-transaction snapshot point, so it can discard an archive whose halt
-    // arrived after the snapshot, and it cannot see a marker inserted and then
-    // cleared during the dump. Publishing nothing beats publishing unverified, and
-    // the same reading also catches every other late fault the gate covers (the
-    // container died mid-dump, lag grew past the ceiling, the module went wedged).
-    // Cheap: askMariadbRootPassword caches, so no second prompt, and a skipped gate
+    // A live reading alone cannot speak for the archive: the bytes that ship are the
+    // --single-transaction snapshot taken when the dump started, so a halt raised
+    // after the pre-flight gate and cleared before this call lands INSIDE the
+    // snapshot while both readings look clean. `since` is the pre-flight gate's
+    // marker-table watermark, and the marker tables are append-only and id-ordered,
+    // so the gate can ask what was RAISED anywhere in the dump window rather than
+    // only what is live now.
+    //
+    // Still deliberately conservative rather than exact: a halt raised after the
+    // snapshot point, which the archive therefore does not carry, also refuses.
+    // Publishing nothing beats publishing unverified, and the same reading also
+    // catches every other late fault the gate covers (the container died mid-dump,
+    // lag grew past the ceiling, the module went wedged). Cheap:
+    // askMariadbRootPassword caches, so no second prompt, and a skipped gate
     // (XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE) skips both calls alike.
     try {
-        await assertBootstrapSourceHealthy(coin, network, module)
+        await assertBootstrapSourceHealthy(coin, network, module, { since: preflightWatermark })
     } catch (err) {
         console.log(`The ${module} source stopped being known-good while ${dbName} was dumping; `
             + 'discarding the finished dump rather than publishing it.')
@@ -1184,6 +1196,19 @@ function reportUnknownFreshness(subject, err) {
     console.log('  FORCE_BOOTSTRAP to restore anyway.')
 }
 
+// The in-container listing behind utxoTrackerVolumeFreshness, kept as a named
+// constant so a test can run the exact string a real shell sees.
+//
+// It must EXIT NON-ZERO when the listing fails. `ls -A /data | head -1` cannot:
+// a pipeline exits with its LAST stage's status, so a failed `ls` still leaves
+// head exiting 0 with empty stdout, the exec resolves, and empty stdout reads
+// as a confirmed-empty volume. Capturing into a variable puts `ls`'s own status
+// on the assignment, so a failed listing rejects the exec and lands in the
+// UNKNOWN catch. stderr is deliberately NOT suppressed: the reason travels into
+// the rejection message and reaches the operator warning. (Alpine's /bin/sh is
+// busybox ash, so this stays POSIX and does not lean on `set -o pipefail`.)
+const UTXO_TRACKER_LISTING_COMMAND = 'entries=$(ls -A /data) || exit 1; printf %s "$entries" | head -n 1'
+
 // Freshness of the utxo-tracker LevelDB volume. Used as a race-free gate: it
 // must be checked BEFORE the container starts, because a freshly-started tracker
 // creates an (empty) LevelDB immediately.
@@ -1207,7 +1232,7 @@ async function utxoTrackerVolumeFreshness(coin, network) {
     }
     try {
         const { stdout } = await execFileAsync('docker',
-            ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'ls -A /data 2>/dev/null | head -1'])
+            ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', UTXO_TRACKER_LISTING_COMMAND])
         return String(stdout).trim().length > 0 ? FRESHNESS_POPULATED : FRESHNESS_EMPTY
     } catch (err) {
         reportUnknownFreshness(`the Docker volume ${volumeName}`, err)
@@ -1574,6 +1599,24 @@ async function mariaDbModuleFreshness(coin, network, module) {
         }
     }
 
+    // Ask the tri-state probe FIRST. getDatabaseContainerId() answers null for
+    // an inspect that failed as readily as for a container that is not there,
+    // and only the second of those is a fresh install; the first authorised a
+    // DROP DATABASE over a populated store (uuid:7037604f).
+    let presence
+    try {
+        presence = await getDatabaseContainerPresence()
+    } catch (err) {
+        reportUnknownFreshness(`the database ${dbName}`, err)
+        return FRESHNESS_UNKNOWN
+    }
+    if (presence !== 'exists' && presence !== 'gone') {
+        reportUnknownFreshness(`the database ${dbName}`,
+            new Error('could not determine whether the database container exists'))
+        return FRESHNESS_UNKNOWN
+    }
+    if (presence === 'gone') return FRESHNESS_EMPTY // docker SAID it is absent: a fresh install
+
     let dbContainerId
     try {
         dbContainerId = await getDatabaseContainerId()
@@ -1581,7 +1624,13 @@ async function mariaDbModuleFreshness(coin, network, module) {
         reportUnknownFreshness(`the database ${dbName}`, err)
         return FRESHNESS_UNKNOWN
     }
-    if (!dbContainerId) return FRESHNESS_EMPTY // no DB container yet (fresh install)
+    // The container existed a moment ago, so a null id here is a lookup that
+    // failed, not an absence, and must not authorise the restore.
+    if (!dbContainerId) {
+        reportUnknownFreshness(`the database ${dbName}`,
+            new Error('the database container is present but its id could not be resolved'))
+        return FRESHNESS_UNKNOWN
+    }
 
     let rootPassword
     try {
@@ -1708,6 +1757,7 @@ module.exports = {
     restoreBootstrap,
     downloadBootstrap,
     utxoTrackerVolumeFreshness,
+    UTXO_TRACKER_LISTING_COMMAND,
     ensureBootstrapUtxoTracker,
     mariaDbModuleFreshness,
     ensureBootstrapMariaDb,
