@@ -18,6 +18,7 @@ const { srcDir } = require('./config')
 const MariaDbStore      = require('./db')
 const GitHubDownloader  = require('./services/github_downloader.js')
 
+// --- Singleton service instances ---
 // db starts unconfigured; precheck.js calls db.createDatabase(config) once
 // the mariadb container is up and per-OS-user credentials are loaded
 const db              = new MariaDbStore()

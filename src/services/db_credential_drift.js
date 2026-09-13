@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
- * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * General Public License v3.0 or later; see. A commercial
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
@@ -20,9 +20,10 @@
  * one Docker daemon and one MariaDB (a source checkout plus a scratch clone,
  * each with its own config/<coin>-<network>) therefore pin different passwords
  * for the SAME account, and whichever provisions last silently locks the other
- * install's container out; a container stuck in a resulting restart loop also
- * loses its Docker DNS entry, so the outage can surface as ENOTFOUND rather
- * than as a credential fault.
+ * install's container out. A container locked out that way crash-loops on
+ * ER_ACCESS_DENIED, and a container in a restart loop loses its Docker DNS
+ * entry, so the fault reaches every caller as ENOTFOUND rather than as a
+ * credential fault.
  *
  * The check compares each RUNNING container's frozen env against the password
  * about to be written and fails closed BEFORE any ALTER USER runs, so a refusal

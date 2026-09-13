@@ -443,7 +443,7 @@ class E2EEnv extends TestEnv {
         // child_process, so DatabaseService's stub map does not reach it and the
         // guard reads whatever containers the HOST actually has. On a CI venue
         // carrying a container from another config store that is a real refusal,
-        // which failed all five install-path E2E cases there while passing on
+        // which failed all five install-path E2E cases on test-host while passing on
         // a laptop with no such container. Stubbed at the same seam, so
         // the guard still runs, against this harness's containers.
         const DbCredentialDrift = proxyquire(path.join(ROOT, 'src/services/db_credential_drift'), {

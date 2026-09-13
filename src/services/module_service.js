@@ -70,11 +70,11 @@ function runGitClone(module, branch, destination) {
                     // scrolling console.warn is a silent-wrong-code hazard
                     // (uuid:4f649bd0). Fail the clone instead.
                     //
-                    // The hint matters because the mechanism is routinely misread:
-                    // install/update clone from the module's REMOTE, so a branch that
-                    // exists only in the checkout on this box is invisible here. Push
-                    // it, or point the module at a local path with
-                    // XCHAIN_NODE_MODULES_URLS_OVERRIDE.
+                    // The hint matters because the mechanism is routinely misread
+                    // (, and the  note it corrects): install/update clone
+                    // from the module's REMOTE, so a branch that exists only in the
+                    // checkout on this box is invisible here. Push it, or point the
+                    // module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE.
                     reject(`Error cloning project: branch '${branch}' not found for module '${module}'`
                         + ` (clones come from the module's remote, so a branch that exists only in the`
                         + ` local checkout is not visible: push it, or set`
@@ -579,13 +579,14 @@ const SERVICE_HEALTHCHECK = {
     [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
     [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
     // sync's startPeriod covers MAX_HUB_WAIT_MS (xchain-sync/src/config.js, default
-    // 300000ms), not just process boot: /health answers 503 'starting' for the
-    // whole hub wait instead of reporting healthy with zero pollers running, and
-    // at 45s + 3x15s the container would have flipped UNHEALTHY at ~90s on any
-    // stack whose hub takes longer to come up. Docker ends the start period on
-    // the first passing check, so the wider window costs nothing once sync is up;
-    // a hub that never arrives is still caught by _waitForHub exiting non-zero at
-    // MAX_HUB_WAIT_MS. Widen both together if MAX_HUB_WAIT_MS is raised.
+    // 300000ms), not just process boot. /health answers 503 'starting' for the
+    // whole hub wait instead of reporting healthy with zero pollers running, and at
+    // 45s + 3x15s the container would flip UNHEALTHY at ~90s
+    // on any stack whose hub takes longer to come up. Docker ends the start period
+    // on the first passing check, so the wider window costs nothing once sync is up,
+    // and a hub that never arrives is not silently tolerated either: _waitForHub
+    // exits non-zero at MAX_HUB_WAIT_MS and the restart policy takes over. Widen
+    // both together if MAX_HUB_WAIT_MS is raised.
     [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     path: '/health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '300s' }
     // xchain-e2e-test: one-shot execution container, never gets --restart, healthcheck not applicable
     // coin nodes (node module): managed by NodeService / crypto_nodes; not built via buildAndUp,

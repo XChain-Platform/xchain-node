@@ -170,6 +170,7 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
 // release branch, so these two values are deliberately allowed to differ.
 const DEFAULT_MODULE_BRANCH = "master"
 
+// --- Library bundles ---
 // Maps a service to the library modules that must be staged into its build
 // context before docker build. Used by ModuleService.buildAndUp to clone +
 // copy each library into the service's modules/ subdir; the service's
@@ -181,14 +182,21 @@ const LIBRARY_BUNDLES = {
     // optionalDependency; staging it makes the feature available in built
     // images. Builds still succeed without it (endpoint 503s).
     "xchain-explorer": ["xchain-vm"],
-    // Each entry rides along because the e2e suites `require` its source
-    // directly from inside the dockerized image: xchain-hub for in-process
-    // XChainHub instances (multiHubAttestation, llmAttestation), xchain-sdk
-    // for the test:sdk suites, xchain-contracts for the template suites
-    // (XCHAIN_CONTRACTS_DIR; they skip without it), and xchain-indexer so
-    // attestationHelper and the integration/parity/regression suites can
-    // resolve its consensus-critical primitives instead of dying with
-    // MODULE_NOT_FOUND at load.
+    // xchain-e2e-test's multiValidatorHubHelper boots in-process XChainHub
+    // instances against the regtest stack (multiHubAttestation,
+    // llmAttestation). xchain-hub needs to ride into the build context so
+    // those tests can `require` its source from inside the dockerized image.
+    // xchain-sdk rides along the same way for the test:sdk suites
+    // (test/sdk/sdkHelper.js loadSDK resolves the file: dep first).
+    // xchain-contracts carries the contract-template source the template
+    // suites load via XCHAIN_CONTRACTS_DIR (see ConfigService); without it
+    // those suites skip rather than abort the run.
+    // xchain-indexer is staged so the e2e suites that share the indexer's
+    // consensus-critical primitives can `require('../../../xchain-indexer/src/...')`
+    // from inside the dockerized image (those relative paths resolve to the
+    // monorepo root locally, but to the image root /xchain-indexer here, where
+    // the Dockerfile COPYs it). Without it attestationHelper (and the
+    // integration/parity/regression suites) die with MODULE_NOT_FOUND at load.
     // xchain-sync rides along for ONE suite that cannot be replaced by a unit
     // golden: consensusHashConformance recomputes every indexed block's hashes with
     // sync's BlockHasher and compares them to the indexer's committed values, which
@@ -332,7 +340,8 @@ const SERVICE_REGISTRY = {
     }
 }
 
-// Operator-relevant directory roots are env-var-overridable so that hosts
+// --- Directory paths ---
+// These five operator-relevant roots are env-var-overridable so that hosts
 // with a small / partition and a large data volume (e.g., OVH RISE-3 with
 // /misc on a SATA mirror) can land bootstrap work + outputs on the big disk
 // without symlink surgery. Falling back to the in-repo default preserves

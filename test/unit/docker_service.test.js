@@ -1371,7 +1371,7 @@ describe('DockerService', function () {
                 log: sinon.stub().returns(mockLogger)
             }
 
-            // docker logs spawn child
+            // Set up mock children for docker logs spawn
             const childStdout = new Readable({ read() {} })
             const childStderr = new Readable({ read() {} })
             const logChild = new EventEmitter()

@@ -156,6 +156,7 @@ describe('Fuzz: filterCommandParameters()', function () {
         expect(result).to.not.have.property('bitcoin')
     })
 
+    // --- Shared-service routing (hub / explorer / db / sync) ---
     // Shared services register under a single empty coin+network key. A bare
     // `update xchain-hub` must resolve there, not fan out across real coins
     // (where it matches no container and silently no-ops).

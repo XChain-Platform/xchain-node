@@ -22,6 +22,8 @@
  * with nobody echoing it. xchain-hub solved its own half of this in
  * `xchain-hub/src/secret-env.js`; this is the xchain-node half, covering the
  * sidecar keys the node itself owns and composes into every container env.
+ * Until it existed, renaming a key on a running stack broke that stack, so the
+ * rename could not be rolled out at all.
  *
  * This module lets every secret-bearing config key be supplied under a
  * redaction-safe `_SECRET` name, keeping the historical name as a deprecated
@@ -53,7 +55,8 @@
 // SIGNING_PRIVKEY_HEX) are here as well as in xchain-hub's own table because
 // xchain-node is what READS them out of `config/hub.local` and the validator env
 // and composes the hub container's environment. Both tables must agree on the
-// preferred name; `test/unit/secret_env.test.js` pins them together.
+// preferred name; `test/unit/secret_env.test.js` pins them together, and the
+// platform's secret-name audit pins its rename suggestions to both.
 const SECRET_ENV_ALIASES = Object.freeze({
     NODE_PASSWORD:                'NODE_SECRET',
     DECODER_DB_PASS:              'DECODER_DB_SECRET',
@@ -69,8 +72,13 @@ const LEGACY_BY_ALIAS = Object.freeze(Object.fromEntries(
     Object.entries(SECRET_ENV_ALIASES).map(([legacy, alias]) => [alias, legacy])
 ))
 
-// The redaction-safe name a secret-bearing key should be supplied under, or
-// undefined when the key is not one this module governs.
+/**
+ * The redaction-safe name a secret-bearing key should be supplied under, or
+ * undefined when the key is not one this module governs.
+ *
+ * @param {string} key
+ * @returns {string|undefined}
+ */
 function preferredSecretEnvName(key) {
     return SECRET_ENV_ALIASES[key]
 }

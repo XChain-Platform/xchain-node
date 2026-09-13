@@ -108,7 +108,8 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
 
             expect(fs.existsSync(env.dataDir), 'data dir').to.be.true
             expect(fs.existsSync(env.moduleDir), 'module dir').to.be.true
-            // tmp and containers_files are created by patchConstants in setup, not asserted here
+            // Note: tmp and containers_files are created by patchConstants in setup
+            // precheck.createDirectories would create them via the patched paths
         })
     })
 

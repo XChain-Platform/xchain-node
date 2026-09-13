@@ -169,10 +169,10 @@ describe('Fuzz: Branch Name Validation', function () {
 
     // --- Branch names that pass the regex but look like git flags ---
     const regexPassButDangerous = [
-        // "--upload-pack" and similar strings pass the branch-name regex (it
-        // allows hyphens) but are safe: execFile passes args as an array, so
-        // "-b" always consumes the following element as the branch name and
-        // never as a separate flag.
+        // The regex DOES allow this (all chars are in [a-zA-Z0-9._\-\/])
+        // But with execFile, args are passed as array elements, not a shell string.
+        // git clone -b --upload-pack treats it as a branch name argument to -b, not a separate flag
+        // This is safe because -b consumes the next argument
         // These match ^[a-zA-Z0-9._\-\/]+$ but start with -
         // The regex allows hyphens, so "--upload-pack" could pass if it starts with valid chars
         // Actually: --upload-pack contains only [a-zA-Z-] so it DOES match the regex

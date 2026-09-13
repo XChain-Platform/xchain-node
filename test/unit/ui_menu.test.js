@@ -1,4 +1,5 @@
-// The interactive menu functions (src/ui/menu.js) are the operator entry
+// Unit coverage for the ui component
+// (src/ui/menu.js). The interactive menu functions are the operator entry
 // points; they must load without side effects and expose the expected
 // callable surface. The prompts themselves are interactive, so this pins the
 // module contract (exports present and callable) rather than driving a TTY.

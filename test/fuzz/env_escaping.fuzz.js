@@ -98,8 +98,9 @@ function captureDockerRunArgs(stubs) {
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
 
-    // execFile passes each env var as two raw array elements ('-e', 'KEY=value'),
-    // never through a shell, so no escaping or quoting is needed or performed.
+    // With execFile, env vars are passed as raw array elements; no shell escaping is needed.
+    // Each env var is passed as two separate args: '-e', 'KEY=value'
+    // The values are NOT shell-quoted or escaped.
 
     // With execFile, env vars are passed as raw array elements; no shell escaping is needed.
     // Each env var is passed as two separate args: '-e', 'KEY=value'

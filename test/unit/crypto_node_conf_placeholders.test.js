@@ -1,7 +1,7 @@
-// The bundled crypto-node conf files must ship placeholder credential tokens,
-// never a literal weak default ('rpc') or a real generated credential
-// accidentally written back into the repo by buildCryptoNode's in-place
-// substitution (NodeService injects the provisioned creds at build).
+// Guards : the bundled crypto-node conf files must ship placeholder
+// credential tokens, never a literal weak default ('rpc') or a real generated
+// credential accidentally written back into the repo by buildCryptoNode's
+// in-place substitution (NodeService injects the provisioned creds at build).
 const assert = require('assert')
 const fs = require('fs')
 const path = require('path')

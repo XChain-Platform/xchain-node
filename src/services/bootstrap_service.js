@@ -798,6 +798,7 @@ async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = 
     const checksumFile  = path.join(workDir, 'dump.sha256')
     const finalOutput   = path.join(outputDir, archiveName)
 
+    // Get DB credentials (and container ID when not using external DB).
     // In external-DB mode there is no local container; talk to the DB over the
     // native connection (mirrors restoreBootstrapMariaDb's EXTERNAL_DB branch)
     // so bootstrap publishing works from an external-DB host too.
@@ -993,9 +994,9 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
 
-    // Extract + verify the inner archive against the checksum that shipped
-    // inside the signature-verified outer archive (resumable, but the reused
-    // bytes are always re-bound to the verified archive; see the helper).
+    // Extract and verify the inner archive against the checksum that
+    // shipped inside the signature-verified outer archive (resumable, but the
+    // reused bytes are always re-bound to the verified archive; see the helper).
     const innerArchive = await ensureVerifiedInnerArchive(archivePath, workDir, 'data.tar.gz', 'data.sha256')
 
     // Make sure the DB pool is open first; when this routine is invoked outside
@@ -1087,9 +1088,9 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
 
-    // Extract + verify the inner archive against the checksum that shipped
-    // inside the signature-verified outer archive (resumable, but the reused
-    // bytes are always re-bound to the verified archive; see the helper).
+    // Extract and verify the inner archive against the checksum that
+    // shipped inside the signature-verified outer archive (resumable, but the
+    // reused bytes are always re-bound to the verified archive; see the helper).
     const innerArchive = await ensureVerifiedInnerArchive(archivePath, workDir, 'dump.sql.gz', 'dump.sha256')
 
     let dbContainerId = null

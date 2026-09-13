@@ -1919,6 +1919,8 @@ describe('DatabaseService', function () {
         })
     })
 
+    // clearHubPriceIngestWatermark 
+    //
     // A wiped indexer DB restarts push_generations at 0, which the hub's price
     // ingest fence reads as a stale replay and drops, taking that chain's price
     // rail down. The reset clears the fence row so the rail comes back.

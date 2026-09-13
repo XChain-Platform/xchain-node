@@ -160,7 +160,7 @@ function writeState(stateFile, state) {
 // descriptor uses, the oldest entry is at most ~60-75s old and the value
 // returned here slides forward with each new probe. Use it only to seed the
 // persisted onset in runAutoheal; timing the grace window off it directly
-// caps the measurable episode below any grace window over ~75s.
+// caps the measurable episode below any grace window over ~75s (XC #3470).
 function getUnhealthySinceMs(health) {
     const log = Array.isArray(health.Log) ? health.Log : []
     if (log.length === 0) return null
@@ -321,7 +321,7 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         // Anchor the episode to the FIRST pass that saw it unhealthy. Re-deriving
         // from Health.Log every pass cannot work: the log holds 5 entries and the
         // probes are 15s apart, so the derived onset never gets further than
-        // ~60-75s back and a 120s grace window is unreachable. Seed
+        // ~60-75s back and a 120s grace window is unreachable (XC #3470). Seed
         // from the derived value so a container already wedged when autoheal first
         // runs is credited the episode Docker can still see.
         // Two halves of one rule. Reset the onset when the retained probes

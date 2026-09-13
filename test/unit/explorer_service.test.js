@@ -531,10 +531,10 @@ describe('ExplorerService: installExplorerModule() updateExplorer error in loop'
 
 describe('ExplorerService: installExplorerModule() persistent attach failure', function () {
 
-    // This is an explicit design choice ("a genuinely broken network now fails
-    // the install, intended"): the ping loop's existing catch absorbs a
-    // transient updateExplorer failure, while a persistent one exhausts the
-    // tries rather than reporting a success the explorer cannot deliver.
+    // By design, a genuinely broken network fails the install. The ping loop's
+    // existing catch absorbs a transient updateExplorer failure, and a
+    // persistent one exhausts the tries rather than reporting a success the
+    // explorer cannot deliver.
     it('exhausts the ping retries and throws instead of returning success', async function () {
         let pingCount = 0
         const lastStatus = {
@@ -578,8 +578,9 @@ describe('ExplorerService: installExplorerModule() full happy path', function ()
         })
         const es = loadExplorerService(stubs)
         const result = await es.installExplorerModule(false)
-        // ping returns true from the first call, so the "is it running?" check
-        // short-circuits and the install returns true immediately.
+        // ping fails on the "is it running?" check (count 0 → false handled by stub)
+        // Actually since ping returns true on count >= 1:
+        // First call (checking if running): pingCount=1 → true → return true immediately
         expect(result).to.be.true
     })
 

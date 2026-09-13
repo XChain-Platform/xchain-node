@@ -44,8 +44,8 @@ describe('Integration: Docker Command Construction', function () {
 
         capture.when(/docker build/).returns({ stdout: '' })
         capture.when(/docker run/).returns({ stdout: containerId + '\n' })
-        // kill/rm echo the container ID back from the command so DockerService's
-        // stdout === containerId check passes.
+        // Echo back the container ID from the command for kill/rm
+        // so DockerService's stdout === containerId check passes
         const extractId = (cmd) => {
             const parts = cmd.trim().split(/\s+/)
             return { stdout: parts[parts.length - 1] }

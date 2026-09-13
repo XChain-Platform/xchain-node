@@ -510,7 +510,7 @@ describe('AutohealService', () => {
         expect(result.failed).to.have.length(0)
     })
 
-    // Docker keeps 5 Health.Log entries, the probes are 15s apart, so
+    // XC #3470: Docker keeps 5 Health.Log entries, the probes are 15s apart, so
     // the log-derived onset never gets more than ~60s back and slides forward
     // with every pass. Timing the 120s grace off it made autoheal a permanent
     // no-op in production. The onset must be persisted on first sighting.

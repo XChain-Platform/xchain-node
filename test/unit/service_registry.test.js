@@ -26,9 +26,12 @@ const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME
 } = require('../../src/config')
 
-// buildHubModuleConfig is not exported, so it is exercised indirectly: the
-// docker builder via ModuleService's public buildModuleDockerArgs, and the
-// hub descriptor by asserting the SERVICE_REGISTRY shape directly.
+// buildHubModuleConfig is not exported; exercise it through the public
+// buildModuleDockerArgs for docker, and re-derive the hub descriptor by
+// loading HubService with a captured config. Simpler: test the docker builder
+// via ModuleService's export, and the hub descriptor via SERVICE_REGISTRY
+// data + a tiny local re-implementation mirror is NOT used; instead we assert
+// the registry shape directly plus drive the real docker builder.
 function loadModuleService() {
     return proxyquire('../../src/services/module_service', {
         // ModuleService only pulls ValidatorService in lazily (hub caps), and

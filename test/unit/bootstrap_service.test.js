@@ -2182,13 +2182,20 @@ describe('BootstrapService', function () {
         })
     })
 
-    // Integrity refusals must be classified, and must land BEFORE the DROP.
-    // The destructive restore was first exercised end-to-end against a
-    // throwaway database, which surfaced two properties that had been
-    // implicit: a refused archive must not cost the operator their existing
-    // data (the refusal is raised before DROP DATABASE), and the refusal must
-    // read as a refusal rather than a crash, which is why it carries a named
-    // error class that cli.js/menu.js switch on to print the reason and exit 1.
+    // : integrity refusals are classified, and land BEFORE the DROP.
+    //
+    // The destructive restore was first exercised end-to-end on test-host against
+    // a throwaway MariaDB. Two properties matter and both were only implicit:
+    //
+    //   1. A refused archive must not have cost the operator their database.
+    //      The refusal is raised before DROP DATABASE, so a tampered archive
+    //      leaves the existing data intact and the operator can retry with a
+    //      good one. Nothing pinned that ordering, so a future edit that moved
+    //      the gate below the DROP would still pass every other test here.
+    //   2. The refusal must be distinguishable from a crash. Uncaught, it
+    //      printed a Node stack trace, which reads as "the tool broke, retry"
+    //      when it means "this archive is not trustworthy". The named class is
+    //      what lets cli.js/menu.js print the reason and exit 1 instead.
 
     describe('restoreBootstrapMariaDb(): integrity refusal is fail-closed and classified', function () {
 

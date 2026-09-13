@@ -417,9 +417,10 @@ describe('Security', function () {
         it('getDefaultConfig rejects a path-traversal coin parameter', async function () {
             const ConfigService = require('../../src/services/config_service')
             // A traversal string in `coin` must be refused. The guard is a known-coin
-            // allowlist that rejects unknown coins before any path join (a dedicated
-            // traversal-detection guard also exists on other code paths), so the
-            // malicious input must never be silently accepted.
+            // allowlist (coin-name resolution rejects an unknown coin before it can reach
+            // any path join), so '../../../etc' is refused as an unknown coin; an explicit
+            // 'Config path traversal detected' guard also exists on other paths. Either way
+            // the malicious input must be rejected, not silently accepted.
             let threw = null
             try {
                 await ConfigService.getDefaultConfig('xchain-encoder', '../../../etc', 'passwd')
@@ -555,9 +556,11 @@ describe('Security', function () {
                     const line = lines[i].trim()
                     if (line.startsWith('//') || line.startsWith('*')) continue
                     if (line.includes("require('child_process')")) continue
-                    // Requires the char before `exec` to be start-of-line or non-word/non-dot,
-                    // which excludes `x.exec(` method calls (RegExp.prototype.exec was a false
-                    // positive here) while still catching a bare imported exec(.
+                    // Check for a BARE exec( (the imported child_process.exec), but not a
+                    // method call like RegExp.prototype.exec (`re.exec(...)`) or execFile(.
+                    // Requiring the char before `exec` to be start-of-line or a non-dot,
+                    // non-word char excludes `x.exec(` method calls (the false positive that
+                    // flagged a regex `.exec`), while still catching a bare imported exec(.
                     if (/(^|[^.\w])exec\s*\(/.test(line) && !/\bexecFile/.test(line)) {
                         // Allow promisify references and variable names
                         if (/promisify/.test(line)) continue

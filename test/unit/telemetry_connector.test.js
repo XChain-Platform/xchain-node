@@ -1,7 +1,4 @@
-// Telemetry is best-effort and must never throw or block a CLI command; this
-// pins the URL-resolution precedence and the fail-silent contract of report().
-
-//  doctrine test-coverage program: unit coverage for
+// Unit coverage for
 // src/services/telemetry_connector.js. Telemetry is best-effort and must never throw or
 // block a CLI command; this pins the URL-resolution precedence and the
 // fail-silent contract of report().

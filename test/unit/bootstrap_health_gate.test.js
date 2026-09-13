@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// The bootstrap publisher must refuse an unhealthy source.
+//  leg 2: the bootstrap publisher must refuse an unhealthy source.
 //
 // The publisher dumped whatever state the service was in, and because a published
 // archive is the NEWEST file in the served directory it becomes the default choice

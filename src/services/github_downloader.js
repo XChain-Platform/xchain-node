@@ -341,13 +341,20 @@ class GitHubDownloader {
     logger.info(`✅ Hash verified for ${repoKey}@${version} (${resolvedArch})`);
   }
 
-  // Verifies a downloaded FILE (e.g. a prebuilt release tarball) against the
-  // registered SHA-256, before it is decompressed or executed. Counterpart to
-  // verifyRepositoryHash (which hashes an extracted source directory) for
-  // binaries fetched as a single archive, notably the Bitcoin Core tarball
-  // from bitcoincore.org, whose registered hashes are the project's own
-  // published+GPG-signed SHA256SUMS values. Fails closed: throws when no hash
-  // is registered for the (repo, version, arch) tuple.
+  /**
+   * Verifies a downloaded FILE (e.g. a prebuilt release tarball) against the
+   * registered SHA-256, before it is decompressed or executed. This is the
+   * counterpart to verifyRepositoryHash (which hashes an extracted source
+   * directory) for binaries fetched as a single archive, notably the
+   * Bitcoin Core tarball from bitcoincore.org, whose registered hashes are
+   * the project's own published+GPG-signed SHA256SUMS values. Fails closed:
+   * throws when no hash is registered for the (repo, version, arch) tuple.
+   *
+   * @param {string} filePath  the downloaded archive on disk
+   * @param {string} repoKey   e.g. 'bitcoin/bitcoin'
+   * @param {string} version   e.g. 'v28.1'
+   * @param {string|null} arch defaults to the host arch
+   */
   async verifyFileHash(filePath, repoKey, version, arch = null) {
     const resolvedArch = arch ?? getHostArch();
     const expectedHash = this.getHashForArch(repoKey, version, resolvedArch);

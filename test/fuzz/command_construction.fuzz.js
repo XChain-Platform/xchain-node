@@ -147,7 +147,7 @@ describe('Fuzz: Docker Command Construction', function () {
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const cmd = getCmd()
-        // format: "-e KEY1=val1" with no quotes around KEY=value
+        // With execFile, env vars appear as "-e KEY1=val1" (no quotes around KEY=value)
         expect(cmd).to.include('-e KEY1=val1')
         expect(cmd).to.include('-e KEY2=val2')
         expect(cmd).to.include('-e KEY3=val3')
