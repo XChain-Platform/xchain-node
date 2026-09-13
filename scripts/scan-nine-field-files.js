@@ -26,7 +26,7 @@
  * It reads the DECODER database on purpose. The indexer's stored params are truncated to
  * the format's field list, so a scan there cannot see a tenth token and returns zero hits
  * on a chain that has one. The logic and that reasoning live in
- * src/services/GatedFileFieldScan.js and are unit tested there; this file is connection,
+ * src/services/gated_file_field_scan.js and are unit tested there; this file is connection,
  * paging and exit codes. The paging loop and the corpus measurement are exported behind an
  * entrypoint guard and covered by test/unit/scanNineFieldFiles.test.js.
  ********************************************************************/
@@ -34,7 +34,7 @@
 'use strict';
 
 const mariadb = require('mariadb');
-const scanner = require('../src/services/GatedFileFieldScan');
+const scanner = require('../src/services/gated_file_field_scan');
 
 function argFrom(argv, name, fallback) {
     const i = argv.indexOf('--' + name);

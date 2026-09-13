@@ -22,9 +22,9 @@
  * irreversible act, and a survivor found afterwards costs an abort that is no
  * longer clean.
  *
- * The logic lives in src/services/RebaseCompletenessSweep.js and is unit tested there;
+ * The logic lives in src/services/rebase_completeness_sweep.js and is unit tested there;
  * this file is only credentials, connections and exit codes. Those are exported behind
- * an entrypoint guard and covered by test/unit/checkRebaseCompleteness.test.js,
+ * an entrypoint guard and covered by test/unit/check_rebase_completeness.test.js,
  * because a credential or store-lookup fault here decides a deploy just as hard as the
  * sweep verdict does.
  *
@@ -62,7 +62,7 @@
 const fs      = require('fs');
 const path    = require('path');
 const mariadb = require('mariadb');
-const sweeper = require('../src/services/RebaseCompletenessSweep');
+const sweeper = require('../src/services/rebase_completeness_sweep');
 
 const EPOCH_MARKER_SQL = 'SELECT batch_tag FROM consensus_epoch ORDER BY id DESC LIMIT 1';
 
@@ -166,7 +166,7 @@ module.exports = {
     makeQueryCreateTimes, makeQueryEpochMarker, loadConfig, main
 };
 
-// Guarded so test/unit/checkRebaseCompleteness.test.js can require the helpers without
+// Guarded so test/unit/check_rebase_completeness.test.js can require the helpers without
 // the CLI firing on import. The undefined arm covers `node -` (stdin), where require.main
 // is undefined rather than this module; it costs nothing here and keeps the three
 // scripts/ entrypoints on one guard that cannot be copied into a stdin-piped tool wrong.
