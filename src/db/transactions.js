@@ -25,7 +25,7 @@
  * `data LIKE 'FILE|%' OR data LIKE 'BATCH|%'` is the widest useful filter: a FILE can
  * only reach the chain as a top-level FILE or inside a BATCH, and anything else cannot
  * dispatch as one. It is a filter on the RAW payload, never on parsed params, which is
- * the distinction this whole scan turns on.
+ * the distinction this whole tool turns on.
  */
 function payloadScanSql(limit) {
     return 'SELECT t.tx_index, t.block_index, it.hash AS hash, t.data '
@@ -40,11 +40,12 @@ function payloadScanSql(limit) {
  * scan, because "0 hits" over 0 rows and "0 hits" over 40k rows are different
  * facts and only one of them is a scan.
  *
- * This was not theoretical. The first fleet-wide run printed the confident CLEAN
- * verdict for nine of ten stores whose `transactions` table is EMPTY, and the
- * report gave the reader nothing to tell that apart from a real scan. The
- * verdict was true in both cases; the evidence behind it was not comparable, and
- * a gate that reads identically either way trains people to skim it.
+ * This was not theoretical. The first fleet-wide run (2026-07-29) printed the
+ * confident CLEAN verdict for nine of ten stores whose `transactions` table is
+ * EMPTY, and the report gave the reader nothing to tell that apart from a real
+ * scan. The verdict was true in both cases; the evidence behind it was not
+ * comparable, and a gate that reads identically either way trains people to
+ * skim it.
  */
 function payloadCorpusSql() {
     return 'SELECT COUNT(*) AS payload_rows FROM transactions '

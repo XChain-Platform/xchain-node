@@ -64,10 +64,11 @@ function schemaSizeSql(dbName) {
 }
 
 /**
- * Table creation times as EPOCH SECONDS, for the named tables of one schema.
+ * The information_schema read, as its own function so the CLI and tests share one shape.
  *
- * THE EPOCH CONVERSION IS THE WHOLE POINT, and a plain CREATE_TIME instead of
- * this query silently passes survivors, which a real run proved:
+ * CREATE_TIME is returned as UNIX_TIMESTAMP, computed BY THE SERVER, and the caller must
+ * pin the session to `time_zone = '+00:00'` first. That is not fussiness; the naive form
+ * of this query silently passes survivors, which a real run proved:
  *
  *   MariaDB returns CREATE_TIME as a zone-less DATETIME in the SESSION time zone. The
  *   driver then builds a JS Date by interpreting those digits in the CLIENT's LOCAL zone.
