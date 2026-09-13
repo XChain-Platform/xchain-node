@@ -412,6 +412,7 @@ describe('Boundary Tests', function () {
 
         it('explorer special case sets coins to empty', function () {
             const result = filterCommandParameters(null, 'explorer', 'bitcoin', 'mainnet')
+            // Should only have the shared '' key with explorer
             expect(result['']).to.exist
             expect(result['']['']).to.deep.equal(['xchain-explorer'])
             // Should NOT have bitcoin key since coins array was emptied

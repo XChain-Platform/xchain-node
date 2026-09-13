@@ -349,6 +349,7 @@ describe('Chaos: Process Resilience', function () {
                 expect(err).to.equal('module not found')
             }
 
+            // No docker commands should have been called
             expect(stubs.execFile.called).to.be.false
         })
     })

@@ -45,8 +45,10 @@ class CommandCapture {
                 route.response = response
                 return this
             },
-            // respondsWith takes fn(command) => { stdout, stderr, error } for
-            // responses that depend on the matched command.
+            /**
+             * Dynamic response: fn(command) => { stdout, stderr, error }, for
+             * responses that depend on the matched command.
+             */
             respondsWith: (fn) => {
                 route.dynamic = fn
                 return this
@@ -81,8 +83,12 @@ class CommandCapture {
         return this._defaultResponse
     }
 
-    // execFile(command, args, [options], callback) callback-style stub.
-    // Joins command + args into one string for findCommands()/assertCalled().
+    /**
+     * Create a stub for child_process.execFile (callback style).
+     * Compatible with: execFile(command, args, [options], callback)
+     * Records the full command string (command + args.join(' ')) for backward
+     * compatibility with findCommands() and assertCalled().
+     */
     createExecFileStub() {
         const self = this
         return function execFileStub(command, args, ...rest) {

@@ -350,9 +350,11 @@ describe('Chaos: Download Resilience', function () {
             const { GitHubDownloader } = loadDownloader({ spawnSync: spawnSyncStub })
             const dl = new GitHubDownloader('/test/hashes.json')
 
-            // Exercises spawnSync in isolation rather than downloadReleaseAsset,
-            // since that path is async and mocking a full release/asset chain
-            // would add complexity for marginal benefit here.
+            // Directly testing the extraction path would mean calling downloadReleaseAsset
+            // with a mocked release that has a .tar.gz asset. Since downloadReleaseAsset is
+            // async and complex, test via downloadRepoVersion; for a simpler test, verify
+            // spawnSync behavior in isolation: mocking a full release/asset chain would add
+            // complexity for marginal benefit here.
             const result = spawnSyncStub('tar', ['-xzf', '/path/to/file.tar.gz', '-C', '/output'])
             expect(result.status).to.equal(2)
         })

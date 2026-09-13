@@ -20,7 +20,7 @@ const HttpCapture    = require('./http-capture')
 
 /**
  * In-memory replacement for MariaDbStore. Implements the same public API
- * (createDatabase / get/insert/remove ModuleContainer / getModuleCount /
+ * (createDatabase / get/set/delete ModuleContainer / getModuleCount /
  * isReady / close / getAllModuleContainers) backed by a Map. Lets
  * integration tests run without a live MariaDB.
  */
@@ -214,8 +214,10 @@ class TestEnv {
         return this._store.getAllModuleContainers(null, null)
     }
 
-    // Overrides the config/module/data dir constants to point at temp dirs;
-    // restoreConstants() undoes it.
+    /**
+     * Overrides constants paths for config/module/data dirs to use temp dirs.
+     * Returns a restore function; restoreConstants() undoes it.
+     */
     patchConstants() {
         const constants = require('../../../src/config/index')
         this._origConstants = {

@@ -215,7 +215,8 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const modulesBefore = await env.getAllModules()
             expect(modulesBefore.length).to.be.greaterThanOrEqual(5)
 
-            // uninstallModule calls getStatus, which re-queries LevelDB + docker inspect (both stubbed here)
+            // Uninstall: uninstallModule requires getStatus to return module status.
+            // Our StatusService will re-query the registry + docker inspect (both stubbed here).
             await cli.moduleOps.uninstallModules(serviceList)
 
             const encoderEntry = await env.getModule('xchain-encoder', 'bitcoin', 'regtest')

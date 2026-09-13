@@ -31,9 +31,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         await env.teardown()
     })
 
-    // ---------------------------------------------------------------
     // Direct LevelDB operations via state.db
-    // ---------------------------------------------------------------
     describe('LevelDB key format and CRUD', function () {
         const state = require('../../src/state')
 
@@ -88,7 +86,8 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             await state.db.setModuleContainer('xchain-hub', '', '', hubId)
             await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', encoderId)
 
-            // Shared services (empty coin/network) are always included in a filtered query.
+            // When filtering by bitcoin/mainnet, shared services (empty coin/network) are also
+            // returned: a shared service is always included in a filtered query.
             const modules = await state.db.getAllModuleContainers('bitcoin', 'mainnet')
             const moduleNames = modules.map(m => m.module)
             expect(moduleNames).to.include('xchain-hub')
@@ -107,9 +106,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
     })
 
-    // ---------------------------------------------------------------
     // Multiple modules maintain separate state
-    // ---------------------------------------------------------------
     describe('multi-module state isolation', function () {
         const state = require('../../src/state')
 
@@ -122,7 +119,6 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             await state.db.setModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', decId)
             await state.db.setModuleContainer('xchain-indexer', 'bitcoin', 'mainnet', idxId)
 
-            // Others still intact
             // Verify each
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(encId)
             expect(await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')).to.equal(decId)
@@ -131,6 +127,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             // Remove one
             await state.db.deleteModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
 
+            // Others still intact
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(encId)
             expect(await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')).to.be.null
             expect(await state.db.getModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')).to.equal(idxId)
@@ -151,9 +148,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
     })
 
-    // ---------------------------------------------------------------
     // moduleOperations -> LevelDB interaction (start/stop/restart)
-    // ---------------------------------------------------------------
     describe('moduleOperations uses LevelDB for container lookups', function () {
 
         it('startModules reads container IDs from LevelDB and calls docker start', async function () {
@@ -259,6 +254,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
         })
 
         it('startModules gracefully handles missing LevelDB entry', async function () {
+            // No modules inserted; the registry is empty
             const moduleOps = proxyquire('../../src/operations/module_operations', {
                 '../services/docker_service': {
                     startContainer: sinon.stub().resolves(true),
@@ -275,7 +271,8 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             })
 
             const serviceList = { 'bitcoin': { 'mainnet': ['xchain-encoder'] } }
-            // A missing container ID must not throw: the operation catches and logs it.
+            // Should not throw; the operation catches errors and logs them. A missing
+            // container ID must not throw: the operation catches and logs it.
             const result = await moduleOps.startModules(serviceList)
             expect(result).to.be.true
         })

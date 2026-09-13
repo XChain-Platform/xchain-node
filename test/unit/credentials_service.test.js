@@ -16,6 +16,8 @@ const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const os         = require('os')
 
+// Helpers
+
 // Homedir used by tests (never the real home)
 const FAKE_HOME = '/tmp/test-xchain-home'
 const CREDS_DIR  = path.join(FAKE_HOME, '.xchain-node')
@@ -41,14 +43,10 @@ function makeFs(overrides = {}) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 describe('CredentialsService', function () {
 
-    // -------------------------------------------------------------------
     // Path helpers
-    // -------------------------------------------------------------------
     describe('getCredentialsDir()', function () {
 
         it('returns ~/.xchain-node', function () {
@@ -65,9 +63,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // sanitizeForMariaDb
-    // -------------------------------------------------------------------
     describe('sanitizeForMariaDb()', function () {
 
         it('passes through alphanumeric + underscore unchanged', function () {
@@ -98,9 +94,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // getOsUserDbName
-    // -------------------------------------------------------------------
     describe('getOsUserDbName()', function () {
 
         it('returns xchain_node_<sanitized-username>', function () {
@@ -128,9 +122,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // generatePassword
-    // -------------------------------------------------------------------
     describe('generatePassword()', function () {
 
         it('returns a non-empty base64url string', function () {
@@ -154,9 +146,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // hasCredentials
-    // -------------------------------------------------------------------
     describe('hasCredentials()', function () {
 
         it('returns true when credentials file exists', function () {
@@ -180,9 +170,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // loadCredentials
-    // -------------------------------------------------------------------
     describe('loadCredentials()', function () {
 
         it('returns parsed object with user and password', function () {
@@ -236,9 +224,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // saveCredentials
-    // -------------------------------------------------------------------
     describe('saveCredentials()', function () {
 
         it('creates dir if it does not exist', function () {
@@ -320,9 +306,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // loadDbRootPassword / saveDbRootPassword
-    // -------------------------------------------------------------------
     describe('loadDbRootPassword() / saveDbRootPassword()', function () {
 
         it('loadDbRootPassword returns null when the file or key is absent', function () {
@@ -386,9 +370,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // hasExternalDbConfig
-    // -------------------------------------------------------------------
     describe('hasExternalDbConfig()', function () {
 
         it('returns true when credentials.json has a well-formed externalDb block', function () {
@@ -462,9 +444,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // loadExternalDbConfig
-    // -------------------------------------------------------------------
     describe('loadExternalDbConfig()', function () {
 
         it('returns the externalDb block when present', function () {
@@ -493,9 +473,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // saveExternalDbConfig
-    // -------------------------------------------------------------------
     describe('saveExternalDbConfig()', function () {
 
         it('creates dir if it does not exist', function () {
@@ -566,9 +544,7 @@ describe('CredentialsService', function () {
         })
     })
 
-    // -------------------------------------------------------------------
     // XCHAIN_NODE_DB constant
-    // -------------------------------------------------------------------
     describe('XCHAIN_NODE_DB', function () {
 
         it('equals "xchain_node"', function () {

@@ -33,17 +33,20 @@
  *   DECODER_DB_SECRET  (preferred)  ->  DECODER_DB_PASS   (legacy, honoured)
  *   INDEXER_DB_SECRET  (preferred)  ->  INDEXER_DB_PASS   (legacy, honoured)
  *
- * It deliberately does NOT rewrite anyone's file; a sidecar keeps the names
- * the operator wrote. Renaming is an operator step, done together with the
- * credential rotation and a consumer restart, because a sidecar silently
- * rewritten to a name an older xchain-node build cannot read turns a
- * downgrade into an outage. Both names set to DIFFERENT values is a hard
- * error rather than a silent precedence rule, since that shape is a
- * half-finished rename and guessing which one the operator meant risks
- * authenticating with the credential that was supposed to be rotated away
- * from. Renaming the variable does not un-leak anything by itself: it only
- * stops the NEXT read from leaking, so a credential that already appeared in
- * a transcript still has to be rotated.
+ * What it deliberately does NOT do: rewrite anyone's file. A sidecar keeps the
+ * names the operator wrote. Renaming is an operator step because on a shared
+ * stack it has to land together with the credential rotation and a consumer
+ * restart, and because a sidecar silently rewritten to a name an older
+ * xchain-node build cannot read turns a downgrade into an outage.
+ *
+ * Both names set to DIFFERENT values is a hard error rather than a silent
+ * precedence rule: that shape is a half-finished rename, and guessing which one
+ * the operator meant is how a stack ends up authenticating with the very
+ * credential it was supposed to have rotated away from.
+ *
+ * Renaming the variable does not un-leak anything by itself. A name the filter
+ * catches only stops the NEXT read from leaking; a credential that already
+ * appeared in a transcript still has to be rotated.
  *
  ********************************************************************/
 
