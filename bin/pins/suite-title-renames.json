@@ -157,6 +157,13 @@
       "utils/dockerMariadb mariadbEnv() does not mutate process.env": "utils/docker_mariadb mariadbEnv() does not mutate process.env",
       "utils/dockerMariadb mariadbEnv() returns process.env plus MYSQL_PWD": "utils/docker_mariadb mariadbEnv() returns process.env plus MYSQL_PWD"
     },
+    "test/unit/github_downloader.test.js": {
+      "GitHubDownloader _getHashForArch() returns arch-specific hash for object entry": "GitHubDownloader getHashForArch() returns arch-specific hash for object entry",
+      "GitHubDownloader _getHashForArch() returns null for missing repo/version": "GitHubDownloader getHashForArch() returns null for missing repo/version",
+      "GitHubDownloader _getHashForArch() returns null for unknown arch in object entry": "GitHubDownloader getHashForArch() returns null for unknown arch in object entry",
+      "GitHubDownloader _getHashForArch() returns string hash for legacy string entry (any arch)": "GitHubDownloader getHashForArch() returns string hash for legacy string entry (any arch)",
+      "GitHubDownloader verifyRepositoryHash() passes explicit arch parameter to _getHashForArch": "GitHubDownloader verifyRepositoryHash() passes explicit arch parameter to getHashForArch"
+    },
     "test/unit/maria_db_store.test.js": {
       "MariaDbStore countModules() returns 0 when no rows": "MariaDbStore getModuleCount() returns 0 when no rows",
       "MariaDbStore countModules() returns 0 when pool is not ready": "MariaDbStore getModuleCount() returns 0 when pool is not ready",

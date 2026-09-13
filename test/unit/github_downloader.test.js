@@ -384,13 +384,13 @@ describe('GitHubDownloader', function () {
         })
     })
 
-    describe('_getHashForArch()', function () {
+    describe('getHashForArch()', function () {
 
         it('returns string hash for legacy string entry (any arch)', function () {
             const { GitHubDownloader } = loadDownloader()
             const dl = new GitHubDownloader('/test/hashes.json')
             // validHashesData has 'owner/repo': { 'v1.0.0': validHash } (string)
-            const result = dl._getHashForArch('owner/repo', 'v1.0.0', 'x86_64')
+            const result = dl.getHashForArch('owner/repo', 'v1.0.0', 'x86_64')
             expect(result).to.equal(validHash)
         })
 
@@ -408,8 +408,8 @@ describe('GitHubDownloader', function () {
             }
             const { GitHubDownloader } = loadDownloader({ fs: fsStub })
             const dl = new GitHubDownloader('/test/hashes.json')
-            expect(dl._getHashForArch('owner/repo', 'v2.0.0', 'x86_64')).to.equal(xHash)
-            expect(dl._getHashForArch('owner/repo', 'v2.0.0', 'aarch64')).to.equal(armHash)
+            expect(dl.getHashForArch('owner/repo', 'v2.0.0', 'x86_64')).to.equal(xHash)
+            expect(dl.getHashForArch('owner/repo', 'v2.0.0', 'aarch64')).to.equal(armHash)
         })
 
         it('returns null for unknown arch in object entry', function () {
@@ -425,13 +425,13 @@ describe('GitHubDownloader', function () {
             }
             const { GitHubDownloader } = loadDownloader({ fs: fsStub })
             const dl = new GitHubDownloader('/test/hashes.json')
-            expect(dl._getHashForArch('owner/repo', 'v2.0.0', 'unknown_arch')).to.be.null
+            expect(dl.getHashForArch('owner/repo', 'v2.0.0', 'unknown_arch')).to.be.null
         })
 
         it('returns null for missing repo/version', function () {
             const { GitHubDownloader } = loadDownloader()
             const dl = new GitHubDownloader('/test/hashes.json')
-            expect(dl._getHashForArch('nobody/norepo', 'v0.0.0', 'x86_64')).to.be.null
+            expect(dl.getHashForArch('nobody/norepo', 'v0.0.0', 'x86_64')).to.be.null
         })
     })
 
@@ -1241,7 +1241,7 @@ describe('GitHubDownloader', function () {
             }
         })
 
-        it('passes explicit arch parameter to _getHashForArch', async function () {
+        it('passes explicit arch parameter to getHashForArch', async function () {
             const content = Buffer.from('test')
             const expectedHash = crypto.createHash('sha256').update(content).digest('hex')
 

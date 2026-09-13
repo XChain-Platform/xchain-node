@@ -213,7 +213,7 @@ async function getExternalDbConfig() {
             // mean we should re-prompt rather than propagate a bad value.
             try {
                 saved.port = resolveExternalDbPort(saved.port)
-                await _pingMariaDb(saved)
+                await pingMariaDb(saved)
                 return saved
             } catch {
                 logger.info("Saved external-DB credentials no longer work. Please re-enter them.")
@@ -256,7 +256,7 @@ async function getExternalDbConfig() {
 
         try {
             const candidate = { host: String(host).trim(), port: resolveExternalDbPort(port), root_user: String(root_user).trim(), root_password }
-            await _pingMariaDb(candidate)
+            await pingMariaDb(candidate)
             saveExternalDbConfig(candidate)
             logger.info("External MariaDB connection verified. Saved to ~/.xchain-node/credentials.json")
             cfg = candidate
@@ -268,7 +268,7 @@ async function getExternalDbConfig() {
 }
 
 // Lightweight ping: open a one-shot connection, SELECT 1, close.
-async function _pingMariaDb({ host, port, root_user, root_password }) {
+async function pingMariaDb({ host, port, root_user, root_password }) {
     const conn = await mariadb.createConnection({
         host, port: Number(port), user: root_user, password: root_password,
         connectTimeout: 5_000
@@ -294,7 +294,7 @@ async function pingExternalDatabase() {
         return { ok: false, host: null, port: null, error: (err && err.message) || String(err) }
     }
     try {
-        await _pingMariaDb(cfg)
+        await pingMariaDb(cfg)
         return { ok: true, host: cfg.host, port: cfg.port }
     } catch (err) {
         return { ok: false, host: cfg.host, port: cfg.port, error: (err && err.message) || String(err) }
@@ -1319,7 +1319,7 @@ async function buildDatabaseModule(coin, network) {
     if (EXTERNAL_DB) {
         const cfg = await getExternalDbConfig()
         try {
-            await _pingMariaDb(cfg)
+            await pingMariaDb(cfg)
         } catch (err) {
             throw new Error("Cannot reach external MariaDB at " + cfg.host + ":" + cfg.port + ": " + (err.message || err))
         }

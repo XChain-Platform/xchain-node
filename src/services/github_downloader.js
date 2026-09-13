@@ -297,7 +297,7 @@ class GitHubDownloader {
    * Resolve the hash for a (repo, version, arch) tuple. Legacy string-valued
    * entries return their string regardless of arch.
    */
-  _getHashForArch(repoKey, version, arch) {
+  getHashForArch(repoKey, version, arch) {
     const entry = this.hashesData[repoKey]?.[version];
     if (!entry) return null;
     if (typeof entry === 'string') return entry;
@@ -310,7 +310,7 @@ class GitHubDownloader {
    */
   async verifyRepositoryHash(repoKey, version, repoPath, arch = null) {
     const resolvedArch = arch ?? getHostArch();
-    const expectedHash = this._getHashForArch(repoKey, version, resolvedArch);
+    const expectedHash = this.getHashForArch(repoKey, version, resolvedArch);
     if (!expectedHash) {
       throw new Error(`No SHA-256 hash registered for ${repoKey}@${version} on ${resolvedArch}`);
     }
@@ -332,7 +332,7 @@ class GitHubDownloader {
   // is registered for the (repo, version, arch) tuple.
   async verifyFileHash(filePath, repoKey, version, arch = null) {
     const resolvedArch = arch ?? getHostArch();
-    const expectedHash = this._getHashForArch(repoKey, version, resolvedArch);
+    const expectedHash = this.getHashForArch(repoKey, version, resolvedArch);
     if (!expectedHash) {
       throw new Error(`No SHA-256 hash registered for ${repoKey}@${version} on ${resolvedArch}`);
     }

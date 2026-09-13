@@ -78,7 +78,7 @@ function saveCredentials(creds) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     }
     const filePath = getCredentialsPath()
-    const existing = _readCredentialsRaw() || {}
+    const existing = readCredentialsRaw() || {}
     Object.assign(existing, creds)
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), { mode: 0o600 })
     try {
@@ -93,7 +93,7 @@ function saveCredentials(creds) {
 // to the OS-user creds without forcing a separate file. Only populated when
 // XCHAIN_NODE_EXTERNAL_DB=1.
 
-function _readCredentialsRaw() {
+function readCredentialsRaw() {
     try {
         const content = fs.readFileSync(getCredentialsPath(), 'utf8')
         return JSON.parse(content)
@@ -112,7 +112,7 @@ function _readCredentialsRaw() {
 // accepted, read back as the last non-interactive fallback.
 
 function loadDbRootPassword() {
-    const raw = _readCredentialsRaw()
+    const raw = readCredentialsRaw()
     return (raw && typeof raw.dbRootPassword === 'string' && raw.dbRootPassword.length > 0)
         ? raw.dbRootPassword
         : null
@@ -124,14 +124,14 @@ function saveDbRootPassword(password) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     }
     const filePath = getCredentialsPath()
-    const existing = _readCredentialsRaw() || {}
+    const existing = readCredentialsRaw() || {}
     existing.dbRootPassword = String(password)
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), { mode: 0o600 })
     try { fs.chmodSync(filePath, 0o600) } catch {}
 }
 
 function hasExternalDbConfig() {
-    const raw = _readCredentialsRaw()
+    const raw = readCredentialsRaw()
     return !!(raw && raw.externalDb
         && typeof raw.externalDb.host === 'string'
         && typeof raw.externalDb.port === 'number'
@@ -140,7 +140,7 @@ function hasExternalDbConfig() {
 }
 
 function loadExternalDbConfig() {
-    const raw = _readCredentialsRaw()
+    const raw = readCredentialsRaw()
     if (!raw || !raw.externalDb) return null
     return raw.externalDb
 }
@@ -151,7 +151,7 @@ function saveExternalDbConfig(cfg) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     }
     const filePath = getCredentialsPath()
-    const existing = _readCredentialsRaw() || {}
+    const existing = readCredentialsRaw() || {}
     existing.externalDb = {
         host:          String(cfg.host),
         port:          Number(cfg.port),

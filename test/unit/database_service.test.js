@@ -71,7 +71,7 @@ function makeStubs(overrides = {}) {
     // container found via `docker inspect`).
     const execFileAsync = sinon.stub().resolves({ stdout: VALID_CONTAINER_ID + '\n' })
 
-    // Fake mariadb connection used in executeNativeMariaDbCommand / _pingMariaDb
+    // Fake mariadb connection used in executeNativeMariaDbCommand / pingMariaDb
     const fakeConn = {
         query: sinon.stub().resolves([]),
         end: sinon.stub().resolves()
