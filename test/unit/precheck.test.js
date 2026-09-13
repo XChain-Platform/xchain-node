@@ -21,7 +21,6 @@ const sinon      = require('sinon')
 const { configStub } = require('../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
-const cs = require('../../src/services/config_service');
 
 function loadPrecheck(overrides) {
     const stubs = Object.assign({
@@ -458,6 +457,7 @@ describe('preCheck: the CLI presents the sidecar HUB_API_KEY to the hub @regress
     it('runs the hydration through the real sidecar reader with a host-env key left untouched', async function () {
         // The real reader, not a stub: host env wins, and an unset key with no
         // sidecar on disk stays unset (never minted).
+        const cs = require('../../src/services/config_service')
         process.env.HUB_API_KEY = 'host-env-key'
         await cs.applyHubApiKeyFromSidecar(process.env)
         expect(process.env.HUB_API_KEY).to.equal('host-env-key')

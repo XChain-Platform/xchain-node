@@ -14,9 +14,6 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
-const constants = require('../../src/config');
-const ConfigService = require('../../src/services/config_service');
-const fs = require('fs');
 
 function makeExecFileStub() {
     return sinon.stub()
@@ -289,6 +286,7 @@ describe('Security', function () {
 
         it('accepts valid lowercase alphanumeric prefix', function () {
             // The default "xchain-node" must pass validation
+            const constants = require('../../src/config/index')
             expect(constants.NODE_PREFIX).to.match(/^[a-z0-9][a-z0-9._-]*$/)
         })
 
@@ -392,12 +390,14 @@ describe('Security', function () {
         })
 
         it('resolveArgs rejects invalid branch names', function () {
+            const ConfigService = require('../../src/services/config_service')
             expect(() => {
                 ConfigService.resolveArgs(['xchain-encoder', 'bitcoin', 'mainnet', 'bad;branch'], { expectBranch: true })
             }).to.throw('Invalid branch name')
         })
 
         it('resolveArgs accepts valid branch names', function () {
+            const ConfigService = require('../../src/services/config_service')
             const result = ConfigService.resolveArgs(['xchain-encoder', 'bitcoin', 'mainnet', 'develop'], { expectBranch: true })
             expect(result.branch).to.equal('develop')
         })
@@ -406,6 +406,7 @@ describe('Security', function () {
     describe('Config path traversal prevention', function () {
 
         it('getDefaultConfig rejects a path-traversal coin parameter', async function () {
+            const ConfigService = require('../../src/services/config_service')
             // A traversal string in `coin` must be refused. The guard is a known-coin
             // allowlist that rejects unknown coins before any path join (a dedicated
             // traversal-detection guard also exists on other code paths), so the
@@ -511,6 +512,7 @@ describe('Security', function () {
     })
 
     describe('No remaining exec() calls in source files', function () {
+        const fs = require('fs')
         const srcDir = path.join(__dirname, '../../src')
 
         function getAllJsFiles(dir) {

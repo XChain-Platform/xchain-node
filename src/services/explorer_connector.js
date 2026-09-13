@@ -17,6 +17,9 @@
  ********************************************************************/
 
 const axios = require('axios');
+const util = require('node:util');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 class ExplorerConnector {
     constructor(url, port) {
@@ -52,7 +55,7 @@ class ExplorerConnector {
             if (err.response && err.response.status) {
                 return { answering: true, healthy: false }
             }
-            console.error('ExplorerConnector: failed to check explorer connectivity:', err.message);
+            logger.error(util.format('ExplorerConnector: failed to check explorer connectivity:', err.message));
             return { answering: false, healthy: false }
         }
 

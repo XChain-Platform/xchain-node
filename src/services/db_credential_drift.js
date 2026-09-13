@@ -35,6 +35,8 @@ const execFileAsync = promisify(execFile)
 
 const { XChainService, HUB_MODULE_NAME } = require('../config')
 const { getDockerContainerImageName } = require('./config_service')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Escape hatch for the operator who knows the lagging container is about to be
 // recreated anyway (the `recreate` remediation itself does not need it, because
@@ -216,8 +218,8 @@ async function assertNoHubDbCredentialDrift(intended, deps = {}) {
     if (drift.length === 0) return drift
 
     if (env[DRIFT_OVERRIDE_ENV] === '1') {
-        console.log(formatHubDbCredentialDriftError(drift))
-        console.log(`${DRIFT_OVERRIDE_ENV}=1 is set; rotating anyway.`)
+        logger.info(formatHubDbCredentialDriftError(drift))
+        logger.info(`${DRIFT_OVERRIDE_ENV}=1 is set; rotating anyway.`)
         return drift
     }
     const error = new Error(formatHubDbCredentialDriftError(drift))
@@ -287,8 +289,8 @@ async function assertNoDbCredentialDrift(coin, network, intended, deps = {}) {
     if (drift.length === 0) return drift
 
     if (env[DRIFT_OVERRIDE_ENV] === '1') {
-        console.log(formatDbCredentialDriftError(coin, network, drift, excludeModules))
-        console.log(`${DRIFT_OVERRIDE_ENV}=1 is set; rotating anyway.`)
+        logger.info(formatDbCredentialDriftError(coin, network, drift, excludeModules))
+        logger.info(`${DRIFT_OVERRIDE_ENV}=1 is set; rotating anyway.`)
         return drift
     }
     const error = new Error(formatDbCredentialDriftError(coin, network, drift, excludeModules))

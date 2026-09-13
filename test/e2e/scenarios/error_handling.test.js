@@ -19,7 +19,6 @@ const E2EEnv = require('../helpers/e2e-env')
 const TestEnv = require('../../integration/helpers/test-env')
 const CommandCapture = require('../../integration/helpers/command-capture')
 const { filterCommandParameters } = require('../../../src/services/config_service')
-const state = require('../../../src/state');
 
 const ROOT = path.join(__dirname, '../../..')
 
@@ -32,6 +31,7 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
         env = new E2EEnv()
         await env.setup()
 
+        const state = require('../../../src/state')
         state.setDbRootPassword('testrootpw')
     })
 

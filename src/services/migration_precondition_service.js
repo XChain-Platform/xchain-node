@@ -60,6 +60,8 @@ const { tableCountSql, tableExistsSql } = require('../db/information_schema')
 const { appliedMigrationsSql } = require('../db/migrations')
 const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName } = require('./config_service')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Only these modules ship a migrations directory, so everything else skips the
 // guard entirely and costs the update path nothing.
@@ -338,7 +340,7 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
 async function assertRequiredMigrationsApplied(module, coin, network, branch = null, deps = {}) {
     if (!MIGRATION_BEARING_MODULES.includes(module)) return { checked: false, reason: 'no-migrations' }
     if (guardSkipped()) {
-        console.warn(`WARNING: ${SKIP_ENV} is set; skipping the migration precondition check for ${module}. ` +
+        logger.warn(`WARNING: ${SKIP_ENV} is set; skipping the migration precondition check for ${module}. ` +
             'A service whose startup assertion needs an unapplied migration crash-loops as soon as the container is recreated.')
         return { checked: false, reason: 'skipped-by-env' }
     }
@@ -358,7 +360,7 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
         await cloneGitDep(module, false, true, branch)
         required = listRequired(path.join(getModuleTmpDir(module), 'src', 'sql', 'migrations'))
     } catch (err) {
-        console.warn(`Migration precondition guard: could not read ${module}'s migrations ` +
+        logger.warn(`Migration precondition guard: could not read ${module}'s migrations ` +
             `(${err && err.message ? err.message : err}); guard not applied.`)
         return { checked: false, reason: 'source-unreadable' }
     }
@@ -368,7 +370,7 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
     const result = await readApplied({ database: dbName, coin, network })
 
     if (result.state === 'empty-database') {
-        console.warn(`Migration precondition guard: ${dbName} holds no tables yet, so ${module}'s gated ` +
+        logger.warn(`Migration precondition guard: ${dbName} holds no tables yet, so ${module}'s gated ` +
             `migrations (${required.join(', ')}) cannot be outstanding on it; proceeding.`)
         return { checked: true, required, ok: true, reason: 'empty-database' }
     }

@@ -55,6 +55,8 @@ const execFileAsync = promisify(execFile)
 const { XChainService, NODE_MODULE_NAME } = require('../config')
 const gate = require('./bootstrap_health_gate');
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // How each coin image's CLI reaches its daemon. Mirrors the HEALTHCHECK line
 // in crypto_nodes/<coin>/Dockerfile, which is the same call and the proof the
@@ -205,7 +207,7 @@ async function probeServiceCapability(module, coin, network, { runner = defaultR
 // Returns { verdict, refuse, detail, archiveHeight, nodeHeight, gap, ibd }.
 async function assessNodeTipForRestore({ coin, network, module, archivePath }, deps = {}) {
     if (guardSkipped()) {
-        console.log('WARNING: XCHAIN_NODE_SKIP_NODE_TIP_GUARD is set: the archive height is NOT compared with the coin node tip.')
+        logger.info('WARNING: XCHAIN_NODE_SKIP_NODE_TIP_GUARD is set: the archive height is NOT compared with the coin node tip.')
         return { verdict: VERDICT.SKIPPED, refuse: false, detail: 'node tip guard skipped by XCHAIN_NODE_SKIP_NODE_TIP_GUARD' }
     }
     const meta = deps.readBootstrapArchiveMeta || require('./bootstrap_archive_meta').readBootstrapArchiveMeta
@@ -243,16 +245,16 @@ async function assessNodeTipForRestore({ coin, network, module, archivePath }, d
 
     switch (result.verdict) {
         case VERDICT.OK:
-            console.log(`Coin node tip ${result.nodeHeight} is at or past the archive height ${result.archiveHeight}.`)
+            logger.info(`Coin node tip ${result.nodeHeight} is at or past the archive height ${result.archiveHeight}.`)
             break
         case VERDICT.BEHIND_WAIT:
-            console.log(`WARNING: ${result.detail}.`)
+            logger.info(`WARNING: ${result.detail}.`)
             break
         case VERDICT.BEHIND_REFUSE:
-            console.log(`REFUSING the ${module} bootstrap restore: ${result.detail}.`)
+            logger.info(`REFUSING the ${module} bootstrap restore: ${result.detail}.`)
             break
         default:
-            console.log(`Note: ${result.detail}.`)
+            logger.info(`Note: ${result.detail}.`)
     }
     return result
 }

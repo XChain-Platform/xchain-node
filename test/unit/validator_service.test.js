@@ -16,7 +16,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const crypto     = require('crypto')
-const vm = require('vm');
 
 // Fake config dir (never touches the real filesystem)
 const FAKE_CONFIG_DIR = '/tmp/test-xchain-config'
@@ -938,6 +937,7 @@ describe('ValidatorService', function () {
         // run createTx over fresh UTXOs and fund the same payload a second time. So the
         // template is driven for real here rather than grepped, with the SDK stubbed.
         describe('the emitted signer marks post-funding failures', function () {
+            const vm     = require('vm')
             const PHASE1 = 'f'.repeat(64)
 
             // Compile the written template and hand it a stub SDK, so the two-phase

@@ -16,7 +16,6 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const TestEnv = require('./helpers/test-env')
 const CommandCapture = require('./helpers/command-capture')
-const state = require('../../src/state');
 
 describe('Integration: Module Lifecycle (LevelDB state)', function () {
     this.timeout(15000)
@@ -33,6 +32,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
     })
 
     describe('LevelDB key format and CRUD', function () {
+        const state = require('../../src/state')
 
         it('setModuleContainer stores and getModuleContainer retrieves by MC key', async function () {
             const containerId = TestEnv.fakeContainerId('a')
@@ -103,6 +103,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
     })
 
     describe('multi-module state isolation', function () {
+        const state = require('../../src/state')
 
         it('three modules on same coin/network have independent entries', async function () {
             const encId = TestEnv.fakeContainerId('e')

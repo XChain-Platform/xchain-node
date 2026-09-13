@@ -24,6 +24,8 @@ const MAX_CONTAINERS = 6
 
 const { containersFilesDir }     = require('../config')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 async function checkDockerInstalledAndReachable() {
     return new Promise((resolve, reject) => {
@@ -174,10 +176,10 @@ async function createDockerNetwork(networkName) {
         execFile('docker', ['network', 'inspect', networkName], (error) => {
             if (error) {
                 // Network doesn't exist; create it
-                console.log("Creating docker network " + networkName)
+                logger.info("Creating docker network " + networkName)
                 execFile('docker', ['network', 'create', networkName], (err2) => {
                     if (err2) {
-                        console.log(err2)
+                        logger.info(err2)
                         reject(false)
                     } else {
                         resolve(true)
@@ -195,7 +197,7 @@ async function addContainerToNetwork(containerId, networkName) {
 
     return new Promise((resolve, reject) => {
         if (!(networkName in containerStatus["NetworkSettings"]["Networks"])) {
-            console.log("Connecting container " + containerId + " to network " + networkName)
+            logger.info("Connecting container " + containerId + " to network " + networkName)
             execFile('docker', ['network', 'connect', networkName, containerId], (error) => {
                 if (error) {
                     reject(error)
@@ -463,7 +465,7 @@ async function startDockerMonitor(containerIds, follow) {
         const truncated = containerIds.length > MAX_CONTAINERS
         if (truncated) {
             const omitted = containerIds.slice(MAX_CONTAINERS).map(c => c["name"]).join(", ")
-            console.log("Monitoring only " + n + " of " + containerIds.length + " containers; omitted: " + omitted)
+            logger.info("Monitoring only " + n + " of " + containerIds.length + " containers; omitted: " + omitted)
         }
 
         const screen = blessed.screen({

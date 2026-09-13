@@ -13,7 +13,6 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
-const EventEmitter = require('events');
 
 function makeStubs() {
     return {
@@ -621,6 +620,7 @@ describe('DockerService', function () {
     describe('logContainer()', function () {
         it('calls spawn with --tail and --follow for follow=true', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const child = new EventEmitter()
             child.kill = sinon.stub()
             stubs.spawn.returns(child)
@@ -637,6 +637,7 @@ describe('DockerService', function () {
 
         it('calls spawn without --follow for follow=false', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const child = new EventEmitter()
             child.kill = sinon.stub()
             stubs.spawn.returns(child)
@@ -893,6 +894,7 @@ describe('DockerService', function () {
 
         it('resolves true when tee exits with code 0', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Writable, Readable } = require('stream')
 
             const stdin = new Writable({
@@ -922,6 +924,7 @@ describe('DockerService', function () {
 
         it('rejects when tee exits with non-zero code', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Writable, Readable } = require('stream')
 
             const stdin = new Writable({ write(chunk, enc, cb) { cb() } })
@@ -945,6 +948,7 @@ describe('DockerService', function () {
 
         it('rejects on spawn error', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Writable, Readable } = require('stream')
 
             const stdin = new Writable({ write(chunk, enc, cb) { cb() } })
@@ -971,6 +975,7 @@ describe('DockerService', function () {
 
         it('spawns docker logs and pipes to file, resolves when output finishes', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Readable, Writable } = require('stream')
 
             // Mock fs for saveContainerLogs
@@ -1013,6 +1018,7 @@ describe('DockerService', function () {
 
         it('rejects when spawn emits error', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Readable } = require('stream')
 
             const mockWriteStream = new EventEmitter()
@@ -1227,6 +1233,7 @@ describe('DockerService', function () {
 
         it('sets up stdin raw mode and keypress handler when follow=true and isTTY=true', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const child = new EventEmitter()
             child.kill = sinon.stub()
             stubs.spawn.returns(child)
@@ -1256,6 +1263,7 @@ describe('DockerService', function () {
 
         it('ESC keypress kills child process', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const child = new EventEmitter()
             child.kill = sinon.stub()
             stubs.spawn.returns(child)
@@ -1284,6 +1292,7 @@ describe('DockerService', function () {
 
         it('Ctrl-C keypress kills child process', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const child = new EventEmitter()
             child.kill = sinon.stub()
             stubs.spawn.returns(child)
@@ -1315,6 +1324,7 @@ describe('DockerService', function () {
 
         it('sets up blessed UI, spawns docker logs for each container, resolves on q key', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Readable } = require('stream')
 
             let keyHandler = null
@@ -1377,6 +1387,7 @@ describe('DockerService', function () {
 
         it('warns and names omitted containers plus labels banner "n of N" when more than MAX_CONTAINERS are requested', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Readable } = require('stream')
 
             let keyHandler = null
@@ -1435,6 +1446,7 @@ describe('DockerService', function () {
 
         it('does not warn and keeps the plain banner when at most MAX_CONTAINERS are requested', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Readable } = require('stream')
 
             let keyHandler = null
@@ -1487,6 +1499,7 @@ describe('DockerService', function () {
 
         it('spawns docker logs without -f flag when follow=false', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const { Readable } = require('stream')
 
             let keyHandler = null

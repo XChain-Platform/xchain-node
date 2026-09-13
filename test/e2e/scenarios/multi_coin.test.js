@@ -14,7 +14,6 @@ const { expect } = require('chai')
 
 const E2EEnv = require('../helpers/e2e-env')
 const { filterCommandParameters } = require('../../../src/services/config_service')
-const state = require('../../../src/state');
 
 describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
     this.timeout(30000)
@@ -26,6 +25,7 @@ describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
         await env.setup()
         env.setupDefaultRoutes()
 
+        const state = require('../../../src/state')
         state.setDbRootPassword('testrootpw')
     })
 

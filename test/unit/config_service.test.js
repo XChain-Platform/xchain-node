@@ -16,10 +16,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const { Readable } = require('stream')
-const fs = require('fs');
-const os = require('os');
-const realFs = require('fs');
-const crypto = require('crypto');
 
 const {
     NODE_PREFIX, SEP, DB_SEP,
@@ -274,6 +270,8 @@ describe('ConfigService', function () {
     })
 
     describe('persistSidecarCreds()', function () {
+        const os = require('os')
+        const fs = require('fs')
         const { persistSidecarCreds } = require('../../src/services/config_service')
 
         let tmpFile
@@ -1737,6 +1735,9 @@ describe('ConfigService', function () {
     // is never returned by the code and is never rendered by a test, so a failing assertion
     // cannot print a live credential.
     describe('ensureHubApiKey()', function () {
+        const crypto = require('crypto')
+        const realFs = require('fs')
+        const os     = require('os')
         let dir
 
         function serviceWithConfigDir(d) {

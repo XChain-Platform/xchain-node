@@ -12,8 +12,6 @@ const proxyquire = require('proxyquire').noCallThru()
 const { PassThrough, EventEmitter } = require('stream')
 
 const { XChainService, SEP, BOOTSTRAP_BASE_URL } = require('../../src/config')
-const crypto = require('crypto');
-const os = require('os');
 
 const COIN    = 'bitcoin'
 const NETWORK = 'mainnet'
@@ -223,6 +221,7 @@ function stubVerifiedInner(stubs, {
     innerHashOverride = null,
     manageExistsSync = true,
 } = {}) {
+    const crypto = require('crypto')
     const expectedHash = crypto.createHash('sha256').update(innerBytes).digest('hex')
     const declaredHash = innerHashOverride || expectedHash
     let extracted = initiallyPresent
@@ -555,6 +554,7 @@ describe('BootstrapService', function () {
         // run the string the module actually hands the container through a real
         // shell and require it to fail when the listing fails.
         it('uses a listing command that exits non-zero when the listing fails', async function () {
+            const os = require('os')
             const { spawnSync } = require('child_process')
             const stubs = makeStubs()
             let lastArgs = null

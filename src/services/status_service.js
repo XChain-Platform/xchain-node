@@ -30,6 +30,8 @@ const { getStatusFromContainer }         = require('./docker_service')
 const { checkRemoteNodeVersion }         = require('./version_service')
 const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./version_service')
 const { redactSecrets }                  = require('../utils/helpers')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // The remote node version is ADVISORY: it fills one column of the status table
 // and gates nothing. checkRemoteNodeVersion reaches the GitHub releases API, so
@@ -58,7 +60,7 @@ async function checkRemoteNodeVersionAdvisory(coin, network) {
             // reads mid-deploy, and the precheck sweep's equivalent warning is
             // one line too. redactSecrets still runs over it (a credentialed URL
             // can reach an axios message).
-            console.log("Warning: couldn't fetch the remote node version"
+            logger.info("Warning: couldn't fetch the remote node version"
                 + (coin ? " for " + coin : "")
                 + " (GitHub unreachable or rate-limited); continuing without version check: "
                 + redactSecrets((err && err.message) ? err.message : err))
@@ -256,7 +258,7 @@ function describeReorgHaltNote(coin, network, reorgHalt) {
 
 async function getStatus(coin, network, printStatus = false, checkVersions = false) {
     if (isStatusUpdated()) {
-        if (printStatus) console.log(getLastPrintedStatus())
+        if (printStatus) logger.info(getLastPrintedStatus())
         return getLastStatus()
     }
 
@@ -538,7 +540,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
         output += "\x1b[33m! " + note + "\x1b[0m\n"
     }
     setLastPrintedStatus(output)
-    if (printStatus) console.log(getLastPrintedStatus())
+    if (printStatus) logger.info(getLastPrintedStatus())
 
     setLastStatus(installedModules)
     setStatusUpdated(true)

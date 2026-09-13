@@ -17,8 +17,6 @@ const sinon = require('sinon')
 
 const CommandCapture = require('./command-capture')
 const HttpCapture    = require('./http-capture')
-const state = require('../../../src/state');
-const constants = require('../../../src/config');
 
 /**
  * In-memory replacement for MariaDbStore. Implements the same public API
@@ -137,6 +135,7 @@ class TestEnv {
      * methods so production code transparently uses the mock.
      */
     _patchStateDb() {
+        const state = require('../../../src/state')
         const realDb = state.db
         const store = this._store
 
@@ -202,6 +201,7 @@ class TestEnv {
     // Overrides the config/module/data dir constants to point at temp dirs;
     // restoreConstants() undoes it.
     patchConstants() {
+        const constants = require('../../../src/config/index')
         this._origConstants = {
             configDir: constants.configDir,
             moduleDir: constants.moduleDir,

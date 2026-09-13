@@ -13,7 +13,6 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
-const shipped = require('../../src/release-manifest.json');
 
 const PIN_SHA   = 'a'.repeat(40)
 const OTHER_SHA = 'b'.repeat(40)
@@ -377,6 +376,7 @@ describe('ReleaseManifestService', () => {
         // one: the shipped manifest carries real pins. What has to hold from here
         // on is that every pin is USABLE, because a malformed one is the failure
         // this whole file exists to prevent.
+        const shipped = require('../../src/release-manifest.json')
         const real    = proxyquire('../../src/services/release_manifest_service', {
             './github_downloader': { githubApiHeaders: () => ({}), githubRateLimitError: () => null }
         })

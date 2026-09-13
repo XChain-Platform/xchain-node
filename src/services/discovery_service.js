@@ -32,6 +32,8 @@ const {
 } = require('../config')
 const { db } = require('../state')
 const { stringToXChainService } = require('../utils/helpers')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Every coin/network-independent service whose container is named bare
 // NODE_PREFIX+SEP+module and whose registry row is (module,'',''). Must stay in
@@ -42,7 +44,7 @@ const { stringToXChainService } = require('../utils/helpers')
 const SHARED_MODULES = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
 
 function logIfNotSilent(silent, message) {
-    if (!silent) console.log(message)
+    if (!silent) logger.info(message)
 }
 
 // Resolve a docker container to its registry identity { module, coin, network }

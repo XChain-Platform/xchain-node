@@ -48,7 +48,7 @@ function nodeStopTimeoutSeconds() {
     if (raw === undefined || String(raw).trim() === '') return DEFAULT_NODE_STOP_TIMEOUT_SECONDS
     const seconds = parseInt(raw, 10)
     if (!Number.isFinite(seconds) || seconds < 1 || String(seconds) !== String(raw).trim()) {
-        console.warn(`${NODE_STOP_TIMEOUT_ENV}=${raw} is not a whole number of seconds; using the default ${DEFAULT_NODE_STOP_TIMEOUT_SECONDS}`)
+        logger.warn(`${NODE_STOP_TIMEOUT_ENV}=${raw} is not a whole number of seconds; using the default ${DEFAULT_NODE_STOP_TIMEOUT_SECONDS}`)
         return DEFAULT_NODE_STOP_TIMEOUT_SECONDS
     }
     return seconds
@@ -83,6 +83,8 @@ const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validat
 const { statusChanged }                 = require('./status_service')
 const { checkRemoteNodeVersion }        = require('./version_service')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Enumerate a host's mirror addresses so a failover can dial one of them.
 // Pinning the address changes nothing else: URL, SNI and certificate checks
@@ -166,7 +168,7 @@ async function getCryptoNode(coin, network, version) {
     if (coin === Coin.BITCOIN) {
         if (version.startsWith("v")) version = version.substring(1)
 
-        console.log("Downloading bitcoin node...")
+        logger.info("Downloading bitcoin node...")
         const destination = cryptoNodesDir + "/bitcoin"
         const filePath = destination + "/bitcoin" + version + ".tar.gz"
 
@@ -190,10 +192,10 @@ async function getCryptoNode(coin, network, version) {
         if (fs.existsSync(filePath)) {
             try {
                 await gitHubDownloader.verifyFileHash(filePath, 'bitcoin/bitcoin', 'v' + version, arch)
-                console.log(`Using the bitcoin node tarball already at ${filePath}: it matches the pinned SHA-256.`)
+                logger.info(`Using the bitcoin node tarball already at ${filePath}: it matches the pinned SHA-256.`)
                 downloaded = true
             } catch {
-                console.log(`Discarding the file at ${filePath}: it does not match the pinned SHA-256.`)
+                logger.info(`Discarding the file at ${filePath}: it does not match the pinned SHA-256.`)
                 try { fs.rmSync(filePath, { force: true }) } catch { /* best-effort */ }
             }
         }
@@ -212,7 +214,7 @@ async function getCryptoNode(coin, network, version) {
 
             const mirrors = await resolveMirrorAddresses(new URL(downloadUrl).hostname)
             for (const pinned of mirrors) {
-                console.log(`Retrying the bitcoin node download via mirror ${pinned.address}...`)
+                logger.info(`Retrying the bitcoin node download via mirror ${pinned.address}...`)
                 try {
                     await downloadTarball(downloadUrl, filePath, pinned)
                     downloaded = true
@@ -244,7 +246,7 @@ async function getCryptoNode(coin, network, version) {
             // Fails closed: unknown version/arch or any mismatch throws.
             await gitHubDownloader.verifyFileHash(filePath, 'bitcoin/bitcoin', 'v' + version, arch)
 
-            console.log("Decompressing bitcoin node files...")
+            logger.info("Decompressing bitcoin node files...")
             await decompressTarGz(filePath)
 
             if (fs.existsSync(destination + "/bitcoin")) {
@@ -312,7 +314,7 @@ async function resolveBlocksDir() {
             }
         } catch (err) {
             // Persistence is a convenience; the env value still applies this run.
-            console.error('Warning: could not persist XCHAIN_NODE_BLOCKS_DIR to ' + sidecarPath + ': ' + err.message)
+            logger.error('Warning: could not persist XCHAIN_NODE_BLOCKS_DIR to ' + sidecarPath + ': ' + err.message)
         }
         return value
     }
@@ -406,10 +408,10 @@ async function buildCryptoNode(coin, network) {
     }
 
     return new Promise((resolve, reject) => {
-        console.log("Building image of " + coin + " " + network + " node")
+        logger.info("Building image of " + coin + " " + network + " node")
         execFile('docker', ['build', '.', '--build-arg', 'CONF_FILE=' + confFileName, '-t', containerPrefix], { cwd: nodeDir }, async (error) => {
             if (error) {
-                console.error("Error creating Docker image: " + error.message)
+                logger.error("Error creating Docker image: " + error.message)
                 reject("Error creating Docker image: " + error.message)
                 return
             }
@@ -487,8 +489,8 @@ async function buildCryptoNode(coin, network) {
             const stopOutcome = await stopContainerByName(containerPrefix, stopBudgetSeconds)
             const stopLine = describeNodeStopOutcome(coin, network, stopOutcome, stopBudgetSeconds)
             if (stopLine) {
-                if (stopOutcome.killed) console.warn(stopLine)
-                else console.log(stopLine)
+                if (stopOutcome.killed) logger.warn(stopLine)
+                else logger.info(stopLine)
             }
 
             // Name-keyed cleanup immediately before `docker run --name`, making
@@ -575,7 +577,7 @@ async function buildCryptoNode(coin, network) {
                 }
             }
 
-            console.log("Creating container of " + coin + " " + network + " node")
+            logger.info("Creating container of " + coin + " " + network + " node")
             execFile('docker', runArgs, { cwd: nodeDir }, async (error2, stdout) => {
                 if (error2) {
                     reject("Error creating the container: " + error2.message)
@@ -627,16 +629,16 @@ function assertNodeVersionPin(coin, network, localNodeVersion, pin) {
 }
 
 async function installNode(coin, network) {
-    console.log("Creating xchain docker network...")
+    logger.info("Creating xchain docker network...")
     const { createDockerNetwork } = require('./docker_service')
     const { getDockerNetwork } = require('./config_service')
     await createDockerNetwork(getDockerNetwork(coin, network))
 
-    console.log("Installing database...")
+    logger.info("Installing database...")
     const { buildDatabaseModule } = require('./database_service')
     await buildDatabaseModule(coin, network)
 
-    console.log("Installing " + coin + " " + network + " node...")
+    logger.info("Installing " + coin + " " + network + " node...")
     const { getLocalNodeVersion } = require('./version_service')
     let localNodeVersion = null
     try {
@@ -648,7 +650,7 @@ async function installNode(coin, network) {
 
     if (localNodeVersion == null) {
         if (versionPin) {
-            console.log("Node version pinned via env: installing " + coin + " " + versionPin)
+            logger.info("Node version pinned via env: installing " + coin + " " + versionPin)
             await getCryptoNode(coin, network, versionPin)
         } else {
             if (!(NODE_MODULE_NAME + SEP + coin in getRemoteModuleVersions())) {
@@ -666,19 +668,19 @@ async function installNode(coin, network) {
 
     const { cloneGit, buildAndUp } = require('./module_service')
 
-    console.log("Downloading xchain-encoder...")
+    logger.info("Downloading xchain-encoder...")
     await cloneGit(XChainService.XCHAIN_ENCODER, true)
-    console.log("Building xchain-encoder container...")
+    logger.info("Building xchain-encoder container...")
     await buildAndUp(XChainService.XCHAIN_ENCODER, coin, network)
 
-    console.log("Downloading xchain-decoder...")
+    logger.info("Downloading xchain-decoder...")
     await cloneGit(XChainService.XCHAIN_DECODER, true)
-    console.log("Building xchain-decoder container...")
+    logger.info("Building xchain-decoder container...")
     await buildAndUp(XChainService.XCHAIN_DECODER, coin, network)
 
-    console.log("Downloading xchain-utxo-tracker...")
+    logger.info("Downloading xchain-utxo-tracker...")
     await cloneGit(XChainService.XCHAIN_UTXO_TRACKER, true)
-    console.log("Building xchain-utxo-tracker...")
+    logger.info("Building xchain-utxo-tracker...")
     // Only a CONFIRMED empty volume authorises the restore below; an inspection
     // that failed is not evidence of emptiness (uuid:7037604f).
     const { utxoTrackerVolumeFreshness, ensureBootstrapUtxoTracker, forceBootstrapRequested,
@@ -689,15 +691,15 @@ async function installNode(coin, network) {
     if (utxoWasFresh) await ensureBootstrapUtxoTracker(coin, network)
 
     if (network === Network.REGTEST) {
-        console.log("Downloading xchain-regtest-miner...")
+        logger.info("Downloading xchain-regtest-miner...")
         await cloneGit(XChainService.XCHAIN_REGTEST_MINER, true)
-        console.log("Building xchain-regtest-miner...")
+        logger.info("Building xchain-regtest-miner...")
         await buildAndUp(XChainService.XCHAIN_REGTEST_MINER, coin, network)
     }
 
-    console.log("Downloading xchain-indexer...")
+    logger.info("Downloading xchain-indexer...")
     await cloneGit(XChainService.XCHAIN_INDEXER, true)
-    console.log("Building xchain-indexer...")
+    logger.info("Building xchain-indexer...")
     await buildAndUp(XChainService.XCHAIN_INDEXER, coin, network)
 
     try {

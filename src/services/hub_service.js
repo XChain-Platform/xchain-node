@@ -138,6 +138,8 @@ const { addUserPasswordToDatabase, getExternalDbConfig } = require('./database_s
 const { readContainerEnv, assertNoHubDbCredentialDrift } = require('./db_credential_drift')
 const HubConnector                             = require('./hub_connector.js')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 async function updateHubOrExplorer(module) {
     if (![HUB_MODULE_NAME, EXPLORER_MODULE_NAME].includes(module)) {
@@ -272,7 +274,7 @@ async function updateHubOrExplorer(module) {
                     (lastErr ? " (last error: " + redactSecrets(lastErr) + "; if this is a connection failure, check `docker logs` for the module - the service is not starting)" : "")
             }
             if (!hubUpdated) {
-                console.log("There was a problem trying to update a config in the " + module + " module" +
+                logger.info("There was a problem trying to update a config in the " + module + " module" +
                     (lastErr ? " (" + redactSecrets(lastErr) + ")" : "") + ". Trying again in 3 seconds...")
                 await sleep(3000)
             }
@@ -294,7 +296,7 @@ async function attachSharedContainer(moduleLabel, containerId, installedCoinsAnd
             try {
                 await addContainerToNetwork(containerId, getDockerNetwork(nextCoin, nextNetwork))
             } catch (firstErr) {
-                console.log("There was an error trying to connect " + moduleLabel + " to the " +
+                logger.info("There was an error trying to connect " + moduleLabel + " to the " +
                     nextCoin + "/" + nextNetwork + " network (" + redactSecrets(firstErr) + "). Trying again in 3 seconds...")
                 await sleep(3000)
                 try {
@@ -373,26 +375,26 @@ async function updateHub({ skipConfigPush = false } = {}) {
 // been a master hub grading a release stack.
 async function installHubModule(branch = null) {
     const defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
-    if (isVerbose()) console.log("Checking if xchain-hub module is running")
+    if (isVerbose()) logger.info("Checking if xchain-hub module is running")
     const hubConnector = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
 
     const pingHub = await hubConnector.ping()
     if (pingHub) return true
 
-    console.log("Checking if xchain-hub module is installed")
+    logger.info("Checking if xchain-hub module is installed")
     if (isStatusUpdated()) {
         const lastStatus = getLastStatus()
         const hubStatus = lastStatus?.[""]?.[""]?.[HUB_MODULE_NAME]
 
         if (hubStatus !== undefined) {
             if (hubStatus["status"]["State"]["Status"] === "exited") {
-                console.log("The hub module container status is 'exited'. Restarting it...")
+                logger.info("The hub module container status is 'exited'. Restarting it...")
                 const { restartContainer } = require('./docker_service')
                 const restarted = await restartContainer(hubStatus["container_id"])
                 if (restarted !== true) {
                     throw false
                 }
-                console.log("Waiting for the xchain-hub to respond")
+                logger.info("Waiting for the xchain-hub to respond")
                 let restartTries = 10
                 while (restartTries > 0) {
                     const ping = await hubConnector.ping()
@@ -405,7 +407,7 @@ async function installHubModule(branch = null) {
         }
     }
 
-    console.log("Downloading xchain-hub...")
+    logger.info("Downloading xchain-hub...")
     // Pinned like the generic path: a release install must stage the manifest's
     // hub, not the tip of whatever branch this checkout defaults to.
     //
@@ -426,7 +428,7 @@ async function installHubModule(branch = null) {
     if (!getActiveTarget() && (!branch || isReleaseRef(branch))) {
         const target = await resolveInstallTarget(branch, { defaultBranch: DEFAULT_MODULE_BRANCH })
         if (target.kind === 'release') {
-            console.log(`Staging the hub from release ${target.tag} (${target.resolvedFrom}); manifest-pinned.`)
+            logger.info(`Staging the hub from release ${target.tag} (${target.resolvedFrom}); manifest-pinned.`)
             setActiveTarget(target)
             ownsTarget = true
         } else {
@@ -461,10 +463,10 @@ async function installHubFromResolvedRef(branch, defaultConfig, hubConnector) {
         defaultConfig["HUB_DB_NAME"], defaultConfig["HUB_DB_USER"], defaultConfig["HUB_DB_PASS"]
     )
 
-    console.log("Installing xchain-hub module...")
+    logger.info("Installing xchain-hub module...")
     await buildAndUp(HUB_MODULE_NAME, null, null)
     await getStatus(null, null, false)
-    console.log("Waiting for the xchain-hub to respond")
+    logger.info("Waiting for the xchain-hub to respond")
 
     let tries = 10
     while (tries > 0) {

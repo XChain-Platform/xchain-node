@@ -22,6 +22,8 @@
 
 const fs   = require('fs')
 const path = require('path')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 const {
     HUB_MODULE_NAME,
@@ -186,7 +188,7 @@ function assertGoLiveReady(module, coin, network, environmentVariables, moduleDi
     if (!mainnetSurface) return
 
     if (isTruthyEnv(process.env.XCHAIN_NODE_SKIP_GO_LIVE_GATE)) {
-        console.warn('WARNING: XCHAIN_NODE_SKIP_GO_LIVE_GATE is set; go-live pre-flight checks SKIPPED for ' + module)
+        logger.warn('WARNING: XCHAIN_NODE_SKIP_GO_LIVE_GATE is set; go-live pre-flight checks SKIPPED for ' + module)
         return
     }
 
@@ -200,7 +202,7 @@ function assertGoLiveReady(module, coin, network, environmentVariables, moduleDi
             + lines.join('\n')
             + '\nSee the go-live checklist. To bypass once (not for launch): XCHAIN_NODE_SKIP_GO_LIVE_GATE=1')
     }
-    console.warn('WARNING: ' + header + ' un-armed launch settings detected (deploy proceeds; will REFUSE once XCHAIN_NODE_GO_LIVE=1):\n' + lines.join('\n'))
+    logger.warn('WARNING: ' + header + ' un-armed launch settings detected (deploy proceeds; will REFUSE once XCHAIN_NODE_GO_LIVE=1):\n' + lines.join('\n'))
 }
 
 module.exports = {

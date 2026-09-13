@@ -35,6 +35,8 @@ const { HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService }
 const { db }                                        = require('../state')
 const { getModuleTmpDir }                           = require('./config_service')
 const { getContainerModuleVersion }                 = require('./version_service')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Only these modules can carry a hub-version constraint; everything else
 // skips the guard entirely (no extra tmp clone on their update path).
@@ -95,7 +97,7 @@ function getRequiredHubVersion(pkg) {
 async function assertHubNotBehind(module, branch = null, deps = {}) {
     if (!HUB_DEPENDENT_MODULES.includes(module)) return { checked: false, reason: 'not-hub-dependent' }
     if (skewGuardSkipped()) {
-        console.warn(`WARNING: ${SKIP_ENV} is set; skipping the hub version-skew guard for ${module}. ` +
+        logger.warn(`WARNING: ${SKIP_ENV} is set; skipping the hub version-skew guard for ${module}. ` +
             'An out-of-order deploy can halt the stack (hub must update before its downstream services).')
         return { checked: false, reason: 'skipped-by-env' }
     }
@@ -115,7 +117,7 @@ async function assertHubNotBehind(module, branch = null, deps = {}) {
     } catch (err) {
         // Can't fetch the source at all: the update itself is about to fail
         // the same way, so don't add a second failure mode here.
-        console.warn(`Skew guard: could not read ${module} manifest (${err && err.message ? err.message : err}); guard not applied.`)
+        logger.warn(`Skew guard: could not read ${module} manifest (${err && err.message ? err.message : err}); guard not applied.`)
         return { checked: false, reason: 'manifest-unreadable' }
     }
 
@@ -124,7 +126,7 @@ async function assertHubNotBehind(module, branch = null, deps = {}) {
 
     const hubContainerId = await getHubContainer()
     if (!hubContainerId) {
-        console.warn(`Skew guard: ${module} requires hub >= ${requiredHub} but no hub is installed on this stack; proceeding (hubless stack).`)
+        logger.warn(`Skew guard: ${module} requires hub >= ${requiredHub} but no hub is installed on this stack; proceeding (hubless stack).`)
         return { checked: true, requiredHub, hubVersion: null, ok: true }
     }
 

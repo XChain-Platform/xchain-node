@@ -29,6 +29,8 @@
  *
  ********************************************************************/
 
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 const DEFAULT_MODULE_STOP_TIMEOUT_SECONDS = 30
 
 // Services whose SIGTERM drain waits for a block boundary. Anything not listed
@@ -57,7 +59,7 @@ function moduleStopTimeoutSeconds(module, env = process.env) {
     if (raw === undefined || String(raw).trim() === '') return fallback
     const seconds = parseInt(raw, 10)
     if (!Number.isFinite(seconds) || seconds < 1 || String(seconds) !== String(raw).trim()) {
-        console.warn(`${key}=${raw} is not a whole number of seconds; using the default ${fallback}`)
+        logger.warn(`${key}=${raw} is not a whole number of seconds; using the default ${fallback}`)
         return fallback
     }
     return seconds
@@ -91,8 +93,8 @@ async function stopModuleContainer(stopContainerByName, module, coin, network, c
     const outcome = await stopContainerByName(containerRef, budget)
     const line = describeModuleStopOutcome(module, coin, network, outcome, budget)
     if (line) {
-        if (outcome.killed) console.warn(line)
-        else console.log(line)
+        if (outcome.killed) logger.warn(line)
+        else logger.info(line)
     }
     return { ...outcome, budget }
 }

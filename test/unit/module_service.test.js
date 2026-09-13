@@ -16,13 +16,6 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
 const { modulesUrls, XChainService, DEFAULT_NODE_PREFIX, DEPENDENCY_HEALTH_START_PERIOD } = require('../../src/config')
-const pq = require('proxyquire');
-const RealDockerService = require('../../src/services/docker_service');
-const RealHubConsensusEnvGuard = require('../../src/services/hub_consensus_env_guard');
-const RealDbCredentialDrift = require('../../src/services/db_credential_drift');
-const sinon3 = require('sinon');
-const sinon2 = require('sinon');
-const ms = require('../../src/services/module_service');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -187,6 +180,7 @@ function loadModuleService(stubs, constantsOverride, extraProxies) {
 // mocha run, including other test files. Scope the flip to the single load that
 // asked for it.
 function proxyquireCallThru(request, stubs) {
+    const pq = require('proxyquire')
     pq.callThru()
     try {
         return pq(request, stubs)
@@ -204,6 +198,7 @@ describe('ModuleService', function () {
     // port the test asks for (one venue held port 3001 with a live utxo-tracker).
     // Replace the real probe for the duration of this file so a missing stub fails
     // the same way everywhere instead of depending on what the host is running.
+    const RealDockerService = require('../../src/services/docker_service')
     const realGetPublishedHostPorts = RealDockerService.getPublishedHostPorts
 
     // Same venue independence for the hub consensus-env guard, which buildAndUp
@@ -213,6 +208,7 @@ describe('ModuleService', function () {
     // consensus-shaped vars that live container was deployed with. loadModuleService
     // now stubs it by default; this makes a load that forgets fail loudly and
     // identically on every box instead of only on the venue that has a hub.
+    const RealHubConsensusEnvGuard = require('../../src/services/hub_consensus_env_guard')
     const realAssertNoHubConsensusEnvDrift = RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift
 
     // Same venue independence for the DB-credential-drift pre-flight, which
@@ -225,6 +221,7 @@ describe('ModuleService', function () {
     // that forgets (or bypasses loadModuleService via proxyquireCallThru)
     // fail loudly and identically on every box instead of only timing out on
     // a busy venue.
+    const RealDbCredentialDrift = require('../../src/services/db_credential_drift')
     const realAssertNoDbCredentialDrift = RealDbCredentialDrift.assertNoDbCredentialDrift
     const realAssertNoHubDbCredentialDrift = RealDbCredentialDrift.assertNoHubDbCredentialDrift
 
@@ -2043,6 +2040,7 @@ describe('ModuleService', function () {
     describe('installModule(): bootstrap paths via @global proxyquire', function () {
 
         it('calls ensureBootstrapUtxoTracker when utxo-tracker volume was fresh', async function () {
+            const sinon3 = require('sinon')
             const ensureBootstrapUtxoTrackerStub = sinon3.stub().resolves()
             const utxoTrackerVolumeFreshnessStub = sinon3.stub().resolves('empty') // confirmed empty = fresh
             const containerId = 'f'.repeat(64)
@@ -2103,6 +2101,7 @@ describe('ModuleService', function () {
         })
 
         it('calls ensureBootstrapMariaDb when decoder DB was fresh', async function () {
+            const sinon3 = require('sinon')
             const ensureBootstrapMariaDbStub = sinon3.stub().resolves()
             const mariaDbModuleFreshnessStub = sinon3.stub().resolves('empty') // confirmed empty = fresh
             const setDatabaseParametersStub = sinon3.stub().resolves()
@@ -2173,6 +2172,7 @@ describe('ModuleService', function () {
         // rolling update answers unknown, which must leave a populated store
         // untouched.
         it('does NOT call ensureBootstrapMariaDb when the decoder DB freshness is unknown', async function () {
+            const sinon3 = require('sinon')
             const ensureBootstrapMariaDbStub = sinon3.stub().resolves()
             const mariaDbModuleFreshnessStub = sinon3.stub().resolves('unknown')
             const containerId = 'a'.repeat(64)
@@ -2236,6 +2236,7 @@ describe('ModuleService', function () {
         // replaced the container, so a refusal left the working decoder destroyed
         // and locked out of MariaDB. The refusal must now land before any teardown.
         it('refuses a drifting decoder update before tearing the container down', async function () {
+            const sinon3 = require('sinon')
             const driftError = new Error('Refusing to rotate the bitcoin mainnet MariaDB accounts')
             driftError.code = 'DB_CREDENTIAL_DRIFT'
             const assertNoDbCredentialDriftStub = sinon3.stub().rejects(driftError)
@@ -2502,6 +2503,7 @@ describe('ModuleService', function () {
     describe('installModule(): branch switch path', function () {
 
         it('reclones when existing branch differs from requested branch', async function () {
+            const sinon3 = require('sinon')
             const containerId = 'd'.repeat(64)
             const execFileStub = sinon3.stub()
             const cloneCallArgs = []
@@ -2723,6 +2725,7 @@ describe('ModuleService', function () {
                 else { cb(null, '') }
             })
             // Use a util stub so execFileAsync resolves with {stdout} shape for containerExistsByName
+            const sinon3 = require('sinon')
             let asyncCallCount = 0
             const ms = proxyquireCallThru('../../src/services/module_service', {
                 'child_process': { execFile: stubs.execFile },
@@ -2794,6 +2797,7 @@ describe('ModuleService', function () {
             // The real execFile has util.promisify.custom returning {stdout,stderr}.
             // We use a custom proxyquire that replaces util.promisify with one
             // that returns an async function yielding {stdout, stderr}.
+            const sinon2 = require('sinon')
             const execFileStub = sinon2.stub()
             const gitResolve = sinon2.stub().resolves({ stdout: 'feature/test\n', stderr: '' })
             const ms2 = proxyquire('../../src/services/module_service', {
@@ -3204,6 +3208,7 @@ describe('ModuleService', function () {
     // -----------------------------------------------------------------------
 
     describe('resolveObservabilityEnv()', function () {
+        const ms = require('../../src/services/module_service')
 
         it('names exactly the four shim controls', function () {
             expect(ms.OBSERVABILITY_ENV_KEYS).to.deep.equal(

@@ -47,6 +47,8 @@ const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, 
 const { assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError } = require('./db_credential_drift')
 const { statusChanged }           = require('./status_service')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 const {
     XCHAIN_NODE_DB, getOsUserDbName, generatePassword,
     hasCredentials, loadCredentials, saveCredentials,
@@ -214,7 +216,7 @@ async function getExternalDbConfig() {
                 await _pingMariaDb(saved)
                 return saved
             } catch {
-                console.log("Saved external-DB credentials no longer work. Please re-enter them.")
+                logger.info("Saved external-DB credentials no longer work. Please re-enter them.")
             }
         }
     }
@@ -238,8 +240,8 @@ async function getExternalDbConfig() {
     }
 
     // Interactive prompt
-    console.log("\nExternal MariaDB configuration (XCHAIN_NODE_EXTERNAL_DB=1)")
-    console.log("Provide the connection details for the host-native MariaDB this node should use.\n")
+    logger.info("\nExternal MariaDB configuration (XCHAIN_NODE_EXTERNAL_DB=1)")
+    logger.info("Provide the connection details for the host-native MariaDB this node should use.\n")
 
     let cfg = null
     while (!cfg) {
@@ -256,10 +258,10 @@ async function getExternalDbConfig() {
             const candidate = { host: String(host).trim(), port: resolveExternalDbPort(port), root_user: String(root_user).trim(), root_password }
             await _pingMariaDb(candidate)
             saveExternalDbConfig(candidate)
-            console.log("External MariaDB connection verified. Saved to ~/.xchain-node/credentials.json")
+            logger.info("External MariaDB connection verified. Saved to ~/.xchain-node/credentials.json")
             cfg = candidate
         } catch (err) {
-            console.log("Could not connect: " + (err.message || err) + ". Please try again.")
+            logger.info("Could not connect: " + (err.message || err) + ". Please try again.")
         }
     }
     return cfg
@@ -426,7 +428,7 @@ async function askMariadbRootPassword(coin, network) {
         // so a silent switch to the container's own password hides exactly the
         // half-done rotation this resolver exists to survive (uuid:aa6c2267).
         // Names the variable, never a value: this line reaches logs and CI output.
-        console.warn('WARNING: XCHAIN_NODE_DB_ROOT_PASSWORD did not authenticate against the running '
+        logger.warn('WARNING: XCHAIN_NODE_DB_ROOT_PASSWORD did not authenticate against the running '
             + 'MariaDB container and is being ignored; falling back to the container\'s own '
             + 'MYSQL_ROOT_PASSWORD. Rotate both sides, or unset the variable.')
     }
@@ -500,7 +502,7 @@ async function askMariadbRootPassword(coin, network) {
                     saveDbRootPassword(answer)
                     return answer
                 } else {
-                    console.log("Wrong password, please try again")
+                    logger.info("Wrong password, please try again")
                 }
             } else {
                 setDbRootPassword(answer)
@@ -508,7 +510,7 @@ async function askMariadbRootPassword(coin, network) {
                 return answer
             }
         } catch (err) {
-            console.log("An error has occurred asking for database password")
+            logger.info("An error has occurred asking for database password")
             throw err
         }
     }
@@ -606,7 +608,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                     "CREATE DATABASE IF NOT EXISTS " + databaseName
                 )
-                console.log(redactSecrets("Database " + databaseName + " created!"))
+                logger.info(redactSecrets("Database " + databaseName + " created!"))
             }
 
             // Ensure the account exists and force its password to the intended value on every
@@ -624,7 +626,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                 "ALTER USER " + mariadbUser + " IDENTIFIED BY " + escapeSqlStringLiteral(userPassword)
             )
-            console.log(redactSecrets("User " + mariadbUser + " ensured (password set)!"))
+            logger.info(redactSecrets("User " + mariadbUser + " ensured (password set)!"))
 
             let userGrants = await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
                 "SHOW GRANTS FOR " + mariadbUser, "-B -N"
@@ -635,7 +637,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON " + databaseName + ".* TO " + mariadbUser
                 )
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("Permissions granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("Permissions granted to " + mariadbUser + "!"))
             }
 
             // The e2e federation suites (xchain-e2e-test test:federation /
@@ -650,7 +652,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_MVH\\_%`.* TO " + mariadbUser
                 )
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
             }
 
             // The sync server polls these accounts for the replication engine's view of
@@ -663,7 +665,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT SLAVE MONITOR ON *.* TO " + mariadbUser
                 )
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("Replication-status read permission granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("Replication-status read permission granted to " + mariadbUser + "!"))
             }
 
             // Same shape as the MVH grant above, for the other suite that needs a
@@ -686,7 +688,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_DrillB\\_%`.* TO " + mariadbUser
                 )
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
             }
 
             // Same shape again, for row 39's self-synced checkpoint mirror (#4138
@@ -706,12 +708,12 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_HubMirror`.* TO " + mariadbUser
                 )
                 await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
             }
 
             return true
         } catch (err) {
-            console.log(err)
+            logger.info(err)
             throw err
         }
     } else {
@@ -728,7 +730,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                 await executeNativeMariaDbCommand(externalCfg,
                     "CREATE DATABASE IF NOT EXISTS " + databaseName
                 )
-                console.log(redactSecrets("Database " + databaseName + " created!"))
+                logger.info(redactSecrets("Database " + databaseName + " created!"))
             }
 
             // Force-set the password on every run (idempotent). See the docker branch above:
@@ -741,7 +743,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
             await executeNativeMariaDbCommand(externalCfg,
                 "ALTER USER " + mariadbUser + " IDENTIFIED BY " + escapeSqlStringLiteral(userPassword)
             )
-            console.log(redactSecrets("User " + mariadbUser + " ensured (password set)!"))
+            logger.info(redactSecrets("User " + mariadbUser + " ensured (password set)!"))
 
             let userGrants = await executeNativeMariaDbCommand(externalCfg,
                 "SHOW GRANTS FOR " + mariadbUser, "-B -N"
@@ -752,7 +754,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON " + databaseName + ".* TO " + mariadbUser
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("Permissions granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("Permissions granted to " + mariadbUser + "!"))
             }
 
             // See the docker branch above: grant the hub user CREATE/DROP on the
@@ -763,7 +765,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_MVH\\_%`.* TO " + mariadbUser
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("MVH test-database permissions granted to " + mariadbUser + "!"))
             }
 
             // See the docker branch above: the same replication-status read grant. It
@@ -776,7 +778,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT SLAVE MONITOR ON *.* TO " + mariadbUser
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("Replication-status read permission granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("Replication-status read permission granted to " + mariadbUser + "!"))
             }
 
             // See the docker branch above: the same DrillB parity grant, since the
@@ -788,7 +790,7 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_DrillB\\_%`.* TO " + mariadbUser
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("DrillB parity-database permissions granted to " + mariadbUser + "!"))
             }
 
             // See the docker branch above: the same row-39 checkpoint hub-mirror
@@ -798,11 +800,11 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
                     "GRANT ALL PRIVILEGES ON `XChain\\_%\\_HubMirror`.* TO " + mariadbUser
                 )
                 await executeNativeMariaDbCommand(externalCfg, "FLUSH PRIVILEGES")
-                console.log(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
+                logger.info(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
             }
             return true
         } catch (err) {
-            console.log(err)
+            logger.info(err)
             throw err
         }
     }
@@ -866,13 +868,13 @@ async function setDatabaseParameters() {
                     accountsProvisioned += 2
                 }
             } catch (err) {
-                console.log(err)
+                logger.info(err)
                 // Only claim a networking cause when the failure could plausibly be
                 // one. A credential-drift refusal already carries its own diagnosis
                 // and remediation, and appending a docker-network line to it sends
                 // the operator hunting the wrong layer.
                 if (!isDbCredentialDriftError(err)) {
-                    console.log("There was a problem adding the database container to the docker network of " + nextCoin + " " + nextNetwork)
+                    logger.info("There was a problem adding the database container to the docker network of " + nextCoin + " " + nextNetwork)
                 }
                 throw err
             }
@@ -963,7 +965,7 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
         for (const dbName of resetTargets) {
             await executeNativeMariaDbCommand(cfg, `DROP DATABASE IF EXISTS ${dbName}`)
             await executeNativeMariaDbCommand(cfg, `CREATE DATABASE ${dbName}`)
-            console.log(`Database ${dbName} reset!`)
+            logger.info(`Database ${dbName} reset!`)
         }
         return
     }
@@ -986,7 +988,7 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
         await executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword,
             `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`
         )
-        console.log(`Database ${dbName} reset!`)
+        logger.info(`Database ${dbName} reset!`)
     }
 }
 
@@ -1087,7 +1089,7 @@ async function clearHubPriceIngestWatermark(coin, network) {
         await runner(chainOnlyDelete)
     }
 
-    console.log(redactSecrets("Cleared the hub price ingest fence for " + ticker + " on "
+    logger.info(redactSecrets("Cleared the hub price ingest fence for " + ticker + " on "
         + (networkScoped ? (fenceNetwork || "the unset-network (legacy) scope")
                          : "every network this hub holds (it has no " + FENCE_NETWORK_COLUMN + " column)")
         + " (" + hubDbName + "." + PRICE_FENCE_TABLE + ") so the rebuilt indexer's generation-0 pushes are accepted."
@@ -1123,13 +1125,13 @@ function isMissingFenceNetworkColumnError(err) {
 // and the hub release that carries it so the fix is a hub upgrade plus the
 // fleet migration, not a guess.
 function warnPriceFenceNetworkColumnMissing(ticker, hubDbName) {
-    console.warn("WARNING: " + hubDbName + "." + PRICE_FENCE_TABLE + " has no `" + FENCE_NETWORK_COLUMN
+    logger.warn("WARNING: " + hubDbName + "." + PRICE_FENCE_TABLE + " has no `" + FENCE_NETWORK_COLUMN
         + "` column, so the network-scoped clear could not run.")
-    console.warn("  That column (and the (network, source_chain) key) arrives with xchain-hub "
+    logger.warn("  That column (and the (network, source_chain) key) arrives with xchain-hub "
         + FENCE_NETWORK_COLUMN_HUB_FLOOR + "; this hub is older.")
-    console.warn("  Falling back to the chain-only delete: DELETE FROM " + PRICE_FENCE_TABLE
+    logger.warn("  Falling back to the chain-only delete: DELETE FROM " + PRICE_FENCE_TABLE
         + " WHERE source_chain = '" + ticker + "'")
-    console.warn("  On this pre-" + FENCE_NETWORK_COLUMN_HUB_FLOOR + " schema the fence is keyed by chain alone, so that is"
+    logger.warn("  On this pre-" + FENCE_NETWORK_COLUMN_HUB_FLOOR + " schema the fence is keyed by chain alone, so that is"
         + " the whole row. Once the hub is upgraded and the fleet migration has run, the clear scopes to one network again.")
 }
 
@@ -1147,13 +1149,13 @@ function normalizeFenceNetwork(network) {
 // every network's fence for the chain, which is the failure the column was added
 // to remove.
 function warnPriceFenceNotCleared(ticker, fenceNetwork, reason) {
-    console.warn(redactSecrets("WARNING: the hub price ingest fence for " + ticker + " was NOT cleared (" + reason + ")."))
-    console.warn("  A reset indexer DB restarts its push_generations at 0, and the hub DROPS every")
-    console.warn("  price push at or below its recorded retraction generation, taking that chain's price rail")
-    console.warn("  and the native-fee / XCHAIN-USD path down with it. Run this on the hub's OWN database")
-    console.warn("  before the indexer resumes pushing:")
-    console.warn("    " + manualClearStatement(ticker, fenceNetwork))
-    console.warn("  Keep the network clause: it is what leaves every OTHER network's fence for "
+    logger.warn(redactSecrets("WARNING: the hub price ingest fence for " + ticker + " was NOT cleared (" + reason + ")."))
+    logger.warn("  A reset indexer DB restarts its push_generations at 0, and the hub DROPS every")
+    logger.warn("  price push at or below its recorded retraction generation, taking that chain's price rail")
+    logger.warn("  and the native-fee / XCHAIN-USD path down with it. Run this on the hub's OWN database")
+    logger.warn("  before the indexer resumes pushing:")
+    logger.warn("    " + manualClearStatement(ticker, fenceNetwork))
+    logger.warn("  Keep the network clause: it is what leaves every OTHER network's fence for "
         + ticker + " in place.")
 }
 
@@ -1247,11 +1249,11 @@ async function purgeHubCrossChainRows(coin, network) {
         await runner(purgeChainCallsSql(hubDbName, PURGEABLE_NETWORK, ticker))
     }
 
-    console.log(redactSecrets("Purged the hub's " + PURGEABLE_NETWORK + " cross-chain relic rows for "
+    logger.info(redactSecrets("Purged the hub's " + PURGEABLE_NETWORK + " cross-chain relic rows for "
         + ticker + " (" + hubDbName + ") so a fresh indexer does not mirror the dead chain's matches"))
     // The engine rebuilds its committed ledger only at startup, so until the hub
     // is restarted it still holds the purged matches in memory.
-    console.log("Restart the hub so it drops its in-memory match ledger: xchain-node restart " + HUB_MODULE_NAME)
+    logger.info("Restart the hub so it drops its in-memory match ledger: xchain-node restart " + HUB_MODULE_NAME)
     return true
 }
 
@@ -1280,25 +1282,25 @@ async function hubHoldsAnotherNetwork(runner, cfg, hubDbName) {
 // One wording for every "could not purge them here" branch, so the operator
 // always gets the exact statements to run on whichever DB the hub actually uses.
 function warnHubCrossChainRowsNotPurged(ticker, reason) {
-    console.warn(redactSecrets("WARNING: the hub's " + PURGEABLE_NETWORK
+    logger.warn(redactSecrets("WARNING: the hub's " + PURGEABLE_NETWORK
         + " cross-chain relic rows for " + ticker + " were NOT purged (" + reason + ")."))
-    console.warn("  A fresh indexer on the re-genesised chain mirrors the DEAD chain's finalized matches")
-    console.warn("  back in, where they can never settle and each holds a per-block settlement slot.")
-    console.warn("  Run this on the hub's OWN database before the indexer catches up:")
+    logger.warn("  A fresh indexer on the re-genesised chain mirrors the DEAD chain's finalized matches")
+    logger.warn("  back in, where they can never settle and each holds a per-block settlement slot.")
+    logger.warn("  Run this on the hub's OWN database before the indexer catches up:")
     for (const statement of manualHubCrossChainPurgeStatements(ticker)) {
-        console.warn("    " + statement)
+        logger.warn("    " + statement)
     }
-    console.warn("  Then restart the hub: xchain-node restart " + HUB_MODULE_NAME)
+    logger.warn("  Then restart the hub: xchain-node restart " + HUB_MODULE_NAME)
 }
 
 // The snapshots half alone was skipped: the matches and calls are already gone.
 function warnCapabilitySnapshotsKept(reason) {
-    console.warn(redactSecrets("WARNING: the hub's " + CAPABILITY_SNAPSHOT_TABLE
+    logger.warn(redactSecrets("WARNING: the hub's " + CAPABILITY_SNAPSHOT_TABLE
         + " rows were NOT purged (" + reason + ")."))
-    console.warn("  That table carries no network column, so purging it from here could take another")
-    console.warn("  network's validator sets with it. The re-genesised chain's matches and calls WERE")
-    console.warn("  purged. If this hub really is the regtest one, run on its own database:")
-    console.warn("    " + manualSnapshotPurgeStatement())
+    logger.warn("  That table carries no network column, so purging it from here could take another")
+    logger.warn("  network's validator sets with it. The re-genesised chain's matches and calls WERE")
+    logger.warn("  purged. If this hub really is the regtest one, run on its own database:")
+    logger.warn("    " + manualSnapshotPurgeStatement())
 }
 
 // The by-hand form of what purgeHubCrossChainRows issues, shared by the warning
@@ -1327,12 +1329,12 @@ async function buildDatabaseModule(coin, network) {
     const existingId = await checkIfDatabaseModuleExists(coin, network)
 
     if (!existingId) {
-        console.log("Installing mariadb database...")
+        logger.info("Installing mariadb database...")
         const mariadbRootPassword = await askMariadbRootPassword(coin, network)
         const environmentVariables = await getDefaultConfig(DB_MODULE_NAME, coin, network)
         const containerPrefix = getDockerContainerImageName(DB_MODULE_NAME, coin, network)
 
-        console.log("Building image of database")
+        logger.info("Building image of database")
         await execFileAsync('docker', ['pull', 'mariadb:10.11'])
         await execFileAsync('docker', ['tag', 'mariadb:10.11', containerPrefix])
 
@@ -1465,7 +1467,7 @@ async function buildDatabaseModule(coin, network) {
         const { assertNoHostPortConflicts } = require('./module_service')
         await assertNoHostPortConflicts(['-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`], containerPrefix)
 
-        console.log("Creating container of module " + DB_MODULE_NAME)
+        logger.info("Creating container of module " + DB_MODULE_NAME)
         const { stdout } = await execFileAsync('docker', runArgs, {
             env: { ...process.env, MYSQL_ROOT_PASSWORD: mariadbRootPassword }
         })
@@ -1517,7 +1519,7 @@ async function buildDatabaseModule(coin, network) {
             }
             return true
         } catch (err) {
-            console.log(err)
+            logger.info(err)
             throw "There was a problem trying to add the db container to the network " + coin + " " + network
         }
     }
@@ -1541,7 +1543,7 @@ async function ensureXchainNodeAccess() {
                 await conn.end()
                 return existing
             } catch {
-                console.log("Stored xchain-node credentials no longer work against the external MariaDB; reprovisioning")
+                logger.info("Stored xchain-node credentials no longer work against the external MariaDB; reprovisioning")
             }
         }
 
@@ -1551,7 +1553,7 @@ async function ensureXchainNodeAccess() {
         // Same allowlist/escape contract as addUserPasswordToDatabase: dbUser is
         // an identifier (validate), dbPassword may carry arbitrary bytes (escape).
         assertSafeDbIdentifier(dbUser, 'database user')
-        console.log("Creating xchain-node database and user " + dbUser + " on external MariaDB")
+        logger.info("Creating xchain-node database and user " + dbUser + " on external MariaDB")
         await executeNativeMariaDbCommand(externalCfg, "CREATE DATABASE IF NOT EXISTS " + XCHAIN_NODE_DB)
         await executeNativeMariaDbCommand(externalCfg, "CREATE USER IF NOT EXISTS '" + dbUser + "'@'%' IDENTIFIED BY " + escapeSqlStringLiteral(dbPassword))
         // Force password in case user exists from earlier with a different one
@@ -1561,7 +1563,7 @@ async function ensureXchainNodeAccess() {
 
         const creds = { user: dbUser, password: dbPassword, database: XCHAIN_NODE_DB }
         saveCredentials(creds)
-        console.log("Credentials saved to user home directory")
+        logger.info("Credentials saved to user home directory")
         return creds
     }
 
@@ -1583,7 +1585,7 @@ async function ensureXchainNodeAccess() {
         const works = await checkIfDatabaseIsReady(existing.user, existing.password, XCHAIN_NODE_DB,
             { tries: 2, retryDelay: 1000 })
         if (works) return existing
-        console.log("Stored xchain-node credentials no longer work against this MariaDB (auth or xchain_node DB missing); reprovisioning")
+        logger.info("Stored xchain-node credentials no longer work against this MariaDB (auth or xchain_node DB missing); reprovisioning")
     }
 
     const rootPassword = await askMariadbRootPassword("", "")
@@ -1598,7 +1600,7 @@ async function ensureXchainNodeAccess() {
     // Same allowlist/escape contract as addUserPasswordToDatabase: dbUser is an
     // identifier (validate), dbPassword may carry arbitrary bytes (escape).
     assertSafeDbIdentifier(dbUser, 'database user')
-    console.log("Creating xchain-node database and user " + dbUser)
+    logger.info("Creating xchain-node database and user " + dbUser)
     await executeDockerMariaDbCommand(containerId, rootPassword,
         "CREATE DATABASE IF NOT EXISTS " + XCHAIN_NODE_DB
     )
@@ -1616,7 +1618,7 @@ async function ensureXchainNodeAccess() {
 
     const creds = { user: dbUser, password: dbPassword, database: XCHAIN_NODE_DB }
     saveCredentials(creds)
-    console.log("Credentials saved to user home directory")
+    logger.info("Credentials saved to user home directory")
     return creds
 }
 

@@ -20,8 +20,6 @@ const {
 
 const TestEnv     = require('./helpers/test-env')
 const HttpCapture = require('./helpers/http-capture')
-const statusState = require('../../src/state');
-const state = require('../../src/state');
 
 describe('Integration: Hub/Explorer Config Update', function () {
     this.timeout(15000)
@@ -50,6 +48,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
             'axios': axiosStub
         })
 
+        const statusState = require('../../src/state')
 
         const HubService = proxyquire('../../src/services/hub_service', {
             './hub_connector.js': HubConnector,
@@ -76,6 +75,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
     describe('updateHubOrExplorer payload for hub', function () {
 
         it('builds JSON config with module connection details from installed modules', async function () {
+            const state = require('../../src/state')
 
             const encId = TestEnv.fakeContainerId('e')
             const decId = TestEnv.fakeContainerId('d')
@@ -125,6 +125,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
         })
 
         it('includes node config with correct ports and credentials', async function () {
+            const state = require('../../src/state')
 
             const nodeId = TestEnv.fakeContainerId('n')
             const hubId = TestEnv.fakeContainerId('h')
@@ -164,6 +165,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
         })
 
         it('includes multiple coin/network stacks', async function () {
+            const state = require('../../src/state')
 
             const id1 = TestEnv.fakeContainerId('1')
             const id2 = TestEnv.fakeContainerId('2')
@@ -207,6 +209,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
     describe('hub update retry logic', function () {
 
         it('retries on failure and succeeds when hub responds', async function () {
+            const state = require('../../src/state')
 
             const hubId = TestEnv.fakeContainerId('h')
             const encId = TestEnv.fakeContainerId('e')
@@ -236,6 +239,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
         })
 
         it('throws after exhausting all retries', async function () {
+            const state = require('../../src/state')
 
             const hubId = TestEnv.fakeContainerId('h')
             await env.insertModule('xchain-hub', '', '', hubId)
@@ -261,6 +265,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
     describe('updateHubOrExplorer for explorer', function () {
 
         it('writes config.json to explorer container via docker exec', async function () {
+            const state = require('../../src/state')
 
             const explorerId = TestEnv.fakeContainerId('x')
             const encId = TestEnv.fakeContainerId('e')
@@ -317,6 +322,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
     describe('updateHub network connectivity', function () {
 
         it('connects hub container to all installed coin/network Docker networks', async function () {
+            const state = require('../../src/state')
 
             const hubId = TestEnv.fakeContainerId('h')
             const encId = TestEnv.fakeContainerId('e')
@@ -392,6 +398,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
         })
 
         async function pushWithContainerEnv(containerEnv) {
+            const state = require('../../src/state')
 
             const hubId = TestEnv.fakeContainerId('h')
             const btcId = TestEnv.fakeContainerId('b')

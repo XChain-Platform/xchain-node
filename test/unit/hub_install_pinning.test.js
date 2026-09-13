@@ -20,11 +20,11 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
-const manifest = require('../../src/services/release_manifest_service');
 
 const PIN_SHA = 'c'.repeat(40)
 
 function load(stubs) {
+    const manifest = require('../../src/services/release_manifest_service')
     return proxyquire('../../src/services/hub_service', {
         '../state': {
             db: { getModuleContainer: sinon.stub().resolves(null) },

@@ -40,6 +40,8 @@ const { assertBootstrapSourceHealthy }                = require('./bootstrap_hea
 const { recordBootstrapPublished }                    = require('./bootstrap_republish_ledger')
 const { declareEncoderMaintenance, clearEncoderMaintenance } = require('./encoder_maintenance_window')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Bootstrap signing (supply-chain integrity):
 //
@@ -101,7 +103,7 @@ function loadBootstrapPublicKey() {
     // REQUIRE_SIGNED=0 opt-out: an operator watching the "signature OK" line
     // must be told the pinned anchor is NOT the one that validated the archive.
     if (override && path.resolve(override) !== path.resolve(DEFAULT_BOOTSTRAP_PUBKEY_PATH)) {
-        console.log(`WARNING: bootstrap signature trust anchor overridden via XCHAIN_NODE_BOOTSTRAP_PUBKEY=${override}; the repo-pinned public key (${DEFAULT_BOOTSTRAP_PUBKEY_PATH}) is NOT in use.`)
+        logger.info(`WARNING: bootstrap signature trust anchor overridden via XCHAIN_NODE_BOOTSTRAP_PUBKEY=${override}; the repo-pinned public key (${DEFAULT_BOOTSTRAP_PUBKEY_PATH}) is NOT in use.`)
     }
     if (!fs.existsSync(pubkeyPath)) return null
     return crypto.createPublicKey(fs.readFileSync(pubkeyPath, 'utf8'))
@@ -143,7 +145,7 @@ async function checkBootstrapSignature(archivePath) {
     if (publicKey && fs.existsSync(sigPath)) {
         process.stdout.write('Verifying bootstrap signature... ')
         await verifyBootstrapSignature(archivePath, sigPath, publicKey)
-        console.log('OK')
+        logger.info('OK')
         return
     }
 
@@ -153,7 +155,7 @@ async function checkBootstrapSignature(archivePath) {
     if (requireSigned) {
         throw new BootstrapIntegrityError(`Refusing unsigned bootstrap: ${missing}. Signed bootstraps are required by default; set XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0 to override.`)
     }
-    console.log(redactSecrets(`WARNING: restoring bootstrap WITHOUT signature verification (${missing}). Signature enforcement disabled via XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0; the embedded checksum only detects transport corruption, not tampering.`))
+    logger.info(redactSecrets(`WARNING: restoring bootstrap WITHOUT signature verification (${missing}). Signature enforcement disabled via XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP=0; the embedded checksum only detects transport corruption, not tampering.`))
 }
 
 // Sign the just-created archive when a publisher signing key is configured.
@@ -162,11 +164,11 @@ async function checkBootstrapSignature(archivePath) {
 async function maybeSignBootstrap(finalOutput) {
     const keyPath = config.XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY
     if (!keyPath) {
-        console.log('NOTE: XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY not set; bootstrap is unsigned. Consumers cannot verify provenance.')
+        logger.info('NOTE: XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY not set; bootstrap is unsigned. Consumers cannot verify provenance.')
         return null
     }
     const sigPath = await signBootstrapArchive(finalOutput, keyPath)
-    console.log(redactSecrets(`Bootstrap signed: ${sigPath}`))
+    logger.info(redactSecrets(`Bootstrap signed: ${sigPath}`))
     return sigPath
 }
 
@@ -255,16 +257,16 @@ async function ensureVerifiedInnerArchive(archivePath, workDir, innerName, check
         process.stdout.write('Checking existing work-dir archive against the verified checksum... ')
         const computed = await computeSha256(innerArchive)
         if (computed === expectedInnerSha) {
-            console.log('OK (reusing)')
+            logger.info('OK (reusing)')
             return innerArchive
         }
-        console.log('mismatch; discarding and re-extracting')
+        logger.info('mismatch; discarding and re-extracting')
     }
 
     // Fresh extraction from the verified outer archive.
     if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
     ensureDir(workDir)
-    console.log('Extracting outer archive...')
+    logger.info('Extracting outer archive...')
     await execFileAsync('tar', ['xzf', archivePath, '-C', workDir])
     if (!fs.existsSync(innerArchive)) {
         fs.rmSync(workDir, { recursive: true })
@@ -275,7 +277,7 @@ async function ensureVerifiedInnerArchive(archivePath, workDir, innerName, check
         fs.rmSync(workDir, { recursive: true })
         throw new BootstrapIntegrityError(`Inner archive checksum mismatch\n  Expected: ${expectedInnerSha}\n  Got:      ${computed}`)
     }
-    console.log('Outer archive extracted and inner checksum verified')
+    logger.info('Outer archive extracted and inner checksum verified')
     return innerArchive
 }
 
@@ -457,7 +459,7 @@ async function makeBootstrap(coin, network, module) {
     try {
         recordBootstrapPublished(module, coin, network)
     } catch (err) {
-        console.log(`Warning: could not clear the bootstrap republish marker for ${module} ${coin}/${network} (${err.message}).`)
+        logger.info(`Warning: could not clear the bootstrap republish marker for ${module} ${coin}/${network} (${err.message}).`)
     }
 
     return result
@@ -543,7 +545,7 @@ async function warnOnThinTrackerVolume(volumeName, totalBytes) {
     const wanted = Math.round(totalBytes * TRACKER_SNAPSHOT_HEADROOM_RATIO)
     if (availableBytes >= wanted) return
     const gb = bytes => (bytes / 1024 / 1024 / 1024).toFixed(1)
-    console.log(
+    logger.info(
         `WARNING: ${volumeName} has ${gb(availableBytes)} GB free against a ${gb(totalBytes)} GB store.\n` +
         `The snapshot holds every SST the tracker compacts away while the archive is built, so a long\n` +
         `run on this volume can fill it and halt the tracker. Free space or expect a stopped tracker.`
@@ -634,7 +636,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
         )
         totalBytes = parseInt(stdout.trim().split(/\s+/)[0], 10) || 0
     } catch {
-        console.log('Could not estimate volume size, progress will show as ?%')
+        logger.info('Could not estimate volume size, progress will show as ?%')
     }
 
     // Refuse now if either filesystem cannot hold it. Checked before the stop
@@ -683,7 +685,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
         await clearEncoderMaintenance(coin, network)
     }
 
-    console.log(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
+    logger.info(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
     await stopContainer(containerId)
 
     let snapshotTaken     = false
@@ -692,7 +694,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
         try {
             snapshotTaken = await snapshotTrackerVolume(volumeName)
         } catch (err) {
-            console.log(`Volume snapshot unavailable (${err.message}); compressing with the tracker stopped.`)
+            logger.info(`Volume snapshot unavailable (${err.message}); compressing with the tracker stopped.`)
             // A half-written snapshot must not be swept into the fallback
             // archive, and a volume we cannot clean is not one we can publish
             // from: let this throw into the outer finally, which restarts the
@@ -706,7 +708,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
         // full run (2026-08-01: 3h36m BTC, 1h04m LTC, 42m DOGE), which the
         // encoder correctly published as tracker_reachable:false.
         if (snapshotTaken) {
-            console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container (compressing from the snapshot)...`)
+            logger.info(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container (compressing from the snapshot)...`)
             await startContainer(containerId)
             containerRestored = true
             await endMaintenanceWindow()
@@ -743,7 +745,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
 
         const checksum = innerHash.digest('hex')
         await fs.promises.writeFile(checksumFile, `${checksum}  data.tar.gz\n`)
-        console.log(`Checksum: ${checksum}`)
+        logger.info(`Checksum: ${checksum}`)
 
         // Metadata leads the wrapper so a restore can read the height without
         // a pass over the whole archive (see BootstrapArchiveMeta).
@@ -751,13 +753,13 @@ async function makeBootstrapUtxoTracker(coin, network) {
             module: XChainService.XCHAIN_UTXO_TRACKER, coin, network, height: archiveHeight
         }))
 
-        console.log(`Wrapping into ${archiveName}...`)
+        logger.info(`Wrapping into ${archiveName}...`)
         await writeStoredGzipTar(finalOutput, workDir, [metaMember, 'data.tar.gz', 'data.sha256'])
 
         await maybeSignBootstrap(finalOutput)
 
         fs.rmSync(workDir, { recursive: true })
-        console.log(redactSecrets(`Bootstrap created: ${finalOutput}`))
+        logger.info(redactSecrets(`Bootstrap created: ${finalOutput}`))
 
     } finally {
         // Cleanup first, but never let it throw past the restart: a pinned
@@ -765,10 +767,10 @@ async function makeBootstrapUtxoTracker(coin, network) {
         try {
             await removeTrackerSnapshot(volumeName)
         } catch (err) {
-            console.log(`Warning: could not remove /data/${TRACKER_SNAPSHOT_DIR} in ${volumeName} (${err.message}); it holds disk until removed.`)
+            logger.info(`Warning: could not remove /data/${TRACKER_SNAPSHOT_DIR} in ${volumeName} (${err.message}); it holds disk until removed.`)
         }
         if (!containerRestored) {
-            console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
+            logger.info(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
             await startContainer(containerId)
         }
         // After the restart, always: the fallback path held the window for the
@@ -825,7 +827,7 @@ async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = 
         }
         totalBytes = parseInt(String(sizeOut).trim(), 10) || 0
     } catch {
-        console.log('Could not estimate DB size, progress will show as ?%')
+        logger.info('Could not estimate DB size, progress will show as ?%')
     }
 
     if (fs.existsSync(workDir)) fs.rmSync(workDir, { recursive: true })
@@ -886,7 +888,7 @@ async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = 
     try {
         await assertBootstrapSourceHealthy(coin, network, module, { since: preflightWatermark })
     } catch (err) {
-        console.log(`The ${module} source stopped being known-good while ${dbName} was dumping; `
+        logger.info(`The ${module} source stopped being known-good while ${dbName} was dumping; `
             + 'discarding the finished dump rather than publishing it.')
         try { fs.rmSync(workDir, { recursive: true }) } catch { /* the refusal is what matters */ }
         throw err
@@ -895,7 +897,7 @@ async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = 
     process.stdout.write('Computing checksum... ')
     const checksum = await computeSha256(innerArchive)
     await fs.promises.writeFile(checksumFile, `${checksum}  dump.sql.gz\n`)
-    console.log(checksum)
+    logger.info(checksum)
 
     // The height the dump ends at, for the restore-time comparison with the
     // coin node (BootstrapNodeTipGuard). Read after the dump so it can only
@@ -904,13 +906,13 @@ async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = 
     const archiveHeight = await readMariaDbTipHeight(dbName, { dbContainerId, rootPassword, externalCfg })
     const metaMember = await writeBootstrapMeta(workDir, buildBootstrapMeta({ module, coin, network, height: archiveHeight }))
 
-    console.log(`Wrapping into ${archiveName}...`)
+    logger.info(`Wrapping into ${archiveName}...`)
     await execFileAsync('tar', ['czf', finalOutput, '-C', workDir, metaMember, 'dump.sql.gz', 'dump.sha256'])
 
     await maybeSignBootstrap(finalOutput)
 
     fs.rmSync(workDir, { recursive: true })
-    console.log(redactSecrets(`Bootstrap created: ${finalOutput}`))
+    logger.info(redactSecrets(`Bootstrap created: ${finalOutput}`))
 
     return true
 }
@@ -934,7 +936,7 @@ async function readMariaDbTipHeight(dbName, { dbContainerId, rootPassword, exter
         const height = parseInt(String(out).trim(), 10)
         return Number.isInteger(height) && height >= 0 ? height : null
     } catch (err) {
-        console.log(`Could not read the ${dbName} tip height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
+        logger.info(`Could not read the ${dbName} tip height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
         return null
     }
 }
@@ -957,7 +959,7 @@ async function readTrackerCommittedHeight(coin, network, containerId) {
         }
         return null
     } catch (err) {
-        console.log(`Could not read the tracker height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
+        logger.info(`Could not read the tracker height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
         return null
     }
 }
@@ -1008,11 +1010,11 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         throw new Error(`utxo-tracker container not found for ${coin}/${network} (DB pool is ready but no matching row in the modules table)`)
     }
 
-    console.log(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
+    logger.info(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
     await stopContainer(containerId)
 
     try {
-        console.log('Clearing LevelDB volume...')
+        logger.info('Clearing LevelDB volume...')
         await execFileAsync('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
 
         const stats      = await fs.promises.stat(innerArchive)
@@ -1039,7 +1041,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         progress.stop('LevelDB data restored')
 
         fs.rmSync(workDir, { recursive: true })
-        console.log('Bootstrap restore complete')
+        logger.info('Bootstrap restore complete')
 
     } catch (err) {
         // Post-wipe regime (uuid:7edc76f3). Every statement in the try above runs
@@ -1052,7 +1054,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         // xchain-utxo-tracker/src/bootstrap-recovery.js `handleRestoreFailure`,
         // where a post-wipe abort fails loud instead of resuming.
         err.postWipe = true
-        console.log(
+        logger.info(
             `[fatal] ${XChainService.XCHAIN_UTXO_TRACKER} bootstrap restore failed AFTER the LevelDB\n` +
             `volume was wiped; the store is incomplete and the container has been left STOPPED so it\n` +
             `cannot report a wiped store as caught up. Re-run the restore with\n` +
@@ -1061,7 +1063,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         throw err
     }
 
-    console.log(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
+    logger.info(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
     await startContainer(containerId)
 
     return true
@@ -1113,12 +1115,12 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
         serviceContainerId = await db.getModuleContainer(module, coin, network)
     } catch { /* service not installed yet, proceed without stopping */ }
     if (serviceContainerId) {
-        console.log(`Stopping ${module} container...`)
+        logger.info(`Stopping ${module} container...`)
         await stopContainer(serviceContainerId)
     }
 
     try {
-        console.log(`Recreating database ${dbName}...`)
+        logger.info(`Recreating database ${dbName}...`)
         if (EXTERNAL_DB) {
             // Driver-based path: DROP and CREATE as separate statements (the
             // mariadb driver rejects multi-statement strings unlike the CLI).
@@ -1167,13 +1169,13 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
         progress.stop(`${dbName} restored`)
 
         fs.rmSync(workDir, { recursive: true })
-        console.log('Bootstrap restore complete')
+        logger.info('Bootstrap restore complete')
 
         return true
     } finally {
         // Always restart the service so a failed restore doesn't leave it down.
         if (serviceContainerId) {
-            console.log(`Starting ${module} container...`)
+            logger.info(`Starting ${module} container...`)
             await startContainer(serviceContainerId)
         }
     }
@@ -1192,11 +1194,11 @@ const FRESHNESS_UNKNOWN   = 'unknown'
 // Say so once, in the operator's log, whenever a probe could not answer. Silent
 // UNKNOWNs are how the old conflation stayed invisible for so long.
 function reportUnknownFreshness(subject, err) {
-    console.log(`WARNING: could not determine whether ${subject} already holds data `
+    logger.info(`WARNING: could not determine whether ${subject} already holds data `
         + `(${redactSecrets(String((err && err.message) || err))}).`)
-    console.log('  Treating it as NOT empty: automatic bootstrap restore is skipped rather than')
-    console.log('  risking a DROP over populated data. Re-run once the inspection works, or set')
-    console.log('  FORCE_BOOTSTRAP to restore anyway.')
+    logger.info('  Treating it as NOT empty: automatic bootstrap restore is skipped rather than')
+    logger.info('  risking a DROP over populated data. Re-run once the inspection works, or set')
+    logger.info('  FORCE_BOOTSTRAP to restore anyway.')
 }
 
 // The in-container listing behind utxoTrackerVolumeFreshness, kept as a named
@@ -1327,7 +1329,7 @@ async function downloadBootstrap(coin, network, module, destDir) {
               '  archive is the cause, not your host.'
             : '  It still restores; the service resyncs forward from the archive height, which just takes longer\n' +
               '  the older the archive is.'
-        console.log(
+        logger.info(
             `WARNING: the published ${module} bootstrap for ${coin}/${network} is ${ageDays} days old ` +
             `(${path.basename(finalUrl)}).\n` + consequence
         )
@@ -1372,7 +1374,7 @@ function reportBootstrapOutcomes() {
     // Wiped-then-failed is NOT part of `failed`: those services are down, not
     // syncing from block 0, so the paragraph below would misdescribe them.
     const wipedDown = bootstrapOutcomes.filter((o) => o.status === 'wiped-left-down')
-    console.log('\nBootstrap restore summary:')
+    logger.info('\nBootstrap restore summary:')
     const nodeBehind = bootstrapOutcomes.filter((o) => o.status === 'node-behind')
     for (const o of bootstrapOutcomes) {
         const line = o.status === 'restored' ? 'restored'
@@ -1387,10 +1389,10 @@ function reportBootstrapOutcomes() {
         const archiveNote = !o.archive ? ''
             : o.archive.removed ? ` (archive removed${o.archive.bytes !== null ? `, ${formatGiB(o.archive.bytes)} GiB` : ''})`
             : ` (archive kept${o.archive.bytes !== null ? `, ${formatGiB(o.archive.bytes)} GiB` : ''})`
-        console.log(`  ${o.module}: ${line}${archiveNote}`)
+        logger.info(`  ${o.module}: ${line}${archiveNote}`)
     }
     if (nodeBehind.length > 0) {
-        console.log(
+        logger.info(
             '\nThose services were not restored because their coin node has not reached the archive\n' +
             'height yet and their image would read the node\'s lower tip as a reorg. They sync forward\n' +
             'from their start height as the node catches up. To take the restore instead, wait for the\n' +
@@ -1398,7 +1400,7 @@ function reportBootstrapOutcomes() {
         )
     }
     if (wipedDown.length > 0) {
-        console.log(
+        logger.info(
             '\nThose services had their data directory wiped by a restore that then failed, so\n' +
             'their containers were deliberately left STOPPED rather than restarted over an\n' +
             'incomplete store that would report itself caught up. Re-run install with\n' +
@@ -1407,7 +1409,7 @@ function reportBootstrapOutcomes() {
         )
     }
     if (failed.length > 0) {
-        console.log(
+        logger.info(
             '\nThose services are now syncing from block 0, which takes hours to days\n' +
             'rather than minutes. Fix the cause above, then re-run install with\n' +
             'XCHAIN_NODE_FORCE_BOOTSTRAP=1 to take the restore again: without it a\n' +
@@ -1467,11 +1469,11 @@ function retireBootstrapArchive(archivePath, bytes, note) {
         fs.rmSync(archivePath, { force: true })
         fs.rmSync(sigPath, { force: true })
     } catch (err) {
-        console.log(`WARNING: could not remove the bootstrap archive ${archivePath} (${err.message}); remove it manually to reclaim its disk space.`)
+        logger.info(`WARNING: could not remove the bootstrap archive ${archivePath} (${err.message}); remove it manually to reclaim its disk space.`)
         return { removed: false, bytes }
     }
     const gib = bytes !== null ? formatGiB(bytes) : '?'
-    console.log(note
+    logger.info(note
         ? `Bootstrap archive removed (${note}) (${gib} GiB released)`
         : `Bootstrap archive removed after restore (${gib} GiB released)`)
     return { removed: true, bytes }
@@ -1484,7 +1486,7 @@ function retireBootstrapArchive(archivePath, bytes, note) {
 // downloaded in the first place.
 function reportKeptBootstrapArchive(archivePath, bytes) {
     if (bytes === null) return null
-    console.log(`Bootstrap archive kept after failed restore (${formatGiB(bytes)} GiB at ${archivePath})`)
+    logger.info(`Bootstrap archive kept after failed restore (${formatGiB(bytes)} GiB at ${archivePath})`)
     return { removed: false, bytes }
 }
 
@@ -1501,7 +1503,7 @@ function forceBootstrapRequested() {
 // logs a warning and returns so the install proceeds with a normal sync.
 async function ensureBootstrapUtxoTracker(coin, network) {
     if (config.XCHAIN_NODE_NO_BOOTSTRAP) {
-        console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
+        logger.info('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
         recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'disabled')
         return false
     }
@@ -1513,10 +1515,10 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         const defaultConfig = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
         const bootstrapDir  = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"]
 
-        console.log(`Checking for a published bootstrap for ${coin}/${network}...`)
+        logger.info(`Checking for a published bootstrap for ${coin}/${network}...`)
         const fileName = await downloadBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, bootstrapDir)
         if (!fileName) {
-            console.log('No bootstrap available; the tracker will sync from scratch')
+            logger.info('No bootstrap available; the tracker will sync from scratch')
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'none-published')
             return false
         }
@@ -1532,7 +1534,7 @@ async function ensureBootstrapUtxoTracker(coin, network) {
             return false
         }
         await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
-        console.log('Bootstrap installed; tracker will continue from the bootstrap height')
+        logger.info('Bootstrap installed; tracker will continue from the bootstrap height')
         const bytes   = await statBootstrapArchiveBytes(archivePath)
         const archive = retireBootstrapArchive(archivePath, bytes)
         recordRestoredOutcome(XChainService.XCHAIN_UTXO_TRACKER, tip, archive)
@@ -1544,14 +1546,14 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         // emptied and the container was left stopped (uuid:7edc76f3), so the old
         // "will sync from scratch" wording described a state that is not on disk.
         if (err.postWipe) {
-            console.log(
+            logger.info(
                 `WARNING: bootstrap auto-restore failed (${reason}) AFTER the LevelDB volume was wiped: ` +
                 `the tracker store is incomplete and its container was left stopped, not syncing.`
             )
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'wiped-left-down', reason, archive)
             return false
         }
-        console.log(`WARNING: bootstrap auto-restore failed (${reason}): the tracker will sync from scratch`)
+        logger.info(`WARNING: bootstrap auto-restore failed (${reason}): the tracker will sync from scratch`)
         recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'failed', reason, archive)
         return false
     }
@@ -1675,7 +1677,7 @@ async function mariaDbModuleFreshness(coin, network, module) {
 // install proceeds with a normal sync from scratch.
 async function ensureBootstrapMariaDb(coin, network, module) {
     if (config.XCHAIN_NODE_NO_BOOTSTRAP) {
-        console.log('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
+        logger.info('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
         recordBootstrapOutcome(module, 'disabled')
         return false
     }
@@ -1689,10 +1691,10 @@ async function ensureBootstrapMariaDb(coin, network, module) {
             ? defaultConfig["DECODER_BOOTSTRAP_VOLUME"]
             : defaultConfig["INDEXER_BOOTSTRAP_VOLUME"]
 
-        console.log(`Checking for a published ${module} bootstrap for ${coin}/${network}...`)
+        logger.info(`Checking for a published ${module} bootstrap for ${coin}/${network}...`)
         const fileName = await downloadBootstrap(coin, network, module, bootstrapDir)
         if (!fileName) {
-            console.log('No bootstrap available; the service will sync from scratch')
+            logger.info('No bootstrap available; the service will sync from scratch')
             recordBootstrapOutcome(module, 'none-published')
             return false
         }
@@ -1708,7 +1710,7 @@ async function ensureBootstrapMariaDb(coin, network, module) {
             return false
         }
         await restoreBootstrap(coin, network, module, fileName)
-        console.log('Bootstrap installed; the service will continue from the bootstrap height')
+        logger.info('Bootstrap installed; the service will continue from the bootstrap height')
         const bytes   = await statBootstrapArchiveBytes(archivePath)
         const archive = retireBootstrapArchive(archivePath, bytes)
         recordRestoredOutcome(module, tip, archive)
@@ -1716,7 +1718,7 @@ async function ensureBootstrapMariaDb(coin, network, module) {
     } catch (err) {
         const reason  = redactSecrets(err.message)
         const archive = archivePath ? reportKeptBootstrapArchive(archivePath, await statBootstrapArchiveBytes(archivePath)) : null
-        console.log(`WARNING: bootstrap auto-restore failed (${reason}): the service will sync from scratch`)
+        logger.info(`WARNING: bootstrap auto-restore failed (${reason}): the service will sync from scratch`)
         recordBootstrapOutcome(module, 'failed', reason, archive)
         return false
     }

@@ -20,7 +20,6 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
-const path = require('path');
 
 const {
     SERVICE_REGISTRY, XChainService,
@@ -221,6 +220,7 @@ describe('SERVICE_REGISTRY', function () {
         })
 
         it('hub: mounts the generated DOGE signer (ro) with this package\'s node_modules beside it', function () {
+            const path = require('path')
             const ms2 = proxyquire('../../src/services/module_service', {
                 './config_service': {
                     getUtxoTrackerVolumeName: () => 'v', getModuleDir: (m) => '/m/' + m,

@@ -27,10 +27,6 @@ const TestEnv      = require('../integration/helpers/test-env')
 const E2EEnv       = require('../e2e/helpers/e2e-env')
 
 const { filterCommandParameters } = require('../../src/services/config_service')
-const ConfigService = require('../../src/services/config_service');
-const constants = require('../../src/config');
-const state = require('../../src/state');
-const realConfigService = require('../../src/services/config_service');
 
 function streamFromString(str) {
     const s = new Readable()
@@ -121,6 +117,7 @@ describe('Regression Suite', function () {
     })
 
     describe('[regression:p0] Argument Parsing & Validation', function () {
+        const ConfigService = require('../../src/services/config_service')
 
         it('R-ARG-001: resolveArgs identifies service, coin, network from any argument order', function () {
             const r1 = ConfigService.resolveArgs(['bitcoin', 'xchain-encoder', 'mainnet'])
@@ -511,6 +508,7 @@ describe('Regression Suite', function () {
         })
 
         it('R-SEC-007: NODE_PREFIX regex rejects shell metacharacters', function () {
+            const constants = require('../../src/config/index')
             expect(constants.NODE_PREFIX).to.match(/^[a-z0-9][a-z0-9._-]*$/)
         })
     })
@@ -530,6 +528,7 @@ describe('Regression Suite', function () {
         })
 
         it('R-LIF-001: install stores container ID in LevelDB via buildAndUp', async function () {
+            const state = require('../../src/state')
             const containerId = TestEnv.fakeContainerId('a')
             await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
             const retrieved = await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
@@ -615,6 +614,7 @@ describe('Regression Suite', function () {
         })
 
         it('R-LIF-005: uninstall removes LevelDB entry', async function () {
+            const state = require('../../src/state')
             const containerId = TestEnv.fakeContainerId('u')
             await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
 
@@ -742,6 +742,7 @@ describe('Regression Suite', function () {
             env = new E2EEnv()
             await env.setup()
             env.setupDefaultRoutes()
+            const state = require('../../src/state')
             state.setDbRootPassword('testrootpw')
         })
 
@@ -886,6 +887,7 @@ describe('Regression Suite', function () {
 
             // And the module every call-time require resolves to answers from
             // this env's temp config dir, not from the checkout's config dir.
+            const realConfigService = require('../../src/services/config_service')
             const config = await realConfigService.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
             expect(config['XC1986_CONFIG_SOURCE']).to.equal('temp-config-dir')
         })
@@ -986,6 +988,7 @@ describe('Regression Suite', function () {
         // test/unit/maria_db_store.test.js after the migration to MariaDB.
 
         it('R-PRE-004: path traversal in config coin parameter is caught', async function () {
+            const ConfigService = require('../../src/services/config_service')
             try {
                 await ConfigService.getDefaultConfig('xchain-encoder', '../../../etc', 'passwd')
                 expect.fail('expected getDefaultConfig to reject a traversal coin')

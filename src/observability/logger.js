@@ -24,11 +24,16 @@
  * and archives) is a LOG, and a log wants a level, a place to go and one
  * decision about verbosity. That second population is what comes through here.
  *
- * WHY IT WRITES TO THE STREAMS AND NOT THROUGH console. A logger that calls
- * console.log is a logger that can be patched out from under itself by
- * anything else that patches console, and it also reads to every checker as
- * one more raw print in a file that is supposed to have none. Writing the
- * stream directly is the same bytes with none of that ambiguity.
+ * WHY IT FALLS THROUGH TO console, which looks like the thing it exists to
+ * remove. The fleet's vendored observability logger does the same, and for the
+ * same two reasons. First, console IS the sink on a CLI: there is no shipper
+ * here, no HTTP surface, nothing to send a structured line to, so a level and
+ * one place to change it is the whole of what a logger buys. Second, console is
+ * the seam every caller and every suite already reaches for; writing the
+ * streams directly would silently take the output away from a process that had
+ * been reading it, which is a behaviour change dressed as a cleanup. The calls
+ * below are the ONLY raw console in the service layer, and they are the
+ * implementation of the rule rather than an exception to it.
  *
  * WHY THE ACCESSOR IS A FUNCTION. A module can write `const log = getLogger()`
  * at require time and still see a later verbosity change, because the object
@@ -64,13 +69,13 @@ function isVerbose() {
     return threshold <= LEVELS.debug
 }
 
-// Warnings and errors go to stderr so a scriptable command's stdout stays
-// parseable when something goes wrong halfway through it.
+// Resolved per call rather than captured once, so a test that replaces console
+// still sees what this writes, and so does an operator whose shell redirects
+// one stream and not the other.
 function write(level, args) {
     if (LEVELS[level] < threshold) return
-    const line = util.format(...args)
-    const stream = (level === 'warn' || level === 'error') ? process.stderr : process.stdout
-    stream.write(line + '\n')
+    const sink = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
+    sink(util.format(...args))
 }
 
 // One object for the whole process. It holds no state of its own: the level

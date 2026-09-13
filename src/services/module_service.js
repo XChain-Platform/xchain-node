@@ -38,6 +38,8 @@ const { stopModuleContainer, stopTimeoutArgs } = require('./stop_budget_service'
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./database_service')
 const { redactSecrets, sleep } = require('../utils/helpers')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Sibling directories used to make a rewrite-clone atomic-ish (see cloneGit).
 // Both live beside the module checkout inside the modules dir, so the two
@@ -222,7 +224,7 @@ async function warnIfSourceBranchIsBehind(module, url, branch) {
         const { stdout } = await execFileAsync('git', ['-C', url, 'rev-list', '--count', local + '..' + upstream])
         const behind = parseInt(String(stdout || '').trim(), 10)
         if (!(behind > 0)) return
-        console.warn(`WARNING: '${module}' is being deployed from the local checkout ${url},`
+        logger.warn(`WARNING: '${module}' is being deployed from the local checkout ${url},`
             + ` whose '${branch}' is ${behind} commit(s) BEHIND its own origin/${branch}`
             + ` (${local.slice(0, 12)} vs ${upstream.slice(0, 12)}).`
             + ` The deploy will contain the older tree; fetch that checkout if you meant the upstream branch.`)
@@ -255,7 +257,7 @@ async function verifyDeploySource(module, branch, dir, expectedCommit) {
     let head = (await readCheckoutIdentity(dir)).commit
     if (!head || head === tip) return
 
-    console.warn(`WARNING: the clone of '${module}' landed on ${head.slice(0, 12)} but`
+    logger.warn(`WARNING: the clone of '${module}' landed on ${head.slice(0, 12)} but`
         + ` '${branch}' points at ${tip.slice(0, 12)} in the source. Re-cloning once.`)
     fs.rmSync(dir, { recursive: true, force: true })
     await runGitClone(module, branch, dir)
@@ -280,10 +282,10 @@ async function reportDeployedSource(module, dir, branch) {
     const { commit, committedAt, subject } = await readCheckoutIdentity(dir)
     const url = redactSecrets(String(modulesUrls[module] || 'unknown source'))
     if (!commit) {
-        console.log(`Deploy source for '${module}': commit UNKNOWN (not a git checkout?) from ${url}`)
+        logger.info(`Deploy source for '${module}': commit UNKNOWN (not a git checkout?) from ${url}`)
         return
     }
-    console.log(`Deploy source for '${module}': ${commit} (${branch || 'default branch'})`
+    logger.info(`Deploy source for '${module}': ${commit} (${branch || 'default branch'})`
         + ` committed ${committedAt || 'at an unknown time'}`
         + (subject ? ` "${subject}"` : '')
         + ` from ${url}`)
@@ -446,7 +448,7 @@ async function resolveBundledLibRef(module, lib) {
         return { ref: parentRef, commit: null, pinned: false, reason: `inherited from ${module}` }
     }
 
-    console.warn(`Bundled library ${lib}: ${module} is on a detached HEAD and no release`
+    logger.warn(`Bundled library ${lib}: ${module} is on a detached HEAD and no release`
         + ` manifest is active, so the library cannot inherit a ref.`
         + ` Falling back to '${DEFAULT_MODULE_BRANCH}'.`)
     return { ref: DEFAULT_MODULE_BRANCH, commit: null, pinned: false, reason: 'default branch fallback' }
@@ -623,7 +625,7 @@ function resolveStartPeriod(module, fallback) {
     if (/^\d+$/.test(value)) return value + 's'
     // Malformed override: say so rather than silently standing on the default,
     // mirroring the loud-drift guard in buildHealthcheckArgs below.
-    console.log("WARNING: ignoring " + key + "=" + value
+    logger.info("WARNING: ignoring " + key + "=" + value
         + ": expected bare seconds (900) or a duration with an ms/s/m/h unit (900s)")
     return fallback
 }
@@ -666,7 +668,7 @@ function buildHealthcheckArgs(module, environmentVariables) {
         // the key, the container would otherwise be created with NO healthcheck and no
         // trace of why: make that drift loud at install/update time. Empty-array return
         // is preserved so callers stay safe.
-        console.log("WARNING: no healthcheck for " + module + ": env " + hc.portKey + " is unset")
+        logger.info("WARNING: no healthcheck for " + module + ": env " + hc.portKey + " is unset")
         return []
     }
 
@@ -845,7 +847,7 @@ async function attachCrossChainNetworks(module, coin, network, containerId) {
             try {
                 await addContainerToNetwork(containerId, networkName)
             } catch (retryErr) {
-                console.error("WARNING: could not join " + module + " (" + coin + " " + network + ") to the "
+                logger.error("WARNING: could not join " + module + " (" + coin + " " + network + ") to the "
                     + networkName + " network (" + redactSecrets(retryErr) + "). Cross-chain reads over that "
                     + "network (ROLLCALL epoch close, ANCHOR rewards) will stall while the container looks "
                     + "healthy. Remedy: docker network connect " + networkName + " " + containerId.slice(0, 12)
@@ -926,12 +928,12 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         // branch becomes develop, which is why this lands BEFORE the flip
         // (release-management spec sections 8 and 11).
         const libRef = await resolveBundledLibRef(module, lib)
-        console.log(`Cloning bundled library ${lib} for ${module} at ${libRef.ref}`
+        logger.info(`Cloning bundled library ${lib} for ${module} at ${libRef.ref}`
             + (libRef.pinned ? ` (manifest-pinned ${libRef.commit.slice(0, 12)})` : ` (${libRef.reason})`))
         await cloneGit(lib, true, false, libRef.ref, libRef.commit)
         const libSrc  = getModuleDir(lib)
         const libDest = path.join(dir, lib)
-        console.log("Staging " + lib + " into " + module + " build context")
+        logger.info("Staging " + lib + " into " + module + " build context")
         fs.rmSync(libDest, { recursive: true, force: true })
         fs.cpSync(libSrc, libDest, {
             recursive: true,
@@ -971,7 +973,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         const trackerCount = await countInstalledTrackers(db, { coin, network })
         const memory = memoryArgsFor(module, { trackerCount })
         memoryArgs = memory.args
-        if (memory.note) console.log(memory.note)
+        if (memory.note) logger.info(memory.note)
     }
 
     // Validate all port values
@@ -1120,7 +1122,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                     ...(dockerCmdArgs ?? [])
                 ]
 
-                console.log("Creating container of module " + module + (coin && network ? " in " + coin + " " + network : ""))
+                logger.info("Creating container of module " + module + (coin && network ? " in " + coin + " " + network : ""))
                 execFile('docker', runArgs, { cwd: dir, env: dockerEnv }, async (error2, stdout) => {
                     if (error2) {
                         // error2.message embeds the full argv; redact any secret-shaped
@@ -1175,7 +1177,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         }
 
         if (reuseImage) {
-            console.log("Reusing the existing image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
+            logger.info("Reusing the existing image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
             createContainer()
             return
         }
@@ -1191,7 +1193,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             ? checkBuildKitAvailable()
             : Promise.resolve(true)
         buildKitProbe.then(() => {
-            console.log("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
+            logger.info("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
                 + (sourceLabels.commit ? " from " + sourceLabels.commit.slice(0, 12) + " (" + (sourceLabels.ref || 'detached') + ")" : ""))
             const buildEnv = { ...process.env, DOCKER_BUILDKIT: '1' }
             execFile('docker', ['build', ...buildLabelArgs, '.', '-t', containerPrefix], { cwd: dir, env: buildEnv }, (error) => {
@@ -1359,7 +1361,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                         ? (await getModuleCommit(module)) === pin.commit
                         : currentBranch === cloneRef
                     if (!alreadyThere) {
-                        console.log(`Module '${module}' is on '${currentBranch}', switching to '${cloneRef}'...`)
+                        logger.info(`Module '${module}' is on '${currentBranch}', switching to '${cloneRef}'...`)
                         await cloneGit(module, true, false, cloneRef, pin.commit)
                     }
                 }
@@ -1423,7 +1425,7 @@ async function uninstallModule(coin, network, module) {
 
     const moduleStatus = modulesStatus?.[(coin ?? "")]?.[(network ?? "")]?.[module]
     if (moduleStatus !== undefined) {
-        console.log("Uninstalling " + module + " (" + coin + "/" + network + ")")
+        logger.info("Uninstalling " + module + " (" + coin + "/" + network + ")")
         try {
             if (moduleStatus["status"]["State"]["Status"] !== "exited") {
                 await stopModuleContainer(stopContainerByName, module, coin, network, moduleStatus["container_id"])
@@ -1456,7 +1458,7 @@ async function uninstallModule(coin, network, module) {
         if (staleId) {
             await db.deleteModuleContainer(module, coin, network)
             await statusChanged()
-            console.log("Removed stale tracking row for " + module + " (" + coin + "/" + network + ")")
+            logger.info("Removed stale tracking row for " + module + " (" + coin + "/" + network + ")")
         }
         return true
     }

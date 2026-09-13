@@ -14,10 +14,6 @@ const sinon      = require('sinon')
 const { configStub } = require('../helpers/config_stub');
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
-const releaseManifest = require('../../src/services/release_manifest_service');
-const installTarget = require('../../src/services/install_target_service');
-const versions = require('../../src/services/version_service');
-const readline = require('readline');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -222,6 +218,7 @@ describe('moduleOperations', function () {
     // run. Same lazy-require reason as above: stubbed on the module's exports.
     let recordInstallTargetStub, resolveUpdateTargetStub
     beforeEach(function () {
+        const releaseManifest = require('../../src/services/release_manifest_service')
         resolveInstallTargetStub = sinon.stub(releaseManifest, 'resolveInstallTarget').resolves({
             kind: 'release',
             ref: 'v0.11.0',
@@ -229,6 +226,7 @@ describe('moduleOperations', function () {
             manifest: { platform_version: '0.11.0', components: {} },
             resolvedFrom: 'latest published release'
         })
+        const installTarget = require('../../src/services/install_target_service')
         recordInstallTargetStub = sinon.stub(installTarget, 'recordInstallTarget').returns(true)
         resolveUpdateTargetStub = sinon.stub(installTarget, 'resolveUpdateTarget').resolves({
             kind: 'release', ref: null, tag: null, inferred: true
@@ -1312,6 +1310,7 @@ describe('moduleOperations', function () {
             // Any doubt answers "rebuild": the operator could always get one.
             const stubs = makeStubs()
             stubs.getLastStatus = () => ({ bitcoin: { mainnet: { node: { container_version: '28.1' } } } })
+            const versions = require('../../src/services/version_service')
             const check = sinon.stub(versions, 'checkRemoteNodeVersion').rejects(new Error('rate limited'))
             const ops = loadOperations(stubs)
             try {
@@ -2198,6 +2197,7 @@ describe('moduleOperations', function () {
             })
 
             it('names the hub rows in the confirmation for a regtest node reset', async function () {
+                const readline = require('readline')
                 const isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
                 Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
                 const createInterface = sinon.stub(readline, 'createInterface').returns({

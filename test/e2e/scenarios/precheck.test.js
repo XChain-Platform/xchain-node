@@ -18,7 +18,6 @@ const fs         = require('fs')
 
 const E2EEnv = require('../helpers/e2e-env')
 const CommandCapture = require('../../integration/helpers/command-capture')
-const state = require('../../../src/state');
 
 const ROOT = path.join(__dirname, '..', '..', '..')
 
@@ -32,6 +31,7 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
         await env.setup()
         env.setupDefaultRoutes()
 
+        const state = require('../../../src/state')
         state.setDbRootPassword('testrootpw')
     })
 

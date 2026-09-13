@@ -25,6 +25,8 @@ const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./st
 const { addContainerToNetwork, killContainer, removeContainer } = require('./docker_service')
 const { cloneGit, buildAndUp }               = require('./module_service')
 const ExplorerConnector                      = require('./explorer_connector.js')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 async function updateExplorer() {
     const lastStatus = getLastStatus()
@@ -54,7 +56,7 @@ async function updateExplorer() {
                 try {
                     await addContainerToNetwork(explorerContainerId, network)
                 } catch (firstErr) {
-                    console.log("There was an error trying to connect the xchain-explorer to the " +
+                    logger.info("There was an error trying to connect the xchain-explorer to the " +
                         nextCoin + "/" + nextNetwork + " network (" + redactSecrets(firstErr) + "). Trying again in 3 seconds...")
                     await sleep(3000)
                     try {
@@ -96,14 +98,14 @@ async function updateExplorer() {
 // install, and the explorer was staged unpinned.
 async function installExplorerModule(force = false, branch = null) {
     const defaultConfig = await getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
-    console.log("Checking if xchain-explorer module is running")
+    logger.info("Checking if xchain-explorer module is running")
     const explorerConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
 
     if (!force) {
         const pingExplorer = await explorerConnector.ping()
         if (pingExplorer) return true
 
-        console.log("Checking if xchain-explorer module is installed")
+        logger.info("Checking if xchain-explorer module is installed")
         if (isStatusUpdated()) {
             const lastStatus = getLastStatus()
             const explorerStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
@@ -114,21 +116,21 @@ async function installExplorerModule(force = false, branch = null) {
         // the fresh clone + buildAndUp below doesn't collide with stale state.
         const existingContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
         if (existingContainerId) {
-            console.log("Force rebuild: removing existing xchain-explorer container")
+            logger.info("Force rebuild: removing existing xchain-explorer container")
             try { await killContainer(existingContainerId) }   catch { /* may already be exited */ }
             try { await removeContainer(existingContainerId) } catch { /* may already be gone */ }
             try { await db.deleteModuleContainer(EXPLORER_MODULE_NAME, "", "") } catch { /* row may already be gone */ }
         }
     }
 
-    console.log("Downloading xchain-explorer...")
+    logger.info("Downloading xchain-explorer...")
     const { resolveComponentRef } = require('./release_manifest_service')
     const explorerPin = resolveComponentRef(EXPLORER_MODULE_NAME, branch)
     await cloneGit(EXPLORER_MODULE_NAME, true, false, explorerPin.ref, explorerPin.commit)
-    console.log("Installing xchain-explorer module...")
+    logger.info("Installing xchain-explorer module...")
     await buildAndUp(EXPLORER_MODULE_NAME, null, null)
     await getStatus(null, null, false)
-    console.log("Waiting for the xchain-explorer to respond")
+    logger.info("Waiting for the xchain-explorer to respond")
 
     // A healthy explorer is one holding at least one DB pool, and its pools come
     // from the COIN stacks. So on a host with no coin installed yet there is no
@@ -162,7 +164,7 @@ async function installExplorerModule(force = false, branch = null) {
                 continue
             }
             if (!healthy) {
-                console.log("xchain-explorer is up with no coin data to serve yet;" +
+                logger.info("xchain-explorer is up with no coin data to serve yet;" +
                     " it starts serving as each coin stack is installed.")
             }
             return true
@@ -213,7 +215,7 @@ async function waitForExplorerReady(timeoutMs = 150000, silenceGraceMs = 6000) {
         if (!everAnswered && Date.now() - started >= silenceGraceMs) return true
 
         if (answering && !announced) {
-            console.log("Waiting for the xchain-explorer to pick up the installed coins" +
+            logger.info("Waiting for the xchain-explorer to pick up the installed coins" +
                 " (it polls the hub for config, so this takes up to a poll interval)...")
             announced = true
         }

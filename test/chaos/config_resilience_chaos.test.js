@@ -15,9 +15,9 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { Readable } = require('stream')
 const path       = require('path')
-const constants = require('../../src/config');
 
 function makeConfigService(fsStub, readlineOverride) {
+    const constants = require('../../src/config/index')
     const stubs = {
         'fs': fsStub || require('fs'),
         '../config/constants': {

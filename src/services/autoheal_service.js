@@ -64,6 +64,8 @@ const { db } = require('../state')
 const { getStatusFromContainer, restartContainer } = require('./docker_service')
 const { SERVICE_HEALTHCHECK } = require('./module_service')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // A container must be continuously unhealthy for at least this long before
 // a restart is considered (on top of Docker's own retries budget).
@@ -363,7 +365,7 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
 
         if (now - since < graceMs) {
             result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
-            console.log(`autoheal: ${label} is unhealthy but inside the ${graceMs}ms grace window, not restarting yet`)
+            logger.info(`autoheal: ${label} is unhealthy but inside the ${graceMs}ms grace window, not restarting yet`)
             continue
         }
 
@@ -376,13 +378,13 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         const lastRestart     = state.restarts[containerId]
         if (typeof lastRestart === 'number' && now - lastRestart < effectiveCooldownMs) {
             result.skipped.push({ module, coin, network, containerId, reason: 'inside restart cooldown' })
-            console.log(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
+            logger.info(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
             continue
         }
 
         result.candidates.push({ module, coin, network, containerId })
         if (dryRun) {
-            console.log(`autoheal: DRY RUN, would restart ${label} (unhealthy for ${now - since}ms)`)
+            logger.info(`autoheal: DRY RUN, would restart ${label} (unhealthy for ${now - since}ms)`)
             continue
         }
 
@@ -391,10 +393,10 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
             state.restarts[containerId]     = now
             state.restartCount[containerId] = attempts + 1
             result.restarted.push({ module, coin, network, containerId })
-            console.log(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
+            logger.info(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
         } catch (err) {
             result.failed.push({ module, coin, network, containerId, reason: String(err) })
-            console.log(`autoheal: FAILED to restart ${label}: ${err}`)
+            logger.info(`autoheal: FAILED to restart ${label}: ${err}`)
         }
     }
 
@@ -415,7 +417,7 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
     }
 
     if (result.candidates.length === 0) {
-        console.log('autoheal: nothing to do')
+        logger.info('autoheal: nothing to do')
     }
     return result
 }

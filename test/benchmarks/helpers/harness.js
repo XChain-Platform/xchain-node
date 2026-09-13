@@ -30,8 +30,6 @@ const path = require('path')
 const { Readable } = require('stream')
 const proxyquire = require('proxyquire').noCallThru()
 const MetricsCollector = require('./metrics_collector')
-const realFs = require('fs');
-const constants = require('../../../src/config');
 
 const BASELINE_PATH = path.join(__dirname, '../baseline.json')
 
@@ -115,6 +113,7 @@ Scenarios: ${SCENARIO_FILES.join(', ')}
  * Build a proxyquire'd ConfigService with fs mocked to return in-memory config streams.
  */
 function createMockedConfigService() {
+    const realFs = require('fs')
     const configDir = require('../../../src/config').configDir
 
     const fsStub = {
@@ -140,6 +139,7 @@ function createMockedConfigService() {
 
 async function createContext() {
     const ConfigService = createMockedConfigService()
+    const constants = require('../../../src/config/index')
 
     return { ConfigService, constants, CONFIG_FILES }
 }

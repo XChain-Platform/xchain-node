@@ -57,6 +57,8 @@ const { getDefaultConfig, getModuleDatabaseName } = require('./config_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
 const databaseService = require('./database_service');
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 const {
     markerTablesSql, liveReorgHaltCountSql, liveSyncHaltCountSql,
     eventsWatermarkSql, syncHaltWatermarkSql, reorgHaltsSinceSql, syncHaltsSinceSql
@@ -537,7 +539,7 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
     const label = `${coin}/${network} ${module}`
 
     if (gateSkipped()) {
-        console.log(`WARNING: XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE is set - publishing ${label} WITHOUT ` +
+        logger.info(`WARNING: XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE is set - publishing ${label} WITHOUT ` +
             'verifying the source is healthy. The resulting archive becomes the newest (default) recovery ' +
             'source for anyone who restores it. Do not use this for a routine publish.')
         return { skipped: true, reasons: [] }
@@ -654,7 +656,7 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
 
     if (reasons.length > 0) throw new BootstrapSourceUnhealthyError(label, reasons)
 
-    console.log(`Bootstrap source health gate: ${label} is healthy, no halt markers, within the lag limit.`)
+    logger.info(`Bootstrap source health gate: ${label} is healthy, no halt markers, within the lag limit.`)
     return { skipped: false, reasons: [], watermark }
 }
 

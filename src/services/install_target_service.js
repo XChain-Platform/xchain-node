@@ -32,6 +32,8 @@ const fs   = require('fs')
 const path = require('path')
 
 const { dataDir, moduleDir } = require('../config')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 const TARGET_FILE = 'install-target.json'
 
@@ -65,7 +67,7 @@ function recordInstallTarget(target) {
         fs.renameSync(tmp, targetFilePath())
         return true
     } catch (err) {
-        console.warn(`Could not record the install target (${err.message}); the next no-ref update will classify the node from its checkouts.`)
+        logger.warn(`Could not record the install target (${err.message}); the next no-ref update will classify the node from its checkouts.`)
         return false
     }
 }

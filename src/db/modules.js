@@ -24,6 +24,8 @@
 const crypto = require('crypto')
 const { NODE_PREFIX, DEFAULT_NODE_PREFIX } = require('../config')
 const { assertSafeDbIdentifier } = require('../utils/sql_safety')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 /*
  * Registry table, scoped to THIS stack.
@@ -166,7 +168,7 @@ const modulesMixin = {
             }
             return true
         } catch (err) {
-            console.log(err)
+            logger.info(err)
             return false
         }
     },

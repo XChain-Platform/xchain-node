@@ -20,6 +20,9 @@
 
 const axios = require('axios');
 const config = require('../config');
+const util = require('node:util');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 class HubConnector {
 
@@ -98,7 +101,7 @@ class HubConnector {
         // as down (which would make the install/restart loop exhaust its retries
         // against a live hub), but log the degraded state so it stays visible.
         if(result && typeof result === 'object' && result.status === 'degraded'){
-            console.warn('Hub reachable but reporting degraded state: ', result);
+            logger.warn(util.format('Hub reachable but reporting degraded state: ', result));
         }
         return result !== null;
     }

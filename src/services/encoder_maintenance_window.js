@@ -40,6 +40,8 @@
 const { XChainService } = require('../config')
 const { db } = require('../state')
 const { stringToDockerContainerFile, execContainer } = require('./docker_service')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Must match xchain-encoder's DEFAULT_SENTINEL. The encoder side can be
 // repointed with ENCODER_MAINTENANCE_FILE; repoint this with the same value.
@@ -77,7 +79,7 @@ async function declareEncoderMaintenance(coin, network, { reason, minutes = DEFA
         await stringToDockerContainerFile(containerId, sentinel + '\n', SENTINEL_PATH)
         return true
     } catch (err) {
-        console.log(`Warning: could not declare the encoder maintenance window for ${coin}/${network} (${err.message}); the status board will show Degraded for the outage.`)
+        logger.info(`Warning: could not declare the encoder maintenance window for ${coin}/${network} (${err.message}); the status board will show Degraded for the outage.`)
         return false
     }
 }
@@ -92,7 +94,7 @@ async function clearEncoderMaintenance(coin, network) {
         await execContainer(containerId, ['rm', '-f', SENTINEL_PATH])
         return true
     } catch (err) {
-        console.log(`Warning: could not clear the encoder maintenance window for ${coin}/${network} (${err.message}); it expires on its own.`)
+        logger.info(`Warning: could not clear the encoder maintenance window for ${coin}/${network} (${err.message}); it expires on its own.`)
         return false
     }
 }

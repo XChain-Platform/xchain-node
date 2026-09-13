@@ -33,6 +33,8 @@ const {
 } = require('../config/secret_env')
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 function getModuleDir(module) {
     return moduleDir + "/" + module
@@ -242,7 +244,7 @@ async function readSidecarValue(localFilePath, key) {
 // than from a transcript that printed the value.
 function warnDeprecatedSecretNames(config, filePath) {
     for (const { legacy, preferred } of deprecatedSecretEnvNames(config)) {
-        console.warn(`Warning: ${legacy} is a deprecated name that automatic secret redaction does not match; ` +
+        logger.warn(`Warning: ${legacy} is a deprecated name that automatic secret redaction does not match; ` +
             `rename it to ${preferred} in ${filePath} (its value prints in full whenever the file is read)`)
     }
 }
@@ -355,7 +357,7 @@ const warnedHubConfigKeys = new Set()
 function warnHubConfigOnce(key, message) {
     if (warnedHubConfigKeys.has(key)) return
     warnedHubConfigKeys.add(key)
-    console.warn(message)
+    logger.warn(message)
 }
 
 // The coin/network stacks this deployment runs, from the module registry. Returns []
@@ -1299,7 +1301,7 @@ async function getDefaultConfig(module, coin, network) {
         if (!defaultValues["HUB_API_KEY"] && defaultValues["HUB_ALLOW_UNAUTHENTICATED"] === undefined
             && !hubNetworkIsMainnet) {
             defaultValues["HUB_ALLOW_UNAUTHENTICATED"] = "true"
-            console.warn("WARNING: HUB_API_KEY is not set, so this hub is deployed with an UNAUTHENTICATED " +
+            logger.warn("WARNING: HUB_API_KEY is not set, so this hub is deployed with an UNAUTHENTICATED " +
                 "write surface (HUB_ALLOW_UNAUTHENTICATED=true). Anyone who can reach the hub port can drive " +
                 "updateconfig / registervalidator / reportreorg. Set HUB_API_KEY in the host env before " +
                 "exposing this hub beyond a trusted network.")
@@ -1352,7 +1354,7 @@ async function getDefaultConfig(module, coin, network) {
         // a deploy cannot tell those apart. A statement, never a refusal.
         const validator = validatorModeReport()
         if (validator.mode === 'validator') {
-            console.log("xchain-node: this hub deploys in VALIDATOR mode, from " + validator.dir)
+            logger.info("xchain-node: this hub deploys in VALIDATOR mode, from " + validator.dir)
         } else if (validator.mode === 'incomplete') {
             warnHubConfigOnce("VALIDATOR_STATE_INCOMPLETE",
                 "WARNING: the validator state under " + validator.dir + " is HALF PRESENT (missing " +
@@ -1362,10 +1364,10 @@ async function getDefaultConfig(module, coin, network) {
                 "than a choice: restore the missing file, or point XCHAIN_NODE_CONFIG_DIR at the config " +
                 "directory that holds the complete set.")
         } else if (validator.mode === 'disabled') {
-            console.log("xchain-node: this hub deploys STANDALONE because the validator state at " +
+            logger.info("xchain-node: this hub deploys STANDALONE because the validator state at " +
                 validator.dir + " records enabled:false.")
         } else {
-            console.log("xchain-node: this hub deploys STANDALONE (no validator state under " +
+            logger.info("xchain-node: this hub deploys STANDALONE (no validator state under " +
                 validator.dir + "). If this host IS meant to be a validator, XCHAIN_NODE_CONFIG_DIR is " +
                 "resolving to the wrong config directory and the real one holds validator/.")
         }
@@ -1387,7 +1389,7 @@ async function getDefaultConfig(module, coin, network) {
         let mainFileHasCreds = false
 
         if (!fs.existsSync(configFilePath)) {
-            console.warn("Warning: config file not found: " + configFilePath + " (using defaults)")
+            logger.warn("Warning: config file not found: " + configFilePath + " (using defaults)")
         } else {
             const configFileStream = fs.createReadStream(configFilePath)
             const rl = readline.createInterface({ input: configFileStream, crlfDelay: Infinity })

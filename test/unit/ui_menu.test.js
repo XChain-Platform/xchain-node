@@ -5,8 +5,6 @@
 
 const assert = require('assert');
 const menu = require('../../src/ui/menu.js');
-const fs = require('fs');
-const path = require('path');
 
 describe('ui/menu', function () {
     const expected = [
@@ -114,6 +112,8 @@ describe('ui/menu restoreBootstrapInterface non-interactive resolution', functio
 // no-op with no error to report. The labels are now shared constants; this binds
 // the two sides so a rename cannot re-open the gap on one side only.
 describe('ui/menu per-module action labels are all handled', function () {
+    const path = require('path');
+    const fs   = require('fs');
     const src  = fs.readFileSync(path.join(__dirname, '../../src/ui/menu.js'), 'utf8');
 
     // The handler chain lives after the choice list; both reference the same

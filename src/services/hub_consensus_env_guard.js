@@ -78,6 +78,8 @@
 const { HUB_MODULE_NAME } = require('../config')
 const { getDockerContainerImageName } = require('./config_service')
 const { readContainerEnv } = require('./db_credential_drift')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // Escape hatch, named and shaped like DbCredentialDrift's, for an operator who
 // is deliberately changing one of these values on a live hub (a real,
@@ -277,7 +279,7 @@ function formatHubConsensusEnvDriftError(drift) {
 function logConsensusEnvSupplyState(intended, network) {
     const { supplied, defaulted } = describeConsensusEnvSupply(intended, network)
     if (defaulted.length > 0) {
-        console.warn(
+        logger.warn(
             'WARNING: hub consensus-shaped settings NOT supplied by the invoking shell (the hub will use ' +
             `its own built-in default for each): ${defaulted.join(', ')}. If this hub previously ran with ` +
             'different values (a single-source regtest ORACLE_MIN_SUBMISSIONS=1, a shortened ' +
@@ -286,7 +288,7 @@ function logConsensusEnvSupplyState(intended, network) {
         )
     }
     if (supplied.length > 0) {
-        console.log(`hub consensus-shaped settings supplied from the host env: ${supplied.join(', ')}`)
+        logger.info(`hub consensus-shaped settings supplied from the host env: ${supplied.join(', ')}`)
     }
 }
 
@@ -318,8 +320,8 @@ async function assertNoHubConsensusEnvDrift(environmentVariables, deps = {}) {
     if (drift.length === 0) return drift
 
     if (env[DRIFT_OVERRIDE_ENV] === '1') {
-        console.log(formatHubConsensusEnvDriftError(drift))
-        console.log(`${DRIFT_OVERRIDE_ENV}=1 is set; deploying anyway.`)
+        logger.info(formatHubConsensusEnvDriftError(drift))
+        logger.info(`${DRIFT_OVERRIDE_ENV}=1 is set; deploying anyway.`)
         return drift
     }
     const error = new Error(formatHubConsensusEnvDriftError(drift))

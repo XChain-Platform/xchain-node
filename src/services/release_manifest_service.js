@@ -32,6 +32,8 @@ const axios = require('axios')
 
 const { githubApiHeaders, githubRateLimitError } = require('./github_downloader')
 const { verifyManifestForTag } = require('./release_signature_service')
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // The repo that carries the manifest. Pinned installs resolve their manifest
 // from a tag on THIS repo, never from a sibling.
@@ -272,8 +274,8 @@ async function resolveInstallTarget(ref, { defaultBranch = 'master', fallbackToB
                 + ' Nothing was changed. Retry, or name the release explicitly (e.g. `update all v0.15.2`).'
             )
         }
-        console.warn(`Could not resolve the latest xchain-node release (${err.message}).`)
-        console.warn(`Falling back to a tracking install of '${defaultBranch}' (UNRELEASED).`)
+        logger.warn(`Could not resolve the latest xchain-node release (${err.message}).`)
+        logger.warn(`Falling back to a tracking install of '${defaultBranch}' (UNRELEASED).`)
         return { kind: 'branch', ref: defaultBranch, tag: null, manifest: null, resolvedFrom: 'fallback after lookup failure' }
     }
 
@@ -282,7 +284,7 @@ async function resolveInstallTarget(ref, { defaultBranch = 'master', fallbackToB
             throw new Error('No published xchain-node release exists to update to. Nothing was changed.')
         }
         // Pre-first-train, and after any release-less bootstrap. Not an error.
-        console.log(`No published xchain-node release yet; installing '${defaultBranch}' (UNRELEASED).`)
+        logger.info(`No published xchain-node release yet; installing '${defaultBranch}' (UNRELEASED).`)
         return { kind: 'branch', ref: defaultBranch, tag: null, manifest: null, resolvedFrom: 'no published release' }
     }
 

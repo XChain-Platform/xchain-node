@@ -16,7 +16,6 @@ const E2EEnv = require('../helpers/e2e-env')
 const TestEnv = require('../../integration/helpers/test-env')
 
 const { filterCommandParameters } = require('../../../src/services/config_service')
-const state = require('../../../src/state');
 
 describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
     this.timeout(30000)
@@ -29,6 +28,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
         env.setupDefaultRoutes()
 
         // Pre-set database root password to skip interactive prompt
+        const state = require('../../../src/state')
         state.setDbRootPassword('testrootpw')
     })
 

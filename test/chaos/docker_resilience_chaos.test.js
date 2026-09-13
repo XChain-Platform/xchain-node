@@ -13,7 +13,6 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
-const EventEmitter = require('events');
 
 function makeStubs() {
     return {
@@ -562,6 +561,7 @@ describe('Chaos: Docker Resilience', function () {
 
         it('rejects when spawn child exits with non-zero code', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const child = new EventEmitter()
             child.stdin = { write: sinon.stub(), end: sinon.stub() }
             child.stderr = new EventEmitter()
@@ -582,6 +582,7 @@ describe('Chaos: Docker Resilience', function () {
 
         it('rejects when spawn emits error event', async function () {
             const stubs = makeStubs()
+            const EventEmitter = require('events')
             const child = new EventEmitter()
             child.stdin = { write: sinon.stub(), end: sinon.stub() }
             child.stderr = new EventEmitter()

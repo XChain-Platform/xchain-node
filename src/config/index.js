@@ -72,6 +72,8 @@ const REGTEST_MODULES = [
 // Coin name/ticker maps, generated from the canonical coin registry (src/coins)
 // so xchain-node never drifts from the rest of the platform.
 const coins = require('../coins');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 
 // fullname-uppercase -> fullname (e.g. BITCOIN -> "bitcoin")
 const Coin = {};
@@ -140,7 +142,7 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
         const overrides = JSON.parse(process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE)
         for (const [mod, url] of Object.entries(overrides)) {
             if (!(mod in modulesUrls)) {
-                console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: unknown module '" + mod + "' (ignored)")
+                logger.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: unknown module '" + mod + "' (ignored)")
                 continue
             }
             modulesUrls[mod] = url
@@ -150,10 +152,10 @@ if (process.env.XCHAIN_NODE_MODULES_URLS_OVERRIDE) {
             // share. Inlined (not via helpers.redactSecrets) to avoid a
             // constants<->helpers require cycle.
             const safeUrl = String(url).replace(/([a-z][a-z0-9+.\-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1<redacted>@')
-            console.log("modulesUrls['" + mod + "'] overridden via env → " + safeUrl)
+            logger.info("modulesUrls['" + mod + "'] overridden via env → " + safeUrl)
         }
     } catch (err) {
-        console.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: parse failed (" + err.message + "), using defaults")
+        logger.warn("XCHAIN_NODE_MODULES_URLS_OVERRIDE: parse failed (" + err.message + "), using defaults")
     }
 }
 

@@ -27,6 +27,8 @@ const { assertSafeArchiveMemberNames } = require('../utils/helpers');
 const util = require('util');
 const stream = require('stream');
 const config = require('../config');
+const { getLogger } = require('../observability/logger');
+const logger = getLogger();
 const pipeline = util.promisify(stream.pipeline);
 
 // Map Node's process.arch to the substring used in GitHub release asset names
@@ -257,7 +259,7 @@ class GitHubDownloader {
         if (result.status !== 0) throw new Error(`unzip exited with code ${result.status}`);
         fs.unlinkSync(downloadPath);
       } else {
-        console.warn(`Unrecognized file extension: ${fileExtension}. Will not extract.`);
+        logger.warn(`Unrecognized file extension: ${fileExtension}. Will not extract.`);
       }
 
       const extractedDirs = fs.readdirSync(outputPath).filter(f =>
@@ -318,7 +320,7 @@ class GitHubDownloader {
       throw new Error(`Hash verification failed for ${repoKey}@${version} (${resolvedArch})\nExpected: ${expectedHash}\nActual: ${actualHash}`);
     }
 
-    console.log(`✅ Hash verified for ${repoKey}@${version} (${resolvedArch})`);
+    logger.info(`✅ Hash verified for ${repoKey}@${version} (${resolvedArch})`);
   }
 
   // Verifies a downloaded FILE (e.g. a prebuilt release tarball) against the
@@ -340,7 +342,7 @@ class GitHubDownloader {
       throw new Error(`Hash verification failed for ${repoKey}@${version} (${resolvedArch})\nExpected: ${expectedHash}\nActual: ${actualHash}`);
     }
 
-    console.log(`✅ Tarball hash verified for ${repoKey}@${version} (${resolvedArch})`);
+    logger.info(`✅ Tarball hash verified for ${repoKey}@${version} (${resolvedArch})`);
   }
 
   async calculateFileHash(filePath) {
@@ -386,7 +388,7 @@ class GitHubDownloader {
 
     return files;
   } catch (error) {
-    console.error(`Error procesando ${dirPath}:`, error);
+    logger.error(util.format(`Error procesando ${dirPath}:`, error));
     return [];
   }
 }

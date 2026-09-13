@@ -20,8 +20,6 @@ const {
 
 const TestEnv        = require('./helpers/test-env')
 const CommandCapture = require('./helpers/command-capture')
-const EventEmitter = require('events');
-const state = require('../../src/state');
 
 describe('Integration: Database Service Chain', function () {
     this.timeout(15000)
@@ -54,6 +52,7 @@ describe('Integration: Database Service Chain', function () {
     // the regex-based assertions below (targeting the actual SQL text, e.g.
     // /CREATE USER/) keep working against the real post-fix argv+stdin split.
     function makeMariadbSpawnStub(cmdCapture) {
+        const EventEmitter = require('events')
         return function spawnStub(command, args) {
             const child = new EventEmitter()
             child.stdout = new EventEmitter()
@@ -84,6 +83,7 @@ describe('Integration: Database Service Chain', function () {
     }
 
     function makeDatabaseService(options = {}) {
+        const state = require('../../src/state')
         state.setDbRootPassword('testrootpw')
 
         const dbContainerId = options.dbContainerId || TestEnv.fakeContainerId('d')
@@ -210,6 +210,7 @@ describe('Integration: Database Service Chain', function () {
             // inside the container this branch creates, so it doesn't exist
             // yet. Lookups use DatabaseService.getDatabaseContainerId()
             // (docker inspect by name) instead.
+            const state = require('../../src/state')
             const storedId = await state.db.getModuleContainer(DB_MODULE_NAME, '', '')
             expect(storedId).to.equal(null)
         })
@@ -272,6 +273,7 @@ describe('Integration: Database Service Chain', function () {
                 '../utils/helpers': { sleep: async () => {}, redactSecrets: (s) => s }
             })
 
+            const state = require('../../src/state')
             state.setDbRootPassword('testrootpw')
 
             await DatabaseService.buildDatabaseModule('litecoin', 'mainnet')
@@ -367,6 +369,7 @@ describe('Integration: Database Service Chain', function () {
                 '../utils/helpers': { sleep: async () => {}, redactSecrets: (s) => s }
             })
 
+            const state = require('../../src/state')
             state.setDbRootPassword('testrootpw')
 
             await DatabaseService.addUserPasswordToDatabase(

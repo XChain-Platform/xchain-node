@@ -69,6 +69,8 @@ const path = require('path')
 const crypto = require('crypto')
 const { configDir } = require('../config')
 const config = require('../config')
+const { getLogger } = require('../observability/logger')
+const logger = getLogger()
 const { ensureHubApiKey, readHubApiKey } = require('./config_service')
 
 const VALIDATOR_DIR   = path.join(configDir, 'validator')
@@ -563,7 +565,7 @@ function ensureCapabilityConfigLayout() {
         // against the same config dir) is NOT read by anything: say so rather
         // than let an operator tune a file the hub will never see.
         if (legacyIsFile) {
-            console.log('WARNING: ignoring stale ' + LEGACY_CAPS_FILE
+            logger.info('WARNING: ignoring stale ' + LEGACY_CAPS_FILE
                 + '; the live capability config is ' + CAPS_FILE + ' (delete the stale one)')
         }
         return false
@@ -573,7 +575,7 @@ function ensureCapabilityConfigLayout() {
 
     if (!fs.existsSync(CAPS_DIR)) fs.mkdirSync(CAPS_DIR, { recursive: true })
     fs.renameSync(LEGACY_CAPS_FILE, CAPS_FILE)
-    console.log('Moved validator capability config to ' + CAPS_FILE
+    logger.info('Moved validator capability config to ' + CAPS_FILE
         + ' (its own directory, so the hub mount cannot break `docker cp`).')
     return true
 }
@@ -619,17 +621,17 @@ async function resolveHubApiKey(alreadyInitialized, opts) {
 // a terminal is an API key in a scrollback buffer.
 function reportHubApiKey(hubApiKey) {
     if (hubApiKey.missing) {
-        console.log('  hub API key : NONE in ' + hubApiKey.path + ' - this host runs its hub KEYLESS,')
-        console.log('                and re-running init does NOT mint one. Every indexer, explorer and')
-        console.log('                service already pointed at this hub carries no key either, so a key')
-        console.log('                appearing here would flip the hub to authenticated on its next deploy')
-        console.log('                and 401 all of them at once, while the hub still reported healthy.')
-        console.log('                Re-run with --mint-hub-api-key ONLY if the hub is refusing to boot for')
-        console.log('                want of a key, and put the same value in every consumer before')
-        console.log('                redeploying the hub.')
+        logger.info('  hub API key : NONE in ' + hubApiKey.path + ' - this host runs its hub KEYLESS,')
+        logger.info('                and re-running init does NOT mint one. Every indexer, explorer and')
+        logger.info('                service already pointed at this hub carries no key either, so a key')
+        logger.info('                appearing here would flip the hub to authenticated on its next deploy')
+        logger.info('                and 401 all of them at once, while the hub still reported healthy.')
+        logger.info('                Re-run with --mint-hub-api-key ONLY if the hub is refusing to boot for')
+        logger.info('                want of a key, and put the same value in every consumer before')
+        logger.info('                redeploying the hub.')
         return
     }
-    console.log('  hub API key : ' + hubApiKey.path
+    logger.info('  hub API key : ' + hubApiKey.path
         + ' (mode 0600, key HUB_API_KEY, ' + (hubApiKey.generated ? 'generated now' : 'already present, reused') + ')')
 }
 
@@ -684,9 +686,9 @@ function setupWallets(network, opts) {
 // Print the two funding addresses. Addresses only: the keys stay in the file.
 function reportWallets(walletInfo, network, verb) {
     const coins = COIN_NETWORKS[(walletInfo && walletInfo.network) || network] || COIN_NETWORKS.mainnet
-    console.log('  Wallets ' + verb + '. Fund these two addresses:')
-    console.log('    stake / fees   (' + coins.stakeCoin + ') : ' + walletInfo.stakeAddress)
-    console.log('    price + anchor (' + coins.dogeCoin  + ') : ' + walletInfo.dogeAddress)
+    logger.info('  Wallets ' + verb + '. Fund these two addresses:')
+    logger.info('    stake / fees   (' + coins.stakeCoin + ') : ' + walletInfo.stakeAddress)
+    logger.info('    price + anchor (' + coins.dogeCoin  + ') : ' + walletInfo.dogeAddress)
 }
 
 // Generate a key + write all validator files. Idempotent guard via `force`.
@@ -708,7 +710,7 @@ async function initValidator(opts = {}) {
 
     if (alreadyInitialized && !opts.force) {
         const existing = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))
-        console.log('Validator already initialized. Pubkey: ' + existing.pubkey)
+        logger.info('Validator already initialized. Pubkey: ' + existing.pubkey)
         reportHubApiKey(hubApiKey)
 
         // REPAIR, never rotate. Everything below is additive: it fills in what
@@ -722,7 +724,7 @@ async function initValidator(opts = {}) {
         if (!existing.network && network) {
             existing.network = network
             fs.writeFileSync(SETTINGS_FILE, JSON.stringify(existing, null, 2))
-            console.log('  network     : recorded as ' + network + ' (derived from P2P port ' + existing.P2P_PORT + ')')
+            logger.info('  network     : recorded as ' + network + ' (derived from P2P port ' + existing.P2P_PORT + ')')
         }
 
         const w = setupWallets(network, opts)
@@ -731,22 +733,22 @@ async function initValidator(opts = {}) {
             ensureCapabilityConfigLayout()
             fillPublisherConfig(walletInfo)
         }
-        console.log('')
+        logger.info('')
         if (walletInfo) {
             reportWallets(walletInfo, network, w.generated
                 ? (w.imported.length ? 'imported (' + w.imported.join(', ') + ')' : 'generated now')
                 : 'already present')
             if (w.generated) {
-                console.log('')
-                console.log('  Next: xchain-node validator stake      (dry run shows balances and the plan)')
+                logger.info('')
+                logger.info('  Next: xchain-node validator stake      (dry run shows balances and the plan)')
             }
         } else if (w.skippedNoNetwork) {
-            console.log('  No wallets, and the network is unknown for port ' + existing.P2P_PORT + '.')
-            console.log('  Re-run with --network testnet|mainnet to generate them.')
+            logger.info('  No wallets, and the network is unknown for port ' + existing.P2P_PORT + '.')
+            logger.info('  Re-run with --network testnet|mainnet to generate them.')
         }
-        console.log('')
-        console.log('Re-run with --force to regenerate the SIGNING KEY (that creates a NEW key; you would need to re-stake).')
-        console.log('Wallets are never replaced by --force; --force-wallets does that, abandoning the old addresses.')
+        logger.info('')
+        logger.info('Re-run with --force to regenerate the SIGNING KEY (that creates a NEW key; you would need to re-stake).')
+        logger.info('Wallets are never replaced by --force; --force-wallets does that, abandoning the old addresses.')
         return existing
     }
 
@@ -819,49 +821,49 @@ async function initValidator(opts = {}) {
         fillPublisherConfig(walletInfo)
     }
 
-    console.log('')
-    console.log('Validator initialized' + (network ? ' for ' + network : '') + '.')
-    console.log('  signing key : ' + KEY_FILE + ' (mode 0600, keep this secret and back it up)')
-    console.log('  settings    : ' + SETTINGS_FILE)
-    console.log('  capabilities: ' + CAPS_FILE)
+    logger.info('')
+    logger.info('Validator initialized' + (network ? ' for ' + network : '') + '.')
+    logger.info('  signing key : ' + KEY_FILE + ' (mode 0600, keep this secret and back it up)')
+    logger.info('  settings    : ' + SETTINGS_FILE)
+    logger.info('  capabilities: ' + CAPS_FILE)
     reportHubApiKey(hubApiKey)
     if (walletInfo) {
-        console.log('  wallets     : ' + WALLETS_FILE + ' (mode 0600, holds both private keys: BACK IT UP)')
-        console.log('  DOGE signer : ' + SIGNER_DIR + ' (mounted read-only into the hub)')
+        logger.info('  wallets     : ' + WALLETS_FILE + ' (mode 0600, holds both private keys: BACK IT UP)')
+        logger.info('  DOGE signer : ' + SIGNER_DIR + ' (mounted read-only into the hub)')
     }
-    console.log('')
-    console.log('  PUBKEY (stake XCHAIN to this to qualify capabilities):')
-    console.log('    ' + pubkey)
-    console.log('')
+    logger.info('')
+    logger.info('  PUBKEY (stake XCHAIN to this to qualify capabilities):')
+    logger.info('    ' + pubkey)
+    logger.info('')
     if (walletInfo) {
         reportWallets(walletInfo, network, walletsGenerated
             ? (walletsImported.length ? 'imported (' + walletsImported.join(', ') + ')' : 'generated')
             : 'already present, kept')
-        console.log('')
-        console.log('  Then: xchain-node validator stake            (mints XCHAIN on testnet, then stakes)')
-        console.log('        xchain-node install ' + RELEASE_REF + ' xchain-hub  (starts the validator)')
+        logger.info('')
+        logger.info('  Then: xchain-node validator stake            (mints XCHAIN on testnet, then stakes)')
+        logger.info('        xchain-node install ' + RELEASE_REF + ' xchain-hub  (starts the validator)')
     } else if (walletsSkippedNoNetwork) {
-        console.log('  Wallets skipped: the network is unknown for port ' + p2pPort + '. Re-run with --network testnet|mainnet')
-        console.log('  to generate them, or run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR.')
+        logger.info('  Wallets skipped: the network is unknown for port ' + p2pPort + '. Re-run with --network testnet|mainnet')
+        logger.info('  to generate them, or run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR.')
     } else {
-        console.log('  Wallets skipped (--no-wallets). Run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR')
-        console.log('  and set oracle_publish.doge_address in ' + CAPS_FILE + ' by hand.')
-        console.log('  Then: xchain-node install ' + RELEASE_REF + ' xchain-hub')
+        logger.info('  Wallets skipped (--no-wallets). Run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR')
+        logger.info('  and set oracle_publish.doge_address in ' + CAPS_FILE + ' by hand.')
+        logger.info('  Then: xchain-node install ' + RELEASE_REF + ' xchain-hub')
     }
-    console.log('')
+    logger.info('')
     if (!settings.ORACLE_EPOCH_START)
-        console.log('  NOTE: set ORACLE_EPOCH_START (--oracle-epoch-start <unix-ms>) to the value shared by your federation before running the oracle.')
+        logger.info('  NOTE: set ORACLE_EPOCH_START (--oracle-epoch-start <unix-ms>) to the value shared by your federation before running the oracle.')
     else if (oracleEpochDefaulted)
-        console.log('  ORACLE_EPOCH_START: defaulted to the ' + network + ' federation value ' + oracleEpochStart + '.')
+        logger.info('  ORACLE_EPOCH_START: defaulted to the ' + network + ' federation value ' + oracleEpochStart + '.')
     if (seedNodes.length === 0)
-        console.log('  NOTE: no SEED_NODES set. Add peer addresses (--seed-nodes host:port,...) to join the gossip mesh.')
+        logger.info('  NOTE: no SEED_NODES set. Add peer addresses (--seed-nodes host:port,...) to join the gossip mesh.')
     else if (seedNodesDefaulted)
-        console.log('  SEED_NODES: defaulted to the five validator01-05.xchain.io bootstrap peers on port ' +
+        logger.info('  SEED_NODES: defaulted to the five validator01-05.xchain.io bootstrap peers on port ' +
                     p2pPort + '. Override with --seed-nodes host:port,... if you peer elsewhere.')
     if (!network)
-        console.log('  NOTE: network unknown (non-standard port). The hub needs HUB_NETWORK in the host .env.')
-    console.log('  cross_chain needs a BTC RPC endpoint in ' + CAPS_FILE + ' or must be listed under DISABLED_CAPABILITIES.')
-    console.log('')
+        logger.info('  NOTE: network unknown (non-standard port). The hub needs HUB_NETWORK in the host .env.')
+    logger.info('  cross_chain needs a BTC RPC endpoint in ' + CAPS_FILE + ' or must be listed under DISABLED_CAPABILITIES.')
+    logger.info('')
 
     return settings
 }
