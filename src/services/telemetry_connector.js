@@ -44,5 +44,8 @@ class TelemetryConnector {
     }
 }
 
+// The default endpoint rides on the class rather than as a second export,
+// so this module has one export shape and the test can still name it.
+TelemetryConnector.DEFAULT_TELEMETRY_URL = DEFAULT_TELEMETRY_URL
+
 module.exports = TelemetryConnector
-module.exports.DEFAULT_TELEMETRY_URL = DEFAULT_TELEMETRY_URL

@@ -23,7 +23,7 @@ const {
     XChainService, Coin, NODE_VERSION_FILE_NAME, projectFolders
 } = require('../config')
 const { gitHubDownloader, getRemoteModuleVersions, setRemoteModuleVersion } = require('../state')
-const { githubApiHeaders, githubRateLimitError }                             = require('./github_downloader')
+const { githubApiHeaders, githubRateLimitError }                             = require('../utils/github_api')
 const { getModuleDir, getModuleTmpDir, getCryptoNodeDir }                   = require('./config_service')
 const { getDockerContainerFileData, getDockerContainerFileCat }              = require('./docker_service')
 

@@ -27,6 +27,7 @@ const { assertSafeArchiveMemberNames } = require('../utils/helpers');
 const util = require('util');
 const stream = require('stream');
 const config = require('../config');
+const { githubApiHeaders, githubRateLimitError } = require('../utils/github_api');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 const pipeline = util.promisify(stream.pipeline);
@@ -41,25 +42,6 @@ function getHostArch() {
     const arch = ARCH_MAP[process.arch];
     if (!arch) throw new Error(`Unsupported host architecture for GitHub asset download: ${process.arch}`);
     return arch;
-}
-
-// Unauthenticated api.github.com calls share a 60-req/hr per-IP quota, which a busy host
-// exhausts (403 on every version check). An optional token (GITHUB_TOKEN or GH_TOKEN, any
-// scope) raises it to 5000/hr. api.github.com endpoints only: release-asset downloads
-// follow a redirect to S3, which rejects requests carrying an extra Authorization header.
-function githubApiHeaders() {
-    const headers = { 'User-Agent': 'GitHubDownloader' };
-    const token = config.GITHUB_TOKEN || config.GH_TOKEN;
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    return headers;
-}
-
-function githubRateLimitError(error) {
-    const res = error.response;
-    if (!res || res.status !== 403 || res.headers?.['x-ratelimit-remaining'] !== '0') return null;
-    const resetSec = Number(res.headers['x-ratelimit-reset']);
-    const resetAt  = Number.isFinite(resetSec) ? new Date(resetSec * 1000).toISOString() : 'unknown';
-    return new Error(`GitHub API rate limit exhausted for this IP (resets ${resetAt}); set GITHUB_TOKEN to raise the limit`);
 }
 
 class GitHubDownloader {
@@ -395,5 +377,3 @@ class GitHubDownloader {
 }
 
 module.exports = GitHubDownloader;
-module.exports.githubApiHeaders = githubApiHeaders;
-module.exports.githubRateLimitError = githubRateLimitError;

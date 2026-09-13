@@ -30,7 +30,7 @@ const fs    = require('fs')
 const path  = require('path')
 const axios = require('axios')
 
-const { githubApiHeaders, githubRateLimitError } = require('./github_downloader')
+const { githubApiHeaders, githubRateLimitError } = require('../utils/github_api')
 const { verifyManifestForTag } = require('./release_signature_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
