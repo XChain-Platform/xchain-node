@@ -31,7 +31,7 @@ function makeStubs() {
             // The non-swallowing read the destructive reset paths use: a registry
             // failure throws here instead of answering "not installed".
             getModuleContainerStrict: sinon.stub().resolves('container-id-123'),
-            removeModuleContainer: sinon.stub().resolves(true),
+            deleteModuleContainer: sinon.stub().resolves(true),
             // Registry contents AFTER the per-coin uninstall pass. Empty by default =
             // nothing left for a shared service to serve, which is the full-teardown
             // case; tests that need a surviving coin override this.

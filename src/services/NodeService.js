@@ -583,7 +583,7 @@ async function buildCryptoNode(coin, network) {
                 try {
                     const containerId = stdout.trim()
                     if (/^[a-f0-9]{64}$/.test(containerId)) {
-                        if (await db.insertModuleContainer(NODE_MODULE_NAME, coin, network, containerId)) {
+                        if (await db.setModuleContainer(NODE_MODULE_NAME, coin, network, containerId)) {
                             await statusChanged()
                             resolve(containerId)
                         } else {

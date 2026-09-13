@@ -30,9 +30,9 @@ function makeStubs() {
             readFileSync: sinon.stub()
         },
         db: {
-            insertModuleContainer: sinon.stub().resolves(true),
+            setModuleContainer: sinon.stub().resolves(true),
             getModuleContainer: sinon.stub().resolves('old-container-id'),
-            removeModuleContainer: sinon.stub().resolves('removed-id')
+            deleteModuleContainer: sinon.stub().resolves('removed-id')
         },
         statusChanged: sinon.stub().resolves(),
         getStatus: sinon.stub().resolves({}),
@@ -563,8 +563,8 @@ describe('ModuleService', function () {
             })
             const ms = loadModuleService(stubs)
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
-            expect(stubs.db.insertModuleContainer.calledOnce).to.be.true
-            const dbArgs = stubs.db.insertModuleContainer.firstCall.args
+            expect(stubs.db.setModuleContainer.calledOnce).to.be.true
+            const dbArgs = stubs.db.setModuleContainer.firstCall.args
             expect(dbArgs[0]).to.equal('xchain-encoder')
             expect(dbArgs[1]).to.equal('bitcoin')
             expect(dbArgs[2]).to.equal('mainnet')
@@ -758,7 +758,7 @@ describe('ModuleService', function () {
             expect(stubs.stopContainerByName.calledWith('old-id-123', 30)).to.be.true
             expect(stubs.removeContainer.calledWith('old-id-123')).to.be.true
             expect(stubs.forceRemoveContainerByName.calledWith('xchain-node-bitcoin-mainnet-xchain-encoder')).to.be.true
-            expect(stubs.db.insertModuleContainer.calledWith('xchain-encoder', 'bitcoin', 'mainnet', 'e'.repeat(64))).to.be.true
+            expect(stubs.db.setModuleContainer.calledWith('xchain-encoder', 'bitcoin', 'mainnet', 'e'.repeat(64))).to.be.true
         })
 
         it('leaves the default path building the image', async function () {
@@ -1210,7 +1210,7 @@ describe('ModuleService', function () {
             stubs.db.getModuleContainer.resolves('stale-cid')
             const ms = loadModuleService(stubs)
             const result = await ms.uninstallModule('bitcoin', 'mainnet', 'xchain-encoder')
-            expect(stubs.db.removeModuleContainer.calledOnce).to.be.true
+            expect(stubs.db.deleteModuleContainer.calledOnce).to.be.true
             expect(stubs.statusChanged.calledOnce).to.be.true
             expect(result).to.be.true
         })
@@ -1962,9 +1962,9 @@ describe('ModuleService', function () {
             }
         })
 
-        it('rejects when insertModuleContainer returns false', async function () {
+        it('rejects when setModuleContainer returns false', async function () {
             const stubs = makeStubs()
-            stubs.db.insertModuleContainer.resolves(false)
+            stubs.db.setModuleContainer.resolves(false)
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let opts = {}, cb
                 if (typeof rest[0] === 'function') { cb = rest[0] } else { opts = rest[0] || {}; cb = rest[1] }
@@ -1992,7 +1992,7 @@ describe('ModuleService', function () {
             const ms = loadModuleService(stubs)
             const result = await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, true)
             expect(result).to.equal(containerId)
-            expect(stubs.db.insertModuleContainer.called).to.be.false
+            expect(stubs.db.setModuleContainer.called).to.be.false
         })
     })
 
@@ -2074,7 +2074,7 @@ describe('ModuleService', function () {
                 // call-through would rename real paths on the test host.
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
-                    db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
+                    db: { setModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), deleteModuleContainer: sinon3.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
                     getLastStatus: () => null
                 },
@@ -2136,7 +2136,7 @@ describe('ModuleService', function () {
                 // call-through would rename real paths on the test host.
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
-                    db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
+                    db: { setModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), deleteModuleContainer: sinon3.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
                     getLastStatus: () => null
                 },
@@ -2203,7 +2203,7 @@ describe('ModuleService', function () {
                 'child_process': { execFile: execFileStub },
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
-                    db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
+                    db: { setModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), deleteModuleContainer: sinon3.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
                     getLastStatus: () => null
                 },
@@ -2268,7 +2268,7 @@ describe('ModuleService', function () {
                 'child_process': { execFile: cloneExecFileStub },
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
-                    db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
+                    db: { setModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), deleteModuleContainer: sinon3.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
                     getLastStatus: () => null
                 },
@@ -2529,7 +2529,7 @@ describe('ModuleService', function () {
                 // call-through would rename real paths on the test host.
                 'fs': { existsSync: sinon3.stub(), rmSync: sinon3.stub(), mkdirSync: sinon3.stub(), readFileSync: sinon3.stub(), cpSync: sinon3.stub(), renameSync: sinon3.stub() },
                 '../state': {
-                    db: { insertModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), removeModuleContainer: sinon3.stub().resolves(true) },
+                    db: { setModuleContainer: sinon3.stub().resolves(true), getModuleContainer: sinon3.stub().resolves(null), deleteModuleContainer: sinon3.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
                     getLastStatus: () => null
                 },
@@ -2569,12 +2569,12 @@ describe('ModuleService', function () {
     })
 
     // -------------------------------------------------------------------
-    // uninstallModule: removeModuleContainer returns false
+    // uninstallModule: deleteModuleContainer returns false
     // -------------------------------------------------------------------
 
-    describe('uninstallModule(): removeModuleContainer returns false', function () {
+    describe('uninstallModule(): deleteModuleContainer returns false', function () {
 
-        it('throws when removeModuleContainer returns false after successful container removal', async function () {
+        it('throws when deleteModuleContainer returns false after successful container removal', async function () {
             const stubs = makeStubs()
             stubs.getStatus.resolves({
                 bitcoin: {
@@ -2586,7 +2586,7 @@ describe('ModuleService', function () {
                     }
                 }
             })
-            stubs.db.removeModuleContainer.resolves(null) // falsy → triggers throw
+            stubs.db.deleteModuleContainer.resolves(null) // falsy → triggers throw
             const ms = loadModuleService(stubs)
             try {
                 await ms.uninstallModule('bitcoin', 'mainnet', 'xchain-encoder')
@@ -2809,7 +2809,7 @@ describe('ModuleService', function () {
                 },
                 'fs': { existsSync: sinon2.stub(), rmSync: sinon2.stub(), mkdirSync: sinon2.stub(), readFileSync: sinon2.stub(), cpSync: sinon2.stub() },
                 '../state': {
-                    db: { insertModuleContainer: sinon2.stub().resolves(true), getModuleContainer: sinon2.stub().resolves(null), removeModuleContainer: sinon2.stub().resolves(true) },
+                    db: { setModuleContainer: sinon2.stub().resolves(true), getModuleContainer: sinon2.stub().resolves(null), deleteModuleContainer: sinon2.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
                     getLastStatus: () => null
                 },
@@ -2975,7 +2975,7 @@ describe('ModuleService', function () {
             const ms = proxyquire('../../src/services/ModuleService', {
                 'child_process': { execFile: execFileStub },
                 'fs': fsStub,
-                '../state': { db: { insertModuleContainer: sinon.stub().resolves(true) }, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
+                '../state': { db: { setModuleContainer: sinon.stub().resolves(true) }, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
                 './ConfigService': {
                     getModuleDir: (mod) => '/modules/' + mod,
                     getModuleTmpDir: (mod) => '/tmp/' + mod,

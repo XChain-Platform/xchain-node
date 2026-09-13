@@ -84,7 +84,7 @@ function load({ heads = [TIP], tip = TIP, sourceUrl = null, gitAsyncExtra = null
         'util': { promisify: () => gitAsync },
         'fs': fs,
         '../state': {
-            db: { insertModuleContainer: sinon.stub().resolves(true), getModuleContainer: sinon.stub().resolves(null), removeModuleContainer: sinon.stub().resolves(true) },
+            db: { setModuleContainer: sinon.stub().resolves(true), getModuleContainer: sinon.stub().resolves(null), deleteModuleContainer: sinon.stub().resolves(true) },
             getRemoteModuleVersions: () => ({}),
             getLastStatus: () => null
         },

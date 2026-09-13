@@ -1490,7 +1490,7 @@ async function buildDatabaseModule(coin, network) {
         })
         const containerId = stdout.trim()
         if (/^[a-f0-9]{64}$/.test(containerId)) {
-            // No db.insertModuleContainer() call: the `modules` table lives
+            // No db.setModuleContainer() call: the `modules` table lives
             // inside the container just created, so it doesn't exist yet.
             // Lookups instead use getDatabaseContainerId() (docker inspect by
             // name); DiscoveryService.discoverContainers() fills the row later.

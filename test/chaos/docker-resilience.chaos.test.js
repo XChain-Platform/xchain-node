@@ -55,9 +55,9 @@ function loadModuleService(stubs, opts = {}) {
         },
         '../state': {
             db: opts.db || {
-                insertModuleContainer: sinon.stub().resolves(true),
+                setModuleContainer: sinon.stub().resolves(true),
                 getModuleContainer: sinon.stub().resolves(null),
-                removeModuleContainer: sinon.stub().resolves(true)
+                deleteModuleContainer: sinon.stub().resolves(true)
             },
             getRemoteModuleVersions: () => ({}),
             getLastStatus: () => null
@@ -213,9 +213,9 @@ describe('Chaos: Docker Resilience', function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
             const dbStub = {
-                insertModuleContainer: sinon.stub().resolves(true),
+                setModuleContainer: sinon.stub().resolves(true),
                 getModuleContainer: sinon.stub().resolves(null),
-                removeModuleContainer: sinon.stub().resolves(true)
+                deleteModuleContainer: sinon.stub().resolves(true)
             }
 
             stubs.execFile.callsFake((cmd, args, ...rest) => {
@@ -234,7 +234,7 @@ describe('Chaos: Docker Resilience', function () {
                 // Expected
             }
 
-            expect(dbStub.insertModuleContainer.called).to.be.false
+            expect(dbStub.setModuleContainer.called).to.be.false
         })
     })
 
@@ -296,9 +296,9 @@ describe('Chaos: Docker Resilience', function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
             const dbStub = {
-                insertModuleContainer: sinon.stub().resolves(true),
+                setModuleContainer: sinon.stub().resolves(true),
                 getModuleContainer: sinon.stub().resolves(null),
-                removeModuleContainer: sinon.stub().resolves(true)
+                deleteModuleContainer: sinon.stub().resolves(true)
             }
 
             stubs.execFile.callsFake((cmd, args, ...rest) => {
@@ -319,7 +319,7 @@ describe('Chaos: Docker Resilience', function () {
                 // Expected
             }
 
-            expect(dbStub.insertModuleContainer.called).to.be.false
+            expect(dbStub.setModuleContainer.called).to.be.false
         })
 
         it('rejects when docker run returns invalid container ID', async function () {
@@ -378,9 +378,9 @@ describe('Chaos: Docker Resilience', function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
             const dbStub = {
-                insertModuleContainer: sinon.stub().resolves(false),
+                setModuleContainer: sinon.stub().resolves(false),
                 getModuleContainer: sinon.stub().resolves(null),
-                removeModuleContainer: sinon.stub().resolves(true)
+                deleteModuleContainer: sinon.stub().resolves(true)
             }
 
             stubs.execFile.callsFake((cmd, args, ...rest) => {
@@ -618,7 +618,7 @@ describe('Chaos: Docker Resilience', function () {
                 'child_process': { execFile: stubs.execFile },
                 'fs': { existsSync: sinon.stub().returns(true), rmSync: sinon.stub(), mkdirSync: sinon.stub() },
                 '../state': {
-                    db: { insertModuleContainer: sinon.stub().resolves(true) },
+                    db: { setModuleContainer: sinon.stub().resolves(true) },
                     getRemoteModuleVersions: () => ({}),
                     getLastStatus: () => null
                 },

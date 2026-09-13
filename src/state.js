@@ -15,7 +15,7 @@
  ********************************************************************/
 
 const { srcDir } = require('./config/constants')
-const MariaDbStore      = require('./MariaDbStore.js')
+const MariaDbStore      = require('./db')
 const GitHubDownloader  = require('./GitHubDownloader.js')
 
 // db starts unconfigured; precheck.js calls db.createDatabase(config) once

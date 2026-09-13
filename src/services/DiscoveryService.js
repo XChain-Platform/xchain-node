@@ -145,19 +145,19 @@ async function scanAndRegisterModules({ silent = false } = {}) {
         seen.add(key)
         const existing = await db.getModuleContainer(module, coin, network)
         if (existing == null) {
-            // insertModuleContainer swallows query errors and answers false, so
+            // setModuleContainer swallows query errors and answers false, so
             // counting the row as added without reading that answer is how a
             // registry silently stays empty across a "successful" scan.
-            if (!await db.insertModuleContainer(module, coin, network, nextContainer.ID)) {
+            if (!await db.setModuleContainer(module, coin, network, nextContainer.ID)) {
                 throw new Error("Couldn't register " + label + " (" + nextContainer.ID.slice(0,12) + ") in the module registry")
             }
             logIfNotSilent(silent, "Added " + label + " (" + nextContainer.ID.slice(0,12) + ")")
             added++
         } else if (existing !== nextContainer.ID) {
             // Stale registry: running container has a different ID than recorded
-            // (typically a rebuild that bypassed the CLI). insertModuleContainer
+            // (typically a rebuild that bypassed the CLI). setModuleContainer
             // is an UPSERT, so this fixes the row in-place.
-            if (!await db.insertModuleContainer(module, coin, network, nextContainer.ID)) {
+            if (!await db.setModuleContainer(module, coin, network, nextContainer.ID)) {
                 throw new Error("Couldn't reconcile " + label + " to " + nextContainer.ID.slice(0,12) + " in the module registry")
             }
             logIfNotSilent(silent, "Reconciled " + label + " (was " + existing.slice(0,12) + ", now " + nextContainer.ID.slice(0,12) + ")")
@@ -174,7 +174,7 @@ async function scanAndRegisterModules({ silent = false } = {}) {
     for (const row of allRows) {
         const k = keyOf(row.module, row.coin || '', row.network || '')
         if (seen.has(k)) continue
-        await db.removeModuleContainer(row.module, row.coin || '', row.network || '')
+        await db.deleteModuleContainer(row.module, row.coin || '', row.network || '')
         logIfNotSilent(silent, "Removed orphan registry row " +
             (row.coin || row.network ? (row.coin + SEP + row.network + SEP) : '') +
             row.module + " (was " + String(row.container_id || '').slice(0,12) + ")")

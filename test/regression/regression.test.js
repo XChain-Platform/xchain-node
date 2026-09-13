@@ -99,7 +99,7 @@ function loadModuleService(stubs, configOverrides) {
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs || { existsSync: sinon.stub().returns(true), rmSync: sinon.stub(), mkdirSync: sinon.stub() },
         '../state': {
-            db: stubs.db || { insertModuleContainer: sinon.stub().resolves(true) },
+            db: stubs.db || { setModuleContainer: sinon.stub().resolves(true) },
             getLastStatus: () => null,
             getRemoteModuleVersions: () => ({})
         },
@@ -310,7 +310,7 @@ describe('Regression Suite', function () {
     describe('[regression:p0] Docker Command Construction', function () {
 
         it('R-DCK-001: buildAndUp constructs docker run with env vars and returns 64-char container ID', async function () {
-            const stubs = { execFile: sinon.stub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: sinon.stub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             const validId = 'a'.repeat(64)
             let runArgs = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
@@ -348,7 +348,7 @@ describe('Regression Suite', function () {
         })
 
         it('R-DCK-004: env vars from config reach docker run via --env NAME + process env, never argv values', async function () {
-            const stubs = { execFile: sinon.stub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: sinon.stub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             let runArgs = null
             let runOpts = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
@@ -430,7 +430,7 @@ describe('Regression Suite', function () {
         })
 
         it('R-SEC-003: container ID with non-hex characters rejected', async function () {
-            const stubs = { execFile: sinon.stub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: sinon.stub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             const invalidId = 'g'.repeat(64)
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
@@ -447,7 +447,7 @@ describe('Regression Suite', function () {
         })
 
         it('R-SEC-004: container ID with injection payload rejected', async function () {
-            const stubs = { execFile: sinon.stub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: sinon.stub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             const maliciousId = 'a'.repeat(63) + ';'
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
@@ -478,7 +478,7 @@ describe('Regression Suite', function () {
         })
 
         it('R-SEC-006: shell metacharacters in env values pass literally via the child env, never argv', async function () {
-            const stubs = { execFile: sinon.stub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: sinon.stub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             let runArgs = null
             let runOpts = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
@@ -530,7 +530,7 @@ describe('Regression Suite', function () {
         it('R-LIF-001: install stores container ID in LevelDB via buildAndUp', async function () {
             const state = require('../../src/state')
             const containerId = TestEnv.fakeContainerId('a')
-            await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
+            await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
             const retrieved = await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             expect(retrieved).to.equal(containerId)
         })
@@ -616,9 +616,9 @@ describe('Regression Suite', function () {
         it('R-LIF-005: uninstall removes LevelDB entry', async function () {
             const state = require('../../src/state')
             const containerId = TestEnv.fakeContainerId('u')
-            await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
+            await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
 
-            const removed = await state.db.removeModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            const removed = await state.db.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             expect(removed).to.equal(containerId)
 
             const retrieved = await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')

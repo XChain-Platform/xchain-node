@@ -12,19 +12,18 @@
  *
  **********************************************************************
  *
- * XChain Node - MariaDbStore Class
+ * XChain Node - the module registry table
  *
- * Drop-in replacement for LevelUpStore. Persists module→container ID
- * mappings in a shared MariaDB instance (the xchain_node database, in the
- * per-stack registry table MODULES_TABLE resolves below).
+ * Every query against the per-stack `modules` registry, plus the DDL that
+ * creates it. Installed onto the store's prototype by db/index.js, so a caller
+ * still writes `store.getModuleContainer(...)` and cannot tell the file split
+ * happened.
  *
  ********************************************************************/
 
-const mariadb = require('mariadb')
 const crypto = require('crypto')
-const { sleep } = require('./utils/helpers')
-const { NODE_PREFIX, DEFAULT_NODE_PREFIX } = require('./config/constants')
-const { assertSafeDbIdentifier } = require('./utils/sqlSafety')
+const { NODE_PREFIX, DEFAULT_NODE_PREFIX } = require('../config/constants')
+const { assertSafeDbIdentifier } = require('../utils/sqlSafety')
 
 /*
  * Registry table, scoped to THIS stack.
@@ -63,58 +62,10 @@ const MODULES_TABLE = NODE_PREFIX === DEFAULT_NODE_PREFIX
             + '_' + crypto.createHash('sha256').update(NODE_PREFIX).digest('hex').substring(0, 12),
         'registry table name')
 
-class MariaDbStore {
-    constructor(config = null) {
-        this.config = config
-        this.pool = null
-    }
-
-    setConfig(config) {
-        this.config = config
-    }
-
-    async createDatabase(config = null) {
-        if (this.pool) return this.pool
-
-        if (config) this.config = config
-        if (!this.config) {
-            throw new Error("MariaDbStore needs config (host, port, user, password, database) before createDatabase")
-        }
-
-        try {
-            this.pool = mariadb.createPool({
-                host:            this.config.host,
-                port:            this.config.port,
-                user:            this.config.user,
-                password:        this.config.password,
-                database:        this.config.database,
-                connectionLimit: this.config.connectionLimit || 5
-            })
-        } catch (err) {
-            throw new Error("Couldn't create MariaDB pool: " + err.message)
-        }
-
-        // Right after a fresh container start, mariadbd may already answer
-        // through the unix socket (so docker exec checks pass) while the TCP
-        // listener / docker port mapping aren't quite ready. Retry briefly.
-        let conn
-        let lastErr
-        for (let attempt = 0; attempt < 6; attempt++) {
-            try {
-                conn = await this.pool.getConnection()
-                break
-            } catch (err) {
-                lastErr = err
-                await sleep(2000)
-            }
-        }
-        if (!conn) {
-            throw new Error("Couldn't open/create MariaDB database: " + lastErr.message)
-        }
-
-        try {
-            await conn.query(
-                `CREATE TABLE IF NOT EXISTS ${MODULES_TABLE} (
+// The DDL for the table above. It is created on every open rather than
+// migrated, because the registry is derived state that precheck repopulates.
+const CREATE_MODULES_TABLE_SQL =
+    `CREATE TABLE IF NOT EXISTS ${MODULES_TABLE} (
                     module       VARCHAR(64)  NOT NULL,
                     coin         VARCHAR(32)  NOT NULL DEFAULT '',
                     network      VARCHAR(32)  NOT NULL DEFAULT '',
@@ -123,41 +74,8 @@ class MariaDbStore {
                     updated_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     PRIMARY KEY (module, coin, network)
                 )`
-            )
-        } catch (err) {
-            throw new Error("Couldn't open/create MariaDB database: " + err.message)
-        } finally {
-            conn.release()
-        }
 
-        return this.pool
-    }
-
-    async close() {
-        if (this.pool) {
-            await this.pool.end()
-            this.pool = null
-        }
-    }
-
-    isReady() {
-        return this.pool !== null
-    }
-
-    // Callers that treat "no rows" as a valid answer (status printing, early
-    // precheck) can live with the empty array getAllModuleContainers returns
-    // when the pool isn't open yet. Callers that act ON the row set cannot: an
-    // unconfigured store is indistinguishable from an empty install, so they
-    // silently do nothing and report success. Those sites assert first.
-    assertReady(operation) {
-        if (!this.pool) {
-            throw new Error(
-                "MariaDbStore is not connected, so " + operation + " would silently operate on an empty " +
-                "module set and report success. Run precheck (db.createDatabase) before this call."
-            )
-        }
-    }
-
+const modulesMixin = {
     async getAllModuleContainers(coin, network) {
         if (!this.pool) return []
 
@@ -180,9 +98,9 @@ class MariaDbStore {
             coin: r.coin,
             container_id: r.container_id
         }))
-    }
+    },
 
-    async insertModuleContainer(module, coin, network, containerId) {
+    async setModuleContainer(module, coin, network, containerId) {
         if (!this.pool) return false
         try {
             await this.pool.query(
@@ -195,7 +113,7 @@ class MariaDbStore {
         } catch (err) {
             return false
         }
-    }
+    },
 
     async getModuleContainer(module, coin, network) {
         if (!this.pool) return null
@@ -210,7 +128,7 @@ class MariaDbStore {
         } catch (err) {
             return null
         }
-    }
+    },
 
     // Answer the same question as getModuleContainer, but only from evidence.
     // getModuleContainer returns null for a genuine zero-row miss AND for every
@@ -228,9 +146,9 @@ class MariaDbStore {
         )
         if (rows.length === 0) return null
         return rows[0].container_id
-    }
+    },
 
-    async removeModuleContainer(module, coin, network) {
+    async deleteModuleContainer(module, coin, network) {
         if (!this.pool) return false
         try {
             const rows = await this.pool.query(
@@ -251,13 +169,13 @@ class MariaDbStore {
             console.log(err)
             return false
         }
-    }
+    },
 
-    async countModules() {
+    async getModuleCount() {
         if (!this.pool) return 0
         const rows = await this.pool.query(`SELECT COUNT(*) AS cnt FROM ${MODULES_TABLE}`)
         return Number(rows[0].cnt)
     }
 }
 
-module.exports = MariaDbStore
+module.exports = { MODULES_TABLE, CREATE_MODULES_TABLE_SQL, modulesMixin }

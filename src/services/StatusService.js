@@ -454,7 +454,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                 // happens even if the registry delete fails.
                                 toRemove.push(nextModule)
                                 try {
-                                    await db.removeModuleContainer(nextModule, nextCoin, nextCoinNetwork)
+                                    await db.deleteModuleContainer(nextModule, nextCoin, nextCoinNetwork)
                                 } catch { /* registry cleanup is best-effort */ }
                             } else {
                                 // Transient inspect failure (daemon unreachable /

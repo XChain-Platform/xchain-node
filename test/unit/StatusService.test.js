@@ -215,7 +215,7 @@ describe('StatusService: getStatus() with installed modules', function () {
 
     it('removes module from installedModules AND reconciles the registry when docker confirms the container is gone', async function () {
         const installedModulesObj = {}
-        const removeModuleContainer = sinon.stub().resolves(true)
+        const deleteModuleContainer = sinon.stub().resolves(true)
         const state = makeStateStub({
             isStatusUpdated:  sinon.stub().returns(false),
             getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
@@ -227,7 +227,7 @@ describe('StatusService: getStatus() with installed modules', function () {
                 getAllModuleContainers: sinon.stub().resolves([
                     { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'bbb' }
                 ]),
-                removeModuleContainer
+                deleteModuleContainer
             }
         })
 
@@ -241,7 +241,7 @@ describe('StatusService: getStatus() with installed modules', function () {
         const coinNetModules = (result.bitcoin || {})[`mainnet`] || {}
         expect(coinNetModules['xchain-encoder']).to.be.undefined
         // ...and the persistent registry row reconciled, not only in-memory status.
-        expect(removeModuleContainer.calledOnceWith('xchain-encoder', 'bitcoin', 'mainnet')).to.be.true
+        expect(deleteModuleContainer.calledOnceWith('xchain-encoder', 'bitcoin', 'mainnet')).to.be.true
     })
 
     it('cleans up empty coin slot when all containers are confirmed gone', async function () {
@@ -257,7 +257,7 @@ describe('StatusService: getStatus() with installed modules', function () {
                 getAllModuleContainers: sinon.stub().resolves([
                     { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'ccc' }
                 ]),
-                removeModuleContainer: sinon.stub().resolves(true)
+                deleteModuleContainer: sinon.stub().resolves(true)
             }
         })
 
@@ -271,7 +271,7 @@ describe('StatusService: getStatus() with installed modules', function () {
 
     it('does NOT prune or touch the registry on a transient inspect failure (daemon unreachable)', async function () {
         const installedModulesObj = {}
-        const removeModuleContainer = sinon.stub().resolves(true)
+        const deleteModuleContainer = sinon.stub().resolves(true)
         const state = makeStateStub({
             isStatusUpdated:  sinon.stub().returns(false),
             getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
@@ -283,7 +283,7 @@ describe('StatusService: getStatus() with installed modules', function () {
                 getAllModuleContainers: sinon.stub().resolves([
                     { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', container_id: 'ddd' }
                 ]),
-                removeModuleContainer
+                deleteModuleContainer
             }
         })
 
@@ -299,7 +299,7 @@ describe('StatusService: getStatus() with installed modules', function () {
         expect(mod).to.exist
         expect(mod.status.State.Status).to.equal('unknown')
         // ...and no registry row is deleted on an ambiguous/transient failure.
-        expect(removeModuleContainer.called).to.be.false
+        expect(deleteModuleContainer.called).to.be.false
     })
 
     it('sets remote_version on module from remoteModuleVersions', async function () {

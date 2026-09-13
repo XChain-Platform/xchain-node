@@ -55,7 +55,7 @@ function loadModuleService(modulesDir, tmpDir, remote) {
             modulesUrls: Object.assign({}, realConstants.modulesUrls, { [MODULE]: remote })
         }),
         '../state': {
-            db: { insertModuleContainer: sinon.stub().resolves(true), getModuleContainer: sinon.stub().resolves(null), removeModuleContainer: sinon.stub().resolves(true) },
+            db: { setModuleContainer: sinon.stub().resolves(true), getModuleContainer: sinon.stub().resolves(null), deleteModuleContainer: sinon.stub().resolves(true) },
             getRemoteModuleVersions: () => ({}),
             getLastStatus: () => null
         },

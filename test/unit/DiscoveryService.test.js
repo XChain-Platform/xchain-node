@@ -28,12 +28,12 @@ const proxyquire = require('proxyquire').noCallThru()
 
 function loadService({ containers = [], db = {} } = {}) {
     const dbStub = {
-        // insertModuleContainer answers true/false rather than throwing, and the
+        // setModuleContainer answers true/false rather than throwing, and the
         // scan now honors that answer, so the stub has to model it truthfully.
         getModuleContainer:     sinon.stub().resolves(null),
-        insertModuleContainer:  sinon.stub().resolves(true),
+        setModuleContainer:  sinon.stub().resolves(true),
         getAllModuleContainers: sinon.stub().resolves([]),
-        removeModuleContainer:  sinon.stub().resolves(),
+        deleteModuleContainer:  sinon.stub().resolves(),
         assertReady:            sinon.stub(),
         ...db,
     }
@@ -126,7 +126,7 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
         })
         const changed = await svc.scanAndRegisterModules({ silent: true })
         expect(changed).to.equal(1)
-        sinon.assert.calledWith(db.insertModuleContainer,
+        sinon.assert.calledWith(db.setModuleContainer,
             'xchain-indexer', 'litecoin', 'mainnet', 'cafebabecafebabecafebabe')
     })
 
@@ -147,7 +147,7 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
         })
         const changed = await svc.scanAndRegisterModules({ silent: true })
         expect(changed).to.equal(0)
-        sinon.assert.notCalled(db.removeModuleContainer)
+        sinon.assert.notCalled(db.deleteModuleContainer)
     })
 
     it('does NOT purge the live sync service row (shared, coin/network-independent)', async function () {
@@ -168,7 +168,7 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
         })
         const changed = await svc.scanAndRegisterModules({ silent: true })
         expect(changed).to.equal(0)
-        sinon.assert.notCalled(db.removeModuleContainer)
+        sinon.assert.notCalled(db.deleteModuleContainer)
     })
 
     it('still purges genuinely orphaned rows', async function () {
@@ -182,7 +182,7 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
         })
         const changed = await svc.scanAndRegisterModules({ silent: true })
         expect(changed).to.equal(1)
-        sinon.assert.calledWith(db.removeModuleContainer, 'xchain-decoder', 'bitcoin', 'testnet')
+        sinon.assert.calledWith(db.deleteModuleContainer, 'xchain-decoder', 'bitcoin', 'testnet')
     })
 
     it('reconciles a stale container_id in place', async function () {
@@ -200,8 +200,8 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
         })
         const changed = await svc.scanAndRegisterModules({ silent: true })
         expect(changed).to.equal(1)
-        sinon.assert.calledWith(db.insertModuleContainer, 'database', '', '', 'newid')
-        sinon.assert.notCalled(db.removeModuleContainer)
+        sinon.assert.calledWith(db.setModuleContainer, 'database', '', '', 'newid')
+        sinon.assert.notCalled(db.deleteModuleContainer)
     })
 })
 
@@ -234,14 +234,14 @@ describe('DiscoveryService.scanAndRegisterModules fail-closed registry', functio
                 ID: 'abc', State: 'running',
             }],
             db: {
-                insertModuleContainer: sinon.stub().resolves(false),
+                setModuleContainer: sinon.stub().resolves(false),
             },
         })
         let err = null
         try { await svc.scanAndRegisterModules({ silent: true }) } catch (e) { err = e }
         expect(err, 'a swallowed write error must not read as success').to.not.equal(null)
         expect(err.message).to.match(/Couldn't register database/)
-        sinon.assert.calledOnce(db.insertModuleContainer)
+        sinon.assert.calledOnce(db.setModuleContainer)
     })
 
     it('throws when a reconcile write fails', async function () {
@@ -252,7 +252,7 @@ describe('DiscoveryService.scanAndRegisterModules fail-closed registry', functio
             }],
             db: {
                 getModuleContainer:    sinon.stub().resolves('oldid'),
-                insertModuleContainer: sinon.stub().resolves(false),
+                setModuleContainer: sinon.stub().resolves(false),
             },
         })
         let err = null

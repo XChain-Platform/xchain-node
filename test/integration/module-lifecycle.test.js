@@ -34,9 +34,9 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
     describe('LevelDB key format and CRUD', function () {
         const state = require('../../src/state')
 
-        it('insertModuleContainer stores and getModuleContainer retrieves by MC key', async function () {
+        it('setModuleContainer stores and getModuleContainer retrieves by MC key', async function () {
             const containerId = TestEnv.fakeContainerId('a')
-            const result = await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
+            const result = await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
             expect(result).to.be.true
 
             const retrieved = await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
@@ -48,11 +48,11 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             expect(retrieved).to.be.null
         })
 
-        it('removeModuleContainer deletes the entry', async function () {
+        it('deleteModuleContainer deletes the entry', async function () {
             const containerId = TestEnv.fakeContainerId('b')
-            await state.db.insertModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', containerId)
+            await state.db.setModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', containerId)
 
-            const removed = await state.db.removeModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
+            const removed = await state.db.deleteModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
             expect(removed).to.equal(containerId)
 
             const retrieved = await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
@@ -64,9 +64,9 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const id2 = TestEnv.fakeContainerId('2')
             const id3 = TestEnv.fakeContainerId('3')
 
-            await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', id1)
-            await state.db.insertModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', id2)
-            await state.db.insertModuleContainer('xchain-encoder', 'litecoin', 'mainnet', id3)
+            await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', id1)
+            await state.db.setModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', id2)
+            await state.db.setModuleContainer('xchain-encoder', 'litecoin', 'mainnet', id3)
 
             const btcModules = await state.db.getAllModuleContainers('bitcoin', 'mainnet')
             expect(btcModules).to.have.length(2)
@@ -80,8 +80,8 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const hubId = TestEnv.fakeContainerId('h')
             const encoderId = TestEnv.fakeContainerId('e')
 
-            await state.db.insertModuleContainer('xchain-hub', '', '', hubId)
-            await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', encoderId)
+            await state.db.setModuleContainer('xchain-hub', '', '', hubId)
+            await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', encoderId)
 
             // Shared services (empty coin/network) are always included in a filtered query.
             const modules = await state.db.getAllModuleContainers('bitcoin', 'mainnet')
@@ -90,12 +90,12 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             expect(moduleNames).to.include('xchain-encoder')
         })
 
-        it('insertModuleContainer overwrites existing entry', async function () {
+        it('setModuleContainer overwrites existing entry', async function () {
             const oldId = TestEnv.fakeContainerId('x')
             const newId = TestEnv.fakeContainerId('y')
 
-            await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', oldId)
-            await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', newId)
+            await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', oldId)
+            await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', newId)
 
             const retrieved = await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             expect(retrieved).to.equal(newId)
@@ -110,15 +110,15 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const decId = TestEnv.fakeContainerId('d')
             const idxId = TestEnv.fakeContainerId('i')
 
-            await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', encId)
-            await state.db.insertModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', decId)
-            await state.db.insertModuleContainer('xchain-indexer', 'bitcoin', 'mainnet', idxId)
+            await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', encId)
+            await state.db.setModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', decId)
+            await state.db.setModuleContainer('xchain-indexer', 'bitcoin', 'mainnet', idxId)
 
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(encId)
             expect(await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')).to.equal(decId)
             expect(await state.db.getModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')).to.equal(idxId)
 
-            await state.db.removeModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
+            await state.db.deleteModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
 
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(encId)
             expect(await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')).to.be.null
@@ -130,9 +130,9 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const ltcId = TestEnv.fakeContainerId('l')
             const dogeId = TestEnv.fakeContainerId('d')
 
-            await state.db.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', btcId)
-            await state.db.insertModuleContainer('xchain-encoder', 'litecoin', 'mainnet', ltcId)
-            await state.db.insertModuleContainer('xchain-encoder', 'dogecoin', 'testnet', dogeId)
+            await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', btcId)
+            await state.db.setModuleContainer('xchain-encoder', 'litecoin', 'mainnet', ltcId)
+            await state.db.setModuleContainer('xchain-encoder', 'dogecoin', 'testnet', dogeId)
 
             expect(await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')).to.equal(btcId)
             expect(await state.db.getModuleContainer('xchain-encoder', 'litecoin', 'mainnet')).to.equal(ltcId)

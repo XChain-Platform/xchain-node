@@ -1131,7 +1131,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                         const containerId = stdout.trim()
                         if (/^[a-f0-9]{64}$/.test(containerId)) {
                             if (!onlyExecution) {
-                                if (await db.insertModuleContainer(module, coin, network, containerId)) {
+                                if (await db.setModuleContainer(module, coin, network, containerId)) {
                                     // Cross-chain network membership is part of creating the
                                     // container, not a post-install nicety: install, update and
                                     // recreate all funnel through here, and each of them replaces
@@ -1429,7 +1429,7 @@ async function uninstallModule(coin, network, module) {
             }
             await removeContainer(moduleStatus["container_id"])
             await statusChanged()
-            const removed = await db.removeModuleContainer(module, coin, network)
+            const removed = await db.deleteModuleContainer(module, coin, network)
             if (removed) {
                 return removed
             } else {
@@ -1453,7 +1453,7 @@ async function uninstallModule(coin, network, module) {
         // container truly isn't present: clean up any orphaned row.
         const staleId = await db.getModuleContainer(module, coin, network)
         if (staleId) {
-            await db.removeModuleContainer(module, coin, network)
+            await db.deleteModuleContainer(module, coin, network)
             await statusChanged()
             console.log("Removed stale tracking row for " + module + " (" + coin + "/" + network + ")")
         }

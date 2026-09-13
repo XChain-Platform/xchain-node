@@ -86,7 +86,7 @@ function buildFakeMariadbModule() {
 
 function loadStore() {
     const fake = buildFakeMariadbModule()
-    const MariaDbStore = proxyquire('../../src/MariaDbStore', { 'mariadb': fake.module })
+    const MariaDbStore = proxyquire('../../src/db', { 'mariadb': fake.module })
     return { MariaDbStore, rows: fake.rows }
 }
 
@@ -169,9 +169,9 @@ describe('MariaDbStore', function () {
                 query: async () => undefined,
                 end: async () => {}
             }
-            const MariaDbStore = proxyquire('../../src/MariaDbStore', {
+            const MariaDbStore = proxyquire('../../src/db', {
                 'mariadb': { createPool: () => fakePool },
-                './utils/helpers': { sleep: async () => { sleepCalls++ } }
+                '../utils/helpers': { sleep: async () => { sleepCalls++ } }
             })
             return { MariaDbStore, getAttempts: () => attempts, getSleepCalls: () => sleepCalls }
         }
@@ -201,10 +201,10 @@ describe('MariaDbStore', function () {
         })
     })
 
-    describe('insertModuleContainer() + getModuleContainer()', function () {
+    describe('setModuleContainer() + getModuleContainer()', function () {
 
         it('stores and retrieves a container ID', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'abc123def456')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'abc123def456')
             const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             expect(id).to.equal('abc123def456')
         })
@@ -215,21 +215,21 @@ describe('MariaDbStore', function () {
         })
 
         it('overwrites existing entry on re-insert', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'old-id')
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'new-id')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'old-id')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'new-id')
             const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             expect(id).to.equal('new-id')
         })
 
         it('stores shared modules with empty coin/network', async function () {
-            await store.insertModuleContainer('xchain-hub', '', '', 'hub-container-id')
+            await store.setModuleContainer('xchain-hub', '', '', 'hub-container-id')
             const id = await store.getModuleContainer('xchain-hub', '', '')
             expect(id).to.equal('hub-container-id')
         })
 
         it('keeps separate entries for different coin/network combos', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'btc-main')
-            await store.insertModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'doge-test')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'btc-main')
+            await store.setModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'doge-test')
             const btc  = await store.getModuleContainer('xchain-encoder', 'bitcoin',  'mainnet')
             const doge = await store.getModuleContainer('xchain-encoder', 'dogecoin', 'testnet')
             expect(btc).to.equal('btc-main')
@@ -237,14 +237,14 @@ describe('MariaDbStore', function () {
         })
 
         it('returns true on successful insert', async function () {
-            const result = await store.insertModuleContainer('xchain-hub', '', '', 'id123')
+            const result = await store.setModuleContainer('xchain-hub', '', '', 'id123')
             expect(result).to.be.true
         })
 
         it('insert is a no-op (returns false) when pool is not ready', async function () {
             const { MariaDbStore } = loadStore()
             const bare = new MariaDbStore()
-            const result = await bare.insertModuleContainer('xchain-hub', '', '', 'id123')
+            const result = await bare.setModuleContainer('xchain-hub', '', '', 'id123')
             expect(result).to.be.false
         })
 
@@ -256,36 +256,36 @@ describe('MariaDbStore', function () {
         })
 
         it('coerces null coin/network to empty string for keying', async function () {
-            await store.insertModuleContainer('xchain-hub', null, null, 'hub-id')
+            await store.setModuleContainer('xchain-hub', null, null, 'hub-id')
             const id = await store.getModuleContainer('xchain-hub', '', '')
             expect(id).to.equal('hub-id')
         })
     })
 
-    describe('removeModuleContainer()', function () {
+    describe('deleteModuleContainer()', function () {
 
         it('removes an existing entry and returns the container ID', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'container-abc')
-            const result = await store.removeModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'container-abc')
+            const result = await store.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             expect(result).to.equal('container-abc')
         })
 
         it('entry is no longer retrievable after removal', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'container-abc')
-            await store.removeModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'container-abc')
+            await store.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             expect(id).to.be.null
         })
 
         it('returns true for non-existent key (idempotent delete)', async function () {
-            const result = await store.removeModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            const result = await store.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             expect(result).to.equal(true)
         })
 
         it('does not affect other entries', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'btc-main')
-            await store.insertModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'doge-test')
-            await store.removeModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'btc-main')
+            await store.setModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'doge-test')
+            await store.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
             const doge = await store.getModuleContainer('xchain-encoder', 'dogecoin', 'testnet')
             expect(doge).to.equal('doge-test')
         })
@@ -293,7 +293,7 @@ describe('MariaDbStore', function () {
         it('returns false when pool is not ready', async function () {
             const { MariaDbStore } = loadStore()
             const bare = new MariaDbStore()
-            const result = await bare.removeModuleContainer('xchain-hub', '', '')
+            const result = await bare.deleteModuleContainer('xchain-hub', '', '')
             expect(result).to.be.false
         })
     })
@@ -301,10 +301,10 @@ describe('MariaDbStore', function () {
     describe('getAllModuleContainers()', function () {
 
         beforeEach(async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'enc-btc-main')
-            await store.insertModuleContainer('xchain-decoder', 'bitcoin',  'mainnet', 'dec-btc-main')
-            await store.insertModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'enc-doge-test')
-            await store.insertModuleContainer('xchain-hub',     '',         '',        'hub-id')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'enc-btc-main')
+            await store.setModuleContainer('xchain-decoder', 'bitcoin',  'mainnet', 'dec-btc-main')
+            await store.setModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'enc-doge-test')
+            await store.setModuleContainer('xchain-hub',     '',         '',        'hub-id')
         })
 
         it('returns all entries when no filters', async function () {
@@ -368,25 +368,25 @@ describe('MariaDbStore', function () {
         })
     })
 
-    describe('countModules()', function () {
+    describe('getModuleCount()', function () {
 
         it('returns 0 when no rows', async function () {
-            const count = await store.countModules()
+            const count = await store.getModuleCount()
             expect(count).to.equal(0)
         })
 
         it('returns the number of registered modules', async function () {
-            await store.insertModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'a')
-            await store.insertModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', 'b')
-            await store.insertModuleContainer('xchain-hub',     '',        '',        'c')
-            const count = await store.countModules()
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'a')
+            await store.setModuleContainer('xchain-decoder', 'bitcoin', 'mainnet', 'b')
+            await store.setModuleContainer('xchain-hub',     '',        '',        'c')
+            const count = await store.getModuleCount()
             expect(count).to.equal(3)
         })
 
         it('returns 0 when pool is not ready', async function () {
             const { MariaDbStore } = loadStore()
             const bare = new MariaDbStore()
-            const count = await bare.countModules()
+            const count = await bare.getModuleCount()
             expect(count).to.equal(0)
         })
     })
@@ -416,9 +416,16 @@ describe('MariaDbStore registry scoping by NODE_PREFIX', function () {
             end: async () => {}
         }
         const constants = require('../../src/config/constants')
-        const MariaDbStore = proxyquire('../../src/MariaDbStore', {
+        // The table name is resolved inside the registry mixin, not in the
+        // store, so the prefix has to be stubbed where it is READ and the
+        // stubbed mixin handed to the store. Stubbing constants at the store
+        // reaches nothing: proxyquire only intercepts a module's own requires.
+        const modules = proxyquire('../../src/db/modules', {
+            '../config/constants': Object.assign({}, constants, { NODE_PREFIX: prefix })
+        })
+        const MariaDbStore = proxyquire('../../src/db', {
             'mariadb': { createPool: () => pool },
-            './config/constants': Object.assign({}, constants, { NODE_PREFIX: prefix })
+            './modules': modules
         })
         return { MariaDbStore, statements }
     }
@@ -427,12 +434,12 @@ describe('MariaDbStore registry scoping by NODE_PREFIX', function () {
         const { MariaDbStore, statements } = loadWithPrefix(prefix)
         const store = new MariaDbStore()
         await store.createDatabase({ host: '127.0.0.1', port: 3306, user: 'u', password: 'p', database: 'xchain_node' })
-        await store.insertModuleContainer('xchain-indexer', 'bitcoin', 'mainnet', 'aaa')
+        await store.setModuleContainer('xchain-indexer', 'bitcoin', 'mainnet', 'aaa')
         await store.getModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')
         await store.getAllModuleContainers(null, null)
         await store.getAllModuleContainers('bitcoin', 'mainnet')
-        await store.removeModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')
-        await store.countModules()
+        await store.deleteModuleContainer('xchain-indexer', 'bitcoin', 'mainnet')
+        await store.getModuleCount()
         await store.close()
         return statements
     }

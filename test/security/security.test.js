@@ -84,7 +84,7 @@ function loadModuleService(stubs, configOverrides) {
     return proxyquire('../../src/services/ModuleService', {
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs || { existsSync: sinon.stub().returns(true), rmSync: sinon.stub(), mkdirSync: sinon.stub() },
-        '../state': { db: stubs.db || { insertModuleContainer: sinon.stub().resolves(true) }, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
+        '../state': { db: stubs.db || { setModuleContainer: sinon.stub().resolves(true) }, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
         './ConfigService': configServiceStub,
         './StatusService': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
         './DockerService': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), getStatusFromContainer: sinon.stub().resolves({}),
@@ -174,7 +174,7 @@ describe('Security', function () {
         })
 
         it('buildAndUp passes env vars via the child env (bare --env NAME), never as values in argv', async function () {
-            const stubs = { execFile: makeExecFileStub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: makeExecFileStub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             let runArgs = null
             let runOpts = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
@@ -219,7 +219,7 @@ describe('Security', function () {
     describe('Container ID validation', function () {
 
         it('ModuleService buildAndUp validates container ID as 64-char hex', async function () {
-            const stubs = { execFile: makeExecFileStub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: makeExecFileStub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             const validId = 'a'.repeat(64)
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
@@ -232,7 +232,7 @@ describe('Security', function () {
         })
 
         it('rejects non-hex container IDs', async function () {
-            const stubs = { execFile: makeExecFileStub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: makeExecFileStub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             const invalidId = 'g'.repeat(64)
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
@@ -249,7 +249,7 @@ describe('Security', function () {
         })
 
         it('rejects container IDs with shell metacharacters', async function () {
-            const stubs = { execFile: makeExecFileStub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: makeExecFileStub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             const maliciousId = 'a'.repeat(63) + ';'
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
@@ -266,7 +266,7 @@ describe('Security', function () {
         })
 
         it('rejects container IDs shorter than 64 chars', async function () {
-            const stubs = { execFile: makeExecFileStub(), db: { insertModuleContainer: sinon.stub().resolves(true) } }
+            const stubs = { execFile: makeExecFileStub(), db: { setModuleContainer: sinon.stub().resolves(true) } }
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 if (args[0] === 'build') cb(null, '')

@@ -20,7 +20,7 @@ function makeExplorerServiceStubs(overrides = {}) {
     return {
         db: {
             getModuleContainer:    overrides.dbGetModuleContainer    || sinon.stub().resolves(null),
-            removeModuleContainer: overrides.dbRemoveModuleContainer || sinon.stub().resolves()
+            deleteModuleContainer: overrides.dbRemoveModuleContainer || sinon.stub().resolves()
         },
         getLastStatus:    overrides.getLastStatus    || sinon.stub().returns(null),
         isStatusUpdated:  overrides.isStatusUpdated  || sinon.stub().returns(false),
@@ -394,7 +394,7 @@ describe('ExplorerService: installExplorerModule() force=true', function () {
         expect(result).to.be.true
         expect(stubs.killContainer.calledWith(existingId)).to.be.true
         expect(stubs.removeContainer.calledWith(existingId)).to.be.true
-        expect(stubs.db.removeModuleContainer.called).to.be.true
+        expect(stubs.db.deleteModuleContainer.called).to.be.true
     })
 
     it('swallows errors from killContainer/removeContainer during force rebuild', async function () {

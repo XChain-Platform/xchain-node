@@ -20,7 +20,7 @@ const HttpCapture    = require('./http-capture')
 
 /**
  * In-memory replacement for MariaDbStore. Implements the same public API
- * (createDatabase / get/insert/remove ModuleContainer / countModules /
+ * (createDatabase / get/insert/remove ModuleContainer / getModuleCount /
  * isReady / close / getAllModuleContainers) backed by a Map. Lets
  * integration tests run without a live MariaDB.
  */
@@ -47,7 +47,7 @@ class InMemoryStore {
         }
     }
 
-    async countModules() {
+    async getModuleCount() {
         return this.modules.size
     }
 
@@ -65,7 +65,7 @@ class InMemoryStore {
         return out
     }
 
-    async insertModuleContainer(module, coin, network, containerId) {
+    async setModuleContainer(module, coin, network, containerId) {
         this.modules.set(this._key(module, coin, network), containerId)
         return true
     }
@@ -75,7 +75,7 @@ class InMemoryStore {
         return v === undefined ? null : v
     }
 
-    async removeModuleContainer(module, coin, network) {
+    async deleteModuleContainer(module, coin, network) {
         const key = this._key(module, coin, network)
         const value = this.modules.get(key)
         if (value === undefined) return false
@@ -140,9 +140,9 @@ class TestEnv {
         const store = this._store
 
         const methodNames = [
-            'createDatabase', 'close', 'isReady', 'assertReady', 'countModules',
-            'getAllModuleContainers', 'insertModuleContainer',
-            'getModuleContainer', 'removeModuleContainer'
+            'createDatabase', 'close', 'isReady', 'assertReady', 'getModuleCount',
+            'getAllModuleContainers', 'setModuleContainer',
+            'getModuleContainer', 'deleteModuleContainer'
         ]
 
         this._origDbMethods = {}
@@ -187,7 +187,7 @@ class TestEnv {
     }
 
     async insertModule(module, coin, network, containerId) {
-        return this._store.insertModuleContainer(module, coin, network, containerId)
+        return this._store.setModuleContainer(module, coin, network, containerId)
     }
 
     async getModule(module, coin, network) {

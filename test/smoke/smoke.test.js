@@ -24,7 +24,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
     const safeDirect = {
         'config/constants':   'src/config/constants.js',
         'utils/helpers':      'src/utils/helpers.js',
-        'MariaDbStore':       'src/MariaDbStore.js',
+        'MariaDbStore':       'src/db/index.js',
         'HubConnector':       'src/HubConnector.js',
         'ExplorerConnector':  'src/ExplorerConnector.js'
     }
@@ -86,7 +86,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
 
     it('requires state module without throwing', function () {
         const mod = proxyquire(path.join(ROOT, 'src/state'), {
-            './MariaDbStore.js': function StubMariaDbStore() {
+            './db': function StubMariaDbStore() {
                 this.createDatabase = sinon.stub().resolves()
                 this.isReady = sinon.stub().returns(false)
             },
@@ -132,7 +132,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
     it('requires moduleOperations without throwing', function () {
         const mod = proxyquire(path.join(ROOT, 'src/operations/moduleOperations'), {
             '../state': {
-                db: { getAllModuleContainers: sinon.stub().resolves([]), insertModuleContainer: sinon.stub().resolves() },
+                db: { getAllModuleContainers: sinon.stub().resolves([]), setModuleContainer: sinon.stub().resolves() },
                 getInstalledModules: sinon.stub().returns({}),
                 setInstalledModules: sinon.stub(),
                 resetInstalledModules: sinon.stub(),
@@ -719,7 +719,7 @@ describe('S-SMOKE-008 – Parameter Expansion', function () {
 describe('S-SMOKE-009 – State Module Initialization', function () {
 
     const state = proxyquire(path.join(ROOT, 'src/state'), {
-        './MariaDbStore.js': function StubMariaDbStore() {
+        './db': function StubMariaDbStore() {
             this.createDatabase = sinon.stub().resolves()
             this.isReady = sinon.stub().returns(false)
         },

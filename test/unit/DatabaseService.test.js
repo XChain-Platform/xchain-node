@@ -92,7 +92,7 @@ function makeStubs(overrides = {}) {
             assertReady: sinon.stub(),
             createDatabase: sinon.stub().resolves(),
             getModuleContainer: sinon.stub().resolves('db-container-id'),
-            insertModuleContainer: sinon.stub().resolves(true)
+            setModuleContainer: sinon.stub().resolves(true)
         },
         getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['mainnet'] }),
         getDbRootPassword: sinon.stub().returns('rootpass'),

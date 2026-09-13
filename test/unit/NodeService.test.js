@@ -36,7 +36,7 @@ function makeNodeServiceStubs(overrides = {}) {
     // that never fails in a real checkout.
     fsStub.existsSync.withArgs(sinon.match(/crypto_nodes[\\/][a-z]+[\\/](Dockerfile|[a-z]+-[a-z]+\.conf)$/)).returns(true)
     const dbStub = {
-        insertModuleContainer: sinon.stub().resolves(true),
+        setModuleContainer: sinon.stub().resolves(true),
         isReady:               sinon.stub().returns(true)
     }
     const gitHubDownloaderStub = {
@@ -619,8 +619,8 @@ describe('NodeService: buildCryptoNode()', function () {
         const ns = loadNodeService(stubs)
         await ns.buildCryptoNode('bitcoin', 'mainnet')
 
-        expect(stubs.db.insertModuleContainer.calledOnce).to.be.true
-        const insertArgs = stubs.db.insertModuleContainer.firstCall.args
+        expect(stubs.db.setModuleContainer.calledOnce).to.be.true
+        const insertArgs = stubs.db.setModuleContainer.firstCall.args
         expect(insertArgs[0]).to.equal('node')
         expect(insertArgs[1]).to.equal('bitcoin')
         expect(insertArgs[2]).to.equal('mainnet')
@@ -966,9 +966,9 @@ describe('NodeService: buildCryptoNode()', function () {
         }
     })
 
-    it('rejects when db.insertModuleContainer returns false', async function () {
+    it('rejects when db.setModuleContainer returns false', async function () {
         const stubs = makeNodeServiceStubs()
-        stubs.db.insertModuleContainer.resolves(false)
+        stubs.db.setModuleContainer.resolves(false)
         const containerId = 'e'.repeat(64)
 
         stubs.execFile.callsFake((cmd, args, opts, cb) => {
@@ -1022,7 +1022,7 @@ describe('NodeService: buildCryptoNode()', function () {
         } catch (err) {
             expect(String(err)).to.include('no container id')
         }
-        expect(stubs.db.insertModuleContainer.called).to.be.false
+        expect(stubs.db.setModuleContainer.called).to.be.false
     })
 
     it('rejects (does not hang) when the blocksDir mkdir fails', async function () {

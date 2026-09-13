@@ -117,7 +117,7 @@ async function installExplorerModule(force = false, branch = null) {
             console.log("Force rebuild: removing existing xchain-explorer container")
             try { await killContainer(existingContainerId) }   catch { /* may already be exited */ }
             try { await removeContainer(existingContainerId) } catch { /* may already be gone */ }
-            try { await db.removeModuleContainer(EXPLORER_MODULE_NAME, "", "") } catch { /* row may already be gone */ }
+            try { await db.deleteModuleContainer(EXPLORER_MODULE_NAME, "", "") } catch { /* row may already be gone */ }
         }
     }
 

@@ -46,9 +46,9 @@ function makeModuleServiceStubs() {
             readFileSync: sinon.stub()
         },
         db: {
-            insertModuleContainer: sinon.stub().resolves(true),
+            setModuleContainer: sinon.stub().resolves(true),
             getModuleContainer: sinon.stub().resolves('old-container-id'),
-            removeModuleContainer: sinon.stub().resolves('removed-id')
+            deleteModuleContainer: sinon.stub().resolves('removed-id')
         },
         statusChanged: sinon.stub().resolves(),
         getStatus: sinon.stub().resolves({}),

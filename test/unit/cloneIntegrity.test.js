@@ -63,9 +63,9 @@ function loadWithGit({ revParse, cloneFails = false } = {}) {
         'fs': fs,
         '../state': {
             db: {
-                insertModuleContainer: sinon.stub().resolves(true),
+                setModuleContainer: sinon.stub().resolves(true),
                 getModuleContainer:    sinon.stub().resolves(null),
-                removeModuleContainer: sinon.stub().resolves(true)
+                deleteModuleContainer: sinon.stub().resolves(true)
             },
             getRemoteModuleVersions: () => ({}),
             getLastStatus: () => null
