@@ -21,6 +21,7 @@
   },
   "scripts": {
     "test": "mocha 'test/unit/**/*.test.js' --timeout 2000 --recursive",
+    "lint": "eslint src test bin scripts",
     "coverage": "c8 --reporter=text --reporter=html --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 2000 --recursive --exit",
     "coverage:check": "c8 --check-coverage --lines 91 --statements 91 --branches 86.5 --functions 89.5 --reporter=text-summary --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 2000 --recursive --exit",
     "ci": "mocha 'test/unit/**/*.test.js' --timeout 2000 --recursive --exit && npm run ci:security && npm run ci:regression",
@@ -48,6 +49,7 @@
     "@stryker-mutator/mocha-runner": "^9.6.1",
     "c8": "^11.0.0",
     "chai": "^4.5.0",
+    "eslint": "^9.39.5",
     "mocha": "^11.7.5",
     "proxyquire": "^2.1.3",
     "sinon": "^21.0.3"
