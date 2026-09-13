@@ -99,8 +99,8 @@ class E2EEnv extends TestEnv {
      * a no-op.
      */
     sealBootstrapSeam() {
-        const BootstrapService = require(path.join(ROOT, 'src/services/BootstrapService'))
-        this._sealSeam('src/services/BootstrapService', {
+        const BootstrapService = require(path.join(ROOT, 'src/services/bootstrap_service'))
+        this._sealSeam('src/services/bootstrap_service', {
             utxoTrackerVolumeFreshness: async () => BootstrapService.FRESHNESS_EMPTY,
             mariaDbModuleFreshness:     async () => BootstrapService.FRESHNESS_EMPTY,
             ensureBootstrapUtxoTracker: async () => false,
@@ -129,16 +129,16 @@ class E2EEnv extends TestEnv {
      */
     sealLazyRequireSeams(patchedConfigService) {
         const dbContainerId = 'd'.repeat(64)
-        this._sealSeam('src/services/DatabaseService', {
+        this._sealSeam('src/services/database_service', {
             getDatabaseContainerId: async () => dbContainerId
         })
-        this._sealSeam('src/services/BootstrapHealthGate', {
+        this._sealSeam('src/services/bootstrap_health_gate', {
             probeServiceStatus: async () => { throw new Error('no status probe succeeded') }
         })
         // getDefaultConfig is the one real-ConfigService read those seams (and
         // any other call-time require of it) make; point it at the copy wired
         // to this env's temp config dir so no venue's config file is read.
-        this._sealSeam('src/services/ConfigService', {
+        this._sealSeam('src/services/config_service', {
             getDefaultConfig: (...args) => patchedConfigService.getDefaultConfig(...args)
         })
     }
@@ -308,7 +308,7 @@ class E2EEnv extends TestEnv {
         const http = this.http
 
         // Patched constants
-        const patchedConstants = Object.assign({}, require(path.join(ROOT, 'src/config/constants')), {
+        const patchedConstants = Object.assign({}, require(path.join(ROOT, 'src/config/index')), {
             configDir: this.configDir,
             moduleDir: this.moduleDir,
             dataDir: this.dataDir,
@@ -322,8 +322,8 @@ class E2EEnv extends TestEnv {
         // (cloneGit's rewrite path no longer deletes them at all: it stages the
         // clone and swaps it in, and the fake `git clone` route materializes the
         // staged copy.)
-        const RealConfigService = proxyquire(path.join(ROOT, 'src/services/ConfigService'), {
-            '../config/constants': patchedConstants
+        const RealConfigService = proxyquire(path.join(ROOT, 'src/services/config_service'), {
+            '../config/index': patchedConstants
         })
         const ConfigService = Object.assign({}, RealConfigService, {
             removeModuleDir: () => {},
@@ -348,14 +348,14 @@ class E2EEnv extends TestEnv {
         }
 
         // DockerService
-        const DockerService = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
+        const DockerService = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
             'child_process': {
                 execFile: execFileStub,
                 spawn: autoCloseSpawnStub,
                 spawnSync: spawnSyncStub
             },
             'util': { promisify: () => execFileAsyncStub },
-            '../config/constants': patchedConstants,
+            '../config/index': patchedConstants,
             'blessed': {
                 screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),
                 text: () => {},
@@ -366,17 +366,17 @@ class E2EEnv extends TestEnv {
         // StatusService: uses real logic but with stubbed Docker.
         // Override statusChanged to avoid lazy require of real HubService/ExplorerService
         const { setStatusUpdated } = require(path.join(ROOT, 'src/state'))
-        const RealStatusService = proxyquire(path.join(ROOT, 'src/services/StatusService'), {
-            '../config/constants': patchedConstants,
-            './DockerService': DockerService,
-            './VersionService': {
+        const RealStatusService = proxyquire(path.join(ROOT, 'src/services/status_service'), {
+            '../config/index': patchedConstants,
+            './docker_service': DockerService,
+            './version_service': {
                 checkRemoteNodeVersion: async () => true,
                 getLocalNodeVersion: async () => '0.0.1',
                 getContainerNodeVersion: async () => '0.0.1',
                 getLocalModuleVersion: async () => '0.0.1',
                 getContainerModuleVersion: async () => '0.0.1'
             },
-            './ModuleService': {
+            './module_service': {
                 getModuleBranch: async () => 'master'
             }
         })
@@ -397,31 +397,31 @@ class E2EEnv extends TestEnv {
         }
 
         // HubService
-        const HubService = proxyquire(path.join(ROOT, 'src/services/HubService'), {
-            '../config/constants': patchedConstants,
-            './ConfigService': ConfigService,
-            './StatusService': StatusService,
-            './DockerService': DockerService,
-            './ModuleService': {
+        const HubService = proxyquire(path.join(ROOT, 'src/services/hub_service'), {
+            '../config/index': patchedConstants,
+            './config_service': ConfigService,
+            './status_service': StatusService,
+            './docker_service': DockerService,
+            './module_service': {
                 cloneGit: async () => true,
                 buildAndUp: async () => TestEnv.fakeContainerId('hub')
             },
-            '../HubConnector.js': StubHubConnector,
-            '../ExplorerConnector.js': StubExplorerConnector
+            './hub_connector.js': StubHubConnector,
+            './explorer_connector.js': StubExplorerConnector
         })
 
         // ExplorerService
-        const ExplorerService = proxyquire(path.join(ROOT, 'src/services/ExplorerService'), {
-            '../config/constants': patchedConstants,
-            './ConfigService': ConfigService,
-            './StatusService': StatusService,
-            './DockerService': DockerService,
-            './ModuleService': {
+        const ExplorerService = proxyquire(path.join(ROOT, 'src/services/explorer_service'), {
+            '../config/index': patchedConstants,
+            './config_service': ConfigService,
+            './status_service': StatusService,
+            './docker_service': DockerService,
+            './module_service': {
                 cloneGit: async () => true,
                 buildAndUp: async () => TestEnv.fakeContainerId('exp')
             },
-            '../HubConnector.js': StubHubConnector,
-            '../ExplorerConnector.js': StubExplorerConnector
+            './hub_connector.js': StubHubConnector,
+            './explorer_connector.js': StubExplorerConnector
         })
 
         // DatabaseService pipes SQL to `docker exec -i ... mariadb` over STDIN
@@ -446,20 +446,20 @@ class E2EEnv extends TestEnv {
         // which failed all five install-path E2E cases there while passing on
         // a laptop with no such container. Stubbed at the same seam, so
         // the guard still runs, against this harness's containers.
-        const DbCredentialDrift = proxyquire(path.join(ROOT, 'src/services/DbCredentialDrift'), {
+        const DbCredentialDrift = proxyquire(path.join(ROOT, 'src/services/db_credential_drift'), {
             'child_process': { execFile: execFileStub },
             'util': { promisify: () => execFileAsyncStub }
         })
 
         // DatabaseService
-        const DatabaseService = proxyquire(path.join(ROOT, 'src/services/DatabaseService'), {
+        const DatabaseService = proxyquire(path.join(ROOT, 'src/services/database_service'), {
             'child_process': { execFile: execFileStub, spawn: dbSpawnStub },
             'util': { promisify: () => execFileAsyncStub },
-            './DbCredentialDrift': DbCredentialDrift,
-            '../config/constants': patchedConstants,
-            './ConfigService': ConfigService,
-            './DockerService': DockerService,
-            './StatusService': StatusService,
+            './db_credential_drift': DbCredentialDrift,
+            '../config/index': patchedConstants,
+            './config_service': ConfigService,
+            './docker_service': DockerService,
+            './status_service': StatusService,
             'enquirer': {
                 Password: function () {
                     this.run = async () => 'testrootpw'
@@ -479,40 +479,40 @@ class E2EEnv extends TestEnv {
 
         // ModuleService: must also stub 'util' because getModuleBranch does
         // promisify(execFile) inline, and our execFile stub lacks the custom promisify symbol
-        const ModuleService = proxyquire(path.join(ROOT, 'src/services/ModuleService'), {
+        const ModuleService = proxyquire(path.join(ROOT, 'src/services/module_service'), {
             'child_process': { execFile: execFileStub },
             'util': { promisify: () => execFileAsyncStub },
-            '../config/constants': patchedConstants,
-            './ConfigService': ConfigService,
-            './DockerService': DockerService,
-            './StatusService': StatusService,
-            './DatabaseService': DatabaseService,
+            '../config/index': patchedConstants,
+            './config_service': ConfigService,
+            './docker_service': DockerService,
+            './status_service': StatusService,
+            './database_service': DatabaseService,
             // Same seam as DatabaseService above: installModule now runs the drift
             // guard ahead of buildAndUp too, so an unstubbed copy would read the
             // HOST's containers and fail install cases on a venue.
-            './DbCredentialDrift': DbCredentialDrift,
-            './VersionService': VersionService,
-            './NodeService': {
+            './db_credential_drift': DbCredentialDrift,
+            './version_service': VersionService,
+            './node_service': {
                 buildCryptoNode: async () => true,
                 getCryptoNode: async () => true
             },
-            './ExplorerService': {
+            './explorer_service': {
                 installExplorerModule: async () => true
             }
         })
 
         // moduleOperations: the main entry point.
         // Must also stub 'util' because resetModules uses promisify(execFile) at top level
-        const moduleOps = proxyquire(path.join(ROOT, 'src/operations/moduleOperations'), {
+        const moduleOps = proxyquire(path.join(ROOT, 'src/operations/module_operations'), {
             'child_process': { execFile: execFileStub },
             'util': { promisify: () => execFileAsyncStub },
             'fs': Object.assign({}, require('fs'), { existsSync: () => false }),
-            '../config/constants': patchedConstants,
-            '../services/ConfigService': ConfigService,
-            '../services/DockerService': DockerService,
-            '../services/DatabaseService': DatabaseService,
-            '../services/ModuleService': ModuleService,
-            '../services/StatusService': StatusService
+            '../config/index': patchedConstants,
+            '../services/config_service': ConfigService,
+            '../services/docker_service': DockerService,
+            '../services/database_service': DatabaseService,
+            '../services/module_service': ModuleService,
+            '../services/status_service': StatusService
         })
 
         return {

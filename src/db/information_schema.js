@@ -28,7 +28,7 @@
  *
  ********************************************************************/
 
-const { escapeSqlStringLiteral } = require('../utils/sqlSafety')
+const { escapeSqlStringLiteral } = require('../utils/sql_safety')
 
 /** How many schemas carry this exact name: 1 when the database exists, 0 when it does not. */
 function schemaExistsSql(databaseName) {

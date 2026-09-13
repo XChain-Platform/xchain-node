@@ -21,7 +21,7 @@
  *
  ********************************************************************/
 
-const { escapeSqlStringLiteral } = require('../utils/sqlSafety')
+const { escapeSqlStringLiteral } = require('../utils/sql_safety')
 
 const PRICE_FENCE_TABLE = 'price_ingest_watermarks'
 

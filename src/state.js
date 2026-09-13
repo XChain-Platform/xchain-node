@@ -14,9 +14,9 @@
  * XChain Node - Shared state & singleton instances
  ********************************************************************/
 
-const { srcDir } = require('./config/constants')
+const { srcDir } = require('./config')
 const MariaDbStore      = require('./db')
-const GitHubDownloader  = require('./GitHubDownloader.js')
+const GitHubDownloader  = require('./services/github_downloader.js')
 
 // db starts unconfigured; precheck.js calls db.createDatabase(config) once
 // the mariadb container is up and per-OS-user credentials are loaded

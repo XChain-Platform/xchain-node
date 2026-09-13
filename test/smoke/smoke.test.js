@@ -22,11 +22,11 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
 
     // Modules that can be required with zero side-effects
     const safeDirect = {
-        'config/constants':   'src/config/constants.js',
+        'config/constants':   'src/config/index.js',
         'utils/helpers':      'src/utils/helpers.js',
         'MariaDbStore':       'src/db/index.js',
-        'HubConnector':       'src/HubConnector.js',
-        'ExplorerConnector':  'src/ExplorerConnector.js'
+        'HubConnector':       'src/services/hub_connector.js',
+        'ExplorerConnector':  'src/services/explorer_connector.js'
     }
 
     for (const [label, relPath] of Object.entries(safeDirect)) {
@@ -39,7 +39,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
 
     // Modules that need child_process / fs / blessed / leveldb stubbed
     it('requires ConfigService without throwing', function () {
-        const mod = proxyquire(path.join(ROOT, 'src/services/ConfigService'), {
+        const mod = proxyquire(path.join(ROOT, 'src/services/config_service'), {
             'fs': {
                 existsSync: sinon.stub().returns(false),
                 rmSync: sinon.stub(),
@@ -53,7 +53,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
     })
 
     it('requires DockerService without throwing', function () {
-        const mod = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
+        const mod = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
             'child_process': {
                 execFile: sinon.stub(),
                 spawn: sinon.stub(),
@@ -72,7 +72,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
     })
 
     it('requires GitHubDownloader without throwing', function () {
-        const mod = proxyquire(path.join(ROOT, 'src/GitHubDownloader'), {
+        const mod = proxyquire(path.join(ROOT, 'src/services/github_downloader'), {
             'fs': {
                 existsSync: sinon.stub().returns(true),
                 readFileSync: sinon.stub().returns('{}'),
@@ -90,7 +90,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
                 this.createDatabase = sinon.stub().resolves()
                 this.isReady = sinon.stub().returns(false)
             },
-            './GitHubDownloader.js': function StubGitHubDownloader() {
+            './services/github_downloader.js': function StubGitHubDownloader() {
                 this.loadHashesFile = sinon.stub().returns({})
             }
         })
@@ -105,24 +105,24 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
                 db: { createDatabase: sinon.stub().resolves() },
                 isVerbose: sinon.stub().returns(false)
             },
-            './services/DockerService': {
+            './services/docker_service': {
                 checkDockerInstalledAndReachable: sinon.stub().resolves(true),
                 createDockerNetwork: sinon.stub().resolves(true)
             },
-            './services/ConfigService': {
+            './services/config_service': {
                 getDockerNetwork: sinon.stub().returns('xchain-node')
             },
-            './services/VersionService': {
+            './services/version_service': {
                 checkAllRemoteVersions: sinon.stub().resolves()
             },
-            './services/StatusService': {
+            './services/status_service': {
                 getStatus: sinon.stub().resolves()
             },
-            './services/HubService': {
+            './services/hub_service': {
                 installHubModule: sinon.stub().resolves(),
                 updateHub: sinon.stub().resolves()
             },
-            './services/ExplorerService': {
+            './services/explorer_service': {
                 updateExplorer: sinon.stub().resolves()
             }
         })
@@ -130,7 +130,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
     })
 
     it('requires moduleOperations without throwing', function () {
-        const mod = proxyquire(path.join(ROOT, 'src/operations/moduleOperations'), {
+        const mod = proxyquire(path.join(ROOT, 'src/operations/module_operations'), {
             '../state': {
                 db: { getAllModuleContainers: sinon.stub().resolves([]), setModuleContainer: sinon.stub().resolves() },
                 getInstalledModules: sinon.stub().returns({}),
@@ -140,7 +140,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
                 setDbRootPassword: sinon.stub(),
                 isVerbose: sinon.stub().returns(false)
             },
-            '../services/ConfigService': {
+            '../services/config_service': {
                 getModuleDir: sinon.stub(),
                 getModuleTmpDir: sinon.stub(),
                 moduleDirExists: sinon.stub(),
@@ -157,7 +157,7 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
                 getDockerContainerImageNamePrefix: sinon.stub(),
                 getModuleDatabaseName: sinon.stub()
             },
-            '../services/DockerService': {
+            '../services/docker_service': {
                 checkDockerInstalledAndReachable: sinon.stub().resolves(true),
                 createDockerNetwork: sinon.stub().resolves(true),
                 stopContainer: sinon.stub().resolves(),
@@ -173,26 +173,26 @@ describe('S-SMOKE-001 – Module Import Chain', function () {
                 saveContainerLogs: sinon.stub().resolves(),
                 waitContainer: sinon.stub().resolves()
             },
-            '../services/ModuleService': {
+            '../services/module_service': {
                 cloneGit: sinon.stub().resolves(),
                 buildAndUp: sinon.stub().resolves(),
                 installModule: sinon.stub().resolves(),
                 uninstallModule: sinon.stub().resolves()
             },
-            '../services/StatusService': {
+            '../services/status_service': {
                 getStatus: sinon.stub().resolves(),
                 statusChanged: sinon.stub().resolves()
             },
-            '../services/DatabaseService': {
+            '../services/database_service': {
                 setDatabaseParameters: sinon.stub().resolves(),
                 createDatabase: sinon.stub().resolves(),
                 dropDatabase: sinon.stub().resolves()
             },
-            '../services/HubService': {
+            '../services/hub_service': {
                 installHubModule: sinon.stub().resolves(),
                 updateHub: sinon.stub().resolves()
             },
-            '../services/BootstrapService': {
+            '../services/bootstrap_service': {
                 makeBootstrap: sinon.stub().resolves(),
                 restoreBootstrap: sinon.stub().resolves()
             }
@@ -223,11 +223,11 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
             },
             './precheck': { preCheck: sinon.stub().resolves() },
             './state': { setVerbose: sinon.stub() },
-            './services/ConfigService': {
+            './services/config_service': {
                 filterCommandParameters: sinon.stub().returns({}),
                 resolveArgs: sinon.stub().returns({ service: 'all', chain: 'all', network: 'all', branch: 'master' })
             },
-            './operations/moduleOperations': {
+            './operations/module_operations': {
                 installModules: sinon.stub().resolves(),
                 updateModules: sinon.stub().resolves(),
                 uninstallModules: sinon.stub().resolves(),
@@ -241,8 +241,8 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
                 runE2ETest: sinon.stub().resolves({ logFile: '', exitCode: 0 }),
                 resetModules: sinon.stub().resolves()
             },
-            './services/StatusService': { getStatus: sinon.stub().resolves() },
-            './services/BootstrapService': { makeBootstrap: sinon.stub().resolves() },
+            './services/status_service': { getStatus: sinon.stub().resolves() },
+            './services/bootstrap_service': { makeBootstrap: sinon.stub().resolves() },
             './ui/menu': {
                 restoreBootstrapInterface: sinon.stub().resolves(),
                 startInterface: sinon.stub().resolves()
@@ -335,11 +335,11 @@ describe('S-SMOKE-003 – Global Options Registration', function () {
             },
             './precheck': { preCheck: sinon.stub().resolves() },
             './state': { setVerbose: sinon.stub() },
-            './services/ConfigService': {
+            './services/config_service': {
                 filterCommandParameters: sinon.stub().returns({}),
                 resolveArgs: sinon.stub().returns({ service: 'all', chain: 'all', network: 'all', branch: 'master' })
             },
-            './operations/moduleOperations': {
+            './operations/module_operations': {
                 installModules: sinon.stub().resolves(),
                 updateModules: sinon.stub().resolves(),
                 uninstallModules: sinon.stub().resolves(),
@@ -353,8 +353,8 @@ describe('S-SMOKE-003 – Global Options Registration', function () {
                 runE2ETest: sinon.stub().resolves({ logFile: '', exitCode: 0 }),
                 resetModules: sinon.stub().resolves()
             },
-            './services/StatusService': { getStatus: sinon.stub().resolves() },
-            './services/BootstrapService': { makeBootstrap: sinon.stub().resolves() },
+            './services/status_service': { getStatus: sinon.stub().resolves() },
+            './services/bootstrap_service': { makeBootstrap: sinon.stub().resolves() },
             './ui/menu': {
                 restoreBootstrapInterface: sinon.stub().resolves(),
                 startInterface: sinon.stub().resolves()
@@ -389,7 +389,7 @@ describe('S-SMOKE-003 – Global Options Registration', function () {
 
 describe('S-SMOKE-004 – Constants and Enum Integrity', function () {
 
-    const constants = require(path.join(ROOT, 'src/config/constants'))
+    const constants = require(path.join(ROOT, 'src/config/index'))
 
     describe('XChainService enum', function () {
         const expectedServices = [
@@ -562,7 +562,7 @@ describe('S-SMOKE-005 – Config Template File Integrity', function () {
 
 describe('S-SMOKE-006 – Config Composition', function () {
 
-    const ConfigService = require(path.join(ROOT, 'src/services/ConfigService'))
+    const ConfigService = require(path.join(ROOT, 'src/services/config_service'))
 
     it('getDefaultConfig returns populated config for bitcoin/mainnet', async function () {
         const config = await ConfigService.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
@@ -612,7 +612,7 @@ describe('S-SMOKE-006 – Config Composition', function () {
 
 describe('S-SMOKE-007 – Docker Command Construction', function () {
 
-    const DockerService = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
+    const DockerService = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
         'child_process': {
             execFile: sinon.stub(),
             spawn: sinon.stub(),
@@ -658,7 +658,7 @@ describe('S-SMOKE-007 – Docker Command Construction', function () {
 
 describe('S-SMOKE-008 – Parameter Expansion', function () {
 
-    const { filterCommandParameters } = require(path.join(ROOT, 'src/services/ConfigService'))
+    const { filterCommandParameters } = require(path.join(ROOT, 'src/services/config_service'))
 
     it('expands all/bitcoin/mainnet to all non-regtest services', function () {
         const result = filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
@@ -723,7 +723,7 @@ describe('S-SMOKE-009 – State Module Initialization', function () {
             this.createDatabase = sinon.stub().resolves()
             this.isReady = sinon.stub().returns(false)
         },
-        './GitHubDownloader.js': function StubGitHubDownloader() {
+        './services/github_downloader.js': function StubGitHubDownloader() {
             this.loadHashesFile = sinon.stub().returns({})
         }
     })

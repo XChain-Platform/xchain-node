@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon = require('sinon')
+const EventEmitter = require('events');
 
 /**
  * CommandCapture - records child_process.execFile/spawn calls and returns configurable responses.
@@ -138,7 +139,6 @@ class CommandCapture {
             const fullCommand = command + ' ' + (args || []).join(' ')
             self._history.push({ command: fullCommand, args, options: options || {}, type: 'spawn', timestamp: Date.now() })
 
-            const EventEmitter = require('events')
             const child = new EventEmitter()
             child.stdout = new EventEmitter()
             child.stderr = new EventEmitter()

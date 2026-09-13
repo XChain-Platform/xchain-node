@@ -22,8 +22,8 @@
  ********************************************************************/
 
 const crypto = require('crypto')
-const { NODE_PREFIX, DEFAULT_NODE_PREFIX } = require('../config/constants')
-const { assertSafeDbIdentifier } = require('../utils/sqlSafety')
+const { NODE_PREFIX, DEFAULT_NODE_PREFIX } = require('../config')
+const { assertSafeDbIdentifier } = require('../utils/sql_safety')
 
 /*
  * Registry table, scoped to THIS stack.

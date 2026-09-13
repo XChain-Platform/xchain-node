@@ -16,7 +16,7 @@
 
 const { execFile } = require('child_process')
 const path         = require('path')
-const { Coin, Network, XChainService } = require('../config/constants')
+const { Coin, Network, XChainService } = require('../config')
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms))

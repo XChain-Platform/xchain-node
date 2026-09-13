@@ -21,12 +21,16 @@ const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     Coin, Network, XChainService, CoinTickerSymbol, REGTEST_MODULES,
     moduleDir, tmpDir, configDir
-} = require('../../src/config/constants')
+} = require('../../src/config')
 
 const TestEnv      = require('../integration/helpers/test-env')
 const E2EEnv       = require('../e2e/helpers/e2e-env')
 
-const { filterCommandParameters } = require('../../src/services/ConfigService')
+const { filterCommandParameters } = require('../../src/services/config_service')
+const ConfigService = require('../../src/services/config_service');
+const constants = require('../../src/config');
+const state = require('../../src/state');
+const realConfigService = require('../../src/services/config_service');
 
 function streamFromString(str) {
     const s = new Readable()
@@ -36,7 +40,7 @@ function streamFromString(str) {
 }
 
 function makeConfigService(fsStub) {
-    return proxyquire('../../src/services/ConfigService', {
+    return proxyquire('../../src/services/config_service', {
         'fs': fsStub || require('fs')
     })
 }
@@ -56,7 +60,7 @@ function makeServiceWithConfig(configContent) {
 }
 
 function loadDockerService(stubs) {
-    return proxyquire('../../src/services/DockerService', {
+    return proxyquire('../../src/services/docker_service', {
         'child_process': {
             execFile: stubs.execFile,
             spawn: stubs.spawn || sinon.stub(),
@@ -95,7 +99,7 @@ function loadModuleService(stubs, configOverrides) {
         })
     }, configOverrides || {})
 
-    return proxyquire('../../src/services/ModuleService', {
+    return proxyquire('../../src/services/module_service', {
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs || { existsSync: sinon.stub().returns(true), rmSync: sinon.stub(), mkdirSync: sinon.stub() },
         '../state': {
@@ -103,10 +107,10 @@ function loadModuleService(stubs, configOverrides) {
             getLastStatus: () => null,
             getRemoteModuleVersions: () => ({})
         },
-        './ConfigService': configServiceStub,
-        './StatusService': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
-        './DockerService': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), getStatusFromContainer: sinon.stub().resolves({}) },
-        './DatabaseService': { setDatabaseParameters: sinon.stub().resolves() }
+        './config_service': configServiceStub,
+        './status_service': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
+        './docker_service': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), getStatusFromContainer: sinon.stub().resolves({}) },
+        './database_service': { setDatabaseParameters: sinon.stub().resolves() }
     })
 }
 
@@ -117,7 +121,6 @@ describe('Regression Suite', function () {
     })
 
     describe('[regression:p0] Argument Parsing & Validation', function () {
-        const ConfigService = require('../../src/services/ConfigService')
 
         it('R-ARG-001: resolveArgs identifies service, coin, network from any argument order', function () {
             const r1 = ConfigService.resolveArgs(['bitcoin', 'xchain-encoder', 'mainnet'])
@@ -222,7 +225,7 @@ describe('Regression Suite', function () {
         })
 
         it('R-CFG-003: Docker image names follow prefix-coin-network-module pattern', function () {
-            const { getDockerContainerImageName } = require('../../src/services/ConfigService')
+            const { getDockerContainerImageName } = require('../../src/services/config_service')
             for (const coin of Object.values(Coin)) {
                 for (const network of Object.values(Network)) {
                     const name = getDockerContainerImageName('xchain-encoder', coin, network)
@@ -232,21 +235,21 @@ describe('Regression Suite', function () {
         })
 
         it('R-CFG-003b: shared modules omit coin/network from image name', function () {
-            const { getDockerContainerImageName } = require('../../src/services/ConfigService')
+            const { getDockerContainerImageName } = require('../../src/services/config_service')
             expect(getDockerContainerImageName(HUB_MODULE_NAME, '', '')).to.equal('xchain-node-xchain-hub')
             expect(getDockerContainerImageName(DB_MODULE_NAME, 'bitcoin', 'mainnet')).to.equal('xchain-node-database')
             expect(getDockerContainerImageName(EXPLORER_MODULE_NAME, '', '')).to.equal('xchain-node-xchain-explorer')
         })
 
         it('R-CFG-004: Docker network names follow prefix-coin-network pattern', function () {
-            const { getDockerNetwork } = require('../../src/services/ConfigService')
+            const { getDockerNetwork } = require('../../src/services/config_service')
             expect(getDockerNetwork('bitcoin', 'mainnet')).to.equal('xchain-node-bitcoin-mainnet')
             expect(getDockerNetwork('dogecoin', 'regtest')).to.equal('xchain-node-dogecoin-regtest')
             expect(getDockerNetwork('', '')).to.equal('xchain-node')
         })
 
         it('R-CFG-005: database names follow XChain_TICKER_Network_Module pattern', function () {
-            const { getModuleDatabaseName } = require('../../src/services/ConfigService')
+            const { getModuleDatabaseName } = require('../../src/services/config_service')
             expect(getModuleDatabaseName('xchain-decoder', 'bitcoin', 'mainnet')).to.equal('XChain_BTC_Mainnet_Decoder')
             expect(getModuleDatabaseName('xchain-indexer', 'dogecoin', 'testnet')).to.equal('XChain_DOGE_Testnet_Indexer')
             expect(getModuleDatabaseName('xchain-decoder', 'litecoin', 'regtest')).to.equal('XChain_LTC_Regtest_Decoder')
@@ -508,7 +511,6 @@ describe('Regression Suite', function () {
         })
 
         it('R-SEC-007: NODE_PREFIX regex rejects shell metacharacters', function () {
-            const constants = require('../../src/config/constants')
             expect(constants.NODE_PREFIX).to.match(/^[a-z0-9][a-z0-9._-]*$/)
         })
     })
@@ -528,7 +530,6 @@ describe('Regression Suite', function () {
         })
 
         it('R-LIF-001: install stores container ID in LevelDB via buildAndUp', async function () {
-            const state = require('../../src/state')
             const containerId = TestEnv.fakeContainerId('a')
             await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
             const retrieved = await state.db.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
@@ -540,8 +541,8 @@ describe('Regression Suite', function () {
             await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', containerId)
 
             const startedIds = []
-            const moduleOps = proxyquire('../../src/operations/moduleOperations', {
-                '../services/DockerService': {
+            const moduleOps = proxyquire('../../src/operations/module_operations', {
+                '../services/docker_service': {
                     startContainer: async (id) => { startedIds.push(id); return true },
                     createDockerNetwork: async () => true,
                     stopContainer: async () => true,
@@ -565,8 +566,8 @@ describe('Regression Suite', function () {
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', containerId)
 
             const stoppedIds = []
-            const moduleOps = proxyquire('../../src/operations/moduleOperations', {
-                '../services/DockerService': {
+            const moduleOps = proxyquire('../../src/operations/module_operations', {
+                '../services/docker_service': {
                     stopContainer: async (id) => { stoppedIds.push(id); return true },
                     stopContainerByName: async (id) => { stoppedIds.push(id); return { stopped: true, seconds: 1, killed: false } },
                     createDockerNetwork: async () => true,
@@ -591,8 +592,8 @@ describe('Regression Suite', function () {
             await env.insertModule('xchain-indexer', 'bitcoin', 'mainnet', containerId)
 
             const restartedIds = []
-            const moduleOps = proxyquire('../../src/operations/moduleOperations', {
-                '../services/DockerService': {
+            const moduleOps = proxyquire('../../src/operations/module_operations', {
+                '../services/docker_service': {
                     restartContainer: async (id) => { restartedIds.push(id); return true },
                     createDockerNetwork: async () => true,
                     startContainer: async () => true,
@@ -604,7 +605,7 @@ describe('Regression Suite', function () {
                     logContainer: async () => true,
                     startDockerMonitor: async () => true
                 },
-                '../services/StatusService': { statusChanged: async () => true }
+                '../services/status_service': { statusChanged: async () => true }
             })
 
             const serviceList = { 'bitcoin': { 'mainnet': ['xchain-indexer'] } }
@@ -614,7 +615,6 @@ describe('Regression Suite', function () {
         })
 
         it('R-LIF-005: uninstall removes LevelDB entry', async function () {
-            const state = require('../../src/state')
             const containerId = TestEnv.fakeContainerId('u')
             await state.db.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', containerId)
 
@@ -635,8 +635,8 @@ describe('Regression Suite', function () {
             await env.insertModule('xchain-encoder', 'litecoin', 'testnet', id3)
 
             const stoppedIds = []
-            const moduleOps = proxyquire('../../src/operations/moduleOperations', {
-                '../services/DockerService': {
+            const moduleOps = proxyquire('../../src/operations/module_operations', {
+                '../services/docker_service': {
                     stopContainer: async (id) => { stoppedIds.push(id); return true },
                     stopContainerByName: async (id) => { stoppedIds.push(id); return { stopped: true, seconds: 1, killed: false } },
                     createDockerNetwork: async () => true,
@@ -664,8 +664,8 @@ describe('Regression Suite', function () {
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', containerId)
 
             const execCalls = []
-            const moduleOps = proxyquire('../../src/operations/moduleOperations', {
-                '../services/DockerService': {
+            const moduleOps = proxyquire('../../src/operations/module_operations', {
+                '../services/docker_service': {
                     execContainer: async (id, cmd) => { execCalls.push({ id, cmd }); return 'output' },
                     createDockerNetwork: async () => true,
                     startContainer: async () => true,
@@ -688,7 +688,7 @@ describe('Regression Suite', function () {
 
     describe('[regression:p1] State & Data Integrity', function () {
 
-        // Store-level regressions (R-STA-001..003b) live in test/unit/MariaDbStore.test.js
+        // Store-level regressions (R-STA-001..003b) live in test/unit/maria_db_store.test.js
         // since the persistence layer moved from LevelDB to MariaDB.
 
         it('R-STA-004: state singleton getters/setters round-trip correctly', function () {
@@ -742,7 +742,6 @@ describe('Regression Suite', function () {
             env = new E2EEnv()
             await env.setup()
             env.setupDefaultRoutes()
-            const state = require('../../src/state')
             state.setDbRootPassword('testrootpw')
         })
 
@@ -875,11 +874,11 @@ describe('Regression Suite', function () {
             // Each of these is a call-time require the install really makes;
             // an unrecorded one means the real, host-reaching copy ran.
             const seams = env.hostSeamCallNames()
-            expect(seams, 'utxo-tracker freshness').to.include('BootstrapService.utxoTrackerVolumeFreshness')
-            expect(seams, 'decoder/indexer freshness').to.include('BootstrapService.mariaDbModuleFreshness')
-            expect(seams, 'db container probe').to.include('DatabaseService.getDatabaseContainerId')
-            expect(seams, 'container health probe').to.include('BootstrapHealthGate.probeServiceStatus')
-            expect(seams, 'config read').to.include('ConfigService.getDefaultConfig')
+            expect(seams, 'utxo-tracker freshness').to.include('bootstrap_service.utxoTrackerVolumeFreshness')
+            expect(seams, 'decoder/indexer freshness').to.include('bootstrap_service.mariaDbModuleFreshness')
+            expect(seams, 'db container probe').to.include('database_service.getDatabaseContainerId')
+            expect(seams, 'container health probe').to.include('bootstrap_health_gate.probeServiceStatus')
+            expect(seams, 'config read').to.include('config_service.getDefaultConfig')
 
             // No bootstrap archive was fetched over the network.
             const downloads = env.hostSeamCalls.filter(c => c.name === 'downloadBootstrap')
@@ -887,7 +886,6 @@ describe('Regression Suite', function () {
 
             // And the module every call-time require resolves to answers from
             // this env's temp config dir, not from the checkout's config dir.
-            const realConfigService = require('../../src/services/ConfigService')
             const config = await realConfigService.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
             expect(config['XC1986_CONFIG_SOURCE']).to.equal('temp-config-dir')
         })
@@ -961,8 +959,8 @@ describe('Regression Suite', function () {
             await env.setup()
 
             try {
-                const moduleOps = proxyquire('../../src/operations/moduleOperations', {
-                    '../services/DockerService': {
+                const moduleOps = proxyquire('../../src/operations/module_operations', {
+                    '../services/docker_service': {
                         startContainer: sinon.stub().resolves(true),
                         createDockerNetwork: async () => true,
                         stopContainer: async () => true,
@@ -985,10 +983,9 @@ describe('Regression Suite', function () {
         })
 
         // R-PRE-003 (LevelDB remove returns false for missing key) lives in
-        // test/unit/MariaDbStore.test.js after the migration to MariaDB.
+        // test/unit/maria_db_store.test.js after the migration to MariaDB.
 
         it('R-PRE-004: path traversal in config coin parameter is caught', async function () {
-            const ConfigService = require('../../src/services/ConfigService')
             try {
                 await ConfigService.getDefaultConfig('xchain-encoder', '../../../etc', 'passwd')
                 expect.fail('expected getDefaultConfig to reject a traversal coin')

@@ -20,19 +20,19 @@ const semver    = require('semver')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     XChainService, Coin, Network, SEP
-} = require('../config/constants')
+} = require('../config')
 const { db, getRemoteModuleVersions }   = require('../state')
-const { getStatus, statusChanged }       = require('../services/StatusService')
+const { getStatus, statusChanged }       = require('../services/status_service')
 const { redactSecrets }                  = require('../utils/helpers')
-const { cloneGit, installModule } = require('../services/ModuleService')
-const { installModules, uninstallModules, updateModules, restartModules, logModules, runE2ETest } = require('../operations/moduleOperations')
-const { installNode }                    = require('../services/NodeService')
-const { makeBootstrap, restoreBootstrap, getBootstrapFilesList } = require('../services/BootstrapService')
+const { cloneGit, installModule } = require('../services/module_service')
+const { installModules, uninstallModules, updateModules, restartModules, logModules, runE2ETest } = require('../operations/module_operations')
+const { installNode }                    = require('../services/node_service')
+const { makeBootstrap, restoreBootstrap, getBootstrapFilesList } = require('../services/bootstrap_service')
 const {
     getLocalNodeVersion, getLocalModuleVersion,
     getContainerNodeVersion, getContainerModuleVersion
-} = require('../services/VersionService')
-const { scanAndRegisterModules } = require('../services/DiscoveryService')
+} = require('../services/version_service')
+const { scanAndRegisterModules } = require('../services/discovery_service')
 
 // Per-module action labels. enquirer's Select resolves to a choice's NAME, so the
 // label the menu offers and the string the handler branches on must be the same

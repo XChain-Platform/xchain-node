@@ -20,6 +20,7 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
+const cs = require('../../src/services/config_service');
 
 function loadPrecheck(overrides) {
     const stubs = Object.assign({
@@ -41,36 +42,36 @@ function loadPrecheck(overrides) {
 
     const precheck = proxyquire('../../src/precheck.js', {
         'fs': { existsSync: () => true, mkdirSync: () => {} },
-        './config/constants': {
+        './config/index': {
             dataDir: '/tmp/x', moduleDir: '/tmp/x', tmpDir: '/tmp/x', containersFilesDir: '/tmp/x',
             EXTERNAL_DB: stubs.externalDb
         },
         './state': { db: { createDatabase: stubs.createDatabase }, isVerbose: () => false },
         './utils/helpers': { redactSecrets: (e) => e },
-        './services/DockerService': {
+        './services/docker_service': {
             checkDockerInstalledAndReachable: sinon.stub().resolves(),
             createDockerNetwork:              sinon.stub().resolves(),
             checkContainerdDataRootRelocation: stubs.checkContainerdDataRootRelocation
         },
-        './services/ConfigService':    {
+        './services/config_service':    {
             getDockerNetwork:          () => 'xchain',
             applyHubApiKeyFromSidecar: stubs.applyHubApiKeyFromSidecar
         },
-        './services/VersionService':   { checkAllRemoteVersions: stubs.checkAllRemoteVersions },
-        './services/StatusService':    { getStatus: stubs.getStatus },
-        './services/HubService':       {
+        './services/version_service':   { checkAllRemoteVersions: stubs.checkAllRemoteVersions },
+        './services/status_service':    { getStatus: stubs.getStatus },
+        './services/hub_service':       {
             installHubModule: stubs.installHubModule,
             updateHub:        stubs.updateHub,
             isHubAnswering:   stubs.isHubAnswering
         },
-        './services/ExplorerService':  { updateExplorer: stubs.updateExplorer },
-        './services/DatabaseService': {
+        './services/explorer_service':  { updateExplorer: stubs.updateExplorer },
+        './services/database_service': {
             buildDatabaseModule:   sinon.stub().resolves(),
             ensureXchainNodeAccess: sinon.stub().resolves({ user: 'u', password: 'p', database: 'xchain_node' }),
             getDatabaseHostPort:   stubs.getDatabaseHostPort,
             getExternalDbConfig:   stubs.getExternalDbConfig
         },
-        './services/DiscoveryService': { scanAndRegisterModules: sinon.stub().resolves() }
+        './services/discovery_service': { scanAndRegisterModules: sinon.stub().resolves() }
     })
     return { precheck, stubs }
 }
@@ -456,7 +457,6 @@ describe('preCheck: the CLI presents the sidecar HUB_API_KEY to the hub @regress
     it('runs the hydration through the real sidecar reader with a host-env key left untouched', async function () {
         // The real reader, not a stub: host env wins, and an unset key with no
         // sidecar on disk stays unset (never minted).
-        const cs = require('../../src/services/ConfigService')
         process.env.HUB_API_KEY = 'host-env-key'
         await cs.applyHubApiKeyFromSidecar(process.env)
         expect(process.env.HUB_API_KEY).to.equal('host-env-key')

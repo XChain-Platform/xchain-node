@@ -14,6 +14,9 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
+const constants = require('../../src/config');
+const ConfigService = require('../../src/services/config_service');
+const fs = require('fs');
 
 function makeExecFileStub() {
     return sinon.stub()
@@ -45,7 +48,7 @@ function makeDbSpawnStub() {
 }
 
 function loadDockerService(stubs) {
-    return proxyquire('../../src/services/DockerService', {
+    return proxyquire('../../src/services/docker_service', {
         'child_process': {
             execFile: stubs.execFile,
             spawn: stubs.spawn || sinon.stub(),
@@ -81,23 +84,23 @@ function loadModuleService(stubs, configOverrides) {
         ...(configOverrides || {})
     }
 
-    return proxyquire('../../src/services/ModuleService', {
+    return proxyquire('../../src/services/module_service', {
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs || { existsSync: sinon.stub().returns(true), rmSync: sinon.stub(), mkdirSync: sinon.stub() },
         '../state': { db: stubs.db || { setModuleContainer: sinon.stub().resolves(true) }, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
-        './ConfigService': configServiceStub,
-        './StatusService': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
-        './DockerService': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), getStatusFromContainer: sinon.stub().resolves({}),
+        './config_service': configServiceStub,
+        './status_service': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
+        './docker_service': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), getStatusFromContainer: sinon.stub().resolves({}),
             // buildAndUp now runs a host-port-conflict pre-check (assertNoHostPortConflicts ->
             // getPublishedHostPorts), which returns a Map<hostPort, Set<name>>. Empty Map = no
             // conflict, so the container-ID validation path under test is reached.
             getPublishedHostPorts: sinon.stub().resolves(new Map()) },
-        './DatabaseService': { setDatabaseParameters: sinon.stub().resolves() }
+        './database_service': { setDatabaseParameters: sinon.stub().resolves() }
     })
 }
 
 function loadDatabaseService(stubs) {
-    return proxyquire('../../src/services/DatabaseService', {
+    return proxyquire('../../src/services/database_service', {
         'child_process': { execFile: stubs.execFile, spawn: stubs.spawn || makeDbSpawnStub() },
         'util': { promisify: () => stubs.execFileAsync || sinon.stub().resolves({ stdout: '', stderr: '' }) },
         'mariadb': {},
@@ -108,18 +111,18 @@ function loadDatabaseService(stubs) {
             setDbRootPassword: sinon.stub()
         },
         '../utils/helpers': { sleep: sinon.stub().resolves() },
-        './ConfigService': {
+        './config_service': {
             getDefaultConfig: sinon.stub().resolves({}),
             getDockerContainerImageName: sinon.stub().returns('xchain-node-database'),
             getDockerNetwork: sinon.stub().returns('xchain-node-bitcoin-mainnet'),
             getModuleDatabaseName: sinon.stub().returns('XChain_BTC_Mainnet_Decoder')
         },
-        './DockerService': {
+        './docker_service': {
             getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } }),
             getDockerNetworkInspect: sinon.stub().resolves({ IPAM: { Config: [{ Gateway: '172.18.0.1' }] } }),
             addContainerToNetwork: sinon.stub().resolves()
         },
-        './StatusService': { statusChanged: sinon.stub().resolves() }
+        './status_service': { statusChanged: sinon.stub().resolves() }
     })
 }
 
@@ -286,7 +289,6 @@ describe('Security', function () {
 
         it('accepts valid lowercase alphanumeric prefix', function () {
             // The default "xchain-node" must pass validation
-            const constants = require('../../src/config/constants')
             expect(constants.NODE_PREFIX).to.match(/^[a-z0-9][a-z0-9._-]*$/)
         })
 
@@ -295,14 +297,14 @@ describe('Security', function () {
             const origEnv = process.env.NODE_PREFIX
             process.env.NODE_PREFIX = malicious
             try {
-                delete require.cache[require.resolve('../../src/config/constants')]
+                delete require.cache[require.resolve('../../src/config/index')]
                 expect(() => {
-                    require('../../src/config/constants')
+                    require('../../src/config')
                 }).to.throw('Invalid NODE_PREFIX')
             } finally {
                 if (origEnv === undefined) delete process.env.NODE_PREFIX
                 else process.env.NODE_PREFIX = origEnv
-                delete require.cache[require.resolve('../../src/config/constants')]
+                delete require.cache[require.resolve('../../src/config/index')]
             }
         })
 
@@ -310,14 +312,14 @@ describe('Security', function () {
             const origEnv = process.env.NODE_PREFIX
             process.env.NODE_PREFIX = 'xchain node'
             try {
-                delete require.cache[require.resolve('../../src/config/constants')]
+                delete require.cache[require.resolve('../../src/config/index')]
                 expect(() => {
-                    require('../../src/config/constants')
+                    require('../../src/config')
                 }).to.throw('Invalid NODE_PREFIX')
             } finally {
                 if (origEnv === undefined) delete process.env.NODE_PREFIX
                 else process.env.NODE_PREFIX = origEnv
-                delete require.cache[require.resolve('../../src/config/constants')]
+                delete require.cache[require.resolve('../../src/config/index')]
             }
         })
 
@@ -325,14 +327,14 @@ describe('Security', function () {
             const origEnv = process.env.NODE_PREFIX
             process.env.NODE_PREFIX = 'xchain$HOME'
             try {
-                delete require.cache[require.resolve('../../src/config/constants')]
+                delete require.cache[require.resolve('../../src/config/index')]
                 expect(() => {
-                    require('../../src/config/constants')
+                    require('../../src/config')
                 }).to.throw('Invalid NODE_PREFIX')
             } finally {
                 if (origEnv === undefined) delete process.env.NODE_PREFIX
                 else process.env.NODE_PREFIX = origEnv
-                delete require.cache[require.resolve('../../src/config/constants')]
+                delete require.cache[require.resolve('../../src/config/index')]
             }
         })
     })
@@ -390,14 +392,12 @@ describe('Security', function () {
         })
 
         it('resolveArgs rejects invalid branch names', function () {
-            const ConfigService = require('../../src/services/ConfigService')
             expect(() => {
                 ConfigService.resolveArgs(['xchain-encoder', 'bitcoin', 'mainnet', 'bad;branch'], { expectBranch: true })
             }).to.throw('Invalid branch name')
         })
 
         it('resolveArgs accepts valid branch names', function () {
-            const ConfigService = require('../../src/services/ConfigService')
             const result = ConfigService.resolveArgs(['xchain-encoder', 'bitcoin', 'mainnet', 'develop'], { expectBranch: true })
             expect(result.branch).to.equal('develop')
         })
@@ -406,7 +406,6 @@ describe('Security', function () {
     describe('Config path traversal prevention', function () {
 
         it('getDefaultConfig rejects a path-traversal coin parameter', async function () {
-            const ConfigService = require('../../src/services/ConfigService')
             // A traversal string in `coin` must be refused. The guard is a known-coin
             // allowlist that rejects unknown coins before any path join (a dedicated
             // traversal-detection guard also exists on other code paths), so the
@@ -461,7 +460,7 @@ describe('Security', function () {
 
         it('uses spawnSync instead of execSync for tar extraction', function () {
             const source = require('fs').readFileSync(
-                path.join(__dirname, '../../src/GitHubDownloader.js'), 'utf8'
+                path.join(__dirname, '../../src/services/github_downloader.js'), 'utf8'
             )
             expect(source).to.not.include('execSync')
             expect(source).to.include('spawnSync')
@@ -469,7 +468,7 @@ describe('Security', function () {
 
         it('uses fs.unlinkSync instead of shell rm for cleanup', function () {
             const source = require('fs').readFileSync(
-                path.join(__dirname, '../../src/GitHubDownloader.js'), 'utf8'
+                path.join(__dirname, '../../src/services/github_downloader.js'), 'utf8'
             )
             expect(source).to.include('fs.unlinkSync')
             expect(source).to.not.match(/&& rm /)
@@ -491,7 +490,7 @@ describe('Security', function () {
 
         it('uses spawn with tee instead of exec with shell interpolation', function () {
             const source = require('fs').readFileSync(
-                path.join(__dirname, '../../src/services/DockerService.js'), 'utf8'
+                path.join(__dirname, '../../src/services/docker_service.js'), 'utf8'
             )
             // Guards against a regression to the earlier broken template literal.
             expect(source).to.not.include("docker exec -i ${containerId}")
@@ -504,7 +503,7 @@ describe('Security', function () {
 
         it('uses chmod 755 instead of 777 for bootstrap directories', function () {
             const source = require('fs').readFileSync(
-                path.join(__dirname, '../../src/services/BootstrapService.js'), 'utf8'
+                path.join(__dirname, '../../src/services/bootstrap_service.js'), 'utf8'
             )
             expect(source).to.not.include('chmod 777')
             expect(source).to.include("'755'")
@@ -512,7 +511,6 @@ describe('Security', function () {
     })
 
     describe('No remaining exec() calls in source files', function () {
-        const fs = require('fs')
         const srcDir = path.join(__dirname, '../../src')
 
         function getAllJsFiles(dir) {

@@ -18,6 +18,7 @@ const fs         = require('fs')
 
 const E2EEnv = require('../helpers/e2e-env')
 const CommandCapture = require('../../integration/helpers/command-capture')
+const state = require('../../../src/state');
 
 const ROOT = path.join(__dirname, '..', '..', '..')
 
@@ -31,7 +32,6 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
         await env.setup()
         env.setupDefaultRoutes()
 
-        const state = require('../../../src/state')
         state.setDbRootPassword('testrootpw')
     })
 
@@ -42,7 +42,7 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
     function makePreCheck(capture, overrides = {}) {
         const execFileStub = capture.createExecFileStub()
 
-        const patchedConstants = Object.assign({}, require(path.join(ROOT, 'src/config/constants')), {
+        const patchedConstants = Object.assign({}, require(path.join(ROOT, 'src/config/index')), {
             configDir: env.configDir,
             moduleDir: env.moduleDir,
             dataDir: env.dataDir,
@@ -50,14 +50,14 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
             containersFilesDir: path.join(env.tmpDir, 'tmp', 'containers_files')
         })
 
-        const DockerService = proxyquire(path.join(ROOT, 'src/services/DockerService'), {
+        const DockerService = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
             'child_process': {
                 execFile: execFileStub,
                 spawn: capture.createSpawnStub(),
                 spawnSync: capture.createSpawnSyncStub()
             },
             'util': { promisify: () => capture.createExecFileAsyncStub() },
-            '../config/constants': patchedConstants,
+            '../config/index': patchedConstants,
             'blessed': {
                 screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),
                 text: () => {},
@@ -65,25 +65,25 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
             }
         })
 
-        const ConfigService = proxyquire(path.join(ROOT, 'src/services/ConfigService'), {
-            '../config/constants': patchedConstants
+        const ConfigService = proxyquire(path.join(ROOT, 'src/services/config_service'), {
+            '../config/index': patchedConstants
         })
 
         const precheck = proxyquire(path.join(ROOT, 'src/precheck'), {
-            './config/constants': patchedConstants,
-            './services/DockerService': overrides.DockerService || DockerService,
-            './services/ConfigService': overrides.ConfigService || ConfigService,
-            './services/VersionService': overrides.VersionService || {
+            './config/index': patchedConstants,
+            './services/docker_service': overrides.DockerService || DockerService,
+            './services/config_service': overrides.ConfigService || ConfigService,
+            './services/version_service': overrides.VersionService || {
                 checkAllRemoteVersions: async () => true
             },
-            './services/StatusService': overrides.StatusService || {
+            './services/status_service': overrides.StatusService || {
                 getStatus: async () => ({})
             },
-            './services/HubService': overrides.HubService || {
+            './services/hub_service': overrides.HubService || {
                 installHubModule: async () => true,
                 updateHub: async () => true
             },
-            './services/ExplorerService': overrides.ExplorerService || {
+            './services/explorer_service': overrides.ExplorerService || {
                 updateExplorer: async () => true
             }
         })

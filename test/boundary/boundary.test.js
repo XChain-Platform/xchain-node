@@ -21,7 +21,7 @@ const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
     Coin, Network, XChainService, CoinTickerSymbol, REGTEST_MODULES,
     moduleDir, tmpDir, configDir
-} = require('../../src/config/constants')
+} = require('../../src/config')
 
 function streamFromString(str) {
     const s = new Readable()
@@ -31,7 +31,7 @@ function streamFromString(str) {
 }
 
 function makeConfigService(fsStub) {
-    return proxyquire('../../src/services/ConfigService', {
+    return proxyquire('../../src/services/config_service', {
         'fs': fsStub || require('fs')
     })
 }
@@ -76,7 +76,7 @@ function loadModuleService(stubs, configOverrides) {
         })
     }, configOverrides || {})
 
-    return proxyquire('../../src/services/ModuleService', {
+    return proxyquire('../../src/services/module_service', {
         'child_process': { execFile: stubs.execFile },
         'fs': stubs.fs,
         '../state': {
@@ -84,16 +84,16 @@ function loadModuleService(stubs, configOverrides) {
             getLastStatus: () => null,
             getRemoteModuleVersions: () => ({})
         },
-        './ConfigService': configServiceStub,
-        './StatusService': {
+        './config_service': configServiceStub,
+        './status_service': {
             statusChanged: stubs.statusChanged,
             getStatus: stubs.getStatus
         },
-        './DockerService': {
+        './docker_service': {
             killContainer: stubs.killContainer,
             removeContainer: stubs.removeContainer
         },
-        './DatabaseService': {
+        './database_service': {
             setDatabaseParameters: sinon.stub().resolves()
         }
     })
@@ -274,7 +274,7 @@ describe('Boundary Tests', function () {
     })
 
     describe('ConfigService: resolveArgs boundaries', function () {
-        const { resolveArgs } = require('../../src/services/ConfigService')
+        const { resolveArgs } = require('../../src/services/config_service')
 
         it('returns all defaults when all args are null', function () {
             const result = resolveArgs([null, null, null, null])
@@ -355,7 +355,7 @@ describe('Boundary Tests', function () {
     })
 
     describe('ConfigService: filterCommandParameters boundaries', function () {
-        const { filterCommandParameters } = require('../../src/services/ConfigService')
+        const { filterCommandParameters } = require('../../src/services/config_service')
 
         it('returns empty module list for regtest-only service on mainnet', function () {
             const result = filterCommandParameters(null, 'xchain-regtest-miner', 'bitcoin', 'mainnet')
@@ -700,17 +700,17 @@ describe('Boundary Tests', function () {
     describe('moduleOperations: grep/testName handling', function () {
 
         function loadModuleOperations(stubs) {
-            return proxyquire('../../src/operations/moduleOperations', {
-                '../config/constants': require('../../src/config/constants'),
+            return proxyquire('../../src/operations/module_operations', {
+                '../config/index': require('../../src/config'),
                 '../state': {
                     db: stubs.db
                 },
-                '../services/ConfigService': {
+                '../services/config_service': {
                     getDockerContainerImageName: (m, c, n) => `xchain-node-${c}-${n}-${m}`,
-                    filterCommandParameters: require('../../src/services/ConfigService').filterCommandParameters,
+                    filterCommandParameters: require('../../src/services/config_service').filterCommandParameters,
                     getDockerNetwork: (c, n) => `xchain-node-${c}-${n}`
                 },
-                '../services/DockerService': {
+                '../services/docker_service': {
                     createDockerNetwork: sinon.stub().resolves(true),
                     killContainer: sinon.stub().resolves(true),
                     removeContainer: stubs.removeContainer || sinon.stub().resolves(true),
@@ -724,17 +724,17 @@ describe('Boundary Tests', function () {
                     waitContainer: stubs.waitContainer || sinon.stub().resolves(0),
                     saveContainerLogs: stubs.saveContainerLogs || sinon.stub().resolves(true)
                 },
-                '../services/DatabaseService': {
+                '../services/database_service': {
                     buildDatabaseModule: sinon.stub().resolves(true),
                     resetDatabases: sinon.stub().resolves(true)
                 },
-                '../services/ModuleService': {
+                '../services/module_service': {
                     cloneGit: sinon.stub().resolves(true),
                     getModuleBranch: sinon.stub().resolves('master'),
                     installModule: stubs.installModule || sinon.stub().resolves('a'.repeat(64)),
                     uninstallModule: sinon.stub().resolves(true)
                 },
-                '../services/StatusService': {
+                '../services/status_service': {
                     statusChanged: sinon.stub().resolves()
                 }
             })
@@ -843,7 +843,7 @@ describe('Boundary Tests', function () {
             getDockerContainerImageName,
             getDockerNetwork,
             getModuleDatabaseName
-        } = require('../../src/services/ConfigService')
+        } = require('../../src/services/config_service')
 
         it('getDockerNetwork with both empty strings returns just prefix', function () {
             expect(getDockerNetwork('', '')).to.equal('xchain-node')

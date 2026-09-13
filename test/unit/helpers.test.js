@@ -14,7 +14,7 @@ const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
-const { Coin, Network, XChainService } = require('../../src/config/constants')
+const { Coin, Network, XChainService } = require('../../src/config')
 
 describe('utils/helpers', function () {
 

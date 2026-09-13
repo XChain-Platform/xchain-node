@@ -22,7 +22,7 @@
  *
  ********************************************************************/
 
-const { escapeSqlStringLiteral } = require('../utils/sqlSafety')
+const { escapeSqlStringLiteral } = require('../utils/sql_safety')
 
 const CROSS_CHAIN_MATCH_TABLE    = 'cross_chain_matches'
 const CROSS_CHAIN_CALL_TABLE     = 'cross_chain_calls'

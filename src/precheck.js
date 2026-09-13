@@ -18,17 +18,17 @@
 const fs = require('fs')
 
 const { dataDir, moduleDir, tmpDir, containersFilesDir,
-        EXTERNAL_DB } = require('./config/constants')
+        EXTERNAL_DB } = require('./config')
 const { db, isVerbose }                = require('./state')
 const { redactSecrets }                = require('./utils/helpers')
-const { checkDockerInstalledAndReachable, createDockerNetwork, checkContainerdDataRootRelocation } = require('./services/DockerService')
-const { getDockerNetwork, applyHubApiKeyFromSidecar } = require('./services/ConfigService')
-const { checkAllRemoteVersions }       = require('./services/VersionService')
-const { getStatus }                    = require('./services/StatusService')
-const { installHubModule, updateHub, isHubAnswering } = require('./services/HubService')
-const { updateExplorer }               = require('./services/ExplorerService')
-const { buildDatabaseModule, ensureXchainNodeAccess, getDatabaseHostPort, getExternalDbConfig } = require('./services/DatabaseService')
-const { scanAndRegisterModules }       = require('./services/DiscoveryService')
+const { checkDockerInstalledAndReachable, createDockerNetwork, checkContainerdDataRootRelocation } = require('./services/docker_service')
+const { getDockerNetwork, applyHubApiKeyFromSidecar } = require('./services/config_service')
+const { checkAllRemoteVersions }       = require('./services/version_service')
+const { getStatus }                    = require('./services/status_service')
+const { installHubModule, updateHub, isHubAnswering } = require('./services/hub_service')
+const { updateExplorer }               = require('./services/explorer_service')
+const { buildDatabaseModule, ensureXchainNodeAccess, getDatabaseHostPort, getExternalDbConfig } = require('./services/database_service')
+const { scanAndRegisterModules }       = require('./services/discovery_service')
 
 function createDirectories() {
     if (!fs.existsSync(dataDir))             fs.mkdirSync(dataDir)
