@@ -1291,6 +1291,37 @@ describe('ConfigService', function () {
                 expect(config['HUB_PORT']).to.equal(10000)
             })
 
+            // the hub has no per-coin config file, so a host env override is
+            // the only injection point for a second co-located install (e.g. verifying
+            // `install master xchain-hub` boots without tearing down a standing shared
+            // hub on the default 10000). Mirrors the EXPLORER_PORT_HTTP/HTTPS/PORT
+            // override above HUB_PORT in ConfigService.js.
+            it('honours a HUB_PORT host env override', async function () {
+                const prev = process.env.HUB_PORT
+                process.env.HUB_PORT = '10001'
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['HUB_PORT']).to.equal('10001')
+                } finally {
+                    if (prev === undefined) delete process.env.HUB_PORT
+                    else process.env.HUB_PORT = prev
+                }
+            })
+
+            it('leaves HUB_PORT at the 10000 default when host env sets no override', async function () {
+                const prev = process.env.HUB_PORT
+                delete process.env.HUB_PORT
+                try {
+                    const cs = makeServiceWithConfig('')
+                    const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+                    expect(config['HUB_PORT']).to.equal(10000)
+                } finally {
+                    if (prev === undefined) delete process.env.HUB_PORT
+                    else process.env.HUB_PORT = prev
+                }
+            })
+
             it('returns EXPLORER_PORT as 18080', async function () {
                 const cs = makeServiceWithConfig('')
                 const config = await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)

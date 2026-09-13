@@ -879,6 +879,24 @@ async function getDefaultConfig(module, coin, network) {
             "HUB_API_HOST_SYNC":       getDockerContainerImageName(HUB_MODULE_NAME, "", "")
         }
 
+        // Allow the operator to override the shared hub's port via host env.
+        // The hub has no per-coin config file, so host env is the injection point, same
+        // as the explorer override below. constants.js's HUB_MODULE_NAME.docker.ports
+        // entry maps BOTH the published host port and the container-internal port from
+        // this one HUB_PORT value (`-p ${HUB_PORT}:${HUB_PORT}`), and every hub client
+        // in this file (buildCheckpointConfig, updateHubOrExplorer, ...) reads the
+        // computed defaultValues.HUB_PORT rather than the constants.js default, so
+        // overriding it here keeps the published port, the container's own listener,
+        // and every in-process caller in agreement. Motivating case: a second
+        // co-located xchain-node install (e.g. verifying `install master xchain-hub`
+        // boots correctly) needs its hub reachable on a host port distinct from a
+        // standing shared hub's 10000, which had no override at all and so could only
+        // be tested by tearing the shared hub down or standing up a whole separate
+        // Docker daemon.
+        if (process.env.HUB_PORT !== undefined && process.env.HUB_PORT !== "") {
+            defaultValues.HUB_PORT = process.env.HUB_PORT
+        }
+
         // Allow the operator to override the explorer's published HOST ports via host
         // env. Shared services (explorer/hub) have no per-coin config file, so host env
         // is the injection point (same pattern as the hub passthrough vars below). The
