@@ -29,6 +29,7 @@ const {
 // read from the coin/network default config.
 function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
     const hubConfig = (SERVICE_REGISTRY[nextModule] || {}).hubConfig
+    // A module with no hub-config descriptor contributes nothing to the hub, so skip it.
     if (!hubConfig) return null
 
     if (hubConfig.type === 'database') {
@@ -120,6 +121,7 @@ async function isCheckpointSelfSyncEnabled(deps = {}) {
 
     const readEnv = deps.readContainerEnv || readContainerEnv
     const containerEnv = await readEnv(getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""), deps)
+    // No explorer container, or one whose environment cannot be read, means self-sync was not chosen.
     if (!containerEnv) return false
 
     return (containerEnv.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && containerEnv.EXPLORER_CHECKPOINT_SELF_SYNC !== "") ||
@@ -142,6 +144,7 @@ const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
 async function updateHubOrExplorer(module) {
+    // Only the hub and the explorer accept a pushed config; refuse anything else before a connector is built.
     if (![HUB_MODULE_NAME, EXPLORER_MODULE_NAME].includes(module)) {
         throw "Only the xchain-hub or the xchain-explorer could be updated"
     }
@@ -158,6 +161,7 @@ async function updateHubOrExplorer(module) {
 
     await getStatus(null, null, false)
 
+    // The pushed config is built from live container status, so refuse to push from a status that did not refresh.
     if (!isStatusUpdated()) {
         throw "The status is not updated"
     }
@@ -269,6 +273,7 @@ async function updateHubOrExplorer(module) {
             }
 
             tries--
+            // Out of retries: give up, naming the last concrete error instead of a generic failure.
             if (tries <= 0) {
                 throw "There was a problem trying to update a config in the " + module + " module" +
                     (lastErr ? " (last error: " + redactSecrets(lastErr) + "; if this is a connection failure, check `docker logs` for the module - the service is not starting)" : "")
@@ -391,6 +396,7 @@ async function installHubModule(branch = null) {
                 logger.info("The hub module container status is 'exited'. Restarting it...")
                 const { restartContainer } = require('./docker_service')
                 const restarted = await restartContainer(hubStatus["container_id"])
+                // An exited hub that will not restart cannot receive the config, so stop here.
                 if (restarted !== true) {
                     throw false
                 }
