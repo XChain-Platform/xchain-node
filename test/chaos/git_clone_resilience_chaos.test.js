@@ -69,11 +69,12 @@ function loadModuleService(stubs, configOverrides = {}) {
     })
 }
 
-describe('Chaos: Git Clone Resilience', function () {
+function restoreSinon() {
+    sinon.restore()
+}
 
-    afterEach(function () {
-        sinon.restore()
-    })
+describe('Chaos: Git Clone Resilience', function () {
+    afterEach(restoreSinon)
 
     // Experiment 7: Git clone failures (CMD-08)
     describe('Experiment 7: Network failure during git clone', function () {
@@ -110,7 +111,10 @@ describe('Chaos: Git Clone Resilience', function () {
             }
         })
     })
+})
 
+describe('Chaos: Git Clone Resilience', function () {
+    afterEach(restoreSinon)
     describe('Experiment 7b: Invalid branch fails loud (no silent master fallback)', function () {
 
         it('rejects (no fallback clone attempt) when specified branch is not found', async function () {
@@ -160,7 +164,10 @@ describe('Chaos: Git Clone Resilience', function () {
             }
         })
     })
+})
 
+describe('Chaos: Git Clone Resilience', function () {
+    afterEach(restoreSinon)
     describe('Experiment 7c: Branch name validation in cloneGit', function () {
 
         it('rejects invalid branch names with shell metacharacters', async function () {
@@ -212,7 +219,10 @@ describe('Chaos: Git Clone Resilience', function () {
             expect(stubs.execFile.firstCall.args[1]).to.include('feature/my-branch')
         })
     })
+})
 
+describe('Chaos: Git Clone Resilience', function () {
+    afterEach(restoreSinon)
     describe('Experiment 7d: Module directory conflict', function () {
 
         it('rejects when module directory already exists and rewrite is false', async function () {
@@ -246,7 +256,10 @@ describe('Chaos: Git Clone Resilience', function () {
             expect(stubs.fs.renameSync.callCount).to.equal(2)
         })
     })
+})
 
+describe('Chaos: Git Clone Resilience', function () {
+    afterEach(restoreSinon)
     describe('Experiment 7e: Unknown module URL', function () {
 
         it('rejects when module has no URL mapping', async function () {
@@ -261,7 +274,10 @@ describe('Chaos: Git Clone Resilience', function () {
             }
         })
     })
+})
 
+describe('Chaos: Git Clone Resilience', function () {
+    afterEach(restoreSinon)
     describe('Experiment 7f: useTmp mode resilience', function () {
 
         it('clones to tmp directory when useTmp=true', async function () {
