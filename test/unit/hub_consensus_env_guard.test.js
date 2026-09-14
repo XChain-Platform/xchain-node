@@ -36,16 +36,27 @@ function missingContainerStub() {
     return sinon.stub().rejects(new Error('No such container'))
 }
 
+// The regtest-only XCHAIN/BTC derivation overrides: honored by
+// XchainPriceSource.pinOffRegtest only when HUB_NETWORK is regtest, pinned to
+// the constants.js values everywhere else.
+const REGTEST_ONLY_KEYS = [
+    'XCHAIN_PRICE_WINDOW_BLOCKS', 'XCHAIN_PRICE_CONFIRMATION_BUFFER',
+    'XCHAIN_PRICE_BOOTSTRAP_SATS', 'XCHAIN_PRICE_MIN_BTC_VOLUME'
+]
+
+let warnStub, logStub
+
+function stubConsole() {
+    warnStub = sinon.stub(console, 'warn')
+    logStub  = sinon.stub(console, 'log')
+}
+
+function restoreConsole() {
+    warnStub.restore()
+    logStub.restore()
+}
+
 describe('HubConsensusEnvGuard', () => {
-
-    // The regtest-only XCHAIN/BTC derivation overrides: honored by
-    // XchainPriceSource.pinOffRegtest only when HUB_NETWORK is regtest, pinned to
-    // the constants.js values everywhere else.
-    const REGTEST_ONLY_KEYS = [
-        'XCHAIN_PRICE_WINDOW_BLOCKS', 'XCHAIN_PRICE_CONFIRMATION_BUFFER',
-        'XCHAIN_PRICE_BOOTSTRAP_SATS', 'XCHAIN_PRICE_MIN_BTC_VOLUME'
-    ]
-
     it('covers the named consensus-shaped var groups', () => {
         // Pinned so a future edit to the group table cannot silently drop one of
         // the row's named vars without a red test.
@@ -62,6 +73,8 @@ describe('HubConsensusEnvGuard', () => {
     it('covers the four regtest-only XCHAIN/BTC derivation overrides too', () => {
         expect(CONSENSUS_ENV_KEYS).to.include.members(REGTEST_ONLY_KEYS)
     })
+})
+describe('HubConsensusEnvGuard', () => {
 
     describe('network gating', () => {
 
@@ -108,6 +121,8 @@ describe('HubConsensusEnvGuard', () => {
             expect(mainnetKeys).to.include('XCHAIN_PRICE_INDEXER_DB_HOST')
         })
     })
+})
+describe('HubConsensusEnvGuard', () => {
 
     describe('describeConsensusEnvSupply()', () => {
 
@@ -151,6 +166,8 @@ describe('HubConsensusEnvGuard', () => {
                 .to.deep.equal([])
         })
     })
+})
+describe('HubConsensusEnvGuard', () => {
 
     describe('findHubConsensusEnvDrift()', () => {
 
@@ -199,6 +216,10 @@ describe('HubConsensusEnvGuard', () => {
             const drift = findHubConsensusEnvDrift({}, { XCHAIN_PRICE_INDEXER_DB_PASS: 'topsecret' })
             expect(drift).to.deep.equal([{ key: 'XCHAIN_PRICE_INDEXER_DB_PASS' }])
         })
+    })
+})
+describe('HubConsensusEnvGuard', () => {
+    describe('findHubConsensusEnvDrift()', () => {
 
         // The trap this row exists to avoid: guarding the derivation overrides
         // everywhere would refuse the deploy that unsets a variable the hub has
@@ -245,6 +266,8 @@ describe('HubConsensusEnvGuard', () => {
             expect(drift.map(d => d.key).sort()).to.deep.equal(['HUB_NETWORK', 'XCHAIN_PRICE_BOOTSTRAP_SATS'])
         })
     })
+})
+describe('HubConsensusEnvGuard', () => {
 
     describe('formatHubConsensusEnvDriftError()', () => {
 
@@ -258,15 +281,8 @@ describe('HubConsensusEnvGuard', () => {
     })
 
     describe('logConsensusEnvSupplyState()', () => {
-        let warnStub, logStub
-        beforeEach(() => {
-            warnStub = sinon.stub(console, 'warn')
-            logStub  = sinon.stub(console, 'log')
-        })
-        afterEach(() => {
-            warnStub.restore()
-            logStub.restore()
-        })
+        beforeEach(stubConsole)
+        afterEach(restoreConsole)
 
         it('warns naming every defaulted key when nothing is supplied', () => {
             logConsensusEnvSupplyState({})
@@ -284,17 +300,12 @@ describe('HubConsensusEnvGuard', () => {
             expect(logStub.firstCall.args[0]).to.contain('HUB_NETWORK')
         })
     })
+})
+describe('HubConsensusEnvGuard', () => {
 
     describe('assertNoHubConsensusEnvDrift()', () => {
-        let warnStub, logStub
-        beforeEach(() => {
-            warnStub = sinon.stub(console, 'warn')
-            logStub  = sinon.stub(console, 'log')
-        })
-        afterEach(() => {
-            warnStub.restore()
-            logStub.restore()
-        })
+        beforeEach(stubConsole)
+        afterEach(restoreConsole)
 
         it('is a no-op (returns empty) on a fresh install with no running hub container', async () => {
             const drift = await assertNoHubConsensusEnvDrift(
@@ -325,6 +336,12 @@ describe('HubConsensusEnvGuard', () => {
             expect(thrown.drift).to.deep.equal([{ key: 'ORACLE_MIN_SUBMISSIONS' }])
             expect(isHubConsensusEnvDriftError(thrown)).to.equal(true)
         })
+    })
+})
+describe('HubConsensusEnvGuard', () => {
+    describe('assertNoHubConsensusEnvDrift()', () => {
+        beforeEach(stubConsole)
+        afterEach(restoreConsole)
 
         it('lets a mainnet recreate unset a stale, already-ignored derivation override', async () => {
             // End to end over the exact deploy the naive "just add the keys"
