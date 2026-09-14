@@ -33,6 +33,7 @@ const { redactSecrets }                  = require('../utils/helpers')
 // Destructured where they are used, so each call reads the export at that moment.
 const childProcess                       = require('child_process')
 const nodeUtil                           = require('util')
+const configService                      = require('./config_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -145,7 +146,7 @@ async function loadInstalledModules(coin, network, checkVersions = false) {
 // container from holding `ps` hostage.
 async function probeServiceHealthPayload(module, containerId, coin, network) {
     const { probeServiceStatus, MODULE_API_PORT_KEY } = require('./bootstrap_health_gate')
-    const { getDefaultConfig } = require('./config_service')
+    const { getDefaultConfig } = configService
     const { execFile } = childProcess
     const { promisify } = nodeUtil
     const runner = (cmd, args) => promisify(execFile)(cmd, args, { timeout: 15000 })

@@ -83,8 +83,11 @@ const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validat
 const { statusChanged }                 = require('./status_service')
 const { checkRemoteNodeVersion }        = require('./version_service')
 const config = require('../config');
-// Destructured where it is used, so each call reads the export at that moment.
+// Destructured where they are used, so each call reads the export at that moment.
 const dockerService = require('./docker_service')
+const configService = require('./config_service')
+const databaseService = require('./database_service')
+const versionService = require('./version_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -305,7 +308,7 @@ function nodeNetworkSubdir(coin, network) {
 // Returns null when neither source has a value (in-datadir layout).
 async function resolveBlocksDir() {
     const { configDir } = config
-    const { readSidecarValue, upsertSidecarValues } = require('./config_service')
+    const { readSidecarValue, upsertSidecarValues } = configService
     const sidecarPath = path.resolve(configDir, 'node.local')
     const envValue = config.XCHAIN_NODE_BLOCKS_DIR
     if (envValue && envValue.trim() !== '') {
@@ -633,15 +636,15 @@ function assertNodeVersionPin(coin, network, localNodeVersion, pin) {
 async function installNode(coin, network) {
     logger.info("Creating xchain docker network...")
     const { createDockerNetwork } = dockerService
-    const { getDockerNetwork } = require('./config_service')
+    const { getDockerNetwork } = configService
     await createDockerNetwork(getDockerNetwork(coin, network))
 
     logger.info("Installing database...")
-    const { buildDatabaseModule } = require('./database_service')
+    const { buildDatabaseModule } = databaseService
     await buildDatabaseModule(coin, network)
 
     logger.info("Installing " + coin + " " + network + " node...")
-    const { getLocalNodeVersion } = require('./version_service')
+    const { getLocalNodeVersion } = versionService
     let localNodeVersion = null
     try {
         localNodeVersion = await getLocalNodeVersion(coin, network)
@@ -705,7 +708,7 @@ async function installNode(coin, network) {
     await buildAndUp(XChainService.XCHAIN_INDEXER, coin, network)
 
     try {
-        const { setDatabaseParameters } = require('./database_service')
+        const { setDatabaseParameters } = databaseService
         await setDatabaseParameters()
     } catch (e) {
         // setDatabaseParameters is the ONLY step that force-sets the live decoder/indexer

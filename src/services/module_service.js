@@ -43,6 +43,13 @@ const goLiveGate             = require('./go_live_gate')
 const memoryLimitService     = require('./memory_limit_service')
 const releaseManifestService = require('./release_manifest_service')
 const stateModule            = require('../state')
+const validatorService       = require('./validator_service')
+const hubConsensusEnvGuard   = require('./hub_consensus_env_guard')
+const versionService         = require('./version_service')
+const nodeService            = require('./node_service')
+const databaseService        = require('./database_service')
+const dbCredentialDrift      = require('./db_credential_drift')
+const bootstrapService       = require('./bootstrap_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -748,7 +755,7 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
             // directory holding nothing but the capability config, so the
             // validator's signing.key never enters the container.
             if ('HUB_CAPABILITY_CONFIG' in environmentVariables) {
-                const { getCapabilityConfigMountDir, CAPS_CONTAINER_DIR } = require('./validator_service')
+                const { getCapabilityConfigMountDir, CAPS_CONTAINER_DIR } = validatorService
                 const capsHostDir = getCapabilityConfigMountDir()
                 if (capsHostDir) {
                     volumeArgs.push('-v', `${capsHostDir}:${CAPS_CONTAINER_DIR}:ro`)
@@ -771,7 +778,7 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
                 // do when the mountpoint already exists on the host (otherwise
                 // container creation fails outright); getSignerMountDir()
                 // guarantees that directory before naming the mount.
-                const { getSignerMountDir, SIGNER_CONTAINER_DIR } = require('./validator_service')
+                const { getSignerMountDir, SIGNER_CONTAINER_DIR } = validatorService
                 const signerDir = getSignerMountDir()
                 if (signerDir) {
                     const nodeModules = path.join(__dirname, '../../node_modules')
@@ -905,7 +912,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     // when a RUNNING hub would lose a value it already has; only warns (never
     // blocks) when there is no running hub to lose anything from.
     if (module === HUB_MODULE_NAME) {
-        const { assertNoHubConsensusEnvDrift } = require('./hub_consensus_env_guard')
+        const { assertNoHubConsensusEnvDrift } = hubConsensusEnvGuard
         await assertNoHubConsensusEnvDrift(environmentVariables)
     }
 
@@ -1238,12 +1245,12 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
     if (coin === "") coin = null
     if (network === "") network = null
 
-    const { getLocalNodeVersion, getLocalModuleVersion } = require('./version_service')
+    const { getLocalNodeVersion, getLocalModuleVersion } = versionService
     const { getRemoteModuleVersions, getLastStatus }     = stateModule
-    const { buildCryptoNode, getCryptoNode }             = require('./node_service')
-    const { buildDatabaseModule }                        = require('./database_service')
+    const { buildCryptoNode, getCryptoNode }             = nodeService
+    const { buildDatabaseModule }                        = databaseService
     const { installExplorerModule }                      = require('./explorer_service')
-    const { checkRemoteNodeVersion }                     = require('./version_service')
+    const { checkRemoteNodeVersion }                     = versionService
 
     if (module === NODE_MODULE_NAME) {
         const lastStatus = getLastStatus()
@@ -1325,7 +1332,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
             // `recreate` does not route through here and stays the remediation,
             // because it converges every named container before provisioning once.
             if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
-                const { assertNoDbCredentialDrift } = require('./db_credential_drift')
+                const { assertNoDbCredentialDrift } = dbCredentialDrift
                 const driftCfg = await getDefaultConfig(XChainService.XCHAIN_INDEXER, coin, network)
                 await assertNoDbCredentialDrift(coin, network, {
                     decoder: driftCfg["DECODER_DB_PASS"],
@@ -1337,7 +1344,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
             // runs its guard after buildAndUp has already torn this hub down and back
             // up, so refuse here while nothing has been touched yet (uuid:a48aab2c).
             if (module === HUB_MODULE_NAME && !onlyExecution) {
-                const { assertNoHubDbCredentialDrift } = require('./db_credential_drift')
+                const { assertNoHubDbCredentialDrift } = dbCredentialDrift
                 const hubCfg = await getDefaultConfig(HUB_MODULE_NAME, null, null)
                 await assertNoHubDbCredentialDrift(
                     { user: hubCfg["HUB_DB_USER"], pass: hubCfg["HUB_DB_PASS"] },
@@ -1380,7 +1387,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                 // scratch rather than a populated store (uuid:7037604f).
                 let utxoWasFresh = false
                 if (module === XChainService.XCHAIN_UTXO_TRACKER && !onlyExecution) {
-                    const { utxoTrackerVolumeFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = require('./bootstrap_service')
+                    const { utxoTrackerVolumeFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = bootstrapService
                     utxoWasFresh = (await utxoTrackerVolumeFreshness(coin, network)) === FRESHNESS_EMPTY
                         || forceBootstrapRequested()
                 }
@@ -1389,7 +1396,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                 // make a fresh install look populated.
                 let mariaWasFresh = false
                 if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
-                    const { mariaDbModuleFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = require('./bootstrap_service')
+                    const { mariaDbModuleFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = bootstrapService
                     mariaWasFresh = (await mariaDbModuleFreshness(coin, network, module)) === FRESHNESS_EMPTY
                         || forceBootstrapRequested()
                 }
@@ -1403,11 +1410,11 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
                     await setHubDatabaseParameters()
                 }
                 if (utxoWasFresh) {
-                    const { ensureBootstrapUtxoTracker } = require('./bootstrap_service')
+                    const { ensureBootstrapUtxoTracker } = bootstrapService
                     await ensureBootstrapUtxoTracker(coin, network)
                 }
                 if (mariaWasFresh) {
-                    const { ensureBootstrapMariaDb } = require('./bootstrap_service')
+                    const { ensureBootstrapMariaDb } = bootstrapService
                     await ensureBootstrapMariaDb(coin, network, module)
                 }
                 if (!onlyExecution) await statusChanged()

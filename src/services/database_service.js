@@ -47,6 +47,8 @@ const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, 
 const { assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError } = require('./db_credential_drift')
 const { statusChanged }           = require('./status_service')
 const config = require('../config');
+// Destructured where it is used, so each call reads the export at that moment.
+const statusService = require('./status_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 const {
@@ -820,7 +822,7 @@ async function setDatabaseParameters() {
     // here: fail closed on an unready store and on an empty set alike.
     db.assertReady("setting decoder/indexer database parameters")
 
-    const { getInstalledCoinsAndNetworks } = require('./status_service')
+    const { getInstalledCoinsAndNetworks } = statusService
     const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
     const dbContainerId = EXTERNAL_DB ? null : await getDatabaseContainerId()
 

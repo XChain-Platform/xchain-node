@@ -40,6 +40,9 @@ const { assertBootstrapSourceHealthy }                = require('./bootstrap_hea
 const { recordBootstrapPublished }                    = require('./bootstrap_republish_ledger')
 const { declareEncoderMaintenance, clearEncoderMaintenance } = require('./encoder_maintenance_window')
 const config = require('../config');
+// Destructured where they are used, so each call reads the export at that moment.
+const databaseService     = require('./database_service')
+const bootstrapHealthGate = require('./bootstrap_health_gate')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -785,7 +788,7 @@ async function makeBootstrapUtxoTracker(coin, network) {
 // `preflightWatermark` is the marker-table reading the pre-flight gate took before
 // this dump started; the post-dump gate needs it to bound the dump window.
 async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = null) {
-    const { askMariadbRootPassword } = require('./database_service')
+    const { askMariadbRootPassword } = databaseService
 
     const defaultConfig = await getDefaultConfig(module, coin, network)
     const outputDir     = module === XChainService.XCHAIN_DECODER
@@ -946,7 +949,7 @@ async function readMariaDbTipHeight(dbName, { dbContainerId, rootPassword, exter
 // before the container is stopped for the compress.
 async function readTrackerCommittedHeight(coin, network, containerId) {
     try {
-        const { probeServiceStatus, MODULE_API_PORT_KEY } = require('./bootstrap_health_gate')
+        const { probeServiceStatus, MODULE_API_PORT_KEY } = bootstrapHealthGate
         if (typeof probeServiceStatus !== 'function') return null
         const config = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
         const port = config && config[MODULE_API_PORT_KEY[XChainService.XCHAIN_UTXO_TRACKER]]
@@ -1071,7 +1074,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
 }
 
 async function restoreBootstrapMariaDb(coin, network, module, fileName) {
-    const { askMariadbRootPassword } = require('./database_service')
+    const { askMariadbRootPassword } = databaseService
 
     const defaultConfig = await getDefaultConfig(module, coin, network)
     const bootstrapDir  = module === XChainService.XCHAIN_DECODER
@@ -1573,7 +1576,7 @@ async function ensureBootstrapUtxoTracker(coin, network) {
 // and reading it as EMPTY is what let a rolling-update blip authorise
 // DROP DATABASE over a populated store (uuid:7037604f).
 async function mariaDbModuleFreshness(coin, network, module) {
-    const { askMariadbRootPassword } = require('./database_service')
+    const { askMariadbRootPassword } = databaseService
     const dbName = getModuleDatabaseName(module, coin, network)
     // Row counts and table counts are only evidence when they parse: an answer
     // that does not parse becomes null, never a number that lands on "fresh".
