@@ -78,6 +78,14 @@ const HUB_TABLE       = path.join(HUB_DIR, 'src/secret_env.js')
 const HUB_PRESENT     = fs.existsSync(HUB_DIR)
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
 
+// The platform checkout as a directory, not just the one script this suite
+// reads from it: a present checkout missing the pinned tool is a moved or
+// renamed file, while an absent checkout is a standalone install with no
+// platform tree to compare against.
+const PLATFORM_DIR    = path.resolve(__dirname, '..', '..', '..', 'claude')
+const AUDIT_TOOL       = path.join(PLATFORM_DIR, 'bin', 'env-secret-name-audit.js')
+const PLATFORM_PRESENT = fs.existsSync(PLATFORM_DIR)
+
 describe('secret-env', function () {
 
     describe('the alias table', function () {
@@ -122,9 +130,18 @@ describe('secret-env', function () {
         it('agrees with the rename the platform audit gate tells operators to make', function () {
             // The platform's env-secret-name audit tool prints "rename X to Y". Y has
             // to be a name this module reads, or following the gate breaks the stack.
-            const auditTool = path.resolve(__dirname, '..', '..', '..', 'claude', 'bin', 'env-secret-name-audit.js')
-            if (!fs.existsSync(auditTool)) this.skip()     // platform repo not checked out
-            const { preferredName } = require(auditTool)
+            if (!PLATFORM_PRESENT) {
+                if (REQUIRE_SIBLINGS)
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the platform checkout is not present at ' + PLATFORM_DIR)
+                this.skip()     // platform repo not checked out
+                return
+            }
+            // A present platform checkout with no tool at the pinned path is a moved
+            // or renamed script, not a missing checkout, and skipping here would hide
+            // exactly the drift this test exists to catch.
+            expect(fs.existsSync(AUDIT_TOOL), 'the platform checkout is present at ' + PLATFORM_DIR
+                + ' but has no env-secret-name-audit tool at ' + AUDIT_TOOL).to.equal(true)
+            const { preferredName } = require(AUDIT_TOOL)
             for (const [legacy, preferred] of Object.entries(secretEnv.SECRET_ENV_ALIASES)) {
                 expect(preferredName(legacy), 'the audit gate suggests a name xchain-node does not accept for ' + legacy)
                     .to.equal(preferred)
