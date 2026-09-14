@@ -119,6 +119,9 @@ describe('cli commandRepairsHub()', function () {
             expect(commandRepairsHub('autoheal', cmd([]))).to.equal(true)
         })
     })
+})
+
+describe('cli commandRepairsHub()', function () {
 
     describe('says no when the command needs a hub it cannot fix', function () {
 
