@@ -18,6 +18,7 @@
 const { expect } = require('chai')
 const {
     memoryArgsFor, trackerMemoryLimitMb, countInstalledTrackers, moduleEnvKey,
+    memoryCapNotAppliedWarning, memorySupportPreflightWarning,
     TRACKER_FLOOR_MB, TRACKER_CEILING_MB
 } = require('../../src/services/memory_limit_service')
 
@@ -98,6 +99,64 @@ describe('MemoryLimitService', function () {
 
         it('derives the env key from the service name', function () {
             expect(moduleEnvKey('xchain-utxo-tracker')).to.equal('XCHAIN_NODE_MODULE_MEMORY_MB_XCHAIN_UTXO_TRACKER')
+        })
+    })
+
+    // `update all` creates one tracker per chain. Without the coin and network in
+    // the line, three chains printed three identical notes and none of them said
+    // which container it was about.
+    describe('memoryArgsFor() note, which chain it is about', function () {
+
+        it('names the chain in the note', function () {
+            const r = memoryArgsFor(TRACKER, { hostBytes: 16 * GiB, trackerCount: 3, env: {}, coin: 'dogecoin', network: 'mainnet' })
+            expect(r.note).to.equal(
+                'memory limit for xchain-utxo-tracker (dogecoin mainnet): 2730 MB (host 16384 MB, 50% shared by 3 trackers)')
+        })
+
+        it('names the chain in an explicit limit note too', function () {
+            const env = { XCHAIN_NODE_MODULE_MEMORY_MB_XCHAIN_DECODER: '1536' }
+            const r = memoryArgsFor('xchain-decoder', { hostBytes: 16 * GiB, env, coin: 'litecoin', network: 'testnet' })
+            expect(r.note).to.match(/memory limit for xchain-decoder \(litecoin testnet\): 1536 MB/)
+        })
+
+        it('leaves a singleton service, which has no chain, named by module alone', function () {
+            const env = { XCHAIN_NODE_MODULE_MEMORY_MB_XCHAIN_HUB: '2048' }
+            const r = memoryArgsFor('xchain-hub', { hostBytes: 16 * GiB, env, coin: '', network: '' })
+            expect(r.note).to.match(/memory limit for xchain-hub: 2048 MB/)
+        })
+    })
+
+    // Docker takes --memory on a kernel with no memory cgroup controller, warns on
+    // stderr, exits 0, and creates the container with HostConfig.Memory=0. These
+    // are the two lines that tell an operator so, and they must carry the same fix.
+    describe('the no-memory-limit-support warnings', function () {
+
+        it('says what was asked for, that it was not kept, and that the container is uncapped', function () {
+            const w = memoryCapNotAppliedWarning({
+                module: TRACKER, coin: 'dogecoin', network: 'mainnet', requestedMb: 2703, observedBytes: 0
+            })
+            expect(w).to.match(/2703 MB memory limit was requested for xchain-utxo-tracker \(dogecoin mainnet\)/)
+            expect(w).to.match(/Docker did not keep it \(HostConfig\.Memory reads 0 bytes\)/)
+            expect(w).to.match(/running UNCAPPED/)
+        })
+
+        it('carries the same host fix in both lines', function () {
+            const capWarning = memoryCapNotAppliedWarning({
+                module: TRACKER, coin: 'dogecoin', network: 'mainnet', requestedMb: 2703, observedBytes: 0
+            })
+            const preflight = memorySupportPreflightWarning('WARNING: No memory limit support')
+            for (const line of [capWarning, preflight]) {
+                expect(line).to.match(/cgroup_enable=memory cgroup_memory=1/)
+                expect(line).to.match(/\/boot\/firmware\/cmdline\.txt/)
+                expect(line).to.match(/recreate xchain-utxo-tracker all all/)
+                expect(line).to.match(/docker info/)
+                expect(line).to.match(/No memory limit support/)
+            }
+        })
+
+        it('quotes what docker itself said in the preflight line', function () {
+            expect(memorySupportPreflightWarning('WARNING: No memory limit support'))
+                .to.match(/no memory-limit support on this host \(WARNING: No memory limit support\)/)
         })
     })
 

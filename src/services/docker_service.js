@@ -74,6 +74,46 @@ async function checkBuildKitAvailable() {
     })
 }
 
+// Whether this host can enforce a container memory limit at all.
+//
+// A kernel built without the memory cgroup controller, or booted with it off
+// (Raspberry Pi OS is the common case), does not refuse `docker run --memory`:
+// it accepts the flag, warns on stderr, and creates the container with no limit.
+// Docker knows perfectly well that it cannot do it, and says so in the warnings
+// `docker info` carries, which is one cheap question asked once before any
+// container is created rather than N surprises afterwards.
+//
+// A DIAGNOSTIC only, and best-effort in both directions: any failure to ask
+// (no docker, an older daemon with no Warnings field, output that is not JSON)
+// resolves null and the command proceeds exactly as it did before.
+//
+// Returns the warning line Docker gave, or null when memory limits are supported
+// or the question could not be asked.
+async function checkMemoryLimitSupport() {
+    return new Promise((resolve) => {
+        execFile('docker', ['info', '--format', '{{json .Warnings}}'], (error, stdout) => {
+            if (error || !stdout || !stdout.trim()) {
+                resolve(null)
+                return
+            }
+            try {
+                const warnings = JSON.parse(stdout.trim())
+                if (!Array.isArray(warnings)) {
+                    resolve(null)
+                    return
+                }
+                // "WARNING: No memory limit support" is the line. The neighbouring
+                // swap-limit warning is a different (and survivable) shortfall, so
+                // match the memory phrase rather than any limit warning.
+                const hit = warnings.find(w => /memory limit/i.test(String(w)))
+                resolve(hit ? String(hit) : null)
+            } catch {
+                resolve(null)
+            }
+        })
+    })
+}
+
 // When an operator relocates Docker's data-root off the root
 // filesystem (the common "move Docker to a big NVMe/HDD" recipe: set
 // `"data-root": "/misc/docker"` in /etc/docker/daemon.json), Docker's own
@@ -651,6 +691,7 @@ module.exports = {
     checkDockerInstalledAndReachable,
     checkBuildKitAvailable,
     checkContainerdDataRootRelocation,
+    checkMemoryLimitSupport,
     getStatusFromContainer,
     getDockerNetworkInspect,
     createDockerNetwork,

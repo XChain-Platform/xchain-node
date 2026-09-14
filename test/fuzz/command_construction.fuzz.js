@@ -88,6 +88,14 @@ function captureDockerRunCmd(stubs) {
             runCmd = fullCmd
             runArgs = args
             cb(null, 'a'.repeat(64) + '\n')
+        } else if (args && args[0] === 'inspect') {
+            // A create that asked for a memory limit reads it back off the new
+            // container. Echo the cap that was asked for, which is derived from
+            // the RAM of whatever host runs this suite.
+            const mb = runArgs ? runArgs[runArgs.indexOf('--memory') + 1] : null
+            cb(null, String(mb ? parseInt(mb, 10) * 1024 * 1024 : 0) + '\n')
+        } else {
+            cb(null, '')
         }
     })
     return () => runCmd

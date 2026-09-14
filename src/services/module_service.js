@@ -871,6 +871,80 @@ async function attachCrossChainNetworks(module, coin, network, containerId) {
 }
 
 /**
+ * Read a created container's memory limit back and warn when it did not stick.
+ *
+ * `docker run --memory` is advice, not a contract: on a kernel with no memory
+ * cgroup controller (Raspberry Pi OS ships with it off) docker prints
+ * "Limitation discarded", exits 0, and creates the container with
+ * HostConfig.Memory=0. Nothing downstream notices, so the CLI's own note goes on
+ * claiming a cap the tracker never received and the operator sizes the host
+ * against a number that is not true. This is the only place that checks.
+ *
+ * Warns rather than throws: the container works exactly as it did before the cap
+ * existed, and failing the create would block every install on such a host. A
+ * reading that cannot be parsed (docker gone, an older stub, an empty answer) is
+ * not evidence of anything and stays silent at debug.
+ *
+ * @param {string} containerId
+ * @param {string} module
+ * @param {string|null} coin
+ * @param {string|null} network
+ * @param {number|null} requestedMb the cap that was asked for, in MB
+ * @returns {Promise<void>} always resolves; the finding is a log line, not a result
+ */
+function verifyContainerMemoryLimit(containerId, module, coin, network, requestedMb) {
+    return new Promise((resolve) => {
+        if (!requestedMb) {
+            resolve()
+            return
+        }
+        execFile('docker', ['inspect', '-f', '{{.HostConfig.Memory}}', containerId], (error, stdout) => {
+            if (error) {
+                logger.debug("Could not read the memory limit back off " + module + ": "
+                    + redactSecrets(String(error.message || error)))
+                resolve()
+                return
+            }
+            const observedBytes = parseInt(String(stdout).trim(), 10)
+            if (!Number.isFinite(observedBytes)) {
+                logger.debug("Docker reported no readable memory limit for " + module + "; nothing to compare")
+                resolve()
+                return
+            }
+            // MB as docker parses `--memory 2703m`: powers of 1024, which is what
+            // dockerMemoryArgs writes and what HostConfig.Memory reports back.
+            if (observedBytes !== requestedMb * 1024 * 1024) {
+                logger.warn(memoryLimitService.memoryCapNotAppliedWarning({
+                    module, coin, network, requestedMb, observedBytes
+                }))
+            }
+            resolve()
+        })
+    })
+}
+
+/**
+ * Print what a SUCCESSFUL `docker run` said on stderr.
+ *
+ * Exit 0 with a warning on stderr is how docker reports that it accepted an
+ * argument and then ignored it; a discarded memory limit is reported no other
+ * way. Only stdout was ever read, so those lines went nowhere.
+ *
+ * @param {string|Buffer|undefined} stderr
+ * @param {string} module
+ * @param {string|null} coin
+ * @param {string|null} network
+ */
+function logDockerCreateWarnings(stderr, module, coin, network) {
+    const text = String(stderr || '').trim()
+    if (!text) return
+    const label = memoryLimitService.moduleLabel(module, coin, network)
+    for (const line of text.split('\n')) {
+        if (line.trim()) logger.warn("docker said while creating " + label + ": " + redactSecrets(line.trim()))
+    }
+}
+
+/**
  * Build the module image and (re)create its container from the current config.
  *
  * `options.reuseImage` keeps the image that is already tagged for this container and
@@ -981,11 +1055,15 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     // containers stay uncapped. The registry read is handed this file's own
     // `db`, so it counts from the same handle the rest of this file uses.
     let memoryArgs = []
+    let memoryLimitMb = null
     if (!onlyExecution) {
         const { memoryArgsFor, countInstalledTrackers } = memoryLimitService
         const trackerCount = await countInstalledTrackers(db, { coin, network })
-        const memory = memoryArgsFor(module, { trackerCount })
+        const memory = memoryArgsFor(module, { trackerCount, coin, network })
         memoryArgs = memory.args
+        // Kept for the post-create readback below. Only a cap that was actually
+        // asked for can fail to stick, so an empty args list leaves this null.
+        memoryLimitMb = memory.args.length > 0 ? memory.mb : null
         if (memory.note) logger.info(memory.note)
     }
 
@@ -1136,17 +1214,21 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
                 ]
 
                 logger.info("Creating container of module " + module + (coin && network ? " in " + coin + " " + network : ""))
-                execFile('docker', runArgs, { cwd: dir, env: dockerEnv }, async (error2, stdout) => {
+                execFile('docker', runArgs, { cwd: dir, env: dockerEnv }, async (error2, stdout, stderr) => {
                     if (error2) {
                         // error2.message embeds the full argv; redact any secret-shaped
                         // token defensively even though values now live in the child env.
                         reject("Error creating the container: " + redactSecrets(error2.message))
                         return
                     }
+                    // A create that exits 0 can still have refused part of what it was
+                    // asked for, and stderr is the only place it says so.
+                    logDockerCreateWarnings(stderr, module, coin, network)
                     try {
                         const containerId = stdout.trim()
                         if (/^[a-f0-9]{64}$/.test(containerId)) {
                             if (!onlyExecution) {
+                                await verifyContainerMemoryLimit(containerId, module, coin, network, memoryLimitMb)
                                 if (await db.setModuleContainer(module, coin, network, containerId)) {
                                     // Cross-chain network membership is part of creating the
                                     // container, not a post-install nicety: install, update and

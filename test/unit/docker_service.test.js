@@ -150,7 +150,53 @@ describe('DockerService', function () {
         })
     })
 
-    // checkContainerdDataRootRelocation 
+    // checkMemoryLimitSupport
+    //
+    // A kernel with no memory cgroup controller does not refuse `docker run
+    // --memory`: it takes the flag, warns, and creates the container uncapped.
+    // Docker says so in `docker info` warnings, which is the one cheap place to
+    // ask before any container exists.
+    describe('checkMemoryLimitSupport()', function () {
+
+        // `answer` is what `docker info --format {{json .Warnings}}` prints.
+        function load(answer, { dockerError } = {}) {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                expect(cmd).to.equal('docker')
+                expect(args[0]).to.equal('info')
+                if (dockerError) { cb(new Error('daemon unreachable')); return }
+                cb(null, answer)
+            })
+            return loadDockerService(stubs)
+        }
+
+        it('returns the warning when Docker says it cannot enforce a memory limit', async function () {
+            const ds = load('["WARNING: No memory limit support","WARNING: No swap limit support"]\n')
+            expect(await ds.checkMemoryLimitSupport()).to.equal('WARNING: No memory limit support')
+        })
+
+        it('returns null when the only shortfall is swap, which is survivable', async function () {
+            const ds = load('["WARNING: No swap limit support"]\n')
+            expect(await ds.checkMemoryLimitSupport()).to.be.null
+        })
+
+        it('returns null on a host with no warnings at all', async function () {
+            expect(await load('[]\n').checkMemoryLimitSupport()).to.be.null
+            expect(await load('null\n').checkMemoryLimitSupport()).to.be.null
+        })
+
+        it('returns null (best-effort) when docker info fails or answers nothing', async function () {
+            expect(await load('', { dockerError: true }).checkMemoryLimitSupport()).to.be.null
+            expect(await load('').checkMemoryLimitSupport()).to.be.null
+        })
+
+        it('returns null rather than throwing on output that is not JSON', async function () {
+            expect(await load('not json at all\n').checkMemoryLimitSupport()).to.be.null
+        })
+    })
+
+    // checkContainerdDataRootRelocation
     describe('checkContainerdDataRootRelocation()', function () {
 
         // Helper: stub `docker info` to return a data-root, and fs.statSync to

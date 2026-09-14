@@ -35,6 +35,17 @@
  * Any module can still be capped explicitly with
  * XCHAIN_NODE_MODULE_MEMORY_MB_<SERVICE> (0 disables a derived cap).
  *
+ * ASKING FOR A LIMIT IS NOT GETTING ONE. A host whose kernel has no memory
+ * cgroup controller (Raspberry Pi OS ships with it off) takes `--memory`,
+ * prints "Limitation discarded" on stderr, exits 0, and creates the container
+ * with HostConfig.Memory=0. The operator then reads the CLI's own note saying
+ * the tracker was capped at 2703 MB while it is in fact running on the whole
+ * host. So the words below are only half of the job: the caller reads the limit
+ * back off the created container and warns when it did not stick, using
+ * memoryCapNotAppliedWarning. It warns rather than fails, because an uncapped
+ * container works exactly as it did before the cap existed and failing would
+ * block every install on such a host.
+ *
  ********************************************************************/
 
 const os = require('os')
@@ -56,6 +67,43 @@ const TRACKER_FLOOR_MB = 1024
 // memoryBudget clamps each slice at 4 GiB, so past this a cap changes nothing
 // the tracker would do; it only stops a runaway from taking the host.
 const TRACKER_CEILING_MB = 16384
+
+// The one place the host fix is written. Both the after-the-fact warning and
+// the install-time preflight quote it, so an operator cannot be handed two
+// different repairs for the same missing kernel feature.
+const MEMORY_SUPPORT_HOST_FIX =
+    'On Raspberry Pi OS the memory cgroup controller is off by default: append '
+    + '`cgroup_enable=memory cgroup_memory=1` to /boot/firmware/cmdline.txt, reboot, then run '
+    + '`xchain-node recreate xchain-utxo-tracker all all`. On any other host run `docker info` and '
+    + 'look for "No memory limit support" among its warnings.'
+
+// Which chain a note is about. `update all` creates one tracker per chain, and
+// without this every one of them printed the same line with no way to tell
+// which container it described. Singleton services carry no coin or network.
+function moduleLabel(module, coin, network) {
+    return coin && network ? module + ' (' + coin + ' ' + network + ')' : String(module)
+}
+
+// The line printed when a container was created with --memory but came back
+// with a different (usually zero) HostConfig.Memory. `observedBytes` is what
+// docker inspect reported, in bytes, so the operator can match it to the
+// container themselves.
+function memoryCapNotAppliedWarning({ module, coin, network, requestedMb, observedBytes }) {
+    return 'WARNING: a ' + requestedMb + ' MB memory limit was requested for '
+        + moduleLabel(module, coin, network) + ', but Docker did not keep it'
+        + ' (HostConfig.Memory reads ' + observedBytes + ' bytes).'
+        + ' The container is running UNCAPPED, with the whole host available to it, exactly as it did'
+        + ' before the limit existed. ' + MEMORY_SUPPORT_HOST_FIX
+}
+
+// The line printed by the install/update/recreate preflight when Docker itself
+// says the host cannot enforce a limit, which is the same fault caught one step
+// earlier and before any container has been created.
+function memorySupportPreflightWarning(dockerWarning) {
+    return 'Warning: Docker reports no memory-limit support on this host ('
+        + String(dockerWarning).trim() + '), so every --memory it is given is discarded and the'
+        + ' containers run uncapped. ' + MEMORY_SUPPORT_HOST_FIX
+}
 
 // XCHAIN_NODE_MODULE_MEMORY_MB_XCHAIN_UTXO_TRACKER, and so on.
 function moduleEnvKey(module) {
@@ -88,8 +136,10 @@ function dockerMemoryArgs(mb) {
 //   { args, source: 'env' | 'derived' | 'none', mb, note }
 // `note` is a line worth printing at create time (a cap, an ignored value, or a
 // host too small for its trackers); null when there is nothing to say.
-function memoryArgsFor(module, { hostBytes = os.totalmem(), trackerCount = 1, env = MODULE_MEMORY_ENV } = {}) {
+function memoryArgsFor(module, { hostBytes = os.totalmem(), trackerCount = 1, env = MODULE_MEMORY_ENV,
+    coin = '', network = '' } = {}) {
     const key = moduleEnvKey(module)
+    const label = moduleLabel(module, coin, network)
     const raw = env[key]
     const explicit = envMemoryMb(module, env)
     if (raw !== undefined && raw !== '' && explicit === null) {
@@ -98,17 +148,17 @@ function memoryArgsFor(module, { hostBytes = os.totalmem(), trackerCount = 1, en
     }
     if (explicit !== null) {
         if (explicit === 0) {
-            return { args: [], source: 'env', mb: 0, note: key + '=0: no memory limit for ' + module }
+            return { args: [], source: 'env', mb: 0, note: key + '=0: no memory limit for ' + label }
         }
         return { args: dockerMemoryArgs(explicit), source: 'env', mb: explicit,
-            note: 'memory limit for ' + module + ': ' + explicit + ' MB (' + key + ')' }
+            note: 'memory limit for ' + label + ': ' + explicit + ' MB (' + key + ')' }
     }
     if (module !== XChainService.XCHAIN_UTXO_TRACKER) {
         return { args: [], source: 'none', mb: null, note: null }
     }
     const d = trackerMemoryLimitMb({ hostBytes, trackerCount })
     const hostMb = Math.floor(Number(hostBytes) / MIB)
-    let note = 'memory limit for ' + module + ': ' + d.mb + ' MB (host ' + hostMb + ' MB, '
+    let note = 'memory limit for ' + label + ': ' + d.mb + ' MB (host ' + hostMb + ' MB, '
         + Math.round(TRACKER_HOST_SHARE * 100) + '% shared by ' + d.count + ' tracker' + (d.count === 1 ? '' : 's') + ')'
     if (d.floored) {
         note += '. WARNING: the derived share (' + d.shareMb + ' MB) is under the ' + TRACKER_FLOOR_MB
@@ -142,6 +192,10 @@ module.exports = {
     countInstalledTrackers,
     envMemoryMb,
     moduleEnvKey,
+    moduleLabel,
+    memoryCapNotAppliedWarning,
+    memorySupportPreflightWarning,
+    MEMORY_SUPPORT_HOST_FIX,
     TRACKER_HOST_SHARE,
     TRACKER_FLOOR_MB,
     TRACKER_CEILING_MB

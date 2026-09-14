@@ -21,7 +21,8 @@ const { dataDir, moduleDir, tmpDir, containersFilesDir,
         EXTERNAL_DB } = require('./config')
 const { db, isVerbose }                = require('./state')
 const { redactSecrets }                = require('./utils/helpers')
-const { checkDockerInstalledAndReachable, createDockerNetwork, checkContainerdDataRootRelocation } = require('./services/docker_service')
+const { checkDockerInstalledAndReachable, createDockerNetwork, checkContainerdDataRootRelocation, checkMemoryLimitSupport } = require('./services/docker_service')
+const { memorySupportPreflightWarning }    = require('./services/memory_limit_service')
 const { getDockerNetwork, applyHubApiKeyFromSidecar } = require('./services/config_service')
 const { checkAllRemoteVersions }       = require('./services/version_service')
 const { getStatus }                    = require('./services/status_service')
@@ -95,6 +96,20 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
         }
     } catch {
         // Diagnostic only; never block a command on the containerd probe.
+    }
+
+    // Say once, before anything is created, that this host cannot enforce a
+    // container memory limit. Without it the only signal is a warning docker
+    // prints on a create that exits 0, and the tracker then runs on the whole
+    // host while the CLI reports the cap it asked for. Same shape as the probe
+    // above: guarded, best-effort, never blocking.
+    try {
+        if (typeof checkMemoryLimitSupport === 'function') {
+            const noMemoryLimits = await checkMemoryLimitSupport()
+            if (noMemoryLimits) console.log(memorySupportPreflightWarning(noMemoryLimits))
+        }
+    } catch {
+        // Diagnostic only; never block a command on the memory-support probe.
     }
 
     if (isVerbose()) console.log("Checking/Creating directories")

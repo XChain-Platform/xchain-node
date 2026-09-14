@@ -31,6 +31,7 @@ function loadPrecheck(overrides) {
         checkAllRemoteVersions: sinon.stub().resolves(),
         getStatus:              sinon.stub().resolves(),
         checkContainerdDataRootRelocation: sinon.stub().resolves(null),
+        checkMemoryLimitSupport: sinon.stub().resolves(null),
         updateHub:              sinon.stub().resolves(),
         updateExplorer:         sinon.stub().resolves(),
         installHubModule:       sinon.stub().resolves(),
@@ -51,7 +52,8 @@ function loadPrecheck(overrides) {
         './services/docker_service': {
             checkDockerInstalledAndReachable: sinon.stub().resolves(),
             createDockerNetwork:              sinon.stub().resolves(),
-            checkContainerdDataRootRelocation: stubs.checkContainerdDataRootRelocation
+            checkContainerdDataRootRelocation: stubs.checkContainerdDataRootRelocation,
+            checkMemoryLimitSupport:           stubs.checkMemoryLimitSupport
         },
         './services/config_service':    {
             getDockerNetwork:          () => 'xchain',
@@ -190,6 +192,47 @@ describe('preCheck(): containerd data-root relocation warning @regression', func
             checkContainerdDataRootRelocation: sinon.stub().rejects(new Error('probe blew up'))
         })
         // preCheck must still complete its normal flow despite the probe failing.
+        await precheck.preCheck(false, false)
+        expect(stubs.createDatabase.calledOnce).to.be.true
+    })
+})
+
+// A kernel with no memory cgroup controller takes `docker run --memory`, warns,
+// and creates the container uncapped. Asking Docker once, before anything is
+// created, is cheaper than N containers that silently ignored their limit.
+describe('preCheck(): memory-limit support warning @regression', function () {
+
+    it('prints the host fix when Docker says it has no memory-limit support', async function () {
+        const { precheck } = loadPrecheck({
+            checkMemoryLimitSupport: sinon.stub().resolves('WARNING: No memory limit support')
+        })
+        const log = sinon.stub(console, 'log')
+        try {
+            await precheck.preCheck(false, false)
+        } finally {
+            log.restore()
+        }
+        const printed = log.args.map(a => String(a[0])).join('\n')
+        expect(printed).to.match(/no memory-limit support on this host/)
+        expect(printed).to.match(/cgroup_enable=memory cgroup_memory=1/)
+        expect(printed).to.match(/\/boot\/firmware\/cmdline\.txt/)
+    })
+
+    it('says nothing on a host that can enforce a limit', async function () {
+        const { precheck } = loadPrecheck({ checkMemoryLimitSupport: sinon.stub().resolves(null) })
+        const log = sinon.stub(console, 'log')
+        try {
+            await precheck.preCheck(false, false)
+        } finally {
+            log.restore()
+        }
+        expect(log.args.some(a => String(a[0]).includes('memory-limit support'))).to.be.false
+    })
+
+    it('does not block the command when the probe throws', async function () {
+        const { precheck, stubs } = loadPrecheck({
+            checkMemoryLimitSupport: sinon.stub().rejects(new Error('probe blew up'))
+        })
         await precheck.preCheck(false, false)
         expect(stubs.createDatabase.calledOnce).to.be.true
     })
