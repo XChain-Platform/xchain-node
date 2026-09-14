@@ -483,7 +483,7 @@ function resolveNetwork(opts, p2pPort) {
     return NETWORK_BY_P2P_PORT[p2pPort] || null
 }
 
-// ASN.1 DER prefixes for Ed25519 (same as xchain-hub/src/ValidatorIdentity.js),
+// ASN.1 DER prefixes for Ed25519 (same as xchain-hub/src/validators/identity.js),
 // so the pubkey we print matches what the hub derives from the same seed.
 const PKCS8_ED25519_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
 const SPKI_ED25519_PREFIX  = Buffer.from('302a300506032b6570032100', 'hex')

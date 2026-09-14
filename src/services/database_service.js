@@ -1136,7 +1136,7 @@ function warnPriceFenceNetworkColumnMissing(ticker, hubDbName) {
 }
 
 // The fence's network scope, folded the same way the hub folds it
-// (xchain-hub/src/db.js normalizeFenceNetwork) so a reset and the hub that wrote
+// (xchain-hub/src/db/index.js normalizeFenceNetwork) so a reset and the hub that wrote
 // the row agree on the key. Both sides lowercase and trim; anything else and the
 // reset would delete nothing and report success.
 function normalizeFenceNetwork(network) {

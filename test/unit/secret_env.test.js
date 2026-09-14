@@ -93,7 +93,7 @@ describe('secret-env', function () {
         it('agrees with the xchain-hub table on every key both own', function () {
             // xchain-node composes the hub container's env, so if the two tables
             // disagreed on a name the hub would boot without its DB password.
-            const hubTable = path.join(__dirname, '../../../xchain-hub/src/secret-env.js')
+            const hubTable = path.join(__dirname, '../../../xchain-hub/src/secret_env.js')
             if (!fs.existsSync(hubTable)) this.skip()      // sibling repo not checked out
             const hubAliases = require(hubTable).SECRET_ENV_ALIASES
             for (const [legacy, preferred] of Object.entries(hubAliases)) {

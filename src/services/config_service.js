@@ -1184,7 +1184,7 @@ async function getDefaultConfig(module, coin, network) {
             // ATTEST_RESPONSE_FORWARD_S_OVERRIDE lets a regtest venue's leader pick a short
             // effective_time margin instead of the real 120s ATTEST_RESPONSE_FORWARD_S, so a
             // response can bind within the same short block cadence a regtest drill runs at
-            // (xchain-hub/src/lib/attest_response_timing.js).
+            // (xchain-hub/src/attestation/attest_response_timing.js).
             "ATTEST_RESPONSE_FORWARD_S_OVERRIDE",
             // ATTEST_BATCH_WINDOW_S_OVERRIDE is the same seam for the batch cadence:
             // AttestationBatchPublisher (row 20, not yet built) will read it on the same

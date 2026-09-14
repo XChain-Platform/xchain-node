@@ -21,7 +21,7 @@
  * credential in full. That is how a credential reaches a transcript with
  * nobody echoing it: the name simply does not trip the filter.
  *
- * xchain-hub solved its own half in `xchain-hub/src/secret-env.js`. This is the
+ * xchain-hub solved its own half in `xchain-hub/src/secret_env.js`. This is the
  * xchain-node half: the sidecar keys the node itself owns and composes into
  * every container env. Without it, renaming a key on a running stack breaks
  * that stack, so the rename cannot be rolled out at all.
