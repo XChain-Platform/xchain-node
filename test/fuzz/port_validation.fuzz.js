@@ -77,62 +77,62 @@ describe('Fuzz: validatePort()', function () {
 })
 
 // Port validation in buildAndUp()
-describe('Fuzz: Port Validation in buildAndUp()', function () {
-
-    function loadModuleService(envVars) {
-        const stubs = {
-            execFile: sinon.stub(),
-            fs: {
-                existsSync: sinon.stub().returns(true),
-                rmSync: sinon.stub(),
-                mkdirSync: sinon.stub(),
-                readFileSync: sinon.stub()
-            },
-            db: {
-                setModuleContainer: sinon.stub().resolves(true),
-                getModuleContainer: sinon.stub().resolves(null),
-                deleteModuleContainer: sinon.stub().resolves(true)
-            }
+function loadModuleService(envVars) {
+    const stubs = {
+        execFile: sinon.stub(),
+        fs: {
+            existsSync: sinon.stub().returns(true),
+            rmSync: sinon.stub(),
+            mkdirSync: sinon.stub(),
+            readFileSync: sinon.stub()
+        },
+        db: {
+            setModuleContainer: sinon.stub().resolves(true),
+            getModuleContainer: sinon.stub().resolves(null),
+            deleteModuleContainer: sinon.stub().resolves(true)
         }
-
-        stubs.execFile.callsFake((cmd, args, opts, cb) => {
-            if (typeof opts === 'function') { cb = opts; opts = {} }
-            if (args && args.includes('build')) {
-                cb(null)
-            } else if (args && args.includes('run')) {
-                cb(null, 'a'.repeat(64) + '\n')
-            }
-        })
-
-        const ms = proxyquire('../../src/services/module_service', {
-            'child_process': { execFile: stubs.execFile },
-            'util': { promisify: () => async (cmd, args) => ({ stdout: '', stderr: '' }) },
-            'fs': stubs.fs,
-            '../state': {
-                db: stubs.db,
-                getRemoteModuleVersions: () => ({}),
-                getLastStatus: () => null
-            },
-            './config_service': {
-                getModuleDir: (mod) => '/modules/' + mod,
-                getModuleTmpDir: (mod) => '/tmp/' + mod,
-                moduleDirExists: sinon.stub().returns(false),
-                checkIfModuleExists: sinon.stub().returns(true),
-                removeModuleDir: sinon.stub(),
-                removeModuleTmpDir: sinon.stub(),
-                createModuleTmpDir: sinon.stub(),
-                getDockerContainerImageName: (mod, coin, net) => 'xchain-node-' + coin + '-' + net + '-' + mod,
-                getDockerNetwork: () => 'xchain-node-bitcoin-mainnet',
-                getDefaultConfig: sinon.stub().resolves(envVars),
-                validatePort: (v) => { const p = Number(v); return Number.isInteger(p) && p >= 1 && p <= 65535 }
-            },
-            './status_service': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
-            './docker_service': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves() },
-            './database_service': { setDatabaseParameters: sinon.stub().resolves() }
-        })
-
-        return ms
     }
+
+    stubs.execFile.callsFake((cmd, args, opts, cb) => {
+        if (typeof opts === 'function') { cb = opts; opts = {} }
+        if (args && args.includes('build')) {
+            cb(null)
+        } else if (args && args.includes('run')) {
+            cb(null, 'a'.repeat(64) + '\n')
+        }
+    })
+
+    const ms = proxyquire('../../src/services/module_service', {
+        'child_process': { execFile: stubs.execFile },
+        'util': { promisify: () => async (cmd, args) => ({ stdout: '', stderr: '' }) },
+        'fs': stubs.fs,
+        '../state': {
+            db: stubs.db,
+            getRemoteModuleVersions: () => ({}),
+            getLastStatus: () => null
+        },
+        './config_service': {
+            getModuleDir: (mod) => '/modules/' + mod,
+            getModuleTmpDir: (mod) => '/tmp/' + mod,
+            moduleDirExists: sinon.stub().returns(false),
+            checkIfModuleExists: sinon.stub().returns(true),
+            removeModuleDir: sinon.stub(),
+            removeModuleTmpDir: sinon.stub(),
+            createModuleTmpDir: sinon.stub(),
+            getDockerContainerImageName: (mod, coin, net) => 'xchain-node-' + coin + '-' + net + '-' + mod,
+            getDockerNetwork: () => 'xchain-node-bitcoin-mainnet',
+            getDefaultConfig: sinon.stub().resolves(envVars),
+            validatePort: (v) => { const p = Number(v); return Number.isInteger(p) && p >= 1 && p <= 65535 }
+        },
+        './status_service': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
+        './docker_service': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves() },
+        './database_service': { setDatabaseParameters: sinon.stub().resolves() }
+    })
+
+    return ms
+}
+
+describe('Fuzz: Port Validation in buildAndUp()', function () {
 
     it('succeeds with valid port pair', async function () {
         const ms = loadModuleService({ 'ENCODER_PORT': 3003, 'ENCODER_API_PORT': 3003 })
@@ -169,7 +169,9 @@ describe('Fuzz: Port Validation in buildAndUp()', function () {
             expect(String(err)).to.include('Invalid port')
         }
     })
+})
 
+describe('Fuzz: Port Validation in buildAndUp()', function () {
     it('rejects when ENCODER_API_PORT is NaN', async function () {
         const ms = loadModuleService({ 'ENCODER_PORT': 3003, 'ENCODER_API_PORT': 'NaN' })
         try {
