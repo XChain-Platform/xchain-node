@@ -37,9 +37,16 @@ describe('Integration: Hub/Explorer Config Update', function () {
         await env.teardown()
     })
 
+    /**
+     * Create HubService with stubbed dependencies:
+     * - DockerService (network ops)
+     * - Axios via HubConnector/ExplorerConnector
+     * - Real ConfigService, and the registry via env
+     */
     function makeHubService(options = {}) {
         const axiosStub = httpCapture.createAxiosStub()
 
+        // Hub connector using our HTTP capture
         const HubConnector = proxyquire('../../src/services/hub_connector', {
             'axios': axiosStub
         })
@@ -48,6 +55,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
             'axios': axiosStub
         })
 
+        // Status service that returns data from the registry
         const statusState = require('../../src/state')
 
         const HubService = proxyquire('../../src/services/hub_service', {
@@ -85,6 +93,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', decId)
             await env.insertModule('xchain-hub', '', '', hubId)
 
+            // Set up status so updateHubOrExplorer can read it
             env.writeConfigFile('bitcoin-mainnet', '')
             state.setStatusUpdated(true)
             state.setLastStatus({
@@ -235,6 +244,7 @@ describe('Integration: Hub/Explorer Config Update', function () {
             const { HubService } = makeHubService()
             await HubService.updateHubOrExplorer('xchain-hub')
 
+            // Should have been called 3 times (2 failures + 1 success)
             expect(httpCapture.callCount('127.0.0.1:10000')).to.equal(3)
         })
 

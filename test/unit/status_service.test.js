@@ -183,6 +183,7 @@ describe('StatusService: getStatus() DB not ready', function () {
 describe('StatusService: getStatus() with installed modules', function () {
 
     it('builds status for a running container and returns installedModules', async function () {
+        // One installed module row in DB
         const installedModulesObj = {}
         const state = makeStateStub({
             isStatusUpdated:  sinon.stub().returns(false),

@@ -39,6 +39,10 @@ describe('Integration: Status Query Chain', function () {
         }])
     }
 
+    /**
+     * Create a StatusService with stubbed DockerService (docker inspect)
+     * and stubbed VersionService, but real registry interaction via env.
+     */
     function makeStatusService(inspectResponses) {
         return proxyquire('../../src/services/status_service', {
             './docker_service': {
@@ -221,6 +225,7 @@ describe('Integration: Status Query Chain', function () {
 
             const StatusService = makeStatusService(inspectResponses)
 
+            // getStatus first to populate state
             await StatusService.getStatus(null, null, false)
 
             const result = await StatusService.getInstalledCoinsAndNetworks()

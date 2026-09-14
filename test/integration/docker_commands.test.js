@@ -39,6 +39,13 @@ describe('Integration: Docker Command Construction', function () {
         await env.teardown()
     })
 
+    /**
+     * Creates a ModuleService with:
+     * - Patched ConfigService (using env temp dirs for configDir/moduleDir)
+     * - Stubbed child_process (via capture)
+     * - Stubbed StatusService and DatabaseService
+     * - Real config generation logic
+     */
     function makeBuildAndUp() {
         const containerId = TestEnv.fakeContainerId('c')
 
@@ -137,6 +144,7 @@ describe('Integration: Docker Command Construction', function () {
             expect(runCmd).to.include('--hostname xchain-node-bitcoin-mainnet-xchain-encoder')
             expect(runCmd).to.include('--network xchain-node-bitcoin-mainnet')
             expect(runCmd).to.include('-t xchain-node-bitcoin-mainnet-xchain-encoder')
+            // Port mapping
             expect(runCmd).to.include('-p 3003:3003')
 
             // Every container env var is passed by NAME on the docker run
@@ -227,6 +235,7 @@ describe('Integration: Docker Command Construction', function () {
             expect(runEnv.DECODER_DB_PASS).to.equal('xchain-password')
             expect(runCmd).to.include('-p 3002:3002')
 
+            // Bootstrap volume mount
             expect(runCmd).to.include('-v ')
             expect(runCmd).to.include(':/bootstrap/xchain-decoder')
         })
@@ -261,9 +270,12 @@ describe('Integration: Docker Command Construction', function () {
 
             const runCmd = capture.findCommands(/docker run/)[0].command
 
+            // Data volume
             expect(runCmd).to.include('-v xchain-utxo-tracker-bitcoin-mainnet-data:/data/xchain-utxo-tracker')
+            // Bootstrap volume
             expect(runCmd).to.include(':/bootstrap/xchain-utxo-tracker')
             expect(runCmd).to.include('--ulimit nofile=2048:2048')
+            // Port
             expect(runCmd).to.include('-p 3001:3001')
             expect(runCmd).to.include('--network xchain-node-bitcoin-mainnet')
         })
@@ -324,6 +336,7 @@ describe('Integration: Docker Command Construction', function () {
         })
     })
 
+    // Hub Docker command (shared service)
     describe('xchain-hub Docker run command', function () {
 
         it('uses base network and hub port', async function () {
@@ -342,6 +355,7 @@ describe('Integration: Docker Command Construction', function () {
         })
     })
 
+    // Explorer Docker command (shared service)
     describe('xchain-explorer Docker run command', function () {
 
         it('uses base network and both HTTP/HTTPS ports', async function () {
@@ -358,6 +372,7 @@ describe('Integration: Docker Command Construction', function () {
         })
     })
 
+    // Overwrite (update) scenario
     describe('buildAndUp with overwriteContainerId', function () {
 
         it('kills and removes old container before creating new one', async function () {

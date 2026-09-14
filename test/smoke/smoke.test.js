@@ -249,6 +249,7 @@ describe('S-SMOKE-002 – Commander CLI Registration', function () {
             }
         })
 
+        // Invoke parseCommand to trigger all program.command() registrations
         mod.parseCommand()
 
         program = capturedProgram

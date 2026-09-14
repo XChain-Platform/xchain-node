@@ -307,6 +307,7 @@ describe('Integration: Multi-Module Orchestration', function () {
         })
 
         it('continues uninstalling remaining modules when one fails', async function () {
+            // Modules must exist in the registry for uninstall to proceed
             await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('1'))
             await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('2'))
             await env.insertModule('xchain-indexer', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('3'))

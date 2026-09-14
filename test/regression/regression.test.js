@@ -116,6 +116,7 @@ describe('Regression Suite', function () {
         sinon.restore()
     })
 
+    // P0: CRITICAL
     describe('[regression:p0] Argument Parsing & Validation', function () {
         const ConfigService = require('../../src/services/config_service')
 
@@ -513,6 +514,7 @@ describe('Regression Suite', function () {
         })
     })
 
+    // P1: HIGH
     describe('[regression:p1] Service Lifecycle', function () {
         this.timeout(15000)
 
@@ -940,6 +942,7 @@ describe('Regression Suite', function () {
         })
     })
 
+    // P2: MEDIUM
     describe('[regression:p2] Precheck & Error Handling', function () {
         this.timeout(15000)
 

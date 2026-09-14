@@ -628,6 +628,7 @@ describe('GitHubDownloader', function () {
             // Stub downloadReleaseAsset to succeed without real download
             dl.downloadReleaseAsset = sinon.stub().resolves()
             const result = await dl.downloadRepoVersion('owner', 'repo', 'v1.0.0', { verifyHash: false })
+            // Should have written version file
             expect(fsStub.writeFileSync.called).to.be.true
             expect(result).to.include('repo')
         })
@@ -958,6 +959,7 @@ describe('GitHubDownloader', function () {
             }
 
             await dl.downloadReleaseAsset(release, '/output', 'owner/repo', 'v1.0.0', false)
+            // No spawnSync called (no extraction)
             expect(spawnSyncStub.called).to.be.false
         })
 

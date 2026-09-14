@@ -302,6 +302,7 @@ describe('Security', function () {
             const origEnv = process.env.NODE_PREFIX
             process.env.NODE_PREFIX = malicious
             try {
+                // Clear require cache to re-evaluate config/index.js
                 delete require.cache[require.resolve('../../src/config/index')]
                 expect(() => {
                     require('../../src/config')

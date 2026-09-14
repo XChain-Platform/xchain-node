@@ -158,6 +158,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const containerId = TestEnv.fakeContainerId('a')
             await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', containerId)
 
+            // Use proxyquire to inject our stubs into the operation chain
             const moduleOps = proxyquire('../../src/operations/module_operations', {
                 '../services/docker_service': {
                     startContainer: async (id) => {
