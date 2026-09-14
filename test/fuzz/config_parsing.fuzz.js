@@ -101,7 +101,9 @@ describe('Fuzz: Config File Parsing', function () {
         expect(config['KEY1']).to.exist
         expect(config['KEY2']).to.exist
     })
+})
 
+describe('Fuzz: Config File Parsing', function () {
     // --- Value fuzzing: injection payloads in config values ---
     const dangerousValues = [
         ['shell metachar semicolon',  'EVIL=value; rm -rf /'],
@@ -124,7 +126,9 @@ describe('Fuzz: Config File Parsing', function () {
             expect(config['NODE_PORT']).to.equal(8332)
         })
     }
+})
 
+describe('Fuzz: Config File Parsing', function () {
     // --- Port value fuzzing ---
     const fuzzedPorts = [
         ['negative port',        'ENCODER_PORT=-1',        '-1'],
@@ -146,7 +150,9 @@ describe('Fuzz: Config File Parsing', function () {
             expect(config['ENCODER_PORT']).to.equal(expected)
         })
     }
+})
 
+describe('Fuzz: Config File Parsing', function () {
     // --- Key fuzzing ---
     it('handles key with special characters', async function () {
         const cs = makeServiceWithConfig('KEY WITH SPACES=value\n')
@@ -169,7 +175,9 @@ describe('Fuzz: Config File Parsing', function () {
         expect(config['ENCODER_API_PORT']).to.equal(3003)
         expect(config['HUB_PORT']).to.equal(10000)
     })
+})
 
+describe('Fuzz: Config File Parsing', function () {
     // --- Large config file ---
     it('handles config file with 1000 lines', async function () {
         const lines = Array.from({ length: 1000 }, (_, i) => `KEY_${i}=value_${i}`).join('\n')
@@ -182,7 +190,9 @@ describe('Fuzz: Config File Parsing', function () {
         // Default values should still be present
         expect(config['NODE_PORT']).to.equal(8332)
     })
+})
 
+describe('Fuzz: Config File Parsing', function () {
     // --- Missing config file ---
     it('uses defaults when config file does not exist', async function () {
         const fsStub = {
@@ -197,7 +207,9 @@ describe('Fuzz: Config File Parsing', function () {
         expect(config['NODE_PORT']).to.equal(8332)
         expect(config['ENCODER_API_PORT']).to.equal(3003)
     })
+})
 
+describe('Fuzz: Config File Parsing', function () {
     // --- Shared service config (no coin/network) ---
     it('returns shared config when coin and network are null', async function () {
         const cs = makeServiceWithConfig('')
