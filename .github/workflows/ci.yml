@@ -66,6 +66,16 @@ jobs:
             console.log("consensus pin conformance OK (testnet, regtest)");
           '
 
+      # Identity pin: bin/pins/identity.json records the sha256 of every
+      # vendored coin file. Re-hash the tree against it and fail on any moved,
+      # missing or unreadable file, so a stale pin cannot reach develop or
+      # master green through a direct push or a release pull request.
+      # bin/ci-full.sh runs the same command before a push; the tool uses only
+      # node builtins, so this job needs no install.
+      - name: Identity pin (vendored coin bytes)
+        working-directory: xchain-node
+        run: node bin/pin_identity.js --compare bin/pins/identity.json
+
   # Coverage ratchet: re-run the unit suite under c8 and fail if line or
   # branch coverage drops below this repo's floor in bin/coverage-thresholds.json
   # (mirrored into the `coverage:check` npm script). Catches silent coverage
