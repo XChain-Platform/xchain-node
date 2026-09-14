@@ -23,35 +23,66 @@ const TRACKER = XChainService.XCHAIN_UTXO_TRACKER
 const DECODER = XChainService.XCHAIN_DECODER
 const INDEXER = XChainService.XCHAIN_INDEXER
 
+let ledgerDir, ledger, savedDir
+let lockDir, holder
+const CLI = path.join(__dirname, '../../src/index.js')
+
+function setupLedgerTest() {
+    ledgerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-republish-'))
+    savedDir  = process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR
+    process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR = ledgerDir
+    // The path is resolved per call, so a single require is enough; the
+    // require cache is cleared anyway so each suite starts from module load.
+    delete require.cache[require.resolve('../../src/services/bootstrap_republish_ledger')]
+    ledger = require('../../src/services/bootstrap_republish_ledger')
+}
+
+function teardownLedgerTest() {
+    if (savedDir === undefined) delete process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR
+    else process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR = savedDir
+    fs.rmSync(ledgerDir, { recursive: true, force: true })
+}
+
+function ledgerFile() {
+    return path.join(ledgerDir, 'bootstrap-reindex.json')
+}
+
+function writeRaw(text) {
+    fs.writeFileSync(ledgerFile(), text)
+}
+
+function setupDueCommandTest() {
+    lockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-due-lock-'))
+    holder  = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'])
+    fs.writeFileSync(
+        path.join(lockDir, 'command.lock'),
+        JSON.stringify({ pid: holder.pid, command: 'update', startedAt: new Date().toISOString() })
+    )
+}
+
+function teardownDueCommandTest() {
+    if (holder) holder.kill()
+    fs.rmSync(lockDir, { recursive: true, force: true })
+}
+
+function runDue(args = []) {
+    const res = spawnSync(process.execPath, [CLI, 'bootstrap-republish-due', ...args], {
+        env: {
+            ...process.env,
+            XCHAIN_NODE_REINDEX_LEDGER_DIR: ledgerDir,
+            XCHAIN_NODE_LOCK_DIR: lockDir,
+            // No unit test may reach a real Docker daemon.
+            DOCKER_HOST: 'unix:///nonexistent/xchain-node-test-docker.sock'
+        },
+        encoding: 'utf8',
+        timeout: 25000
+    })
+    return { status: res.status, out: `${res.stdout || ''}`, err: `${res.stderr || ''}` }
+}
+
 describe('BootstrapRepublishLedger', function () {
-
-    let ledgerDir
-    let ledger
-    let savedDir
-
-    beforeEach(function () {
-        ledgerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-republish-'))
-        savedDir  = process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR
-        process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR = ledgerDir
-        // The path is resolved per call, so a single require is enough; the
-        // require cache is cleared anyway so each suite starts from module load.
-        delete require.cache[require.resolve('../../src/services/bootstrap_republish_ledger')]
-        ledger = require('../../src/services/bootstrap_republish_ledger')
-    })
-
-    afterEach(function () {
-        if (savedDir === undefined) delete process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR
-        else process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR = savedDir
-        fs.rmSync(ledgerDir, { recursive: true, force: true })
-    })
-
-    function ledgerFile() {
-        return path.join(ledgerDir, 'bootstrap-reindex.json')
-    }
-
-    function writeRaw(text) {
-        fs.writeFileSync(ledgerFile(), text)
-    }
+    beforeEach(setupLedgerTest)
+    afterEach(teardownLedgerTest)
 
     describe('reindexAffectedModules()', function () {
 
@@ -82,6 +113,11 @@ describe('BootstrapRepublishLedger', function () {
             expect(ledger.reindexAffectedModules()).to.deep.equal([])
         })
     })
+})
+
+describe('BootstrapRepublishLedger', function () {
+    beforeEach(setupLedgerTest)
+    afterEach(teardownLedgerTest)
 
     describe('recordReindex() -> listRepublishDue()', function () {
 
@@ -130,6 +166,11 @@ describe('BootstrapRepublishLedger', function () {
             expect(due[0].reason).to.equal('second')
         })
     })
+})
+
+describe('BootstrapRepublishLedger', function () {
+    beforeEach(setupLedgerTest)
+    afterEach(teardownLedgerTest)
 
     describe('recordBootstrapPublished()', function () {
 
@@ -163,6 +204,11 @@ describe('BootstrapRepublishLedger', function () {
             expect(fs.existsSync(ledgerFile())).to.be.false
         })
     })
+})
+
+describe('BootstrapRepublishLedger', function () {
+    beforeEach(setupLedgerTest)
+    afterEach(teardownLedgerTest)
 
     describe('isRepublishDue()', function () {
 
@@ -193,6 +239,11 @@ describe('BootstrapRepublishLedger', function () {
             expect(ledger.isRepublishDue({ reindexedAt: 'whenever', publishedAt: null })).to.be.false
         })
     })
+})
+
+describe('BootstrapRepublishLedger', function () {
+    beforeEach(setupLedgerTest)
+    afterEach(teardownLedgerTest)
 
     describe('reading a damaged ledger', function () {
 
@@ -238,6 +289,11 @@ describe('BootstrapRepublishLedger', function () {
             expect(ledger.listRepublishDue()).to.deep.equal([])
         })
     })
+})
+
+describe('BootstrapRepublishLedger', function () {
+    beforeEach(setupLedgerTest)
+    afterEach(teardownLedgerTest)
 
     describe('writeReindexLedger()', function () {
 
@@ -268,6 +324,11 @@ describe('BootstrapRepublishLedger', function () {
                 .to.equal(path.join(os.homedir(), '.xchain-node', 'bootstrap-reindex.json'))
         })
     })
+})
+
+describe('BootstrapRepublishLedger', function () {
+    beforeEach(setupLedgerTest)
+    afterEach(teardownLedgerTest)
 
     // The publisher asks this on every run and treats a non-zero exit as "no
     // combo is due". Provisioning Docker/MariaDB or queuing behind the command
@@ -277,38 +338,8 @@ describe('BootstrapRepublishLedger', function () {
     describe('the bootstrap-republish-due command', function () {
 
         this.timeout(30000)
-
-        const CLI = path.join(__dirname, '../../src/index.js')
-        let lockDir, holder
-
-        beforeEach(function () {
-            lockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-due-lock-'))
-            holder  = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'])
-            fs.writeFileSync(
-                path.join(lockDir, 'command.lock'),
-                JSON.stringify({ pid: holder.pid, command: 'update', startedAt: new Date().toISOString() })
-            )
-        })
-
-        afterEach(function () {
-            if (holder) holder.kill()
-            fs.rmSync(lockDir, { recursive: true, force: true })
-        })
-
-        function runDue(args = []) {
-            const res = spawnSync(process.execPath, [CLI, 'bootstrap-republish-due', ...args], {
-                env: {
-                    ...process.env,
-                    XCHAIN_NODE_REINDEX_LEDGER_DIR: ledgerDir,
-                    XCHAIN_NODE_LOCK_DIR: lockDir,
-                    // No unit test may reach a real Docker daemon.
-                    DOCKER_HOST: 'unix:///nonexistent/xchain-node-test-docker.sock'
-                },
-                encoding: 'utf8',
-                timeout: 25000
-            })
-            return { status: res.status, out: `${res.stdout || ''}`, err: `${res.stderr || ''}` }
-        }
+        beforeEach(setupDueCommandTest)
+        afterEach(teardownDueCommandTest)
 
         it('answers while another command holds the lock and Docker is unreachable', function () {
             ledger.recordReindex([DECODER], 'bitcoin', 'testnet', { reason: 'reset xchain-decoder' })
@@ -324,6 +355,18 @@ describe('BootstrapRepublishLedger', function () {
             expect(status).to.equal(0)
             expect(out.trim()).to.equal('')
         })
+    })
+})
+
+describe('BootstrapRepublishLedger', function () {
+    beforeEach(setupLedgerTest)
+    afterEach(teardownLedgerTest)
+
+    describe('the bootstrap-republish-due command', function () {
+
+        this.timeout(30000)
+        beforeEach(setupDueCommandTest)
+        afterEach(teardownDueCommandTest)
 
         it('--json carries the timestamps the operator needs to judge the gap', function () {
             ledger.recordReindex([TRACKER], 'litecoin', 'testnet', {
