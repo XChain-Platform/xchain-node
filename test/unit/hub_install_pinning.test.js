@@ -50,29 +50,32 @@ function load(stubs) {
     })
 }
 
+let manifest, resolveInstallTarget, cloneGit
+
+function setUpInstall() {
+    manifest = require('../../src/services/release_manifest_service')
+    manifest.clearActiveTarget()
+    resolveInstallTarget = sinon.stub(manifest, 'resolveInstallTarget').resolves({
+        kind: 'release', ref: 'v0.15.1', tag: 'v0.15.1', resolvedFrom: 'operator-supplied release ref',
+        manifest: { platform_version: '0.15.1', components: { 'xchain-hub': { tag: 'v0.15.0', commit: PIN_SHA } } }
+    })
+    // Stop the install right after the clone: everything after it is docker.
+    cloneGit = sinon.stub().rejects(new Error('stop-after-clone'))
+    sinon.stub(console, 'log')
+}
+
+function cleanUpInstall() {
+    manifest.clearActiveTarget()
+    sinon.restore()
+}
+
+async function runInstall(svc, ref) {
+    try { await svc.installHubModule(ref) } catch (err) { if (err.message !== 'stop-after-clone') throw err }
+}
+
 describe('installHubModule() stages the hub from the release manifest', function () {
-    let manifest, resolveInstallTarget, cloneGit
-
-    beforeEach(function () {
-        manifest = require('../../src/services/release_manifest_service')
-        manifest.clearActiveTarget()
-        resolveInstallTarget = sinon.stub(manifest, 'resolveInstallTarget').resolves({
-            kind: 'release', ref: 'v0.15.1', tag: 'v0.15.1', resolvedFrom: 'operator-supplied release ref',
-            manifest: { platform_version: '0.15.1', components: { 'xchain-hub': { tag: 'v0.15.0', commit: PIN_SHA } } }
-        })
-        // Stop the install right after the clone: everything after it is docker.
-        cloneGit = sinon.stub().rejects(new Error('stop-after-clone'))
-        sinon.stub(console, 'log')
-    })
-
-    afterEach(function () {
-        manifest.clearActiveTarget()
-        sinon.restore()
-    })
-
-    async function runInstall(svc, ref) {
-        try { await svc.installHubModule(ref) } catch (err) { if (err.message !== 'stop-after-clone') throw err }
-    }
+    beforeEach(setUpInstall)
+    afterEach(cleanUpInstall)
 
     it('pins the hub to the manifest of a named release, not to a hub tag of that name', async function () {
         const svc = load({ cloneGit })
@@ -99,6 +102,11 @@ describe('installHubModule() stages the hub from the release manifest', function
         expect(resolveInstallTarget.called).to.equal(false)
         expect(cloneGit.firstCall.args.slice(3)).to.deep.equal(['develop', null])
     })
+})
+
+describe('installHubModule() stages the hub from the release manifest', function () {
+    beforeEach(setUpInstall)
+    afterEach(cleanUpInstall)
 
     it('falls back to the branch the lookup names when no release exists', async function () {
         resolveInstallTarget.resolves({ kind: 'branch', ref: 'master', tag: null, manifest: null, resolvedFrom: 'no published release' })
