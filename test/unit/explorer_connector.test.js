@@ -40,6 +40,9 @@ describe('ExplorerConnector', function () {
             expect(connector.port).to.equal(8080)
         })
     })
+})
+
+describe('ExplorerConnector', function () {
 
     describe('ping()', function () {
 
