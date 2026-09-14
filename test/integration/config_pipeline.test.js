@@ -25,32 +25,34 @@ const {
 
 const TestEnv = require('./helpers/test-env')
 
+let env, ConfigService
+
+async function setupEnvironment() {
+    env = new TestEnv()
+    await env.setup()
+
+    // Proxyquire ConfigService with overridden constants so configDir/moduleDir
+    // point to our temp directories. This is necessary because ConfigService
+    // destructures constants at require-time.
+    const patchedConstants = configStub({
+        configDir: env.configDir,
+        moduleDir: env.moduleDir,
+        dataDir: env.dataDir
+    })
+
+    ConfigService = proxyquire('../../src/services/config_service', {
+        '../config/index': patchedConstants
+    })
+}
+
+async function teardownEnvironment() {
+    await env.teardown()
+}
+
 describe('Integration: Config Pipeline', function () {
     this.timeout(15000)
-
-    let env, ConfigService
-
-    beforeEach(async function () {
-        env = new TestEnv()
-        await env.setup()
-
-        // Proxyquire ConfigService with overridden constants so configDir/moduleDir
-        // point to our temp directories. This is necessary because ConfigService
-        // destructures constants at require-time.
-        const patchedConstants = configStub({
-            configDir: env.configDir,
-            moduleDir: env.moduleDir,
-            dataDir: env.dataDir
-        })
-
-        ConfigService = proxyquire('../../src/services/config_service', {
-            '../config/index': patchedConstants
-        })
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // filterCommandParameters -> getDefaultConfig integration
     describe('CLI params -> filterCommandParameters -> getDefaultConfig', function () {
@@ -92,7 +94,15 @@ describe('Integration: Config Pipeline', function () {
             expect(config['DECODER_DB_PORT']).to.equal(3306)
             expect(config['INDEXER_COIN']).to.equal('DOGE')
         })
+    })
+})
 
+describe('Integration: Config Pipeline', function () {
+    this.timeout(15000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
+
+    describe('CLI params -> filterCommandParameters -> getDefaultConfig', function () {
         it('indexer on litecoin/regtest gets regtest port and regtest miner config', async function () {
             env.writeConfigFile('litecoin-regtest', '')
 
@@ -135,7 +145,15 @@ describe('Integration: Config Pipeline', function () {
             expect(serviceList['']).to.exist
             expect(serviceList['']['']).to.include('xchain-explorer')
         })
+    })
+})
 
+describe('Integration: Config Pipeline', function () {
+    this.timeout(15000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
+
+    describe('CLI params -> filterCommandParameters -> getDefaultConfig', function () {
         it('"all" on mainnet does not include regtest modules', function () {
             const serviceList = ConfigService.filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
             const modules = serviceList['bitcoin']['mainnet']
@@ -150,6 +168,12 @@ describe('Integration: Config Pipeline', function () {
             expect(modules).to.not.include('xchain-e2e-test')
         })
     })
+})
+
+describe('Integration: Config Pipeline', function () {
+    this.timeout(15000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // Config file overrides
     describe('config file override propagation', function () {
@@ -199,6 +223,12 @@ describe('Integration: Config Pipeline', function () {
             expect(config['ENCODER_PORT']).to.equal('4003')
         })
     })
+})
+
+describe('Integration: Config Pipeline', function () {
+    this.timeout(15000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // Config values per coin/network combination
     describe('config correctness across all coin/network combos', function () {
@@ -233,6 +263,12 @@ describe('Integration: Config Pipeline', function () {
             }
         }
     })
+})
+
+describe('Integration: Config Pipeline', function () {
+    this.timeout(15000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // Docker image naming consistency
     describe('Docker image naming', function () {
