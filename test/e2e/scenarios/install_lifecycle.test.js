@@ -11,30 +11,30 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai')
-
 const E2EEnv = require('../helpers/e2e-env')
 const TestEnv = require('../../integration/helpers/test-env')
-
 const { filterCommandParameters } = require('../../../src/services/config_service')
+
+let env, cli
+
+async function setupEnv() {
+    env = new E2EEnv()
+    await env.setup()
+    env.setupDefaultRoutes()
+
+    // Pre-set database root password to skip interactive prompt
+    const state = require('../../../src/state')
+    state.setDbRootPassword('testrootpw')
+}
+
+async function teardownEnv() {
+    await env.teardown()
+}
 
 describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
     this.timeout(30000)
-
-    let env, cli
-
-    beforeEach(async function () {
-        env = new E2EEnv()
-        await env.setup()
-        env.setupDefaultRoutes()
-
-        // Pre-set database root password to skip interactive prompt
-        const state = require('../../../src/state')
-        state.setDbRootPassword('testrootpw')
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
 
     // E2E-001: Install all services for bitcoin/regtest
     describe('E2E-001: Full install all services for bitcoin/regtest', function () {
@@ -72,7 +72,14 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
                 expect(mod.container_id).to.have.lengthOf(64)
             }
         })
+    })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
+    describe('E2E-001: Full install all services for bitcoin/regtest', function () {
         it('stores bitcoin/regtest as the coin/network for each module', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
@@ -98,7 +105,14 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             expect(dbModule).to.not.be.null
             expect(dbModule).to.have.lengthOf(64)
         })
+    })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
+    describe('E2E-001: Full install all services for bitcoin/regtest', function () {
         it('docker build commands use correct container image names', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
@@ -130,7 +144,12 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             expect(encoderRun.command).to.include('--network xchain-node-bitcoin-regtest')
         })
     })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-002: Stop all services
     describe('E2E-002: Stop all services', function () {
 
@@ -159,7 +178,14 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
                 expect(containerIds, `stopped ID ${stoppedId} not in LevelDB`).to.include(stoppedId)
             }
         })
+    })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
+    describe('E2E-002: Stop all services', function () {
         it('LevelDB entries are preserved after stop (containers not removed)', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
@@ -175,7 +201,12 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             expect(modulesAfter).to.have.lengthOf(modulesBefore.length)
         })
     })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-003: Start all services
     describe('E2E-003: Start all services', function () {
 
@@ -201,7 +232,12 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             }
         })
     })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-004: Uninstall all services
     describe('E2E-004: Uninstall all services', function () {
 
@@ -228,7 +264,14 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const indexerEntry = await env.getModule('xchain-indexer', 'bitcoin', 'regtest')
             expect(indexerEntry).to.be.null
         })
+    })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
+    describe('E2E-004: Uninstall all services', function () {
         it('shared services (database, hub, explorer) are preserved unless --include-shared', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
@@ -243,7 +286,12 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             expect(dbEntry).to.not.be.null
         })
     })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-005: Selective install (decoder only)
     describe('E2E-005: Selective install (decoder only)', function () {
 
@@ -277,7 +325,14 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const utxoEntry = await env.getModule('xchain-utxo-tracker', 'bitcoin', 'regtest')
             expect(utxoEntry).to.be.null
         })
+    })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
+    describe('E2E-005: Selective install (decoder only)', function () {
         it('docker build called only for decoder, not other services', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
@@ -295,7 +350,12 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             expect(hasEncoder, 'encoder should NOT be built').to.be.false
         })
     })
+})
 
+describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-006: Full lifecycle sequence (install → stop → start → uninstall)
     describe('E2E-006: Full lifecycle sequence', function () {
 
