@@ -15,23 +15,25 @@ const { expect } = require('chai')
 const E2EEnv = require('../helpers/e2e-env')
 const { filterCommandParameters } = require('../../../src/services/config_service')
 
+let env, cli
+
+async function setupEnv() {
+    env = new E2EEnv()
+    await env.setup()
+    env.setupDefaultRoutes()
+
+    const state = require('../../../src/state')
+    state.setDbRootPassword('testrootpw')
+}
+
+async function teardownEnv() {
+    await env.teardown()
+}
+
 describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
     this.timeout(30000)
-
-    let env, cli
-
-    beforeEach(async function () {
-        env = new E2EEnv()
-        await env.setup()
-        env.setupDefaultRoutes()
-
-        const state = require('../../../src/state')
-        state.setDbRootPassword('testrootpw')
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
 
     // E2E-010: Install two coins
     describe('E2E-010: Install bitcoin/regtest + litecoin/regtest', function () {
@@ -76,7 +78,14 @@ describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
             // They should have different container IDs
             expect(btcEncoder).to.not.equal(ltcEncoder)
         })
+    })
+})
 
+describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
+    describe('E2E-010: Install bitcoin/regtest + litecoin/regtest', function () {
         it('database container is shared (single entry in LevelDB)', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             env.writeConfigFile('litecoin-regtest', '')
@@ -96,7 +105,12 @@ describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
             expect(dbIdAfterBtc).to.equal(dbIdAfterLtc)
         })
     })
+})
 
+describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-011: Uninstall one coin, other remains
     describe('E2E-011: Uninstall bitcoin, litecoin remains', function () {
 
@@ -147,7 +161,12 @@ describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
             expect(dbEntry).to.not.be.null
         })
     })
+})
 
+describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-012: Container naming per coin
     describe('E2E-012: Container naming uses coin-specific prefixes', function () {
 
