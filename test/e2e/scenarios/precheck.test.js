@@ -21,79 +21,80 @@ const CommandCapture = require('../../integration/helpers/command-capture')
 
 const ROOT = path.join(__dirname, '..', '..', '..')
 
+let env
+
+async function setupEnv() {
+    env = new E2EEnv()
+    await env.setup()
+    env.setupDefaultRoutes()
+
+    const state = require('../../../src/state')
+    state.setDbRootPassword('testrootpw')
+}
+
+async function teardownEnv() {
+    await env.teardown()
+}
+
+/**
+ * Create a preCheck function wired with our stubs.
+ */
+function makePreCheck(capture, overrides = {}) {
+    const execFileStub = capture.createExecFileStub()
+
+    const patchedConstants = Object.assign({}, require(path.join(ROOT, 'src/config/index')), {
+        configDir: env.configDir,
+        moduleDir: env.moduleDir,
+        dataDir: env.dataDir,
+        tmpDir: path.join(env.tmpDir, 'tmp'),
+        containersFilesDir: path.join(env.tmpDir, 'tmp', 'containers_files')
+    })
+
+    const DockerService = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
+        'child_process': {
+            execFile: execFileStub,
+            spawn: capture.createSpawnStub(),
+            spawnSync: capture.createSpawnSyncStub()
+        },
+        'util': { promisify: () => capture.createExecFileAsyncStub() },
+        '../config/index': patchedConstants,
+        'blessed': {
+            screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),
+            text: () => {},
+            log: () => ({ log: () => {} })
+        }
+    })
+
+    const ConfigService = proxyquire(path.join(ROOT, 'src/services/config_service'), {
+        '../config/index': patchedConstants
+    })
+
+    const precheck = proxyquire(path.join(ROOT, 'src/precheck'), {
+        './config/index': patchedConstants,
+        './services/docker_service': overrides.DockerService || DockerService,
+        './services/config_service': overrides.ConfigService || ConfigService,
+        './services/version_service': overrides.VersionService || {
+            checkAllRemoteVersions: async () => true
+        },
+        './services/status_service': overrides.StatusService || {
+            getStatus: async () => ({})
+        },
+        './services/hub_service': overrides.HubService || {
+            installHubModule: async () => true,
+            updateHub: async () => true
+        },
+        './services/explorer_service': overrides.ExplorerService || {
+            updateExplorer: async () => true
+        }
+    })
+
+    return precheck
+}
+
 describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
     this.timeout(30000)
-
-    let env
-
-    beforeEach(async function () {
-        env = new E2EEnv()
-        await env.setup()
-        env.setupDefaultRoutes()
-
-        const state = require('../../../src/state')
-        state.setDbRootPassword('testrootpw')
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
-
-    /**
-     * Create a preCheck function wired with our stubs.
-     */
-    function makePreCheck(capture, overrides = {}) {
-        const execFileStub = capture.createExecFileStub()
-
-        const patchedConstants = Object.assign({}, require(path.join(ROOT, 'src/config/index')), {
-            configDir: env.configDir,
-            moduleDir: env.moduleDir,
-            dataDir: env.dataDir,
-            tmpDir: path.join(env.tmpDir, 'tmp'),
-            containersFilesDir: path.join(env.tmpDir, 'tmp', 'containers_files')
-        })
-
-        const DockerService = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
-            'child_process': {
-                execFile: execFileStub,
-                spawn: capture.createSpawnStub(),
-                spawnSync: capture.createSpawnSyncStub()
-            },
-            'util': { promisify: () => capture.createExecFileAsyncStub() },
-            '../config/index': patchedConstants,
-            'blessed': {
-                screen: () => ({ key: () => {}, on: () => {}, render: () => {}, destroy: () => {} }),
-                text: () => {},
-                log: () => ({ log: () => {} })
-            }
-        })
-
-        const ConfigService = proxyquire(path.join(ROOT, 'src/services/config_service'), {
-            '../config/index': patchedConstants
-        })
-
-        const precheck = proxyquire(path.join(ROOT, 'src/precheck'), {
-            './config/index': patchedConstants,
-            './services/docker_service': overrides.DockerService || DockerService,
-            './services/config_service': overrides.ConfigService || ConfigService,
-            './services/version_service': overrides.VersionService || {
-                checkAllRemoteVersions: async () => true
-            },
-            './services/status_service': overrides.StatusService || {
-                getStatus: async () => ({})
-            },
-            './services/hub_service': overrides.HubService || {
-                installHubModule: async () => true,
-                updateHub: async () => true
-            },
-            './services/explorer_service': overrides.ExplorerService || {
-                updateExplorer: async () => true
-            }
-        })
-
-        return precheck
-    }
-
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-030: PreCheck creates directories and inits LevelDB
     describe('E2E-030: Directory creation and LevelDB init', function () {
 
@@ -112,7 +113,12 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
             // precheck.createDirectories would create them via the patched paths
         })
     })
+})
 
+describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-031: PreCheck verifies Docker
     describe('E2E-031: Docker verification', function () {
 
@@ -126,7 +132,12 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
             capture.assertCalled(/docker ps/)
         })
     })
+})
 
+describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-032: PreCheck installs hub if not running
     describe('E2E-032: Hub auto-install', function () {
 
@@ -146,7 +157,12 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
             expect(installHubCalled.value, 'installHubModule called').to.be.true
         })
     })
+})
 
+describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-033: PreCheck with Docker unreachable
     describe('E2E-033: Docker unreachable throws descriptive error', function () {
 
@@ -195,7 +211,12 @@ describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
             }
         })
     })
+})
 
+describe('E2E: PreCheck Pipeline (Scenario 4.5)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-034: PreCheck creates base Docker network
     describe('E2E-034: Base Docker network creation', function () {
 
