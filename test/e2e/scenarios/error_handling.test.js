@@ -22,22 +22,24 @@ const { filterCommandParameters } = require('../../../src/services/config_servic
 
 const ROOT = path.join(__dirname, '../../..')
 
+let env, cli
+
+async function setupEnv() {
+    env = new E2EEnv()
+    await env.setup()
+
+    const state = require('../../../src/state')
+    state.setDbRootPassword('testrootpw')
+}
+
+async function teardownEnv() {
+    await env.teardown()
+}
+
 describe('E2E: Error Handling (Scenario 4.10)', function () {
     this.timeout(30000)
-
-    let env, cli
-
-    beforeEach(async function () {
-        env = new E2EEnv()
-        await env.setup()
-
-        const state = require('../../../src/state')
-        state.setDbRootPassword('testrootpw')
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
 
     // E2E-060: Docker unreachable
     describe('E2E-060: Docker unreachable during precheck', function () {
@@ -90,7 +92,12 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
             }
         })
     })
+})
 
+describe('E2E: Error Handling (Scenario 4.10)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-061: Docker build failure
     describe('E2E-061: Docker run failure leaves no LevelDB entry', function () {
 
@@ -122,7 +129,12 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
             expect(encoderEntry).to.be.null
         })
     })
+})
 
+describe('E2E: Error Handling (Scenario 4.10)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-062: Missing module directory
     describe('E2E-062: Missing module directory', function () {
 
@@ -141,7 +153,12 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
             }
         })
     })
+})
 
+describe('E2E: Error Handling (Scenario 4.10)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-063: Git clone failure
     describe('E2E-063: Git clone failure propagates error', function () {
 
@@ -170,7 +187,12 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
             }
         })
     })
+})
 
+describe('E2E: Error Handling (Scenario 4.10)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-064: Start with no installed modules
     describe('E2E-064: Start with empty LevelDB', function () {
 
@@ -187,7 +209,12 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
             expect(startCmds).to.have.lengthOf(0)
         })
     })
+})
 
+describe('E2E: Error Handling (Scenario 4.10)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-065: Stop with no installed modules
     describe('E2E-065: Stop with empty LevelDB', function () {
 
