@@ -33,6 +33,9 @@ const {
 } = require('../config/secret_env')
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
+// Destructured where they are used, so each call reads the export at that moment.
+const releaseManifestService = require('./release_manifest_service')
+const stateModule            = require('../state')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -365,7 +368,7 @@ function warnHubConfigOnce(key, message) {
 // rather than "none".
 async function getRegisteredCoinStacks() {
     try {
-        const { db } = require('../state')
+        const { db } = stateModule
         const rows = await db.getAllModuleContainers(null, null)
         return (rows || []).filter(r => r && r.coin && r.network
             && Object.values(Coin).includes(r.coin) && Object.values(Network).includes(r.network))
@@ -1706,7 +1709,7 @@ function resolveArgs(args, { expectBranch = false, defaultBranch = 'master' } = 
     // (operator-confirmed 2026-08-13, release-management spec section 11). The
     // caller decides what to do with it; resolveArgs only reports the shape, so
     // this stays a pure function with no network in it.
-    const { isReleaseRef } = require('./release_manifest_service')
+    const { isReleaseRef } = releaseManifestService
 
     return { service, chain, network, branch, isRelease: isReleaseRef(branch) }
 }

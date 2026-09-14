@@ -25,6 +25,8 @@ const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./st
 const { addContainerToNetwork, killContainer, removeContainer } = require('./docker_service')
 const { cloneGit, buildAndUp }               = require('./module_service')
 const ExplorerConnector                      = require('./explorer_connector.js')
+// Destructured where it is used, so each call reads the export at that moment.
+const releaseManifestService                 = require('./release_manifest_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -124,7 +126,7 @@ async function installExplorerModule(force = false, branch = null) {
     }
 
     logger.info("Downloading xchain-explorer...")
-    const { resolveComponentRef } = require('./release_manifest_service')
+    const { resolveComponentRef } = releaseManifestService
     const explorerPin = resolveComponentRef(EXPLORER_MODULE_NAME, branch)
     await cloneGit(EXPLORER_MODULE_NAME, true, false, explorerPin.ref, explorerPin.commit)
     logger.info("Installing xchain-explorer module...")

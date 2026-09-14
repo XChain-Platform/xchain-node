@@ -83,6 +83,8 @@ const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validat
 const { statusChanged }                 = require('./status_service')
 const { checkRemoteNodeVersion }        = require('./version_service')
 const config = require('../config');
+// Destructured where it is used, so each call reads the export at that moment.
+const dockerService = require('./docker_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -302,7 +304,7 @@ function nodeNetworkSubdir(coin, network) {
 // via a real crash-loop). With no env var the sidecar value applies.
 // Returns null when neither source has a value (in-datadir layout).
 async function resolveBlocksDir() {
-    const { configDir } = require('../config')
+    const { configDir } = config
     const { readSidecarValue, upsertSidecarValues } = require('./config_service')
     const sidecarPath = path.resolve(configDir, 'node.local')
     const envValue = config.XCHAIN_NODE_BLOCKS_DIR
@@ -416,7 +418,7 @@ async function buildCryptoNode(coin, network) {
                 return
             }
 
-            const { dataDir } = require('../config')
+            const { dataDir } = config
             // Env-first with config/node.local fallback (see resolveBlocksDir):
             // a profile-less invocation no longer silently reverts to the
             // in-datadir layout on a relocated-blocks host. Reject (not throw)
@@ -464,7 +466,7 @@ async function buildCryptoNode(coin, network) {
             // came from exactly this: an env-less rebuild dropped the relocated
             // blocks/txindex mounts, so the daemon restarted over an empty
             // blocks store with a current chainstate.
-            const { forceRemoveContainerByName, getContainerBindMounts, stopContainerByName } = require('./docker_service')
+            const { forceRemoveContainerByName, getContainerBindMounts, stopContainerByName } = dockerService
             let existingMounts = []
             try {
                 existingMounts = await getContainerBindMounts(containerPrefix)
@@ -630,7 +632,7 @@ function assertNodeVersionPin(coin, network, localNodeVersion, pin) {
 
 async function installNode(coin, network) {
     logger.info("Creating xchain docker network...")
-    const { createDockerNetwork } = require('./docker_service')
+    const { createDockerNetwork } = dockerService
     const { getDockerNetwork } = require('./config_service')
     await createDockerNetwork(getDockerNetwork(coin, network))
 

@@ -34,6 +34,20 @@ const { assertRequiredMigrationsApplied } = require('../services/migration_preco
 const { statusChanged } = require('../services/status_service')
 const { reindexAffectedModules, recordReindex } = require('../services/bootstrap_republish_ledger')
 const config = require('../config');
+// The services the operations below reach into. Each is bound here as a module
+// object and destructured inside the function that uses it, so a call reads the
+// export as it stands at that moment, exactly as a require at the call site does.
+const bootstrapService       = require('../services/bootstrap_service')
+const databaseService        = require('../services/database_service')
+const explorerService        = require('../services/explorer_service')
+const hubService             = require('../services/hub_service')
+const installTargetService   = require('../services/install_target_service')
+const moduleService          = require('../services/module_service')
+const nodeService            = require('../services/node_service')
+const releaseManifestService = require('../services/release_manifest_service')
+const stateModule            = require('../state')
+const validatorService       = require('../services/validator_service')
+const versionService         = require('../services/version_service')
 
 // Resolve the operator's single ref slot into an install target and publish it
 // for the duration of the run, so every module clone and every bundled-library
@@ -43,8 +57,8 @@ const config = require('../config');
 async function withInstallTarget(ref, run, { fallbackToBranch = true } = {}) {
     const {
         resolveInstallTarget, setActiveTarget, clearActiveTarget
-    } = require('../services/release_manifest_service')
-    const { recordInstallTarget } = require('../services/install_target_service')
+    } = releaseManifestService
+    const { recordInstallTarget } = installTargetService
 
     const target = await resolveInstallTarget(ref, { defaultBranch: DEFAULT_MODULE_BRANCH, fallbackToBranch })
 
@@ -86,7 +100,7 @@ async function installModules(servicesList, ref = null) {
         const outcome = { installed: [], skipped: [] }
         // Per-run, so a second install in the same process reports its own
         // restores rather than replaying the first one's.
-        require('../services/bootstrap_service').resetBootstrapOutcomes()
+        bootstrapService.resetBootstrapOutcomes()
 
         try {
             for (const nextCoin in servicesList) {
@@ -115,7 +129,7 @@ async function installModules(servicesList, ref = null) {
             // In a finally because a run that throws is the one whose summary
             // matters most: it leaves some services restored and some facing
             // hours of resync, and the error alone does not say which.
-            require('../services/bootstrap_service').reportBootstrapOutcomes()
+            bootstrapService.reportBootstrapOutcomes()
         }
 
         // The explorer is installed in the shared bucket, which runs BEFORE the
@@ -148,8 +162,8 @@ async function installModules(servicesList, ref = null) {
 async function syncSharedServicesAfterInstall(outcome) {
     if (!outcome || !outcome.installed.some(i => i.coin && i.network)) return true
 
-    const { updateHub } = require('../services/hub_service')
-    const { updateExplorer, waitForExplorerReady } = require('../services/explorer_service')
+    const { updateHub } = hubService
+    const { updateExplorer, waitForExplorerReady } = explorerService
 
     try { await updateHub() }      catch (err) { console.warn('install: could not push config to the hub: ' + err) }
     try { await updateExplorer() } catch (err) { console.warn('install: could not attach the explorer to the new coin networks: ' + err) }
@@ -196,8 +210,8 @@ function allowDegradedExplorer() {
  * changed is left running rather than rebuilt.
  */
 async function updateModules(servicesList, ref = null, opts = {}) {
-    const { isReleaseRef } = require('../services/release_manifest_service')
-    const { recordInstallTarget, resolveUpdateTarget } = require('../services/install_target_service')
+    const { isReleaseRef } = releaseManifestService
+    const { recordInstallTarget, resolveUpdateTarget } = installTargetService
 
     const list = opts.all ? includeSharedServicesForUpdate(servicesList) : servicesList
     const runOpts = { skipCurrentNode: !!opts.all, quietNotInstalled: !!opts.all }
@@ -249,7 +263,7 @@ async function updateModules(servicesList, ref = null, opts = {}) {
 async function repairValidatorConfigBeforeHubUpdate(servicesList) {
     const shared = (servicesList[""] && servicesList[""][""]) || []
     if (!shared.includes(HUB_MODULE_NAME)) return false
-    const { isInitialized, initValidator } = require('../services/validator_service')
+    const { isInitialized, initValidator } = validatorService
     let initialized = false
     try { initialized = isInitialized() } catch { return false }
     if (!initialized) return false
@@ -422,7 +436,7 @@ async function updateModulesInto(outcome, servicesList, branch, { skipCurrentNod
                     // a tmp tree to find `xchainRequiresHub`, and reading that
                     // from a different ref than the one about to be installed
                     // is how a skew guard blesses a version it never saw.
-                    const { resolveComponentRef } = require('../services/release_manifest_service')
+                    const { resolveComponentRef } = releaseManifestService
                     const pin = resolveComponentRef(nextModule, moduleBranch)
                     await assertHubNotBehind(nextModule, pin.ref)
                     // Migration-precondition guard: a service whose new source asserts a
@@ -458,8 +472,8 @@ async function updateModulesInto(outcome, servicesList, branch, { skipCurrentNod
  */
 async function coinNodeIsCurrent(coin, network) {
     try {
-        const { getLastStatus, getRemoteModuleVersions } = require('../state')
-        const { checkRemoteNodeVersion } = require('../services/version_service')
+        const { getLastStatus, getRemoteModuleVersions } = stateModule
+        const { checkRemoteNodeVersion } = versionService
         const running = getLastStatus()?.[coin]?.[network]?.[NODE_MODULE_NAME]?.["container_version"]
         if (!running) return false
         if (!(NODE_MODULE_NAME + SEP + coin in getRemoteModuleVersions())) {
@@ -496,8 +510,8 @@ const RECREATE_UNSUPPORTED_MODULES = [NODE_MODULE_NAME, DB_MODULE_NAME]
  * @returns {Promise<{recreated: Array, skipped: Array}>}
  */
 async function recreateModules(servicesList) {
-    const { buildAndUp } = require('../services/module_service')
-    const { setDatabaseParameters, setHubDatabaseParameters } = require('../services/database_service')
+    const { buildAndUp } = moduleService
+    const { setDatabaseParameters, setHubDatabaseParameters } = databaseService
 
     const outcome = { recreated: [], skipped: [] }
     const failures = []
@@ -1107,7 +1121,7 @@ async function resetModules(service, coin, network, force = false, withIndexer =
     // Env-first with config/node.local fallback: a reset from a
     // profile-less shell must still see the relocated stores, or it restarts
     // the daemon over stale out-of-datadir chain data.
-    const { resolveBlocksDir } = require('../services/node_service')
+    const { resolveBlocksDir } = nodeService
     const blocksDir     = await resolveBlocksDir()
     const blocksHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}` : null
     const txindexHostPath = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null

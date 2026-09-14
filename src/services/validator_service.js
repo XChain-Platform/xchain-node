@@ -67,6 +67,8 @@
 const fs   = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+// Destructured where it is used, so each call reads the export at that moment.
+const childProcess = require('child_process')
 const { configDir } = require('../config')
 const config = require('../config')
 const { getLogger } = require('../observability/logger')
@@ -185,7 +187,7 @@ function makeCoinWallet(sdkNetwork, wif) {
 // null when there is no terminal, so a non-interactive caller gets a clear
 // error naming the env var instead of a hang.
 function promptSecret(promptText) {
-    const { execFileSync } = require('child_process')
+    const { execFileSync } = childProcess
     let fd
     try { fd = fs.openSync('/dev/tty', 'rs') } catch { return null }
     let echoOff = false

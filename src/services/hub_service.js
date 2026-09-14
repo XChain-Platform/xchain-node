@@ -139,6 +139,10 @@ const { addUserPasswordToDatabase, getExternalDbConfig } = require('./database_s
 // tolerant of a missing container, which is exactly the posture wanted here.
 const { readContainerEnv, assertNoHubDbCredentialDrift } = require('./db_credential_drift')
 const HubConnector                             = require('./hub_connector.js')
+const ExplorerConnector                        = require('./explorer_connector.js')
+// Destructured where they are used, so each call reads the export at that moment.
+const dockerService                            = require('./docker_service')
+const releaseManifestService                   = require('./release_manifest_service')
 const config = require('../config');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -155,7 +159,6 @@ async function updateHubOrExplorer(module) {
     if (module === HUB_MODULE_NAME) {
         moduleConnector = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
     } else {
-        const ExplorerConnector = require('./explorer_connector.js')
         moduleConnector = new ExplorerConnector("127.0.0.1", defaultConfig["EXPLORER_PORT"])
     }
 
@@ -239,7 +242,7 @@ async function updateHubOrExplorer(module) {
             throw "xchain-explorer module is not installed; cannot update its config"
         }
         try {
-            const { stringToDockerContainerFile } = require('./docker_service')
+            const { stringToDockerContainerFile } = dockerService
             await stringToDockerContainerFile(explorerContainerId, JSON.stringify(jsonConfig), "/XChainExplorer/src/config.json")
         } catch {
             throw "There was a problem trying to update a config in the " + module + " module"
@@ -394,7 +397,7 @@ async function installHubModule(branch = null) {
         if (hubStatus !== undefined) {
             if (hubStatus["status"]["State"]["Status"] === "exited") {
                 logger.info("The hub module container status is 'exited'. Restarting it...")
-                const { restartContainer } = require('./docker_service')
+                const { restartContainer } = dockerService
                 const restarted = await restartContainer(hubStatus["container_id"])
                 // An exited hub that will not restart cannot receive the config, so stop here.
                 if (restarted !== true) {
@@ -429,7 +432,7 @@ async function installHubModule(branch = null) {
     // action's own withInstallTarget publishes its own afterwards.
     const {
         resolveComponentRef, getActiveTarget, isReleaseRef, resolveInstallTarget, setActiveTarget, clearActiveTarget
-    } = require('./release_manifest_service')
+    } = releaseManifestService
     let ownsTarget = false
     if (!getActiveTarget() && (!branch || isReleaseRef(branch))) {
         const target = await resolveInstallTarget(branch, { defaultBranch: DEFAULT_MODULE_BRANCH })
@@ -451,7 +454,7 @@ async function installHubModule(branch = null) {
 // The clone-build-wait half of installHubModule, split out so the target
 // published above is cleared on every exit path.
 async function installHubFromResolvedRef(branch, defaultConfig, hubConnector) {
-    const { resolveComponentRef } = require('./release_manifest_service')
+    const { resolveComponentRef } = releaseManifestService
     const hubPin = resolveComponentRef(HUB_MODULE_NAME, branch)
     await cloneGit(HUB_MODULE_NAME, true, false, hubPin.ref, hubPin.commit)
 

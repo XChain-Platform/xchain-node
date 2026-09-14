@@ -38,6 +38,8 @@ const { execFile } = require('child_process')
 
 const { version: nodeVersion } = require('../../package.json')
 const TelemetryConnector = require('./telemetry_connector')
+// Destructured where it is used, so each call reads the export at that moment.
+const statusService = require('./status_service')
 const config = require('../config');
 
 const PREF_DIR_NAME  = '.xchain-node'
@@ -90,8 +92,7 @@ function getDockerVersion() {
 
 // Flatten the cached install status into the telemetry module list.
 async function gatherModules() {
-    // Lazy require avoids a circular dependency (StatusService → HubService → ...).
-    const { getStatus } = require('./status_service')
+    const { getStatus } = statusService
     let status = {}
     try {
         status = await getStatus(null, null, false) || {}

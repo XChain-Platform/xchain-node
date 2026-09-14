@@ -30,6 +30,9 @@ const { getStatusFromContainer }         = require('./docker_service')
 const { checkRemoteNodeVersion }         = require('./version_service')
 const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./version_service')
 const { redactSecrets }                  = require('../utils/helpers')
+// Destructured where they are used, so each call reads the export at that moment.
+const childProcess                       = require('child_process')
+const nodeUtil                           = require('util')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -143,8 +146,8 @@ async function loadInstalledModules(coin, network, checkVersions = false) {
 async function probeServiceHealthPayload(module, containerId, coin, network) {
     const { probeServiceStatus, MODULE_API_PORT_KEY } = require('./bootstrap_health_gate')
     const { getDefaultConfig } = require('./config_service')
-    const { execFile } = require('child_process')
-    const { promisify } = require('util')
+    const { execFile } = childProcess
+    const { promisify } = nodeUtil
     const runner = (cmd, args) => promisify(execFile)(cmd, args, { timeout: 15000 })
     const config = await getDefaultConfig(module, coin, network)
     const port = config && config[MODULE_API_PORT_KEY[module]]

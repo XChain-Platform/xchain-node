@@ -38,6 +38,11 @@ const { stopModuleContainer, stopTimeoutArgs } = require('./stop_budget_service'
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./database_service')
 const { redactSecrets, sleep } = require('../utils/helpers')
 const config = require('../config');
+// Destructured where they are used, so each call reads the export at that moment.
+const goLiveGate             = require('./go_live_gate')
+const memoryLimitService     = require('./memory_limit_service')
+const releaseManifestService = require('./release_manifest_service')
+const stateModule            = require('../state')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -432,7 +437,7 @@ async function getModuleCommit(module) {
  * @returns {Promise<{ref:string, commit:string|null, pinned:boolean, reason:string}>}
  */
 async function resolveBundledLibRef(module, lib) {
-    const { resolveComponentRef } = require('./release_manifest_service')
+    const { resolveComponentRef } = releaseManifestService
 
     const pinned = resolveComponentRef(lib, null)
     if (pinned.pinned) {
@@ -888,7 +893,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
 
     // Go-live pre-flight: warns pre-launch, refuses a mainnet write-surface
     // deploy with un-armed settings once XCHAIN_NODE_GO_LIVE=1.
-    const { assertGoLiveReady } = require('./go_live_gate')
+    const { assertGoLiveReady } = goLiveGate
     assertGoLiveReady(module, coin, network, environmentVariables, dir)
 
     // Hub consensus-shaped settings (HUB_NETWORK, ORACLE_MIN_SUBMISSIONS,
@@ -966,11 +971,11 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     // Container memory limit. Derived for the utxo-tracker from the host and
     // how many trackers share it (MemoryLimitService); explicit for any module
     // through XCHAIN_NODE_MODULE_MEMORY_MB_<SERVICE>. One-shot execution
-    // containers stay uncapped. Required late so the registry read stays on
-    // the same `db` handle the rest of this file uses.
+    // containers stay uncapped. The registry read is handed this file's own
+    // `db`, so it counts from the same handle the rest of this file uses.
     let memoryArgs = []
     if (!onlyExecution) {
-        const { memoryArgsFor, countInstalledTrackers } = require('./memory_limit_service')
+        const { memoryArgsFor, countInstalledTrackers } = memoryLimitService
         const trackerCount = await countInstalledTrackers(db, { coin, network })
         const memory = memoryArgsFor(module, { trackerCount })
         memoryArgs = memory.args
@@ -1234,7 +1239,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
     if (network === "") network = null
 
     const { getLocalNodeVersion, getLocalModuleVersion } = require('./version_service')
-    const { getRemoteModuleVersions, getLastStatus }     = require('../state')
+    const { getRemoteModuleVersions, getLastStatus }     = stateModule
     const { buildCryptoNode, getCryptoNode }             = require('./node_service')
     const { buildDatabaseModule }                        = require('./database_service')
     const { installExplorerModule }                      = require('./explorer_service')
@@ -1345,7 +1350,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
             // v0.9.0 component set, and the pinned commit is verified after the
             // clone. Outside a release install `pin.ref` is just `branch` and
             // `pin.commit` is null, so the branch behaviour below is unchanged.
-            const { resolveComponentRef } = require('./release_manifest_service')
+            const { resolveComponentRef } = releaseManifestService
             const pin = resolveComponentRef(module, branch)
             const cloneRef = pin.ref
 
@@ -1417,7 +1422,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
 }
 
 async function uninstallModule(coin, network, module) {
-    const { DB_MODULE_NAME } = require('../config')
+    const { DB_MODULE_NAME } = config
     const modulesStatus = await getStatus(null, null, false)
 
     if (module === DB_MODULE_NAME) {
