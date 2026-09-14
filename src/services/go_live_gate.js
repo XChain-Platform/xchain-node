@@ -137,12 +137,12 @@ function findFlagDayPlaceholders(moduleDir) {
 }
 
 // Collect go-live violations for one service deploy. environmentVariables is
-// the generated container env (getDefaultConfig output); host process.env is
-// consulted as the fallback for keys the config layer only passes through.
+// the generated container env (getDefaultConfig output); the host environment
+// (config.GO_LIVE_HOST_ENV) is the fallback for keys the config layer only passes through.
 function collectViolations(module, environmentVariables, moduleDir) {
     const violations = []
     const env = environmentVariables || {}
-    const hostEnv = process.env
+    const hostEnv = config.GO_LIVE_HOST_ENV
 
     const keySet = (name) => {
         const v = env[name] !== undefined ? env[name] : hostEnv[name]

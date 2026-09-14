@@ -563,7 +563,7 @@ async function getDefaultConfig(module, coin, network) {
         // Injected as a default, so a value in the <coin>-<network> config file still wins.
         const feeDestEnvName = 'XCHAIN_FEE_DESTINATION_' + CoinTickerSymbol[coin] + '_' + network.toUpperCase()
         const registryFeeDestination = getCoinConfigByFullName(coin, network).addresses.FEE_DESTINATION
-        const feeDestination = (network !== Network.MAINNET && !process.env[feeDestEnvName] && config.FEE_DESTINATION)
+        const feeDestination = (network !== Network.MAINNET && !config.FEE_DESTINATION_ENV[feeDestEnvName] && config.FEE_DESTINATION)
             ? config.FEE_DESTINATION
             : registryFeeDestination
         if (feeDestination) {
@@ -667,8 +667,8 @@ async function getDefaultConfig(module, coin, network) {
                 "GENESIS_AIRDROP_SNAPSHOT_BLOCK", "GENESIS_AIRDROP_SET_HASH"
             ]
             for (const varName of genesisPassthroughVars) {
-                if (process.env[varName] !== undefined && process.env[varName] !== "") {
-                    defaultValues[varName] = process.env[varName]
+                if (config.INDEXER_GENESIS_ENV[varName] !== undefined && config.INDEXER_GENESIS_ENV[varName] !== "") {
+                    defaultValues[varName] = config.INDEXER_GENESIS_ENV[varName]
                 }
             }
             // ROLLCALL rail env (xchain-indexer only). Two separate things, both of which a
@@ -762,8 +762,8 @@ async function getDefaultConfig(module, coin, network) {
                                                                           "HUB_PRICE_SYNC_TIMEOUT_MS",
                                                                           "XCHAIN_COINPAY_EXPIRATION_S")
             for (const varName of rollcallPassthroughVars) {
-                if (process.env[varName] !== undefined && process.env[varName] !== "") {
-                    defaultValues[varName] = process.env[varName]
+                if (config.INDEXER_ROLLCALL_ENV[varName] !== undefined && config.INDEXER_ROLLCALL_ENV[varName] !== "") {
+                    defaultValues[varName] = config.INDEXER_ROLLCALL_ENV[varName]
                 }
             }
 
@@ -852,8 +852,8 @@ async function getDefaultConfig(module, coin, network) {
                     "HUB_SYNC_MATCH_GRACE_S", "HUB_SYNC_CALL_GRACE_S", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S"
                 ]
                 for (const varName of hubSyncRegtestGraceVars) {
-                    defaultValues[varName] = (process.env[varName] !== undefined && process.env[varName] !== "")
-                        ? process.env[varName]
+                    defaultValues[varName] = (config.HUB_SYNC_GRACE_ENV[varName] !== undefined && config.HUB_SYNC_GRACE_ENV[varName] !== "")
+                        ? config.HUB_SYNC_GRACE_ENV[varName]
                         : "0"
                 }
             }
@@ -910,8 +910,8 @@ async function getDefaultConfig(module, coin, network) {
         // port to avoid colliding with the primary's 18080/18081. Container-internal
         // ports (EXPLORER_API_PORT_HTTP/HTTPS) are unchanged.
         for (const k of ["EXPLORER_PORT_HTTP", "EXPLORER_PORT_HTTPS", "EXPLORER_PORT"]) {
-            if (process.env[k] !== undefined && process.env[k] !== "") {
-                defaultValues[k] = process.env[k]
+            if (config.EXPLORER_PORT_ENV[k] !== undefined && config.EXPLORER_PORT_ENV[k] !== "") {
+                defaultValues[k] = config.EXPLORER_PORT_ENV[k]
             }
         }
 
@@ -1073,7 +1073,7 @@ async function getDefaultConfig(module, coin, network) {
                     // default that overrode it would point a working production
                     // explorer at a hostname that does not resolve.
                     const indexerVar = "INDEXER_API_URL_" + tick + "_" + net.toUpperCase()
-                    defaultValues[indexerVar] = process.env[indexerVar]
+                    defaultValues[indexerVar] = config.INDEXER_API_URL_ENV[indexerVar]
                         || "http://" + getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coinName, net) + ":3004"
                 }
             }

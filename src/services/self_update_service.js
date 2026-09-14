@@ -46,7 +46,7 @@ const { execFile, spawn } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 
-const { dataDir } = require('../config')
+const { dataDir, SELF_UPDATE_ENV, childProcessEnv } = require('../config')
 
 const CARRIER_ROOT      = path.join(__dirname, '../..')
 const TARGET_ENV        = 'XCHAIN_NODE_UPDATE_TARGET'
@@ -63,7 +63,7 @@ function versionOfTag(tag) {
     return String(tag || '').trim().replace(/^v/, '')
 }
 
-function selfUpdateDisabled(env = process.env) {
+function selfUpdateDisabled(env = SELF_UPDATE_ENV) {
     return /^(1|true|yes)$/i.test(env[NO_SELF_UPDATE_ENV] || '')
 }
 
@@ -119,7 +119,7 @@ async function describeCarrier(deps = {}) {
  * @param {object} [args.deps]       test seams
  */
 async function selfUpdateAndReexec({ tag, childArgs, deps = {} }) {
-    const env     = deps.env || process.env
+    const env     = deps.env || SELF_UPDATE_ENV
     const logger  = deps.logger || console
     const version = deps.currentVersion ? deps.currentVersion() : currentVersion()
 
@@ -184,7 +184,7 @@ async function selfUpdateAndReexec({ tag, childArgs, deps = {} }) {
     const child = spawnImpl(process.execPath, [process.argv[1], ...childArgs], {
         cwd: process.cwd(),
         stdio: 'inherit',
-        env: { ...env, [TARGET_ENV]: tag }
+        env: { ...(deps.env || childProcessEnv()), [TARGET_ENV]: tag }
     })
     const exitCode = await new Promise((resolve) => {
         child.on('exit', code => resolve(code == null ? 1 : code))
@@ -262,7 +262,7 @@ async function latestReleaseTagCached(deps = {}) {
  * @returns {Promise<string|null>} the newer tag, when there is one
  */
 async function noticeNewerRelease(deps = {}) {
-    const env    = deps.env || process.env
+    const env    = deps.env || SELF_UPDATE_ENV
     const logger = deps.logger || console
     if (env[TARGET_ENV]) return null
     try {

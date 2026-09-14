@@ -319,7 +319,7 @@ function verifyGitTagSignature({ repoDir, tag, keyPath = KEY_PATH, fingerprint =
         const run = spawnSyncImpl('git', ['-C', repoDir, 'verify-tag', '--raw', tag], {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: { ...process.env, GNUPGHOME: homeDir }
+            env: { ...config.childProcessEnv(), GNUPGHOME: homeDir }
         })
         const status = [run.stdout, run.stderr].map(part => (part ? String(part) : '')).join('\n')
         if (run.error || !/\[GNUPG:\]/.test(status)) {

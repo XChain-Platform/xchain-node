@@ -99,7 +99,7 @@ function getStateFilePath() {
 }
 
 function parsePositiveIntEnv(name, fallback) {
-    const raw = process.env[name]
+    const raw = config.AUTOHEAL_TIMING_ENV[name]
     if (!raw) return fallback
     const n = Number(raw)
     if (!Number.isFinite(n) || n < 0) return fallback

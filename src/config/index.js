@@ -72,8 +72,7 @@ const REGTEST_MODULES = [
 // Coin name/ticker maps, generated from the canonical coin registry (src/coins)
 // so xchain-node never drifts from the rest of the platform.
 const coins = require('../coins');
-const { getLogger } = require('../observability/logger');
-const logger = getLogger();
+const logger = require('../observability/logger').getLogger();
 
 // fullname-uppercase -> fullname (e.g. BITCOIN -> "bitcoin")
 const Coin = {};
@@ -451,6 +450,7 @@ module.exports = {
     get XCHAIN_NODE_STAKE_WIF() { return process.env.XCHAIN_NODE_STAKE_WIF },
     get XCHAIN_NODE_STOP_TIMEOUT_SECONDS() { return process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS },
     get XCHAIN_NODE_TELEMETRY_URL() { return process.env.XCHAIN_NODE_TELEMETRY_URL },
+    ...require('./env_views').bindEnvViews({ read: (name) => process.env[name], copy: () => ({ ...process.env }) }),
     // Below this line, one entry per environment variable this service reads.
     // They are passed straight through rather than parsed, because almost all
     // of them are composed into a container's environment and the container is

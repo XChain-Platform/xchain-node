@@ -75,7 +75,7 @@
  * already ignoring, which is the same wrong refusal in a different disguise.
  ********************************************************************/
 
-const { HUB_MODULE_NAME } = require('../config')
+const { HUB_MODULE_NAME, HUB_CONSENSUS_DRIFT_ENV } = require('../config')
 const { getDockerContainerImageName } = require('./config_service')
 const { readContainerEnv } = require('./db_credential_drift')
 const { getLogger } = require('../observability/logger');
@@ -302,7 +302,7 @@ function logConsensusEnvSupplyState(intended, network) {
  * @returns {Promise<Array<{key: string}>>} the drift rows (empty when clean, or when overridden)
  */
 async function assertNoHubConsensusEnvDrift(environmentVariables, deps = {}) {
-    const env = deps.env || process.env
+    const env = deps.env || HUB_CONSENSUS_DRIFT_ENV
 
     const containerName = deps.containerName || getDockerContainerImageName(HUB_MODULE_NAME, null, null)
     const liveEnv = await readContainerEnv(containerName, deps)

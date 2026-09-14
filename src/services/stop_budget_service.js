@@ -29,6 +29,7 @@
  *
  ********************************************************************/
 
+const { MODULE_STOP_TIMEOUT_ENV } = require('../config')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 const DEFAULT_MODULE_STOP_TIMEOUT_SECONDS = 30
@@ -51,7 +52,7 @@ function moduleStopTimeoutEnvName(module) {
 // a chainstate flush, not a drain; it is answered here so `stop node` and
 // `stop all` read one function. A value that is not a whole number of seconds
 // is ignored with a warning rather than silently becoming ten seconds.
-function moduleStopTimeoutSeconds(module, env = process.env) {
+function moduleStopTimeoutSeconds(module, env = MODULE_STOP_TIMEOUT_ENV) {
     if (module === 'node') return require('./node_service').nodeStopTimeoutSeconds()
     const key = moduleStopTimeoutEnvName(module)
     const raw = env[key]
@@ -66,7 +67,7 @@ function moduleStopTimeoutSeconds(module, env = process.env) {
 }
 
 // `docker run` args that make the container's own stop honour the budget.
-function stopTimeoutArgs(module, env = process.env) {
+function stopTimeoutArgs(module, env = MODULE_STOP_TIMEOUT_ENV) {
     return ['--stop-timeout', String(moduleStopTimeoutSeconds(module, env))]
 }
 
@@ -88,7 +89,7 @@ function describeModuleStopOutcome(module, coin, network, outcome, budgetSeconds
 // the budget, say what happened, return the outcome so the caller can decide
 // whether a kill matters to it. `stopContainerByName` accepts an id as well
 // as a name (docker echoes back whatever it was given).
-async function stopModuleContainer(stopContainerByName, module, coin, network, containerRef, env = process.env) {
+async function stopModuleContainer(stopContainerByName, module, coin, network, containerRef, env = MODULE_STOP_TIMEOUT_ENV) {
     const budget = moduleStopTimeoutSeconds(module, env)
     const outcome = await stopContainerByName(containerRef, budget)
     const line = describeModuleStopOutcome(module, coin, network, outcome, budget)

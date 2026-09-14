@@ -1412,7 +1412,7 @@ async function buildDatabaseModule(coin, network) {
             XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT: 'innodb-flush-log-at-trx-commit' // e.g. 2 (faster, less durable)
         }
         for (const [envVar, mysqldFlag] of Object.entries(dbTuningArgs)) {
-            const value = process.env[envVar]
+            const value = config.DB_TUNING_ENV[envVar]
             if (value) runArgs.push(`--${mysqldFlag}=${value}`)
         }
         // max_connections is the exception to "unset = image default": the image's 151
@@ -1471,7 +1471,7 @@ async function buildDatabaseModule(coin, network) {
 
         logger.info("Creating container of module " + DB_MODULE_NAME)
         const { stdout } = await execFileAsync('docker', runArgs, {
-            env: { ...process.env, MYSQL_ROOT_PASSWORD: mariadbRootPassword }
+            env: { ...config.childProcessEnv(), MYSQL_ROOT_PASSWORD: mariadbRootPassword }
         })
         const containerId = stdout.trim()
         if (/^[a-f0-9]{64}$/.test(containerId)) {

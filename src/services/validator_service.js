@@ -220,7 +220,7 @@ function promptSecret(promptText) {
 // neither is available, because silently generating instead would strand the
 // coin the operator already funded at their own address.
 function resolveImportedWif(label, envName, wantImport) {
-    const fromEnv = process.env[envName]
+    const fromEnv = config.IMPORTED_WIF_ENV[envName]
     if (fromEnv) return fromEnv
     if (!wantImport) return null
     const typed = promptSecret('WIF for the ' + label + ' wallet (input hidden): ')

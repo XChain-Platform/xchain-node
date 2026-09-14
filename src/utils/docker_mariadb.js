@@ -24,6 +24,8 @@
  * (owner/root-readable), never in any argv.
  ********************************************************************/
 
+const { childProcessEnv } = require('../config')
+
 function dockerMariadbArgs(containerId, mariadbArgs, { interactive = false } = {}) {
     const args = ['exec']
     if (interactive) args.push('-i')
@@ -32,7 +34,7 @@ function dockerMariadbArgs(containerId, mariadbArgs, { interactive = false } = {
 }
 
 function mariadbEnv(password) {
-    return { ...process.env, MYSQL_PWD: password }
+    return { ...childProcessEnv(), MYSQL_PWD: password }
 }
 
 module.exports = {

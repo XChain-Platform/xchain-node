@@ -31,7 +31,7 @@
 const fs   = require('fs')
 const path = require('path')
 
-const { HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService } = require('../config')
+const { HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SKEW_GUARD_ENV } = require('../config')
 const { db }                                        = require('../state')
 const { getModuleTmpDir }                           = require('./config_service')
 const { getContainerModuleVersion }                 = require('./version_service')
@@ -49,7 +49,7 @@ const HUB_DEPENDENT_MODULES = [
 const SKIP_ENV = 'XCHAIN_NODE_SKIP_SKEW_GUARD'
 
 function skewGuardSkipped() {
-    const v = process.env[SKIP_ENV]
+    const v = SKEW_GUARD_ENV[SKIP_ENV]
     return v === '1' || v === 'true' || v === 'yes'
 }
 

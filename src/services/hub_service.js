@@ -116,7 +116,7 @@ function buildCheckpointConfig(defaultConfigCoinNetwork) {
 // hand-edit. Tolerant by design: no explorer container, or an unreadable one, is
 // simply "not opted in".
 async function isCheckpointSelfSyncEnabled(deps = {}) {
-    const env = deps.env || process.env
+    const env = deps.env || config.CHECKPOINT_SELF_SYNC_ENV
     // An opt-in exported in the invoking shell counts on its own, before any container is read.
     if (env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && env.EXPLORER_CHECKPOINT_SELF_SYNC !== "") return true
 

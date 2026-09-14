@@ -34,7 +34,7 @@ const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 
-const { XChainService, HUB_MODULE_NAME } = require('../config')
+const { XChainService, HUB_MODULE_NAME, DB_CREDENTIAL_DRIFT_ENV } = require('../config')
 const { getDockerContainerImageName } = require('./config_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -204,7 +204,7 @@ async function listRunningContainerNames(deps = {}) {
  * @returns {Promise<Array>} the drift rows (empty when clean, or when overridden)
  */
 async function assertNoHubDbCredentialDrift(intended, deps = {}) {
-    const env = deps.env || process.env
+    const env = deps.env || DB_CREDENTIAL_DRIFT_ENV
     // Sweeps the whole daemon instead of deriving names: the hub has no coin/network
     // to derive from, and a co-located install runs its own under another NODE_PREFIX.
     const exclude = new Set(Array.isArray(deps.excludeContainers) ? deps.excludeContainers : [])
@@ -272,7 +272,7 @@ async function readContainerEnv(name, deps = {}) {
  * @returns {Promise<Array>} the drift rows (empty when clean, or when overridden)
  */
 async function assertNoDbCredentialDrift(coin, network, intended, deps = {}) {
-    const env = deps.env || process.env
+    const env = deps.env || DB_CREDENTIAL_DRIFT_ENV
     // Skip the container a caller is about to replace from THIS install's config:
     // its frozen password is about to stop existing, so counting it would refuse
     // the very rebuild that clears the drift (uuid:cb0bd3be).

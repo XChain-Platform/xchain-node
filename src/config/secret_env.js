@@ -51,6 +51,8 @@
  *
  ********************************************************************/
 
+const { HUB_PASSTHROUGH_ENV } = require('./index')
+
 // Legacy name -> redaction-safe name. Explicit rather than derived from a
 // suffix rule: `SIGNING_PRIVKEY_HEX` has no `_PASS` tail to rewrite, and a
 // derivation clever enough to cover it would be harder to audit than the table.
@@ -139,11 +141,11 @@ function foldSecretEnvAliases(config) {
  * escape from the filter-invisible naming.
  *
  * @param {string} name          canonical (legacy) variable name
- * @param {object} [env=process.env]
+ * @param {object} [env=HUB_PASSTHROUGH_ENV] the host environment, as the config home's view of it
  * @returns {string|undefined}
  * @throws {Error} when both names are set to different values
  */
-function readSecretHostEnv(name, env = process.env) {
+function readSecretHostEnv(name, env = HUB_PASSTHROUGH_ENV) {
     const alias = SECRET_ENV_ALIASES[name]
     if (!alias) return env[name]
     const aliasValue  = env[alias]

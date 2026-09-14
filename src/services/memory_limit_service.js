@@ -38,7 +38,7 @@
  ********************************************************************/
 
 const os = require('os')
-const { XChainService } = require('../config')
+const { XChainService, MODULE_MEMORY_ENV } = require('../config')
 
 const MIB = 1024 * 1024
 
@@ -64,7 +64,7 @@ function moduleEnvKey(module) {
 
 // The operator's explicit limit for a module in MB: null when unset or
 // unparseable (logged by the caller as ignored), 0 when explicitly disabled.
-function envMemoryMb(module, env = process.env) {
+function envMemoryMb(module, env = MODULE_MEMORY_ENV) {
     const raw = env[moduleEnvKey(module)]
     if (raw === undefined || raw === '') return null
     if (!/^\d+$/.test(String(raw).trim())) return null
@@ -88,7 +88,7 @@ function dockerMemoryArgs(mb) {
 //   { args, source: 'env' | 'derived' | 'none', mb, note }
 // `note` is a line worth printing at create time (a cap, an ignored value, or a
 // host too small for its trackers); null when there is nothing to say.
-function memoryArgsFor(module, { hostBytes = os.totalmem(), trackerCount = 1, env = process.env } = {}) {
+function memoryArgsFor(module, { hostBytes = os.totalmem(), trackerCount = 1, env = MODULE_MEMORY_ENV } = {}) {
     const key = moduleEnvKey(module)
     const raw = env[key]
     const explicit = envMemoryMb(module, env)

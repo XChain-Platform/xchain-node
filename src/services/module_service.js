@@ -631,7 +631,7 @@ const SERVICE_HEALTHCHECK = {
 function resolveStartPeriod(module, fallback) {
     const key = 'XCHAIN_NODE_HEALTH_START_PERIOD_'
         + String(module).toUpperCase().replace(/[^A-Z0-9]+/g, '_')
-    const raw = process.env[key]
+    const raw = config.HEALTH_START_PERIOD_ENV[key]
     if (!raw) return fallback
     const value = raw.trim()
     if (/^\d+(ms|s|m|h)$/.test(value)) return value
@@ -659,7 +659,7 @@ function resolveStartPeriod(module, fallback) {
 // bare `--env NAME` path as every other key, so none of them reach argv.
 const OBSERVABILITY_ENV_KEYS = ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH']
 
-function resolveObservabilityEnv(environmentVariables, hostEnv = process.env) {
+function resolveObservabilityEnv(environmentVariables, hostEnv = config.OBSERVABILITY_ENV) {
     const overlay = {}
     for (const key of OBSERVABILITY_ENV_KEYS) {
         if (environmentVariables && key in environmentVariables) continue
@@ -1057,7 +1057,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         // The observability names resolved above join the map here so they travel
         // the same value-out-of-argv path.
         const envArgs = []
-        const dockerEnv = { ...process.env }
+        const dockerEnv = config.childProcessEnv()
         const containerEnv = { ...environmentVariables, ...resolveObservabilityEnv(environmentVariables) }
         for (const key in containerEnv) {
             envArgs.push('--env', key)
@@ -1208,7 +1208,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         buildKitProbe.then(() => {
             logger.info("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
                 + (sourceLabels.commit ? " from " + sourceLabels.commit.slice(0, 12) + " (" + (sourceLabels.ref || 'detached') + ")" : ""))
-            const buildEnv = { ...process.env, DOCKER_BUILDKIT: '1' }
+            const buildEnv = { ...config.childProcessEnv(), DOCKER_BUILDKIT: '1' }
             execFile('docker', ['build', ...buildLabelArgs, '.', '-t', containerPrefix], { cwd: dir, env: buildEnv }, (error) => {
                 if (error) {
                     reject("Error creating Docker image: " + redactSecrets(error.message))

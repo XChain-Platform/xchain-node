@@ -617,7 +617,7 @@ async function buildCryptoNode(coin, network) {
 // installed daemon matches the DEPLOYED fleet image instead of drifting to the
 // latest upstream release. Returns null when no pin is set.
 function resolveNodeVersionPin(coin) {
-    const pin = process.env['XCHAIN_NODE_NODE_VERSION_' + String(coin).toUpperCase()]
+    const pin = config.NODE_VERSION_PIN_ENV['XCHAIN_NODE_NODE_VERSION_' + String(coin).toUpperCase()]
     return pin && pin.trim() !== '' ? pin.trim() : null
 }
 
