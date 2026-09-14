@@ -94,6 +94,9 @@ describe('identify-deployed-ref (deploy-informing script)', function () {
             assert.notStrictEqual(idr.blobId(bytes), idr.blobId(Buffer.from('hello')));
         });
     });
+});
+
+describe('identify-deployed-ref (deploy-informing script)', function () {
 
     describe('tree hash', function () {
 
@@ -112,6 +115,9 @@ describe('identify-deployed-ref (deploy-informing script)', function () {
             assert.notStrictEqual(idr.treeHashOf(['aa f1']), idr.treeHashOf(['ab f1']));
         });
     });
+});
+
+describe('identify-deployed-ref (deploy-informing script)', function () {
 
     describe('git ls-tree parsing', function () {
 
@@ -134,6 +140,9 @@ describe('identify-deployed-ref (deploy-informing script)', function () {
             assert.deepStrictEqual(idr.parseTreeListing('\n\n'), []);
         });
     });
+});
+
+describe('identify-deployed-ref (deploy-informing script)', function () {
 
     describe('probe and match agree on a real repository', function () {
 
@@ -179,6 +188,9 @@ describe('identify-deployed-ref (deploy-informing script)', function () {
             fs.rmSync(dir, { recursive: true, force: true });
         });
     });
+});
+
+describe('identify-deployed-ref (deploy-informing script)', function () {
 
     describe('matching a hash against the history walk', function () {
 
@@ -208,6 +220,9 @@ describe('identify-deployed-ref (deploy-informing script)', function () {
             assert.strictEqual(found.size, 0);
         });
     });
+});
+
+describe('identify-deployed-ref (deploy-informing script)', function () {
 
     describe('the report', function () {
 
@@ -244,6 +259,9 @@ describe('identify-deployed-ref (deploy-informing script)', function () {
             assert.strictEqual(text, 'ROOT=/app\nVERSION=1.2.3\nFILES=7\nTREEHASH=' + HASH_A);
         });
     });
+});
+
+describe('identify-deployed-ref (deploy-informing script)', function () {
 
     describe('argument parsing', function () {
 
@@ -288,6 +306,9 @@ describe('identify-deployed-ref (deploy-informing script)', function () {
             assert.strictEqual(r.wanted.get(HASH_B), 'b');
         });
     });
+});
+
+describe('identify-deployed-ref (deploy-informing script)', function () {
 
     describe('the entrypoint guard', function () {
 
