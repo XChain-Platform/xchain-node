@@ -20,33 +20,36 @@ const { expect } = require('chai')
 const { maybeSelfUpdateBeforeUpdate } = require('../../src/cli')
 const { TARGET_ENV, NO_SELF_UPDATE_ENV, explicitUpdateArgs } = require('../../src/services/self_update_service')
 
+let deps, selfUpdate
+
+function setupSelfUpdateTest() {
+    delete process.env[TARGET_ENV]
+    delete process.env[NO_SELF_UPDATE_ENV]
+    selfUpdate = {
+        TARGET_ENV,
+        selfUpdateDisabled: () => /^(1|true|yes)$/i.test(process.env[NO_SELF_UPDATE_ENV] || ''),
+        explicitUpdateArgs,
+        selfUpdateAndReexec: sinon.stub().resolves({ moved: false, reason: 'current' })
+    }
+    deps = {
+        manifest: {
+            isReleaseRef: ref => /^v\d+\.\d+\.\d+$/.test(String(ref || '')),
+            resolveLatestReleaseTag: sinon.stub().resolves('v0.15.2')
+        },
+        installTarget: { resolveUpdateTarget: sinon.stub().resolves({ kind: 'release', ref: null, inferred: false }) },
+        selfUpdate,
+        acquireCommandLock: sinon.stub().returns(sinon.stub())
+    }
+}
+
+function teardownSelfUpdateTest() {
+    delete process.env[TARGET_ENV]
+    delete process.env[NO_SELF_UPDATE_ENV]
+}
+
 describe('cli maybeSelfUpdateBeforeUpdate()', function () {
-    let deps, selfUpdate
-
-    beforeEach(function () {
-        delete process.env[TARGET_ENV]
-        delete process.env[NO_SELF_UPDATE_ENV]
-        selfUpdate = {
-            TARGET_ENV,
-            selfUpdateDisabled: () => /^(1|true|yes)$/i.test(process.env[NO_SELF_UPDATE_ENV] || ''),
-            explicitUpdateArgs,
-            selfUpdateAndReexec: sinon.stub().resolves({ moved: false, reason: 'current' })
-        }
-        deps = {
-            manifest: {
-                isReleaseRef: ref => /^v\d+\.\d+\.\d+$/.test(String(ref || '')),
-                resolveLatestReleaseTag: sinon.stub().resolves('v0.15.2')
-            },
-            installTarget: { resolveUpdateTarget: sinon.stub().resolves({ kind: 'release', ref: null, inferred: false }) },
-            selfUpdate,
-            acquireCommandLock: sinon.stub().returns(sinon.stub())
-        }
-    })
-
-    afterEach(function () {
-        delete process.env[TARGET_ENV]
-        delete process.env[NO_SELF_UPDATE_ENV]
-    })
+    beforeEach(setupSelfUpdateTest)
+    afterEach(teardownSelfUpdateTest)
 
     it('targets the latest release for a no-ref update on a release node', async function () {
         await maybeSelfUpdateBeforeUpdate(['all'], deps)
@@ -81,6 +84,11 @@ describe('cli maybeSelfUpdateBeforeUpdate()', function () {
         expect(out.reason).to.equal('branch-node')
         expect(deps.manifest.resolveLatestReleaseTag.called).to.equal(false)
     })
+})
+
+describe('cli maybeSelfUpdateBeforeUpdate()', function () {
+    beforeEach(setupSelfUpdateTest)
+    afterEach(teardownSelfUpdateTest)
 
     it('does nothing inside the re-executed child', async function () {
         process.env[TARGET_ENV] = 'v0.15.2'
