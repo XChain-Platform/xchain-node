@@ -16,6 +16,24 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const { Coin, Network, XChainService } = require('../../src/config')
 
+let execFileStub
+
+function loadHelpers(execFileImpl) {
+    execFileStub = execFileImpl || sinon.stub()
+    return proxyquire('../../src/utils/helpers', {
+        'child_process': { execFile: execFileStub }
+    })
+}
+
+/** Answers the member-listing call, then delegates the extract call */
+function listThenExtract(listing, extractImpl) {
+    return function (cmd, args, opts, cb) {
+        if (typeof opts === 'function') { cb = opts; opts = {} }
+        if (args[0] === '-tzf') return cb(null, listing)
+        extractImpl(cmd, args, opts, cb)
+    }
+}
+
 describe('utils/helpers', function () {
 
     // stringToCoin
@@ -46,6 +64,9 @@ describe('utils/helpers', function () {
             expect(stringToCoin(null)).to.be.null
         })
     })
+})
+
+describe('utils/helpers', function () {
 
     // stringToXChainService
     describe('stringToXChainService()', function () {
@@ -83,6 +104,9 @@ describe('utils/helpers', function () {
             expect(stringToXChainService('')).to.be.null
         })
     })
+})
+
+describe('utils/helpers', function () {
 
     // stringToNetwork
     describe('stringToNetwork()', function () {
@@ -118,6 +142,9 @@ describe('utils/helpers', function () {
             expect(result.network).to.be.null
         })
     })
+})
+
+describe('utils/helpers', function () {
 
     // sleep
     describe('sleep()', function () {
@@ -144,27 +171,12 @@ describe('utils/helpers', function () {
             }
         })
     })
+})
+
+describe('utils/helpers', function () {
 
     // decompressTarGz
     describe('decompressTarGz()', function () {
-        let execFileStub
-
-        function loadHelpers(execFileImpl) {
-            execFileStub = execFileImpl || sinon.stub()
-            return proxyquire('../../src/utils/helpers', {
-                'child_process': { execFile: execFileStub }
-            })
-        }
-
-        /** Answers the member-listing call, then delegates the extract call */
-        function listThenExtract(listing, extractImpl) {
-            return function (cmd, args, opts, cb) {
-                if (typeof opts === 'function') { cb = opts; opts = {} }
-                if (args[0] === '-tzf') return cb(null, listing)
-                extractImpl(cmd, args, opts, cb)
-            }
-        }
-
         it('lists members first, then runs tar -xvzf with the file path', function (done) {
             const helpers = loadHelpers(listThenExtract('a/b.txt\n', function (cmd, args, opts, cb) {
                 expect(cmd).to.equal('tar')
@@ -189,6 +201,11 @@ describe('utils/helpers', function () {
             const result = await helpers.decompressTarGz('/tmp/archive.tar.gz')
             expect(result).to.be.true
         })
+    })
+})
+
+describe('utils/helpers', function () {
+    describe('decompressTarGz()', function () {
 
         it('rejects with descriptive message on extraction error', async function () {
             const helpers = loadHelpers(listThenExtract('a/b.txt\n', function (cmd, args, opts, cb) {
@@ -233,6 +250,9 @@ describe('utils/helpers', function () {
             expect(extracted).to.be.false
         })
     })
+})
+
+describe('utils/helpers', function () {
 
     // assertSafeArchiveMemberNames
     describe('assertSafeArchiveMemberNames()', function () {
@@ -271,6 +291,9 @@ describe('utils/helpers', function () {
                 .to.throw(/unsafe member path/)
         })
     })
+})
+
+describe('utils/helpers', function () {
 
     describe('redactSecrets()', function () {
         const { redactSecrets } = require('../../src/utils/helpers')
@@ -299,6 +322,13 @@ describe('utils/helpers', function () {
             expect(out).to.not.include('leak-me')
             expect(out).to.include("PASSWORD('<redacted>')")
         })
+    })
+})
+
+describe('utils/helpers', function () {
+
+    describe('redactSecrets()', function () {
+        const { redactSecrets } = require('../../src/utils/helpers')
 
         it('masks the per-install service secrets in a failed docker-run argv', function () {
             const out = redactSecrets(
