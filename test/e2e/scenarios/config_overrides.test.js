@@ -15,23 +15,25 @@ const { expect } = require('chai')
 const E2EEnv = require('../helpers/e2e-env')
 const { filterCommandParameters } = require('../../../src/services/config_service')
 
+let env, cli
+
+async function setupEnv() {
+    env = new E2EEnv()
+    await env.setup()
+    env.setupDefaultRoutes()
+
+    const state = require('../../../src/state')
+    state.setDbRootPassword('testrootpw')
+}
+
+async function teardownEnv() {
+    await env.teardown()
+}
+
 describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
     this.timeout(30000)
-
-    let env, cli
-
-    beforeEach(async function () {
-        env = new E2EEnv()
-        await env.setup()
-        env.setupDefaultRoutes()
-
-        const state = require('../../../src/state')
-        state.setDbRootPassword('testrootpw')
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
 
     // E2E-020: Default config produces correct env vars
     describe('E2E-020: Default config env vars', function () {
@@ -74,7 +76,12 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             expect(runCmd).to.include('NODE_PORT=18332')
         })
     })
+})
 
+describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-021: Config file overrides flow through to docker run
     describe('E2E-021: Config file overrides', function () {
 
@@ -103,7 +110,14 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             expect(runCmd).to.include('DECODER_API_PORT=4002')
             expect(runCmd).to.include('-p 4002:4002')
         })
+    })
+})
 
+describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
+    describe('E2E-021: Config file overrides', function () {
         it('config file values take precedence over defaults', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             env.writeConfigFile('bitcoin-regtest', 'NODE_USER=customuser\nNODE_PASSWORD=custompass\n')
@@ -132,7 +146,12 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             expect(runCmd).to.include('NODE_PASSWORD=rpc')
         })
     })
+})
 
+describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-022: Regtest-specific config
     describe('E2E-022: Regtest-specific config values', function () {
 
@@ -160,7 +179,12 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             expect(runCmd).to.not.include('REGTEST_MINER_URL')
         })
     })
+})
 
+describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-023: Database naming convention
     describe('E2E-023: Database naming follows convention', function () {
 
@@ -187,7 +211,14 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             const runCmd = env.capture.findCommands(/docker run/).find(c => c.command.includes('xchain-indexer')).command
             expect(runCmd).to.include('INDEXER_DB_NAME=XChain_DOGE_Testnet_Indexer')
         })
+    })
+})
 
+describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
+    describe('E2E-023: Database naming follows convention', function () {
         it('decoder litecoin/regtest → XChain_LTC_Regtest_Decoder', async function () {
             env.setupFullStack('litecoin', 'regtest')
             env.writeConfigFile('litecoin-regtest', '')
