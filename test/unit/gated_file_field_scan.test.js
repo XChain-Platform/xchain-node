@@ -77,6 +77,9 @@ describe('nine-field FILE scan (pre-window gate)', function () {
             assert.ok(scan.inspectCommand('  file|' + eight.concat(['5']).join('|') + '  '));
         });
     });
+});
+
+describe('nine-field FILE scan (pre-window gate)', function () {
 
     describe('BATCH unwrapping', function () {
 
@@ -105,6 +108,9 @@ describe('nine-field FILE scan (pre-window gate)', function () {
             assert.strictEqual(scan.scanRows([{ data: batch }]).hits.length, 0);
         });
     });
+});
+
+describe('nine-field FILE scan (pre-window gate)', function () {
 
     describe('scanning rows', function () {
 
@@ -132,6 +138,9 @@ describe('nine-field FILE scan (pre-window gate)', function () {
             assert.deepStrictEqual(scan.scanRows(null), { scanned: 0, hits: [] });
         });
     });
+});
+
+describe('nine-field FILE scan (pre-window gate)', function () {
 
     describe('the query reads the RAW payload, which is the whole point', function () {
 
@@ -158,6 +167,9 @@ describe('nine-field FILE scan (pre-window gate)', function () {
             assert.match(sql, /ORDER BY t\.tx_index ASC/);
         });
     });
+});
+
+describe('nine-field FILE scan (pre-window gate)', function () {
 
     describe('the gate report', function () {
 
