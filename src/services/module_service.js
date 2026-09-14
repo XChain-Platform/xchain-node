@@ -19,7 +19,6 @@ const { execFile } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 const fs        = require('fs')
-
 const path = require('path')
 const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
@@ -50,6 +49,7 @@ const nodeService            = require('./node_service')
 const databaseService        = require('./database_service')
 const dbCredentialDrift      = require('./db_credential_drift')
 const bootstrapService       = require('./bootstrap_service')
+const peers                  = require('./peer_services').bindPeerServices(require)
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -1249,7 +1249,7 @@ async function installModule(module, coin, network, remoteUpdate = false, overwr
     const { getRemoteModuleVersions, getLastStatus }     = stateModule
     const { buildCryptoNode, getCryptoNode }             = nodeService
     const { buildDatabaseModule }                        = databaseService
-    const { installExplorerModule }                      = require('./explorer_service')
+    const { installExplorerModule }                      = peers.explorerService
     const { checkRemoteNodeVersion }                     = versionService
 
     if (module === NODE_MODULE_NAME) {

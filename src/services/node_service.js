@@ -24,7 +24,7 @@ const semver    = require('semver')
 
 const {
     NODE_MODULE_NAME, NODE_VERSION_FILE_NAME, SEP,
-    Coin, Network, XChainService
+    Coin, Network, XChainService, cryptoNodesDir
 } = require('../config')
 const nodeVersion = process.versions.node
 
@@ -70,7 +70,6 @@ function describeNodeStopOutcome(coin, network, outcome, budgetSeconds) {
 
 const { gitHubDownloader, db, getRemoteModuleVersions } = require('../state')
 const { decompressTarGz }               = require('../utils/helpers')
-const { cryptoNodesDir }                = require('../config')
 
 // The repo's own crypto_nodes tree, which ships each coin's Dockerfile and conf
 // templates in git. Deliberately NOT a constant sourced from config/constants and
@@ -88,6 +87,7 @@ const dockerService = require('./docker_service')
 const configService = require('./config_service')
 const databaseService = require('./database_service')
 const versionService = require('./version_service')
+const peers = require('./peer_services').bindPeerServices(require)
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -406,9 +406,9 @@ async function buildCryptoNode(coin, network) {
     // each running this coin/network node would both bind the node RPC host
     // port; without this, `docker run` fails with a cryptic "port is already
     // allocated". Runs before the build so a conflict fails fast (no wasted
-    // image build). Lazy require avoids a load-time cycle with ModuleService.
+    // image build). ModuleService requires this file at load, so it is read through peers.
     if (defaultExposedPort && defaultNodePort) {
-        const { assertNoHostPortConflicts } = require('./module_service')
+        const { assertNoHostPortConflicts } = peers.moduleService
         await assertNoHostPortConflicts(['-p', `${defaultExposedPort}:${defaultNodePort}`], containerPrefix)
     }
 
@@ -671,7 +671,7 @@ async function installNode(coin, network) {
     }
     await buildCryptoNode(coin, network)
 
-    const { cloneGit, buildAndUp } = require('./module_service')
+    const { cloneGit, buildAndUp } = peers.moduleService
 
     logger.info("Downloading xchain-encoder...")
     await cloneGit(XChainService.XCHAIN_ENCODER, true)

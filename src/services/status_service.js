@@ -27,13 +27,13 @@ const {
     getLastPrintedStatus, setLastPrintedStatus, appendLastPrintedStatus
 } = require('../state')
 const { getStatusFromContainer }         = require('./docker_service')
-const { checkRemoteNodeVersion }         = require('./version_service')
-const { getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./version_service')
+const { checkRemoteNodeVersion, getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion } = require('./version_service')
 const { redactSecrets }                  = require('../utils/helpers')
 // Destructured where they are used, so each call reads the export at that moment.
 const childProcess                       = require('child_process')
 const nodeUtil                           = require('util')
 const configService                      = require('./config_service')
+const peers                              = require('./peer_services').bindPeerServices(require)
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -95,8 +95,8 @@ function isContainerGoneError(err) {
 // keeps failing loudly, but only the step that actually failed is lost.
 async function statusChanged() {
     setStatusUpdated(false)
-    const { updateHub }      = require('./hub_service')
-    const { updateExplorer } = require('./explorer_service')
+    const { updateHub }      = peers.hubService
+    const { updateExplorer } = peers.explorerService
 
     let firstErr = null
     try { await updateHub() }      catch (err) { firstErr = err }
@@ -140,12 +140,12 @@ async function loadInstalledModules(coin, network, checkVersions = false) {
 }
 
 // The decoder's `health` JSON-RPC answer, reduced to its REORG_HALT fields, or
-// null when the surface is unreadable. Required late: BootstrapHealthGate pulls
+// null when the surface is unreadable. Read through peers: BootstrapHealthGate pulls
 // in DatabaseService, and StatusService is itself required from the operations
 // layer that DatabaseService reaches back into. The 15s ceiling keeps a wedged
 // container from holding `ps` hostage.
 async function probeServiceHealthPayload(module, containerId, coin, network) {
-    const { probeServiceStatus, MODULE_API_PORT_KEY } = require('./bootstrap_health_gate')
+    const { probeServiceStatus, MODULE_API_PORT_KEY } = peers.bootstrapHealthGate
     const { getDefaultConfig } = configService
     const { execFile } = childProcess
     const { promisify } = nodeUtil
@@ -336,7 +336,7 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
 
                             let branch = "-"
                             if (nextModule !== NODE_MODULE_NAME) {
-                                const { getModuleBranch } = require('./module_service')
+                                const { getModuleBranch } = peers.moduleService
                                 try { branch = await getModuleBranch(nextModule) } catch { /* not available */ }
                             }
 

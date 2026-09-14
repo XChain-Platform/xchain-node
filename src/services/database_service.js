@@ -47,8 +47,9 @@ const { getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, 
 const { assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError } = require('./db_credential_drift')
 const { statusChanged }           = require('./status_service')
 const config = require('../config');
-// Destructured where it is used, so each call reads the export at that moment.
+// Destructured where they are used, so each call reads the export at that moment.
 const statusService = require('./status_service')
+const peers = require('./peer_services').bindPeerServices(require)
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 const {
@@ -994,7 +995,6 @@ async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DEC
     }
 }
 
-
 // Clear the hub's price ingest fence row for one source chain ON ONE NETWORK.
 //
 // `price_ingest_watermarks` holds, per (network, source chain), the highest
@@ -1466,7 +1466,7 @@ async function buildDatabaseModule(coin, network) {
             await forceRemoveContainerByName(containerPrefix)
         } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
 
-        const { assertNoHostPortConflicts } = require('./module_service')
+        const { assertNoHostPortConflicts } = peers.moduleService
         await assertNoHostPortConflicts(['-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`], containerPrefix)
 
         logger.info("Creating container of module " + DB_MODULE_NAME)

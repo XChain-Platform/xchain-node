@@ -26,6 +26,8 @@ const { gitHubDownloader, getRemoteModuleVersions, setRemoteModuleVersion } = re
 const { githubApiHeaders, githubRateLimitError }                             = require('../utils/github_api')
 const { getModuleDir, getModuleTmpDir, getCryptoNodeDir }                   = require('./config_service')
 const { getDockerContainerFileData, getDockerContainerFileCat }              = require('./docker_service')
+// Services on the far side of the require cycle, resolved when first used.
+const peers = require('./peer_services').bindPeerServices(require)
 
 /**
  * Reads one file out of a container, exec-first.
@@ -104,7 +106,7 @@ async function checkRemoteNodeVersion(coin) {
 }
 
 async function getRemoteModuleVersion(module) {
-    const { cloneGit } = require('./module_service')
+    const { cloneGit } = peers.moduleService
     await cloneGit(module, false, true)
     const packageJsonFilePath = getModuleTmpDir(module) + "/package.json"
 

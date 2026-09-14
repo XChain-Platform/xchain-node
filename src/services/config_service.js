@@ -28,14 +28,13 @@ const {
     EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT
 } = require('../config')
 const { stringToCoin } = require('../utils/helpers')
-const {
-    preferredSecretEnvName, foldSecretEnvAliases, readSecretHostEnv, deprecatedSecretEnvNames
-} = require('../config/secret_env')
+const { preferredSecretEnvName, foldSecretEnvAliases, readSecretHostEnv, deprecatedSecretEnvNames } = require('../config/secret_env')
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
 // Destructured where they are used, so each call reads the export at that moment.
 const releaseManifestService = require('./release_manifest_service')
 const stateModule            = require('../state')
+const peers                  = require('./peer_services').bindPeerServices(require)
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -258,11 +257,11 @@ function warnDeprecatedSecretNames(config, filePath) {
 // runs, so a generated password would never reach the DB and would desync the sidecar from a
 // DB still on the old password (the 2026-06-26 indexer outage). Returns false on any error
 // (e.g. docker absent), the safe direction: prefer the static default over a password we
-// cannot apply. Lazy require avoids a load-time cycle with DatabaseService.
+// cannot apply. DatabaseService requires this file at load, so it is read through peers.
 async function dbPasswordCanRotate() {
     if (EXTERNAL_DB) return true
     try {
-        const { getDatabaseContainerId } = require('./database_service')
+        const { getDatabaseContainerId } = peers.databaseService
         return !!(await getDatabaseContainerId())
     } catch {
         return false
@@ -639,7 +638,7 @@ async function getDefaultConfig(module, coin, network) {
             //
             // A standalone node has no validator, so this is absent and the suite
             // still skips - correctly, because there is no identity to onboard.
-            const { getValidatorSettings } = require('./validator_service')
+            const { getValidatorSettings } = peers.validatorService
             const validatorSettings = getValidatorSettings()
             if (validatorSettings && validatorSettings.pubkey) {
                 defaultValues["VALIDATOR_PUBKEY"] = validatorSettings.pubkey
@@ -1349,7 +1348,7 @@ async function getDefaultConfig(module, coin, network) {
         // P2P / signing-key / capability-config env so the hub starts as a full
         // validator. Returns {} (no change) for a standalone node, so the standalone
         // install path is unaffected.
-        const { getValidatorEnv, validatorModeReport } = require('./validator_service')
+        const { getValidatorEnv, validatorModeReport } = peers.validatorService
         Object.assign(defaultValues, getValidatorEnv())
 
         // State the resolved mode and the directory it came from: an empty validator
@@ -1555,8 +1554,8 @@ async function getDefaultConfig(module, coin, network) {
         // 127.0.0.1:3306 defaults. Otherwise a host/port saved at the first-run
         // prompt is ignored and provisioned containers get *_DB_HOST=127.0.0.1
         // (their own loopback), unreachable to the real DB (uuid:52c5b5f1).
-        // Lazy require avoids a load-time cycle with DatabaseService.
-        const { getExternalDbConfig } = require('./database_service')
+        // DatabaseService requires this file at load, so it is read through peers.
+        const { getExternalDbConfig } = peers.databaseService
         const extCfg = await getExternalDbConfig()
         const extHost = extCfg.host
         const extPort = extCfg.port
