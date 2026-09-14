@@ -141,7 +141,9 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
             expect(found, 'TEST_KEY env var found in args').to.be.true
         })
     }
+})
 
+describe('Fuzz: Environment Variable Handling with execFile', function () {
     // --- Newline / carriage return values are passed as raw strings ---
     // With execFile there is no shell to interpret them, so they are safe
     it('newline characters are passed raw (safe with execFile)', async function () {
@@ -179,7 +181,9 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         expect(envArg).to.exist
         expect(envArg).to.equal('EVIL_KEY=safe_value\r-v /:/host:ro')
     })
+})
 
+describe('Fuzz: Environment Variable Handling with execFile', function () {
     it('combined \\r\\n passed raw (safe with execFile)', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'value\r\n--privileged',
@@ -211,7 +215,9 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         const args = getArgs()
         expect(args).to.exist
     })
+})
 
+describe('Fuzz: Environment Variable Handling with execFile', function () {
     // --- Extreme lengths ---
     it('handles extremely long env var value without crashing', async function () {
         const stubs = makeStubs({
@@ -245,7 +251,9 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         const envArg = args.find(a => a === 'TEST=')
         expect(envArg).to.exist
     })
+})
 
+describe('Fuzz: Environment Variable Handling with execFile', function () {
     // --- Type coercion ---
     it('handles numeric env var value', async function () {
         const stubs = makeStubs({
@@ -278,7 +286,9 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         const envArg = args.find(a => a === 'FLAG=false')
         expect(envArg).to.exist
     })
+})
 
+describe('Fuzz: Environment Variable Handling with execFile', function () {
     it('handles null env var value via String() coercion', async function () {
         const stubs = makeStubs({
             'NULLVAL': null,
@@ -310,7 +320,9 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         const envArg = args.find(a => a === 'UNDEF=undefined')
         expect(envArg).to.exist
     })
+})
 
+describe('Fuzz: Environment Variable Handling with execFile', function () {
     // --- Unicode / special encoding ---
     it('handles unicode characters in env var value', async function () {
         const stubs = makeStubs({
