@@ -32,6 +32,7 @@ const { execFileSync } = require('child_process')
 const realConstants = require('../../src/config')
 
 const MODULE = 'xchain-encoder'
+let root, modulesDir, tmpDir, remote, checkout, ms
 
 function git(args, cwd) {
     execFileSync('git', args, { cwd, stdio: 'pipe' })
@@ -79,32 +80,32 @@ function loadModuleService(modulesDir, tmpDir, remote) {
     })
 }
 
+async function setupCheckout() {
+    root       = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-clone-rollback-'))
+    modulesDir = path.join(root, 'modules')
+    tmpDir     = path.join(root, 'tmp')
+    remote     = path.join(root, 'remote-' + MODULE)
+    checkout   = path.join(modulesDir, MODULE)
+    fs.mkdirSync(modulesDir, { recursive: true })
+    fs.mkdirSync(tmpDir, { recursive: true })
+    makeRemote(remote)
+
+    ms = loadModuleService(modulesDir, tmpDir, remote)
+    // The deploy checkout as it exists on a provisioned box, plus a file
+    // that lives ONLY there (the local-only hotfix branch's stand-in).
+    await ms.cloneGit(MODULE, true, false, null)
+    fs.writeFileSync(path.join(checkout, 'LOCAL-ONLY.txt'), 'unpushed work\n')
+}
+
+function cleanupCheckout() {
+    sinon.restore()
+    if (root) fs.rmSync(root, { recursive: true, force: true })
+}
+
 describe('[regression:p0] Deploy-checkout rollback safety', function () {
     this.timeout(30000)
-
-    let root, modulesDir, tmpDir, remote, checkout, ms
-
-    beforeEach(async function () {
-        root       = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-clone-rollback-'))
-        modulesDir = path.join(root, 'modules')
-        tmpDir     = path.join(root, 'tmp')
-        remote     = path.join(root, 'remote-' + MODULE)
-        checkout   = path.join(modulesDir, MODULE)
-        fs.mkdirSync(modulesDir, { recursive: true })
-        fs.mkdirSync(tmpDir, { recursive: true })
-        makeRemote(remote)
-
-        ms = loadModuleService(modulesDir, tmpDir, remote)
-        // The deploy checkout as it exists on a provisioned box, plus a file
-        // that lives ONLY there (the local-only hotfix branch's stand-in).
-        await ms.cloneGit(MODULE, true, false, null)
-        fs.writeFileSync(path.join(checkout, 'LOCAL-ONLY.txt'), 'unpushed work\n')
-    })
-
-    afterEach(function () {
-        sinon.restore()
-        if (root) fs.rmSync(root, { recursive: true, force: true })
-    })
+    beforeEach(setupCheckout)
+    afterEach(cleanupCheckout)
 
     it('keeps the checkout when the requested branch is absent from the remote', async function () {
         let threw = null
@@ -129,6 +130,12 @@ describe('[regression:p0] Deploy-checkout rollback safety', function () {
         expect(threw).to.include('Error cloning')
         expect(fs.existsSync(path.join(checkout, 'LOCAL-ONLY.txt'))).to.be.true
     })
+})
+
+describe('[regression:p0] Deploy-checkout rollback safety', function () {
+    this.timeout(30000)
+    beforeEach(setupCheckout)
+    afterEach(cleanupCheckout)
 
     it('leaves no staging or backup directories behind after a failure', async function () {
         try {
