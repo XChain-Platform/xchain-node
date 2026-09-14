@@ -46,10 +46,9 @@ function loadService({ containers = [], db = {} } = {}) {
     return { svc, db: dbStub }
 }
 
+const { svc } = loadService()
+
 describe('DiscoveryService.classifyContainer', function () {
-
-    const { svc } = loadService()
-
     it('keys on the container NAME even when the image tag was stolen (bare image ID)', function () {
         // The incident case: image rebuilt out from under a running container.
         expect(svc.classifyContainer({
@@ -79,6 +78,9 @@ describe('DiscoveryService.classifyContainer', function () {
         expect(svc.classifyContainer({ Names: 'xchain-node-xchain-sync', Image: 'x' }))
             .to.deep.equal({ module: 'xchain-sync', coin: '', network: '' })
     })
+})
+
+describe('DiscoveryService.classifyContainer', function () {
 
     it('classifies the coin node module', function () {
         expect(svc.classifyContainer({ Names: 'xchain-node-dogecoin-testnet-node', Image: 'x' }))
@@ -149,6 +151,11 @@ describe('DiscoveryService.scanAndRegisterModules', function () {
         expect(changed).to.equal(0)
         sinon.assert.notCalled(db.deleteModuleContainer)
     })
+})
+
+describe('DiscoveryService.scanAndRegisterModules', function () {
+
+    afterEach(() => sinon.restore())
 
     it('does NOT purge the live sync service row (shared, coin/network-independent)', async function () {
         // Regression (2026-07-09): with sync absent from SHARED_MODULES its key
