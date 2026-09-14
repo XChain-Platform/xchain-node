@@ -47,7 +47,9 @@ describe('Fuzz: filterCommandParameters()', function () {
     it('throws on undefined module (not iterable)', function () {
         expect(() => filterCommandParameters(null, undefined, 'bitcoin', 'mainnet')).to.throw()
     })
+})
 
+describe('Fuzz: filterCommandParameters()', function () {
     // --- Invalid coin names ---
     const invalidCoins = [
         'ethereum',
@@ -64,7 +66,9 @@ describe('Fuzz: filterCommandParameters()', function () {
             expect(result).to.be.an('object')
         })
     }
+})
 
+describe('Fuzz: filterCommandParameters()', function () {
     // --- Invalid network names ---
     const invalidNetworks = [
         'devnet',
@@ -80,7 +84,9 @@ describe('Fuzz: filterCommandParameters()', function () {
             expect(result).to.be.an('object')
         })
     }
+})
 
+describe('Fuzz: filterCommandParameters()', function () {
     // --- "all" expansion correctness ---
     it('"all" modules includes every non-e2e service plus node', function () {
         const result = filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
@@ -111,7 +117,9 @@ describe('Fuzz: filterCommandParameters()', function () {
         expect(networks).to.include('testnet')
         expect(networks).to.include('regtest')
     })
+})
 
+describe('Fuzz: filterCommandParameters()', function () {
     // --- Regtest module filtering ---
     it('regtest-only modules excluded from all non-regtest networks', function () {
         const result = filterCommandParameters(null, 'all', 'all', 'all')
@@ -140,7 +148,9 @@ describe('Fuzz: filterCommandParameters()', function () {
             }
         }
     })
+})
 
+describe('Fuzz: filterCommandParameters()', function () {
     // --- Explorer special handling ---
     it('"all" modules adds explorer under empty coin/network keys', function () {
         const result = filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
@@ -155,7 +165,9 @@ describe('Fuzz: filterCommandParameters()', function () {
         // No coin-specific entries
         expect(result).to.not.have.property('bitcoin')
     })
+})
 
+describe('Fuzz: filterCommandParameters()', function () {
     // --- Shared-service routing (hub / explorer / db / sync) ---
     // Shared services register under a single empty coin+network key. A bare
     // `update xchain-hub` must resolve there, not fan out across real coins
@@ -177,7 +189,9 @@ describe('Fuzz: filterCommandParameters()', function () {
             expect(result).to.not.have.property('bitcoin')
         })
     }
+})
 
+describe('Fuzz: filterCommandParameters()', function () {
     // --- Combinatorial explosion check ---
     it('all x all x all produces bounded output', function () {
         const result = filterCommandParameters(null, 'all', 'all', 'all')
