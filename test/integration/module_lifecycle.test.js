@@ -16,20 +16,21 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const TestEnv = require('./helpers/test-env')
 const CommandCapture = require('./helpers/command-capture')
+let env
+
+async function setupModuleEnv() {
+    env = new TestEnv()
+    await env.setup()
+}
+
+async function cleanupModuleEnv() {
+    await env.teardown()
+}
 
 describe('Integration: Module Lifecycle (LevelDB state)', function () {
     this.timeout(15000)
-
-    let env
-
-    beforeEach(async function () {
-        env = new TestEnv()
-        await env.setup()
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
 
     // Direct LevelDB operations via state.db
     describe('LevelDB key format and CRUD', function () {
@@ -59,6 +60,15 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const retrieved = await state.db.getModuleContainer('xchain-decoder', 'bitcoin', 'mainnet')
             expect(retrieved).to.be.null
         })
+    })
+})
+
+describe('Integration: Module Lifecycle (LevelDB state)', function () {
+    this.timeout(15000)
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
+    describe('LevelDB key format and CRUD', function () {
+        const state = require('../../src/state')
 
         it('getAllModuleContainers returns all entries for a coin/network', async function () {
             const id1 = TestEnv.fakeContainerId('1')
@@ -105,7 +115,12 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             expect(retrieved).to.equal(newId)
         })
     })
+})
 
+describe('Integration: Module Lifecycle (LevelDB state)', function () {
+    this.timeout(15000)
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
     // Multiple modules maintain separate state
     describe('multi-module state isolation', function () {
         const state = require('../../src/state')
@@ -147,7 +162,12 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             expect(await state.db.getModuleContainer('xchain-encoder', 'dogecoin', 'testnet')).to.equal(dogeId)
         })
     })
+})
 
+describe('Integration: Module Lifecycle (LevelDB state)', function () {
+    this.timeout(15000)
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
     // moduleOperations -> LevelDB interaction (start/stop/restart)
     describe('moduleOperations uses LevelDB for container lookups', function () {
 
@@ -184,7 +204,14 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             expect(startCmds).to.have.length(1)
             expect(startCmds[0].command).to.include(containerId)
         })
+    })
+})
 
+describe('Integration: Module Lifecycle (LevelDB state)', function () {
+    this.timeout(15000)
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
+    describe('moduleOperations uses LevelDB for container lookups', function () {
         it('stopModules reads container IDs from LevelDB and calls docker stop', async function () {
             const capture = env.cmdCapture
             const containerId = TestEnv.fakeContainerId('s')
@@ -215,7 +242,14 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             expect(stopCmds).to.have.length(1)
             expect(stopCmds[0].command).to.include(containerId)
         })
+    })
+})
 
+describe('Integration: Module Lifecycle (LevelDB state)', function () {
+    this.timeout(15000)
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
+    describe('moduleOperations uses LevelDB for container lookups', function () {
         it('stopModules handles multiple modules across coin/networks', async function () {
             const capture = env.cmdCapture
             const id1 = TestEnv.fakeContainerId('1')
@@ -253,7 +287,14 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const stopCmds = capture.findCommands(/docker stop/)
             expect(stopCmds).to.have.length(3)
         })
+    })
+})
 
+describe('Integration: Module Lifecycle (LevelDB state)', function () {
+    this.timeout(15000)
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
+    describe('moduleOperations uses LevelDB for container lookups', function () {
         it('startModules gracefully handles missing LevelDB entry', async function () {
             // No modules inserted; the registry is empty
             const moduleOps = proxyquire('../../src/operations/module_operations', {
@@ -277,7 +318,14 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             const result = await moduleOps.startModules(serviceList)
             expect(result).to.be.true
         })
+    })
+})
 
+describe('Integration: Module Lifecycle (LevelDB state)', function () {
+    this.timeout(15000)
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
+    describe('moduleOperations uses LevelDB for container lookups', function () {
         it('restartModules reads IDs and calls docker restart', async function () {
             const restartedIds = []
             const containerId = TestEnv.fakeContainerId('r')
@@ -307,7 +355,14 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             expect(restartedIds).to.have.length(1)
             expect(restartedIds[0]).to.equal(containerId)
         })
+    })
+})
 
+describe('Integration: Module Lifecycle (LevelDB state)', function () {
+    this.timeout(15000)
+    beforeEach(setupModuleEnv)
+    afterEach(cleanupModuleEnv)
+    describe('moduleOperations uses LevelDB for container lookups', function () {
         it('execModules reads container ID and executes command', async function () {
             const execCalls = []
             const containerId = TestEnv.fakeContainerId('x')
