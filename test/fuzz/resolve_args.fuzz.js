@@ -62,7 +62,9 @@ describe('Fuzz: resolveArgs()', function () {
         expect(result.chain).to.equal('all')
         expect(result.network).to.equal('all')
     })
+})
 
+describe('Fuzz: resolveArgs()', function () {
     // --- Order independence ---
     it('recognizes args regardless of order: service chain network', function () {
         const r1 = resolveArgs(['xchain-encoder', 'bitcoin', 'mainnet'])
@@ -78,7 +80,9 @@ describe('Fuzz: resolveArgs()', function () {
         expect(r1.chain).to.equal(r2.chain)
         expect(r1.network).to.equal(r2.network)
     })
+})
 
+describe('Fuzz: resolveArgs()', function () {
     // --- Duplicate arguments ---
     it('last match wins when duplicate chains provided', function () {
         const result = resolveArgs(['bitcoin', 'litecoin'])
@@ -95,7 +99,9 @@ describe('Fuzz: resolveArgs()', function () {
         const result = resolveArgs(['xchain-encoder', 'xchain-decoder'])
         expect(result.service).to.equal('xchain-decoder')
     })
+})
 
+describe('Fuzz: resolveArgs()', function () {
     // --- "all" keyword handling ---
     it('skips "all" arguments (preserves default)', function () {
         const result = resolveArgs(['all', 'all', 'all'])
@@ -110,7 +116,9 @@ describe('Fuzz: resolveArgs()', function () {
         expect(result.chain).to.equal('all')
         expect(result.network).to.equal('all')
     })
+})
 
+describe('Fuzz: resolveArgs()', function () {
     // --- Empty and null args ---
     it('handles empty array', function () {
         const result = resolveArgs([])
@@ -125,7 +133,9 @@ describe('Fuzz: resolveArgs()', function () {
         expect(result.chain).to.equal('all')
         expect(result.network).to.equal('all')
     })
+})
 
+describe('Fuzz: resolveArgs()', function () {
     // --- Branch extraction ---
     it('captures unrecognized argument as branch when expectBranch=true', function () {
         const result = resolveArgs(['develop', 'xchain-encoder', 'bitcoin', 'mainnet'], { expectBranch: true })
@@ -149,7 +159,9 @@ describe('Fuzz: resolveArgs()', function () {
         const result = resolveArgs(['develop', 'xchain-encoder'])
         expect(result.branch).to.be.null
     })
+})
 
+describe('Fuzz: resolveArgs()', function () {
     // --- All valid enum values ---
     it('recognizes every Coin enum value', function () {
         for (const coin of Object.values(Coin)) {
@@ -177,14 +189,18 @@ describe('Fuzz: resolveArgs()', function () {
         expect(resolveArgs([DB_MODULE_NAME]).service).to.equal(DB_MODULE_NAME)
         expect(resolveArgs(['explorer']).service).to.equal('explorer')
     })
+})
 
+describe('Fuzz: resolveArgs()', function () {
     // --- Massive argument list ---
     it('handles 100 garbage arguments without crashing', function () {
         const args = Array.from({ length: 100 }, (_, i) => 'garbage_' + i)
         const result = resolveArgs(args)
         expect(result.service).to.equal('all')
     })
+})
 
+describe('Fuzz: resolveArgs()', function () {
     // --- Arguments with injection patterns ---
     it('does not match injection strings as valid services/chains/networks', function () {
         const injections = [
