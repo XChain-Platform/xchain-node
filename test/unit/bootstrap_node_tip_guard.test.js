@@ -23,19 +23,22 @@ const { XChainService } = require('../../src/config')
 const DECODER = XChainService.XCHAIN_DECODER
 const TRACKER = XChainService.XCHAIN_UTXO_TRACKER
 const INDEXER = XChainService.XCHAIN_INDEXER
+let logs, logStub
+
+function setupLogCapture() {
+    logs = []
+    logStub = sinon.stub(console, 'log').callsFake((...args) => logs.push(args.join(' ')))
+    delete process.env.XCHAIN_NODE_SKIP_NODE_TIP_GUARD
+}
+
+function cleanupLogCapture() {
+    logStub.restore()
+    delete process.env.XCHAIN_NODE_SKIP_NODE_TIP_GUARD
+}
 
 describe('BootstrapNodeTipGuard', function () {
-    let logs
-    let logStub
-    beforeEach(function () {
-        logs = []
-        logStub = sinon.stub(console, 'log').callsFake((...args) => logs.push(args.join(' ')))
-        delete process.env.XCHAIN_NODE_SKIP_NODE_TIP_GUARD
-    })
-    afterEach(function () {
-        logStub.restore()
-        delete process.env.XCHAIN_NODE_SKIP_NODE_TIP_GUARD
-    })
+    beforeEach(setupLogCapture)
+    afterEach(cleanupLogCapture)
 
     describe('evaluateNodeTipAgainstArchive()', function () {
         it('is unknown without an archive height, and says why', function () {
@@ -72,6 +75,11 @@ describe('BootstrapNodeTipGuard', function () {
             expect(r.detail).to.match(/--no-bootstrap/)
         })
     })
+})
+
+describe('BootstrapNodeTipGuard', function () {
+    beforeEach(setupLogCapture)
+    afterEach(cleanupLogCapture)
 
     describe('serviceWaitsOutCatchUp()', function () {
         it('the indexer always passes: it follows the decoder, not the node', function () {
@@ -96,6 +104,11 @@ describe('BootstrapNodeTipGuard', function () {
             expect(guard.serviceWaitsOutCatchUp(TRACKER, { statusPayload: null, version: null })).to.equal(false)
         })
     })
+})
+
+describe('BootstrapNodeTipGuard', function () {
+    beforeEach(setupLogCapture)
+    afterEach(cleanupLogCapture)
 
     describe('readCoinNodeChainInfo()', function () {
         it('runs the coin CLI inside the registered node container with the image\'s conf arguments', async function () {
@@ -130,6 +143,11 @@ describe('BootstrapNodeTipGuard', function () {
                 .to.match(/no usable block height/)
         })
     })
+})
+
+describe('BootstrapNodeTipGuard', function () {
+    beforeEach(setupLogCapture)
+    afterEach(cleanupLogCapture)
 
     describe('assessNodeTipForRestore()', function () {
         const behindNode = async () => ({ blocks: 962304, headers: 964980, initialblockdownload: true })
@@ -172,6 +190,16 @@ describe('BootstrapNodeTipGuard', function () {
             })
             expect(unknownVersion.verdict, 'an unreadable version cannot vouch for the wait').to.equal('behind-refuse')
         })
+    })
+})
+
+describe('BootstrapNodeTipGuard', function () {
+    beforeEach(setupLogCapture)
+    afterEach(cleanupLogCapture)
+
+    describe('assessNodeTipForRestore()', function () {
+        const behindNode = async () => ({ blocks: 962304, headers: 964980, initialblockdownload: true })
+        const archive = async () => ({ format: 1, height: 964970 })
 
         it('never asks the service or the version for the indexer', async function () {
             const probe = sinon.stub().resolves({})
@@ -216,6 +244,16 @@ describe('BootstrapNodeTipGuard', function () {
             expect(r.refuse).to.equal(false)
             expect(r.detail).to.match(/Loading block index/)
         })
+    })
+})
+
+describe('BootstrapNodeTipGuard', function () {
+    beforeEach(setupLogCapture)
+    afterEach(cleanupLogCapture)
+
+    describe('assessNodeTipForRestore()', function () {
+        const behindNode = async () => ({ blocks: 962304, headers: 964980, initialblockdownload: true })
+        const archive = async () => ({ format: 1, height: 964970 })
 
         it('survives a metadata reader that throws', async function () {
             const r = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: DECODER, archivePath: '/x' }, {
@@ -236,6 +274,11 @@ describe('BootstrapNodeTipGuard', function () {
             expect(logs.join('\n')).to.match(/WARNING: XCHAIN_NODE_SKIP_NODE_TIP_GUARD/)
         })
     })
+})
+
+describe('BootstrapNodeTipGuard', function () {
+    beforeEach(setupLogCapture)
+    afterEach(cleanupLogCapture)
 
     describe('probeServiceCapability()', function () {
         it('retries the status probe and returns the first payload', async function () {
@@ -266,6 +309,11 @@ describe('BootstrapNodeTipGuard', function () {
             })).to.equal(null)
         })
     })
+})
+
+describe('BootstrapNodeTipGuard', function () {
+    beforeEach(setupLogCapture)
+    afterEach(cleanupLogCapture)
 
     describe('version parsing', function () {
         it('accepts a leading v and ignores a suffix', function () {
