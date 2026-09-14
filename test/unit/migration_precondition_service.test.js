@@ -33,6 +33,15 @@ const GATED = '2026-07-24-pubkeys-widen-uncompressed.sql'
 const TAGGED   = '-- xchain:migration mode=manual deploy-precondition=required\nALTER TABLE pubkeys MODIFY pubkey VARCHAR(130) NOT NULL;\n'
 const UNTAGGED = '-- xchain:migration mode=manual\nALTER TABLE pubkeys MODIFY pubkey VARCHAR(130) NOT NULL;\n'
 
+// xchain-indexer as a checkout, not just the migrations directory these tests
+// read from it: a present checkout missing the pinned directory is a moved or
+// renamed tree, while an absent checkout is a standalone install with no
+// sibling to compare against.
+const INDEXER_DIR        = path.join(__dirname, '../../../xchain-indexer')
+const INDEXER_MIGRATIONS = path.join(INDEXER_DIR, 'src/sql/migrations')
+const INDEXER_PRESENT    = fs.existsSync(INDEXER_DIR)
+const REQUIRE_SIBLINGS   = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
+
 function makeDeps({ required = [GATED], applied = [GATED], state = 'ledger', reason = 'connection refused', cloneErr = null,
                     supportsPerFile = true, pendingManual = null } = {}) {
     return {
@@ -145,12 +154,16 @@ describe('MigrationPreconditionService', () => {
 
         it('reads the REAL indexer tree and finds the migration behind the 2026-08-09 halt', function () {
             // Guards the whole contract end to end: if the tag is ever dropped from the
-            // committed file, or the migrations path moves, this guard silently stops
-            // protecting the deploy that caused the outage. Skipped when xchain-node is
-            // checked out on its own, without the sibling indexer tree beside it.
-            const indexerMigrations = path.join(__dirname, '../../../xchain-indexer/src/sql/migrations')
-            if (!fs.existsSync(indexerMigrations)) return this.skip()
-            expect(listDeployPreconditionMigrations(indexerMigrations)).to.include(GATED)
+            // committed file, or the migrations path moves, this guard must stop the
+            // suite rather than pass silently on a directory that no longer exists.
+            if (!INDEXER_PRESENT) {
+                if (REQUIRE_SIBLINGS)
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer is not checked out at ' + INDEXER_DIR)
+                return this.skip()      // sibling repo not checked out
+            }
+            expect(fs.existsSync(INDEXER_MIGRATIONS), 'xchain-indexer is checked out at ' + INDEXER_DIR
+                + ' but has no migrations directory at ' + INDEXER_MIGRATIONS).to.equal(true)
+            expect(listDeployPreconditionMigrations(INDEXER_MIGRATIONS)).to.include(GATED)
         })
 
         it('reads the REAL indexer tree and finds the bridge-tables migration', function () {
@@ -162,9 +175,14 @@ describe('MigrationPreconditionService', () => {
             // the moment it lands on the indexer, no xchain-node release required
             // (the same "no coupled release" property MigrationPreconditionService's
             // header describes for the contract as a whole). This test is the proof.
-            const indexerMigrations = path.join(__dirname, '../../../xchain-indexer/src/sql/migrations')
-            if (!fs.existsSync(indexerMigrations)) return this.skip()
-            const required = listDeployPreconditionMigrations(indexerMigrations)
+            if (!INDEXER_PRESENT) {
+                if (REQUIRE_SIBLINGS)
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer is not checked out at ' + INDEXER_DIR)
+                return this.skip()      // sibling repo not checked out
+            }
+            expect(fs.existsSync(INDEXER_MIGRATIONS), 'xchain-indexer is checked out at ' + INDEXER_DIR
+                + ' but has no migrations directory at ' + INDEXER_MIGRATIONS).to.equal(true)
+            const required = listDeployPreconditionMigrations(INDEXER_MIGRATIONS)
             expect(required).to.include('2026-09-12-bridge-tables.sql')
             expect(required).to.not.include('2026-09-12-token-bridge-fields.sql')
         })
