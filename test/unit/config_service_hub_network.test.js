@@ -52,35 +52,40 @@ function stack(module, coin, network) {
     return { module, coin, network, container_id: 'container-id-fixture' }
 }
 
+const HUB_ENV_KEYS = ['HUB_NETWORK', 'BTC_INDEXER_API_URL', 'HUB_API_KEY', 'HUB_ALLOW_UNAUTHENTICATED']
+let savedEnv, savedArgv, registry
+
+function prepareHubConfig() {
+    savedEnv = {}
+    for (const k of HUB_ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k] }
+    savedArgv = process.argv
+    registry = sinon.stub(state.db, 'getAllModuleContainers').resolves([])
+    sinon.stub(console, 'warn')
+}
+
+function cleanHubConfig() {
+    for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+    }
+    process.argv = savedArgv
+    sinon.restore()
+}
+
+function runningCommand(...args) {
+    process.argv = ['/usr/bin/node', '/usr/local/bin/xchain-node', ...args]
+}
+
+async function hubConfig() {
+    return await makeConfigService().getDefaultConfig(HUB_MODULE_NAME, null, null)
+}
+
+const btcIndexerUrl = (network) =>
+    'http://xchain-node-bitcoin-' + network + '-xchain-indexer:3004'
+
 describe('ConfigService hub network and BTC indexer composition', function () {
-
-    const HUB_ENV_KEYS = ['HUB_NETWORK', 'BTC_INDEXER_API_URL', 'HUB_API_KEY', 'HUB_ALLOW_UNAUTHENTICATED']
-    let savedEnv, savedArgv, registry
-
-    beforeEach(function () {
-        savedEnv = {}
-        for (const k of HUB_ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k] }
-        savedArgv = process.argv
-        registry = sinon.stub(state.db, 'getAllModuleContainers').resolves([])
-        sinon.stub(console, 'warn')
-    })
-
-    afterEach(function () {
-        for (const [k, v] of Object.entries(savedEnv)) {
-            if (v === undefined) delete process.env[k]
-            else process.env[k] = v
-        }
-        process.argv = savedArgv
-        sinon.restore()
-    })
-
-    function runningCommand(...args) {
-        process.argv = ['/usr/bin/node', '/usr/local/bin/xchain-node', ...args]
-    }
-
-    async function hubConfig() {
-        return await makeConfigService().getDefaultConfig(HUB_MODULE_NAME, null, null)
-    }
+    beforeEach(prepareHubConfig)
+    afterEach(cleanHubConfig)
 
     describe('HUB_NETWORK', function () {
 
@@ -132,12 +137,13 @@ describe('ConfigService hub network and BTC indexer composition', function () {
             expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal('true')
         })
     })
+})
+
+describe('ConfigService hub network and BTC indexer composition', function () {
+    beforeEach(prepareHubConfig)
+    afterEach(cleanHubConfig)
 
     describe('BTC_INDEXER_API_URL', function () {
-
-        const btcIndexerUrl = (network) =>
-            'http://xchain-node-bitcoin-' + network + '-xchain-indexer:3004'
-
         it('composes the co-located BTC indexer for the hub network', async function () {
             registry.resolves([
                 stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.TESTNET),
@@ -174,6 +180,14 @@ describe('ConfigService hub network and BTC indexer composition', function () {
             expect(cfg['HUB_NETWORK']).to.equal(Network.TESTNET)
             expect(cfg['BTC_INDEXER_API_URL']).to.equal('')
         })
+    })
+})
+
+describe('ConfigService hub network and BTC indexer composition', function () {
+    beforeEach(prepareHubConfig)
+    afterEach(cleanHubConfig)
+
+    describe('BTC_INDEXER_API_URL', function () {
 
         it('never overrides the operator host env', async function () {
             process.env.BTC_INDEXER_API_URL = 'http://btc-indexer.fixture.invalid:3004'
