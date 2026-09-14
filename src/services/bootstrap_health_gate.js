@@ -97,7 +97,7 @@ function gateSkipped() {
 }
 
 function maxLagBlocks() {
-    const raw = parseInt(process.env.XCHAIN_NODE_BOOTSTRAP_MAX_LAG_BLOCKS, 10)
+    const raw = parseInt(config.XCHAIN_NODE_BOOTSTRAP_MAX_LAG_BLOCKS, 10)
     return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_MAX_LAG_BLOCKS
 }
 

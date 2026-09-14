@@ -31,6 +31,9 @@ const {
     XChainService,
     Network
 } = require('../config')
+// The module itself as well, because the two arming flags are getters read
+// when a deploy asks, not values taken when this file loads.
+const config = require('../config')
 
 // An un-armed mainnet activation carries one of two sentinels: 9999999999 (the
 // year-2286 time sentinel) or 999999999 (the height sentinel). Shipping either
@@ -182,12 +185,12 @@ function collectViolations(module, environmentVariables, moduleDir) {
 function assertGoLiveReady(module, coin, network, environmentVariables, moduleDir) {
     if (!WRITE_SURFACES.has(module)) return
 
-    const armed = isTruthyEnv(process.env.XCHAIN_NODE_GO_LIVE)
+    const armed = isTruthyEnv(config.XCHAIN_NODE_GO_LIVE)
     const sharedService = (module === HUB_MODULE_NAME || module === SYNC_MODULE_NAME) && !network
     const mainnetSurface = network === Network.MAINNET || sharedService
     if (!mainnetSurface) return
 
-    if (isTruthyEnv(process.env.XCHAIN_NODE_SKIP_GO_LIVE_GATE)) {
+    if (isTruthyEnv(config.XCHAIN_NODE_SKIP_GO_LIVE_GATE)) {
         logger.warn('WARNING: XCHAIN_NODE_SKIP_GO_LIVE_GATE is set; go-live pre-flight checks SKIPPED for ' + module)
         return
     }

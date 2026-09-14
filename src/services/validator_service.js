@@ -914,7 +914,7 @@ function getValidatorEnv() {
     // The hub refuses to boot in validator mode without HUB_NETWORK. Host env
     // wins (the passthrough list already copied it); the recorded network
     // fills the gap so a fresh install needs no .env edit for it.
-    if (!process.env.HUB_NETWORK && s.network) env.HUB_NETWORK = s.network
+    if (!config.HUB_NETWORK && s.network) env.HUB_NETWORK = s.network
 
     // DOGE publisher wiring, from the wallet init made. Every value here is
     // public (address, pubkey, encoder URL); the WIF stays in the mounted
@@ -1087,7 +1087,7 @@ async function readAnsweredCapabilitySets(pubkey, network, capabilities, deps = 
 async function capabilityDriftReport(options = {}, deps = {}) {
     const resolved = resolvedCapabilitySet()
     const pubkey   = options.expectPubkey || resolved.pubkey
-    const network  = options.network || resolved.network || process.env.HUB_NETWORK || null
+    const network  = options.network || resolved.network || config.HUB_NETWORK || null
     const alerts   = []
     const out      = { resolved, pubkey: pubkey || null, expected: !!options.expectPubkey, answered: null, alerts, drift: null }
 

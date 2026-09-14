@@ -38,6 +38,7 @@
  ********************************************************************/
 
 const { XChainService } = require('../config')
+const config = require('../config')
 const { db } = require('../state')
 const { stringToDockerContainerFile, execContainer } = require('./docker_service')
 const { getLogger } = require('../observability/logger');
@@ -45,7 +46,8 @@ const logger = getLogger();
 
 // Must match xchain-encoder's DEFAULT_SENTINEL. The encoder side can be
 // repointed with ENCODER_MAINTENANCE_FILE; repoint this with the same value.
-const SENTINEL_PATH = process.env.XCHAIN_NODE_ENCODER_MAINTENANCE_FILE
+// Read once when this file loads, so one process writes and clears the same path.
+const SENTINEL_PATH = config.XCHAIN_NODE_ENCODER_MAINTENANCE_FILE
     || '/tmp/xchain-encoder-maintenance.json'
 
 // How long a declared window stays credible without being renewed. Deliberately

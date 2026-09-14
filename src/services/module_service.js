@@ -756,7 +756,7 @@ function buildModuleDockerArgs(module, environmentVariables, coin, network) {
             // read-only; ConfigService sets HUB_SIGNER_MODULE to the matching
             // in-container path. No-op when unconfigured.
             if (config.XCHAIN_NODE_HUB_SIGNER_DIR && fs.existsSync(config.XCHAIN_NODE_HUB_SIGNER_DIR)) {
-                volumeArgs.push('-v', `${process.env.XCHAIN_NODE_HUB_SIGNER_DIR}:/XChainHub/operator-signer:ro`)
+                volumeArgs.push('-v', `${config.XCHAIN_NODE_HUB_SIGNER_DIR}:/XChainHub/operator-signer:ro`)
             } else {
                 // The signer `validator init` wrote. Its signer.js requires the
                 // SDK, resolved from a node_modules mounted beside it: this

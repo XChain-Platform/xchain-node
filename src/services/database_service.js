@@ -1382,7 +1382,7 @@ async function buildDatabaseModule(coin, network) {
         // behaviour. Set XCHAIN_NODE_DB_DATA_DIR=/var/lib/mysql to keep the DB
         // on a dedicated NVMe volume.
         if (config.XCHAIN_NODE_DB_DATA_DIR) {
-            runArgs.push('-v', `${process.env.XCHAIN_NODE_DB_DATA_DIR}:/var/lib/mysql`)
+            runArgs.push('-v', `${config.XCHAIN_NODE_DB_DATA_DIR}:/var/lib/mysql`)
         }
         // Pass the root password through docker's OWN environment via a bare
         // `--env NAME` (value supplied in the execFile env below), NOT

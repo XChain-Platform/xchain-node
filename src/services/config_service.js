@@ -522,7 +522,7 @@ async function getDefaultConfig(module, coin, network) {
             // reasoning as INDEXER_ALLOW_UNAUTHENTICATED below), so default it open;
             // a host CORS_ORIGIN or config-file value still wins. mainnet/testnet keep
             // the fail-safe default (CORS off unless the operator opts in).
-            defaultValues["CORS_ORIGIN"] = process.env.CORS_ORIGIN || "*"
+            defaultValues["CORS_ORIGIN"] = config.CORS_ORIGIN || "*"
         }
 
         // Encoder passthrough. A production encoder sits behind a reverse proxy on
@@ -942,8 +942,8 @@ async function getDefaultConfig(module, coin, network) {
         // agnostic service (it may front mainnet), so unlike the per-network encoder
         // above it is NOT auto-defaulted open: the operator opts in via host env.
         // On a local regtest dev box set CORS_ORIGIN=* when installing the hub.
-        if (process.env.CORS_ORIGIN !== undefined && process.env.CORS_ORIGIN !== "") {
-            defaultValues.CORS_ORIGIN = process.env.CORS_ORIGIN
+        if (config.CORS_ORIGIN !== undefined && config.CORS_ORIGIN !== "") {
+            defaultValues.CORS_ORIGIN = config.CORS_ORIGIN
         }
 
         if (module === EXPLORER_MODULE_NAME) {
