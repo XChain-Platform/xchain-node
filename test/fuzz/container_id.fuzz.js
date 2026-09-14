@@ -117,7 +117,9 @@ describe('Fuzz: Container ID Validation', function () {
         const result = await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         expect(result).to.equal(id)
     })
+})
 
+describe('Fuzz: Container ID Validation', function () {
     // --- Invalid container IDs that must be rejected ---
     const invalidIds = [
         ['63 chars (too short)',      'a'.repeat(63)],
@@ -150,7 +152,9 @@ describe('Fuzz: Container ID Validation', function () {
             }
         })
     }
+})
 
+describe('Fuzz: Container ID Validation', function () {
     // --- Whitespace handling ---
     it('trims leading/trailing whitespace from container ID', async function () {
         const id = 'a'.repeat(64)
