@@ -84,6 +84,17 @@ describe('crypto-node build scaffold (XCHAIN_NODE_CRYPTO_NODES_DIR)', function (
         expect(confName).to.not.equal('bitcoin-testnet.conf')
         expect(confName).to.include('.generated.')
     })
+})
+
+describe('crypto-node build scaffold (XCHAIN_NODE_CRYPTO_NODES_DIR)', function () {
+    let tmpRoot
+
+    beforeEach(function () {
+        tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xcn-scaffold-'))
+    })
+    afterEach(function () {
+        fs.rmSync(tmpRoot, { recursive: true, force: true })
+    })
 
     it('writes the credential-bearing conf 0600', function () {
         const nodeDir  = path.join(tmpRoot, 'bitcoin')
@@ -122,6 +133,17 @@ describe('crypto-node build scaffold (XCHAIN_NODE_CRYPTO_NODES_DIR)', function (
         } finally {
             fs.rmSync(path.join(bundled, confName), { force: true })
         }
+    })
+})
+
+describe('crypto-node build scaffold (XCHAIN_NODE_CRYPTO_NODES_DIR)', function () {
+    let tmpRoot
+
+    beforeEach(function () {
+        tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xcn-scaffold-'))
+    })
+    afterEach(function () {
+        fs.rmSync(tmpRoot, { recursive: true, force: true })
     })
 
     // Not about the build scaffold, but the same class of problem: a secret the
