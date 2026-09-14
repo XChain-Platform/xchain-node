@@ -27,11 +27,12 @@ function loadExplorerConnector(axiosStub) {
     })
 }
 
-describe('Chaos: Network Resilience (Hub/Explorer)', function () {
+function restoreSinon() {
+    sinon.restore()
+}
 
-    afterEach(function () {
-        sinon.restore()
-    })
+describe('Chaos: Network Resilience (Hub/Explorer)', function () {
+    afterEach(restoreSinon)
 
     // Experiment 15: Hub registration failures (NET-04)
     describe('Experiment 15: Hub connector resilience', function () {
@@ -79,7 +80,12 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             const result = await hub.ping()
             expect(result).to.be.false
         })
+    })
+})
 
+describe('Chaos: Network Resilience (Hub/Explorer)', function () {
+    afterEach(restoreSinon)
+    describe('Experiment 15: Hub connector resilience', function () {
         it('returns true when hub responds with result', async function () {
             const axiosStub = {
                 post: sinon.stub().resolves({ data: { result: true } })
@@ -90,7 +96,6 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             const result = await hub.ping()
             expect(result).to.be.true
         })
-
         it('updateConfig returns false when hub is unreachable', async function () {
             const axiosStub = {
                 post: sinon.stub().rejects(new Error('ECONNREFUSED'))
@@ -101,7 +106,12 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             const result = await hub.updateConfig({ key: 'value' })
             expect(result).to.be.false
         })
+    })
+})
 
+describe('Chaos: Network Resilience (Hub/Explorer)', function () {
+    afterEach(restoreSinon)
+    describe('Experiment 15: Hub connector resilience', function () {
         it('updateConfig returns false when hub returns HTTP 500', async function () {
             const axiosStub = {
                 post: sinon.stub().rejects(new Error('Request failed with status code 500'))
@@ -153,7 +163,10 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             expect(opts.timeout).to.equal(10000)
         })
     })
+})
 
+describe('Chaos: Network Resilience (Hub/Explorer)', function () {
+    afterEach(restoreSinon)
     // Experiment 15b: Explorer registration failures (NET-05)
     describe('Experiment 15b: Explorer connector resilience', function () {
 
@@ -189,7 +202,12 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             const result = await explorer.ping()
             expect(result).to.be.false
         })
+    })
+})
 
+describe('Chaos: Network Resilience (Hub/Explorer)', function () {
+    afterEach(restoreSinon)
+    describe('Experiment 15b: Explorer connector resilience', function () {
         it('returns false when explorer returns error in response', async function () {
             const axiosStub = {
                 post: sinon.stub().resolves({ data: { error: { code: -32601, message: 'Method not found' } } })
@@ -228,7 +246,10 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             expect(data.id).to.equal(1)
         })
     })
+})
 
+describe('Chaos: Network Resilience (Hub/Explorer)', function () {
+    afterEach(restoreSinon)
     // Experiment: DNS resolution failure
     describe('Experiment: DNS resolution failure for service endpoints', function () {
 
@@ -254,7 +275,10 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             expect(result).to.be.false
         })
     })
+})
 
+describe('Chaos: Network Resilience (Hub/Explorer)', function () {
+    afterEach(restoreSinon)
     // Experiment: Malformed JSON-RPC responses
     describe('Experiment: Malformed JSON-RPC responses', function () {
 
