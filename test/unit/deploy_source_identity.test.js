@@ -40,18 +40,17 @@ const OLD    = 'b'.repeat(40)
 //
 // `heads` is the sequence of commits the checkout reads back as, one per clone, so a
 // re-clone can land somewhere different from the first attempt.
-function load({ heads = [TIP], tip = TIP, sourceUrl = null, gitAsyncExtra = null, files = null, moduleDirExists = false } = {}) {
-    const state = { clones: 0 }
-    const asyncCalls = []
-
-    const execFile = sinon.stub().callsFake((cmd, args, ...rest) => {
+function makeExecFile(state) {
+    return sinon.stub().callsFake((cmd, args, ...rest) => {
         const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
         if (args[0] === 'clone') state.clones++
         if (args[0] === 'build' || args[0] === 'run') return cb(null, 'c'.repeat(64) + '\n')
         return cb(null, '', '')
     })
+}
 
-    const gitAsync = async (cmd, args) => {
+function makeGitAsync(asyncCalls, state, heads, tip, gitAsyncExtra) {
+    return async (cmd, args) => {
         asyncCalls.push({ cmd, args })
         if (gitAsyncExtra) {
             const custom = gitAsyncExtra(args)
@@ -70,8 +69,10 @@ function load({ heads = [TIP], tip = TIP, sourceUrl = null, gitAsyncExtra = null
         }
         return { stdout: '' }
     }
+}
 
-    const fs = files || {
+function makeFiles(files) {
+    return files || {
         existsSync:   sinon.stub().returns(true),
         rmSync:       sinon.stub(),
         mkdirSync:    sinon.stub(),
@@ -79,8 +80,10 @@ function load({ heads = [TIP], tip = TIP, sourceUrl = null, gitAsyncExtra = null
         cpSync:       sinon.stub(),
         renameSync:   sinon.stub()
     }
+}
 
-    const proxies = {
+function makeProxies(execFile, gitAsync, fs, moduleDirExists) {
+    return {
         'child_process': { execFile },
         'util': { promisify: () => gitAsync },
         'fs': fs,
@@ -113,6 +116,15 @@ function load({ heads = [TIP], tip = TIP, sourceUrl = null, gitAsyncExtra = null
         './database_service': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
         './go_live_gate': { assertGoLiveReady: () => {} }
     }
+}
+
+function load({ heads = [TIP], tip = TIP, sourceUrl = null, gitAsyncExtra = null, files = null, moduleDirExists = false } = {}) {
+    const state = { clones: 0 }
+    const asyncCalls = []
+    const execFile = makeExecFile(state)
+    const gitAsync = makeGitAsync(asyncCalls, state, heads, tip, gitAsyncExtra)
+    const fs = makeFiles(files)
+    const proxies = makeProxies(execFile, gitAsync, fs, moduleDirExists)
 
     if (sourceUrl) {
         proxies['../config'] = configStub({
@@ -124,20 +136,44 @@ function load({ heads = [TIP], tip = TIP, sourceUrl = null, gitAsyncExtra = null
     return { ms, state, execFile, fs, asyncCalls }
 }
 
+// A checkout on disk: HEAD points at a branch, the branch ref holds the commit.
+function checkoutFiles({ headFile = 'ref: refs/heads/master\n', refFile = TIP + '\n', packed = null } = {}) {
+    const readFileSync = sinon.stub().callsFake((p) => {
+        if (String(p).endsWith('/.git/HEAD')) return headFile
+        if (String(p).endsWith('/.git/refs/heads/master')) {
+            if (refFile === null) throw new Error('ENOENT')
+            return refFile
+        }
+        if (String(p).endsWith('/.git/packed-refs')) {
+            if (packed === null) throw new Error('ENOENT')
+            return packed
+        }
+        throw new Error('ENOENT: ' + p)
+    })
+    return { existsSync: sinon.stub().returns(true), rmSync: sinon.stub(), mkdirSync: sinon.stub(), readFileSync, cpSync: sinon.stub(), renameSync: sinon.stub() }
+}
+
+function buildArgsFrom(execFile) {
+    const call = execFile.getCalls().find(c => c.args[1][0] === 'build')
+    return call ? call.args[1] : null
+}
+
+let logs, warns
+
+function prepareDeployIdentity() {
+    logs  = []
+    warns = []
+    sinon.stub(console, 'log').callsFake((...a) => logs.push(a.join(' ')))
+    sinon.stub(console, 'warn').callsFake((...a) => warns.push(a.join(' ')))
+}
+
+function cleanDeployIdentity() {
+    sinon.restore()
+}
+
 describe('deploy source identity', function () {
-
-    let logs, warns
-
-    beforeEach(function () {
-        logs  = []
-        warns = []
-        sinon.stub(console, 'log').callsFake((...a) => logs.push(a.join(' ')))
-        sinon.stub(console, 'warn').callsFake((...a) => warns.push(a.join(' ')))
-    })
-
-    afterEach(function () {
-        sinon.restore()
-    })
+    beforeEach(prepareDeployIdentity)
+    afterEach(cleanDeployIdentity)
 
     describe('reporting', function () {
 
@@ -158,6 +194,11 @@ describe('deploy source identity', function () {
             expect(logs.some(l => l.includes('Deploy source') && l.includes(TIP))).to.equal(true)
         })
     })
+})
+
+describe('deploy source identity', function () {
+    beforeEach(prepareDeployIdentity)
+    afterEach(cleanDeployIdentity)
 
     describe('freshness of a named branch', function () {
 
@@ -192,6 +233,14 @@ describe('deploy source identity', function () {
             expect(threw.message).to.include('Nothing has been deployed')
             expect(state.clones).to.equal(2)
         })
+    })
+})
+
+describe('deploy source identity', function () {
+    beforeEach(prepareDeployIdentity)
+    afterEach(cleanDeployIdentity)
+
+    describe('freshness of a named branch', function () {
 
         it('does not check a branch tip for a manifest-pinned install', async function () {
             // A pin names a commit and assertCheckoutCommit already proved it; a tag
@@ -216,6 +265,11 @@ describe('deploy source identity', function () {
             expect(asyncCalls.some(c => c.args[0] === 'ls-remote')).to.equal(false)
         })
     })
+})
+
+describe('deploy source identity', function () {
+    beforeEach(prepareDeployIdentity)
+    afterEach(cleanDeployIdentity)
 
     describe('local-path source behind its own upstream', function () {
 
@@ -240,6 +294,14 @@ describe('deploy source identity', function () {
             expect(warned).to.include(OLD.slice(0, 12))
             expect(warned).to.include(TIP.slice(0, 12))
         })
+    })
+})
+
+describe('deploy source identity', function () {
+    beforeEach(prepareDeployIdentity)
+    afterEach(cleanDeployIdentity)
+
+    describe('local-path source behind its own upstream', function () {
 
         it('says nothing when the local checkout is level with its upstream', async function () {
             const { ms } = load({
@@ -262,31 +324,13 @@ describe('deploy source identity', function () {
             expect(asyncCalls.some(c => c.args.includes('rev-list'))).to.equal(false)
         })
     })
+})
+
+describe('deploy source identity', function () {
+    beforeEach(prepareDeployIdentity)
+    afterEach(cleanDeployIdentity)
 
     describe('image stamping', function () {
-
-        // A checkout on disk: HEAD points at a branch, the branch ref holds the commit.
-        function checkoutFiles({ headFile = 'ref: refs/heads/master\n', refFile = TIP + '\n', packed = null } = {}) {
-            const readFileSync = sinon.stub().callsFake((p) => {
-                if (String(p).endsWith('/.git/HEAD')) return headFile
-                if (String(p).endsWith('/.git/refs/heads/master')) {
-                    if (refFile === null) throw new Error('ENOENT')
-                    return refFile
-                }
-                if (String(p).endsWith('/.git/packed-refs')) {
-                    if (packed === null) throw new Error('ENOENT')
-                    return packed
-                }
-                throw new Error('ENOENT: ' + p)
-            })
-            return { existsSync: sinon.stub().returns(true), rmSync: sinon.stub(), mkdirSync: sinon.stub(), readFileSync, cpSync: sinon.stub(), renameSync: sinon.stub() }
-        }
-
-        function buildArgsFrom(execFile) {
-            const call = execFile.getCalls().find(c => c.args[1][0] === 'build')
-            return call ? call.args[1] : null
-        }
-
         it('labels the image with the commit it was built from', async function () {
             const { ms, execFile } = load({ files: checkoutFiles() })
             await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest')
@@ -311,7 +355,14 @@ describe('deploy source identity', function () {
             expect(args).to.include('xchain.source.commit=' + TIP)
             expect(args.some(a => String(a).startsWith('xchain.source.ref='))).to.equal(false)
         })
+    })
+})
 
+describe('deploy source identity', function () {
+    beforeEach(prepareDeployIdentity)
+    afterEach(cleanDeployIdentity)
+
+    describe('image stamping', function () {
         it('builds without labels rather than failing when the checkout is unreadable', async function () {
             const files = checkoutFiles()
             files.readFileSync = sinon.stub().throws(new Error('EACCES'))
