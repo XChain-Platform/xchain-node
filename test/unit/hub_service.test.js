@@ -267,6 +267,11 @@ describe('HubService.isCheckpointSelfSyncEnabled', function () {
         })
         expect(enabled).to.be.true
     })
+})
+
+describe('HubService.isCheckpointSelfSyncEnabled', function () {
+
+    const EXPLORER_CONTAINER = 'xchain-node-xchain-explorer'
 
     it('is not opted in when neither the env nor the container says so', async function () {
         const { svc } = loadHubService()
