@@ -34,42 +34,45 @@ function loadServiceWithRealFs() {
     })
 }
 
-describe('Bootstrap signing', function () {
-    let tmpDir, archivePath, privPath, pubPath, svc
-    const savedEnv = {}
+let tmpDir, archivePath, privPath, pubPath, svc
+const savedEnv = {}
 
-    function stashEnv(name) {
-        savedEnv[name] = process.env[name]
-        delete process.env[name]
+function stashEnv(name) {
+    savedEnv[name] = process.env[name]
+    delete process.env[name]
+}
+
+function setupBootstrapSigningTest() {
+    tmpDir      = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-bootstrap-sign-'))
+    archivePath = path.join(tmpDir, 'mainnet-xchain-utxo-tracker-test.tar.gz')
+    privPath    = path.join(tmpDir, 'signing_key.pem')
+    pubPath     = path.join(tmpDir, 'signing_pubkey.pem')
+
+    fs.writeFileSync(archivePath, 'pretend-this-is-a-bootstrap-archive')
+
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519')
+    fs.writeFileSync(privPath, privateKey.export({ type: 'pkcs8', format: 'pem' }))
+    fs.writeFileSync(pubPath,  publicKey.export({ type: 'spki', format: 'pem' }))
+
+    stashEnv('XCHAIN_NODE_BOOTSTRAP_PUBKEY')
+    stashEnv('XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY')
+    stashEnv('XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP')
+
+    svc = loadServiceWithRealFs()
+}
+
+function teardownBootstrapSigningTest() {
+    for (const [name, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
     }
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+    sinon.restore()
+}
 
-    beforeEach(function () {
-        tmpDir      = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-bootstrap-sign-'))
-        archivePath = path.join(tmpDir, 'mainnet-xchain-utxo-tracker-test.tar.gz')
-        privPath    = path.join(tmpDir, 'signing_key.pem')
-        pubPath     = path.join(tmpDir, 'signing_pubkey.pem')
-
-        fs.writeFileSync(archivePath, 'pretend-this-is-a-bootstrap-archive')
-
-        const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519')
-        fs.writeFileSync(privPath, privateKey.export({ type: 'pkcs8', format: 'pem' }))
-        fs.writeFileSync(pubPath,  publicKey.export({ type: 'spki', format: 'pem' }))
-
-        stashEnv('XCHAIN_NODE_BOOTSTRAP_PUBKEY')
-        stashEnv('XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY')
-        stashEnv('XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP')
-
-        svc = loadServiceWithRealFs()
-    })
-
-    afterEach(function () {
-        for (const [name, value] of Object.entries(savedEnv)) {
-            if (value === undefined) delete process.env[name]
-            else process.env[name] = value
-        }
-        fs.rmSync(tmpDir, { recursive: true, force: true })
-        sinon.restore()
-    })
+describe('Bootstrap signing', function () {
+    beforeEach(setupBootstrapSigningTest)
+    afterEach(teardownBootstrapSigningTest)
 
     it('sign → verify round-trip passes', async function () {
         const sigPath = await svc.signBootstrapArchive(archivePath, privPath)
@@ -124,6 +127,11 @@ describe('Bootstrap signing', function () {
         }
         expect(threw).to.be.true
     })
+})
+
+describe('Bootstrap signing', function () {
+    beforeEach(setupBootstrapSigningTest)
+    afterEach(teardownBootstrapSigningTest)
 
     describe('checkBootstrapSignature() policy', function () {
 
@@ -163,6 +171,14 @@ describe('Bootstrap signing', function () {
             }
             expect(threw).to.be.true
         })
+    })
+})
+
+describe('Bootstrap signing', function () {
+    beforeEach(setupBootstrapSigningTest)
+    afterEach(teardownBootstrapSigningTest)
+
+    describe('checkBootstrapSignature() policy', function () {
 
         it('warns but proceeds when enforcement is explicitly disabled (=0)', async function () {
             process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY = path.join(tmpDir, 'does-not-exist.pem')
@@ -197,6 +213,11 @@ describe('Bootstrap signing', function () {
             expect(threw).to.be.true
         })
     })
+})
+
+describe('Bootstrap signing', function () {
+    beforeEach(setupBootstrapSigningTest)
+    afterEach(teardownBootstrapSigningTest)
 
     // The first real destructive restore, against a throwaway MariaDB,
     // showed the gate refusing a tampered archive correctly but reporting it as
@@ -252,6 +273,11 @@ describe('Bootstrap signing', function () {
             expect(err.message).to.include(archivePath)
         })
     })
+})
+
+describe('Bootstrap signing', function () {
+    beforeEach(setupBootstrapSigningTest)
+    afterEach(teardownBootstrapSigningTest)
 
     describe('downloadBootstrap(): companion signature fetch', function () {
 
