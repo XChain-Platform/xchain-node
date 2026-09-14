@@ -22,6 +22,7 @@ const { execFileSync } = require('child_process')
 const { expect } = require('chai')
 
 const meta = require('../../src/services/bootstrap_archive_meta')
+let dir
 
 function makeWorkDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-bootstrap-meta-'))
@@ -43,10 +44,17 @@ function tarUp(dir, members) {
     return out
 }
 
+function setupWorkDir() {
+    dir = makeWorkDir()
+}
+
+function cleanupWorkDir() {
+    fs.rmSync(dir, { recursive: true, force: true })
+}
+
 describe('BootstrapArchiveMeta', function () {
-    let dir
-    beforeEach(function () { dir = makeWorkDir() })
-    afterEach(function () { fs.rmSync(dir, { recursive: true, force: true }) })
+    beforeEach(setupWorkDir)
+    afterEach(cleanupWorkDir)
 
     describe('buildBootstrapMeta()', function () {
         it('carries the format, the combo and an integer height', function () {
@@ -65,6 +73,11 @@ describe('BootstrapArchiveMeta', function () {
             expect(meta.buildBootstrapMeta({ module: 'x', coin: 'c', network: 'n', height: 1 }).created).to.match(/^\d{4}-\d{2}-\d{2}T/)
         })
     })
+})
+
+describe('BootstrapArchiveMeta', function () {
+    beforeEach(setupWorkDir)
+    afterEach(cleanupWorkDir)
 
     describe('writeBootstrapMeta() + readBootstrapArchiveMeta()', function () {
         it('round-trips the height through a real wrapper when the member leads it', async function () {
@@ -101,7 +114,14 @@ describe('BootstrapArchiveMeta', function () {
             const archive = tarUp(dir, ['dump.sql.gz', 'bootstrap.json', 'dump.sha256'])
             expect(await meta.readBootstrapArchiveMeta(archive)).to.equal(null)
         })
+    })
+})
 
+describe('BootstrapArchiveMeta', function () {
+    beforeEach(setupWorkDir)
+    afterEach(cleanupWorkDir)
+
+    describe('writeBootstrapMeta() + readBootstrapArchiveMeta()', function () {
         it('answers null, never rejects, for a missing, truncated or non-gzip file', async function () {
             expect(await meta.readBootstrapArchiveMeta(path.join(dir, 'nope.tar.gz'))).to.equal(null)
             writeMembers(dir)
@@ -134,6 +154,11 @@ describe('BootstrapArchiveMeta', function () {
             expect(read.height).to.equal(null)
         })
     })
+})
+
+describe('BootstrapArchiveMeta', function () {
+    beforeEach(setupWorkDir)
+    afterEach(cleanupWorkDir)
 
     describe('parseTarHeader()', function () {
         it('returns null for the end-of-archive zero block and for a short block', function () {
