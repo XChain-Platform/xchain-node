@@ -48,6 +48,15 @@ describe('crossChainNetworksFor', function () {
         const networks = crossChainNetworksFor(XChainService.XCHAIN_INDEXER, 'dogecoin', 'regtest', installed)
         expect(networks).to.deep.equal([getDockerNetwork('bitcoin', 'regtest')])
     })
+})
+
+describe('crossChainNetworksFor', function () {
+
+    const installed = {
+        bitcoin:  ['regtest'],
+        dogecoin: ['regtest', 'testnet'],
+        litecoin: ['testnet']
+    }
 
     it('returns all same-tier siblings, sorted, when several are installed', function () {
         const both = {
