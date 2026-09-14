@@ -130,15 +130,15 @@ describe('HubConnector', function () {
         })
     })
 
-    // _call(): degraded-response handling
-    describe('_call()', function () {
+    // callRpc(): degraded-response handling
+    describe('callRpc()', function () {
 
         it('surfaces the JSON-RPC body of a 503 "degraded" response instead of discarding it', async function () {
             const axiosStub = makeAxiosStub()
             axiosStub.post.rejects(degraded503Error())
             const HubConnector = loadConnector(axiosStub)
             const connector = new HubConnector('localhost', 10000)
-            const result = await connector._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            const result = await connector.callRpc({ jsonrpc: '2.0', method: 'ping', id: 1 })
             expect(result).to.deep.equal({ status: 'degraded', db: false })
         })
 
@@ -148,7 +148,7 @@ describe('HubConnector', function () {
             axiosStub.post.onSecondCall().resolves({ data: { result: 'pong' } })
             const HubConnector = loadConnector(axiosStub)
             const connector = new HubConnector(['http://hub1:10000', 'http://hub2:10000'])
-            const result = await connector._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            const result = await connector.callRpc({ jsonrpc: '2.0', method: 'ping', id: 1 })
             expect(result).to.equal('pong')
             expect(axiosStub.post.callCount).to.equal(2)
         })
@@ -158,7 +158,7 @@ describe('HubConnector', function () {
             axiosStub.post.rejects(new Error('ECONNREFUSED'))
             const HubConnector = loadConnector(axiosStub)
             const connector = new HubConnector('localhost', 10000)
-            const result = await connector._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+            const result = await connector.callRpc({ jsonrpc: '2.0', method: 'ping', id: 1 })
             expect(result).to.be.null
         })
     })

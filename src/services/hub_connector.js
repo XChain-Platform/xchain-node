@@ -37,7 +37,7 @@ class HubConnector {
         // answered, so a degraded first endpoint isn't retried first every call
         // (which would cost the full timeout per call before falling back).
         this._lastGoodIdx = 0;
-        // Per-endpoint failure detail from the most recent _call(). Populated with
+        // Per-endpoint failure detail from the most recent callRpc(). Populated with
         // "url → code|message" strings for each unreachable endpoint so callers
         // can report exactly what was tried and why, instead of a bare null.
         this.lastFailures = [];
@@ -45,7 +45,7 @@ class HubConnector {
 
     // Internal: call a JSON-RPC method, trying each endpoint starting from the
     // last one that succeeded and wrapping around through the rest.
-    async _call(data, timeout = 5000){
+    async callRpc(data, timeout = 5000){
         // A reachable-but-unhealthy hub responds with a non-2xx status (e.g. the
         // 503 "degraded" health body returned when its DB pool is down) that
         // still carries a valid JSON-RPC body. Axios throws on any non-2xx, so
@@ -95,7 +95,7 @@ class HubConnector {
     }
 
     async ping(){
-        let result = await this._call({ jsonrpc: '2.0', method: 'ping', id: 1 });
+        let result = await this.callRpc({ jsonrpc: '2.0', method: 'ping', id: 1 });
         // A reachable-but-degraded hub returns a non-null {status:"degraded"}
         // body. The hub is up, so report it as reachable rather than treating it
         // as down (which would make the install/restart loop exhaust its retries
@@ -107,7 +107,7 @@ class HubConnector {
     }
 
     async updateConfig(newConfigJson){
-        let result = await this._call({
+        let result = await this.callRpc({
             jsonrpc: '2.0',
             method: 'updateconfig',
             params: { config: newConfigJson },

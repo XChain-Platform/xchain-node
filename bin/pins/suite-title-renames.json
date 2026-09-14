@@ -164,6 +164,11 @@
       "GitHubDownloader _getHashForArch() returns string hash for legacy string entry (any arch)": "GitHubDownloader getHashForArch() returns string hash for legacy string entry (any arch)",
       "GitHubDownloader verifyRepositoryHash() passes explicit arch parameter to _getHashForArch": "GitHubDownloader verifyRepositoryHash() passes explicit arch parameter to getHashForArch"
     },
+    "test/unit/hub_connector.test.js": {
+      "HubConnector _call() prefers a healthy endpoint over a degraded one": "HubConnector callRpc() prefers a healthy endpoint over a degraded one",
+      "HubConnector _call() returns null when an endpoint is truly unreachable (no err.response)": "HubConnector callRpc() returns null when an endpoint is truly unreachable (no err.response)",
+      "HubConnector _call() surfaces the JSON-RPC body of a 503 \"degraded\" response instead of discarding it": "HubConnector callRpc() surfaces the JSON-RPC body of a 503 \"degraded\" response instead of discarding it"
+    },
     "test/unit/maria_db_store.test.js": {
       "MariaDbStore countModules() returns 0 when no rows": "MariaDbStore getModuleCount() returns 0 when no rows",
       "MariaDbStore countModules() returns 0 when pool is not ready": "MariaDbStore getModuleCount() returns 0 when pool is not ready",

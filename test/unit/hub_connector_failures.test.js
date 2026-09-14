@@ -13,7 +13,7 @@
 // Guards the contract HubService's config-push retry loop depends on for its
 // error message.
 //
-// THE DEFECT THIS EXISTS FOR. `_call()` catches its own transport errors and
+// THE DEFECT THIS EXISTS FOR. `callRpc()` catches its own transport errors and
 // returns null, so `updateConfig()` reports failure by RETURNING FALSE rather
 // than throwing. The retry loop only recorded a cause in its `catch`, so the
 // one path that never throws - a 401 from a key-enforcing hub - printed
