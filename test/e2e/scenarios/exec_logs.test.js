@@ -16,23 +16,25 @@ const E2EEnv = require('../helpers/e2e-env')
 const TestEnv = require('../../integration/helpers/test-env')
 const { filterCommandParameters } = require('../../../src/services/config_service')
 
+let env, cli
+
+async function setupEnv() {
+    env = new E2EEnv()
+    await env.setup()
+    env.setupDefaultRoutes()
+
+    const state = require('../../../src/state')
+    state.setDbRootPassword('testrootpw')
+}
+
+async function teardownEnv() {
+    await env.teardown()
+}
+
 describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
     this.timeout(30000)
-
-    let env, cli
-
-    beforeEach(async function () {
-        env = new E2EEnv()
-        await env.setup()
-        env.setupDefaultRoutes()
-
-        const state = require('../../../src/state')
-        state.setDbRootPassword('testrootpw')
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
 
     // E2E-070: execModules reads container ID and calls docker exec
     describe('E2E-070: Exec command', function () {
@@ -81,7 +83,12 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
             expect(execCmds).to.have.lengthOf(0)
         })
     })
+})
 
+describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-071: logModules reads container ID and calls docker logs
     describe('E2E-071: Logs command', function () {
 
@@ -117,7 +124,12 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
             expect(result).to.be.true
         })
     })
+})
 
+describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-072: Restart calls docker restart for each module
     describe('E2E-072: Restart command', function () {
 
