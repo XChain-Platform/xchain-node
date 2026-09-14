@@ -47,7 +47,7 @@ function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
     return config
 }
 
-// Row 39 (#4138 decoupling): the explorer's checkpoint/proof/cross-chain routes
+// The explorer's checkpoint/proof/cross-chain routes
 // read state_checkpoints / capability_snapshots / cross_chain_matches from a
 // LOCAL schema (config database.checkpoint), because xchain-sync deliberately
 // never replicates those hub-mirrored tables. A deployment with no externally-
@@ -117,6 +117,7 @@ function buildCheckpointConfig(defaultConfigCoinNetwork) {
 // simply "not opted in".
 async function isCheckpointSelfSyncEnabled(deps = {}) {
     const env = deps.env || process.env
+    // An opt-in exported in the invoking shell counts on its own, before any container is read.
     if (env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && env.EXPLORER_CHECKPOINT_SELF_SYNC !== "") return true
 
     const readEnv = deps.readContainerEnv || readContainerEnv
@@ -213,7 +214,7 @@ async function updateHubOrExplorer(module) {
                 }
             }
 
-            // Row 39: advertise a self-synced checkpoint schema for this coin/
+            // Advertise a self-synced checkpoint schema for this coin/
             // network once an indexer is actually installed for it (the
             // checkpoint config needs the indexer's own DB host/port/user/pass)
             // and the operator opted in (once, at any point in this deployment's
@@ -234,10 +235,10 @@ async function updateHubOrExplorer(module) {
     if (module === "xchain-explorer") {
         const explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
         // getModuleContainer returns null on a registry miss rather than
-        // throwing, so an uninstalled explorer previously fell through into
-        // stringToDockerContainerFile(null, ...) and surfaced as the same
-        // generic "problem trying to update a config" error as a real
-        // failure, masking the actual cause (uuid:fd7cc224 sibling site).
+        // throwing, so an uninstalled explorer is refused here by name. Passed
+        // on to stringToDockerContainerFile(null, ...) it would surface as the
+        // same generic "problem trying to update a config" error as a real
+        // failure, masking the actual cause.
         if (!explorerContainerId) {
             throw "xchain-explorer module is not installed; cannot update its config"
         }
