@@ -82,6 +82,9 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
             assert.strictEqual(cli.slug(null), '');
         });
     });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('credentials', function () {
 
@@ -116,6 +119,9 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
             assert.throws(() => cli.passwordFor(store, {}), /no password in the environment/);
         });
     });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('connection options', function () {
 
@@ -149,6 +155,9 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
             assert.notStrictEqual(opts.database, CONFIG.stores[0].database);
         });
     });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('store lookup', function () {
 
@@ -162,6 +171,9 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
             assert.strictEqual(cli.findStore(null, 'nope'), null);
         });
     });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('the CREATE_TIME read', function () {
 
@@ -200,6 +212,12 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
                                  ('XChain_BTC_Indexer', ['blocks']);
             assert.deepStrictEqual(out, rows);
         });
+    });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
+
+    describe('the CREATE_TIME read', function () {
 
         it('throws for a database the config never inventoried', async function () {
             // A store present on the host but absent from the section 3.1 inventory must
@@ -235,6 +253,9 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
             assert.deepStrictEqual(out, rows);
         });
     });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('the epoch-marker read', function () {
 
@@ -290,6 +311,9 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
             assert.strictEqual(out, '637');
         });
     });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('the config file', function () {
 
@@ -309,6 +333,9 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
             fs.rmSync(dir, { recursive: true, force: true });
         });
     });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('the sweep wiring end to end', function () {
 
@@ -359,6 +386,9 @@ describe('check-rebase-completeness CLI (deploy-informing script)', function () 
             assert.strictEqual(result.pass, true);
         });
     });
+});
+
+describe('check-rebase-completeness CLI (deploy-informing script)', function () {
 
     describe('the entrypoint guard', function () {
 
