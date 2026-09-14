@@ -109,6 +109,9 @@ describe('EncoderMaintenanceWindow', function () {
             expect(await mod.declareEncoderMaintenance(COIN, NETWORK)).to.be.false
         })
     })
+})
+
+describe('EncoderMaintenanceWindow', function () {
 
     describe('clearEncoderMaintenance()', function () {
 
