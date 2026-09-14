@@ -16,23 +16,25 @@ const E2EEnv = require('../helpers/e2e-env')
 const TestEnv = require('../../integration/helpers/test-env')
 const { filterCommandParameters } = require('../../../src/services/config_service')
 
+let env, cli
+
+async function setupEnvironment() {
+    env = new E2EEnv()
+    await env.setup()
+    env.setupDefaultRoutes()
+
+    const state = require('../../../src/state')
+    state.setDbRootPassword('testrootpw')
+}
+
+async function teardownEnvironment() {
+    await env.teardown()
+}
+
 describe('E2E: Update Flow (Scenario 4.6)', function () {
     this.timeout(30000)
-
-    let env, cli
-
-    beforeEach(async function () {
-        env = new E2EEnv()
-        await env.setup()
-        env.setupDefaultRoutes()
-
-        const state = require('../../../src/state')
-        state.setDbRootPassword('testrootpw')
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // E2E-040: Update kills old container and creates new one
     describe('E2E-040: Update replaces container', function () {
@@ -70,6 +72,12 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             env.capture.assertCalled(/docker run/)
         })
     })
+})
+
+describe('E2E: Update Flow (Scenario 4.6)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // E2E-041: New container ID replaces old in LevelDB
     describe('E2E-041: LevelDB updated with new container ID', function () {
@@ -91,6 +99,12 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             expect(newContainerId).to.not.equal(oldContainerId)
         })
     })
+})
+
+describe('E2E: Update Flow (Scenario 4.6)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // E2E-042: Update with branch argument
     describe('E2E-042: Update with specific branch', function () {
@@ -112,6 +126,12 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             expect(hasDevelop, 'git clone uses develop branch').to.be.true
         })
     })
+})
+
+describe('E2E: Update Flow (Scenario 4.6)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // E2E-043: Update multiple modules in sequence
     describe('E2E-043: Update multiple modules', function () {
