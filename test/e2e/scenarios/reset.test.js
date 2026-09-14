@@ -15,23 +15,25 @@ const { expect } = require('chai')
 const E2EEnv = require('../helpers/e2e-env')
 const { filterCommandParameters } = require('../../../src/services/config_service')
 
+let env, cli
+
+async function setupEnvironment() {
+    env = new E2EEnv()
+    await env.setup()
+    env.setupDefaultRoutes()
+
+    const state = require('../../../src/state')
+    state.setDbRootPassword('testrootpw')
+}
+
+async function teardownEnvironment() {
+    await env.teardown()
+}
+
 describe('E2E: Reset Command (Scenario 4.8)', function () {
     this.timeout(30000)
-
-    let env, cli
-
-    beforeEach(async function () {
-        env = new E2EEnv()
-        await env.setup()
-        env.setupDefaultRoutes()
-
-        const state = require('../../../src/state')
-        state.setDbRootPassword('testrootpw')
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // E2E-050: Reset stops containers, clears data, restarts
     describe('E2E-050: Reset lifecycle (stop → clear → restart)', function () {
@@ -77,6 +79,12 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
             expect(idAfter).to.equal(idBefore)
         })
     })
+})
+
+describe('E2E: Reset Command (Scenario 4.8)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // E2E-051: Reset decoder triggers database DROP/CREATE
     describe('E2E-051: Reset decoder resets database', function () {
@@ -100,6 +108,12 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
             expect(hasDropCreate, 'DROP and CREATE DATABASE executed').to.be.true
         })
     })
+})
+
+describe('E2E: Reset Command (Scenario 4.8)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnvironment)
+    afterEach(teardownEnvironment)
 
     // E2E-052: Reset all stops multiple services
     describe('E2E-052: Reset all stops multiple modules', function () {
