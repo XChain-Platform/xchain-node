@@ -68,20 +68,21 @@ function loadCli() {
     return { program: captured, stubs }
 }
 
+let exitStub, errorStub
+
+function setupRollbackTest() {
+    exitStub  = sinon.stub(process, 'exit')
+    errorStub = sinon.stub(console, 'error')
+}
+
+function runRollback(program) {
+    return program.parseAsync(['rollback', '4200', 'xchain-indexer', 'bitcoin', 'regtest'], { from: 'user' })
+}
+
 describe('CLI `rollback` incident-path behaviour', function () {
-
-    let exitStub, errorStub
-
-    beforeEach(function () {
-        exitStub  = sinon.stub(process, 'exit')
-        errorStub = sinon.stub(console, 'error')
-    })
+    beforeEach(setupRollbackTest)
 
     afterEach(function () { sinon.restore() })
-
-    async function runRollback(program) {
-        await program.parseAsync(['rollback', '4200', 'xchain-indexer', 'bitcoin', 'regtest'], { from: 'user' })
-    }
 
     it('exits NON-ZERO instead of leaving the process alive on open handles', async function () {
         const { program } = loadCli()
@@ -113,6 +114,12 @@ describe('CLI `rollback` incident-path behaviour', function () {
         expect(printed).to.match(/xchain-node reset xchain-decoder litecoin testnet/)
         expect(printed).to.match(/xchain-node bootstrap restore xchain-decoder litecoin testnet/)
     })
+})
+
+describe('CLI `rollback` incident-path behaviour', function () {
+    beforeEach(setupRollbackTest)
+
+    afterEach(function () { sinon.restore() })
 
     // The two waits that made it look like a hang. preCheck provisions the
     // database container, hub module and module registry before any action runs;
