@@ -22,8 +22,8 @@
  * 503, and the board has no way to tell that outage apart from a broken
  * encoder. On 2026-08-01 the monthly cron therefore showed the mainnet
  * BTC encoder Degraded for 3h36m. The probe is right and must not be
- * silenced (see xchain-encoder src/maintenanceWindow.js, which folds this
- * window in as CONTEXT and never lets it move a readiness field or the
+ * silenced (see xchain-encoder src/server/maintenance_window.js, which folds
+ * this window in as CONTEXT and never lets it move a readiness field or the
  * 503). What was missing was the operator's own declaration.
  *
  * The sentinel is written INTO the encoder container with `docker exec

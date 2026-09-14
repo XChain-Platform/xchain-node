@@ -584,7 +584,7 @@ async function getDefaultConfig(module, coin, network) {
             defaultValues["NETWORK"] = coin + "-" + network
         }
 
-        // LevelDB tuning passthrough (xchain-utxo-tracker only). LevelUpDb.js reads
+        // LevelDB tuning passthrough (xchain-utxo-tracker only). src/store/level_up_db.js reads
         // LEVELDB_CACHE_BYTES (documented default 4 GiB, components/utxo-tracker/configuration.md:41)
         // and LEVELDB_WRITE_BUFFER_BYTES from process.env inside the container, but
         // getDefaultConfig never forwarded either host var into the tracker's

@@ -16,7 +16,7 @@
  *
  * The utxo-tracker sizes its LevelDB cache, heap-flush threshold and bulk-sync
  * budget from the memory it may use, read from the cgroup when one binds below
- * host RAM (xchain-utxo-tracker/src/memoryBudget.js). Nothing ever set that
+ * host RAM (xchain-utxo-tracker/src/store/memory_budget.js). Nothing ever set that
  * limit: every container ran with HostConfig.Memory=0, so every tracker took
  * fractions of the WHOLE host, and N trackers on one box oversubscribed it
  * (operator report 2026-09-07: three trackers on a 16 GB host intended 13.7 GB

@@ -1052,7 +1052,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
         // halted=false, so get_sync_status / GET /status report a normal non-503
         // status and BootstrapHealthGate has nothing to refuse on: an emptied
         // store reads as caught up. Mirrors the tracker's own contract in
-        // xchain-utxo-tracker/src/bootstrap-recovery.js `handleRestoreFailure`,
+        // xchain-utxo-tracker/src/bootstrap/bootstrap_recovery.js `handleRestoreFailure`,
         // where a post-wipe abort fails loud instead of resuming.
         err.postWipe = true
         logger.info(

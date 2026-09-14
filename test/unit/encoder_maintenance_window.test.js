@@ -136,7 +136,7 @@ describe('EncoderMaintenanceWindow', function () {
 
     describe('sentinel path', function () {
         // The encoder resolves the same default (xchain-encoder
-        // src/maintenanceWindow.js DEFAULT_SENTINEL). A drift here means the
+        // src/server/maintenance_window.js DEFAULT_SENTINEL). A drift here means the
         // publish writes a window nothing ever reads.
         it('defaults to the path the encoder reads', function () {
             const { mod } = load()

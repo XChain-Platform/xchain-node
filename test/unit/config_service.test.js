@@ -1228,7 +1228,7 @@ describe('ConfigService', function () {
             })
 
             // LEVELDB_CACHE_BYTES is documented at
-            // components/utxo-tracker/configuration.md:41 and LevelUpDb.js reads it from
+            // components/utxo-tracker/configuration.md:41 and src/store/level_up_db.js reads it from
             // process.env inside the container, but getDefaultConfig never forwarded the
             // host var into the tracker's own config, so an operator exporting it got
             // silence on install/update/recreate.
