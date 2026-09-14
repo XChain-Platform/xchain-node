@@ -94,12 +94,13 @@ function pinnedTarget(components) {
     return { kind: 'release', tag: 'v0.9.0', manifest: { platform_version: '0.9.0', components } }
 }
 
-describe('clone integrity (manifest-pinned installs)', () => {
+function resetCloneIntegrityTest() {
+    releaseSvc.clearActiveTarget()
+    sinon.restore()
+}
 
-    afterEach(() => {
-        releaseSvc.clearActiveTarget()
-        sinon.restore()
-    })
+describe('clone integrity (manifest-pinned installs)', () => {
+    afterEach(resetCloneIntegrityTest)
 
     describe('cloneGit() commit verification', () => {
 
@@ -128,6 +129,13 @@ describe('clone integrity (manifest-pinned installs)', () => {
             await ms.cloneGit('xchain-vm', false, false, 'v0.9.0', PIN_SHA).catch(() => {})
             expect(fs.rmSync.calledWith('/modules/xchain-vm', sinon.match({ recursive: true, force: true }))).to.equal(true)
         })
+    })
+})
+
+describe('clone integrity (manifest-pinned installs)', () => {
+    afterEach(resetCloneIntegrityTest)
+
+    describe('cloneGit() commit verification', () => {
 
         it('leaves an EXISTING checkout untouched when a rewrite fails verification', async () => {
             // The check runs against the staging tree, before the swap, so a moved
@@ -162,6 +170,10 @@ describe('clone integrity (manifest-pinned installs)', () => {
             expect(configService.removeModuleTmpDir.calledWith('xchain-vm')).to.equal(true)
         })
     })
+})
+
+describe('clone integrity (manifest-pinned installs)', () => {
+    afterEach(resetCloneIntegrityTest)
 
     describe('resolveBundledLibRef()', () => {
 
@@ -189,6 +201,13 @@ describe('clone integrity (manifest-pinned installs)', () => {
             const ref = await ms.resolveBundledLibRef('xchain-indexer', 'xchain-vm')
             expect(ref.ref).to.equal('feature/gas-rounding')
         })
+    })
+})
+
+describe('clone integrity (manifest-pinned installs)', () => {
+    afterEach(resetCloneIntegrityTest)
+
+    describe('resolveBundledLibRef()', () => {
 
         it('falls back to the default branch only on a detached parent with no manifest', async () => {
             sinon.stub(console, 'warn')
@@ -224,6 +243,10 @@ describe('clone integrity (manifest-pinned installs)', () => {
             }
         })
     })
+})
+
+describe('clone integrity (manifest-pinned installs)', () => {
+    afterEach(resetCloneIntegrityTest)
 
     describe('source-level guard', () => {
 
