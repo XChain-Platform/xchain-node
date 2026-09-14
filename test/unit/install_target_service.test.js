@@ -31,19 +31,27 @@ function load(dataDir, moduleDir, getModuleBranch) {
     })
 }
 
+let workDir, dataDir, moduleDir
+
+function setUpTargetDirs() {
+    workDir   = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-target-'))
+    dataDir   = path.join(workDir, 'data')
+    moduleDir = path.join(workDir, 'modules')
+}
+
+function cleanUpTargetDirs() {
+    fs.rmSync(workDir, { recursive: true, force: true })
+    sinon.restore()
+}
+
+function withModules(names) {
+    fs.mkdirSync(moduleDir, { recursive: true })
+    for (const name of names) fs.mkdirSync(path.join(moduleDir, name))
+}
+
 describe('InstallTargetService', function () {
-    let workDir, dataDir, moduleDir
-
-    beforeEach(function () {
-        workDir   = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-target-'))
-        dataDir   = path.join(workDir, 'data')
-        moduleDir = path.join(workDir, 'modules')
-    })
-
-    afterEach(function () {
-        fs.rmSync(workDir, { recursive: true, force: true })
-        sinon.restore()
-    })
+    beforeEach(setUpTargetDirs)
+    afterEach(cleanUpTargetDirs)
 
     describe('recordInstallTarget() / readInstallTarget()', function () {
 
@@ -89,14 +97,13 @@ describe('InstallTargetService', function () {
             expect(warn.calledOnce).to.equal(true)
         })
     })
+})
+
+describe('InstallTargetService', function () {
+    beforeEach(setUpTargetDirs)
+    afterEach(cleanUpTargetDirs)
 
     describe('inferInstallTarget()', function () {
-
-        function withModules(names) {
-            fs.mkdirSync(moduleDir, { recursive: true })
-            for (const name of names) fs.mkdirSync(path.join(moduleDir, name))
-        }
-
         it('classifies detached checkouts as a release node', async function () {
             withModules(['xchain-hub', 'xchain-indexer'])
             const svc = load(dataDir, moduleDir, sinon.stub().resolves('HEAD'))
@@ -131,6 +138,11 @@ describe('InstallTargetService', function () {
             expect(t.kind).to.equal('release')
         })
     })
+})
+
+describe('InstallTargetService', function () {
+    beforeEach(setUpTargetDirs)
+    afterEach(cleanUpTargetDirs)
 
     describe('resolveUpdateTarget()', function () {
 
