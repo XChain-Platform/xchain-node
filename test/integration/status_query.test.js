@@ -15,61 +15,62 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
 const TestEnv = require('./helpers/test-env')
+let env
+
+async function setupStatusEnv() {
+    env = new TestEnv()
+    await env.setup()
+}
+
+async function cleanupStatusEnv() {
+    await env.teardown()
+}
+
+function makeDockerInspectResponse(status, ports) {
+    return JSON.stringify([{
+        State: { Status: status },
+        NetworkSettings: {
+            Ports: ports || {}
+        }
+    }])
+}
+
+/**
+ * Create a StatusService with stubbed DockerService (docker inspect)
+ * and stubbed VersionService, but real registry interaction via env.
+ */
+function makeStatusService(inspectResponses) {
+    return proxyquire('../../src/services/status_service', {
+        './docker_service': {
+            getStatusFromContainer: async (containerId) => {
+                if (containerId in inspectResponses) {
+                    return inspectResponses[containerId]
+                }
+                // Match `docker inspect`'s real error text (StatusService's
+                // isContainerGoneError greps for "no such (object|container|
+                // image)"). A message that doesn't match reads as a transient
+                // inspect failure and is deliberately kept visible with an
+                // "unknown" state instead of pruned (src/services/
+                // StatusService.js, since d3cbc8a); only a confirmed-gone
+                // error prunes the module, which is what these two tests mean
+                // to exercise.
+                throw new Error('No such object: ' + containerId)
+            }
+        },
+        './version_service': {
+            checkRemoteNodeVersion: async () => {},
+            getLocalNodeVersion: async () => '0.0.1',
+            getContainerNodeVersion: async () => '0.0.1',
+            getLocalModuleVersion: async () => '0.0.1',
+            getContainerModuleVersion: async () => '0.0.1'
+        }
+    })
+}
 
 describe('Integration: Status Query Chain', function () {
     this.timeout(15000)
-
-    let env
-
-    beforeEach(async function () {
-        env = new TestEnv()
-        await env.setup()
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
-
-    function makeDockerInspectResponse(status, ports) {
-        return JSON.stringify([{
-            State: { Status: status },
-            NetworkSettings: {
-                Ports: ports || {}
-            }
-        }])
-    }
-
-    /**
-     * Create a StatusService with stubbed DockerService (docker inspect)
-     * and stubbed VersionService, but real registry interaction via env.
-     */
-    function makeStatusService(inspectResponses) {
-        return proxyquire('../../src/services/status_service', {
-            './docker_service': {
-                getStatusFromContainer: async (containerId) => {
-                    if (containerId in inspectResponses) {
-                        return inspectResponses[containerId]
-                    }
-                    // Match `docker inspect`'s real error text (StatusService's
-                    // isContainerGoneError greps for "no such (object|container|
-                    // image)"). A message that doesn't match reads as a transient
-                    // inspect failure and is deliberately kept visible with an
-                    // "unknown" state instead of pruned (src/services/
-                    // StatusService.js, since d3cbc8a); only a confirmed-gone
-                    // error prunes the module, which is what these two tests mean
-                    // to exercise.
-                    throw new Error('No such object: ' + containerId)
-                }
-            },
-            './version_service': {
-                checkRemoteNodeVersion: async () => {},
-                getLocalNodeVersion: async () => '0.0.1',
-                getContainerNodeVersion: async () => '0.0.1',
-                getLocalModuleVersion: async () => '0.0.1',
-                getContainerModuleVersion: async () => '0.0.1'
-            }
-        })
-    }
+    beforeEach(setupStatusEnv)
+    afterEach(cleanupStatusEnv)
 
     describe('getStatus with installed modules', function () {
 
@@ -110,7 +111,15 @@ describe('Integration: Status Query Chain', function () {
 
             expect(result['bitcoin']['mainnet']['xchain-decoder']['status']['State']['Status']).to.equal('exited')
         })
+    })
+})
 
+describe('Integration: Status Query Chain', function () {
+    this.timeout(15000)
+    beforeEach(setupStatusEnv)
+    afterEach(cleanupStatusEnv)
+
+    describe('getStatus with installed modules', function () {
         it('returns multiple modules across different coins/networks', async function () {
             const id1 = TestEnv.fakeContainerId('1')
             const id2 = TestEnv.fakeContainerId('2')
@@ -136,6 +145,12 @@ describe('Integration: Status Query Chain', function () {
             expect(result['']['']['xchain-hub']).to.exist
         })
     })
+})
+
+describe('Integration: Status Query Chain', function () {
+    this.timeout(15000)
+    beforeEach(setupStatusEnv)
+    afterEach(cleanupStatusEnv)
 
     describe('getStatus with empty LevelDB', function () {
 
@@ -145,6 +160,12 @@ describe('Integration: Status Query Chain', function () {
             expect(result).to.deep.equal({})
         })
     })
+})
+
+describe('Integration: Status Query Chain', function () {
+    this.timeout(15000)
+    beforeEach(setupStatusEnv)
+    afterEach(cleanupStatusEnv)
 
     describe('getStatus when Docker inspect fails', function () {
 
@@ -178,6 +199,12 @@ describe('Integration: Status Query Chain', function () {
             }
         })
     })
+})
+
+describe('Integration: Status Query Chain', function () {
+    this.timeout(15000)
+    beforeEach(setupStatusEnv)
+    afterEach(cleanupStatusEnv)
 
     describe('status caching', function () {
 
@@ -209,6 +236,12 @@ describe('Integration: Status Query Chain', function () {
             expect(inspectCount).to.equal(firstCount)
         })
     })
+})
+
+describe('Integration: Status Query Chain', function () {
+    this.timeout(15000)
+    beforeEach(setupStatusEnv)
+    afterEach(cleanupStatusEnv)
 
     describe('getInstalledCoinsAndNetworks', function () {
 
