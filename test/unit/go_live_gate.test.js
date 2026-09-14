@@ -25,42 +25,45 @@ const GATE_ENV_VARS = [
     'INDEXER_API_KEY', 'HUB_API_KEY', 'API_KEY', 'ENCODER_API_KEY', 'SYNC_API_KEY'
 ]
 
-describe('GoLiveGate', () => {
-    let savedEnv, warnStub, tmpDir
+let savedEnv, warnStub, tmpDir
 
-    // A module dir with a clean src tree (no placeholder timestamps).
-    const makeModuleDir = (files = { 'src/index.js': 'module.exports = 1' }) => {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'golive-'))
-        tmpDir = dir
-        for (const [rel, content] of Object.entries(files)) {
-            const full = path.join(dir, rel)
-            fs.mkdirSync(path.dirname(full), { recursive: true })
-            fs.writeFileSync(full, content)
-        }
-        return dir
+// A module dir with a clean src tree (no placeholder timestamps).
+const makeModuleDir = (files = { 'src/index.js': 'module.exports = 1' }) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'golive-'))
+    tmpDir = dir
+    for (const [rel, content] of Object.entries(files)) {
+        const full = path.join(dir, rel)
+        fs.mkdirSync(path.dirname(full), { recursive: true })
+        fs.writeFileSync(full, content)
     }
+    return dir
+}
 
-    // Env every write surface needs so key checks pass.
-    const armedKeys = { INDEXER_API_KEY: 'k', HUB_API_KEY: 'k', API_KEY: 'k', SYNC_API_KEY: 'k' }
+// Env every write surface needs so key checks pass.
+const armedKeys = { INDEXER_API_KEY: 'k', HUB_API_KEY: 'k', API_KEY: 'k', SYNC_API_KEY: 'k' }
 
-    beforeEach(() => {
-        savedEnv = {}
-        for (const name of GATE_ENV_VARS) {
-            savedEnv[name] = process.env[name]
-            delete process.env[name]
-        }
-        warnStub = sinon.stub(console, 'warn')
-        tmpDir = null
-    })
+function resetGateState() {
+    savedEnv = {}
+    for (const name of GATE_ENV_VARS) {
+        savedEnv[name] = process.env[name]
+        delete process.env[name]
+    }
+    warnStub = sinon.stub(console, 'warn')
+    tmpDir = null
+}
 
-    afterEach(() => {
-        for (const name of GATE_ENV_VARS) {
-            if (savedEnv[name] === undefined) delete process.env[name]
-            else process.env[name] = savedEnv[name]
-        }
-        warnStub.restore()
-        if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true })
-    })
+function restoreGateState() {
+    for (const name of GATE_ENV_VARS) {
+        if (savedEnv[name] === undefined) delete process.env[name]
+        else process.env[name] = savedEnv[name]
+    }
+    warnStub.restore()
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true })
+}
+
+describe('GoLiveGate', () => {
+    beforeEach(resetGateState)
+    afterEach(restoreGateState)
 
     describe('scope', () => {
         it('ignores read surfaces (decoder) on mainnet even when armed', () => {
@@ -75,6 +78,11 @@ describe('GoLiveGate', () => {
             expect(warnStub.called).to.equal(false)
         })
     })
+})
+
+describe('GoLiveGate', () => {
+    beforeEach(resetGateState)
+    afterEach(restoreGateState)
 
     describe('pre-launch (XCHAIN_NODE_GO_LIVE unset): warn-only', () => {
         it('warns but does not throw on a mainnet indexer with missing keys', () => {
@@ -90,6 +98,11 @@ describe('GoLiveGate', () => {
             expect(warnStub.called).to.equal(false)
         })
     })
+})
+
+describe('GoLiveGate', () => {
+    beforeEach(resetGateState)
+    afterEach(restoreGateState)
 
     describe('armed (XCHAIN_NODE_GO_LIVE=1): refuses', () => {
         beforeEach(() => { process.env.XCHAIN_NODE_GO_LIVE = '1' })
@@ -142,6 +155,11 @@ describe('GoLiveGate', () => {
             expect(warnStub.firstCall.args[0]).to.include('SKIPPED')
         })
     })
+})
+
+describe('GoLiveGate', () => {
+    beforeEach(resetGateState)
+    afterEach(restoreGateState)
 
     describe('collectViolations key resolution', () => {
         it('accepts keys from the generated container env over host env', () => {
@@ -154,6 +172,11 @@ describe('GoLiveGate', () => {
             expect(collectViolations('xchain-sync', {}, null)).to.deep.equal([])
         })
     })
+})
+
+describe('GoLiveGate', () => {
+    beforeEach(resetGateState)
+    afterEach(restoreGateState)
 
     describe('findFlagDayPlaceholders', () => {
         it('finds an un-armed mainnet activation anywhere under src/ but skips node_modules', () => {
