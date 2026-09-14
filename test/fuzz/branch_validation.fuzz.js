@@ -70,6 +70,50 @@ function makeStubs() {
 // Tests
 // ---------------------------------------------------------------------------
 
+// --- Invalid branch names that must be rejected ---
+const invalidBranches = [
+    // Shell injection attempts
+    'master; rm -rf /',
+    'master && echo pwned',
+    'master | cat /etc/passwd',
+    'master$(whoami)',
+    'master`id`',
+    // Git flag injection
+    '--upload-pack=evil',
+    '--template=/tmp/evil',
+    // Whitespace
+    'branch name',
+    'branch\tname',
+    'branch\nname',
+    // Special characters
+    'branch"name',
+    "branch'name",
+    'branch\\name',
+    'branch<name',
+    'branch>name',
+    'branch:name',
+    'branch*name',
+    'branch?name',
+    'branch[name',
+    'branch]name',
+    'branch{name}',
+    'branch(name)',
+    'branch!name',
+    'branch@name',
+    'branch#name',
+    'branch$name',
+    'branch%name',
+    'branch^name',
+    'branch&name',
+    'branch=name',
+    'branch+name',
+    'branch~name',
+    // Null bytes
+    'branch\x00name',
+    // Unicode
+    'bränch',
+]
+
 describe('Fuzz: Branch Name Validation', function () {
 
     // --- Valid branch names that must be accepted ---
@@ -105,51 +149,9 @@ describe('Fuzz: Branch Name Validation', function () {
             expect(clonedCmd).to.include(`-b ${branch}`)
         })
     }
+})
 
-    // --- Invalid branch names that must be rejected ---
-    const invalidBranches = [
-        // Shell injection attempts
-        'master; rm -rf /',
-        'master && echo pwned',
-        'master | cat /etc/passwd',
-        'master$(whoami)',
-        'master`id`',
-        // Git flag injection
-        '--upload-pack=evil',
-        '--template=/tmp/evil',
-        // Whitespace
-        'branch name',
-        'branch\tname',
-        'branch\nname',
-        // Special characters
-        'branch"name',
-        "branch'name",
-        'branch\\name',
-        'branch<name',
-        'branch>name',
-        'branch:name',
-        'branch*name',
-        'branch?name',
-        'branch[name',
-        'branch]name',
-        'branch{name}',
-        'branch(name)',
-        'branch!name',
-        'branch@name',
-        'branch#name',
-        'branch$name',
-        'branch%name',
-        'branch^name',
-        'branch&name',
-        'branch=name',
-        'branch+name',
-        'branch~name',
-        // Null bytes
-        'branch\x00name',
-        // Unicode
-        'bränch',
-    ]
-
+describe('Fuzz: Branch Name Validation', function () {
     for (const branch of invalidBranches) {
         it(`rejects invalid branch name: ${JSON.stringify(branch)}`, async function () {
             const stubs = makeStubs()
@@ -166,7 +168,9 @@ describe('Fuzz: Branch Name Validation', function () {
             }
         })
     }
+})
 
+describe('Fuzz: Branch Name Validation', function () {
     // --- Branch names that pass the regex but look like git flags ---
     const regexPassButDangerous = [
         // The regex DOES allow this (all chars are in [a-zA-Z0-9._\-\/])
@@ -197,7 +201,9 @@ describe('Fuzz: Branch Name Validation', function () {
         const bIndex = parts.indexOf('-b')
         expect(parts[bIndex + 1]).to.equal('--upload-pack')
     })
+})
 
+describe('Fuzz: Branch Name Validation', function () {
     // --- Null branch (no branch specified) ---
     it('treats empty string branch same as null (no -b flag)', async function () {
         const stubs = makeStubs()
@@ -224,7 +230,9 @@ describe('Fuzz: Branch Name Validation', function () {
         await ms.cloneGit('xchain-encoder', false, false, null)
         expect(clonedCmd).to.not.include('-b')
     })
+})
 
+describe('Fuzz: Branch Name Validation', function () {
     // --- Extremely long branch name ---
     it('accepts a very long but valid branch name', async function () {
         const longBranch = 'a'.repeat(500)
