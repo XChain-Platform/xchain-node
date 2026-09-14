@@ -18,42 +18,43 @@ const { Coin, Network } = require('../../src/config')
 
 const TestEnv        = require('./helpers/test-env')
 const CommandCapture = require('./helpers/command-capture')
+let env, capture
+
+async function setupNetworkEnv() {
+    env = new TestEnv()
+    await env.setup()
+    capture = new CommandCapture()
+}
+
+async function cleanupNetworkEnv() {
+    await env.teardown()
+}
+
+function makeDockerService() {
+    return proxyquire('../../src/services/docker_service', {
+        'child_process': {
+            execFile: capture.createExecFileStub(),
+            spawn: capture.createSpawnStub(),
+            spawnSync: capture.createSpawnSyncStub()
+        },
+        'util': { promisify: () => capture.createExecFileAsyncStub() },
+        'blessed': {
+            screen: () => ({
+                key: () => {},
+                on: () => {},
+                render: () => {},
+                destroy: () => {}
+            }),
+            text: () => {},
+            log: () => ({ log: () => {} })
+        }
+    })
+}
 
 describe('Integration: Docker Network Management', function () {
     this.timeout(15000)
-
-    let env, capture
-
-    beforeEach(async function () {
-        env = new TestEnv()
-        await env.setup()
-        capture = new CommandCapture()
-    })
-
-    afterEach(async function () {
-        await env.teardown()
-    })
-
-    function makeDockerService() {
-        return proxyquire('../../src/services/docker_service', {
-            'child_process': {
-                execFile: capture.createExecFileStub(),
-                spawn: capture.createSpawnStub(),
-                spawnSync: capture.createSpawnSyncStub()
-            },
-            'util': { promisify: () => capture.createExecFileAsyncStub() },
-            'blessed': {
-                screen: () => ({
-                    key: () => {},
-                    on: () => {},
-                    render: () => {},
-                    destroy: () => {}
-                }),
-                text: () => {},
-                log: () => ({ log: () => {} })
-            }
-        })
-    }
+    beforeEach(setupNetworkEnv)
+    afterEach(cleanupNetworkEnv)
 
     // createDockerNetwork
     describe('createDockerNetwork', function () {
@@ -95,6 +96,12 @@ describe('Integration: Docker Network Management', function () {
             capture.assertCalled(/docker network create xchain-node/)
         })
     })
+})
+
+describe('Integration: Docker Network Management', function () {
+    this.timeout(15000)
+    beforeEach(setupNetworkEnv)
+    afterEach(cleanupNetworkEnv)
 
     // addContainerToNetwork
     describe('addContainerToNetwork', function () {
@@ -143,6 +150,12 @@ describe('Integration: Docker Network Management', function () {
             capture.assertNotCalled(/docker network connect/)
         })
     })
+})
+
+describe('Integration: Docker Network Management', function () {
+    this.timeout(15000)
+    beforeEach(setupNetworkEnv)
+    afterEach(cleanupNetworkEnv)
 
     // Container lifecycle commands
     describe('container lifecycle commands', function () {
@@ -180,7 +193,15 @@ describe('Integration: Docker Network Management', function () {
             expect(result).to.be.true
             capture.assertCalled(/docker restart/)
         })
+    })
+})
 
+describe('Integration: Docker Network Management', function () {
+    this.timeout(15000)
+    beforeEach(setupNetworkEnv)
+    afterEach(cleanupNetworkEnv)
+
+    describe('container lifecycle commands', function () {
         it('removeContainer calls docker rm with correct ID', async function () {
             const containerId = TestEnv.fakeContainerId('m')
             capture.when(/docker rm/).returns({ stdout: containerId })
@@ -216,6 +237,12 @@ describe('Integration: Docker Network Management', function () {
             expect(cmds[0].command).to.include('ls -la')
         })
     })
+})
+
+describe('Integration: Docker Network Management', function () {
+    this.timeout(15000)
+    beforeEach(setupNetworkEnv)
+    afterEach(cleanupNetworkEnv)
 
     // checkDockerInstalledAndReachable
     describe('checkDockerInstalledAndReachable', function () {
@@ -254,6 +281,12 @@ describe('Integration: Docker Network Management', function () {
             }
         })
     })
+})
+
+describe('Integration: Docker Network Management', function () {
+    this.timeout(15000)
+    beforeEach(setupNetworkEnv)
+    afterEach(cleanupNetworkEnv)
 
     // getStatusFromContainer
     describe('getStatusFromContainer', function () {
