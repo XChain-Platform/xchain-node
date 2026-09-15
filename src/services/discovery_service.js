@@ -96,14 +96,8 @@ function classifyContainer(container) {
     return { module, coin: coinStr, network: networkStr }
 }
 
-async function scanAndRegisterModules({ silent = false } = {}) {
-    // Every write below is a no-op against an unconfigured store, and the
-    // counters/logs below don't read the write result, so a scan that persisted
-    // nothing still prints "Added ..." and returns a healthy-looking count.
-    // precheck opens the pool before it calls us; anything else is a bug.
-    db.assertReady("module discovery")
-
-    const containers = await new Promise((resolve, reject) => {
+async function listDockerContainers() {
+    return new Promise((resolve, reject) => {
         execFile('docker', ['ps', '-a', '--no-trunc', '--format', 'json'], (error, stdout) => {
             if (error) return reject(error)
             const list = stdout.trim()
@@ -112,16 +106,15 @@ async function scanAndRegisterModules({ silent = false } = {}) {
             resolve(list)
         })
     })
+}
 
+function moduleKey(module, coin, network) {
+    return module + '|' + coin + '|' + network
+}
+
+async function registerContainers(containers, silent, seen) {
     let added       = 0
     let reconciled  = 0
-    let removed     = 0
-    // Track which (module, coin, network) keys we saw a live container for, so
-    // we can purge orphan rows whose registered container_id no longer maps to
-    // any docker container at all.
-    const seen = new Set()
-    const keyOf = (module, coin, network) => module + '|' + coin + '|' + network
-
     // Sort containers so RUNNING ones come first. When multiple containers
     // share the same expected key (e.g. an old exited container and a fresh
     // running one), the running ID wins on the upsert.
@@ -142,7 +135,7 @@ async function scanAndRegisterModules({ silent = false } = {}) {
         // (e.g. a stopped container that classifies to the same key via the
         // image fallback) is skipped so it cannot overwrite the live ID with a
         // dead one. The key still records into `seen` for the orphan purge.
-        const key = keyOf(module, coin, network)
+        const key = moduleKey(module, coin, network)
         if (seen.has(key)) continue
         seen.add(key)
         const existing = await db.getModuleContainer(module, coin, network)
@@ -166,7 +159,11 @@ async function scanAndRegisterModules({ silent = false } = {}) {
             reconciled++
         }
     }
+    return added + reconciled
+}
 
+async function removeOrphanRows(silent, seen) {
+    let removed = 0
     // Purge orphan registry rows: modules table entries whose key we never
     // saw in `docker ps -a`, meaning the container was deleted externally
     // (or the row is otherwise unreferenced). Leaving these around makes
@@ -174,7 +171,7 @@ async function scanAndRegisterModules({ silent = false } = {}) {
     // "container not found" warnings against a phantom container.
     const allRows = await db.getAllModuleContainers(null, null)
     for (const row of allRows) {
-        const k = keyOf(row.module, row.coin || '', row.network || '')
+        const k = moduleKey(row.module, row.coin || '', row.network || '')
         if (seen.has(k)) continue
         await db.deleteModuleContainer(row.module, row.coin || '', row.network || '')
         logIfNotSilent(silent, "Removed orphan registry row " +
@@ -182,8 +179,24 @@ async function scanAndRegisterModules({ silent = false } = {}) {
             row.module + " (was " + String(row.container_id || '').slice(0,12) + ")")
         removed++
     }
+    return removed
+}
 
-    return added + reconciled + removed
+async function scanAndRegisterModules({ silent = false } = {}) {
+    // Every write below is a no-op against an unconfigured store, and the
+    // counters/logs below don't read the write result, so a scan that persisted
+    // nothing still prints "Added ..." and returns a healthy-looking count.
+    // precheck opens the pool before it calls us; anything else is a bug.
+    db.assertReady("module discovery")
+
+    const containers = await listDockerContainers()
+    // Track which (module, coin, network) keys we saw a live container for, so
+    // we can purge orphan rows whose registered container_id no longer maps to
+    // any docker container at all.
+    const seen = new Set()
+    const registered = await registerContainers(containers, silent, seen)
+    const removed = await removeOrphanRows(silent, seen)
+    return registered + removed
 }
 
 module.exports = {

@@ -85,55 +85,19 @@ async function updateExplorer() {
     return true
 }
 
-// `branch` is the ref the invoking command named (`install <ref> ...`), or null
-// for the commands that name none. It exists because this function is one of the
-// two install paths that did not take one, and a clone with no ref takes the
-// module's DEFAULT branch: measured 2026-08-18, `install develop all bitcoin
-// regtest` built the explorer from master while every generic-path module built
-// from develop, and the bundled xchain-vm then INHERITED master from it. That is
-// not only a mixed stack, it is the failure mode the release ceremony's frozen-ref
-// e2e gate exists to rule out, since `install release/vX.Y.Z` would have tested
-// master's explorer and reported on the release.
-//
-// Resolved through resolveComponentRef for the same reason the generic path is: a
-// pinned release install must pin everything it stages, or it is not a pinned
-// install, and the explorer was staged unpinned.
-async function installExplorerModule(force = false, branch = null) {
-    const defaultConfig = await getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
-    logger.info("Checking if xchain-explorer module is running")
-    const explorerConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
-
-    if (!force) {
-        const pingExplorer = await explorerConnector.ping()
-        if (pingExplorer) return true
-
-        logger.info("Checking if xchain-explorer module is installed")
-        if (isStatusUpdated()) {
-            const lastStatus = getLastStatus()
-            const explorerStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
-            if (explorerStatus !== undefined) return true
-        }
-    } else {
-        // Force-rebuild: tear down any existing explorer container + DB row so
-        // the fresh clone + buildAndUp below doesn't collide with stale state.
-        const existingContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
-        if (existingContainerId) {
-            logger.info("Force rebuild: removing existing xchain-explorer container")
-            try { await killContainer(existingContainerId) }   catch { /* may already be exited */ }
-            try { await removeContainer(existingContainerId) } catch { /* may already be gone */ }
-            try { await db.deleteModuleContainer(EXPLORER_MODULE_NAME, "", "") } catch { /* row may already be gone */ }
-        }
+async function removeExistingExplorer() {
+    // Force-rebuild: tear down any existing explorer container + DB row so
+    // the fresh clone + buildAndUp below doesn't collide with stale state.
+    const existingContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
+    if (existingContainerId) {
+        logger.info("Force rebuild: removing existing xchain-explorer container")
+        try { await killContainer(existingContainerId) }   catch { /* may already be exited */ }
+        try { await removeContainer(existingContainerId) } catch { /* may already be gone */ }
+        try { await db.deleteModuleContainer(EXPLORER_MODULE_NAME, "", "") } catch { /* row may already be gone */ }
     }
+}
 
-    logger.info("Downloading xchain-explorer...")
-    const { resolveComponentRef } = releaseManifestService
-    const explorerPin = resolveComponentRef(EXPLORER_MODULE_NAME, branch)
-    await cloneGit(EXPLORER_MODULE_NAME, true, false, explorerPin.ref, explorerPin.commit)
-    logger.info("Installing xchain-explorer module...")
-    await buildAndUp(EXPLORER_MODULE_NAME, null, null)
-    await getStatus(null, null, false)
-    logger.info("Waiting for the xchain-explorer to respond")
-
+async function waitForInstalledExplorer(explorerConnector) {
     // A healthy explorer is one holding at least one DB pool, and its pools come
     // from the COIN stacks. So on a host with no coin installed yet there is no
     // reply that can satisfy a health check, and demanding one made the first
@@ -177,6 +141,49 @@ async function installExplorerModule(force = false, branch = null) {
     }
 
     throw "Couldn't install the explorer module"
+}
+
+// `branch` is the ref the invoking command named (`install <ref> ...`), or null
+// for the commands that name none. It exists because this function is one of the
+// two install paths that did not take one, and a clone with no ref takes the
+// module's DEFAULT branch: measured 2026-08-18, `install develop all bitcoin
+// regtest` built the explorer from master while every generic-path module built
+// from develop, and the bundled xchain-vm then INHERITED master from it. That is
+// not only a mixed stack, it is the failure mode the release ceremony's frozen-ref
+// e2e gate exists to rule out, since `install release/vX.Y.Z` would have tested
+// master's explorer and reported on the release.
+//
+// Resolved through resolveComponentRef for the same reason the generic path is: a
+// pinned release install must pin everything it stages, or it is not a pinned
+// install, and the explorer was staged unpinned.
+async function installExplorerModule(force = false, branch = null) {
+    const defaultConfig = await getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+    logger.info("Checking if xchain-explorer module is running")
+    const explorerConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
+
+    if (!force) {
+        const pingExplorer = await explorerConnector.ping()
+        if (pingExplorer) return true
+
+        logger.info("Checking if xchain-explorer module is installed")
+        if (isStatusUpdated()) {
+            const lastStatus = getLastStatus()
+            const explorerStatus = lastStatus?.[""]?.[""]?.[EXPLORER_MODULE_NAME]
+            if (explorerStatus !== undefined) return true
+        }
+    } else {
+        await removeExistingExplorer()
+    }
+
+    logger.info("Downloading xchain-explorer...")
+    const { resolveComponentRef } = releaseManifestService
+    const explorerPin = resolveComponentRef(EXPLORER_MODULE_NAME, branch)
+    await cloneGit(EXPLORER_MODULE_NAME, true, false, explorerPin.ref, explorerPin.commit)
+    logger.info("Installing xchain-explorer module...")
+    await buildAndUp(EXPLORER_MODULE_NAME, null, null)
+    await getStatus(null, null, false)
+    logger.info("Waiting for the xchain-explorer to respond")
+    return waitForInstalledExplorer(explorerConnector)
 }
 
 // Block until the explorer is actually serving, or the budget runs out.

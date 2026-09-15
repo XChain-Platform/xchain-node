@@ -113,6 +113,39 @@ function toEpochMs(v) {
     return Number.isNaN(t) ? null : t;
 }
 
+function indexCreateTimes(rows) {
+    const byTable = new Map();
+    for (const r of (rows || [])) {
+        const name = String(r.table_name !== undefined ? r.table_name : r.TABLE_NAME || '').toLowerCase();
+        if (name) byTable.set(name, r.create_time !== undefined ? r.create_time : r.CREATE_TIME);
+    }
+    return byTable;
+}
+
+function checkTableFreshness(result, replayed, rows, windowOpenMs) {
+    const byTable = indexCreateTimes(rows);
+    for (const t of replayed) {
+        const key = String(t).toLowerCase();
+        if (!byTable.has(key)) {
+            result.failures.push({ table: t, code: MISSING_TABLE,
+                detail: 'inventoried as REPLAYED but not present in the store' });
+            continue;
+        }
+        const ms = toEpochMs(byTable.get(key));
+        if (ms === null) {
+            result.failures.push({ table: t, code: NO_CREATE_TIME,
+                detail: 'engine reported no CREATE_TIME, so freshness cannot be established' });
+            continue;
+        }
+        result.checked++;
+        if (ms < windowOpenMs) {
+            result.failures.push({ table: t, code: STALE_TABLE,
+                detail: 'CREATE_TIME ' + new Date(ms).toISOString() + ' predates the window opening '
+                        + new Date(windowOpenMs).toISOString() + ': this table survived the rebase' });
+        }
+    }
+}
+
 /**
  * Sweep one store.
  *
@@ -147,32 +180,7 @@ async function sweepStore(store, opts) {
         return result;
     }
 
-    const byTable = new Map();
-    for (const r of (rows || [])) {
-        const name = String(r.table_name !== undefined ? r.table_name : r.TABLE_NAME || '').toLowerCase();
-        if (name) byTable.set(name, r.create_time !== undefined ? r.create_time : r.CREATE_TIME);
-    }
-
-    for (const t of replayed) {
-        const key = String(t).toLowerCase();
-        if (!byTable.has(key)) {
-            result.failures.push({ table: t, code: MISSING_TABLE,
-                detail: 'inventoried as REPLAYED but not present in the store' });
-            continue;
-        }
-        const ms = toEpochMs(byTable.get(key));
-        if (ms === null) {
-            result.failures.push({ table: t, code: NO_CREATE_TIME,
-                detail: 'engine reported no CREATE_TIME, so freshness cannot be established' });
-            continue;
-        }
-        result.checked++;
-        if (ms < opts.windowOpenMs) {
-            result.failures.push({ table: t, code: STALE_TABLE,
-                detail: 'CREATE_TIME ' + new Date(ms).toISOString() + ' predates the window opening '
-                        + new Date(opts.windowOpenMs).toISOString() + ': this table survived the rebase' });
-        }
-    }
+    checkTableFreshness(result, replayed, rows, opts.windowOpenMs);
 
     // Corroboration only. A marker cannot rescue a stale table, and its absence cannot
     // fail a store whose tables all postdate the window.
