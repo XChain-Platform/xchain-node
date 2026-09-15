@@ -19,7 +19,7 @@ describe('Security', function () {
 
         it('uses spawn with tee instead of exec with shell interpolation', function () {
             const source = require('fs').readFileSync(
-                path.join(__dirname, '../../../src/services/docker_service.js'), 'utf8'
+                path.join(__dirname, '../../../src/services/docker_service/networks_and_files.js'), 'utf8'
             )
             // Guards against a regression to the earlier broken template literal.
             expect(source).to.not.include("docker exec -i ${containerId}")

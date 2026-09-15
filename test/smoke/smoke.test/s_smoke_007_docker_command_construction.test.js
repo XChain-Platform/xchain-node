@@ -12,14 +12,14 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-const proxyquire = require('proxyquire').noCallThru()
+const { proxyquireDockerService } = require('../../helpers/docker_service_loader')
 const path       = require('path')
 
 const ROOT = path.join(__dirname, '..', '..', '..')
 
 describe('S-SMOKE-007 – Docker Command Construction', function () {
 
-    const DockerService = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
+    const DockerService = proxyquireDockerService(path.join(ROOT, 'src/services/docker_service'), {
         'child_process': {
             execFile: sinon.stub(),
             spawn: sinon.stub(),

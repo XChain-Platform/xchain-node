@@ -12,6 +12,7 @@
 
 const fs = require('fs')
 const proxyquire = require('proxyquire').noCallThru()
+const { proxyquireDockerService } = require('../../../helpers/docker_service_loader')
 
 const { configStub } = require('../../../helpers/config_stub')
 const TestEnv        = require('../../helpers/test-env')
@@ -53,7 +54,7 @@ function makePatchedDockerService(capture) {
     const execFileStub = capture.createExecFileStub()
     const execFileAsyncStub = capture.createExecFileAsyncStub()
 
-    const PatchedDockerService = proxyquire('../../../../src/services/docker_service', {
+    const PatchedDockerService = proxyquireDockerService(require.resolve('../../../../src/services/docker_service'), {
         'child_process': {
             execFile: execFileStub,
             spawn: capture.createSpawnStub(),

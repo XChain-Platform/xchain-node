@@ -13,6 +13,7 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
+const { proxyquireDockerService } = require('../../helpers/docker_service_loader')
 const path       = require('path')
 const fs         = require('fs')
 
@@ -50,7 +51,7 @@ function makePreCheck(capture, overrides = {}) {
         containersFilesDir: path.join(env.tmpDir, 'tmp', 'containers_files')
     })
 
-    const DockerService = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
+    const DockerService = proxyquireDockerService(path.join(ROOT, 'src/services/docker_service'), {
         'child_process': {
             execFile: execFileStub,
             spawn: capture.createSpawnStub(),

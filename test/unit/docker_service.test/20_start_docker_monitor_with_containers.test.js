@@ -12,7 +12,7 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-const proxyquire = require('proxyquire').noCallThru()
+const { proxyquireDockerService } = require('../../helpers/docker_service_loader')
 
 // Helpers
 function makeStubs() {
@@ -24,7 +24,7 @@ function makeStubs() {
 }
 
 function loadDockerService(stubs, fsStub) {
-    return proxyquire('../../../src/services/docker_service', {
+    return proxyquireDockerService(require.resolve('../../../src/services/docker_service'), {
         'child_process': {
             execFile: stubs.execFile,
             spawn: stubs.spawn,
@@ -85,7 +85,7 @@ function registerMonitorUiExit() {
         const fixture = makeMonitorFixture(stubs, setKeyHandler)
         const { mockScreen, blessedStub, childStdout, childStderr, logChild } = fixture
 
-        const ds = proxyquire('../../../src/services/docker_service', {
+        const ds = proxyquireDockerService(require.resolve('../../../src/services/docker_service'), {
             'child_process': {
                 execFile: stubs.execFile,
                 spawn: stubs.spawn,
@@ -152,7 +152,7 @@ function registerMonitorTruncationWarning() {
 
         const logSpy = sinon.spy(console, 'log')
         try {
-            const ds = proxyquire('../../../src/services/docker_service', {
+            const ds = proxyquireDockerService(require.resolve('../../../src/services/docker_service'), {
                 'child_process': { execFile: stubs.execFile, spawn: stubs.spawn, spawnSync: stubs.spawnSync },
                 'fs': { readFileSync: sinon.stub(), mkdirSync: sinon.stub(), createWriteStream: sinon.stub() },
                 'blessed': blessedStub
@@ -213,7 +213,7 @@ function registerMonitorPlainBanner() {
 
         const logSpy = sinon.spy(console, 'log')
         try {
-            const ds = proxyquire('../../../src/services/docker_service', {
+            const ds = proxyquireDockerService(require.resolve('../../../src/services/docker_service'), {
                 'child_process': { execFile: stubs.execFile, spawn: stubs.spawn, spawnSync: stubs.spawnSync },
                 'fs': { readFileSync: sinon.stub(), mkdirSync: sinon.stub(), createWriteStream: sinon.stub() },
                 'blessed': blessedStub
@@ -269,7 +269,7 @@ function registerMonitorWithoutFollow() {
             return logChild
         })
 
-        const ds = proxyquire('../../../src/services/docker_service', {
+        const ds = proxyquireDockerService(require.resolve('../../../src/services/docker_service'), {
             'child_process': { execFile: stubs.execFile, spawn: stubs.spawn, spawnSync: stubs.spawnSync },
             'fs': { readFileSync: sinon.stub(), mkdirSync: sinon.stub(), createWriteStream: sinon.stub() },
             'blessed': blessedStub

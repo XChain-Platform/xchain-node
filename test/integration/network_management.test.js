@@ -12,7 +12,7 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-const proxyquire = require('proxyquire').noCallThru()
+const { proxyquireDockerService } = require('../helpers/docker_service_loader')
 
 const { Coin, Network } = require('../../src/config')
 
@@ -31,7 +31,7 @@ async function cleanupNetworkEnv() {
 }
 
 function makeDockerService() {
-    return proxyquire('../../src/services/docker_service', {
+    return proxyquireDockerService(require.resolve('../../src/services/docker_service'), {
         'child_process': {
             execFile: capture.createExecFileStub(),
             spawn: capture.createSpawnStub(),

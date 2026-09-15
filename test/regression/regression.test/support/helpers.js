@@ -12,6 +12,7 @@
 
 const sinon      = require('sinon')
 const proxyquire = require('proxyquire').noCallThru()
+const { proxyquireDockerService } = require('../../../helpers/docker_service_loader')
 const { Readable } = require('stream')
 
 const { moduleDir, tmpDir } = require('../../../../src/config')
@@ -44,7 +45,7 @@ function makeServiceWithConfig(configContent) {
 }
 
 function loadDockerService(stubs) {
-    return proxyquire('../../../../src/services/docker_service', {
+    return proxyquireDockerService(require.resolve('../../../../src/services/docker_service'), {
         'child_process': {
             execFile: stubs.execFile,
             spawn: stubs.spawn || sinon.stub(),

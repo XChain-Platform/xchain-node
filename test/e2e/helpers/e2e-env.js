@@ -14,6 +14,7 @@ const fs         = require('fs')
 const path       = require('path')
 const sinon      = require('sinon')
 const proxyquire = require('proxyquire').noCallThru()
+const { proxyquireDockerService } = require('../../helpers/docker_service_loader')
 
 const TestEnv        = require('../../integration/helpers/test-env')
 const CommandCapture = require('../../integration/helpers/command-capture')
@@ -348,7 +349,7 @@ class E2EEnv extends TestEnv {
         }
 
         // DockerService
-        const DockerService = proxyquire(path.join(ROOT, 'src/services/docker_service'), {
+        const DockerService = proxyquireDockerService(path.join(ROOT, 'src/services/docker_service'), {
             'child_process': {
                 execFile: execFileStub,
                 spawn: autoCloseSpawnStub,
