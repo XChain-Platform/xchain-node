@@ -1,7 +1,7 @@
 'use strict'
 
-// Copyright © 2025–2026 Dankest, LLC
-// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+// Copyright © 2025-2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC - https://dankest.llc
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
@@ -105,6 +105,12 @@ describe('secret-env', function () {
                 expect(preferred).to.match(/_(SECRET|KEY|TOKEN)$/)
             }
         })
+    })
+})
+
+describe('secret-env', function () {
+
+    describe('the alias table', function () {
 
         it('agrees with the xchain-hub table on every key both own', function () {
             // xchain-node composes the hub container's env, so if the two tables
@@ -148,6 +154,9 @@ describe('secret-env', function () {
             }
         })
     })
+})
+
+describe('secret-env', function () {
 
     describe('foldSecretEnvAliases()', function () {
 
@@ -190,6 +199,9 @@ describe('secret-env', function () {
             expect(config).to.deep.equal({ NODE_USER: 'u', DUST_AMOUNT: '546' })
         })
     })
+})
+
+describe('secret-env', function () {
 
     describe('deprecatedSecretEnvNames()', function () {
 
@@ -203,6 +215,9 @@ describe('secret-env', function () {
             expect(secretEnv.deprecatedSecretEnvNames({ NODE_PASSWORD: '' })).to.deep.equal([])
         })
     })
+})
+
+describe('secret-env', function () {
 
     describe('readSecretHostEnv()', function () {
 
@@ -225,8 +240,11 @@ describe('secret-env', function () {
             expect(secretEnv.readSecretHostEnv('HUB_API_KEY', { HUB_API_KEY: 'k' })).to.equal('k')
         })
     })
+})
 
-    // The thing that was actually blocked: renaming a key on a live venue.
+describe('secret-env', function () {
+
+    // Core requirement: rename a sidecar key while the node stays running.
     describe('ConfigService accepts the renamed sidecar keys', function () {
 
         it('a sidecar written entirely under the new names produces a working config', async function () {
@@ -258,7 +276,7 @@ describe('secret-env', function () {
         })
 
         it('the new name in the sidecar beats the legacy name in the main config file', async function () {
-            // Sidecar-wins is the existing precedence rule; the rename must not invert it.
+            // The sidecar-wins precedence rule must not be inverted by the rename.
             const { cs } = makeMemoryConfigService({
                 [coinMain]:    'DECODER_DB_PASS=stale\n',
                 [coinSidecar]: 'NODE_USER=u\nNODE_SECRET=n\nDECODER_DB_SECRET=current\nINDEXER_DB_SECRET=i\n'
@@ -266,6 +284,12 @@ describe('secret-env', function () {
             const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
             expect(config['DECODER_DB_PASS']).to.equal('current')
         })
+    })
+})
+
+describe('secret-env', function () {
+
+    describe('ConfigService accepts the renamed sidecar keys', function () {
 
         it('a half-finished rename in a sidecar fails the config load instead of picking one', async function () {
             const { cs } = makeMemoryConfigService({
@@ -286,8 +310,8 @@ describe('secret-env', function () {
         })
 
         it('a credential in the MAIN config file is relocated to the sidecar under either name', async function () {
-            // The legacy-install migration keys off NODE_PASSWORD; NODE_SECRET has to
-            // arm it too, or a renamed credential stays in the shareable file forever.
+            // Migration from legacy installs keys off NODE_PASSWORD; NODE_SECRET arms
+            // the same path so a renamed credential does not remain in the main file.
             const { cs, files } = makeMemoryConfigService({
                 [coinMain]: 'DUST_AMOUNT=546\nNODE_USER=u\nNODE_SECRET=inmainfile\n'
             })
@@ -297,6 +321,9 @@ describe('secret-env', function () {
             expect(files[coinSidecar]).to.include('NODE_PASSWORD=inmainfile')
         })
     })
+})
+
+describe('secret-env', function () {
 
     describe('sidecar helpers', function () {
         const sidecar = path.resolve(configDir, 'bitcoin-regtest') + '.local'
