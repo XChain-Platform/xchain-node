@@ -24,82 +24,89 @@ const SCRIPT = path.join(__dirname, '../../scripts/publish-bootstraps.sh')
 // /usr/bin/env bash on Linux; a box whose PATH bash is 3.2 (stock macOS) cannot
 // run it at all, so skip rather than report a red that says nothing about the
 // change under test.
+let mapfileSupport
+
 function bashSupportsMapfile() {
-    const probe = spawnSync('bash', ['-c', 'mapfile -t x < /dev/null'], { encoding: 'utf8' })
-    return probe.status === 0
+    if (mapfileSupport === undefined) {
+        const probe = spawnSync('bash', ['-c', 'mapfile -t x < /dev/null'], { encoding: 'utf8' })
+        mapfileSupport = probe.status === 0
+    }
+    return mapfileSupport
 }
 
-describe('publish-bootstraps.sh: forced republish after a reindex', function () {
+let workDir
+let binDir
 
-    this.timeout(10000)
+function requireMapfile() {
+    if (!bashSupportsMapfile()) this.skip()
+}
 
-    let workDir
-    let binDir
+function createWorkDir() {
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-publish-'))
+    binDir  = path.join(workDir, 'bin')
+    fs.mkdirSync(binDir)
+}
 
-    before(function () {
-        if (!bashSupportsMapfile()) this.skip()
-    })
-
-    beforeEach(function () {
-        workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-publish-'))
-        binDir  = path.join(workDir, 'bin')
-        fs.mkdirSync(binDir)
-    })
-
-    afterEach(function () {
-        fs.rmSync(workDir, { recursive: true, force: true })
-    })
+function removeWorkDir() {
+    fs.rmSync(workDir, { recursive: true, force: true })
+}
 
     /**
      * Install a fake `xchain-node` that answers the two listing subcommands the
      * planner uses and nothing else. --dry-run exits before any create, so the
      * plan is the whole observable behaviour.
      */
-    function fakeNode({ combos = [], due = [] } = {}) {
-        // Each line is emitted by its own printf so no escape sequence in the
-        // fixture is ever interpreted by the shell; the hostile-input case below
-        // depends on the fake echoing its combos back verbatim.
-        const emit = list => list.length === 0
-            ? 'true'
-            : list.map(c => `printf '%s\\n' ${JSON.stringify(c)}`).join('; ')
-        const script = [
-            '#!/usr/bin/env bash',
-            'case "$1" in',
-            `  bootstrap-combos)         ${emit(combos)} ;;`,
-            `  bootstrap-republish-due)  ${emit(due)} ;;`,
-            '  *) echo "unexpected: $*" >&2; exit 3 ;;',
-            'esac',
-            'exit 0',
-            ''
-        ].join('\n')
-        const p = path.join(binDir, 'xchain-node')
-        fs.writeFileSync(p, script, { mode: 0o755 })
-        return p
-    }
+function fakeNode({ combos = [], due = [] } = {}) {
+    // Each line is emitted by its own printf so no escape sequence in the
+    // fixture is ever interpreted by the shell; the hostile-input case below
+    // depends on the fake echoing its combos back verbatim.
+    const emit = list => list.length === 0
+        ? 'true'
+        : list.map(c => `printf '%s\\n' ${JSON.stringify(c)}`).join('; ')
+    const script = [
+        '#!/usr/bin/env bash',
+        'case "$1" in',
+        `  bootstrap-combos)         ${emit(combos)} ;;`,
+        `  bootstrap-republish-due)  ${emit(due)} ;;`,
+        '  *) echo "unexpected: $*" >&2; exit 3 ;;',
+        'esac',
+        'exit 0',
+        ''
+    ].join('\n')
+    const p = path.join(binDir, 'xchain-node')
+    fs.writeFileSync(p, script, { mode: 0o755 })
+    return p
+}
 
-    function runPlan(args) {
-        try {
-            return execFileSync(SCRIPT, args, {
-                encoding: 'utf8',
-                env: {
-                    ...process.env,
-                    PATH:      `${binDir}:${process.env.PATH}`,
-                    STAGE_DIR: path.join(workDir, 'stage'),
-                    TMP_DIR:   path.join(workDir, 'tmp'),
-                    LOCK_FILE: path.join(workDir, 'publish.lock')
-                }
-            })
-        } catch (err) {
-            // Surface the script's own output on a non-zero exit; a bare
-            // "Command failed" says nothing about which precondition tripped.
-            throw new Error(`${err.message}\n--- stdout ---\n${err.stdout}\n--- stderr ---\n${err.stderr}`)
-        }
+function runPlan(args) {
+    try {
+        return execFileSync(SCRIPT, args, {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                PATH:      `${binDir}:${process.env.PATH}`,
+                STAGE_DIR: path.join(workDir, 'stage'),
+                TMP_DIR:   path.join(workDir, 'tmp'),
+                LOCK_FILE: path.join(workDir, 'publish.lock')
+            }
+        })
+    } catch (err) {
+        // Surface the script's own output on a non-zero exit; a bare
+        // "Command failed" says nothing about which precondition tripped.
+        throw new Error(`${err.message}\n--- stdout ---\n${err.stdout}\n--- stderr ---\n${err.stderr}`)
     }
+}
 
-    function planLine(out) {
-        const line = out.split('\n').find(l => l.includes('publish plan ('))
-        return line || ''
-    }
+function planLine(out) {
+    const line = out.split('\n').find(l => l.includes('publish plan ('))
+    return line || ''
+}
+
+describe('publish-bootstraps.sh: forced republish after a reindex', function () {
+    this.timeout(10000)
+    before(requireMapfile)
+    beforeEach(createWorkDir)
+    afterEach(removeWorkDir)
 
     it('keeps the scheduled plan when nothing was reindexed', function () {
         fakeNode({
@@ -127,6 +134,13 @@ describe('publish-bootstraps.sh: forced republish after a reindex', function () 
         expect(out).to.include('FORCED (reindexed since last publish; overrides --trackers-only): xchain-decoder:bitcoin:testnet')
         expect(planLine(out)).to.include('xchain-decoder:bitcoin:testnet')
     })
+})
+
+describe('publish-bootstraps.sh: forced republish after a reindex', function () {
+    this.timeout(10000)
+    before(requireMapfile)
+    beforeEach(createWorkDir)
+    afterEach(removeWorkDir)
 
     // A due combo the registry no longer lists, or one an explicit invocation
     // never named, still has a wrong archive standing as newest.
@@ -153,6 +167,13 @@ describe('publish-bootstraps.sh: forced republish after a reindex', function () 
         expect(planLine(out)).to.include('publish plan (1)')
         expect(planLine(out)).to.not.include('xchain-utxo-tracker')
     })
+})
+
+describe('publish-bootstraps.sh: forced republish after a reindex', function () {
+    this.timeout(10000)
+    before(requireMapfile)
+    beforeEach(createWorkDir)
+    afterEach(removeWorkDir)
 
     it('republishes a due tracker when the operator accepts the downtime', function () {
         fakeNode({
@@ -174,6 +195,13 @@ describe('publish-bootstraps.sh: forced republish after a reindex', function () 
         expect(out).to.not.include('FORCED')
         expect(out).to.not.include('DEFERRED')
     })
+})
+
+describe('publish-bootstraps.sh: forced republish after a reindex', function () {
+    this.timeout(10000)
+    before(requireMapfile)
+    beforeEach(createWorkDir)
+    afterEach(removeWorkDir)
 
     // The due list is read from a file on disk and interpolated into the plan,
     // so anything that is not a <service>:<coin>:<network> triple is dropped
