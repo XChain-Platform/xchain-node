@@ -21,16 +21,21 @@ const { expect } = require('chai')
 const sinon = require('sinon')
 const sbs = require('../../src/services/stop_budget_service')
 
+let logStub, warnStub
+
+function prepareConsoleStubs() {
+    logStub  = sinon.stub(console, 'log')
+    warnStub = sinon.stub(console, 'warn')
+}
+
+function restoreConsoleStubs() {
+    logStub.restore()
+    warnStub.restore()
+}
+
 describe('StopBudgetService', function () {
-    let logStub, warnStub
-    beforeEach(function () {
-        logStub  = sinon.stub(console, 'log')
-        warnStub = sinon.stub(console, 'warn')
-    })
-    afterEach(function () {
-        logStub.restore()
-        warnStub.restore()
-    })
+    beforeEach(prepareConsoleStubs)
+    afterEach(restoreConsoleStubs)
 
     describe('moduleStopTimeoutSeconds()', function () {
         it('gives the decoder and tracker more than docker\'s ten seconds, and the rest a default above it', function () {
@@ -60,12 +65,22 @@ describe('StopBudgetService', function () {
             expect(sbs.moduleStopTimeoutSeconds('node', {})).to.equal(nodeStopTimeoutSeconds())
         })
     })
+})
+
+describe('StopBudgetService', function () {
+    beforeEach(prepareConsoleStubs)
+    afterEach(restoreConsoleStubs)
 
     describe('stopTimeoutArgs()', function () {
         it('stamps the same budget on the container so a plain docker stop honours it', function () {
             expect(sbs.stopTimeoutArgs('xchain-decoder', {})).to.deep.equal(['--stop-timeout', String(sbs.MODULE_STOP_TIMEOUT_SECONDS['xchain-decoder'])])
         })
     })
+})
+
+describe('StopBudgetService', function () {
+    beforeEach(prepareConsoleStubs)
+    afterEach(restoreConsoleStubs)
 
     describe('stopModuleContainer()', function () {
         it('stops with the budget and reports a clean stop with the time it took', async function () {
