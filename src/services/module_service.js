@@ -54,1265 +54,20 @@ const peers                  = require('./peer_services').bindPeerServices(requi
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
-// Sibling directories used to make a rewrite-clone atomic-ish (see cloneGit).
-// Both live beside the module checkout inside the modules dir, so the two
-// renames below stay on one filesystem and cannot fail with EXDEV.
-const CLONE_STAGING_SUFFIX  = '.xchain-node-staging'
-const CLONE_PREVIOUS_SUFFIX = '.xchain-node-previous'
-
-// Run `git clone` into `destination`. Rejects with the operator-facing string
-// the callers already surface; performs no filesystem cleanup of its own so
-// the caller owns the rollback decision.
-function runGitClone(module, branch, destination) {
-    return new Promise((resolve, reject) => {
-        const gitUrl = modulesUrls[module]
-        const cloneArgs = ['clone']
-        if (branch) cloneArgs.push('-b', branch)
-        // Local-path sources (no ':' i.e. not a URL/SCP-style remote) on the
-        // Parallels share can't hardlink between the two trees, so force
-        // a copy instead of git's default object-linking.
-        if (gitUrl && gitUrl.startsWith('/')) cloneArgs.push('--no-hardlinks')
-        cloneArgs.push(gitUrl, destination)
-
-        execFile('git', cloneArgs, (error, stdout, stderr) => {
-            if (error) {
-                if (branch && stderr && stderr.toLowerCase().includes('not found')) {
-                    // Do NOT silently fall back to the default branch: install/update
-                    // callers pass `branch` as an explicit operator request (cli.js),
-                    // and running different code than what was asked for with only a
-                    // scrolling console.warn is a silent-wrong-code hazard
-                    // (uuid:4f649bd0). Fail the clone instead.
-                    //
-                    // The hint matters because the mechanism is routinely misread
-                    // (, and the  note it corrects): install/update clone
-                    // from the module's REMOTE, so a branch that exists only in the
-                    // checkout on this box is invisible here. Push it, or point the
-                    // module at a local path with XCHAIN_NODE_MODULES_URLS_OVERRIDE.
-                    reject(`Error cloning project: branch '${branch}' not found for module '${module}'`
-                        + ` (clones come from the module's remote, so a branch that exists only in the`
-                        + ` local checkout is not visible: push it, or set`
-                        + ` XCHAIN_NODE_MODULES_URLS_OVERRIDE='{"${module}":"/path/to/local/checkout"}')`)
-                } else {
-                    reject("Error cloning project: " + redactSecrets(error.message))
-                }
-            } else {
-                resolve(true)
-            }
-        })
-    })
-}
-
-// Clone-integrity check for a pinned install (release-management spec section 11).
-//
-// The manifest records each component's tag AND the commit that tag pointed at
-// when the train was cut, because a tag is mutable by whoever owns the repo: it
-// can be deleted and re-pushed at different content, and a clone of `-b v0.9.0`
-// would follow it without complaint. Verifying the checked-out commit is what
-// turns "we asked for v0.9.0" into "we are running the reviewed v0.9.0", and it
-// extends the SHA-256 discipline github_hashes.json already applies to
-// downloaded coin-daemon binaries to the git-cloned half of the stack.
-//
-// Throws on mismatch; the caller owns cleanup and must not leave the mismatched
-// tree in place.
-async function assertCheckoutCommit(module, dir, expectedCommit) {
-    if (!expectedCommit) return
-
-    let head
-    try {
-        const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', 'HEAD'])
-        head = stdout.trim()
-    } catch (err) {
-        throw new Error(`Could not read the cloned commit for '${module}': ${redactSecrets(String(err && err.message ? err.message : err))}`)
-    }
-
-    if (head !== expectedCommit) {
-        throw new Error(
-            `Clone integrity check FAILED for '${module}': the release manifest pins`
-            + ` ${expectedCommit} but the clone checked out ${head}.`
-            + ` The tag has moved since the release was cut, or the remote is not the`
-            + ` repository the manifest was written against. Nothing has been installed.`
-        )
-    }
-}
-
-// Identity of a checkout: the commit an operator would have to name to
-// reproduce this exact tree, plus enough context to recognise an old one at a
-// glance. Returns nulls instead of throwing, because reporting which code is
-// being deployed must never be the thing that fails a deploy.
-async function readCheckoutIdentity(dir) {
-    const unknown = { commit: null, committedAt: null, subject: null }
-    try {
-        const { stdout } = await execFileAsync('git', ['-C', dir, 'log', '-1', '--format=%H%x1f%cI%x1f%s'])
-        const [commit, committedAt, subject] = String(stdout || '').trim().split('\x1f')
-        if (!/^[a-f0-9]{40}$/.test(commit || '')) return unknown
-        return { commit, committedAt: committedAt || null, subject: subject || null }
-    } catch {
-        return unknown
-    }
-}
-
-// The commit and branch a checkout is on, read straight off the git ref files.
-//
-// Deliberately NOT a `git` subprocess: this runs on the docker-build path, which
-// must not gain a new place to block, and the answer it needs (which commit, which
-// branch) is two small file reads. Returns nulls for anything it cannot read,
-// including a `.git` file (worktree pointer) or a packed-only ref it cannot find.
-function readCheckoutIdentityFromDisk(dir) {
-    const unknown = { commit: null, ref: null }
-    try {
-        const gitDir = path.join(dir, '.git')
-        const head = String(fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8') || '').trim()
-        if (/^[a-f0-9]{40}$/.test(head)) return { commit: head, ref: null }
-
-        const match = head.match(/^ref:\s*(\S+)$/)
-        if (!match) return unknown
-        const refName = match[1]
-        const shortRef = refName.replace(/^refs\/heads\//, '')
-
-        try {
-            const loose = String(fs.readFileSync(path.join(gitDir, refName), 'utf8') || '').trim()
-            if (/^[a-f0-9]{40}$/.test(loose)) return { commit: loose, ref: shortRef }
-        } catch { /* ref is packed, not loose; fall through */ }
-
-        const packed = String(fs.readFileSync(path.join(gitDir, 'packed-refs'), 'utf8') || '')
-        for (const line of packed.split('\n')) {
-            const parts = line.trim().split(/\s+/)
-            if (parts.length === 2 && parts[1] === refName && /^[a-f0-9]{40}$/.test(parts[0])) {
-                return { commit: parts[0], ref: shortRef }
-            }
-        }
-        return unknown
-    } catch {
-        return unknown
-    }
-}
-
-// The commit a source repository's BRANCH points at right now. `git ls-remote`
-// speaks the same protocol for an ssh/https remote and for a local path, which
-// is what lets one oracle cover both clone sources.
-//
-// Returns null when the ref is not a branch there (a tag, a pinned install) or
-// the query fails (offline, auth, no such remote): "could not verify" has to
-// degrade to a warning, never to a refused deploy.
-async function readSourceBranchTip(url, branch) {
-    try {
-        const { stdout } = await execFileAsync('git', ['ls-remote', url, 'refs/heads/' + branch])
-        const line = String(stdout || '').split('\n').find(l => l.trim().length > 0)
-        if (!line) return null
-        const sha = line.trim().split(/\s+/)[0]
-        return /^[a-f0-9]{40}$/.test(sha) ? sha : null
-    } catch {
-        return null
-    }
-}
-
-// A source that is a filesystem path rather than a remote URL. Matches the same
-// shapes runGitClone already treats as local (a leading '/'), plus explicit
-// relative prefixes; anything else is an ssh/https remote as far as this goes.
-// A false negative only costs the extra diagnosis below, never correctness.
-function isLocalPathSource(url) {
-    return typeof url === 'string' && (url.startsWith('/') || url.startsWith('./') || url.startsWith('../'))
-}
-
-// A local-path source (the XCHAIN_NODE_MODULES_URLS_OVERRIDE workflow) is cloned
-// through its OWN refs, so `-b master` deploys THAT checkout's master, not the
-// upstream's. When the checkout is behind its own origin the deploy is quietly
-// older than the branch the operator named, and nothing downstream can tell:
-// the container comes up healthy, and the module's package.json version is the
-// same string it was dozens of commits ago.
-//
-// Warn rather than refuse: deploying local work that is not upstream yet is the
-// entire point of the override, so being behind is legitimate, just never
-// something an operator should discover after measuring the wrong tree.
-async function warnIfSourceBranchIsBehind(module, url, branch) {
-    if (!isLocalPathSource(url)) return
-    try {
-        const revParse = async (ref) => {
-            const { stdout } = await execFileAsync('git', ['-C', url, 'rev-parse', '--verify', '--quiet', ref])
-            return String(stdout || '').trim()
-        }
-        const local    = await revParse('refs/heads/' + branch)
-        const upstream = await revParse('refs/remotes/origin/' + branch)
-        if (!local || !upstream || local === upstream) return
-        const { stdout } = await execFileAsync('git', ['-C', url, 'rev-list', '--count', local + '..' + upstream])
-        const behind = parseInt(String(stdout || '').trim(), 10)
-        if (!(behind > 0)) return
-        logger.warn(`WARNING: '${module}' is being deployed from the local checkout ${url},`
-            + ` whose '${branch}' is ${behind} commit(s) BEHIND its own origin/${branch}`
-            + ` (${local.slice(0, 12)} vs ${upstream.slice(0, 12)}).`
-            + ` The deploy will contain the older tree; fetch that checkout if you meant the upstream branch.`)
-    } catch { /* best-effort diagnosis; never blocks a deploy */ }
-}
-
-// Prove a freshly cloned checkout is the code the operator asked for.
-//
-// assertCheckoutCommit answers "is this the reviewed commit" for a manifest pin.
-// This answers the question a NAMED BRANCH raises and nothing used to ask: is
-// this what that branch points at NOW. Every deploy signal the platform had
-// (package.json version, image tag, container uptime, `docker ps` health) is
-// satisfied by a stale tree, so a branch that resolves to an old commit ships
-// silently and an acceptance test then measures code that was never deployed.
-//
-// A disagreement is re-cloned ONCE (a push landing between the clone and the
-// check is a real race, not a bug) and refused after that, so any source that
-// resolves a branch to something other than its tip fails loudly instead.
-async function verifyDeploySource(module, branch, dir, expectedCommit) {
-    // A pinned install names a commit and assertCheckoutCommit already proved it;
-    // a tag is not a branch, so there is no tip to compare against either.
-    if (expectedCommit || !branch) return
-
-    const url = modulesUrls[module]
-    await warnIfSourceBranchIsBehind(module, url, branch)
-
-    const tip = await readSourceBranchTip(url, branch)
-    if (!tip) return
-
-    let head = (await readCheckoutIdentity(dir)).commit
-    if (!head || head === tip) return
-
-    logger.warn(`WARNING: the clone of '${module}' landed on ${head.slice(0, 12)} but`
-        + ` '${branch}' points at ${tip.slice(0, 12)} in the source. Re-cloning once.`)
-    fs.rmSync(dir, { recursive: true, force: true })
-    await runGitClone(module, branch, dir)
-    head = (await readCheckoutIdentity(dir)).commit
-    if (head === tip) return
-
-    throw new Error(
-        `Stale source for '${module}': the clone resolved '${branch}' to ${head ? head.slice(0, 12) : 'an unreadable commit'}`
-        + ` twice, but '${branch}' points at ${tip.slice(0, 12)}. Nothing has been deployed.`
-        + ` Deploying this would have produced a container that reports the right version while running older code.`
-    )
-}
-
-// Say which commit a module is being deployed from, every time, unprompted.
-//
-// This is the line whose absence cost real evidence: a redeploy that shipped a
-// 13-hour-old commit looked identical to a correct one, because the only things
-// printed were the module name and a version string that had not changed in
-// weeks. The commit and its date make an old tree obvious at the moment it is
-// deployed rather than after a test has measured it.
-async function reportDeployedSource(module, dir, branch) {
-    const { commit, committedAt, subject } = await readCheckoutIdentity(dir)
-    const url = redactSecrets(String(modulesUrls[module] || 'unknown source'))
-    if (!commit) {
-        logger.info(`Deploy source for '${module}': commit UNKNOWN (not a git checkout?) from ${url}`)
-        return
-    }
-    logger.info(`Deploy source for '${module}': ${commit} (${branch || 'default branch'})`
-        + ` committed ${committedAt || 'at an unknown time'}`
-        + (subject ? ` "${subject}"` : '')
-        + ` from ${url}`)
-}
-
-// Clone a module's source into its deploy checkout.
-//
-// A clone that would replace an EXISTING checkout is staged in a sibling
-// directory and swapped in only once git has succeeded. The previous
-// implementation deleted the destination as its first step, so any clone
-// failure (a branch absent from the remote, a network drop, an auth refusal)
-// left the module directory simply gone: on a live install, an `update
-// xchain-hub ... <branch>` destroyed the deploy source including a
-// local-only hotfix branch, and because the running container was untouched
-// nothing surfaced the loss. Validation of the module URL and the branch
-// name also moved ahead of every filesystem mutation for the same reason.
-//
-// Failure semantics: on any error the pre-existing checkout is still in place
-// and unmodified, and the error is thrown (never an unhandled rejection). That
-// includes a failed `expectedCommit` check: it runs against the STAGING tree,
-// before the swap, so a moved tag cannot replace a good checkout with a bad one.
-async function cloneGit(module, rewrite = false, useTmp = false, branch = null, expectedCommit = null) {
-    if (!(module in modulesUrls)) {
-        throw "module doesn't have an url"
-    }
-
-    if (branch && !/^[a-zA-Z0-9._\-\/]+$/.test(branch)) {
-        throw "Invalid branch name: " + branch + " (branch names may only contain letters, numbers, dots, hyphens, underscores, and slashes)"
-    }
-
-    // The tmp tree is scratch space (version probes, the skew guard) that is
-    // rebuilt on every use and holds nothing unrecoverable, so it keeps the
-    // cheap wipe-then-clone shape.
-    if (useTmp) {
-        removeModuleTmpDir(module)
-        createModuleTmpDir(module)
-        const tmpDir = getModuleTmpDir(module)
-        const cloned = await runGitClone(module, branch, tmpDir)
-        try {
-            await assertCheckoutCommit(module, tmpDir, expectedCommit)
-        } catch (err) {
-            removeModuleTmpDir(module)
-            throw err
-        }
-        return cloned
-    }
-
-    const destination = getModuleDir(module)
-
-    if (!moduleDirExists(module)) {
-        const cloned = await runGitClone(module, branch, destination)
-        try {
-            await assertCheckoutCommit(module, destination, expectedCommit)
-            await verifyDeploySource(module, branch, destination, expectedCommit)
-        } catch (err) {
-            // Nothing pre-existed here, so removing the bad tree restores the
-            // starting state exactly.
-            fs.rmSync(destination, { recursive: true, force: true })
-            throw err
-        }
-        await reportDeployedSource(module, destination, branch)
-        return cloned
-    }
-
-    if (!rewrite) {
-        throw "Module directory already exists"
-    }
-
-    const staging  = destination + CLONE_STAGING_SUFFIX
-    const previous = destination + CLONE_PREVIOUS_SUFFIX
-    // Clear leftovers from an interrupted earlier swap before reusing the names.
-    fs.rmSync(staging,  { recursive: true, force: true })
-    fs.rmSync(previous, { recursive: true, force: true })
-
-    try {
-        await runGitClone(module, branch, staging)
-        await assertCheckoutCommit(module, staging, expectedCommit)
-        await verifyDeploySource(module, branch, staging, expectedCommit)
-    } catch (err) {
-        fs.rmSync(staging, { recursive: true, force: true })
-        throw err
-    }
-
-    // Swap: move the live checkout aside, move the new one in, then drop the
-    // old one. Only the middle rename can leave the destination missing, and
-    // it is immediately undone below.
-    try {
-        fs.renameSync(destination, previous)
-    } catch (err) {
-        fs.rmSync(staging, { recursive: true, force: true })
-        throw "Error replacing module checkout for '" + module + "': " + redactSecrets(String(err && err.message ? err.message : err))
-            + " (the existing checkout was left in place)"
-    }
-
-    try {
-        fs.renameSync(staging, destination)
-    } catch (err) {
-        try {
-            fs.renameSync(previous, destination)
-        } catch { /* nothing else to try; the original is at `previous` */ }
-        fs.rmSync(staging, { recursive: true, force: true })
-        throw "Error replacing module checkout for '" + module + "': " + redactSecrets(String(err && err.message ? err.message : err))
-    }
-
-    fs.rmSync(previous, { recursive: true, force: true })
-    await reportDeployedSource(module, destination, branch)
-    return true
-}
-
-async function getModuleBranch(module) {
-    const dir = getModuleDir(module)
-    const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])
-    return stdout.trim()
-}
-
-// The exact commit a module checkout sits on. Unlike getModuleBranch this is
-// meaningful on a detached HEAD, which is what a pinned (tag) install produces.
-async function getModuleCommit(module) {
-    try {
-        const { stdout } = await execFileAsync('git', ['-C', getModuleDir(module), 'rev-parse', 'HEAD'])
-        return stdout.trim()
-    } catch {
-        return null
-    }
-}
-
-/**
- * Decide which ref a bundled library is staged at for `module`'s build context.
- *
- * Precedence, and the reason for it:
- *   1. The active release manifest's pin. A pinned install pins EVERYTHING it
- *      stages, or it is not a pinned install.
- *   2. The ref the parent module is checked out at. Staging a library from a
- *      different branch than the service it is being compiled into is a
- *      version-skew bug wearing a build step's clothing, so the library
- *      inherits rather than floats. This is what makes `install develop
- *      xchain-indexer` stage develop's xchain-vm and `install master ...`
- *      stage master's, with no manifest involved.
- *   3. The platform default branch, only when the parent is on a detached HEAD
- *      with no manifest to consult (a hand-checked-out tag, mid-ceremony
- *      testing). Announced, because it is the one path that can still stage a
- *      library the operator did not name.
- *
- * @returns {Promise<{ref:string, commit:string|null, pinned:boolean, reason:string}>}
- */
-async function resolveBundledLibRef(module, lib) {
-    const { resolveComponentRef } = releaseManifestService
-
-    const pinned = resolveComponentRef(lib, null)
-    if (pinned.pinned) {
-        return { ref: pinned.ref, commit: pinned.commit, pinned: true, reason: 'release manifest' }
-    }
-
-    let parentRef = null
-    try {
-        parentRef = await getModuleBranch(module)
-    } catch { /* module not checked out yet; fall through */ }
-
-    if (parentRef && parentRef !== 'HEAD') {
-        return { ref: parentRef, commit: null, pinned: false, reason: `inherited from ${module}` }
-    }
-
-    logger.warn(`Bundled library ${lib}: ${module} is on a detached HEAD and no release`
-        + ` manifest is active, so the library cannot inherit a ref.`
-        + ` Falling back to '${DEFAULT_MODULE_BRANCH}'.`)
-    return { ref: DEFAULT_MODULE_BRANCH, commit: null, pinned: false, reason: 'default branch fallback' }
-}
-
-// Fail fast on host-port collisions before `docker run`. On a single-stack
-// host this is a no-op; on a multi-stack host (two NODE_PREFIX stacks, or a
-// service container hand-created outside xchain-node) two containers can request
-// the same host port, which `docker run` only surfaces as a cryptic "port is
-// already allocated" AFTER the image build wastes minutes. `selfName` is the
-// container we're (re)creating (excluded so re-installs/updates of the same
-// service don't flag themselves; the old container is already killed+removed
-// before this runs, but the name-exclusion is belt-and-suspenders).
-async function assertNoHostPortConflicts(portArgs, selfName) {
-    const requested = []
-    for (let i = 0; i < portArgs.length; i++) {
-        if (portArgs[i] === '-p') {
-            const pair = portArgs[i + 1]
-            if (typeof pair !== 'string') continue
-            const colonIdx = pair.lastIndexOf(':')
-            if (colonIdx === -1) continue
-            // "-p HOST:CONTAINER" or "-p IP:HOST:CONTAINER": the host port is the
-            // field before the final colon; take the last colon-separated pair's left side.
-            const beforeContainer = pair.substring(0, colonIdx)
-            const hostPort = beforeContainer.substring(beforeContainer.lastIndexOf(':') + 1)
-            if (/^\d+$/.test(hostPort)) requested.push(hostPort)
-        }
-    }
-    if (requested.length === 0) return
-
-    const published = await getPublishedHostPorts()
-    const conflicts = []
-    for (const hostPort of requested) {
-        const holders = published.get(hostPort)
-        if (!holders) continue
-        const others = [...holders].filter(n => n !== selfName)
-        if (others.length > 0) conflicts.push({ hostPort, holders: others })
-    }
-    if (conflicts.length > 0) {
-        const lines = conflicts.map(c => `  host port ${c.hostPort} is already published by: ${c.holders.join(', ')}`)
-        throw new Error(
-            'Host port conflict: cannot publish the following port(s):\n' +
-            lines.join('\n') + '\n' +
-            'Another stack or container already binds them on this host. Override the colliding ' +
-            'port(s) in config/<coin>-<network> (e.g. EXPLORER_PORT_HTTP/HTTPS, INDEXER_PORT, HUB_PORT, ' +
-            'DECODER_PORT, ENCODER_PORT, UTXO_TRACKER_PORT, SYNC_PORT) and re-run, or stop the conflicting container first.'
-        )
-    }
-}
-
-// Per-service healthcheck descriptors.
-// Each entry specifies how Docker should probe container readiness:
-//   portKey   - the env-var name whose value is the container-internal port to probe
-//   probe     - 'http_get' uses wget GET on `path` (default /status); 'jsonrpc_ping'
-//               uses wget POST with a JSON-RPC ping payload; absent means no
-//               healthcheck added
-//   path      - http_get only: route to probe. Defaults to /status. Set it for
-//               services whose /status is expensive: sync's /status runs a
-//               SELECT COUNT(*) census over every replicated table, which on a
-//               heavy multi-chain host (LTC+DOGE) takes longer than the
-//               5s timeout and marks a correctly-serving container UNHEALTHY.
-//               Sync's /health is O(1) liveness (circuit-breaker +
-//               poll-error state, no table scans) and still 503s when the
-//               replicator is genuinely wedged, so the probe measures liveness
-//               rather than a full table census. The decoder sets it for the
-//               opposite reason: its /status is cheap but too NARROW to be a
-//               liveness probe (process-alive + DB-reachable only), so a block
-//               loop retrying one height forever kept answering 200 and autoheal,
-//               which reads nothing but Health.Status, never fired. Its /live
-//               route is /status plus the stall check.
-
-//   interval  - how often Docker reruns the check (--health-interval)
-//   timeout   - per-check timeout (--health-timeout)
-//   retries   - consecutive failures before marking unhealthy (--health-retries)
-//   startPeriod - grace period after container start before failures count
-//                 (--health-start-period); set long enough for npm start + DB connect
-//   autoheal  - opt-in flag consumed by AutohealService/`xchain-node autoheal`:
-//               when true, a container that stays unhealthy past the grace window
-//               gets `docker restart`ed. Default OFF. Only set it where a restart
-//               plausibly clears the wedge (stalled event loop, dead DB pool).
-//               NEVER set it on xchain-utxo-tracker: that service deliberately
-//               enters a stable halted state (503 while halted) instead of
-//               exiting, and a restart would just re-enter the same halt.
-//
-// Timing rationale:
-//   interval=15s  - frequent enough to detect a stuck service quickly without hammering
-//   timeout=5s    - generous but short of the interval; covers a slow DB query
-//   retries=3     - three misses (~45s) before marking unhealthy; avoids flapping
-//   startPeriod=  - NOT sized from the service's own boot time. A service whose
-//                   probe judges a startup step must grant a window at least as
-//                   long as that step, or the probe reports the startup itself as
-//                   a failure, so every entry whose probe cannot pass until a HARD
-//                   DEPENDENCY is up takes DEPENDENCY_HEALTH_START_PERIOD (60s,
-//                   config/constants.js) rather than a number of its own: encoder
-//                   (its default /status 503s until the utxo-tracker is reachable
-//                   and synced), hub and explorer (their probes run SELECT 1 against
-//                   MariaDB). Self-judging boots keep their own literal: decoder
-//                   (/live), indexer, utxo-tracker and miner all take 60s for their
-//                   own DB connect or wallet prep, and sync gets its own hub-wait
-//                   window, see its line below.
-const SERVICE_HEALTHCHECK = {
-    [XChainService.XCHAIN_DECODER]:       { portKey: 'DECODER_API_PORT',       probe: 'http_get',     path: '/live', interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
-    // The encoder carries no `path`, so its probe is the default GET /status, and
-    // that route 503s until the utxo-tracker is reachable AND synced
-    // (xchain-encoder/src/api.js, getServeReadiness). Its window therefore has to
-    // cover the TRACKER's startup, not the encoder's own fast boot: at the former
-    // 30s a simultaneous cold start had the encoder's grace expiring while the
-    // tracker was still inside the 60s window it declares one line below, and this
-    // is the one autoheal: true service whose probe judges another container.
-    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD, autoheal: true },
-    [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
-    [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
-    // The miner's API is JSON-RPC only (no GET /status route); an http_get probe 500s
-    // on every check and marks the container permanently unhealthy. It probes `health`
-    // rather than `ping` because ping always answers 200 and carries wallet readiness
-    // in its body only, so a miner stalled on credential drift or an unreachable coin
-    // node stayed healthy here; startPeriod widened to cover wallet prep,
-    // which the probe now judges instead of ignoring.
-    [XChainService.XCHAIN_REGTEST_MINER]: { portKey: 'REGTEST_MINER_API_PORT',  probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
-    // The hub probes `health`, not `ping`: ping is a bare SELECT 1, while health 503s
-    // on a tripped DB breaker, a stale oracle round, and consensus-input alerting. A
-    // hub that had stopped producing usable consensus data read healthy through the
-    // narrow probe. Deliberately no autoheal: oracle staleness is usually
-    // upstream, where a restart flaps the container and disrupts in-flight rounds.
-    // Both this and the explorer's probe race a SELECT 1 against MariaDB and 503
-    // when it loses, so both windows cover the DB container's own 60s start period
-    // rather than the 45s each was given from its own boot time.
-    [HUB_MODULE_NAME]:                    { portKey: 'HUB_PORT',                probe: 'jsonrpc_health', interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
-    [EXPLORER_MODULE_NAME]:               { portKey: 'EXPLORER_API_PORT_HTTP',  probe: 'jsonrpc_ping', interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
-    // sync's startPeriod covers MAX_HUB_WAIT_MS (xchain-sync/src/config.js, default
-    // 300000ms), not just process boot. /health answers 503 'starting' for the
-    // whole hub wait instead of reporting healthy with zero pollers running, and at
-    // 45s + 3x15s the container would flip UNHEALTHY at ~90s
-    // on any stack whose hub takes longer to come up. Docker ends the start period
-    // on the first passing check, so the wider window costs nothing once sync is up,
-    // and a hub that never arrives is not silently tolerated either: _waitForHub
-    // exits non-zero at MAX_HUB_WAIT_MS and the restart policy takes over. Widen
-    // both together if MAX_HUB_WAIT_MS is raised.
-    [SYNC_MODULE_NAME]:                   { portKey: 'SYNC_API_PORT',           probe: 'http_get',     path: '/health', interval: '15s', timeout: '5s', retries: 3, startPeriod: '300s' }
-    // xchain-e2e-test: one-shot execution container, never gets --restart, healthcheck not applicable
-    // coin nodes (node module): managed by NodeService / crypto_nodes; not built via buildAndUp,
-    //   so buildHealthcheckArgs never runs for them. Their probe is BAKED INTO THE IMAGE instead
-    //   (HEALTHCHECK in crypto_nodes/<coin>/Dockerfile, an RPC getblockchaininfo ping), which is
-    //   why there is no entry here. Deliberately no autoheal either, mirroring the utxo-tracker
-    //   line above: a wedged daemon usually means corrupt state a blind restart re-enters.
-    // database (mariadb): managed by DatabaseService with its own health tooling
-}
-
-// Build the --health-* flags for a service container's docker run invocation.
-// Returns an empty array when no healthcheck is configured for the module
-// (or when the required port env-var is missing), so callers are always safe.
-// Resolve the healthcheck grace window, allowing a per-service env override.
-// A fresh install starts the container (with this window already counting down)
-// and THEN restores its bootstrap archive -- installModule runs
-// ensureBootstrapUtxoTracker / ensureBootstrapMariaDb AFTER buildAndUp -- which
-// on a large chain takes many minutes, far past the default 60s startPeriod, so
-// the container is marked cosmetically unhealthy mid-restore. An install
-// holds the command lock, which already keeps `autoheal` from firing (no watchdog
-// restart mid-restore), but operators expecting a long restore can widen the
-// Docker grace window via XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE> (service
-// upper-cased, non-alnum -> underscore), e.g.
-// XCHAIN_NODE_HEALTH_START_PERIOD_XCHAIN_UTXO_TRACKER=900s. Accepts a value with
-// an ms/s/m/h unit, or bare seconds (900), which is normalized to '900s' before
-// it reaches docker: --health-start-period is parsed by Go's time.ParseDuration,
-// which rejects a unitless number ("missing unit in duration") and fails the
-// whole `docker run`, so the documented bare-seconds form must never be passed
-// through verbatim. Anything else is ignored and the descriptor default stands.
-function resolveStartPeriod(module, fallback) {
-    const key = 'XCHAIN_NODE_HEALTH_START_PERIOD_'
-        + String(module).toUpperCase().replace(/[^A-Z0-9]+/g, '_')
-    const raw = config.HEALTH_START_PERIOD_ENV[key]
-    if (!raw) return fallback
-    const value = raw.trim()
-    if (/^\d+(ms|s|m|h)$/.test(value)) return value
-    if (/^\d+$/.test(value)) return value + 's'
-    // Malformed override: say so rather than silently standing on the default,
-    // mirroring the loud-drift guard in buildHealthcheckArgs below.
-    logger.info("WARNING: ignoring " + key + "=" + value
-        + ": expected bare seconds (900) or a duration with an ms/s/m/h unit (900s)")
-    return fallback
-}
-
-// LOG_LEVEL / LOG_FORMAT / METRICS_ENABLED / XCHAIN_LOG_PATCH are read by every
-// service's observability shim, and nothing carries them from the deploy host
-// into a container unless they are named here: they appear in no module config
-// store, so the shim stands on its compiled defaults and an operator has no way
-// to raise a single box to debug, switch it to NDJSON, or expose /metrics
-// without editing code (spec proactive-system-watch, D20).
-//
-// Resolution is narrowest-first: a value already in the per-install module
-// config store wins, so an operator who pinned LOG_LEVEL for one coin keeps it;
-// otherwise the deploy host's own environment supplies it. When neither sets a
-// name nothing is fabricated, keeping the container env as small as it is today
-// and leaving the shim defaults (LOG_LEVEL=info, LOG_FORMAT=text,
-// METRICS_ENABLED=false, XCHAIN_LOG_PATCH=1) in force. Values ride the same
-// bare `--env NAME` path as every other key, so none of them reach argv.
-const OBSERVABILITY_ENV_KEYS = ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH']
-
-function resolveObservabilityEnv(environmentVariables, hostEnv = config.OBSERVABILITY_ENV) {
-    const overlay = {}
-    for (const key of OBSERVABILITY_ENV_KEYS) {
-        if (environmentVariables && key in environmentVariables) continue
-        const raw = hostEnv[key]
-        if (raw === undefined || raw === '') continue
-        overlay[key] = String(raw)
-    }
-    return overlay
-}
-
-function buildHealthcheckArgs(module, environmentVariables) {
-    const hc = SERVICE_HEALTHCHECK[module]
-    if (!hc) return []
-
-    const port = environmentVariables[hc.portKey]
-    if (!port) {
-        // Every descriptor's portKey currently ships in ConfigService.getDefaultConfig,
-        // so this guard should never fire. If a future rename or config regression drops
-        // the key, the container would otherwise be created with NO healthcheck and no
-        // trace of why: make that drift loud at install/update time. Empty-array return
-        // is preserved so callers stay safe.
-        logger.info("WARNING: no healthcheck for " + module + ": env " + hc.portKey + " is unset")
-        return []
-    }
-
-    let cmd
-    if (hc.probe === 'jsonrpc_ping' || hc.probe === 'jsonrpc_health') {
-        // JSON-RPC POST; hub, explorer, and the regtest miner all speak this protocol.
-        // `ping` is bare liveness (a SELECT 1, or "the port answers"); `health` is the
-        // richer verdict that 503s on a service that is up but no longer making
-        // progress, and wget -qO- exits non-zero on that 503 exactly as it does on a
-        // dead port. Pick per descriptor: a service whose ping already carries the
-        // real verdict (explorer) stays on ping.
-        const method = hc.probe === 'jsonrpc_health' ? 'health' : 'ping'
-        cmd = `wget -qO- --post-data='{"jsonrpc":"2.0","method":"${method}","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
-    } else {
-        // Default: plain HTTP GET on /status; descriptors override via `path`
-        // where /status is too expensive to double as a liveness probe (sync).
-        cmd = `wget -qO- http://localhost:${port}${hc.path || '/status'} || exit 1`
-    }
-
-    return [
-        '--health-cmd',      cmd,
-        '--health-interval', hc.interval,
-        '--health-timeout',  hc.timeout,
-        '--health-retries',  String(hc.retries),
-        '--health-start-period', resolveStartPeriod(module, hc.startPeriod)
-    ]
-}
-
-// Build the per-service docker-run port/volume/ulimit args from the
-// table-driven SERVICE_REGISTRY (constants.js) instead of a hand-maintained
-// switch/case. A module with no `docker` facet (or no registry entry, e.g.
-// the one-shot e2e-test runner) yields empty arg arrays. `singleton` tells the
-// caller to clear coin/network before container-name and network resolution
-// (shared hub/explorer/sync containers). Preserves the previous exact
-// semantics: `always` ports push unconditionally, other ports push only when
-// both env keys are present, and the two hub-only dynamic mounts (validator
-// capability config, operator signer dir) resolve here where ValidatorService
-// and the filesystem are available.
-function buildModuleDockerArgs(module, environmentVariables, coin, network) {
-    const portArgs = []
-    const volumeArgs = []
-    const ulimitArgs = []
-    const docker = (SERVICE_REGISTRY[module] || {}).docker
-    if (!docker) return { portArgs, volumeArgs, ulimitArgs, singleton: false }
-
-    for (const p of docker.ports || []) {
-        if (p.always || (p.host in environmentVariables && p.container in environmentVariables)) {
-            portArgs.push('-p', `${environmentVariables[p.host]}:${environmentVariables[p.container]}`)
-        }
-    }
-
-    for (const v of docker.volumes || []) {
-        if (v.hostKey) {
-            volumeArgs.push('-v', `${environmentVariables[v.hostKey]}:${v.container}`)
-        } else if (v.hostFn === 'utxoTrackerVolume') {
-            // Volume name derivation lives in one place (ConfigService), consumed
-            // here and by resetModules + BootstrapService, so a non-default
-            // NODE_PREFIX can never drift between them (uuid:7523dd94, uuid:a61fc673).
-            volumeArgs.push('-v', `${getUtxoTrackerVolumeName(coin, network)}:${v.container}`)
-        } else if (v.type === 'hubCapabilityConfig') {
-            // Validator mode: mount the capability config (read-only) so the
-            // hub's HUB_CAPABILITY_CONFIG path resolves inside the container.
-            // No-op for a standalone hub (no validator configured).
-            //
-            // The DIRECTORY holding capabilities.json is what gets mounted, not
-            // the file. A single-file bind mount permanently breaks `docker cp`
-            // against this container - Docker recreates each mount destination
-            // as a directory during a copy, collides with the file and aborts
-            // with "mkdirat validator/capabilities.json: file exists" for EVERY
-            // path, not just the mounted one. ValidatorService keeps that
-            // directory holding nothing but the capability config, so the
-            // validator's signing.key never enters the container.
-            if ('HUB_CAPABILITY_CONFIG' in environmentVariables) {
-                const { getCapabilityConfigMountDir, CAPS_CONTAINER_DIR } = validatorService
-                const capsHostDir = getCapabilityConfigMountDir()
-                if (capsHostDir) {
-                    volumeArgs.push('-v', `${capsHostDir}:${CAPS_CONTAINER_DIR}:ro`)
-                }
-            }
-        } else if (v.type === 'hubSignerDir') {
-            // Operator signer for the on-chain DOGE publishers (PRICE v0 / ANCHOR).
-            // The directory carries the operator's signer.js plus its own
-            // node_modules and key file, so the whole directory is mounted
-            // read-only; ConfigService sets HUB_SIGNER_MODULE to the matching
-            // in-container path. No-op when unconfigured.
-            if (config.XCHAIN_NODE_HUB_SIGNER_DIR && fs.existsSync(config.XCHAIN_NODE_HUB_SIGNER_DIR)) {
-                volumeArgs.push('-v', `${config.XCHAIN_NODE_HUB_SIGNER_DIR}:/XChainHub/operator-signer:ro`)
-            } else {
-                // The signer `validator init` wrote. Its signer.js requires the
-                // SDK, resolved from a node_modules mounted beside it: this
-                // package's own node_modules, so init never has to run npm and
-                // the container sees exactly the SDK the CLI uses. The SDK mount
-                // lands INSIDE the read-only signer mount, which docker can only
-                // do when the mountpoint already exists on the host (otherwise
-                // container creation fails outright); getSignerMountDir()
-                // guarantees that directory before naming the mount.
-                const { getSignerMountDir, SIGNER_CONTAINER_DIR } = validatorService
-                const signerDir = getSignerMountDir()
-                if (signerDir) {
-                    const nodeModules = path.join(__dirname, '../../node_modules')
-                    volumeArgs.push('-v', `${signerDir}:${SIGNER_CONTAINER_DIR}:ro`)
-                    volumeArgs.push('-v', `${nodeModules}:${SIGNER_CONTAINER_DIR}/node_modules:ro`)
-                }
-            }
-        }
-    }
-
-    for (const u of docker.ulimits || []) {
-        ulimitArgs.push('--ulimit', u)
-    }
-
-    return { portArgs, volumeArgs, ulimitArgs, singleton: !!docker.singleton }
-}
-
-/**
- * Which sibling-coin docker networks a module's container must join beyond its
- * own, given what is installed on this host. Pure; exported for tests.
- *
- * The indexer is the one module with cross-chain sibling reads: the ROLLCALL
- * epoch close and the ANCHOR reward rail both make a BTC indexer ask the DOGE
- * indexer of the SAME network what is on chain. Each coin/network stack runs on
- * its own bridge network, and container-name DNS only resolves across a network
- * both containers hold, so without the extra membership those reads can only
- * fail. `docker network connect` state dies with the container, which means a
- * hand-applied attach silently evaporates at the next update or recreate; the
- * attachment must be re-declared HERE, at every create. Membership is granted
- * to every locally installed sibling coin on the same network tier (mirroring
- * the hub, which joins every stack) rather than to dogecoin alone, so the next
- * cross-chain read does not need this file changed. Sibling stacks on other
- * hosts are out of scope by construction: their indexer URLs are real
- * hostnames, not container names, and docker networks do not span hosts.
- *
- * @param {string} module
- * @param {string|null} coin
- * @param {string|null} network
- * @param {Object<string,string[]>} installedCoinsAndNetworks coin -> networks
- * @returns {string[]} docker network names to join, sorted
- */
-function crossChainNetworksFor(module, coin, network, installedCoinsAndNetworks) {
-    if (module !== XChainService.XCHAIN_INDEXER) return []
-    if (!coin || !network) return []
-    const networks = []
-    for (const siblingCoin in (installedCoinsAndNetworks || {})) {
-        if (siblingCoin === coin) continue
-        if ((installedCoinsAndNetworks[siblingCoin] || []).includes(network)) {
-            networks.push(getDockerNetwork(siblingCoin, network))
-        }
-    }
-    return networks.sort()
-}
-
-// Join a freshly created container to the sibling networks computed above.
-// Same retry posture as the hub's attachSharedContainer: addContainerToNetwork
-// is idempotent, one retry absorbs the docker race behind most failures. A
-// persistent failure is reported loudly with its operational consequence but
-// does not fail the create: the sibling stack may legitimately be mid-teardown,
-// and the message names the exact symptom to look for and the remedy.
-async function attachCrossChainNetworks(module, coin, network, containerId) {
-    // The installed map mirrors StatusService.getInstalledCoinsAndNetworks but
-    // is derived here from getStatus, the StatusService seam this module
-    // already holds: pulling a second function out of StatusService widens the
-    // coupling surface every consumer of this module has to satisfy.
-    const modulesStatus = await getStatus(null, null, false)
-    const installedCoinsAndNetworks = {}
-    for (const nextCoin in modulesStatus) {
-        if (!Object.values(Coin).includes(nextCoin)) continue
-        installedCoinsAndNetworks[nextCoin] =
-            Object.keys(modulesStatus[nextCoin]).filter(n => Object.values(Network).includes(n))
-    }
-    const networks = crossChainNetworksFor(module, coin, network, installedCoinsAndNetworks)
-    for (const networkName of networks) {
-        try {
-            await addContainerToNetwork(containerId, networkName)
-        } catch (firstErr) {
-            await sleep(3000)
-            try {
-                await addContainerToNetwork(containerId, networkName)
-            } catch (retryErr) {
-                logger.error("WARNING: could not join " + module + " (" + coin + " " + network + ") to the "
-                    + networkName + " network (" + redactSecrets(retryErr) + "). Cross-chain reads over that "
-                    + "network (ROLLCALL epoch close, ANCHOR rewards) will stall while the container looks "
-                    + "healthy. Remedy: docker network connect " + networkName + " " + containerId.slice(0, 12)
-                    + ", or recreate the module once the network exists.")
-            }
-        }
-    }
-}
-
-/**
- * Read a created container's memory limit back and warn when it did not stick.
- *
- * `docker run --memory` is advice, not a contract: on a kernel with no memory
- * cgroup controller (Raspberry Pi OS ships with it off) docker prints
- * "Limitation discarded", exits 0, and creates the container with
- * HostConfig.Memory=0. Nothing downstream notices, so the CLI's own note goes on
- * claiming a cap the tracker never received and the operator sizes the host
- * against a number that is not true. This is the only place that checks.
- *
- * Warns rather than throws: the container works exactly as it did before the cap
- * existed, and failing the create would block every install on such a host. A
- * reading that cannot be parsed (docker gone, an older stub, an empty answer) is
- * not evidence of anything and stays silent at debug.
- *
- * @param {string} containerId
- * @param {string} module
- * @param {string|null} coin
- * @param {string|null} network
- * @param {number|null} requestedMb the cap that was asked for, in MB
- * @returns {Promise<void>} always resolves; the finding is a log line, not a result
- */
-function verifyContainerMemoryLimit(containerId, module, coin, network, requestedMb) {
-    return new Promise((resolve) => {
-        if (!requestedMb) {
-            resolve()
-            return
-        }
-        execFile('docker', ['inspect', '-f', '{{.HostConfig.Memory}}', containerId], (error, stdout) => {
-            if (error) {
-                logger.debug("Could not read the memory limit back off " + module + ": "
-                    + redactSecrets(String(error.message || error)))
-                resolve()
-                return
-            }
-            const observedBytes = parseInt(String(stdout).trim(), 10)
-            if (!Number.isFinite(observedBytes)) {
-                logger.debug("Docker reported no readable memory limit for " + module + "; nothing to compare")
-                resolve()
-                return
-            }
-            // MB as docker parses `--memory 2703m`: powers of 1024, which is what
-            // dockerMemoryArgs writes and what HostConfig.Memory reports back.
-            if (observedBytes !== requestedMb * 1024 * 1024) {
-                logger.warn(memoryLimitService.memoryCapNotAppliedWarning({
-                    module, coin, network, requestedMb, observedBytes
-                }))
-            }
-            resolve()
-        })
-    })
-}
-
-/**
- * Print what a SUCCESSFUL `docker run` said on stderr.
- *
- * Exit 0 with a warning on stderr is how docker reports that it accepted an
- * argument and then ignored it; a discarded memory limit is reported no other
- * way. Only stdout was ever read, so those lines went nowhere.
- *
- * @param {string|Buffer|undefined} stderr
- * @param {string} module
- * @param {string|null} coin
- * @param {string|null} network
- */
-function logDockerCreateWarnings(stderr, module, coin, network) {
-    const text = String(stderr || '').trim()
-    if (!text) return
-    const label = memoryLimitService.moduleLabel(module, coin, network)
-    for (const line of text.split('\n')) {
-        if (line.trim()) logger.warn("docker said while creating " + label + ": " + redactSecrets(line.trim()))
-    }
-}
-
-/**
- * Build the module image and (re)create its container from the current config.
- *
- * `options.reuseImage` keeps the image that is already tagged for this container and
- * skips both the bundled-library re-clone and `docker build`. A container freezes its
- * env at `docker run`, so the ONLY way to correct a credential it carries is to
- * recreate it; without this flag that correction also drags in whatever GitHub HEAD
- * holds today, turning a credential repair into an unreviewed version bump.
- *
- * @param {string} module
- * @param {string|null} coin
- * @param {string|null} network
- * @param {string|null} [overwriteContainerId]
- * @param {boolean} [onlyExecution]
- * @param {string[]|null} [dockerCmdArgs]
- * @param {{reuseImage?: boolean}} [options]
- * @returns {Promise<string>} the new container id
- */
-async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null, options = {}) {
-    if (!checkIfModuleExists(module)) {
-        throw "module not found"
-    }
-
-    const reuseImage = options.reuseImage === true
-
-    const environmentVariables = await getDefaultConfig(module, coin, network)
-    const dir = getModuleDir(module)
-
-    // Go-live pre-flight: warns pre-launch, refuses a mainnet write-surface
-    // deploy with un-armed settings once XCHAIN_NODE_GO_LIVE=1.
-    const { assertGoLiveReady } = goLiveGate
-    assertGoLiveReady(module, coin, network, environmentVariables, dir)
-
-    // A BTC indexer or validator hub with no DOGE indexer read wedges at its
-    // first roll-call epoch close on any network with a ROLLCALL activation,
-    // days after the deploy, with every container reading healthy. Refuse here
-    // while nothing has been torn down. One-shot execution containers never
-    // close an epoch, so they are exempt.
-    if (!onlyExecution) {
-        const { assertDogeReadWired } = rollcallWiring
-        assertDogeReadWired(module, coin, network, environmentVariables)
-    }
-
-    // Hub consensus-shaped settings (HUB_NETWORK, ORACLE_MIN_SUBMISSIONS,
-    // ORACLE_ROUND_INTERVAL/SUBMISSION_WINDOW, XCHAIN_PRICE_INDEXER_DB_*, and
-    // on regtest the four XCHAIN/BTC derivation overrides) are
-    // passed through from the INVOKING SHELL with no warning when absent, so a
-    // recreate/update run from a shell that lacks one quietly deploys a hub
-    // with different consensus behavior than the one just torn down. Refuses
-    // when a RUNNING hub would lose a value it already has; only warns (never
-    // blocks) when there is no running hub to lose anything from.
-    if (module === HUB_MODULE_NAME) {
-        const { assertNoHubConsensusEnvDrift } = hubConsensusEnvGuard
-        await assertNoHubConsensusEnvDrift(environmentVariables)
-    }
-
-    // Stage any bundled library modules into this service's build context.
-    // The service's Dockerfile COPYs them in and npm resolves the
-    // "file:./<lib>" deps recursively at install.
-    // Staging exists to feed `docker build`; with reuseImage there is no build, and
-    // re-cloning would silently move the module's source off the version the image
-    // (and therefore the running container) was made from.
-    const bundledLibs = reuseImage ? [] : (LIBRARY_BUNDLES[module] || [])
-    for (const lib of bundledLibs) {
-        // Always re-clone so bundled-library commits land on every `update`.
-        // The previous "clone only if missing" check meant xchain-vm changes
-        // got silently ignored on `update xchain-indexer` because the cached
-        // modules/xchain-vm dir from a prior run was reused verbatim.
-        // cloneGit(rewrite=true) removes any existing dir before cloning.
-        //
-        // The ref is RESOLVED, never null. Passing null here meant "clone the
-        // remote's default branch", which made a bundled library the one part
-        // of a pinned install that floated: `install v0.9.0 xchain-indexer`
-        // pinned the indexer and then staged whatever xchain-vm's default
-        // branch happened to hold, into the consensus-critical VM, inside the
-        // image the indexer actually runs. The indexer repo gitignores the
-        // staged copy, so no tag pinned it and nothing surfaced the drift.
-        // That is a fork vector today and a sharper one once the default
-        // branch becomes develop, which is why this lands BEFORE the flip
-        // (release-management spec sections 8 and 11).
-        const libRef = await resolveBundledLibRef(module, lib)
-        logger.info(`Cloning bundled library ${lib} for ${module} at ${libRef.ref}`
-            + (libRef.pinned ? ` (manifest-pinned ${libRef.commit.slice(0, 12)})` : ` (${libRef.reason})`))
-        await cloneGit(lib, true, false, libRef.ref, libRef.commit)
-        const libSrc  = getModuleDir(lib)
-        const libDest = path.join(dir, lib)
-        logger.info("Staging " + lib + " into " + module + " build context")
-        fs.rmSync(libDest, { recursive: true, force: true })
-        fs.cpSync(libSrc, libDest, {
-            recursive: true,
-            force: true,
-            filter: (src) => {
-                const base = path.basename(src)
-                return base !== "node_modules" && base !== ".git" &&
-                       base !== "test" && base !== "bench" && base !== "reports"
-            }
-        })
-    }
-
-    const containerPrefix = getDockerContainerImageName(module, coin, network)
-
-    // Table-driven per-service run-args (SERVICE_REGISTRY in constants.js)
-    // replaces the old per-service switch/case: a new service is one table
-    // entry, not four hand-edited dispatch sites. Singleton
-    // services (hub/explorer/sync) clear coin/network so the shared container
-    // name and network resolve correctly below.
-    const built = buildModuleDockerArgs(module, environmentVariables, coin, network)
-    if (built.singleton) {
-        coin = ""
-        network = ""
-    }
-    const portArgs = built.portArgs
-    const volumeArgs = built.volumeArgs
-    const ulimitArgs = built.ulimitArgs
-
-    // Container memory limit. Derived for the utxo-tracker from the host and
-    // how many trackers share it (MemoryLimitService); explicit for any module
-    // through XCHAIN_NODE_MODULE_MEMORY_MB_<SERVICE>. One-shot execution
-    // containers stay uncapped. The registry read is handed this file's own
-    // `db`, so it counts from the same handle the rest of this file uses.
-    let memoryArgs = []
-    let memoryLimitMb = null
-    if (!onlyExecution) {
-        const { memoryArgsFor, countInstalledTrackers } = memoryLimitService
-        const trackerCount = await countInstalledTrackers(db, { coin, network })
-        const memory = memoryArgsFor(module, { trackerCount, coin, network })
-        memoryArgs = memory.args
-        // Kept for the post-create readback below. Only a cap that was actually
-        // asked for can fail to stick, so an empty args list leaves this null.
-        memoryLimitMb = memory.args.length > 0 ? memory.mb : null
-        if (memory.note) logger.info(memory.note)
-    }
-
-    // Validate all port values
-    if (portArgs.length > 0) {
-        for (let i = 0; i < portArgs.length; i++) {
-            if (portArgs[i] === '-p') {
-                const pair = portArgs[i + 1]
-                const colonIdx = pair.indexOf(':')
-                if (colonIdx === -1) continue
-                const hostPort = pair.substring(0, colonIdx)
-                const containerPort = pair.substring(colonIdx + 1)
-                if (!validatePort(hostPort) || !validatePort(containerPort)) {
-                    throw "Invalid port value in configuration: " + pair
-                }
-            }
-        }
-    }
-
-    // Pre-flight host-port collision check (multi-stack hosts), run BEFORE the
-    // docker build so a collision fails fast instead of only surfacing after
-    // minutes of image build are wasted. Safe to run ahead of the
-    // overwrite/teardown below: assertNoHostPortConflicts excludes selfName
-    // (containerPrefix) from conflicts by container name regardless of whether
-    // the old container has been removed yet.
-    await assertNoHostPortConflicts(portArgs, containerPrefix)
-
-    // With no build to make it, the tag has to already exist. Say so here rather
-    // than letting `docker run` fall through to a registry pull for an image name
-    // that was only ever local, which fails with an unrelated auth/not-found error.
-    if (reuseImage) {
-        try {
-            await execFileAsync('docker', ['image', 'inspect', '--format', '{{.Id}}', containerPrefix])
-        } catch {
-            throw new Error(
-                "No local image tagged " + containerPrefix + " to reuse; run `update " + module +
-                (coin && network ? " " + coin + " " + network : "") + "` to build one."
-            )
-        }
-    }
-
-    // Stamp the source commit onto the IMAGE, not just onto a log line that
-    // scrolls away. Neither of the two things an operator can read off a running
-    // container answers "which code is this": the image tag is a fixed name, and
-    // the module's package.json version is a release string that stays put across
-    // dozens of commits (xchain-indexer has reported 2.7.17 since 2026-07-17), so
-    // both said "correct" about a container running a 13-hour-old tree.
-    //
-    // A label is the right carrier: it is fixed at build time, inherited by every
-    // container created from the image, and left alone by a `recreate` (which
-    // reuses the image and must NOT re-stamp it with whatever the checkout holds
-    // today, or the stamp would drift into the same lie). Read it back with
-    //   docker inspect --format '{{index .Config.Labels "xchain.source.commit"}}' <container>
-    const sourceLabels = reuseImage ? { commit: null, ref: null } : readCheckoutIdentityFromDisk(dir)
-    const buildLabelArgs = []
-    if (sourceLabels.commit) buildLabelArgs.push('--label', 'xchain.source.commit=' + sourceLabels.commit)
-    if (sourceLabels.ref)    buildLabelArgs.push('--label', 'xchain.source.ref=' + sourceLabels.ref)
-
-    return new Promise((resolve, reject) => {
-        // Pass every container env var as a bare `--env NAME` (value supplied in
-        // the execFile `env` option below), NOT `--env NAME=value` in argv. The
-        // config map carries per-install secrets (HUB_DB_PASS/DECODER_DB_PASS/
-        // INDEXER_DB_PASS, NODE_PASSWORD, HUB_API_KEY/INDEXER_API_KEY, the per-coin
-        // *_API_KEY, TELEMETRY_ADMIN_KEY). In argv those would land in
-        // /proc/<docker-pid>/cmdline (world-readable, no hidepid) AND in a failed
-        // `docker run` error.message (which upstream logging prints, and an operator
-        // pastes into a bug report). Mirrors DatabaseService's MYSQL_ROOT_PASSWORD
-        // treatment. The value reaches the container identically; only argv changes.
-        // The observability names resolved above join the map here so they travel
-        // the same value-out-of-argv path.
-        const envArgs = []
-        const dockerEnv = config.childProcessEnv()
-        const containerEnv = { ...environmentVariables, ...resolveObservabilityEnv(environmentVariables) }
-        for (const key in containerEnv) {
-            envArgs.push('--env', key)
-            dockerEnv[key] = String(containerEnv[key])
-        }
-
-        // Everything from here on is image-independent: tear down the old container
-        // and `docker run` the tag. reuseImage enters it directly; the normal path
-        // enters it from the build callback.
-        const createContainer = async () => {
-            try {
-                if (overwriteContainerId) {
-                    // SIGTERM with the service's budget, never `docker kill`: the
-                    // decoder and tracker break their loops at a block boundary, and
-                    // a kill lands mid-transaction or mid-rollback on every update.
-                    // A container that is already gone resolves stopped:false and the
-                    // remove below is what tolerates that.
-                    await stopModuleContainer(stopContainerByName, module, coin, network, overwriteContainerId)
-                    try {
-                        await removeContainer(overwriteContainerId)
-                    } catch { /* container may have been removed manually */ }
-                }
-
-                // Name-keyed cleanup immediately before `docker run --name`, making
-                // (re)creation idempotent against a leftover carcass the registry
-                // never recorded: an interrupted onlyExecution run (registry insert
-                // skipped, ModuleService.js ~L416), or a container that exists but
-                // whose registry insert failed. The overwriteContainerId removal
-                // above is id-keyed and misses both cases (uuid:9533ee7a).
-                try {
-                    await forceRemoveContainerByName(containerPrefix)
-                } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
-
-                // One-shot execution containers (e.g. the e2e-test runner) must NOT get a
-                // restart policy: after their command exits, `unless-stopped` would restart
-                // them, re-running the suite and leaving the container "restarting" so the
-                // subsequent `docker rm` fails. Persistent service containers keep the policy.
-                const restartArgs = onlyExecution ? [] : ['--restart', 'unless-stopped']
-                // The same budget the CLI stops with, stamped on the container so an
-                // operator's plain `docker stop` or `docker restart` honours it too.
-                const stopBudgetArgs = onlyExecution ? [] : stopTimeoutArgs(module)
-                // Healthchecks only apply to persistent service containers. One-shot
-                // execution containers exit immediately after their command; a healthcheck
-                // would fire during the exit window and falsely mark them unhealthy.
-                const healthcheckArgs = onlyExecution ? [] : buildHealthcheckArgs(module, environmentVariables)
-                // Cap json-file log growth on persistent containers so a
-                // long-running node cannot fill the host disk, and keep at least
-                // 48 h of history readable so a fault can be reviewed the day
-                // after it happened (spec proactive-system-watch, 2.0.5).
-                //
-                // 50m x 4 = 200 MB. Sizing, from the regtest measurement of
-                // 2026-08-30: the hub is the loudest module at 152 KB/h, and a
-                // public testnet validator is taken at 10x that (a five-peer
-                // PBFT set fans every round out across peers where the regtest
-                // hub runs solo, plus real user traffic), so 1.52 MB/h. 48 h at
-                // 2x headroom needs 146 MB, which a 10m x 3 = 30 MB
-                // window does not reach: 30 MB is under 20 h at that rate.
-                // The cap is a ceiling, not a reservation: the quiet
-                // modules measured 5-38 KB/h and never approach it. --tail 100
-                // still lands inside a single rotated file at this size.
-                //
-                // One-shot execution containers exit immediately and need no cap.
-                const logOptArgs = onlyExecution ? [] : ['--log-opt', 'max-size=50m', '--log-opt', 'max-file=4']
-                const runArgs = [
-                    'run', '-d', ...restartArgs, ...stopBudgetArgs, '--name', containerPrefix, '--hostname', containerPrefix,
-                    ...logOptArgs,
-                    ...volumeArgs,
-                    ...ulimitArgs,
-                    ...memoryArgs,
-                    ...healthcheckArgs,
-                    '--network', getDockerNetwork(coin, network),
-                    ...envArgs,
-                    ...portArgs,
-                    '-t', containerPrefix,
-                    ...(dockerCmdArgs ?? [])
-                ]
-
-                logger.info("Creating container of module " + module + (coin && network ? " in " + coin + " " + network : ""))
-                execFile('docker', runArgs, { cwd: dir, env: dockerEnv }, async (error2, stdout, stderr) => {
-                    if (error2) {
-                        // error2.message embeds the full argv; redact any secret-shaped
-                        // token defensively even though values now live in the child env.
-                        reject("Error creating the container: " + redactSecrets(error2.message))
-                        return
-                    }
-                    // A create that exits 0 can still have refused part of what it was
-                    // asked for, and stderr is the only place it says so.
-                    logDockerCreateWarnings(stderr, module, coin, network)
-                    try {
-                        const containerId = stdout.trim()
-                        if (/^[a-f0-9]{64}$/.test(containerId)) {
-                            if (!onlyExecution) {
-                                await verifyContainerMemoryLimit(containerId, module, coin, network, memoryLimitMb)
-                                if (await db.setModuleContainer(module, coin, network, containerId)) {
-                                    // Cross-chain network membership is part of creating the
-                                    // container, not a post-install nicety: install, update and
-                                    // recreate all funnel through here, and each of them replaces
-                                    // the container that held any hand-applied membership.
-                                    await attachCrossChainNetworks(module, coin, network, containerId)
-                                    // The hub's DB grant must exist before anything requires
-                                    // the replacement hub to ANSWER. statusChanged() below
-                                    // pushes config over the hub's HTTP API and rethrows on
-                                    // failure, and a hub started on a HUB_DB_PASS that MariaDB
-                                    // never received cannot authenticate, cannot serve that
-                                    // push, and so never reaches the rotation its callers run
-                                    // after buildAndUp resolves - ModuleService installModule
-                                    // and moduleOperations recreateModules both (uuid:c466af19).
-                                    // Rotating here lands the ALTER milliseconds after
-                                    // `docker run` instead of behind a health check the
-                                    // missing grant makes impossible. It stays out in front of
-                                    // the container create on purpose: rotating the shared
-                                    // account before the build would lock the OUTGOING hub out
-                                    // for the whole clone-and-build window. The later calls
-                                    // remain, idempotent (CREATE USER IF NOT EXISTS + ALTER).
-                                    if (module === HUB_MODULE_NAME) await setHubDatabaseParameters()
-                                    await statusChanged()
-                                    resolve(containerId)
-                                } else {
-                                    reject("There was a problem trying to store the container's id")
-                                }
-                            } else {
-                                resolve(containerId)
-                            }
-                        } else {
-                            reject("Invalid container ID returned by Docker: " + containerId)
-                        }
-                    } catch (err) {
-                        reject(err)
-                    }
-                })
-            } catch (err) {
-                reject(err)
-            }
-        }
-
-        if (reuseImage) {
-            logger.info("Reusing the existing image of module " + module + (coin && network ? " in " + coin + " " + network : ""))
-            createContainer()
-            return
-        }
-
-        // The module Dockerfiles only build under BuildKit (see
-        // checkBuildKitAvailable). Refuse before the build rather than let the
-        // legacy builder die on a COPY glob, and pin DOCKER_BUILDKIT=1 for the
-        // build so an exported DOCKER_BUILDKIT=0 on the host cannot route a
-        // buildx-equipped docker back to the legacy builder. Guarded the way
-        // precheck guards its DockerService probes: a stubbed or older
-        // DockerService without this export skips the probe, never the build.
-        const buildKitProbe = typeof checkBuildKitAvailable === 'function'
-            ? checkBuildKitAvailable()
-            : Promise.resolve(true)
-        buildKitProbe.then(() => {
-            logger.info("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
-                + (sourceLabels.commit ? " from " + sourceLabels.commit.slice(0, 12) + " (" + (sourceLabels.ref || 'detached') + ")" : ""))
-            const buildEnv = { ...config.childProcessEnv(), DOCKER_BUILDKIT: '1' }
-            execFile('docker', ['build', ...buildLabelArgs, '.', '-t', containerPrefix], { cwd: dir, env: buildEnv }, (error) => {
-                if (error) {
-                    reject("Error creating Docker image: " + redactSecrets(error.message))
-                    return
-                }
-                createContainer()
-            })
-        }).catch((err) => {
-            reject("Error creating Docker image: " + err)
-        })
-    })
+const { configureDependencies: configureGitCheckout, CLONE_STAGING_SUFFIX, CLONE_PREVIOUS_SUFFIX, runGitClone, assertCheckoutCommit, readCheckoutIdentity, readCheckoutIdentityFromDisk, readSourceBranchTip, isLocalPathSource, warnIfSourceBranchIsBehind, verifyDeploySource, reportDeployedSource } = require('./module_service/git_checkout.js')
+const { configureDependencies: configureCloneAndRefs, cloneGit, getModuleBranch, getModuleCommit, resolveBundledLibRef } = require('./module_service/clone_and_refs.js')
+const { configureDependencies: configureDockerArgs, SERVICE_HEALTHCHECK, resolveStartPeriod, OBSERVABILITY_ENV_KEYS, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs, assertNoHostPortConflicts } = require('./module_service/docker_args.js')
+const { configureDependencies: configureContainerNetworks, crossChainNetworksFor, attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings } = require('./module_service/container_networks.js')
+const { configureDependencies: configureBuildAndUp, buildAndUp } = require('./module_service/build_and_up.js')
+
+configureGitCheckout({ execFile, execFileAsync, fs, path, modulesUrls, redactSecrets, logger })
+configureCloneAndRefs({ execFileAsync, fs, modulesUrls, DEFAULT_MODULE_BRANCH, getModuleDir, getModuleTmpDir, moduleDirExists, removeModuleTmpDir, createModuleTmpDir, redactSecrets, releaseManifestService, CLONE_STAGING_SUFFIX, CLONE_PREVIOUS_SUFFIX, runGitClone, assertCheckoutCommit, verifyDeploySource, reportDeployedSource, logger })
+configureDockerArgs({ fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD, getUtxoTrackerVolumeName, getPublishedHostPorts, config, validatorService, logger })
+configureContainerNetworks({ execFile, XChainService, Coin, Network, getDockerNetwork, getStatus, addContainerToNetwork, redactSecrets, sleep, memoryLimitService, logger })
+configureBuildAndUp({ execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort, stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable, stopModuleContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config, goLiveGate, memoryLimitService, hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk, cloneGit, resolveBundledLibRef, assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs, attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings, logger })
+
+for (const part of ['git_checkout', 'clone_and_refs', 'docker_args', 'container_networks', 'build_and_up']) {
+    delete require.cache[require.resolve('./module_service/' + part + '.js')]
 }
 
 // Singleton modules share one coin/network-independent container name (see
@@ -1334,191 +89,155 @@ async function containerExistsByName(name) {
     }
 }
 
+async function installNodeModule(coin, network, remoteUpdate) {
+    const { getLocalNodeVersion, checkRemoteNodeVersion } = versionService
+    const { getRemoteModuleVersions, getLastStatus } = stateModule
+    const { buildCryptoNode, getCryptoNode } = nodeService
+    const containerVersion = getLastStatus()?.[coin ?? ""]?.[network ?? ""]?.[NODE_MODULE_NAME]?.["container_version"] ?? null
+    if (containerVersion && !remoteUpdate) return false
+    let localNodeVersion = null
+    try {
+        localNodeVersion = await getLocalNodeVersion(coin, network)
+    } catch { /* not installed yet */ }
+    if (localNodeVersion == null || remoteUpdate) {
+        const remoteVersions = getRemoteModuleVersions()
+        if (!(NODE_MODULE_NAME + SEP + coin in remoteVersions)) await checkRemoteNodeVersion(coin)
+        const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]["tag_name"]
+        await getCryptoNode(coin, network, remoteNodeVersion)
+    }
+    await buildCryptoNode(coin, network)
+    await statusChanged()
+    return true
+}
+
+async function installDatabaseModule(coin, network) {
+    const { buildDatabaseModule } = databaseService
+    await buildDatabaseModule(coin, network)
+    await statusChanged()
+    return true
+}
+
+async function installExplorer(branch, remoteUpdate) {
+    // An explicit update bypasses the status-row early returns and replaces the container.
+    const { installExplorerModule } = peers.explorerService
+    await installExplorerModule(remoteUpdate, branch)
+    await statusChanged()
+    return true
+}
+
+async function singletonAlreadyInstalled(module, coin, network, remoteUpdate) {
+    if (!SINGLETON_MODULES.includes(module) || remoteUpdate) return false
+    return containerExistsByName(getDockerContainerImageName(module, coin, network))
+}
+
+// Refuse credential rotations while the working container is still intact.
+// The post-build guards run after replacement and can no longer keep a sibling
+// on its deployed password, so the module being replaced is the only exclusion.
+async function assertCredentialCompatibility(module, coin, network, onlyExecution) {
+    if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
+        const { assertNoDbCredentialDrift } = dbCredentialDrift
+        const driftCfg = await getDefaultConfig(XChainService.XCHAIN_INDEXER, coin, network)
+        await assertNoDbCredentialDrift(coin, network, {
+            decoder: driftCfg["DECODER_DB_PASS"],
+            indexer: driftCfg["INDEXER_DB_PASS"]
+        }, { excludeModules: [module] })
+    }
+    if (module === HUB_MODULE_NAME && !onlyExecution) {
+        const { assertNoHubDbCredentialDrift } = dbCredentialDrift
+        const hubCfg = await getDefaultConfig(HUB_MODULE_NAME, null, null)
+        await assertNoHubDbCredentialDrift(
+            { user: hubCfg["HUB_DB_USER"], pass: hubCfg["HUB_DB_PASS"] },
+            { excludeContainers: [getDockerContainerImageName(HUB_MODULE_NAME, "", "")] }
+        )
+    }
+}
+
+// A release manifest selects both the ref and verified commit. Outside a
+// release install, the operator's branch remains the ref and carries no pin.
+// Detached pinned checkouts compare commits so repeated installs do not clone.
+async function checkoutModule(module, branch, remoteUpdate, localModuleVersion) {
+    const { resolveComponentRef } = releaseManifestService
+    const pin = resolveComponentRef(module, branch)
+    if (remoteUpdate || localModuleVersion == null) {
+        await cloneGit(module, true, false, pin.ref, pin.commit)
+        return
+    }
+    if (!pin.ref || !moduleDirExists(module)) return
+    const currentBranch = await getModuleBranch(module)
+    const alreadyThere = pin.pinned
+        ? (await getModuleCommit(module)) === pin.commit
+        : currentBranch === pin.ref
+    if (!alreadyThere) {
+        logger.info(`Module '${module}' is on '${currentBranch}', switching to '${pin.ref}'...`)
+        await cloneGit(module, true, false, pin.ref, pin.commit)
+    }
+}
+
+// Freshness is sampled before the service starts. The tracker creates LevelDB
+// immediately and decoder/indexer begin filling their blocks table, so checking
+// after buildAndUp could hide a fresh store. Unknown inspection results remain
+// non-fresh because the restore path can drop populated database state.
+async function sampleBootstrapFreshness(module, coin, network, onlyExecution) {
+    let utxoWasFresh = false
+    let mariaWasFresh = false
+    if (module === XChainService.XCHAIN_UTXO_TRACKER && !onlyExecution) {
+        const { utxoTrackerVolumeFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = bootstrapService
+        utxoWasFresh = (await utxoTrackerVolumeFreshness(coin, network)) === FRESHNESS_EMPTY || forceBootstrapRequested()
+    }
+    if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
+        const { mariaDbModuleFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = bootstrapService
+        mariaWasFresh = (await mariaDbModuleFreshness(coin, network, module)) === FRESHNESS_EMPTY || forceBootstrapRequested()
+    }
+    return { utxoWasFresh, mariaWasFresh }
+}
+
+// Database credentials are rotated after the replacement starts, while the hub
+// grant is also established inside buildAndUp before its status push. Bootstrap
+// restoration then runs only for the confirmed-fresh stores sampled above.
+async function finishServiceInstall(context, freshness) {
+    const { module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs } = context
+    const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
+    if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
+        await setDatabaseParameters()
+    } else if (module === HUB_MODULE_NAME) {
+        await setHubDatabaseParameters()
+    }
+    if (freshness.utxoWasFresh) {
+        const { ensureBootstrapUtxoTracker } = bootstrapService
+        await ensureBootstrapUtxoTracker(coin, network)
+    }
+    if (freshness.mariaWasFresh) {
+        const { ensureBootstrapMariaDb } = bootstrapService
+        await ensureBootstrapMariaDb(coin, network, module)
+    }
+    if (!onlyExecution) await statusChanged()
+    return containerId
+}
+
+async function installServiceModule(context) {
+    const { module, coin, network, remoteUpdate, onlyExecution, branch } = context
+    if (await singletonAlreadyInstalled(module, coin, network, remoteUpdate)) return false
+    const { getLastStatus } = stateModule
+    const containerVersion = getLastStatus()?.[coin ?? ""]?.[network ?? ""]?.[module]?.["container_version"] ?? null
+    if (containerVersion && !remoteUpdate) return false
+    const { getLocalModuleVersion } = versionService
+    let localModuleVersion = null
+    try {
+        localModuleVersion = await getLocalModuleVersion(module)
+    } catch { /* not installed yet */ }
+    await assertCredentialCompatibility(module, coin, network, onlyExecution)
+    await checkoutModule(module, branch, remoteUpdate, localModuleVersion)
+    const freshness = await sampleBootstrapFreshness(module, coin, network, onlyExecution)
+    return finishServiceInstall(context, freshness)
+}
+
 async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null, dockerCmdArgs = null) {
     if (coin === "") coin = null
     if (network === "") network = null
-
-    const { getLocalNodeVersion, getLocalModuleVersion } = versionService
-    const { getRemoteModuleVersions, getLastStatus }     = stateModule
-    const { buildCryptoNode, getCryptoNode }             = nodeService
-    const { buildDatabaseModule }                        = databaseService
-    const { installExplorerModule }                      = peers.explorerService
-    const { checkRemoteNodeVersion }                     = versionService
-
-    if (module === NODE_MODULE_NAME) {
-        const lastStatus = getLastStatus()
-        const containerNodeVersion = lastStatus?.[coin ?? ""]?.[network ?? ""]?.[module]?.["container_version"] ?? null
-
-        if (!containerNodeVersion || remoteUpdate) {
-            let localNodeVersion = null
-            try {
-                localNodeVersion = await getLocalNodeVersion(coin, network)
-            } catch { /* not installed yet */ }
-
-            if (localNodeVersion == null || remoteUpdate) {
-                try {
-                    const remoteVersions = getRemoteModuleVersions()
-                    if (!(NODE_MODULE_NAME + SEP + coin in remoteVersions)) {
-                        await checkRemoteNodeVersion(coin)
-                    }
-                    const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]["tag_name"]
-                    await getCryptoNode(coin, network, remoteNodeVersion)
-                } catch (err) {
-                    throw err
-                }
-            }
-
-            await buildCryptoNode(coin, network)
-            await statusChanged()
-            return true
-        } else {
-            return false
-        }
-    } else if (module === DB_MODULE_NAME) {
-        try {
-            await buildDatabaseModule(coin, network)
-            await statusChanged()
-            return true
-        } catch (err) {
-            throw err
-        }
-    } else if (module === EXPLORER_MODULE_NAME) {
-        try {
-            // remoteUpdate=true means the user explicitly ran `update explorer`
-            // (or a force-reinstall): bypass the ping/status-row early returns
-            // in installExplorerModule and tear down the existing container.
-            await installExplorerModule(remoteUpdate, branch)
-            await statusChanged()
-            return true
-        } catch (err) {
-            throw err
-        }
-    } else {
-        // For a singleton module the container name is the same for every
-        // coin/network, so once it exists this call is a redundant pass for
-        // another network in the same install run; skip it (an explicit
-        // `update`, remoteUpdate=true, still rebuilds). Without this guard the
-        // second network's `docker run` collides on the existing name.
-        if (SINGLETON_MODULES.includes(module) && !remoteUpdate) {
-            if (await containerExistsByName(getDockerContainerImageName(module, coin, network))) {
-                return false
-            }
-        }
-
-        const lastStatus = getLastStatus()
-        const containerNodeVersion = lastStatus?.[coin ?? ""]?.[network ?? ""]?.[module]?.["container_version"] ?? null
-
-        if (!containerNodeVersion || remoteUpdate) {
-            let localModuleVersion = null
-            try {
-                localModuleVersion = await getLocalModuleVersion(module)
-            } catch { /* not installed yet */ }
-
-            // Refuse a rotation that would lock a sibling out BEFORE this run
-            // re-clones the checkout and buildAndUp tears the old container down.
-            // setDatabaseParameters runs the same guard after the rebuild, and by
-            // then the working container is already destroyed and restarted on a
-            // password the refusal declines to write, so the guard's own "nothing
-            // has been changed" promise is broken by the command that makes it
-            // (uuid:cb0bd3be). The module being rebuilt is excluded: it comes back
-            // on the intended password, so its frozen one is not a lockout.
-            // `recreate` does not route through here and stays the remediation,
-            // because it converges every named container before provisioning once.
-            if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
-                const { assertNoDbCredentialDrift } = dbCredentialDrift
-                const driftCfg = await getDefaultConfig(XChainService.XCHAIN_INDEXER, coin, network)
-                await assertNoDbCredentialDrift(coin, network, {
-                    decoder: driftCfg["DECODER_DB_PASS"],
-                    indexer: driftCfg["INDEXER_DB_PASS"]
-                }, { excludeModules: [module] })
-            }
-
-            // Same ordering rule for the SHARED hub account: setHubDatabaseParameters
-            // runs its guard after buildAndUp has already torn this hub down and back
-            // up, so refuse here while nothing has been touched yet (uuid:a48aab2c).
-            if (module === HUB_MODULE_NAME && !onlyExecution) {
-                const { assertNoHubDbCredentialDrift } = dbCredentialDrift
-                const hubCfg = await getDefaultConfig(HUB_MODULE_NAME, null, null)
-                await assertNoHubDbCredentialDrift(
-                    { user: hubCfg["HUB_DB_USER"], pass: hubCfg["HUB_DB_PASS"] },
-                    { excludeContainers: [getDockerContainerImageName(HUB_MODULE_NAME, "", "")] }
-                )
-            }
-
-            // Under a pinned install the manifest, not the operator's branch
-            // argument, decides this module's ref: `install v0.9.0` means the
-            // v0.9.0 component set, and the pinned commit is verified after the
-            // clone. Outside a release install `pin.ref` is just `branch` and
-            // `pin.commit` is null, so the branch behaviour below is unchanged.
-            const { resolveComponentRef } = releaseManifestService
-            const pin = resolveComponentRef(module, branch)
-            const cloneRef = pin.ref
-
-            try {
-                if (remoteUpdate || localModuleVersion == null) {
-                    await cloneGit(module, true, false, cloneRef, pin.commit)
-                } else if (cloneRef && moduleDirExists(module)) {
-                    const currentBranch = await getModuleBranch(module)
-                    // A pinned install re-clones whenever the checkout is not
-                    // already the pinned commit; a detached checkout reports
-                    // "HEAD" as its branch, which would never equal a tag name
-                    // and so would re-clone every run without this check.
-                    const alreadyThere = pin.pinned
-                        ? (await getModuleCommit(module)) === pin.commit
-                        : currentBranch === cloneRef
-                    if (!alreadyThere) {
-                        logger.info(`Module '${module}' is on '${currentBranch}', switching to '${cloneRef}'...`)
-                        await cloneGit(module, true, false, cloneRef, pin.commit)
-                    }
-                }
-                // Fresh-install detection must happen BEFORE buildAndUp starts the
-                // tracker (a fresh tracker creates an empty LevelDB immediately).
-                // Only a CONFIRMED empty store authorises the bootstrap restore
-                // below, because that restore reaches DROP DATABASE: an inspection
-                // failure answers UNKNOWN, never fresh, so a transient MariaDB or
-                // docker fault during a rolling update costs a slow sync from
-                // scratch rather than a populated store (uuid:7037604f).
-                let utxoWasFresh = false
-                if (module === XChainService.XCHAIN_UTXO_TRACKER && !onlyExecution) {
-                    const { utxoTrackerVolumeFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = bootstrapService
-                    utxoWasFresh = (await utxoTrackerVolumeFreshness(coin, network)) === FRESHNESS_EMPTY
-                        || forceBootstrapRequested()
-                }
-                // Decoder/indexer freshness must also be sampled BEFORE buildAndUp;
-                // once the service starts it fills its `blocks` table, which would
-                // make a fresh install look populated.
-                let mariaWasFresh = false
-                if ((module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) && !onlyExecution) {
-                    const { mariaDbModuleFreshness, forceBootstrapRequested, FRESHNESS_EMPTY } = bootstrapService
-                    mariaWasFresh = (await mariaDbModuleFreshness(coin, network, module)) === FRESHNESS_EMPTY
-                        || forceBootstrapRequested()
-                }
-                const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
-                if (module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_INDEXER) {
-                    await setDatabaseParameters()
-                } else if (module === HUB_MODULE_NAME) {
-                    // Rotate the hub DB account to match the (possibly just-changed) HUB_DB_PASS
-                    // env the new container started with; without this an `update xchain-hub`
-                    // leaves the live hub account on the old password and locks the hub out.
-                    await setHubDatabaseParameters()
-                }
-                if (utxoWasFresh) {
-                    const { ensureBootstrapUtxoTracker } = bootstrapService
-                    await ensureBootstrapUtxoTracker(coin, network)
-                }
-                if (mariaWasFresh) {
-                    const { ensureBootstrapMariaDb } = bootstrapService
-                    await ensureBootstrapMariaDb(coin, network, module)
-                }
-                if (!onlyExecution) await statusChanged()
-                return containerId
-            } catch (err) {
-                throw err
-            }
-        } else {
-            return false
-        }
-    }
+    if (module === NODE_MODULE_NAME) return installNodeModule(coin, network, remoteUpdate)
+    if (module === DB_MODULE_NAME) return installDatabaseModule(coin, network)
+    if (module === EXPLORER_MODULE_NAME) return installExplorer(branch, remoteUpdate)
+    return installServiceModule({ module, coin, network, remoteUpdate, overwriteContainerId, onlyExecution, branch, dockerCmdArgs })
 }
 
 async function uninstallModule(coin, network, module) {
