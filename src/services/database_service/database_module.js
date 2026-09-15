@@ -17,6 +17,7 @@
 
 let { execFile } = require('child_process')
 let { promisify } = require('util')
+let path = require('path')
 let execFileAsync = promisify(execFile)
 let mariadb     = require('mariadb')
 
@@ -29,7 +30,7 @@ let { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, validateP
 let { getStatusFromContainer, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName } = require('../docker_service')
 let { statusChanged }           = require('../status_service')
 let config = require('../../config');
-let peers = require('../peer_services').bindPeerServices(require)
+let peers = require('../peer_services').bindPeerServices((file) => require(path.join('..', file)))
 let { getLogger } = require('../../observability/logger');
 let logger = getLogger();
 let {
