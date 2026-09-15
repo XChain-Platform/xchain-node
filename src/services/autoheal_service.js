@@ -56,160 +56,229 @@
  * past that would be permanently unreachable.
  ********************************************************************/
 
-const fs   = require('fs')
-const os   = require('os')
-const path = require('path')
-
 const { db } = require('../state')
 const { getStatusFromContainer, restartContainer } = require('./docker_service')
 const { SERVICE_HEALTHCHECK } = require('./module_service')
-const config = require('../config');
+const {
+    DEFAULT_GRACE_MS,
+    DEFAULT_COOLDOWN_MS,
+    DEFAULT_COOLDOWN_CEILING_MS,
+    DEFAULT_RESTART_PROBATION_MS,
+    getStateFilePath,
+    parsePositiveIntEnv,
+    restartBackoffMs,
+    readState,
+    writeState,
+    getUnhealthySinceMs,
+    getLastHealthyProbeMs,
+    isRecoveryEstablished
+} = require('./autoheal_service/restart_state.js')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
-// A container must be continuously unhealthy for at least this long before
-// a restart is considered (on top of Docker's own retries budget).
-const DEFAULT_GRACE_MS = 2 * 60 * 1000
-// Wait at least this long after a restart before restarting the same container
-// again. This is the FIRST retry's wait; see restartBackoffMs for the doubling.
-const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000
-// Upper bound on the doubled cooldown, so a long-wedged container settles at one
-// restart every six hours rather than growing to a wait no operator would outlive.
-const DEFAULT_COOLDOWN_CEILING_MS = 6 * 60 * 60 * 1000
-// A passing probe landing inside this window after an autoheal restart is that
-// restart's own artifact, not evidence the wedge cleared. Every service opted
-// into autoheal in SERVICE_HEALTHCHECK (decoder, encoder, indexer) probes at a
-// 15s interval with 3 retries behind a 60s start period, so Docker can
-// legitimately report `starting` or a first fresh pass for ~105s after a
-// restart; 150s leaves margin. An operator who widens a service's start period
-// via XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE> should widen
-// XCHAIN_NODE_AUTOHEAL_PROBATION_MS to match.
-const DEFAULT_RESTART_PROBATION_MS = 150 * 1000
-
-const STATE_DIR_NAME  = '.xchain-node'
-const STATE_FILE_NAME = 'autoheal-state.json'
-
-function getStateFilePath() {
-    // XCHAIN_NODE_AUTOHEAL_STATE_DIR is a test/ops override; the default
-    // matches the per-user dir used by credentials.json and command.lock.
-    const dir = config.XCHAIN_NODE_AUTOHEAL_STATE_DIR ||
-                config.XCHAIN_NODE_LOCK_DIR ||
-                path.join(os.homedir(), STATE_DIR_NAME)
-    return path.join(dir, STATE_FILE_NAME)
+function autohealTiming() {
+    return {
+        graceMs: parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_GRACE_MS', DEFAULT_GRACE_MS),
+        cooldownMs: parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS', DEFAULT_COOLDOWN_MS),
+        ceilingMs: parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS', DEFAULT_COOLDOWN_CEILING_MS),
+        probationMs: parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_PROBATION_MS', DEFAULT_RESTART_PROBATION_MS)
+    }
 }
 
-function parsePositiveIntEnv(name, fallback) {
-    const raw = config.AUTOHEAL_TIMING_ENV[name]
-    if (!raw) return fallback
-    const n = Number(raw)
-    if (!Number.isFinite(n) || n < 0) return fallback
-    return n
+function autohealCandidate(row) {
+    const { module, coin, network, container_id: containerId } = row
+    const label = [module, coin, network].filter(Boolean).join('/')
+    if (!containerId) return null
+
+    const hc = SERVICE_HEALTHCHECK[module]
+    if (!hc || hc.autoheal !== true) return null
+    return { module, coin, network, containerId, label }
 }
 
-// How long to wait before the Nth restart of a container that has not recovered.
-// attempts is the number of restarts already performed in this unhealthy run, so
-// attempts<=1 yields the plain base cooldown and the first retry keeps its
-// documented timing; every further one doubles. A very large attempts count sends
-// the product to Infinity, which Math.min resolves to the ceiling, not to NaN.
-function restartBackoffMs(attempts, cooldownMs, ceilingMs) {
-    if (!(attempts > 1)) return cooldownMs
-    return Math.min(cooldownMs * Math.pow(2, attempts - 1), ceilingMs)
-}
-
-function readState(stateFile) {
-    // {
-    //   restarts:       { <containerId>: <epoch ms of last autoheal restart> },
-    //   unhealthySince: { <containerId>: <epoch ms this unhealthy episode began> },
-    //   restartCount:   { <containerId>: <restarts since this container last was healthy> }
-    // }
+async function inspectCandidate(candidate, result) {
+    const { module, coin, network, containerId } = candidate
     try {
-        const parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
-        if (parsed && typeof parsed.restarts === 'object' && parsed.restarts !== null) {
-            // unhealthySince arrived after restarts; an older state file has none.
-            if (typeof parsed.unhealthySince !== 'object' || parsed.unhealthySince === null) {
-                parsed.unhealthySince = {}
-            }
-            // restartCount arrived after both. An older file reads as zero attempts,
-            // which costs a wedge one un-backed-off retry after an upgrade, never a
-            // missed restart.
-            if (typeof parsed.restartCount !== 'object' || parsed.restartCount === null) {
-                parsed.restartCount = {}
-            }
-            return parsed
-        }
+        candidate.status = await getStatusFromContainer(containerId)
+        return true
     } catch {
-        // Missing or corrupt state file: start clean. Worst case a container
-        // gets one extra restart after a state loss, which is acceptable.
+        // Container gone or Docker unreachable for this id; the registry
+        // reconcile on the next precheck cleans it up. Not our job here.
+        result.skipped.push({ module, coin, network, containerId, reason: 'inspect failed' })
+        return false
     }
-    return { restarts: {}, unhealthySince: {}, restartCount: {} }
 }
 
-function writeState(stateFile, state) {
-    fs.mkdirSync(path.dirname(stateFile), { recursive: true })
-    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n')
+// Heal only what is actually RUNNING. Docker freezes State.Health.Status
+// at its last value the moment a container stops (the probe goroutine
+// runs only while the container is up), so a container that happened to
+// be unhealthy when an operator stopped it keeps reporting `unhealthy`
+// while State.Status is `exited` - and `docker restart` on a stopped
+// container STARTS it, silently undoing the stop. Frozen health from a
+// container that is no longer probing is not evidence of a wedge. This
+// costs no healing either: autoheal exists for the ALIVE-but-stalled
+// case (see the file header), because `--restart unless-stopped` already
+// covers a service whose PID exits, and declines to fire exactly when
+// the operator was the one who stopped it. Same guard the bootstrap gate
+// applies at BootstrapHealthGate.evaluateContainerState.
+function skipNonRunning(candidate, state, result) {
+    const { module, coin, network, containerId, status } = candidate
+    const runState = status && status.State && status.State.Status
+    if (runState === 'running') return null
+
+    result.skipped.push({ module, coin, network, containerId, reason: `not running (state: ${runState || 'unknown'})` })
+    // Forget the onset: a container that comes back up gets a fresh grace
+    // window instead of inheriting a clock that has been stopped all along.
+    // The attempt count is deliberately NOT dropped here - it is cleared on
+    // an observed RECOVERY (below), and a pass that catches a container
+    // mid-restart must not reset the backoff a real wedge has earned.
+    if (state.unhealthySince[containerId] === undefined) return false
+    delete state.unhealthySince[containerId]
+    return true
 }
 
-// How long the container has been CONTINUOUSLY unhealthy, derived from the
-// trailing run of failing probe entries in Health.Log (each entry carries
-// Start/End/ExitCode). Returns null when it cannot be established (no log,
-// or the newest entry passed), in which case the caller must NOT restart:
-// without evidence of a sustained wedge a restart is just noise.
-//
-// This is a LOWER BOUND on the episode, never its true start: Docker retains
-// only the last 5 Health.Log entries, so at the 15s probe interval every
-// descriptor uses, the oldest entry is at most ~60-75s old and the value
-// returned here slides forward with each new probe. Use it only to seed the
-// persisted onset in runAutoheal; timing the grace window off it directly
-// caps the measurable episode below any grace window over ~75s (XC #3470).
-function getUnhealthySinceMs(health) {
-    const log = Array.isArray(health.Log) ? health.Log : []
-    if (log.length === 0) return null
+function skipNonUnhealthy(candidate, health, state) {
+    const { containerId } = candidate
+    if (health && health.Status === 'unhealthy') return null
 
-    // Entries are ordered oldest -> newest; walk back through the trailing
-    // consecutive failures to find when this unhealthy episode began.
-    let since = null
-    for (let i = log.length - 1; i >= 0; i--) {
-        const entry = log[i]
-        if (!entry || entry.ExitCode === 0) break
-        const start = Date.parse(entry.Start)
-        if (Number.isNaN(start)) break
-        since = start
+    let changed = false
+    // Episode over (or the healthcheck is gone): forget the onset so the
+    // next wedge starts its own clock instead of inheriting an old one.
+    if (state.unhealthySince[containerId] !== undefined) {
+        delete state.unhealthySince[containerId]
+        changed = true
     }
-    return since
+    // On THIS branch drop the attempt count only on an OBSERVED `healthy`,
+    // never on a bare `!== unhealthy`, so a container
+    // that DID recover starts its next episode at the base cooldown. Backing
+    // off is a response to a wedge restarts are not clearing; a recovery is
+    // the evidence they cleared it, and `!== 'unhealthy'` is not that
+    // evidence: `docker restart` puts the container into `starting` for the
+    // descriptor's start period plus its retry budget (60s + 3x15s for the
+    // decoder/indexer, and an operator can widen it to minutes via
+    // XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>), so a pass landing in that
+    // window would wipe the counter the restart it had just issued earned.
+    // A wedge no restart clears then stayed at the BASE cooldown forever,
+    // which is the churn the doubling exists to end. Same principle the
+    // not-running guard above states: mid-restart is not recovery. `starting`
+    // is its health-probation form. A container with no healthcheck keeps its
+    // count too, and inertly: it can never reach the restart path below.
+    if (health && health.Status === 'healthy' && state.restartCount[containerId] !== undefined) {
+        delete state.restartCount[containerId]
+        changed = true
+    }
+    return changed
 }
 
-// When the newest PASSING probe in Health.Log ran, or null when the retained
-// entries hold no pass. Reads Start (the same clock getUnhealthySinceMs seeds
-// the onset from) so the two values compare like for like, falling back to End
-// only when Start is unparseable. Never throws on a missing or garbage log.
-//
-// This is the only positive evidence of a RECOVERY the retained log can carry.
-// Its absence means nothing either way: five entries at a 15s probe interval
-// span ~60-75s, so an older pass has simply rotated out. runAutoheal treats it
-// that way, resetting the episode only on a pass it can actually see.
-function getLastHealthyProbeMs(health) {
-    const log = Array.isArray(health && health.Log) ? health.Log : []
-    for (let i = log.length - 1; i >= 0; i--) {
-        const entry = log[i]
-        if (!entry || entry.ExitCode !== 0) continue
-        const at = Date.parse(entry.Start)
-        if (!Number.isNaN(at)) return at
-        const end = Date.parse(entry.End)
-        if (!Number.isNaN(end)) return end
+function seedEpisodeOnset(health, state, containerId, now, derived) {
+    // Anchor the episode to the FIRST pass that saw it unhealthy. Re-deriving
+    // from Health.Log every pass cannot work: the log holds 5 entries and the
+    // probes are 15s apart, so the derived onset never gets further than
+    // ~60-75s back and a 120s grace window is unreachable. Seed from the
+    // derived value so a container already wedged when autoheal first runs
+    // is credited the episode Docker can still see.
+    // Two halves of one rule. Reset the onset when the retained probes
+    // POSITIVELY show a pass after it: a recovery-then-relapse that falls
+    // entirely between two passes is never observed by the `!== unhealthy`
+    // branch above, so without this the new episode inherits the old one's
+    // clock and gets restarted inside its own grace window. Preserve the
+    // onset when the log merely ROTATED older evidence away, which is the
+    // ordinary case: absence of a pass is not evidence of one.
+    let since = state.unhealthySince[containerId]
+    const lastHealthy = getLastHealthyProbeMs(health)
+    let onsetReseeded = false
+    if (typeof since !== 'number' || !Number.isFinite(since) ||
+        (typeof lastHealthy === 'number' && lastHealthy > since)) {
+        since = Math.min(now, derived)
+        state.unhealthySince[containerId] = since
+        onsetReseeded = true
+    }
+    return { since, lastHealthy, onsetReseeded }
+}
+
+function clearRecoveredRestartCount(state, containerId, episode, probationMs) {
+    // The attempt count means "restarts since this container was last
+    // healthy", so a reseeded onset and a surviving count are two halves of
+    // one rule pulled apart: the `!== unhealthy` branch above never sees a
+    // recovery that fell between two passes, and the NEW episode then
+    // inherits the old one's doubled cooldown. At the 6h ceiling that
+    // suppresses a fresh wedge for six hours after the probes proved the
+    // last one cleared. Drop the count on the same evidence that reseeded
+    // the onset, but only when the pass OUTLASTED the restart's probation:
+    // inside that window a pass is the restart's own artifact, which is the
+    // rule the observed-healthy branch and the not-running guard defend.
+    // Absence of a pass still changes nothing, here as there.
+    if (!episode.onsetReseeded || state.restartCount[containerId] === undefined ||
+        !isRecoveryEstablished(episode.lastHealthy, state.restarts[containerId], probationMs)) return false
+    delete state.restartCount[containerId]
+    return true
+}
+
+function establishEpisode(candidate, health, state, now, probationMs, result) {
+    const { module, coin, network, containerId } = candidate
+    const derived = getUnhealthySinceMs(health)
+    if (derived === null) {
+        result.skipped.push({ module, coin, network, containerId, reason: 'no failing probe log to time the episode' })
         return null
     }
-    return null
+
+    const episode = seedEpisodeOnset(health, state, containerId, now, derived)
+    const restartCountCleared = clearRecoveredRestartCount(state, containerId, episode, probationMs)
+    return { since: episode.since, changed: episode.onsetReseeded || restartCountCleared }
 }
 
-// Whether a retained passing probe is evidence of a RECOVERY rather than an
-// artifact of the restart autoheal itself issued. A pass qualifies when there
-// is no autoheal restart to attribute it to, or when it landed more than the
-// probation window after that restart. Pure, so both sides of the rule are
-// unit-testable without driving a whole pass.
-function isRecoveryEstablished(lastHealthyMs, lastRestartMs, probationMs) {
-    if (!Number.isFinite(lastHealthyMs)) return false
-    if (!Number.isFinite(lastRestartMs)) return true
-    return lastHealthyMs > lastRestartMs + probationMs
+async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now) {
+    const { module, coin, network, containerId, label } = candidate
+    if (now - since < timing.graceMs) {
+        result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
+        logger.info(`autoheal: ${label} is unhealthy but inside the ${timing.graceMs}ms grace window, not restarting yet`)
+        return
+    }
+
+    // Each restart this container has already survived without recovering widens
+    // its next wait, so a deterministic wedge (a bad block, a persistent host
+    // fault) costs one restart per cooldown, then per 2x, 4x... to the ceiling,
+    // instead of one per cooldown forever.
+    const attempts = state.restartCount[containerId] || 0
+    const effectiveCooldownMs = restartBackoffMs(attempts, timing.cooldownMs, timing.ceilingMs)
+    const lastRestart = state.restarts[containerId]
+    if (typeof lastRestart === 'number' && now - lastRestart < effectiveCooldownMs) {
+        result.skipped.push({ module, coin, network, containerId, reason: 'inside restart cooldown' })
+        logger.info(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
+        return
+    }
+
+    result.candidates.push({ module, coin, network, containerId })
+    if (dryRun) {
+        logger.info(`autoheal: DRY RUN, would restart ${label} (unhealthy for ${now - since}ms)`)
+        return
+    }
+
+    try {
+        await restartContainer(containerId)
+        state.restarts[containerId] = now
+        state.restartCount[containerId] = attempts + 1
+        result.restarted.push({ module, coin, network, containerId })
+        logger.info(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
+    } catch (err) {
+        result.failed.push({ module, coin, network, containerId, reason: String(err) })
+        logger.info(`autoheal: FAILED to restart ${label}: ${err}`)
+    }
+}
+
+function persistState(stateFile, state, modules) {
+    // Drop state entries for containers no longer in the registry so the
+    // file cannot grow without bound across reinstalls.
+    const known = new Set(modules.map(m => m.container_id))
+    for (const id of Object.keys(state.restarts)) {
+        if (!known.has(id)) delete state.restarts[id]
+    }
+    for (const id of Object.keys(state.unhealthySince)) {
+        if (!known.has(id)) delete state.unhealthySince[id]
+    }
+    for (const id of Object.keys(state.restartCount)) {
+        if (!known.has(id)) delete state.restartCount[id]
+    }
+    writeState(stateFile, state)
 }
 
 // One autoheal pass over the module registry. Never throws for a single bad
@@ -217,13 +286,9 @@ function isRecoveryEstablished(lastHealthyMs, lastRestartMs, probationMs) {
 // Returns { candidates, restarted, failed, skipped } where each array holds
 // { module, coin, network, containerId, reason? }.
 async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
-    const graceMs    = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_GRACE_MS', DEFAULT_GRACE_MS)
-    const cooldownMs = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS', DEFAULT_COOLDOWN_MS)
-    const ceilingMs  = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS', DEFAULT_COOLDOWN_CEILING_MS)
-    const probationMs = parsePositiveIntEnv('XCHAIN_NODE_AUTOHEAL_PROBATION_MS', DEFAULT_RESTART_PROBATION_MS)
-    const stateFile  = getStateFilePath()
-    const state      = readState(stateFile)
-
+    const timing = autohealTiming()
+    const stateFile = getStateFilePath()
+    const state = readState(stateFile)
     const result = { candidates: [], restarted: [], failed: [], skipped: [] }
     // Set whenever an episode-onset or attempt-count entry is recorded or cleared,
     // so the pass persists it even when nothing was restarted. Without this the
@@ -238,187 +303,31 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
 
     const modules = await db.getAllModuleContainers(null, null)
     for (const row of modules) {
-        const { module, coin, network, container_id: containerId } = row
-        const label = [module, coin, network].filter(Boolean).join('/')
-        if (!containerId) continue
+        const candidate = autohealCandidate(row)
+        if (!candidate) continue
+        if (!await inspectCandidate(candidate, result)) continue
 
-        const hc = SERVICE_HEALTHCHECK[module]
-        if (!hc || hc.autoheal !== true) continue
-
-        let status
-        try {
-            status = await getStatusFromContainer(containerId)
-        } catch {
-            // Container gone or Docker unreachable for this id; the registry
-            // reconcile on the next precheck cleans it up. Not our job here.
-            result.skipped.push({ module, coin, network, containerId, reason: 'inspect failed' })
+        const stoppedStateChanged = skipNonRunning(candidate, state, result)
+        if (stoppedStateChanged !== null) {
+            if (stoppedStateChanged) onsetChanged = true
             continue
         }
 
-        // Heal only what is actually RUNNING. Docker freezes State.Health.Status
-        // at its last value the moment a container stops (the probe goroutine
-        // runs only while the container is up), so a container that happened to
-        // be unhealthy when an operator stopped it keeps reporting `unhealthy`
-        // while State.Status is `exited` - and `docker restart` on a stopped
-        // container STARTS it, silently undoing the stop. Frozen health from a
-        // container that is no longer probing is not evidence of a wedge. This
-        // costs no healing either: autoheal exists for the ALIVE-but-stalled
-        // case (see the file header), because `--restart unless-stopped` already
-        // covers a service whose PID exits, and declines to fire exactly when
-        // the operator was the one who stopped it. Same guard the bootstrap gate
-        // applies at BootstrapHealthGate.evaluateContainerState.
-        const runState = status && status.State && status.State.Status
-        if (runState !== 'running') {
-            result.skipped.push({ module, coin, network, containerId, reason: `not running (state: ${runState || 'unknown'})` })
-            // Forget the onset: a container that comes back up gets a fresh grace
-            // window instead of inheriting a clock that has been stopped all along.
-            // The attempt count is deliberately NOT dropped here - it is cleared on
-            // an observed RECOVERY (below), and a pass that catches a container
-            // mid-restart must not reset the backoff a real wedge has earned.
-            if (state.unhealthySince[containerId] !== undefined) {
-                delete state.unhealthySince[containerId]
-                onsetChanged = true
-            }
+        const health = candidate.status && candidate.status.State && candidate.status.State.Health
+        const recoveredStateChanged = skipNonUnhealthy(candidate, health, state)
+        if (recoveredStateChanged !== null) {
+            if (recoveredStateChanged) onsetChanged = true
             continue
         }
 
-        const health = status && status.State && status.State.Health
-        if (!health || health.Status !== 'unhealthy') {
-            // Episode over (or the healthcheck is gone): forget the onset so the
-            // next wedge starts its own clock instead of inheriting an old one.
-            if (state.unhealthySince[containerId] !== undefined) {
-                delete state.unhealthySince[containerId]
-                onsetChanged = true
-            }
-            // On THIS branch drop the attempt count only on an OBSERVED `healthy`,
-            // never on a bare `!== unhealthy`, so a container
-            // that DID recover starts its next episode at the base cooldown. Backing
-            // off is a response to a wedge restarts are not clearing; a recovery is
-            // the evidence they cleared it, and `!== 'unhealthy'` is not that
-            // evidence: `docker restart` puts the container into `starting` for the
-            // descriptor's start period plus its retry budget (60s + 3x15s for the
-            // decoder/indexer, and an operator can widen it to minutes via
-            // XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>), so a pass landing in that
-            // window would wipe the counter the restart it had just issued earned.
-            // A wedge no restart clears then stayed at the BASE cooldown forever,
-            // which is the churn the doubling exists to end. Same principle the
-            // not-running guard above states: mid-restart is not recovery. `starting`
-            // is its health-probation form. A container with no healthcheck keeps its
-            // count too, and inertly: it can never reach the restart path below.
-            if (health && health.Status === 'healthy' && state.restartCount[containerId] !== undefined) {
-                delete state.restartCount[containerId]
-                onsetChanged = true
-            }
-            continue
-        }
-
-        const derived = getUnhealthySinceMs(health)
-        if (derived === null) {
-            result.skipped.push({ module, coin, network, containerId, reason: 'no failing probe log to time the episode' })
-            continue
-        }
-
-        // Anchor the episode to the FIRST pass that saw it unhealthy. Re-deriving
-        // from Health.Log every pass cannot work: the log holds 5 entries and the
-        // probes are 15s apart, so the derived onset never gets further than
-        // ~60-75s back and a 120s grace window is unreachable (XC #3470). Seed
-        // from the derived value so a container already wedged when autoheal first
-        // runs is credited the episode Docker can still see.
-        // Two halves of one rule. Reset the onset when the retained probes
-        // POSITIVELY show a pass after it: a recovery-then-relapse that falls
-        // entirely between two passes is never observed by the `!== unhealthy`
-        // branch above, so without this the new episode inherits the old one's
-        // clock and gets restarted inside its own grace window. Preserve the
-        // onset when the log merely ROTATED older evidence away, which is the
-        // ordinary case: absence of a pass is not evidence of one.
-        let since = state.unhealthySince[containerId]
-        const lastHealthy = getLastHealthyProbeMs(health)
-        let onsetReseeded = false
-        if (typeof since !== 'number' || !Number.isFinite(since)) {
-            since = Math.min(now, derived)
-            state.unhealthySince[containerId] = since
-            onsetChanged = true
-            onsetReseeded = true
-        } else if (typeof lastHealthy === 'number' && lastHealthy > since) {
-            since = Math.min(now, derived)
-            state.unhealthySince[containerId] = since
-            onsetChanged = true
-            onsetReseeded = true
-        }
-
-        // The attempt count means "restarts since this container was last
-        // healthy", so a reseeded onset and a surviving count are two halves of
-        // one rule pulled apart: the `!== unhealthy` branch above never sees a
-        // recovery that fell between two passes, and the NEW episode then
-        // inherits the old one's doubled cooldown. At the 6h ceiling that
-        // suppresses a fresh wedge for six hours after the probes proved the
-        // last one cleared. Drop the count on the same evidence that reseeded
-        // the onset, but only when the pass OUTLASTED the restart's probation:
-        // inside that window a pass is the restart's own artifact, which is the
-        // rule the observed-healthy branch and the not-running guard defend.
-        // Absence of a pass still changes nothing, here as there.
-        if (onsetReseeded && state.restartCount[containerId] !== undefined &&
-            isRecoveryEstablished(lastHealthy, state.restarts[containerId], probationMs)) {
-            delete state.restartCount[containerId]
-            onsetChanged = true
-        }
-
-        if (now - since < graceMs) {
-            result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
-            logger.info(`autoheal: ${label} is unhealthy but inside the ${graceMs}ms grace window, not restarting yet`)
-            continue
-        }
-
-        // Each restart this container has already survived without recovering widens
-        // its next wait, so a deterministic wedge (a bad block, a persistent host
-        // fault) costs one restart per cooldown, then per 2x, 4x... to the ceiling,
-        // instead of one per cooldown forever.
-        const attempts        = state.restartCount[containerId] || 0
-        const effectiveCooldownMs = restartBackoffMs(attempts, cooldownMs, ceilingMs)
-        const lastRestart     = state.restarts[containerId]
-        if (typeof lastRestart === 'number' && now - lastRestart < effectiveCooldownMs) {
-            result.skipped.push({ module, coin, network, containerId, reason: 'inside restart cooldown' })
-            logger.info(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
-            continue
-        }
-
-        result.candidates.push({ module, coin, network, containerId })
-        if (dryRun) {
-            logger.info(`autoheal: DRY RUN, would restart ${label} (unhealthy for ${now - since}ms)`)
-            continue
-        }
-
-        try {
-            await restartContainer(containerId)
-            state.restarts[containerId]     = now
-            state.restartCount[containerId] = attempts + 1
-            result.restarted.push({ module, coin, network, containerId })
-            logger.info(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
-        } catch (err) {
-            result.failed.push({ module, coin, network, containerId, reason: String(err) })
-            logger.info(`autoheal: FAILED to restart ${label}: ${err}`)
-        }
+        const episode = establishEpisode(candidate, health, state, now, timing.probationMs, result)
+        if (!episode) continue
+        if (episode.changed) onsetChanged = true
+        await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now)
     }
 
-    if (!dryRun && (onsetChanged || result.restarted.length > 0)) {
-        // Drop state entries for containers no longer in the registry so the
-        // file cannot grow without bound across reinstalls.
-        const known = new Set(modules.map(m => m.container_id))
-        for (const id of Object.keys(state.restarts)) {
-            if (!known.has(id)) delete state.restarts[id]
-        }
-        for (const id of Object.keys(state.unhealthySince)) {
-            if (!known.has(id)) delete state.unhealthySince[id]
-        }
-        for (const id of Object.keys(state.restartCount)) {
-            if (!known.has(id)) delete state.restartCount[id]
-        }
-        writeState(stateFile, state)
-    }
-
-    if (result.candidates.length === 0) {
-        logger.info('autoheal: nothing to do')
-    }
+    if (!dryRun && (onsetChanged || result.restarted.length > 0)) persistState(stateFile, state, modules)
+    if (result.candidates.length === 0) logger.info('autoheal: nothing to do')
     return result
 }
 
