@@ -99,7 +99,9 @@ describe('DbCredentialDrift', () => {
             expect(drift).to.deep.equal([])
         })
     })
+})
 
+describe('DbCredentialDrift', () => {
     describe('assertNoDbCredentialDrift', () => {
 
         // uuid:cb0bd3be: the pre-flight caller runs this guard BEFORE it replaces a

@@ -88,7 +88,9 @@ describe('DbCredentialDrift', () => {
             expect(thrown.message).to.not.contain('hpass')
         })
     })
+})
 
+describe('DbCredentialDrift', () => {
     describe('assertNoHubDbCredentialDrift', () => {
 
         const HUB_CONTAINERS = {

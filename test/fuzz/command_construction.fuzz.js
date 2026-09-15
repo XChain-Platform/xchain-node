@@ -139,6 +139,9 @@ describe('Fuzz: Docker Command Construction', function () {
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         expect(getCmd()).to.include('-t xchain-node-bitcoin-mainnet-xchain-encoder')
     })
+})
+
+describe('Fuzz: Docker Command Construction', function () {
 
     // env vars are passed as raw array elements; execFile needs no shell quoting.
 
@@ -175,6 +178,13 @@ describe('Fuzz: Docker Command Construction', function () {
         // The command should still be constructable without crashing
         expect(cmd).to.exist
     })
+})
+
+describe('Fuzz: Docker Command Construction', function () {
+    registerDockerCmdTests()
+})
+
+describe('Fuzz: Docker Command Construction', function () {
 
     // --- git clone command structure ---
     describe('git clone command', function () {
@@ -220,6 +230,9 @@ describe('Fuzz: Docker Command Construction', function () {
             expect(cloneCmd).to.include('git clone git@')
         })
     })
+})
+
+describe('Fuzz: Docker Command Construction', function () {
 
     // --- Module-specific port/volume lines ---
     describe('module-specific Docker configuration', function () {
@@ -261,7 +274,9 @@ describe('Fuzz: Docker Command Construction', function () {
             expect(getCmd()).to.include('-v xchain-utxo-tracker-bitcoin-mainnet-data:/data/xchain-utxo-tracker')
         })
     })
+})
 
+function registerDockerCmdTests() {
     // --- dockerCmd passthrough ---
     it('appends dockerCmd args to docker run when provided', async function () {
         const stubs = makeStubs()
@@ -281,4 +296,4 @@ describe('Fuzz: Docker Command Construction', function () {
         expect(cmd).to.not.include('null')
         expect(cmd).to.match(/-t xchain-node-bitcoin-mainnet-xchain-encoder$/)
     })
-})
+}

@@ -84,7 +84,9 @@ describe('DbCredentialDrift', () => {
             expect(drift).to.deep.equal([])
         })
     })
+})
 
+describe('DbCredentialDrift', () => {
     describe('findDbCredentialDrift', () => {
 
         it('ignores a key absent from either side', () => {
