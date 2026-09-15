@@ -54,21 +54,38 @@ function fakeChild(exitCode = 0) {
     return child
 }
 
+let workDir, dataDir, svc, logger, env
+
+function setUpSelfUpdate() {
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-selfupd-'))
+    dataDir = path.join(workDir, 'data')
+    svc     = load(dataDir)
+    logger  = { log: sinon.stub(), warn: sinon.stub(), error: sinon.stub() }
+    env     = {}
+}
+
+function tearDownSelfUpdate() {
+    fs.rmSync(workDir, { recursive: true, force: true })
+    sinon.restore()
+}
+
+function deps(overrides = {}) {
+    return {
+        env, logger, root: workDir,
+        currentVersion: () => '0.12.3',
+        describeCarrier: sinon.stub().resolves({ isRepo: true, commit: 'c'.repeat(40), dirty: [] }),
+        execFile: fakeExec(),
+        verifyGitTagSignature: sinon.stub().returns({ fingerprint: 'F'.repeat(40) }),
+        signatureCheckDisabled: () => false,
+        spawn: sinon.stub().returns(fakeChild(0)),
+        exit: sinon.stub(),
+        ...overrides
+    }
+}
+
 describe('SelfUpdateService', function () {
-    let workDir, dataDir, svc, logger, env
-
-    beforeEach(function () {
-        workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-selfupd-'))
-        dataDir = path.join(workDir, 'data')
-        svc     = load(dataDir)
-        logger  = { log: sinon.stub(), warn: sinon.stub(), error: sinon.stub() }
-        env     = {}
-    })
-
-    afterEach(function () {
-        fs.rmSync(workDir, { recursive: true, force: true })
-        sinon.restore()
-    })
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
 
     describe('compareVersions()', function () {
         it('orders numeric triples and ignores a leading v', function () {
@@ -78,23 +95,13 @@ describe('SelfUpdateService', function () {
             expect(svc.compareVersions('0.15.10', '0.15.9')).to.equal(1)
         })
     })
+})
+
+describe('SelfUpdateService', function () {
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
 
     describe('selfUpdateAndReexec()', function () {
-
-        function deps(overrides = {}) {
-            return {
-                env, logger, root: workDir,
-                currentVersion: () => '0.12.3',
-                describeCarrier: sinon.stub().resolves({ isRepo: true, commit: 'c'.repeat(40), dirty: [] }),
-                execFile: fakeExec(),
-                verifyGitTagSignature: sinon.stub().returns({ fingerprint: 'F'.repeat(40) }),
-                signatureCheckDisabled: () => false,
-                spawn: sinon.stub().returns(fakeChild(0)),
-                exit: sinon.stub(),
-                ...overrides
-            }
-        }
-
         it('does nothing inside the re-executed child (loop guard)', async function () {
             env[svc.TARGET_ENV] = 'v0.15.2'
             const d = deps()
@@ -118,7 +125,14 @@ describe('SelfUpdateService', function () {
             expect(out.reason).to.equal('current')
             expect(d.describeCarrier.called).to.equal(false)
         })
+    })
+})
 
+describe('SelfUpdateService', function () {
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
+
+    describe('selfUpdateAndReexec()', function () {
         it('warns and continues when the CLI is not a git checkout', async function () {
             const d = deps({ describeCarrier: sinon.stub().resolves({ isRepo: false, commit: null, dirty: [] }) })
             const out = await svc.selfUpdateAndReexec({ tag: 'v0.15.2', childArgs: ['update'], deps: d })
@@ -136,7 +150,14 @@ describe('SelfUpdateService', function () {
             expect(err.message).to.match(/Nothing was changed/)
             expect(d.execFile.called).to.equal(false)
         })
+    })
+})
 
+describe('SelfUpdateService', function () {
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
+
+    describe('selfUpdateAndReexec()', function () {
         it('fetches, verifies the tag, checks it out, installs, hands back the lock and re-executes the explicit command', async function () {
             const beforeSpawn = sinon.stub()
             const d = deps({ beforeSpawn })
@@ -159,7 +180,14 @@ describe('SelfUpdateService', function () {
             expect(opts.stdio).to.equal('inherit')
             expect(d.exit.calledWith(0)).to.equal(true)
         })
+    })
+})
 
+describe('SelfUpdateService', function () {
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
+
+    describe('selfUpdateAndReexec()', function () {
         it('exits with the child status', async function () {
             const d = deps({ spawn: sinon.stub().returns(fakeChild(3)) })
             await svc.selfUpdateAndReexec({ tag: 'v0.15.2', childArgs: ['update'], deps: d })
@@ -195,6 +223,11 @@ describe('SelfUpdateService', function () {
             expect(d.spawn.called).to.equal(false)
         })
     })
+})
+
+describe('SelfUpdateService', function () {
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
 
     describe('explicitUpdateArgs()', function () {
         it('always names every slot and the tag, whatever the operator typed', function () {
@@ -204,6 +237,11 @@ describe('SelfUpdateService', function () {
                 .to.deep.equal(['update', 'xchain-hub', 'all', 'all', 'v0.15.2'])
         })
     })
+})
+
+describe('SelfUpdateService', function () {
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
 
     describe('describeCarrier()', function () {
         it('answers not-a-repo when git refuses', async function () {
@@ -220,6 +258,11 @@ describe('SelfUpdateService', function () {
             expect(await svc.describeCarrier(d)).to.deep.equal({ isRepo: true, commit: 'a'.repeat(40), dirty: ['src/cli.js', 'package.json'] })
         })
     })
+})
+
+describe('SelfUpdateService', function () {
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
 
     describe('noticeNewerRelease()', function () {
 
@@ -246,7 +289,14 @@ describe('SelfUpdateService', function () {
             await svc.noticeNewerRelease({ env, logger, currentVersion: () => '0.12.3', resolveLatestReleaseTag: resolve })
             expect(resolve.called).to.equal(false)
         })
+    })
+})
 
+describe('SelfUpdateService', function () {
+    beforeEach(setUpSelfUpdate)
+    afterEach(tearDownSelfUpdate)
+
+    describe('noticeNewerRelease()', function () {
         it('caches the lookup for an hour, including a failed one', async function () {
             const resolve = sinon.stub().rejects(new Error('rate limited'))
             let now = 1000
