@@ -59,6 +59,7 @@ const { tableCountSql, tableExistsSql } = require('../db/information_schema')
 const { appliedMigrationsSql } = require('../db/migrations')
 const { migrationsDirOf, migrationFiles } = require('../utils/migration_files')
 const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName } = require('./config_service')
+const { readMigrateCli, migrateCliPathFor } = require('../utils/indexer_migrate_cli')
 const config = require('../config');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -162,9 +163,8 @@ function pendingManualMigrations(dir, applied) {
 async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
     try {
         const cat = deps.getDockerContainerFileCat || require('./docker_service').getDockerContainerFileCat
-        const source = await cat(container, 'src/migrate.js')
-        if (!source) return null
-        return /['"]--file['"]/.test(String(source))
+        const found = await readMigrateCli(cat, container)
+        return found ? /['"]--file['"]/.test(found.source) : null
     } catch {
         return null
     }
@@ -284,12 +284,12 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
     if (remedy.supportsPerFile === true) {
         instructions = 'apply ' + (plural ? 'them' : 'it') +
             ' deliberately, with the writer quiesced, then re-run the update:\n' +
-            missing.map(f => '    docker exec -i ' + container + ' node src/migrate.js --file ' + f).join('\n')
+            missing.map(f => '    docker exec -i ' + container + ' node ' + migrateCliPathFor(container) + ' --file ' + f).join('\n')
     } else {
         const wouldApply = (remedy.pendingManual && remedy.pendingManual.length)
             ? remedy.pendingManual
             : missing
-        instructions = 'DO NOT run `node src/migrate.js` inside ' + container + '. ' +
+        instructions = 'DO NOT run `node ' + migrateCliPathFor(container) + '` inside ' + container + '. ' +
             (remedy.supportsPerFile === false
                 ? 'That container runs a build with no per-file targeting: it ignores --file'
                 : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +
