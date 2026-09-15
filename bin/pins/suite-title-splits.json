@@ -376,6 +376,28 @@
       "test/regression/regression.test/07_config_parsing_boundaries.test.js",
       "test/regression/regression.test/08_precheck_error_handling.test.js",
       "test/regression/regression.test/09_utility_functions.test.js"
+    ],
+    "test/unit/module_operations.test.js": [
+      "test/unit/module_operations.test.js",
+      "test/unit/module_operations.test/01_update_modules.test.js",
+      "test/unit/module_operations.test/02_recreate_modules.test.js",
+      "test/unit/module_operations.test/03_module_controls.test.js",
+      "test/unit/module_operations.test/04_module_shell_log_monitor.test.js",
+      "test/unit/module_operations.test/05_update_modules_branch_handling.test.js",
+      "test/unit/module_operations.test/06_update_modules_no_ref_target_resolution.test.js",
+      "test/unit/module_operations.test/07_update_modules_all_expansion.test.js",
+      "test/unit/module_operations.test/08_uninstall_and_e2e.test.js",
+      "test/unit/module_operations.test/09_reset_modules.test.js",
+      "test/unit/module_operations.test/10_reset_node_datadir_resolution.test.js",
+      "test/unit/module_operations.test/11_reset_external_db_reachability.test.js",
+      "test/unit/module_operations.test/12_reset_bootstrap_republish.test.js",
+      "test/unit/module_operations.test/13_reset_registry_read.test.js",
+      "test/unit/module_operations.test/14_reset_utxo_tracker_volume.test.js",
+      "test/unit/module_operations.test/15_reset_regtest_hub_purge.test.js",
+      "test/unit/module_operations.test/16_reset_coupled_decoder_indexer.test.js",
+      "test/unit/module_operations.test/17_module_error_paths.test.js",
+      "test/unit/module_operations.test/18_sync_shared_services_after_install.test.js",
+      "test/unit/module_operations.test/19_e2e_image_siblings.test.js"
     ]
   }
 }
