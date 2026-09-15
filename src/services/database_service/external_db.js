@@ -105,10 +105,11 @@ async function getExternalDbConfig() {
     return promptForExternalDbConfig()
 }
 
+async function promptForExternalDbConfig() {
     // Interactive prompt
     logger.info("\nExternal MariaDB configuration (XCHAIN_NODE_EXTERNAL_DB=1)")
     logger.info("Provide the connection details for the host-native MariaDB this node should use.\n")
-async function promptForExternalDbConfig() {
+
     let cfg = null
     while (!cfg) {
         const hostPrompt = new Input({ name: 'host', message: 'Host', initial: EXTERNAL_DB_HOST })
