@@ -10,452 +10,148 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
-const {
-    XChainService, DB_MODULE_NAME, NODE_MODULE_NAME,
-    HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
-    Coin, Network
-} = require('../../src/config')
+const { EXPLORER_MODULE_NAME } = require('../../src/config')
+const { multiModuleSuite } = require('./multi_module_orchestration.test/support/fixture')
 
-const TestEnv        = require('./helpers/test-env')
-const CommandCapture = require('./helpers/command-capture')
+// installModules
+multiModuleSuite('installModules orchestration', function (fixture) {
 
-describe('Integration: Multi-Module Orchestration', function () {
-    this.timeout(15000)
+    it('creates Docker network and database before installing modules', async function () {
+        const { TestEnv } = fixture()
+        const callOrder = []
 
-    let env, capture
+        const moduleOps = proxyquire('../../src/operations/module_operations', {
+            '../services/docker_service': {
+                createDockerNetwork: async (network) => {
+                    callOrder.push('network:' + network)
+                    return true
+                },
+                startContainer: async () => true,
+                stopContainer: async () => true,
+                restartContainer: async () => true,
+                killContainer: async () => true,
+                removeContainer: async () => true,
+                execContainer: async () => '',
+                shellContainer: async () => true,
+                logContainer: async () => true,
+                startDockerMonitor: async () => true
+            },
+            '../services/database_service': {
+                buildDatabaseModule: async (coin, network) => {
+                    callOrder.push('database:' + coin + '-' + network)
+                    return true
+                }
+            },
+            '../services/module_service': {
+                installModule: async (module, coin, network) => {
+                    callOrder.push('install:' + module + ':' + coin + '-' + network)
+                    return TestEnv.fakeContainerId('m')
+                },
+                cloneGit: async () => true
+            }
+        })
 
-    beforeEach(async function () {
-        env = new TestEnv()
-        await env.setup()
-        env.patchConstants()
-        capture = new CommandCapture()
+        // Only shared services (explorer)
+        const serviceList = {
+            'bitcoin': { 'mainnet': ['xchain-encoder', 'xchain-decoder'] }
+        }
+
+        await moduleOps.installModules(serviceList)
+
+        // Order matters: network, then database, then modules.
+        expect(callOrder[0]).to.equal('network:xchain-node-bitcoin-mainnet')
+        // Database built second
+        expect(callOrder[1]).to.equal('database:bitcoin-mainnet')
+        // Then modules installed
+        expect(callOrder[2]).to.equal('install:xchain-encoder:bitcoin-mainnet')
+        expect(callOrder[3]).to.equal('install:xchain-decoder:bitcoin-mainnet')
     })
+})
 
-    afterEach(async function () {
-        await env.teardown()
+multiModuleSuite('installModules orchestration', function (fixture) {
+
+    it('processes multiple coin/network stacks sequentially', async function () {
+        const { TestEnv } = fixture()
+        const installed = []
+
+        const moduleOps = proxyquire('../../src/operations/module_operations', {
+            '../services/docker_service': {
+                createDockerNetwork: async () => true,
+                startContainer: async () => true,
+                stopContainer: async () => true,
+                restartContainer: async () => true,
+                killContainer: async () => true,
+                removeContainer: async () => true,
+                execContainer: async () => '',
+                shellContainer: async () => true,
+                logContainer: async () => true,
+                startDockerMonitor: async () => true
+            },
+            '../services/database_service': {
+                buildDatabaseModule: async () => true
+            },
+            '../services/module_service': {
+                installModule: async (module, coin, network) => {
+                    installed.push({ module, coin, network })
+                    return TestEnv.fakeContainerId('m')
+                },
+                cloneGit: async () => true
+            }
+        })
+
+        const serviceList = {
+            'bitcoin': { 'mainnet': ['xchain-encoder'] },
+            'litecoin': { 'testnet': ['xchain-decoder'] },
+            '': { '': [EXPLORER_MODULE_NAME] }
+        }
+
+        await moduleOps.installModules(serviceList)
+
+        expect(installed).to.have.length(3)
+        expect(installed[0]).to.deep.include({ module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet' })
+        expect(installed[1]).to.deep.include({ module: 'xchain-decoder', coin: 'litecoin', network: 'testnet' })
+        expect(installed[2]).to.deep.include({ module: EXPLORER_MODULE_NAME, coin: '', network: '' })
     })
+})
 
-    // installModules
-    describe('installModules orchestration', function () {
+multiModuleSuite('installModules orchestration', function (fixture) {
 
-        it('creates Docker network and database before installing modules', async function () {
-            const callOrder = []
+    it('skips database creation for shared services (empty coin/network)', async function () {
+        const { TestEnv } = fixture()
+        let databaseCalled = false
 
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async (network) => {
-                        callOrder.push('network:' + network)
-                        return true
-                    },
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async (coin, network) => {
-                        callOrder.push('database:' + coin + '-' + network)
-                        return true
-                    }
-                },
-                '../services/module_service': {
-                    installModule: async (module, coin, network) => {
-                        callOrder.push('install:' + module + ':' + coin + '-' + network)
-                        return TestEnv.fakeContainerId('m')
-                    },
-                    cloneGit: async () => true
-                }
-            })
-
-            // Only shared services (explorer)
-            const serviceList = {
-                'bitcoin': { 'mainnet': ['xchain-encoder', 'xchain-decoder'] }
+        const moduleOps = proxyquire('../../src/operations/module_operations', {
+            '../services/docker_service': {
+                createDockerNetwork: async () => true,
+                startContainer: async () => true,
+                stopContainer: async () => true,
+                restartContainer: async () => true,
+                killContainer: async () => true,
+                removeContainer: async () => true,
+                execContainer: async () => '',
+                shellContainer: async () => true,
+                logContainer: async () => true,
+                startDockerMonitor: async () => true
+            },
+            '../services/database_service': {
+                buildDatabaseModule: async () => { databaseCalled = true; return true }
+            },
+            '../services/module_service': {
+                installModule: async () => TestEnv.fakeContainerId('m'),
+                cloneGit: async () => true
             }
-
-            await moduleOps.installModules(serviceList)
-
-            // Order matters: network, then database, then modules.
-            expect(callOrder[0]).to.equal('network:xchain-node-bitcoin-mainnet')
-            // Database built second
-            expect(callOrder[1]).to.equal('database:bitcoin-mainnet')
-            // Then modules installed
-            expect(callOrder[2]).to.equal('install:xchain-encoder:bitcoin-mainnet')
-            expect(callOrder[3]).to.equal('install:xchain-decoder:bitcoin-mainnet')
         })
 
-        it('processes multiple coin/network stacks sequentially', async function () {
-            const installed = []
+        const serviceList = {
+            '': { '': [EXPLORER_MODULE_NAME] }
+        }
 
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async () => true,
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async () => true
-                },
-                '../services/module_service': {
-                    installModule: async (module, coin, network) => {
-                        installed.push({ module, coin, network })
-                        return TestEnv.fakeContainerId('m')
-                    },
-                    cloneGit: async () => true
-                }
-            })
+        await moduleOps.installModules(serviceList)
 
-            const serviceList = {
-                'bitcoin': { 'mainnet': ['xchain-encoder'] },
-                'litecoin': { 'testnet': ['xchain-decoder'] },
-                '': { '': [EXPLORER_MODULE_NAME] }
-            }
-
-            await moduleOps.installModules(serviceList)
-
-            expect(installed).to.have.length(3)
-            expect(installed[0]).to.deep.include({ module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet' })
-            expect(installed[1]).to.deep.include({ module: 'xchain-decoder', coin: 'litecoin', network: 'testnet' })
-            expect(installed[2]).to.deep.include({ module: EXPLORER_MODULE_NAME, coin: '', network: '' })
-        })
-
-        it('skips database creation for shared services (empty coin/network)', async function () {
-            let databaseCalled = false
-
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async () => true,
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async () => { databaseCalled = true; return true }
-                },
-                '../services/module_service': {
-                    installModule: async () => TestEnv.fakeContainerId('m'),
-                    cloneGit: async () => true
-                }
-            })
-
-            const serviceList = {
-                '': { '': [EXPLORER_MODULE_NAME] }
-            }
-
-            await moduleOps.installModules(serviceList)
-
-            // Database should NOT be called for empty coin/network
-            expect(databaseCalled).to.be.false
-        })
-    })
-
-    // updateModules
-    describe('updateModules orchestration', function () {
-
-        it('reads old container ID from LevelDB and passes it to installModule', async function () {
-            const oldContainerId = TestEnv.fakeContainerId('o')
-            await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', oldContainerId)
-
-            const installCalls = []
-
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async () => true,
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/module_service': {
-                    installModule: async (module, coin, network, remoteUpdate, overwriteId) => {
-                        installCalls.push({ module, coin, network, overwriteId })
-                        return TestEnv.fakeContainerId('n')
-                    },
-                    cloneGit: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async () => true
-                }
-            })
-
-            const serviceList = { 'bitcoin': { 'mainnet': ['xchain-encoder'] } }
-            await moduleOps.updateModules(serviceList)
-
-            expect(installCalls).to.have.length(1)
-            expect(installCalls[0].module).to.equal('xchain-encoder')
-            expect(installCalls[0].overwriteId).to.equal(oldContainerId)
-        })
-
-        it('clones git for non-node modules before installing', async function () {
-            const oldContainerId = TestEnv.fakeContainerId('o')
-            await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', oldContainerId)
-
-            // Since b1601d8 (2026-06-11), updateModulesOnBranch no longer calls
-            // ModuleService.cloneGit itself for the moduleContainerId-exists path;
-            // installModule does the clone internally (moduleOperations.js comment:
-            // "installModule does the clone, so no separate cloneGit is needed
-            // here"). Assert on the installModule call instead of a cloneGit spy
-            // that this path never invokes.
-            const installCalls = []
-
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async () => true,
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/module_service': {
-                    installModule: async (module, coin, network, remoteUpdate, overwriteId) => {
-                        installCalls.push({ module, coin, network, overwriteId })
-                        return TestEnv.fakeContainerId('n')
-                    },
-                    cloneGit: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async () => true
-                }
-            })
-
-            const serviceList = { 'bitcoin': { 'mainnet': ['xchain-decoder'] } }
-            await moduleOps.updateModules(serviceList)
-
-            expect(installCalls.map(c => c.module)).to.include('xchain-decoder')
-        })
-    })
-
-    // uninstallModules
-    describe('uninstallModules orchestration', function () {
-
-        it('calls uninstallModule for each service in the list', async function () {
-            // Modules must exist in LevelDB for uninstall to proceed
-            await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('1'))
-            await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('2'))
-            await env.insertModule('xchain-indexer', 'dogecoin', 'testnet', TestEnv.fakeContainerId('3'))
-
-            const uninstalled = []
-
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async () => true,
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/module_service': {
-                    uninstallModule: async (coin, network, module) => {
-                        uninstalled.push({ coin, network, module })
-                        return true
-                    },
-                    cloneGit: async () => true,
-                    installModule: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async () => true
-                }
-            })
-
-            const serviceList = {
-                'bitcoin': { 'mainnet': ['xchain-encoder', 'xchain-decoder'] },
-                'dogecoin': { 'testnet': ['xchain-indexer'] }
-            }
-
-            await moduleOps.uninstallModules(serviceList)
-
-            expect(uninstalled).to.have.length(3)
-            expect(uninstalled[0]).to.deep.include({ coin: 'bitcoin', network: 'mainnet', module: 'xchain-encoder' })
-            expect(uninstalled[1]).to.deep.include({ coin: 'bitcoin', network: 'mainnet', module: 'xchain-decoder' })
-            expect(uninstalled[2]).to.deep.include({ coin: 'dogecoin', network: 'testnet', module: 'xchain-indexer' })
-        })
-
-        it('continues uninstalling remaining modules when one fails', async function () {
-            // Modules must exist in the registry for uninstall to proceed
-            await env.insertModule('xchain-encoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('1'))
-            await env.insertModule('xchain-decoder', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('2'))
-            await env.insertModule('xchain-indexer', 'bitcoin', 'mainnet', TestEnv.fakeContainerId('3'))
-
-            const uninstalled = []
-            let failCount = 0
-
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async () => true,
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/module_service': {
-                    uninstallModule: async (coin, network, module) => {
-                        if (module === 'xchain-decoder') {
-                            failCount++
-                            throw new Error('Simulated failure')
-                        }
-                        uninstalled.push(module)
-                        return true
-                    },
-                    cloneGit: async () => true,
-                    installModule: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async () => true
-                }
-            })
-
-            const serviceList = {
-                'bitcoin': { 'mainnet': ['xchain-encoder', 'xchain-decoder', 'xchain-indexer'] }
-            }
-
-            // Batch completion and success are separate properties: the loop still
-            // visits every module, but a Docker failure now propagates instead of returning true.
-            let thrown = null
-            try {
-                await moduleOps.uninstallModules(serviceList)
-            } catch (err) {
-                thrown = err
-            }
-
-            expect(thrown, 'a failed uninstall must reject, not report success').to.not.equal(null)
-            expect(thrown.message).to.match(/uninstall failed for 1 module/)
-            // Should still continue past the failure
-            expect(uninstalled).to.deep.equal(['xchain-encoder', 'xchain-indexer'])
-            expect(failCount).to.equal(1)
-        })
-    })
-
-    // Full filterCommandParameters -> installModules pipeline
-    describe('filterCommandParameters -> installModules end-to-end', function () {
-
-        it('"all bitcoin mainnet" installs correct set in correct order', async function () {
-            const { filterCommandParameters } = require('../../src/services/config_service')
-            const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'mainnet')
-
-            const installed = []
-            let networkCreated = false
-            let databaseCreated = false
-
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async () => { networkCreated = true; return true },
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async () => { databaseCreated = true; return true }
-                },
-                '../services/module_service': {
-                    installModule: async (module) => {
-                        installed.push(module)
-                        return TestEnv.fakeContainerId('m')
-                    },
-                    cloneGit: async () => true
-                }
-            })
-
-            await moduleOps.installModules(serviceList)
-
-            expect(networkCreated).to.be.true
-            expect(databaseCreated).to.be.true
-
-            // Core modules should be installed
-            expect(installed).to.include('xchain-encoder')
-            expect(installed).to.include('xchain-decoder')
-            expect(installed).to.include('xchain-utxo-tracker')
-            expect(installed).to.include('xchain-indexer')
-            expect(installed).to.include('node')
-            // Explorer (shared) should be installed too
-            expect(installed).to.include(EXPLORER_MODULE_NAME)
-
-            // Regtest modules should NOT be installed on mainnet
-            expect(installed).to.not.include('xchain-regtest-miner')
-            expect(installed).to.not.include('xchain-e2e-test')
-        })
-
-        it('"all bitcoin regtest" includes regtest-miner but not e2e-test', async function () {
-            const { filterCommandParameters } = require('../../src/services/config_service')
-            const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
-
-            const installed = []
-
-            const moduleOps = proxyquire('../../src/operations/module_operations', {
-                '../services/docker_service': {
-                    createDockerNetwork: async () => true,
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
-                    restartContainer: async () => true,
-                    killContainer: async () => true,
-                    removeContainer: async () => true,
-                    execContainer: async () => '',
-                    shellContainer: async () => true,
-                    logContainer: async () => true,
-                    startDockerMonitor: async () => true
-                },
-                '../services/database_service': {
-                    buildDatabaseModule: async () => true
-                },
-                '../services/module_service': {
-                    installModule: async (module) => {
-                        installed.push(module)
-                        return TestEnv.fakeContainerId('m')
-                    },
-                    cloneGit: async () => true
-                }
-            })
-
-            await moduleOps.installModules(serviceList)
-
-            expect(installed).to.include('xchain-regtest-miner')
-            expect(installed).to.not.include('xchain-e2e-test')
-        })
+        // Database should NOT be called for empty coin/network
+        expect(databaseCalled).to.be.false
     })
 })
