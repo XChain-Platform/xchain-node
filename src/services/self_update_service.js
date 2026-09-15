@@ -106,6 +106,33 @@ async function describeCarrier(deps = {}) {
     return { isRepo: true, commit, dirty }
 }
 
+async function prepareCarrierRelease(tag, version, deps, logger) {
+    logger.log(`Updating the xchain-node CLI ${version} -> ${tag} ...`)
+    // --force: a tag the release key re-signed at the same version is the
+    // release key's decision, and the signature check below is what decides
+    // whether a moved tag is accepted, not the fetch.
+    await git(['fetch', '--tags', '--force', '--quiet', 'origin'], deps)
+
+    const verify = deps.verifyGitTagSignature || require('./release_signature_service').verifyGitTagSignature
+    const disabled = (deps.signatureCheckDisabled || require('./release_signature_service').signatureCheckDisabled)()
+    try {
+        const result = verify({ repoDir: deps.root || CARRIER_ROOT, tag })
+        logger.log(`Tag ${tag} verified against the release key ${result.fingerprint}.`)
+    } catch (err) {
+        if (!disabled) throw err
+        logger.warn(`WARNING: moving the CLI to ${tag} WITHOUT verifying its tag (${err.message}). XCHAIN_NODE_REQUIRE_SIGNED_RELEASE=0 is set.`)
+    }
+
+    await git(['checkout', '--detach', '--quiet', tag], deps)
+}
+
+async function installCarrierDependencies(deps) {
+    const run = deps.execFile || execFileAsync
+    await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
+        cwd: deps.root || CARRIER_ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024
+    })
+}
+
 /**
  * Move the carrier checkout to `tag` and re-execute the command there.
  *
@@ -143,28 +170,9 @@ async function selfUpdateAndReexec({ tag, childArgs, deps = {} }) {
         )
     }
 
-    logger.log(`Updating the xchain-node CLI ${version} -> ${tag} ...`)
-    // --force: a tag the release key re-signed at the same version is the
-    // release key's decision, and the signature check below is what decides
-    // whether a moved tag is accepted, not the fetch.
-    await git(['fetch', '--tags', '--force', '--quiet', 'origin'], deps)
-
-    const verify = deps.verifyGitTagSignature || require('./release_signature_service').verifyGitTagSignature
-    const disabled = (deps.signatureCheckDisabled || require('./release_signature_service').signatureCheckDisabled)()
+    await prepareCarrierRelease(tag, version, deps, logger)
     try {
-        const result = verify({ repoDir: deps.root || CARRIER_ROOT, tag })
-        logger.log(`Tag ${tag} verified against the release key ${result.fingerprint}.`)
-    } catch (err) {
-        if (!disabled) throw err
-        logger.warn(`WARNING: moving the CLI to ${tag} WITHOUT verifying its tag (${err.message}). XCHAIN_NODE_REQUIRE_SIGNED_RELEASE=0 is set.`)
-    }
-
-    await git(['checkout', '--detach', '--quiet', tag], deps)
-    try {
-        const run = deps.execFile || execFileAsync
-        await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
-            cwd: deps.root || CARRIER_ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024
-        })
+        await installCarrierDependencies(deps)
     } catch (err) {
         // The old code still works with its old dependencies; the new code
         // without its dependencies works for nothing. Put the old commit back.

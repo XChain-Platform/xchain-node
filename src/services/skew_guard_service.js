@@ -81,6 +81,19 @@ function getRequiredHubVersion(pkg) {
     return raw.trim().replace(/^v/, '')
 }
 
+function unreadableHubVersionError(module, requiredHub, err) {
+    // An unreadable hub version is distinct from a known version below the
+    // required minimum. Direct operators to inspect container readability
+    // before using the override.
+    return new Error(
+        `update refused: ${module} requires hub >= ${requiredHub}, and the installed hub's version could NOT be ` +
+        `determined, so this is an unknown-version refusal, not a known-too-old hub ` +
+        `(${err && err.message ? err.message : err}). Check the hub container is up and readable ` +
+        `(\`docker exec <hub> cat /XChainHub/package.json\`); if you already know the hub satisfies ` +
+        `>= ${requiredHub}, set ${SKIP_ENV}=1 to override. See DEPLOY-ORDER.md for the hub-first ordering.`
+    )
+}
+
 /**
  * Refuses (throws) when `module`'s to-be-deployed source declares a
  * minimum hub version and the installed hub container is behind it.
@@ -134,19 +147,7 @@ async function assertHubNotBehind(module, branch = null, deps = {}) {
     try {
         hubVersion = await getHubVersion(hubContainerId)
     } catch (err) {
-        // Say which of the two situations this is. The old text told the
-        // operator to "update xchain-hub first", which asserts the hub is
-        // BEHIND - a claim this branch cannot make, since the version is
-        // exactly what could not be read. On the live stack the hub was
-        // 2.2.17 against a required 2.2.0, so the advice sent operators to
-        // redeploy a hub that was already ahead.
-        throw new Error(
-            `update refused: ${module} requires hub >= ${requiredHub}, and the installed hub's version could NOT be ` +
-            `determined, so this is an unknown-version refusal, not a known-too-old hub ` +
-            `(${err && err.message ? err.message : err}). Check the hub container is up and readable ` +
-            `(\`docker exec <hub> cat /XChainHub/package.json\`); if you already know the hub satisfies ` +
-            `>= ${requiredHub}, set ${SKIP_ENV}=1 to override. See DEPLOY-ORDER.md for the hub-first ordering.`
-        )
+        throw unreadableHubVersionError(module, requiredHub, err)
     }
 
     if (compareVersions(hubVersion, requiredHub) < 0) {
