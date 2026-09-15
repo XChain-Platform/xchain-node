@@ -6,6 +6,28 @@
 
 const assert = require('assert');
 const menu = require('../../src/ui/menu.js');
+const proxyquire = require('proxyquire').noCallThru();
+
+function load({ files = [], restored = true } = {}) {
+    const calls = { restore: [] };
+    const mod = proxyquire('../../src/ui/menu.js', {
+        '../services/bootstrap_service': {
+            getBootstrapFilesList: async () => files,
+            restoreBootstrap: async (coin, network, module, file) => {
+                calls.restore.push(file);
+                return restored;
+            },
+            makeBootstrap: async () => true,
+        },
+        'enquirer': {
+            Select: class { run() { throw new Error('the interactive menu must not be reached'); } },
+        },
+    });
+    return { mod, calls };
+}
+
+const NEWEST = 'regtest-xchain-utxo-tracker-2026-07-27.tar.gz';
+const OLDER  = 'regtest-xchain-utxo-tracker-2026-06-04.tar.gz';
 
 describe('ui/menu', function () {
     const expected = [
@@ -33,29 +55,6 @@ describe('ui/menu', function () {
 // paths, which is the whole point of the fix; the Select branch stays untested
 // here because it needs a TTY.
 describe('ui/menu restoreBootstrapInterface non-interactive resolution', function () {
-    const proxyquire = require('proxyquire').noCallThru();
-
-    function load({ files = [], restored = true } = {}) {
-        const calls = { restore: [] };
-        const mod = proxyquire('../../src/ui/menu.js', {
-            '../services/bootstrap_service': {
-                getBootstrapFilesList: async () => files,
-                restoreBootstrap: async (coin, network, module, file) => {
-                    calls.restore.push(file);
-                    return restored;
-                },
-                makeBootstrap: async () => true,
-            },
-            'enquirer': {
-                Select: class { run() { throw new Error('the interactive menu must not be reached'); } },
-            },
-        });
-        return { mod, calls };
-    }
-
-    const NEWEST = 'regtest-xchain-utxo-tracker-2026-07-27.tar.gz';
-    const OLDER  = 'regtest-xchain-utxo-tracker-2026-06-04.tar.gz';
-
     it('restores the newest archive on --latest without prompting', async function () {
         const { mod, calls } = load({ files: [NEWEST, OLDER] });
         const ok = await mod.restoreBootstrapInterface('bitcoin', 'regtest', 'xchain-utxo-tracker', { latest: true });
@@ -76,6 +75,9 @@ describe('ui/menu restoreBootstrapInterface non-interactive resolution', functio
             /not found/);
         assert.deepStrictEqual(calls.restore, []);
     });
+});
+
+describe('ui/menu restoreBootstrapInterface non-interactive resolution', function () {
 
     it('falls back to the newest archive when there is no TTY to prompt on', async function () {
         const saved = process.stdin.isTTY;
