@@ -36,33 +36,42 @@ function nativeHelperStub(nativeResolves) {
 }
 
 function loadGate({ external = false, nativeResolves = null } = {}) {
-    return proxyquire('../../../../src/services/bootstrap_health_gate', {
-        '../config': configStub({
-            XChainService,
-            EXTERNAL_DB: external
+    const config = configStub({
+        XChainService,
+        EXTERNAL_DB: external
+    })
+    const configService = {
+        getDefaultConfig: sinon.stub().resolves({
+            DECODER_API_PORT: 3002,
+            INDEXER_API_PORT: 3004,
+            UTXO_TRACKER_API_PORT: 3001
         }),
+        // Module-aware, because gating an indexer must probe TWO databases and a
+        // test cannot express "decoder dirty, indexer clean" while both share a name.
+        getModuleDatabaseName: sinon.stub().callsFake(m =>
+            (m === XChainService.XCHAIN_INDEXER ? INDEXER_DB : DECODER_DB))
+    }
+    // The marker probe lives in a part the entry requires, so the part is loaded
+    // with the same config, config service and docker stubs and handed to the entry.
+    const haltMarkers = proxyquire('../../../../src/services/bootstrap_health_gate/halt_markers.js', {
+        '../../config': config,
+        '../config_service': configService,
+        '../../utils/docker_mariadb': {
+            dockerMariadbArgs: (id, args) => ['exec', '-e', 'MYSQL_PWD', id, ...args],
+            mariadbEnv:        () => ({})
+        }
+    })
+    return proxyquire('../../../../src/services/bootstrap_health_gate', {
+        '../config': config,
         '../state': { db: { getModuleContainer: sinon.stub().resolves(SVC_CONTAINER) } },
-        './config_service': {
-            getDefaultConfig: sinon.stub().resolves({
-                DECODER_API_PORT: 3002,
-                INDEXER_API_PORT: 3004,
-                UTXO_TRACKER_API_PORT: 3001
-            }),
-            // Module-aware, because gating an indexer must probe TWO databases and a
-            // test cannot express "decoder dirty, indexer clean" while both share a name.
-            getModuleDatabaseName: sinon.stub().callsFake(m =>
-                (m === XChainService.XCHAIN_INDEXER ? INDEXER_DB : DECODER_DB))
-        },
+        './config_service': configService,
         './database_service': {
             getDatabaseContainerId:      sinon.stub().resolves(DB_CONTAINER),
             askMariadbRootPassword:      sinon.stub().resolves('rootpass'),
             getExternalDbConfig:         sinon.stub().resolves({ host: 'h', port: 3306, root_user: 'root', root_password: 'p' }),
             executeNativeMariaDbCommand: nativeHelperStub(nativeResolves)
         },
-        '../utils/docker_mariadb': {
-            dockerMariadbArgs: (id, args) => ['exec', '-e', 'MYSQL_PWD', id, ...args],
-            mariadbEnv:        () => ({})
-        }
+        './bootstrap_health_gate/halt_markers.js': haltMarkers
     })
 }
 
