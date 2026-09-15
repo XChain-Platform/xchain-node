@@ -170,10 +170,6 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
     const {
         runner = execFileAsync,
         getModuleContainer = (m, c, n) => db.getModuleContainer(m, c, n),
-        getDatabaseContainerId,
-        askMariadbRootPassword,
-        getExternalDbConfig,
-        executeNativeMariaDbCommand,
         now = Date.now(),
         // A watermark returned by an EARLIER call to this gate. Given it, the marker
         // probe also refuses when a halt was raised anywhere between that call and
@@ -183,15 +179,7 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
         // bytes that ship while both live readings look clean.
         since = null
     } = deps
-    // Required late so the DatabaseService <-> BootstrapService require cycle
-    // stays exactly as it was before this gate existed.
-    const dbDeps = {
-        runner,
-        getDatabaseContainerId:      getDatabaseContainerId      || databaseService.getDatabaseContainerId,
-        askMariadbRootPassword:      askMariadbRootPassword      || databaseService.askMariadbRootPassword,
-        getExternalDbConfig:         getExternalDbConfig         || databaseService.getExternalDbConfig,
-        executeNativeMariaDbCommand: executeNativeMariaDbCommand || databaseService.executeNativeMariaDbCommand
-    }
+    const dbDeps = markerProbeDeps(runner, deps)
 
     const reasons = []
     // Filled in by the marker probe below and handed back to the caller, which passes
@@ -199,6 +187,53 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
     let watermark = null
 
     // 1. Container state.
+    const container = await containerStateReasons(module, coin, network, getModuleContainer, runner, now)
+    reasons.push(...container.reasons)
+
+    // 2. The service's own health surface (status, halt flags, lag).
+    if (container.containerId)
+        reasons.push(...await healthSurfaceReasons(container.containerId, module, coin, network, runner))
+
+    // 3. Durable halt markers in the database that is about to be dumped, plus (for
+    // an indexer) the paired decoder database that actually owns the REORG_HALT row.
+    // This is the check that catches a decoder which is up, healthy-looking, and
+    // quietly carrying a REORG_HALT row, including on an older image whose health
+    // surface does not report it.
+    if (MARIADB_MODULES.has(module)) {
+        const markers = await haltMarkerReasons(coin, network, module, dbDeps, since)
+        watermark = markers.watermark
+        reasons.push(...markers.reasons)
+    }
+
+    if (reasons.length > 0) throw new BootstrapSourceUnhealthyError(label, reasons)
+
+    logger.info(`Bootstrap source health gate: ${label} is healthy, no halt markers, within the lag limit.`)
+    return { skipped: false, reasons: [], watermark }
+}
+
+// The database helpers the marker probe runs through: the ones a test passes in
+// `deps`, DatabaseService's otherwise.
+function markerProbeDeps(runner, {
+    getDatabaseContainerId,
+    askMariadbRootPassword,
+    getExternalDbConfig,
+    executeNativeMariaDbCommand
+}) {
+    // Required late so the DatabaseService <-> BootstrapService require cycle
+    // stays exactly as it was before this gate existed.
+    return {
+        runner,
+        getDatabaseContainerId:      getDatabaseContainerId      || databaseService.getDatabaseContainerId,
+        askMariadbRootPassword:      askMariadbRootPassword      || databaseService.askMariadbRootPassword,
+        getExternalDbConfig:         getExternalDbConfig         || databaseService.getExternalDbConfig,
+        executeNativeMariaDbCommand: executeNativeMariaDbCommand || databaseService.executeNativeMariaDbCommand
+    }
+}
+
+// Look up the module's container and read its docker state. Returns the
+// container id (null when none was found) and the refusal reasons.
+async function containerStateReasons(module, coin, network, getModuleContainer, runner, now) {
+    const reasons = []
     let containerId = null
     try {
         containerId = await getModuleContainer(module, coin, network)
@@ -214,72 +249,71 @@ async function assertBootstrapSourceHealthy(coin, network, module, deps = {}) {
             reasons.push(`could not inspect the ${module} container: ${err && err.message}`)
         }
     }
+    return { containerId, reasons }
+}
 
-    // 2. The service's own health surface (status, halt flags, lag).
-    if (containerId) {
-        let port = null
+// Resolve the module's API port and probe its health surface. Returns the
+// refusal reasons.
+async function healthSurfaceReasons(containerId, module, coin, network, runner) {
+    const reasons = []
+    let port = null
+    try {
+        const config = await getDefaultConfig(module, coin, network)
+        port = config[MODULE_API_PORT_KEY[module]]
+    } catch (err) {
+        reasons.push(`could not resolve the ${module} API port: ${err && err.message}`)
+    }
+    if (!port) {
+        reasons.push(`no API port configured for ${module}, so its health could not be verified`)
+    } else {
         try {
-            const config = await getDefaultConfig(module, coin, network)
-            port = config[MODULE_API_PORT_KEY[module]]
+            const payload = await probeServiceStatus(containerId, port, runner)
+            reasons.push(...evaluateStatusPayload(payload, { maxLag: maxLagBlocks() }))
         } catch (err) {
-            reasons.push(`could not resolve the ${module} API port: ${err && err.message}`)
-        }
-        if (!port) {
-            reasons.push(`no API port configured for ${module}, so its health could not be verified`)
-        } else {
-            try {
-                const payload = await probeServiceStatus(containerId, port, runner)
-                reasons.push(...evaluateStatusPayload(payload, { maxLag: maxLagBlocks() }))
-            } catch (err) {
-                reasons.push(`the ${module} health probe failed: ${err && err.message}`)
-            }
+            reasons.push(`the ${module} health probe failed: ${err && err.message}`)
         }
     }
+    return reasons
+}
 
-    // 3. Durable halt markers in the database that is about to be dumped, plus (for
-    // an indexer) the paired decoder database that actually owns the REORG_HALT row.
-    // This is the check that catches a decoder which is up, healthy-looking, and
-    // quietly carrying a REORG_HALT row, including on an older image whose health
-    // surface does not report it.
-    if (MARIADB_MODULES.has(module)) {
-        try {
-            const markers = await readHaltMarkers(coin, network, module, dbDeps, since)
-            watermark = {
-                own: markers.watermark,
-                upstream: markers.upstream ? markers.upstream.watermark : null
-            }
-            reasons.push(...windowReasons(markers.raisedInWindow))
-            if (markers.upstream) reasons.push(...windowReasons(markers.upstream.raisedInWindow))
-            if (markers.reorgHalt > 0)
-                reasons.push("the database carries a durable REORG_HALT marker (events.code='REORG_HALT'): " +
-                    'this decoder aborted mid-rollback and will halt at its next reorg. Restoring this archive ' +
-                    'reproduces that fault on every consumer. Recovery is a full resync from a known-good snapshot, ' +
-                    'or, once the rolled-back range is re-parsed and the database is verified intact, ' +
-                    '`xchain-node clear-reorg-halt <chain> <network> --reason "..."`.')
-            if (markers.syncHalt > 0)
-                reasons.push('the database carries an uncleared xchain-sync divergence halt ' +
-                    '(sync_halt with cleared_at IS NULL): its contents are known to diverge from the source of truth.')
-            // An indexer's own database cannot hold these rows; the paired decoder's can,
-            // and an indexer frozen behind a halted decoder is exactly as unfit to publish.
-            if (markers.upstream && markers.upstream.reorgHalt > 0)
-                reasons.push(`the paired decoder database ${markers.upstream.dbName} carries a durable REORG_HALT ` +
-                    "marker (events.code='REORG_HALT'), so this indexer is frozen behind a decoder that aborted " +
-                    'mid-rollback. Its own health surface reports lag 0 only because that lag is measured against ' +
-                    'the frozen decoder height. Recovery is a full resync of the decoder and this indexer from a ' +
-                    'known-good snapshot.')
-            if (markers.upstream && markers.upstream.syncHalt > 0)
-                reasons.push(`the paired decoder database ${markers.upstream.dbName} carries an uncleared ` +
-                    'xchain-sync divergence halt (sync_halt with cleared_at IS NULL), so the rows this indexer ' +
-                    'derived from it are known to diverge from the source of truth.')
-        } catch (err) {
-            reasons.push(`could not read the halt markers from the ${module} database: ${err && err.message}`)
+// Read the durable halt markers and turn them into refusal reasons. Returns the
+// reasons and the watermark the caller hands back (null when the probe failed).
+async function haltMarkerReasons(coin, network, module, dbDeps, since) {
+    const reasons = []
+    let watermark = null
+    try {
+        const markers = await readHaltMarkers(coin, network, module, dbDeps, since)
+        watermark = {
+            own: markers.watermark,
+            upstream: markers.upstream ? markers.upstream.watermark : null
         }
+        reasons.push(...windowReasons(markers.raisedInWindow))
+        if (markers.upstream) reasons.push(...windowReasons(markers.upstream.raisedInWindow))
+        if (markers.reorgHalt > 0)
+            reasons.push("the database carries a durable REORG_HALT marker (events.code='REORG_HALT'): " +
+                'this decoder aborted mid-rollback and will halt at its next reorg. Restoring this archive ' +
+                'reproduces that fault on every consumer. Recovery is a full resync from a known-good snapshot, ' +
+                'or, once the rolled-back range is re-parsed and the database is verified intact, ' +
+                '`xchain-node clear-reorg-halt <chain> <network> --reason "..."`.')
+        if (markers.syncHalt > 0)
+            reasons.push('the database carries an uncleared xchain-sync divergence halt ' +
+                '(sync_halt with cleared_at IS NULL): its contents are known to diverge from the source of truth.')
+        // An indexer's own database cannot hold these rows; the paired decoder's can,
+        // and an indexer frozen behind a halted decoder is exactly as unfit to publish.
+        if (markers.upstream && markers.upstream.reorgHalt > 0)
+            reasons.push(`the paired decoder database ${markers.upstream.dbName} carries a durable REORG_HALT ` +
+                "marker (events.code='REORG_HALT'), so this indexer is frozen behind a decoder that aborted " +
+                'mid-rollback. Its own health surface reports lag 0 only because that lag is measured against ' +
+                'the frozen decoder height. Recovery is a full resync of the decoder and this indexer from a ' +
+                'known-good snapshot.')
+        if (markers.upstream && markers.upstream.syncHalt > 0)
+            reasons.push(`the paired decoder database ${markers.upstream.dbName} carries an uncleared ` +
+                'xchain-sync divergence halt (sync_halt with cleared_at IS NULL), so the rows this indexer ' +
+                'derived from it are known to diverge from the source of truth.')
+    } catch (err) {
+        reasons.push(`could not read the halt markers from the ${module} database: ${err && err.message}`)
     }
-
-    if (reasons.length > 0) throw new BootstrapSourceUnhealthyError(label, reasons)
-
-    logger.info(`Bootstrap source health gate: ${label} is healthy, no halt markers, within the lag limit.`)
-    return { skipped: false, reasons: [], watermark }
+    return { watermark, reasons }
 }
 
 // Turn a probe's dump-window report into refusal reasons. Written for an operator:

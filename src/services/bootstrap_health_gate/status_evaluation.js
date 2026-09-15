@@ -74,6 +74,16 @@ function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}
     if (!payload || typeof payload !== 'object')
         return ['the service returned no readable status payload']
 
+    reasons.push(...statusFlagReasons(payload))
+    reasons.push(...lagReasons(payload, maxLag))
+
+    return reasons
+}
+
+// Refusal reasons from the service's status string and its halt, stall, desync
+// and stale-tip flags, in the order evaluateStatusPayload reports them.
+function statusFlagReasons(payload) {
+    const reasons = []
     const status = payload.status ? String(payload.status).toLowerCase() : null
     if (status && !['ok', 'healthy'].includes(status))
         reasons.push(`the service reports status "${payload.status}"`)
@@ -123,6 +133,13 @@ function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}
     if (payload.node_height_stale === true)
         reasons.push('the service cannot see the node tip (stale node height), so its lag is unknown')
 
+    return reasons
+}
+
+// Refusal reasons from the first lag field the payload publishes, checked
+// against `maxLag`.
+function lagReasons(payload, maxLag) {
+    const reasons = []
     // First lag field the service actually publishes, bounded on BOTH sides. `null`
     // is a real answer and means "position unknown"; NO lag field at all means the
     // same thing (a /status body from an image that publishes none), and neither
