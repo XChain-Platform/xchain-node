@@ -10,18 +10,27 @@ const proxyquire = require('proxyquire').noCallThru();
 
 function load({ files = [], restored = true } = {}) {
     const calls = { restore: [] };
+    const bootstrapService = {
+        getBootstrapFilesList: async () => files,
+        restoreBootstrap: async (coin, network, module, file) => {
+            calls.restore.push(file);
+            return restored;
+        },
+        makeBootstrap: async () => true,
+    };
+    const enquirer = {
+        Select: class { run() { throw new Error('the interactive menu must not be reached'); } },
+    };
+    // restoreBootstrapInterface lives in a part that requires the same modules one
+    // directory deeper, so the stubs are keyed for the part and the entry loads that copy.
+    const restorePrompt = proxyquire('../../src/ui/menu/restore_bootstrap_prompt.js', {
+        '../../services/bootstrap_service': bootstrapService,
+        'enquirer': enquirer,
+    });
     const mod = proxyquire('../../src/ui/menu.js', {
-        '../services/bootstrap_service': {
-            getBootstrapFilesList: async () => files,
-            restoreBootstrap: async (coin, network, module, file) => {
-                calls.restore.push(file);
-                return restored;
-            },
-            makeBootstrap: async () => true,
-        },
-        'enquirer': {
-            Select: class { run() { throw new Error('the interactive menu must not be reached'); } },
-        },
+        '../services/bootstrap_service': bootstrapService,
+        'enquirer': enquirer,
+        './menu/restore_bootstrap_prompt.js': restorePrompt,
     });
     return { mod, calls };
 }

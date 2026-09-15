@@ -27,12 +27,13 @@ const { redactSecrets }                  = require('../utils/helpers')
 const { cloneGit, installModule } = require('../services/module_service')
 const { installModules, uninstallModules, updateModules, restartModules, logModules, runE2ETest } = require('../operations/module_operations')
 const { installNode }                    = require('../services/node_service')
-const { makeBootstrap, restoreBootstrap, getBootstrapFilesList } = require('../services/bootstrap_service')
+const { makeBootstrap }                  = require('../services/bootstrap_service')
 const {
     getLocalNodeVersion, getLocalModuleVersion,
     getContainerNodeVersion, getContainerModuleVersion
 } = require('../services/version_service')
 const { scanAndRegisterModules } = require('../services/discovery_service')
+const { restoreBootstrapInterface } = require('./menu/restore_bootstrap_prompt.js')
 
 // Per-module action labels. enquirer's Select resolves to a choice's NAME, so the
 // label the menu offers and the string the handler branches on must be the same
@@ -43,60 +44,6 @@ const ACTION_REINSTALL_REMOTE          = "Reinstall from remote"
 const ACTION_UPDATE_CONTAINER          = "Update Container"
 const ACTION_REINSTALL_CONTAINER       = "Reinstall"
 const ACTION_INSTALL_LOCAL_IN_CONTAINER = "Install Local Version in Container"
-
-async function restoreBootstrapInterface(coin, network, module, options = {}) {
-    const bootstrapFiles = await getBootstrapFilesList(coin, network, module)
-
-    // `bootstrap restore` used to route unconditionally into the Select
-    // below. Driven from a script (or any non-TTY), enquirer renders a menu
-    // nobody can answer and the command simply blocks - while HOLDING the
-    // mutating-command pidfile lock, which is how one restore sat wedged for
-    // 2.5h and locked out every other xchain-node command on the box.
-    //
-    // So resolve non-interactively whenever the caller named a file, asked for
-    // --latest, or there is no TTY to prompt on. getBootstrapFilesList now
-    // returns NEWEST FIRST, so [0] is genuinely the latest.
-    if (bootstrapFiles.length === 0)
-        throw new Error(`No bootstrap archives found for ${coin}/${network} ${module}`)
-
-    let preselected = null
-    if (options.file) {
-        if (!bootstrapFiles.includes(options.file))
-            throw new Error(`Bootstrap '${options.file}' not found for ${coin}/${network} ${module}. Available: ${bootstrapFiles.join(', ')}`)
-        preselected = options.file
-    } else if (options.latest || !process.stdin.isTTY) {
-        preselected = bootstrapFiles[0]
-        if (!options.latest)
-            console.log(`No TTY to prompt on; restoring the newest bootstrap (${preselected}). Pass --file to choose another.`)
-    }
-
-    if (preselected) {
-        const restored = await restoreBootstrap(coin, network, module, preselected)
-        if (restored) return true
-        throw new Error(`Bootstrap restore failed for ${coin}/${network} ${module} (${preselected})`)
-    }
-
-    const moduleChoices = bootstrapFiles.map(f => ({ name: f, value: f }))
-    moduleChoices.push({ name: "Return", value: "return" })
-
-    const modulesSelect = new Select({
-        name: 'action',
-        message: 'Which bootstrap do you want to restore?',
-        choices: moduleChoices
-    })
-
-    const answer = await modulesSelect.run().catch(() => "Return")
-    if (answer === "Return") {
-        return true
-    } else {
-        const bootstrapRestored = await restoreBootstrap(coin, network, module, answer)
-        if (bootstrapRestored) {
-            return true
-        } else {
-            throw false
-        }
-    }
-}
 
 async function modulesSelectionInterface(coin, network) {
     const modulesStatus = await getStatus(null, null, false)
