@@ -32,13 +32,20 @@ function makeDeps({ pkg = {}, hubContainer = HUB_CID, hubVersion = '2.2.17', hub
     }
 }
 
+let warnStub
+
+function prepareWarnStub() {
+    warnStub = sinon.stub(console, 'warn')
+}
+
+function restoreWarnStub() {
+    warnStub.restore()
+    delete process.env[SKIP_ENV]
+}
+
 describe('SkewGuardService', () => {
-    let warnStub
-    beforeEach(() => { warnStub = sinon.stub(console, 'warn') })
-    afterEach(() => {
-        warnStub.restore()
-        delete process.env[SKIP_ENV]
-    })
+    beforeEach(prepareWarnStub)
+    afterEach(restoreWarnStub)
 
     describe('compareVersions', () => {
         it('orders numerically, not lexically', () => {
@@ -53,6 +60,11 @@ describe('SkewGuardService', () => {
             expect(compareVersions('2.3', '2.2.17')).to.equal(1)
         })
     })
+})
+
+describe('SkewGuardService', () => {
+    beforeEach(prepareWarnStub)
+    afterEach(restoreWarnStub)
 
     describe('getRequiredHubVersion', () => {
         it('returns null when the field is absent', () => {
@@ -67,6 +79,11 @@ describe('SkewGuardService', () => {
             expect(() => getRequiredHubVersion({ xchainRequiresHub: { min: '1' } })).to.throw(/xchainRequiresHub/)
         })
     })
+})
+
+describe('SkewGuardService', () => {
+    beforeEach(prepareWarnStub)
+    afterEach(restoreWarnStub)
 
     describe('assertHubNotBehind', () => {
         it('skips non-hub-dependent modules without cloning', async () => {
@@ -105,6 +122,14 @@ describe('SkewGuardService', () => {
             const res = await assertHubNotBehind(XChainService.XCHAIN_INDEXER, null, deps)
             expect(res).to.deep.include({ checked: true, ok: true, requiredHub: '2.2.0', hubVersion: '2.2.17' })
         })
+    })
+})
+
+describe('SkewGuardService', () => {
+    beforeEach(prepareWarnStub)
+    afterEach(restoreWarnStub)
+
+    describe('assertHubNotBehind', () => {
 
         // Fail-closed stays, but the message must not assert a fact the guard
         // does not have: an unreadable version is NOT evidence of an old hub,
@@ -132,6 +157,14 @@ describe('SkewGuardService', () => {
             expect(res).to.deep.include({ checked: true, ok: true, hubVersion: null })
             expect(warnStub.calledWithMatch(/no hub is installed/)).to.equal(true)
         })
+    })
+})
+
+describe('SkewGuardService', () => {
+    beforeEach(prepareWarnStub)
+    afterEach(restoreWarnStub)
+
+    describe('assertHubNotBehind', () => {
 
         it('proceeds when the module source cannot be cloned (update will fail there anyway)', async () => {
             const deps = makeDeps({ cloneErr: new Error('git down') })
