@@ -57,14 +57,14 @@ function makeStubs() {
 }
 
 function loadService(stubs) {
-    return proxyquire('../../src/services/autoheal_service', {
+    return proxyquire('../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             restartContainer: stubs.restartContainer
         },
         // Real descriptor table: asserts the actual opt-in flags too.
-        './module_service': { SERVICE_HEALTHCHECK: require('../../src/services/module_service').SERVICE_HEALTHCHECK }
+        './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
 }
 
@@ -91,38 +91,30 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // An unconfigured store answers [] rather than erroring, so autoheal
-    // would sweep zero candidates and report a clean run while every unhealthy
-    // container stayed down. A watchdog that cannot read its registry must say so.
-    it('refuses to run against an unconfigured module registry', async () => {
-        stubs.db.assertReady.throws(new Error('MariaDbStore is not connected'))
-
-        let err = null
-        try { await service.runAutoheal({ now: NOW }) } catch (e) { err = e }
-
-        expect(err, 'autoheal must not report a clean sweep it never performed').to.not.equal(null)
-        expect(err.message).to.match(/not connected/)
-        expect(stubs.db.getAllModuleContainers.called).to.equal(false)
-    })
-
-    it('restarts an unhealthy container whose service opted in (autoheal: true)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'aaa')])
+    it('does NOT restart the same container twice within the cooldown window', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'eee')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
 
-        const result = await service.runAutoheal({ now: NOW })
+        const first = await service.runAutoheal({ now: NOW })
+        expect(first.restarted).to.have.length(1)
 
-        expect(stubs.restartContainer.calledOnceWith('aaa')).to.equal(true)
-        expect(result.restarted).to.have.length(1)
-        expect(result.failed).to.have.length(0)
+        // Second pass 3 minutes later, container still unhealthy: cooldown
+        // (default 10min) must block the repeat restart.
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        const second = await service.runAutoheal({ now: NOW + 3 * 60000 })
+
+        expect(stubs.restartContainer.callCount).to.equal(1)
+        expect(second.skipped[0].reason).to.equal('inside restart cooldown')
     })
 
-    it('does NOT restart an unhealthy container whose service is not opted in (utxo-tracker)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-utxo-tracker', 'bbb')])
+    it('restarts again once the cooldown window has elapsed', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'fff')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
 
-        const result = await service.runAutoheal({ now: NOW })
+        await service.runAutoheal({ now: NOW })
+        const later = await service.runAutoheal({ now: NOW + 11 * 60000 })
 
-        expect(stubs.restartContainer.called).to.equal(false)
-        expect(result.candidates).to.have.length(0)
+        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(later.restarted).to.have.length(1)
     })
 })

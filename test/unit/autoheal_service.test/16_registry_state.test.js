@@ -19,17 +19,6 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const NOW = Date.parse('2026-07-21T12:00:00Z')
 
-// Health.Log entry helper: a probe that started `agoMs` before NOW.
-function logEntry(agoMs, exitCode) {
-    const start = new Date(NOW - agoMs)
-    return {
-        Start: start.toISOString(),
-        End: new Date(start.getTime() + 1000).toISOString(),
-        ExitCode: exitCode,
-        Output: exitCode === 0 ? 'ok' : 'wget: server returned error'
-    }
-}
-
 // docker-inspect shape for a container in a given health state. `runState` is
 // State.Status and defaults to 'running'; pass 'exited' to model what Docker
 // reports for a STOPPED container, whose Health.Status stays frozen at whatever
@@ -43,9 +32,21 @@ function inspectStatus(healthStatus, log, runState) {
     }
 }
 
-// Continuously unhealthy for ~10 minutes (well past the 2min default grace).
-function unhealthyPastGrace() {
-    return inspectStatus('unhealthy', [logEntry(11 * 60000, 0), logEntry(10 * 60000, 1), logEntry(5 * 60000, 1), logEntry(60000, 1)])
+// What Docker ACTUALLY exposes for a long-wedged container: Health.Log is capped
+// at 5 entries and every descriptor probes at 15s, so a container wedged for an
+// hour still shows only the last ~60s, all failures, sliding forward with `at`.
+// The unhealthyPastGrace fixture above (entries 11 minutes apart) is a shape a
+// real 15s ring buffer can never produce, which is why it hid this bug.
+function unhealthyRingBuffer(at) {
+    return inspectStatus('unhealthy', [60000, 45000, 30000, 15000, 0].map(ms => {
+        const start = new Date(at - ms)
+        return {
+            Start: start.toISOString(),
+            End: new Date(start.getTime() + 1000).toISOString(),
+            ExitCode: 1,
+            Output: 'wget: server returned error'
+        }
+    }))
 }
 
 function makeStubs() {
@@ -57,14 +58,14 @@ function makeStubs() {
 }
 
 function loadService(stubs) {
-    return proxyquire('../../src/services/autoheal_service', {
+    return proxyquire('../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             restartContainer: stubs.restartContainer
         },
         // Real descriptor table: asserts the actual opt-in flags too.
-        './module_service': { SERVICE_HEALTHCHECK: require('../../src/services/module_service').SERVICE_HEALTHCHECK }
+        './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
 }
 
@@ -91,38 +92,33 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // An unconfigured store answers [] rather than erroring, so autoheal
-    // would sweep zero candidates and report a clean run while every unhealthy
-    // container stayed down. A watchdog that cannot read its registry must say so.
-    it('refuses to run against an unconfigured module registry', async () => {
-        stubs.db.assertReady.throws(new Error('MariaDbStore is not connected'))
+    it('prunes persisted onsets for containers that left the registry', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'gone')])
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW))
+        await service.runAutoheal({ now: NOW })
+        expect(JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8')).unhealthySince)
+            .to.have.property('gone')
 
-        let err = null
-        try { await service.runAutoheal({ now: NOW }) } catch (e) { err = e }
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'other')])
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW + 60000))
+        await service.runAutoheal({ now: NOW + 60000 })
 
-        expect(err, 'autoheal must not report a clean sweep it never performed').to.not.equal(null)
-        expect(err.message).to.match(/not connected/)
-        expect(stubs.db.getAllModuleContainers.called).to.equal(false)
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.unhealthySince).to.not.have.property('gone')
+        expect(state.unhealthySince).to.have.property('other')
     })
 
-    it('restarts an unhealthy container whose service opted in (autoheal: true)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'aaa')])
-        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+    it('reads a legacy state file that predates the unhealthySince map', async () => {
+        fs.writeFileSync(path.join(stateDir, 'autoheal-state.json'),
+            JSON.stringify({ restarts: { legacy: NOW - 60 * 60000 } }))
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'legacy')])
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW))
 
         const result = await service.runAutoheal({ now: NOW })
 
-        expect(stubs.restartContainer.calledOnceWith('aaa')).to.equal(true)
-        expect(result.restarted).to.have.length(1)
-        expect(result.failed).to.have.length(0)
-    })
-
-    it('does NOT restart an unhealthy container whose service is not opted in (utxo-tracker)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-utxo-tracker', 'bbb')])
-        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
-
-        const result = await service.runAutoheal({ now: NOW })
-
-        expect(stubs.restartContainer.called).to.equal(false)
-        expect(result.candidates).to.have.length(0)
+        expect(result.skipped[0].reason).to.equal('inside grace window')
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restarts).to.have.property('legacy')
+        expect(state.unhealthySince).to.have.property('legacy')
     })
 })

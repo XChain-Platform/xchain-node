@@ -43,9 +43,9 @@ function inspectStatus(healthStatus, log, runState) {
     }
 }
 
-// Continuously unhealthy for ~10 minutes (well past the 2min default grace).
-function unhealthyPastGrace() {
-    return inspectStatus('unhealthy', [logEntry(11 * 60000, 0), logEntry(10 * 60000, 1), logEntry(5 * 60000, 1), logEntry(60000, 1)])
+// Unhealthy, but the failing run only started 30s ago.
+function unhealthyInsideGrace() {
+    return inspectStatus('unhealthy', [logEntry(90000, 0), logEntry(30000, 1), logEntry(15000, 1)])
 }
 
 function makeStubs() {
@@ -57,14 +57,14 @@ function makeStubs() {
 }
 
 function loadService(stubs) {
-    return proxyquire('../../src/services/autoheal_service', {
+    return proxyquire('../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             restartContainer: stubs.restartContainer
         },
         // Real descriptor table: asserts the actual opt-in flags too.
-        './module_service': { SERVICE_HEALTHCHECK: require('../../src/services/module_service').SERVICE_HEALTHCHECK }
+        './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
 }
 
@@ -91,38 +91,12 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // An unconfigured store answers [] rather than erroring, so autoheal
-    // would sweep zero candidates and report a clean run while every unhealthy
-    // container stayed down. A watchdog that cannot read its registry must say so.
-    it('refuses to run against an unconfigured module registry', async () => {
-        stubs.db.assertReady.throws(new Error('MariaDbStore is not connected'))
-
-        let err = null
-        try { await service.runAutoheal({ now: NOW }) } catch (e) { err = e }
-
-        expect(err, 'autoheal must not report a clean sweep it never performed').to.not.equal(null)
-        expect(err.message).to.match(/not connected/)
-        expect(stubs.db.getAllModuleContainers.called).to.equal(false)
-    })
-
-    it('restarts an unhealthy container whose service opted in (autoheal: true)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'aaa')])
-        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+    it('honors XCHAIN_NODE_AUTOHEAL_GRACE_MS override', async () => {
+        process.env.XCHAIN_NODE_AUTOHEAL_GRACE_MS = '10000' // 10s grace
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'lll')])
+        stubs.getStatusFromContainer.resolves(unhealthyInsideGrace()) // unhealthy for ~30s
 
         const result = await service.runAutoheal({ now: NOW })
-
-        expect(stubs.restartContainer.calledOnceWith('aaa')).to.equal(true)
         expect(result.restarted).to.have.length(1)
-        expect(result.failed).to.have.length(0)
-    })
-
-    it('does NOT restart an unhealthy container whose service is not opted in (utxo-tracker)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-utxo-tracker', 'bbb')])
-        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
-
-        const result = await service.runAutoheal({ now: NOW })
-
-        expect(stubs.restartContainer.called).to.equal(false)
-        expect(result.candidates).to.have.length(0)
     })
 })

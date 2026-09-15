@@ -57,14 +57,14 @@ function makeStubs() {
 }
 
 function loadService(stubs) {
-    return proxyquire('../../src/services/autoheal_service', {
+    return proxyquire('../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             restartContainer: stubs.restartContainer
         },
         // Real descriptor table: asserts the actual opt-in flags too.
-        './module_service': { SERVICE_HEALTHCHECK: require('../../src/services/module_service').SERVICE_HEALTHCHECK }
+        './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
 }
 
@@ -91,38 +91,30 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // An unconfigured store answers [] rather than erroring, so autoheal
-    // would sweep zero candidates and report a clean run while every unhealthy
-    // container stayed down. A watchdog that cannot read its registry must say so.
-    it('refuses to run against an unconfigured module registry', async () => {
-        stubs.db.assertReady.throws(new Error('MariaDbStore is not connected'))
-
-        let err = null
-        try { await service.runAutoheal({ now: NOW }) } catch (e) { err = e }
-
-        expect(err, 'autoheal must not report a clean sweep it never performed').to.not.equal(null)
-        expect(err.message).to.match(/not connected/)
-        expect(stubs.db.getAllModuleContainers.called).to.equal(false)
-    })
-
-    it('restarts an unhealthy container whose service opted in (autoheal: true)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'aaa')])
+    // A container a restart never fixes must not be restarted once per fixed
+    // cooldown forever: that is pure churn, and the file's own header states it
+    // must not be flapped indefinitely. Each restart that does not clear the
+    // wedge doubles the next wait.
+    it('doubles the cooldown for each restart that does not clear the wedge', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'bo1')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
 
-        const result = await service.runAutoheal({ now: NOW })
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2, base cooldown
+        expect(stubs.restartContainer.callCount).to.equal(2)
 
-        expect(stubs.restartContainer.calledOnceWith('aaa')).to.equal(true)
-        expect(result.restarted).to.have.length(1)
-        expect(result.failed).to.have.length(0)
-    })
+        // 11 minutes after restart #2 clears the BASE cooldown but not the doubled
+        // one, so the old fixed-window behavior would have restarted here.
+        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
 
-    it('does NOT restart an unhealthy container whose service is not opted in (utxo-tracker)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-utxo-tracker', 'bbb')])
-        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        // 21 minutes after restart #2 clears the doubled window.
+        const resumed = await service.runAutoheal({ now: NOW + 32 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(3)
+        expect(resumed.restarted).to.have.length(1)
 
-        const result = await service.runAutoheal({ now: NOW })
-
-        expect(stubs.restartContainer.called).to.equal(false)
-        expect(result.candidates).to.have.length(0)
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.bo1).to.equal(3)
     })
 })

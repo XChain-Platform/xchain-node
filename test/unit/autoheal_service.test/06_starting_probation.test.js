@@ -57,14 +57,14 @@ function makeStubs() {
 }
 
 function loadService(stubs) {
-    return proxyquire('../../src/services/autoheal_service', {
+    return proxyquire('../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             restartContainer: stubs.restartContainer
         },
         // Real descriptor table: asserts the actual opt-in flags too.
-        './module_service': { SERVICE_HEALTHCHECK: require('../../src/services/module_service').SERVICE_HEALTHCHECK }
+        './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
 }
 
@@ -91,38 +91,32 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // An unconfigured store answers [] rather than erroring, so autoheal
-    // would sweep zero candidates and report a clean run while every unhealthy
-    // container stayed down. A watchdog that cannot read its registry must say so.
-    it('refuses to run against an unconfigured module registry', async () => {
-        stubs.db.assertReady.throws(new Error('MariaDbStore is not connected'))
-
-        let err = null
-        try { await service.runAutoheal({ now: NOW }) } catch (e) { err = e }
-
-        expect(err, 'autoheal must not report a clean sweep it never performed').to.not.equal(null)
-        expect(err.message).to.match(/not connected/)
-        expect(stubs.db.getAllModuleContainers.called).to.equal(false)
-    })
-
-    it('restarts an unhealthy container whose service opted in (autoheal: true)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'aaa')])
+    // `docker restart` puts the container into Docker's `starting` probation for the
+    // descriptor's start period plus its retry budget, so a pass landing in that
+    // window sees a status that is not 'unhealthy' and would read it as recovery,
+    // wiping the very counter the restart it had just issued earned. A wedge no
+    // restart clears then sat at the BASE cooldown forever.
+    it('keeps the earned backoff when a restarted container is still in Docker starting probation', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'bo3')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
 
-        const result = await service.runAutoheal({ now: NOW })
+        await service.runAutoheal({ now: NOW })                      // restart #1
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2 -> next wait doubles
+        expect(stubs.restartContainer.callCount).to.equal(2)
 
-        expect(stubs.restartContainer.calledOnceWith('aaa')).to.equal(true)
-        expect(result.restarted).to.have.length(1)
-        expect(result.failed).to.have.length(0)
-    })
+        // A minute after restart #2: Docker still reports `starting`.
+        stubs.getStatusFromContainer.resolves(inspectStatus('starting', [logEntry(15000, 1)]))
+        await service.runAutoheal({ now: NOW + 12 * 60000 })
 
-    it('does NOT restart an unhealthy container whose service is not opted in (utxo-tracker)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-utxo-tracker', 'bbb')])
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.bo3, 'probation is not recovery; the backoff must survive it').to.equal(2)
+        expect(state.unhealthySince, 'a restarted container still earns a fresh grace window').to.not.have.property('bo3')
+
+        // Wedge returns 11 minutes after restart #2. The doubled 20-minute window is
+        // still open, so nothing restarts; with the counter wiped it would have.
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
-
-        const result = await service.runAutoheal({ now: NOW })
-
-        expect(stubs.restartContainer.called).to.equal(false)
-        expect(result.candidates).to.have.length(0)
+        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
     })
 })

@@ -57,14 +57,14 @@ function makeStubs() {
 }
 
 function loadService(stubs) {
-    return proxyquire('../../src/services/autoheal_service', {
+    return proxyquire('../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             restartContainer: stubs.restartContainer
         },
         // Real descriptor table: asserts the actual opt-in flags too.
-        './module_service': { SERVICE_HEALTHCHECK: require('../../src/services/module_service').SERVICE_HEALTHCHECK }
+        './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
 }
 
@@ -91,38 +91,30 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // An unconfigured store answers [] rather than erroring, so autoheal
-    // would sweep zero candidates and report a clean run while every unhealthy
-    // container stayed down. A watchdog that cannot read its registry must say so.
-    it('refuses to run against an unconfigured module registry', async () => {
-        stubs.db.assertReady.throws(new Error('MariaDbStore is not connected'))
-
-        let err = null
-        try { await service.runAutoheal({ now: NOW }) } catch (e) { err = e }
-
-        expect(err, 'autoheal must not report a clean sweep it never performed').to.not.equal(null)
-        expect(err.message).to.match(/not connected/)
-        expect(stubs.db.getAllModuleContainers.called).to.equal(false)
-    })
-
-    it('restarts an unhealthy container whose service opted in (autoheal: true)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'aaa')])
+    it('records a failed restart without aborting the pass and reports it', async () => {
+        stubs.db.getAllModuleContainers.resolves([
+            registryRow('xchain-indexer', 'iii'),
+            { module: 'xchain-decoder', coin: 'litecoin', network: 'regtest', container_id: 'jjj' }
+        ])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        stubs.restartContainer.withArgs('iii').rejects(new Error('docker daemon gone'))
+        stubs.restartContainer.withArgs('jjj').resolves(true)
 
         const result = await service.runAutoheal({ now: NOW })
 
-        expect(stubs.restartContainer.calledOnceWith('aaa')).to.equal(true)
+        expect(result.failed).to.have.length(1)
+        expect(result.failed[0].containerId).to.equal('iii')
         expect(result.restarted).to.have.length(1)
-        expect(result.failed).to.have.length(0)
+        expect(result.restarted[0].containerId).to.equal('jjj')
     })
 
-    it('does NOT restart an unhealthy container whose service is not opted in (utxo-tracker)', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-utxo-tracker', 'bbb')])
-        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+    it('skips a container that cannot be inspected instead of failing the pass', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'kkk')])
+        stubs.getStatusFromContainer.rejects(new Error('No such container'))
 
         const result = await service.runAutoheal({ now: NOW })
 
-        expect(stubs.restartContainer.called).to.equal(false)
-        expect(result.candidates).to.have.length(0)
+        expect(result.skipped[0].reason).to.equal('inspect failed')
+        expect(result.failed).to.have.length(0)
     })
 })
