@@ -61,6 +61,63 @@ async function logContainer(containerId, follow = true) {
     })
 }
 
+// The split-pane screen for the docker monitor: its title and the banner that
+// says how many containers are shown, and `n of N` when the view is truncated.
+function createMonitorScreen(n, containerIds, truncated) {
+    const screen = blessed.screen({
+        smartCSR: true,
+        title: 'XChain Containers Logs',
+        warnings: true
+    })
+
+    blessed.text({
+        parent: screen,
+        top: 0,
+        left: 'center',
+        content: truncated
+            ? ` Monitoring ${n} of ${containerIds.length} containers (Q - Exit) `
+            : ` Monitoring ${n} containers (Q - Exit) `,
+        style: { bg: 'blue', fg: 'white', bold: true }
+    })
+    return screen
+}
+
+// One log pane per monitored container: a bordered box sized to an equal share
+// of the screen height, fed by `docker logs` for that container. The child is
+// recorded in `children` so the exit key can kill every log stream.
+function attachContainerLogPane(screen, children, id, index, n, follow) {
+    const heightPercentage = 100 / n
+
+    const logger = blessed.log({
+        parent: screen,
+        top: `${heightPercentage * index}%`,
+        left: 0,
+        width: '100%',
+        height: `${heightPercentage}%`,
+        label: ` [ ${id["name"]} ] `,
+        border: { type: 'line' },
+        style: {
+            border: { fg: 'cyan' },
+            label: { fg: 'yellow' }
+        }
+    })
+
+    const child = spawn('docker', ['logs', '--tail', '100', (follow ? '-f' : null), id["id"]].filter(item => item != null))
+    children.push(child)
+
+    child.stdout.on('data', (data) => {
+        logger.log(data.toString().trim())
+    })
+
+    child.stderr.on('data', (data) => {
+        logger.log(`{red-fg}${data.toString().trim()}{/red-fg}`)
+    })
+
+    child.on('error', (err) => {
+        logger.log(`{red-fg}Error: ${err.message}{/red-fg}`)
+    })
+}
+
 async function startDockerMonitor(containerIds, follow) {
     return new Promise((resolve, reject) => {
         const children = []
@@ -83,53 +140,10 @@ async function startDockerMonitor(containerIds, follow) {
             logger.info("Monitoring only " + n + " of " + containerIds.length + " containers; omitted: " + omitted)
         }
 
-        const screen = blessed.screen({
-            smartCSR: true,
-            title: 'XChain Containers Logs',
-            warnings: true
-        })
-
-        blessed.text({
-            parent: screen,
-            top: 0,
-            left: 'center',
-            content: truncated
-                ? ` Monitoring ${n} of ${containerIds.length} containers (Q - Exit) `
-                : ` Monitoring ${n} containers (Q - Exit) `,
-            style: { bg: 'blue', fg: 'white', bold: true }
-        })
+        const screen = createMonitorScreen(n, containerIds, truncated)
 
         idsToMonitor.forEach((id, index) => {
-            const heightPercentage = 100 / n
-
-            const logger = blessed.log({
-                parent: screen,
-                top: `${heightPercentage * index}%`,
-                left: 0,
-                width: '100%',
-                height: `${heightPercentage}%`,
-                label: ` [ ${id["name"]} ] `,
-                border: { type: 'line' },
-                style: {
-                    border: { fg: 'cyan' },
-                    label: { fg: 'yellow' }
-                }
-            })
-
-            const child = spawn('docker', ['logs', '--tail', '100', (follow ? '-f' : null), id["id"]].filter(item => item != null))
-            children.push(child)
-
-            child.stdout.on('data', (data) => {
-                logger.log(data.toString().trim())
-            })
-
-            child.stderr.on('data', (data) => {
-                logger.log(`{red-fg}${data.toString().trim()}{/red-fg}`)
-            })
-
-            child.on('error', (err) => {
-                logger.log(`{red-fg}Error: ${err.message}{/red-fg}`)
-            })
+            attachContainerLogPane(screen, children, id, index, n, follow)
         })
 
         screen.key(['escape', 'q', 'C-c'], () => {
