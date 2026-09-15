@@ -45,9 +45,25 @@ const ACTION_UPDATE_CONTAINER          = "Update Container"
 const ACTION_REINSTALL_CONTAINER       = "Reinstall"
 const ACTION_INSTALL_LOCAL_IN_CONTAINER = "Install Local Version in Container"
 
-async function modulesSelectionInterface(coin, network) {
-    const modulesStatus = await getStatus(null, null, false)
-    const remoteModuleVersions = getRemoteModuleVersions()
+// Lists the modules a network can run: its services plus the node and the database.
+function expectedModules(network) {
+    let allModules = Object.values(XChainService)
+
+    const e2eIndex = allModules.indexOf(XChainService.XCHAIN_E2E_TEST)
+    if (e2eIndex >= 0) allModules.splice(e2eIndex, 1)
+
+    if (network !== Network.REGTEST) {
+        const regtestIndex = allModules.indexOf(XChainService.XCHAIN_REGTEST_MINER)
+        if (regtestIndex >= 0) allModules.splice(regtestIndex, 1)
+    }
+
+    allModules.push(NODE_MODULE_NAME)
+    allModules.push(DB_MODULE_NAME)
+    return allModules
+}
+
+// Builds the module list choices and maps each choice key to its module and status.
+function buildModuleChoices(modulesStatus, coin, network) {
     const moduleChoices = []
     const actionModules = {}
 
@@ -60,18 +76,7 @@ async function modulesSelectionInterface(coin, network) {
             modulesStatus[coin][network][DB_MODULE_NAME] = modulesStatus[""][""][DB_MODULE_NAME]
         }
 
-        let allModules = Object.values(XChainService)
-
-        const e2eIndex = allModules.indexOf(XChainService.XCHAIN_E2E_TEST)
-        if (e2eIndex >= 0) allModules.splice(e2eIndex, 1)
-
-        if (network !== Network.REGTEST) {
-            const regtestIndex = allModules.indexOf(XChainService.XCHAIN_REGTEST_MINER)
-            if (regtestIndex >= 0) allModules.splice(regtestIndex, 1)
-        }
-
-        allModules.push(NODE_MODULE_NAME)
-        allModules.push(DB_MODULE_NAME)
+        let allModules = expectedModules(network)
 
         for (const mod in modulesStatus[coin][network]) {
             const moduleStatus = modulesStatus[coin][network][mod]["status"]["State"]["Status"]
@@ -105,6 +110,171 @@ async function modulesSelectionInterface(coin, network) {
     if (network === Network.REGTEST) {
         moduleChoices.splice(moduleChoices.length - 2, 0, { name: "Perform an E2E test", value: "e2etest" })
     }
+    return { moduleChoices, actionModules }
+}
+
+// Reads the remote and local versions of a module, "0" for one that is unavailable.
+async function readModuleVersions(selectedValue, remoteModuleVersions, coin, network) {
+    let remoteVersion = "0"
+    try {
+        remoteVersion = selectedValue === NODE_MODULE_NAME
+            ? await remoteModuleVersions[selectedValue + SEP + coin]["version"]
+            : await remoteModuleVersions[selectedValue]
+    } catch { /* not available */ }
+
+    let localVersion = "0"
+    try {
+        localVersion = selectedValue === NODE_MODULE_NAME
+            ? await getLocalNodeVersion(coin, network)
+            : await getLocalModuleVersion(selectedValue)
+    } catch { /* not available */ }
+    return { remoteVersion, localVersion }
+}
+
+// Lists an installed module's actions from its status and version comparisons.
+function installedModuleActions(selectedStatus, selectedValue, localVersion, remoteVersion, containerVersion) {
+    const moduleActions = [{ name: "Tail logs", value: "tail" }]
+
+    if (selectedStatus === "exited") moduleActions.push({ name: "Restart", value: "restart" })
+
+    // enquirer's Select resolves to a choice's NAME, so the handler below must
+    // branch on these exact strings, or picking one runs nothing and drops back
+    // to the module list. Shared constants keep both sides renamed together.
+    if (semver.valid(localVersion)) {
+        if (semver.valid(remoteVersion)) {
+            if (semver.gt(remoteVersion, localVersion)) {
+                moduleActions.push({ name: ACTION_UPDATE_LOCAL, value: "update local version" })
+            } else if (semver.eq(remoteVersion, localVersion)) {
+                moduleActions.push({ name: ACTION_REINSTALL_REMOTE, value: "reinstall from remote" })
+            }
+        }
+        if (semver.valid(containerVersion)) {
+            if (semver.gt(localVersion, containerVersion)) {
+                moduleActions.push({ name: ACTION_UPDATE_CONTAINER, value: "update container" })
+            } else {
+                moduleActions.push({ name: ACTION_REINSTALL_CONTAINER, value: "reinstall container" })
+            }
+        } else {
+            moduleActions.push({ name: ACTION_INSTALL_LOCAL_IN_CONTAINER, value: "install local version in container" })
+        }
+    } else if (semver.valid(remoteVersion)) {
+        moduleActions.push({ name: ACTION_UPDATE_LOCAL, value: "update local version" })
+    }
+
+    const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
+    if (!sharedModules.includes(selectedValue)) {
+        moduleActions.push({ name: "Uninstall", value: "uninstall" })
+        if (selectedValue === XChainService.XCHAIN_UTXO_TRACKER) {
+            moduleActions.push({ name: "Make Bootstrap", value: "make_bootstrap" })
+            moduleActions.push({ name: "Restore Bootstrap", value: "restore_bootstrap" })
+        }
+    }
+    moduleActions.push({ name: "Return", value: "return" })
+    return moduleActions
+}
+
+// Asks which action to run on the selected module; ESC answers "Return".
+async function promptModuleAction(moduleActions) {
+    const actionSelect = new Select({
+        name: 'action',
+        message: 'What do you want to do with the selected module?',
+        choices: moduleActions
+    })
+    const actionAnswer = await actionSelect.run().catch(() => "Return")
+    return actionAnswer
+}
+
+// Runs the action the operator picked for an installed module.
+async function runInstalledModuleAction(actionAnswer, selected, coin, network) {
+    const selectedValue = selected["value"]
+    if (actionAnswer === "Return") {
+        // ESC or Return: go back to module list
+    } else if (actionAnswer === "Uninstall") {
+        try {
+            await uninstallModules({ [coin]: { [network]: [selectedValue] } })
+        } catch (err) {
+            console.log(redactSecrets(err))
+        }
+    } else if (actionAnswer === "Restart") {
+        try {
+            await restartModules({ [coin]: { [network]: [selectedValue] } })
+        } catch (err) {
+            console.log(redactSecrets(err))
+        }
+    } else if (actionAnswer === ACTION_UPDATE_LOCAL) {
+        await cloneGit(selectedValue, true, false)
+    } else if (actionAnswer === ACTION_UPDATE_CONTAINER
+            || actionAnswer === ACTION_INSTALL_LOCAL_IN_CONTAINER
+            || actionAnswer === ACTION_REINSTALL_CONTAINER) {
+        // All three rebuild the container from the local checkout; they differ only
+        // in how the menu describes the version relationship that led the operator here.
+        await installModule(selectedValue, coin, network, false, selected["container_id"])
+    } else if (actionAnswer === "Make Bootstrap") {
+        try {
+            await makeBootstrap(coin, network, selectedValue)
+        } catch (err) {
+            // A source-health refusal is an expected outcome here, so
+            // print the reasons and stay in the menu rather than
+            // tearing the TUI down with a stack trace.
+            if (err && err.name === 'BootstrapSourceUnhealthyError') console.log(redactSecrets(err.message))
+            else console.log(redactSecrets(err))
+        }
+    } else if (actionAnswer === "Restore Bootstrap") {
+        try {
+            await restoreBootstrapInterface(coin, network, selectedValue)
+        } catch (err) {
+            // Same contract as "Make Bootstrap" above: an integrity
+            // refusal is an expected outcome, so report it and stay in
+            // the TUI instead of tearing it down with a stack trace.
+            if (err && err.name === 'BootstrapIntegrityError') console.log(redactSecrets(err.message))
+            else throw err
+        }
+    } else if (actionAnswer === ACTION_REINSTALL_REMOTE) {
+        await updateModules({ [coin]: { [network]: [selectedValue] } })
+    } else if (actionAnswer === "Tail logs") {
+        await logModules({ [coin]: { [network]: [selectedValue] } })
+    }
+}
+
+// Reads an installed module's container version, then offers and runs its actions.
+async function manageInstalledModule(selected, coin, network, localVersion, remoteVersion) {
+    const selectedValue = selected["value"]
+    let containerVersion = "0"
+    try {
+        containerVersion = selectedValue === NODE_MODULE_NAME
+            ? await getContainerNodeVersion(coin, network, selected["container_id"])
+            : await getContainerModuleVersion(selectedValue, coin, network, selected["container_id"])
+    } catch { /* not available */ }
+
+    const moduleActions = installedModuleActions(selected["status"], selectedValue, localVersion, remoteVersion, containerVersion)
+    const actionAnswer = await promptModuleAction(moduleActions)
+    await runInstalledModuleAction(actionAnswer, selected, coin, network)
+}
+
+// Offers to install a module that has no container, from a local checkout if any.
+async function offerMissingModule(selectedValue, localVersion, coin, network) {
+    const moduleActions = []
+    if (localVersion !== "0") {
+        moduleActions.push({ name: "Install from local", value: "install from local" })
+    } else {
+        moduleActions.push({ name: "Install", value: "install" })
+    }
+    moduleActions.push({ name: "Return", value: "return" })
+
+    const actionAnswer = await promptModuleAction(moduleActions)
+    if (actionAnswer === "Install" || actionAnswer === "Install from local") {
+        try {
+            await installModules({ [coin]: { [network]: [selectedValue] } })
+        } catch (err) {
+            console.log(redactSecrets(err))
+        }
+    }
+}
+
+async function modulesSelectionInterface(coin, network) {
+    const modulesStatus = await getStatus(null, null, false)
+    const remoteModuleVersions = getRemoteModuleVersions()
+    const { moduleChoices, actionModules } = buildModuleChoices(modulesStatus, coin, network)
 
     const modulesSelect = new Select({
         name: 'action',
@@ -145,152 +315,12 @@ async function modulesSelectionInterface(coin, network) {
         return { menuFunction: modulesSelectionInterface, parameters: [coin, network] }
     } else if (moduleAnswer in actionModules) {
         const selected = actionModules[moduleAnswer]
-        const selectedStatus = selected["status"]
-        const selectedValue = selected["value"]
+        const { remoteVersion, localVersion } = await readModuleVersions(selected["value"], remoteModuleVersions, coin, network)
 
-        let remoteVersion = "0"
-        try {
-            remoteVersion = selectedValue === NODE_MODULE_NAME
-                ? await remoteModuleVersions[selectedValue + SEP + coin]["version"]
-                : await remoteModuleVersions[selectedValue]
-        } catch { /* not available */ }
-
-        let localVersion = "0"
-        try {
-            localVersion = selectedValue === NODE_MODULE_NAME
-                ? await getLocalNodeVersion(coin, network)
-                : await getLocalModuleVersion(selectedValue)
-        } catch { /* not available */ }
-
-        if (selectedStatus !== "missing") {
-            let containerVersion = "0"
-            try {
-                containerVersion = selectedValue === NODE_MODULE_NAME
-                    ? await getContainerNodeVersion(coin, network, selected["container_id"])
-                    : await getContainerModuleVersion(selectedValue, coin, network, selected["container_id"])
-            } catch { /* not available */ }
-
-            const moduleActions = [{ name: "Tail logs", value: "tail" }]
-
-            if (selectedStatus === "exited") moduleActions.push({ name: "Restart", value: "restart" })
-
-            // enquirer's Select resolves to a choice's NAME, so the handler below
-            // must branch on these exact strings. Three of them did not match any
-            // branch ("Update local version" vs a handler reading "Update locale
-            // version", "Update Container" vs "Update container version", and
-            // "Reinstall" with no branch at all), so picking them ran nothing and
-            // dropped straight back to the module list - the same silent no-op the
-            // main menu's scan option was reported for. Kept as shared constants so
-            // a rename cannot re-open that gap on one side only.
-            if (semver.valid(localVersion)) {
-                if (semver.valid(remoteVersion)) {
-                    if (semver.gt(remoteVersion, localVersion)) {
-                        moduleActions.push({ name: ACTION_UPDATE_LOCAL, value: "update local version" })
-                    } else if (semver.eq(remoteVersion, localVersion)) {
-                        moduleActions.push({ name: ACTION_REINSTALL_REMOTE, value: "reinstall from remote" })
-                    }
-                }
-                if (semver.valid(containerVersion)) {
-                    if (semver.gt(localVersion, containerVersion)) {
-                        moduleActions.push({ name: ACTION_UPDATE_CONTAINER, value: "update container" })
-                    } else {
-                        moduleActions.push({ name: ACTION_REINSTALL_CONTAINER, value: "reinstall container" })
-                    }
-                } else {
-                    moduleActions.push({ name: ACTION_INSTALL_LOCAL_IN_CONTAINER, value: "install local version in container" })
-                }
-            } else if (semver.valid(remoteVersion)) {
-                moduleActions.push({ name: ACTION_UPDATE_LOCAL, value: "update local version" })
-            }
-
-            const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
-            if (!sharedModules.includes(selectedValue)) {
-                moduleActions.push({ name: "Uninstall", value: "uninstall" })
-                if (selectedValue === XChainService.XCHAIN_UTXO_TRACKER) {
-                    moduleActions.push({ name: "Make Bootstrap", value: "make_bootstrap" })
-                    moduleActions.push({ name: "Restore Bootstrap", value: "restore_bootstrap" })
-                }
-            }
-            moduleActions.push({ name: "Return", value: "return" })
-
-            const actionSelect = new Select({
-                name: 'action',
-                message: 'What do you want to do with the selected module?',
-                choices: moduleActions
-            })
-
-            const actionAnswer = await actionSelect.run().catch(() => "Return")
-            if (actionAnswer === "Return") {
-                // ESC or Return: go back to module list
-            } else if (actionAnswer === "Uninstall") {
-                try {
-                    await uninstallModules({ [coin]: { [network]: [selectedValue] } })
-                } catch (err) {
-                    console.log(redactSecrets(err))
-                }
-            } else if (actionAnswer === "Restart") {
-                try {
-                    await restartModules({ [coin]: { [network]: [selectedValue] } })
-                } catch (err) {
-                    console.log(redactSecrets(err))
-                }
-            } else if (actionAnswer === ACTION_UPDATE_LOCAL) {
-                await cloneGit(selectedValue, true, false)
-            } else if (actionAnswer === ACTION_UPDATE_CONTAINER
-                    || actionAnswer === ACTION_INSTALL_LOCAL_IN_CONTAINER
-                    || actionAnswer === ACTION_REINSTALL_CONTAINER) {
-                // All three rebuild the container from the local checkout; they
-                // differ only in how the menu describes the version relationship
-                // that led the operator here.
-                await installModule(selectedValue, coin, network, false, selected["container_id"])
-            } else if (actionAnswer === "Make Bootstrap") {
-                try {
-                    await makeBootstrap(coin, network, selectedValue)
-                } catch (err) {
-                    // A source-health refusal is an expected outcome here, so
-                    // print the reasons and stay in the menu rather than
-                    // tearing the TUI down with a stack trace.
-                    if (err && err.name === 'BootstrapSourceUnhealthyError') console.log(redactSecrets(err.message))
-                    else console.log(redactSecrets(err))
-                }
-            } else if (actionAnswer === "Restore Bootstrap") {
-                try {
-                    await restoreBootstrapInterface(coin, network, selectedValue)
-                } catch (err) {
-                    // Same contract as "Make Bootstrap" above: an integrity
-                    // refusal is an expected outcome, so report it and stay in
-                    // the TUI instead of tearing it down with a stack trace.
-                    if (err && err.name === 'BootstrapIntegrityError') console.log(redactSecrets(err.message))
-                    else throw err
-                }
-            } else if (actionAnswer === ACTION_REINSTALL_REMOTE) {
-                await updateModules({ [coin]: { [network]: [selectedValue] } })
-            } else if (actionAnswer === "Tail logs") {
-                await logModules({ [coin]: { [network]: [selectedValue] } })
-            }
+        if (selected["status"] !== "missing") {
+            await manageInstalledModule(selected, coin, network, localVersion, remoteVersion)
         } else {
-            const moduleActions = []
-            if (localVersion !== "0") {
-                moduleActions.push({ name: "Install from local", value: "install from local" })
-            } else {
-                moduleActions.push({ name: "Install", value: "install" })
-            }
-            moduleActions.push({ name: "Return", value: "return" })
-
-            const actionSelect = new Select({
-                name: 'action',
-                message: 'What do you want to do with the selected module?',
-                choices: moduleActions
-            })
-
-            const actionAnswer = await actionSelect.run().catch(() => "Return")
-            if (actionAnswer === "Install" || actionAnswer === "Install from local") {
-                try {
-                    await installModules({ [coin]: { [network]: [selectedValue] } })
-                } catch (err) {
-                    console.log(redactSecrets(err))
-                }
-            }
+            await offerMissingModule(selected["value"], localVersion, coin, network)
         }
     }
 
