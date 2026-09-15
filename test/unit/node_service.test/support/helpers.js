@@ -13,7 +13,8 @@
 const sinon      = require('sinon')
 const { configStub } = require('../../../helpers/config_stub')
 const { expect } = require('chai')
-const proxyquire = require('proxyquire').noCallThru()
+const path       = require('path')
+const { proxyquireNodeService } = require('../../../helpers/node_service_loader')
 const { EventEmitter } = require('events')
 
 function makeNodeServiceStubs(overrides = {}) {
@@ -164,7 +165,7 @@ function makeLazyDependencies(stubs) {
 }
 
 function loadNodeService(stubs) {
-    return proxyquire('../../../../src/services/node_service', {
+    return proxyquireNodeService(path.resolve(__dirname, '../../../../src/services/node_service.js'), {
         ...makeCoreDependencies(stubs),
         ...makeLazyDependencies(stubs)
     })
