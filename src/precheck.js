@@ -59,23 +59,16 @@ const HUB_REPAIR_HINT =
     "Repair it with `xchain-node update xchain-hub` (or `xchain-node recreate xchain-hub`); " +
     "those run even while the hub is down. `docker logs` on the hub container says why it is not starting."
 
-// `moduleRef` is the ref the command being prechecked named (`install <ref> ...`,
-// `update <ref> ...`), or null. It exists solely so the hub provisioned here is
-// staged at the ref the operator asked for: preCheck runs ahead of the action, so
-// without it the one module installed from this file is also the one module no
-// `install <ref>` could influence. See installHubModule.
-//
-// `repairsHub` says the command about to run rebuilds, recreates, updates or
-// removes the hub container (cli.js commandRepairsHub decides). It only ever
-// relaxes the config push below, and only while the hub is not answering.
-async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false) {
+async function requireDocker() {
     try {
         if (isVerbose()) console.log("Checking if Docker is installed")
         await checkDockerInstalledAndReachable()
     } catch {
         throw new Error("Docker is not installed or is unreachable. Xchain-node needs Docker to install its modules. Make sure docker commands can be run under this user.")
     }
+}
 
+async function warnIfContainerdStoreOnRoot() {
     // Warn (never block) when Docker's data-root was relocated off the
     // root filesystem but containerd's store was left behind on `/`, where it
     // silently fills the root disk. Guarded + best-effort: a stubbed/older
@@ -97,7 +90,9 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     } catch {
         // Diagnostic only; never block a command on the containerd probe.
     }
+}
 
+async function warnIfMemoryLimitsUnsupported() {
     // Say once, before anything is created, that this host cannot enforce a
     // container memory limit. Without it the only signal is a warning docker
     // prints on a create that exits 0, and the tracker then runs on the whole
@@ -111,10 +106,9 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     } catch {
         // Diagnostic only; never block a command on the memory-support probe.
     }
+}
 
-    if (isVerbose()) console.log("Checking/Creating directories")
-    createDirectories()
-
+async function createBaseNetwork() {
     // The bundled MariaDB container is started with `--network <xchain net>`
     // (DatabaseService.buildDatabaseModule), so the base network MUST exist
     // before it; otherwise a fresh box fails with "network not found".
@@ -123,7 +117,9 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     } catch {
         throw new Error("There was an error trying to create the base xchain network")
     }
+}
 
+async function installDatabaseContainer() {
     if (isVerbose()) console.log("Checking/Installing mariadb container")
     try {
         await buildDatabaseModule("", "")
@@ -131,7 +127,10 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
         console.log(redactSecrets(err))
         throw new Error("There was an error installing the mariadb container")
     }
+}
 
+// Resolves the xchain_node credentials openNodeDatabase opens the pool with.
+async function ensureNodeAccessCredentials() {
     if (isVerbose()) console.log("Checking/Creating xchain_node access for current user")
     let dbCreds
     try {
@@ -140,7 +139,10 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
         console.log(redactSecrets(err))
         throw new Error("There was an error creating xchain_node access")
     }
+    return dbCreds
+}
 
+async function openNodeDatabase(dbCreds) {
     if (isVerbose()) console.log("Opening MariaDB connection")
     try {
         // External mode resolves host/port through getExternalDbConfig() (env →
@@ -175,7 +177,9 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
         console.log(redactSecrets(err))
         throw new Error("Couldn't open the xchain_node MariaDB database")
     }
+}
 
+async function registerModules() {
     try {
         // Always reconcile against `docker ps -a`: adds missing rows
         // (the original empty-table case), updates stale container_ids
@@ -188,6 +192,11 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
         console.log(redactSecrets(err))
         throw new Error("There was an error during module auto-discovery")
     }
+}
+
+// Resolves to whether the status listing shows remote-version columns: false when
+// they were not asked for or could not be fetched.
+async function fetchRemoteVersions(checkVersions) {
     if (checkVersions) {
         if (isVerbose()) console.log("Getting all remote project versions")
         try {
@@ -200,21 +209,10 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
             checkVersions = false
         }
     }
-    if (isVerbose()) console.log("Getting modules status")
-    await getStatus(null, null, false, checkVersions)
+    return checkVersions
+}
 
-    // The CLI authenticates to the hub with the SAME credential the hub was deployed
-    // with. `validator init` mints that key into config/hub.local, and getDefaultConfig
-    // reads the sidecar when it builds the hub container's env, so the hub boots keyed;
-    // but HubConnector only sends what is in process.env, which dotenv fills from .env
-    // alone. On every validator host provisioned per the runbook that left the CLI's
-    // own updateconfig push keyless against a keyed hub: `install xchain-hub` started
-    // the hub and then failed with "HTTP 401" on its config push, and every
-    // state-changing command after it did the same. Same precedence as the container
-    // env: a host-env HUB_API_KEY still wins, the sidecar only fills an empty one, and
-    // this never mints (a host with no sidecar stays keyless exactly as before).
-    await applyHubApiKeyFromSidecar(process.env)
-
+async function installHubAtRef(moduleRef) {
     try {
         if (isVerbose()) console.log("Checking/Installing hub module")
         await installHubModule(moduleRef)
@@ -226,7 +224,9 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
         // Secrets are redacted because installHubModule handles DB credentials.
         throw new Error("There was an error trying to install the hub module: " + redactSecrets(err), { cause: err })
     }
+}
 
+async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
     // Only push local config to the hub/explorer for state-changing commands.
     // Read-only commands (ps, tail, logs, …) pass syncHubConfig=false to skip
     // this step. The updateconfig round-trip can be slow on multi-coin nodes and
@@ -269,6 +269,50 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
                 (hubAnswering ? "" : ". The xchain-hub is not answering. " + HUB_REPAIR_HINT))
         }
     }
+}
+
+// `moduleRef` is the ref the command being prechecked named (`install <ref> ...`,
+// `update <ref> ...`), or null. It exists solely so the hub provisioned here is
+// staged at the ref the operator asked for: preCheck runs ahead of the action, so
+// without it the one module installed from this file is also the one module no
+// `install <ref>` could influence. See installHubModule.
+//
+// `repairsHub` says the command about to run rebuilds, recreates, updates or
+// removes the hub container (cli.js commandRepairsHub decides). It only ever
+// relaxes the config push below, and only while the hub is not answering.
+async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false) {
+    await requireDocker()
+    await warnIfContainerdStoreOnRoot()
+    await warnIfMemoryLimitsUnsupported()
+
+    if (isVerbose()) console.log("Checking/Creating directories")
+    createDirectories()
+
+    await createBaseNetwork()
+    await installDatabaseContainer()
+    const dbCreds = await ensureNodeAccessCredentials()
+    await openNodeDatabase(dbCreds)
+
+    await registerModules()
+    checkVersions = await fetchRemoteVersions(checkVersions)
+    if (isVerbose()) console.log("Getting modules status")
+    await getStatus(null, null, false, checkVersions)
+
+    // The CLI authenticates to the hub with the SAME credential the hub was deployed
+    // with. `validator init` mints that key into config/hub.local, and getDefaultConfig
+    // reads the sidecar when it builds the hub container's env, so the hub boots keyed;
+    // but HubConnector only sends what is in process.env, which dotenv fills from .env
+    // alone. On every validator host provisioned per the runbook that left the CLI's
+    // own updateconfig push keyless against a keyed hub: `install xchain-hub` started
+    // the hub and then failed with "HTTP 401" on its config push, and every
+    // state-changing command after it did the same. Same precedence as the container
+    // env: a host-env HUB_API_KEY still wins, the sidecar only fills an empty one, and
+    // this never mints (a host with no sidecar stays keyless exactly as before).
+    await applyHubApiKeyFromSidecar(process.env)
+
+    await installHubAtRef(moduleRef)
+
+    await pushConfigToHubAndExplorer(syncHubConfig, repairsHub)
 
     return true
 }
