@@ -13,41 +13,44 @@ const { spawnSync } = require('child_process')
 
 const CLI = path.join(__dirname, '../../src/index.js')
 
+let tmpDir, holder
+
+function setUpLock() {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-mutwait-'))
+    // A live pid, so the lock reads as held rather than stale-and-reapable.
+    holder = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'])
+    fs.writeFileSync(
+        path.join(tmpDir, 'command.lock'),
+        JSON.stringify({ pid: holder.pid, command: 'update', startedAt: new Date().toISOString() })
+    )
+}
+
+function tearDownLock() {
+    if (holder) holder.kill()
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+}
+
+function runAutoheal(extraEnv) {
+    const started = Date.now()
+    const res = spawnSync(process.execPath, [CLI, 'autoheal'], {
+        env: {
+            ...process.env,
+            XCHAIN_NODE_LOCK_DIR: tmpDir,
+            // The third case proceeds past the lock into a MUTATING action,
+            // so pin Docker out of reach: no machine may act on real
+            // containers from a unit test.
+            DOCKER_HOST: 'unix:///nonexistent/xchain-node-test-docker.sock',
+            ...extraEnv
+        },
+        encoding: 'utf8',
+        timeout: 60000
+    })
+    return { elapsed: Date.now() - started, output: `${res.stdout || ''}${res.stderr || ''}` }
+}
+
 describe('mutating command lock wait', () => {
-    let tmpDir, holder
-
-    beforeEach(() => {
-        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-mutwait-'))
-        // A live pid, so the lock reads as held rather than stale-and-reapable.
-        holder = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'])
-        fs.writeFileSync(
-            path.join(tmpDir, 'command.lock'),
-            JSON.stringify({ pid: holder.pid, command: 'update', startedAt: new Date().toISOString() })
-        )
-    })
-
-    afterEach(() => {
-        if (holder) holder.kill()
-        fs.rmSync(tmpDir, { recursive: true, force: true })
-    })
-
-    function runAutoheal(extraEnv) {
-        const started = Date.now()
-        const res = spawnSync(process.execPath, [CLI, 'autoheal'], {
-            env: {
-                ...process.env,
-                XCHAIN_NODE_LOCK_DIR: tmpDir,
-                // The third case proceeds past the lock into a MUTATING action,
-                // so pin Docker out of reach: no machine may act on real
-                // containers from a unit test.
-                DOCKER_HOST: 'unix:///nonexistent/xchain-node-test-docker.sock',
-                ...extraEnv
-            },
-            encoding: 'utf8',
-            timeout: 60000
-        })
-        return { elapsed: Date.now() - started, output: `${res.stdout || ''}${res.stderr || ''}` }
-    }
+    beforeEach(setUpLock)
+    afterEach(tearDownLock)
 
     it('refuses a held lock immediately when the env var is unset (interactive default)', function () {
         this.timeout(40000)
@@ -57,6 +60,11 @@ describe('mutating command lock wait', () => {
         // that process startup hits any particular millisecond.
         assert.ok(elapsed < 10000, `expected an immediate refusal, took ${elapsed}ms`)
     })
+})
+
+describe('mutating command lock wait', () => {
+    beforeEach(setUpLock)
+    afterEach(tearDownLock)
 
     it('waits for the holder when XCHAIN_NODE_MUTATING_LOCK_WAIT_MS is set', function () {
         this.timeout(40000)
@@ -66,6 +74,11 @@ describe('mutating command lock wait', () => {
         // this cannot flake the way an upper bound would.
         assert.ok(elapsed >= 2500, `expected to block for the wait, took only ${elapsed}ms`)
     })
+})
+
+describe('mutating command lock wait', () => {
+    beforeEach(setUpLock)
+    afterEach(tearDownLock)
 
     it('takes the lock once the holder releases mid-wait', function () {
         this.timeout(40000)
