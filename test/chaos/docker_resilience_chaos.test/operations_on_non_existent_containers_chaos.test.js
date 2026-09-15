@@ -24,7 +24,7 @@ function makeStubs() {
 }
 
 function loadDockerService(stubs, fsStub) {
-    return proxyquire('../../src/services/docker_service', {
+    return proxyquire('../../../src/services/docker_service', {
         'child_process': {
             execFile: stubs.execFile,
             spawn: stubs.spawn,
@@ -52,46 +52,39 @@ describe('Chaos: Docker Resilience', function () {
         sinon.restore()
     })
 
-    // Experiment 3: Docker daemon unavailable (CMD-01, CMD-02)
-    describe('Experiment 3: Docker daemon unavailable', function () {
+    // Experiment: Container operations on non-existent containers
+    describe('Experiment: Operations on non-existent containers', function () {
 
-        it('rejects when docker binary is not found (ENOENT)', async function () {
+        it('rejects when stopping a non-existent container', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                const err = new Error('spawn docker ENOENT')
-                err.code = 'ENOENT'
-                cb(err)
+                cb(new Error('No such container: phantom123'))
             })
             const ds = loadDockerService(stubs)
 
             try {
-                await ds.checkDockerInstalledAndReachable()
+                await ds.stopContainer('phantom123')
                 expect.fail('should have rejected')
             } catch (err) {
-                expect(err).to.include('docker --version')
+                expect(err).to.be.an.instanceOf(Error)
+                expect(err.message).to.include('No such container')
             }
         })
 
-        it('rejects when docker version succeeds but daemon is down', async function () {
+        it('rejects when restarting a non-existent container', async function () {
             const stubs = makeStubs()
-            let callCount = 0
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                callCount++
-                if (callCount === 1) {
-                    cb(null, 'Docker version 24.0.0, build abc1234')
-                } else {
-                    cb(new Error('Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?'))
-                }
+                cb(new Error('No such container: phantom123'))
             })
             const ds = loadDockerService(stubs)
 
             try {
-                await ds.checkDockerInstalledAndReachable()
+                await ds.restartContainer('phantom123')
                 expect.fail('should have rejected')
             } catch (err) {
-                expect(err).to.include('docker ps')
+                expect(err).to.be.an.instanceOf(Error)
             }
         })
     })
@@ -103,39 +96,37 @@ describe('Chaos: Docker Resilience', function () {
         sinon.restore()
     })
 
-    describe('Experiment 3: Docker daemon unavailable', function () {
+    describe('Experiment: Operations on non-existent containers', function () {
 
-        it('rejects when docker version returns permission denied', async function () {
+        it('rejects when removing a non-existent container', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cb(new Error('Got permission denied while trying to connect to the Docker daemon socket'))
+                cb(new Error('No such container: phantom123'))
             })
             const ds = loadDockerService(stubs)
 
             try {
-                await ds.checkDockerInstalledAndReachable()
+                await ds.removeContainer('phantom123')
                 expect.fail('should have rejected')
             } catch (err) {
-                expect(err).to.be.a('string')
+                expect(err).to.be.an.instanceOf(Error)
             }
         })
 
-        it('rejects when docker version returns empty output', async function () {
+        it('rejects when killing a non-existent container', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                if (args[0] === '--version') {
-                    cb(null, '')
-                }
+                cb(new Error('No such container: phantom123'))
             })
             const ds = loadDockerService(stubs)
 
             try {
-                await ds.checkDockerInstalledAndReachable()
+                await ds.killContainer('phantom123')
                 expect.fail('should have rejected')
             } catch (err) {
-                expect(err).to.include('format')
+                expect(err).to.be.an.instanceOf(Error)
             }
         })
     })
