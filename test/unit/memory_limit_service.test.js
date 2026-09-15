@@ -53,7 +53,9 @@ describe('MemoryLimitService', function () {
             expect(trackerMemoryLimitMb({ hostBytes: 16 * GiB }).mb).to.equal(8192)
         })
     })
+})
 
+describe('MemoryLimitService', function () {
     describe('memoryArgsFor()', function () {
         it('caps the tracker with --memory and an equal --memory-swap', function () {
             const r = memoryArgsFor(TRACKER, { hostBytes: 16 * GiB, trackerCount: 3, env: {} })
@@ -101,7 +103,9 @@ describe('MemoryLimitService', function () {
             expect(moduleEnvKey('xchain-utxo-tracker')).to.equal('XCHAIN_NODE_MODULE_MEMORY_MB_XCHAIN_UTXO_TRACKER')
         })
     })
+})
 
+describe('MemoryLimitService', function () {
     // `update all` creates one tracker per chain. Without the coin and network in
     // the line, three chains printed three identical notes and none of them said
     // which container it was about.
@@ -125,7 +129,9 @@ describe('MemoryLimitService', function () {
             expect(r.note).to.match(/memory limit for xchain-hub: 2048 MB/)
         })
     })
+})
 
+describe('MemoryLimitService', function () {
     // Docker takes --memory on a kernel with no memory cgroup controller, warns on
     // stderr, exits 0, and creates the container with HostConfig.Memory=0. These
     // are the two lines that tell an operator so, and they must carry the same fix.
@@ -159,7 +165,9 @@ describe('MemoryLimitService', function () {
                 .to.match(/no memory-limit support on this host \(WARNING: No memory limit support\)/)
         })
     })
+})
 
+describe('MemoryLimitService', function () {
     describe('countInstalledTrackers()', function () {
         const rows = [
             { module: TRACKER, coin: 'bitcoin', network: 'mainnet' },
