@@ -96,6 +96,9 @@ describe('VersionService', function () {
             expect(result.id).to.equal(99)
         })
     })
+})
+
+describe('VersionService', function () {
 
     describe('checkRemoteNodeVersion()', function () {
 
@@ -132,6 +135,9 @@ describe('VersionService', function () {
             expect(stubs.setRemoteModuleVersion.calledWith('node-bitcoin', release)).to.be.true
         })
     })
+})
+
+describe('VersionService', function () {
 
     describe('getLocalNodeVersion()', function () {
 
@@ -170,6 +176,9 @@ describe('VersionService', function () {
             }
         })
     })
+})
+
+describe('VersionService', function () {
 
     describe('getLocalModuleVersion()', function () {
 
@@ -224,6 +233,9 @@ describe('VersionService', function () {
             }
         })
     })
+})
+
+describe('VersionService', function () {
 
     describe('getContainerNodeVersion()', function () {
 
@@ -248,6 +260,9 @@ describe('VersionService', function () {
             }
         })
     })
+})
+
+describe('VersionService', function () {
 
     describe('getContainerModuleVersion()', function () {
 
@@ -299,6 +314,9 @@ describe('VersionService', function () {
             expect(await vs.getContainerModuleVersion('xchain-encoder', 'bitcoin', 'mainnet', 'c')).to.equal('9.9.9')
         })
     })
+})
+
+describe('VersionService', function () {
 
     describe('readContainerFile()', function () {
 
@@ -326,6 +344,9 @@ describe('VersionService', function () {
             }
         })
     })
+})
+
+describe('VersionService', function () {
 
     describe('checkAllRemoteVersions()', function () {
 
