@@ -18,67 +18,60 @@ const proxyquire = require('proxyquire').noCallThru()
  * Minimal in-memory SQL fake covering the queries MariaDbStore issues.
  * Lets us exercise the real MariaDbStore logic without a live MariaDB.
  */
-function buildFakeMariadbModule() {
-    const rows = new Map()  // key: `${module}|${coin}|${network}` → { module, coin, network, container_id }
+function dispatchFakeSql(rows, sql, params = []) {
+    const trimmed = sql.replace(/\s+/g, ' ').trim()
 
-    function dispatch(sql, params = []) {
-        const trimmed = sql.replace(/\s+/g, ' ').trim()
-
-        if (/^CREATE TABLE IF NOT EXISTS modules/i.test(trimmed)) {
-            return undefined
-        }
-
-        if (/^SELECT COUNT\(\*\) AS cnt FROM modules/i.test(trimmed)) {
-            return [{ cnt: rows.size }]
-        }
-
-        if (/^SELECT module, coin, network, container_id FROM modules$/i.test(trimmed)) {
-            return Array.from(rows.values()).map(r => ({ ...r }))
-        }
-
-        if (/^SELECT module, coin, network, container_id FROM modules WHERE/i.test(trimmed)) {
-            const [coin, network] = params
-            const out = []
-            for (const r of rows.values()) {
-                if ((r.coin === coin && r.network === network) || (r.coin === '' && r.network === '')) {
-                    out.push({ ...r })
-                }
-            }
-            return out
-        }
-
-        if (/^SELECT container_id FROM modules WHERE/i.test(trimmed)) {
-            const [module, coin, network] = params
-            const r = rows.get(`${module}|${coin}|${network}`)
-            return r ? [{ container_id: r.container_id }] : []
-        }
-
-        if (/^INSERT INTO modules/i.test(trimmed)) {
-            const [module, coin, network, container_id] = params
-            rows.set(`${module}|${coin}|${network}`, { module, coin, network, container_id })
-            return undefined
-        }
-
-        if (/^DELETE FROM modules WHERE/i.test(trimmed)) {
-            const [module, coin, network] = params
-            rows.delete(`${module}|${coin}|${network}`)
-            return undefined
-        }
-
-        throw new Error(`buildFakeMariadbModule: unhandled SQL: ${trimmed}`)
+    if (/^CREATE TABLE IF NOT EXISTS modules/i.test(trimmed)) return undefined
+    if (/^SELECT COUNT\(\*\) AS cnt FROM modules/i.test(trimmed)) return [{ cnt: rows.size }]
+    if (/^SELECT module, coin, network, container_id FROM modules$/i.test(trimmed)) {
+        return Array.from(rows.values()).map(r => ({ ...r }))
     }
+    if (/^SELECT module, coin, network, container_id FROM modules WHERE/i.test(trimmed)) {
+        const [coin, network] = params
+        const out = []
+        for (const r of rows.values()) {
+            if ((r.coin === coin && r.network === network) || (r.coin === '' && r.network === '')) out.push({ ...r })
+        }
+        return out
+    }
+    if (/^SELECT container_id FROM modules WHERE/i.test(trimmed)) {
+        const [module, coin, network] = params
+        const r = rows.get(`${module}|${coin}|${network}`)
+        return r ? [{ container_id: r.container_id }] : []
+    }
+    if (/^INSERT INTO modules/i.test(trimmed)) {
+        const [module, coin, network, container_id] = params
+        rows.set(`${module}|${coin}|${network}`, { module, coin, network, container_id })
+        return undefined
+    }
+    if (/^DELETE FROM modules WHERE/i.test(trimmed)) {
+        const [module, coin, network] = params
+        rows.delete(`${module}|${coin}|${network}`)
+        return undefined
+    }
+    throw new Error(`buildFakeMariadbModule: unhandled SQL: ${trimmed}`)
+}
 
-    const fakeConn = {
+function buildFakeConnection(dispatch) {
+    return {
         query: async (sql, params) => dispatch(sql, params),
         release: () => {}
     }
+}
 
-    const fakePool = {
+function buildFakePool(fakeConn, dispatch) {
+    return {
         getConnection: async () => fakeConn,
         query: async (sql, params) => dispatch(sql, params),
         end: async () => {}
     }
+}
 
+function buildFakeMariadbModule() {
+    const rows = new Map()  // key: `${module}|${coin}|${network}` → { module, coin, network, container_id }
+    const dispatch = (sql, params) => dispatchFakeSql(rows, sql, params)
+    const fakeConn = buildFakeConnection(dispatch)
+    const fakePool = buildFakePool(fakeConn, dispatch)
     return {
         module: { createPool: () => fakePool },
         rows
@@ -91,16 +84,15 @@ function loadStore() {
     return { MariaDbStore, rows: fake.rows }
 }
 
-describe('MariaDbStore', function () {
+let store
+let rows
 
-    let store
-    let rows
+const config = {
+    host: '127.0.0.1', port: 3306,
+    user: 'u', password: 'p', database: 'xchain_node'
+}
 
-    const config = {
-        host: '127.0.0.1', port: 3306,
-        user: 'u', password: 'p', database: 'xchain_node'
-    }
-
+function registerStoreHooks() {
     beforeEach(async function () {
         const ctx = loadStore()
         store = new ctx.MariaDbStore()
@@ -111,6 +103,10 @@ describe('MariaDbStore', function () {
     afterEach(async function () {
         await store.close()
     })
+}
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
 
     describe('createDatabase() / isReady() / close()', function () {
 
@@ -146,6 +142,10 @@ describe('MariaDbStore', function () {
             expect(second).to.equal(first)
         })
     })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
 
     describe('createDatabase() connection retry', function () {
 
@@ -201,6 +201,10 @@ describe('MariaDbStore', function () {
             await store.close()
         })
     })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
 
     describe('setModuleContainer() + getModuleContainer()', function () {
 
@@ -227,6 +231,13 @@ describe('MariaDbStore', function () {
             const id = await store.getModuleContainer('xchain-hub', '', '')
             expect(id).to.equal('hub-container-id')
         })
+    })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
+    describe('setModuleContainer() + getModuleContainer()', function () {
 
         it('keeps separate entries for different coin/network combos', async function () {
             await store.setModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'btc-main')
@@ -262,6 +273,10 @@ describe('MariaDbStore', function () {
             expect(id).to.equal('hub-id')
         })
     })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
 
     describe('deleteModuleContainer()', function () {
 
@@ -298,6 +313,10 @@ describe('MariaDbStore', function () {
             expect(result).to.be.false
         })
     })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
 
     describe('getAllModuleContainers()', function () {
 
@@ -352,10 +371,14 @@ describe('MariaDbStore', function () {
             expect(modules).to.deep.equal([])
         })
     })
+})
 
-    // The empty array above is why a probe against an uninitialized
-    // singleton read as "the node lost track of its whole stack". Reads can live
-    // with it; callers that ACT on the row set need a distinguishable signal.
+// The empty array above is why a probe against an uninitialized
+// singleton read as "the node lost track of its whole stack". Reads can live
+// with it; callers that ACT on the row set need a distinguishable signal.
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
     describe('assertReady()', function () {
 
         it('throws on an unconfigured store, naming the operation', function () {
