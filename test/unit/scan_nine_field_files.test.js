@@ -78,7 +78,9 @@ describe('scan-nine-field-files CLI', function () {
             assert.strictEqual(cli.argFrom(['node', 'x', '--label', 'host', '--host', 'h1'], 'host'), 'h1');
         });
     });
+});
 
+describe('scan-nine-field-files CLI', function () {
     describe('corpus measurement', function () {
 
         it('reports the payload row count', async function () {
@@ -105,7 +107,9 @@ describe('scan-nine-field-files CLI', function () {
             assert.strictEqual(await cli.measureCorpus(conn, scanner), null);
         });
     });
+});
 
+describe('scan-nine-field-files CLI', function () {
     describe('keyset paging', function () {
 
         it('starts the cursor below zero so tx_index 0 is scanned', async function () {
@@ -153,7 +157,11 @@ describe('scan-nine-field-files CLI', function () {
             assert.strictEqual(state.calls, 1);
             assert.strictEqual(total.scanned, 0);
         });
+    });
+});
 
+describe('scan-nine-field-files CLI', function () {
+    describe('keyset paging', function () {
         it('breaks rather than spinning when the cursor does not advance', async function () {
             // A page whose last tx_index is not greater than the cursor would otherwise be
             // re-read forever and the gate would never return a verdict.
@@ -187,7 +195,9 @@ describe('scan-nine-field-files CLI', function () {
             assert.match(state.sqls[0], /LIMIT 250$/);
         });
     });
+});
 
+describe('scan-nine-field-files CLI', function () {
     describe('the entrypoint guard', function () {
 
         it('exports the helpers without running the scan on require', function () {
