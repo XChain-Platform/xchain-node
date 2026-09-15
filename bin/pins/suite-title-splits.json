@@ -10,5 +10,150 @@
       "test/unit/big_suite/writes.test.js"
     ]
   },
-  "splits": {}
+  "splits": {
+    "test/boundary/boundary.test.js": [
+      "test/boundary/boundary.test.js",
+      "test/boundary/boundary.test/resolve_args_boundaries.test.js",
+      "test/boundary/boundary.test/filter_command_parameters_boundaries.test.js",
+      "test/boundary/boundary.test/docker_env_var_passing.test.js",
+      "test/boundary/boundary.test/branch_name_validation.test.js",
+      "test/boundary/boundary.test/grep_test_name_handling.test.js",
+      "test/boundary/boundary.test/naming_helper_boundaries.test.js"
+    ],
+    "test/chaos/config_resilience_chaos.test.js": [
+      "test/chaos/config_resilience_chaos.test.js",
+      "test/chaos/config_resilience_chaos.test/malformed_config_content_chaos.test.js",
+      "test/chaos/config_resilience_chaos.test/config_path_traversal_chaos.test.js",
+      "test/chaos/config_resilience_chaos.test/argument_parsing_resilience_chaos.test.js",
+      "test/chaos/config_resilience_chaos.test/port_validation_under_chaos.test.js",
+      "test/chaos/config_resilience_chaos.test/shared_module_config_chaos.test.js"
+    ],
+    "test/chaos/docker_resilience_chaos.test.js": [
+      "test/chaos/docker_resilience_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/docker_build_failure_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/docker_run_failure_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/state_storage_failure_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/docker_network_creation_failure_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/docker_inspect_with_invalid_json_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/operations_on_non_existent_containers_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/docker_exec_failure_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/file_write_to_container_failure_chaos.test.js",
+      "test/chaos/docker_resilience_chaos.test/invalid_port_in_config_during_build_and_up_chaos.test.js"
+    ],
+    "test/chaos/download_resilience_chaos.test.js": [
+      "test/chaos/download_resilience_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/archive_extraction_failure_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/download_cleanup_on_failure_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/github_api_unreachable_timeout_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/github_rate_limiting_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/github_rate_limiting_server_error_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/hashes_file_corruption_format_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/hashes_file_corruption_shape_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/no_compatible_version_available_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/release_tag_not_found_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/repository_not_found_chaos.test.js",
+      "test/chaos/download_resilience_chaos.test/sha_256_hash_mismatch_chaos.test.js"
+    ],
+    "test/chaos/process_resilience_chaos.test.js": [
+      "test/chaos/process_resilience_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_kill_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_remove_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/async_error_propagation_run_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/async_error_propagation_status_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/empty_container_id_non_hex_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/empty_container_id_valid_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/empty_container_id_whitespace_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/multi_step_clone_error_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/multi_step_module_missing_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/precheck_directory_creation_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/precheck_docker_failure_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/precheck_hub_failure_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/precheck_network_failure_chaos.test.js",
+      "test/chaos/process_resilience_chaos.test/uninstall_resilience_chaos.test.js"
+    ],
+    "test/integration/database_setup.test.js": [
+      "test/integration/database_setup.test.js",
+      "test/integration/database_setup.test/add_user_password_to_database.test.js",
+      "test/integration/database_setup.test/build_database_module_already_exists.test.js",
+      "test/integration/database_setup.test/check_if_database_is_ready.test.js",
+      "test/integration/database_setup.test/set_database_parameters.test.js"
+    ],
+    "test/integration/docker_commands.test.js": [
+      "test/integration/docker_commands.test.js",
+      "test/integration/docker_commands.test/build_and_up_with_overwrite_container_id.test.js",
+      "test/integration/docker_commands.test/docker_build_working_directory.test.js",
+      "test/integration/docker_commands.test/every_coin_network_combo_produces_valid_docker_run_commands.test.js",
+      "test/integration/docker_commands.test/xchain_decoder_docker_run_command.test.js",
+      "test/integration/docker_commands.test/xchain_explorer_docker_run_command.test.js",
+      "test/integration/docker_commands.test/xchain_hub_docker_run_command.test.js",
+      "test/integration/docker_commands.test/xchain_indexer_docker_run_command.test.js",
+      "test/integration/docker_commands.test/xchain_regtest_miner_docker_run_command.test.js",
+      "test/integration/docker_commands.test/xchain_utxo_tracker_docker_run_command.test.js"
+    ],
+    "test/unit/bootstrap_health_gate.test.js": [
+      "test/unit/bootstrap_health_gate.test.js",
+      "test/unit/bootstrap_health_gate.test/container_state.test.js",
+      "test/unit/bootstrap_health_gate.test/durable_halt_markers.test.js",
+      "test/unit/bootstrap_health_gate.test/evaluate_container_state.test.js",
+      "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js",
+      "test/unit/bootstrap_health_gate.test/make_bootstrap_consults_the_source_health_gate.test.js",
+      "test/unit/bootstrap_health_gate.test/parse_count_tokens.test.js",
+      "test/unit/bootstrap_health_gate.test/service_health_probe.test.js"
+    ],
+    "test/unit/database_service.test.js": [
+      "test/unit/database_service.test.js",
+      "test/unit/database_service.test/add_user_password_to_database.test.js",
+      "test/unit/database_service.test/ask_mariadb_root_password.test.js",
+      "test/unit/database_service.test/build_database_module.test.js",
+      "test/unit/database_service.test/check_if_database_is_ready.test.js",
+      "test/unit/database_service.test/clear_hub_price_ingest_watermark.test.js",
+      "test/unit/database_service.test/ensure_database_pool.test.js",
+      "test/unit/database_service.test/ensure_xchain_node_access.test.js",
+      "test/unit/database_service.test/execute_native_maria_db_command.test.js",
+      "test/unit/database_service.test/external_db_add_user_password.test.js",
+      "test/unit/database_service.test/external_db_build_database_module.test.js",
+      "test/unit/database_service.test/external_db_ensure_xchain_node_access.test.js",
+      "test/unit/database_service.test/get_database_container_id.test.js",
+      "test/unit/database_service.test/get_database_host_port.test.js",
+      "test/unit/database_service.test/get_external_db_config.test.js",
+      "test/unit/database_service.test/no_coin_network_build_database_module.test.js",
+      "test/unit/database_service.test/pre_network_column_clear_hub_price_ingest_watermark.test.js",
+      "test/unit/database_service.test/provisioning_sql_safety.test.js",
+      "test/unit/database_service.test/purge_hub_cross_chain_rows.test.js",
+      "test/unit/database_service.test/reset_databases.test.js",
+      "test/unit/database_service.test/set_database_parameters.test.js"
+    ],
+    "test/unit/explorer_service.test.js": [
+      "test/unit/explorer_service.test.js",
+      "test/unit/explorer_service.test/01_already_running.test.js",
+      "test/unit/explorer_service.test/02_honours_install_ref.test.js",
+      "test/unit/explorer_service.test/03_no_coins_yet.test.js",
+      "test/unit/explorer_service.test/04_force_rebuild.test.js",
+      "test/unit/explorer_service.test/05_exhausts_retries.test.js",
+      "test/unit/explorer_service.test/06_update_error_retry.test.js",
+      "test/unit/explorer_service.test/07_persistent_attach_failure.test.js",
+      "test/unit/explorer_service.test/08_happy_path.test.js",
+      "test/unit/explorer_service.test/09_wait_for_ready.test.js"
+    ],
+    "test/unit/node_service.test.js": [
+      "test/unit/node_service.test.js",
+      "test/unit/node_service.test/broken_mirror.test.js",
+      "test/unit/node_service.test/placed_tarball.test.js",
+      "test/unit/node_service.test/build_crypto_node.test.js",
+      "test/unit/node_service.test/blocks_and_txindex.test.js",
+      "test/unit/node_service.test/blocks_dir_persistence.test.js",
+      "test/unit/node_service.test/install_node.test.js",
+      "test/unit/node_service.test/node_version_pin.test.js"
+    ],
+    "test/unit/status_service.test.js": [
+      "test/unit/status_service.test.js",
+      "test/unit/status_service.test/get_status_with_installed_modules.test.js",
+      "test/unit/status_service.test/get_status_with_installed_modules_versions_and_output.test.js",
+      "test/unit/status_service.test/get_installed_coins_and_networks.test.js",
+      "test/unit/status_service.test/load_installed_modules.test.js",
+      "test/unit/status_service.test/get_status_branch_column.test.js",
+      "test/unit/status_service.test/get_status_commit_column.test.js",
+      "test/unit/status_service.test/advisory_remote_version_check.test.js"
+    ]
+  }
 }
