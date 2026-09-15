@@ -825,11 +825,14 @@ async function startModules(servicesList) {
 // coin/network; `servicesList` is the filtered map the CLI builds. Returns true
 // only when every targeted decoder answered exit 0.
 async function clearDecoderReorgHalt(servicesList, { reason, force = false, dryRun = false } = {}) {
-    if (typeof reason !== 'string' || reason.trim().length < 8) {
+    // A dry run writes nothing, so it runs without a reason; a real clear records one.
+    const reasonText = typeof reason === 'string' ? reason.trim() : ''
+    if (!dryRun && reasonText.length < 8) {
         console.log('clear-reorg-halt: --reason must say, in at least 8 characters, why this database is known good; it is recorded with the clear.')
         return false
     }
-    const args = ['node', 'src/clear-reorg-halt.js', '--reason', reason.trim()]
+    const args = ['node', 'src/clear-reorg-halt.js']
+    if (reasonText) args.push('--reason', reasonText)
     if (force) args.push('--force')
     if (dryRun) args.push('--dry-run')
     let targeted = 0

@@ -886,6 +886,27 @@ describe('moduleOperations', function () {
             expect(await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: 'short' })).to.be.false
             expect(stubs.execContainer.called).to.be.false
         })
+    })
+
+    // Same title, second block: keeps each describe callback under the 60-line limit.
+    describe('clearDecoderReorgHalt()', function () {
+        const REASON = 'BTC mainnet decoder, no dispensers exist yet, block range intact'
+
+        it('runs a dry run without a reason and passes no --reason', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const ok = await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { dryRun: true })
+            expect(ok).to.be.true
+            expect(stubs.execContainer.firstCall.args[1]).to.deep.equal(
+                ['node', 'src/clear-reorg-halt.js', '--dry-run'])
+        })
+
+        it('refuses a real clear with no reason at all without touching any container', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            expect(await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, {})).to.be.false
+            expect(stubs.execContainer.called).to.be.false
+        })
 
         it('reports false when the script refuses (non-zero exit) and prints its text', async function () {
             const stubs = makeStubs()

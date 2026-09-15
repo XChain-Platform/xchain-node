@@ -660,7 +660,7 @@ opt-in would have skipped them.`)
         .description('Clear a decoder\'s durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table')
         .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet, testnet, regtest)')
-        .requiredOption('--reason <text>', 'Why this database is known good (recorded with the clear)')
+        .option('--reason <text>', 'Why this database is known good (recorded with the clear; required unless --dry-run)')
         .option('--force', 'Clear a database that has held dispenser state; you have compared its dispensers table against a known-good replica')
         .option('--dry-run', 'Run the checks and report the verdict without writing the clear')
         .action(async (chain, network, options) => {
