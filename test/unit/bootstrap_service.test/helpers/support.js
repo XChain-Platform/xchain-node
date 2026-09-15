@@ -6,12 +6,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const sinon      = require('sinon')
-const { configStub } = require('../../helpers/config_stub')
+const { configStub } = require('../../../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { PassThrough, EventEmitter } = require('stream')
 
-const { XChainService, SEP, BOOTSTRAP_BASE_URL } = require('../../../src/config')
+const { XChainService, SEP, BOOTSTRAP_BASE_URL } = require('../../../../src/config')
 
 const COIN    = 'bitcoin'
 const NETWORK = 'mainnet'
@@ -195,7 +195,7 @@ function makeBootstrapPolicyStubs() {
     // subject here. Both have their own suites (BootstrapArchiveMeta.test.js,
     // BootstrapNodeTipGuard.test.js).
     const archiveMetaStub = {
-        buildBootstrapMeta: require('../../../src/services/bootstrap_archive_meta').buildBootstrapMeta,
+        buildBootstrapMeta: require('../../../../src/services/bootstrap_archive_meta').buildBootstrapMeta,
         writeBootstrapMeta: sinon.stub().resolves('bootstrap.json')
     }
     const nodeTipGuardStub = {
@@ -348,7 +348,7 @@ function makeBootstrapOverrides(stubs, execFileCb) {
 
 function loadBootstrapService(stubs) {
     const execFileCb = makeExecFileCallback(stubs)
-    return proxyquire('../../../src/services/bootstrap_service', makeBootstrapOverrides(stubs, execFileCb))
+    return proxyquire('../../../../src/services/bootstrap_service', makeBootstrapOverrides(stubs, execFileCb))
 }
 
 

@@ -17,7 +17,7 @@ const {
     findSnapshotCall,
     makeStubs,
     loadBootstrapService
-} = require('./support')
+} = require('./helpers/support')
 
 let savedRequireSigned
 

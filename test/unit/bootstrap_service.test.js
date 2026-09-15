@@ -15,7 +15,7 @@ const {
     makeAutoSpawn,
     makeStubs,
     loadBootstrapService
-} = require('./bootstrap_service.test/support')
+} = require('./bootstrap_service.test/helpers/support')
 
 let savedRequireSigned
 

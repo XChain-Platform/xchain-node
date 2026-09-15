@@ -18,7 +18,7 @@ const {
     makeStubs,
     stubVerifiedInner,
     loadBootstrapService
-} = require('./support')
+} = require('./helpers/support')
 
 let savedRequireSigned
 
