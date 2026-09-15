@@ -11,12 +11,10 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
-const { configStub } = require('../helpers/config_stub')
+const { configStub } = require('../../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
-const crypto     = require('crypto')
-
 // Fake config dir (never touches the real filesystem)
 const FAKE_CONFIG_DIR = '/tmp/test-xchain-config'
 const FAKE_VALIDATOR_DIR = path.join(FAKE_CONFIG_DIR, 'validator')
@@ -28,51 +26,22 @@ const FAKE_SETTINGS_FILE = path.join(FAKE_VALIDATOR_DIR, 'validator.json')
 const FAKE_CAPS_DIR      = path.join(FAKE_VALIDATOR_DIR, 'hub-caps')
 const FAKE_CAPS_FILE     = path.join(FAKE_CAPS_DIR, 'capabilities.json')
 const FAKE_LEGACY_CAPS   = path.join(FAKE_VALIDATOR_DIR, 'capabilities.json')
-// The coin wallets and the DOGE signer the hub mounts. The stake WIF lives in
-// wallets.env, OUTSIDE the mounted signer directory, so the hub never sees it.
-const FAKE_WALLETS_FILE  = path.join(FAKE_VALIDATOR_DIR, 'wallets.env')
-const FAKE_SIGNER_DIR    = path.join(FAKE_VALIDATOR_DIR, 'signer')
-const FAKE_SIGNER_FILE   = path.join(FAKE_SIGNER_DIR, 'signer.js')
-const FAKE_SIGNER_ENV    = path.join(FAKE_SIGNER_DIR, '.env')
-
-// What a written wallets.env looks like: the argument of the writeFileSync
-// call that targeted it, parsed back into KEY=VALUE.
-function writtenWallets(fs) {
-    const call = fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_WALLETS_FILE)
-    if (!call) return null
-    const out = {}
-    for (const line of String(call.args[1]).split('\n')) {
-        if (!line || line.startsWith('#')) continue
-        const eq = line.indexOf('=')
-        out[line.substring(0, eq)] = line.substring(eq + 1)
-    }
-    return out
-}
-
-// Generate a real 64-hex Ed25519 seed for tests that need valid crypto
-function makeSeedHex() {
-    return crypto.randomBytes(32).toString('hex')
-}
-
 // The shared 0600 sidecar the hub API key lands in. It is NOT under validator/: the key
 // belongs to the host (the hub, the local indexer and the shared services all present it),
 // while validator/ holds this node's identity.
 const FAKE_HUB_SIDECAR = path.join(FAKE_CONFIG_DIR, 'hub.local')
-
 // ConfigService owns the sidecar plumbing and is stubbed here so init never touches a real
 // config directory. `generated` mirrors the read-or-generate result the real one returns.
 function makeHubApiKeyStub(generated = true) {
     return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, generated })
 }
-
 // The non-minting read a re-run uses. `present` is what the sidecar already holds.
 function makeHubApiKeyReadStub(present = false) {
     return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, present })
 }
-
 function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub(),
                               readHubApiKey = makeHubApiKeyReadStub()) {
-    return proxyquire('../../src/services/validator_service', {
+    return proxyquire('../../../src/services/validator_service', {
         'fs': fsStub,
         './config_service': { ensureHubApiKey, readHubApiKey },
         '../config': configStub({
@@ -80,7 +49,6 @@ function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub(),
         })
     })
 }
-
 // Treat every path named here as a regular file for lstat purposes, so the
 // layout migration can tell a real config file from the DIRECTORY docker
 // auto-creates at a missing bind-mount source.
@@ -92,7 +60,6 @@ function fileLstat(paths) {
         throw err
     })
 }
-
 function makeFs(overrides = {}) {
     return {
         existsSync:    sinon.stub().returns(false),
@@ -106,7 +73,6 @@ function makeFs(overrides = {}) {
         ...overrides
     }
 }
-
 // Build a settings object as would be saved by initValidator
 function makeSettings(pubkey = 'a'.repeat(64), opts = {}) {
     return {
@@ -123,60 +89,58 @@ function makeSettings(pubkey = 'a'.repeat(64), opts = {}) {
 
 describe('ValidatorService', function () {
 
-    describe('pubkeyFromSeedHex()', function () {
+    describe('capability-config layout migration', function () {
 
-        it('returns a 64-char hex string', function () {
-            const vs = loadValidatorService(makeFs())
-            const seed = makeSeedHex()
-            const pubkey = vs.pubkeyFromSeedHex(seed)
-            expect(pubkey).to.be.a('string').with.length(64)
-            expect(pubkey).to.match(/^[a-f0-9]{64}$/)
-        })
-
-        it('is deterministic: same seed → same pubkey', function () {
-            const vs = loadValidatorService(makeFs())
-            const seed = makeSeedHex()
-            expect(vs.pubkeyFromSeedHex(seed)).to.equal(vs.pubkeyFromSeedHex(seed))
-        })
-
-        it('different seeds → different pubkeys', function () {
-            const vs = loadValidatorService(makeFs())
-            const pubkey1 = vs.pubkeyFromSeedHex(makeSeedHex())
-            const pubkey2 = vs.pubkeyFromSeedHex(makeSeedHex())
-            expect(pubkey1).to.not.equal(pubkey2)
-        })
-    })
-
-    describe('isInitialized()', function () {
-
-        it('returns true when both settings and key files exist', function () {
+        it('moves a pre-hub-caps capabilities.json into its own directory', function () {
             const fs = makeFs({
                 existsSync: sinon.stub().callsFake(p =>
-                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE)
+                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE || p === FAKE_LEGACY_CAPS),
+                lstatSync: fileLstat([FAKE_LEGACY_CAPS]),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
             })
             const vs = loadValidatorService(fs)
-            expect(vs.isInitialized()).to.be.true
+            expect(vs.ensureCapabilityConfigLayout()).to.be.true
+            expect(fs.mkdirSync.calledWith(FAKE_CAPS_DIR, { recursive: true })).to.be.true
+            expect(fs.renameSync.calledWith(FAKE_LEGACY_CAPS, FAKE_CAPS_FILE)).to.be.true
         })
 
-        it('returns false when settings file is missing', function () {
+        it('MOVES rather than copies, so only one config can ever be edited', function () {
             const fs = makeFs({
-                existsSync: sinon.stub().callsFake(p => p === FAKE_KEY_FILE)
+                existsSync: sinon.stub().callsFake(p => p === FAKE_LEGACY_CAPS),
+                lstatSync: fileLstat([FAKE_LEGACY_CAPS])
             })
             const vs = loadValidatorService(fs)
-            expect(vs.isInitialized()).to.be.false
+            vs.ensureCapabilityConfigLayout()
+            expect(fs.renameSync.calledWith(FAKE_LEGACY_CAPS, FAKE_CAPS_FILE), 'must move the file').to.be.true
+            // Copying would leave two configs: the operator edits one, the hub
+            // reads the other, and the drift is silent.
+            expect(fs.writeFileSync.called).to.be.false
+            expect(fs.copyFileSync).to.be.undefined
         })
 
-        it('returns false when key file is missing', function () {
+        it('is a no-op once migrated', function () {
             const fs = makeFs({
-                existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE)
+                existsSync: sinon.stub().callsFake(p => p === FAKE_CAPS_FILE),
+                lstatSync: fileLstat([FAKE_CAPS_FILE])
             })
             const vs = loadValidatorService(fs)
-            expect(vs.isInitialized()).to.be.false
+            expect(vs.ensureCapabilityConfigLayout()).to.be.false
+            expect(fs.renameSync.called).to.be.false
         })
 
-        it('returns false when neither file exists', function () {
-            const vs = loadValidatorService(makeFs())
-            expect(vs.isInitialized()).to.be.false
+        it('does not migrate the empty DIRECTORY docker leaves at a missing mount source', function () {
+            // docker auto-creates a missing bind-mount source as a directory, so
+            // the legacy path can exist while being no config file at all.
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_LEGACY_CAPS),
+                lstatSync: sinon.stub().callsFake(p => {
+                    if (p === FAKE_LEGACY_CAPS) return { isFile: () => false }
+                    throw new Error('ENOENT')
+                })
+            })
+            const vs = loadValidatorService(fs)
+            expect(vs.ensureCapabilityConfigLayout()).to.be.false
+            expect(fs.renameSync.called).to.be.false
         })
     })
 })

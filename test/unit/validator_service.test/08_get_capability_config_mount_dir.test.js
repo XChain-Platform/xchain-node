@@ -11,12 +11,10 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
-const { configStub } = require('../helpers/config_stub')
+const { configStub } = require('../../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
-const crypto     = require('crypto')
-
 // Fake config dir (never touches the real filesystem)
 const FAKE_CONFIG_DIR = '/tmp/test-xchain-config'
 const FAKE_VALIDATOR_DIR = path.join(FAKE_CONFIG_DIR, 'validator')
@@ -27,52 +25,22 @@ const FAKE_SETTINGS_FILE = path.join(FAKE_VALIDATOR_DIR, 'validator.json')
 // against the container for every path. signing.key must stay outside it.
 const FAKE_CAPS_DIR      = path.join(FAKE_VALIDATOR_DIR, 'hub-caps')
 const FAKE_CAPS_FILE     = path.join(FAKE_CAPS_DIR, 'capabilities.json')
-const FAKE_LEGACY_CAPS   = path.join(FAKE_VALIDATOR_DIR, 'capabilities.json')
-// The coin wallets and the DOGE signer the hub mounts. The stake WIF lives in
-// wallets.env, OUTSIDE the mounted signer directory, so the hub never sees it.
-const FAKE_WALLETS_FILE  = path.join(FAKE_VALIDATOR_DIR, 'wallets.env')
-const FAKE_SIGNER_DIR    = path.join(FAKE_VALIDATOR_DIR, 'signer')
-const FAKE_SIGNER_FILE   = path.join(FAKE_SIGNER_DIR, 'signer.js')
-const FAKE_SIGNER_ENV    = path.join(FAKE_SIGNER_DIR, '.env')
-
-// What a written wallets.env looks like: the argument of the writeFileSync
-// call that targeted it, parsed back into KEY=VALUE.
-function writtenWallets(fs) {
-    const call = fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_WALLETS_FILE)
-    if (!call) return null
-    const out = {}
-    for (const line of String(call.args[1]).split('\n')) {
-        if (!line || line.startsWith('#')) continue
-        const eq = line.indexOf('=')
-        out[line.substring(0, eq)] = line.substring(eq + 1)
-    }
-    return out
-}
-
-// Generate a real 64-hex Ed25519 seed for tests that need valid crypto
-function makeSeedHex() {
-    return crypto.randomBytes(32).toString('hex')
-}
-
 // The shared 0600 sidecar the hub API key lands in. It is NOT under validator/: the key
 // belongs to the host (the hub, the local indexer and the shared services all present it),
 // while validator/ holds this node's identity.
 const FAKE_HUB_SIDECAR = path.join(FAKE_CONFIG_DIR, 'hub.local')
-
 // ConfigService owns the sidecar plumbing and is stubbed here so init never touches a real
 // config directory. `generated` mirrors the read-or-generate result the real one returns.
 function makeHubApiKeyStub(generated = true) {
     return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, generated })
 }
-
 // The non-minting read a re-run uses. `present` is what the sidecar already holds.
 function makeHubApiKeyReadStub(present = false) {
     return sinon.stub().resolves({ path: FAKE_HUB_SIDECAR, present })
 }
-
 function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub(),
                               readHubApiKey = makeHubApiKeyReadStub()) {
-    return proxyquire('../../src/services/validator_service', {
+    return proxyquire('../../../src/services/validator_service', {
         'fs': fsStub,
         './config_service': { ensureHubApiKey, readHubApiKey },
         '../config': configStub({
@@ -80,7 +48,6 @@ function loadValidatorService(fsStub, ensureHubApiKey = makeHubApiKeyStub(),
         })
     })
 }
-
 // Treat every path named here as a regular file for lstat purposes, so the
 // layout migration can tell a real config file from the DIRECTORY docker
 // auto-creates at a missing bind-mount source.
@@ -92,7 +59,6 @@ function fileLstat(paths) {
         throw err
     })
 }
-
 function makeFs(overrides = {}) {
     return {
         existsSync:    sinon.stub().returns(false),
@@ -106,7 +72,6 @@ function makeFs(overrides = {}) {
         ...overrides
     }
 }
-
 // Build a settings object as would be saved by initValidator
 function makeSettings(pubkey = 'a'.repeat(64), opts = {}) {
     return {
@@ -121,62 +86,46 @@ function makeSettings(pubkey = 'a'.repeat(64), opts = {}) {
     }
 }
 
+// The hub container's mount. A single-FILE bind mount makes `docker cp`
+// against that container fail for EVERY path with "mkdirat
+// validator/capabilities.json: file exists", because docker recreates each
+// mount destination as a directory during a copy. The fix mounts the
+// containing directory instead - which is only safe while that directory
+// holds nothing but the capability config, since signing.key is the
+// validator's private key.
 describe('ValidatorService', function () {
 
-    describe('pubkeyFromSeedHex()', function () {
+    describe('getCapabilityConfigMountDir()', function () {
 
-        it('returns a 64-char hex string', function () {
-            const vs = loadValidatorService(makeFs())
-            const seed = makeSeedHex()
-            const pubkey = vs.pubkeyFromSeedHex(seed)
-            expect(pubkey).to.be.a('string').with.length(64)
-            expect(pubkey).to.match(/^[a-f0-9]{64}$/)
-        })
-
-        it('is deterministic: same seed → same pubkey', function () {
-            const vs = loadValidatorService(makeFs())
-            const seed = makeSeedHex()
-            expect(vs.pubkeyFromSeedHex(seed)).to.equal(vs.pubkeyFromSeedHex(seed))
-        })
-
-        it('different seeds → different pubkeys', function () {
-            const vs = loadValidatorService(makeFs())
-            const pubkey1 = vs.pubkeyFromSeedHex(makeSeedHex())
-            const pubkey2 = vs.pubkeyFromSeedHex(makeSeedHex())
-            expect(pubkey1).to.not.equal(pubkey2)
-        })
-    })
-
-    describe('isInitialized()', function () {
-
-        it('returns true when both settings and key files exist', function () {
-            const fs = makeFs({
+        function initializedFs(extraFiles = []) {
+            return makeFs({
                 existsSync: sinon.stub().callsFake(p =>
-                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE)
+                    p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE || p === FAKE_CAPS_FILE || p === FAKE_CAPS_DIR),
+                lstatSync: fileLstat([FAKE_CAPS_FILE]),
+                readdirSync: sinon.stub().returns(['capabilities.json', ...extraFiles]),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
             })
-            const vs = loadValidatorService(fs)
-            expect(vs.isInitialized()).to.be.true
+        }
+
+        it('returns the DIRECTORY holding the capability config, not the file', function () {
+            const vs = loadValidatorService(initializedFs())
+            expect(vs.getCapabilityConfigMountDir()).to.equal(FAKE_CAPS_DIR)
+            expect(vs.getCapabilityConfigMountDir()).to.not.equal(FAKE_CAPS_FILE)
         })
 
-        it('returns false when settings file is missing', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().callsFake(p => p === FAKE_KEY_FILE)
-            })
-            const vs = loadValidatorService(fs)
-            expect(vs.isInitialized()).to.be.false
-        })
-
-        it('returns false when key file is missing', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE)
-            })
-            const vs = loadValidatorService(fs)
-            expect(vs.isInitialized()).to.be.false
-        })
-
-        it('returns false when neither file exists', function () {
+        it('returns null when this node is not a validator', function () {
             const vs = loadValidatorService(makeFs())
-            expect(vs.isInitialized()).to.be.false
+            expect(vs.getCapabilityConfigMountDir()).to.be.null
+        })
+
+        it('REFUSES to hand the hub a directory that also holds the signing key', function () {
+            const vs = loadValidatorService(initializedFs(['signing.key']))
+            expect(() => vs.getCapabilityConfigMountDir()).to.throw(/signing key MUST NOT be in this directory/)
+        })
+
+        it('refuses any other stray file in the mounted directory', function () {
+            const vs = loadValidatorService(initializedFs(['validator.json']))
+            expect(() => vs.getCapabilityConfigMountDir()).to.throw(/must contain only capabilities\.json.*validator\.json/s)
         })
     })
 })
