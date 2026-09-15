@@ -24,7 +24,7 @@ const CREDS_FILE = path.join(CREDS_DIR, 'credentials.json')
 
 // Build a CredentialsService loaded with stubbed fs and os modules
 function loadCredentialsService(fsStub, osStub) {
-    return proxyquire('../../../src/services/credentials_service', {
+    return proxyquire('../../../../src/services/credentials_service', {
         'fs': fsStub,
         'os': osStub || { homedir: () => FAKE_HOME, userInfo: () => ({ username: 'testuser' }) }
     })

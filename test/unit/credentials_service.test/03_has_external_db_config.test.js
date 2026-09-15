@@ -12,7 +12,7 @@
 
 const {
     sinon, expect, loadCredentialsService, makeFs
-} = require('./helpers')
+} = require('./support/helpers')
 
 // hasExternalDbConfig
 describe('CredentialsService', function () {

@@ -12,7 +12,7 @@
 
 const {
     expect, loadCredentialsService, makeFs
-} = require('./helpers')
+} = require('./support/helpers')
 
 // XCHAIN_NODE_DB constant
 describe('CredentialsService', function () {

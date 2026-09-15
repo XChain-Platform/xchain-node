@@ -13,7 +13,7 @@
 const {
     sinon, expect, FAKE_HOME, CREDS_DIR, CREDS_FILE,
     loadCredentialsService, makeFs
-} = require('./credentials_service.test/helpers')
+} = require('./credentials_service.test/support/helpers')
 
 // Tests
 describe('CredentialsService', function () {

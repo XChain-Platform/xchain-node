@@ -13,7 +13,7 @@
 const {
     sinon, expect, CREDS_FILE,
     loadCredentialsService, makeFs
-} = require('./helpers')
+} = require('./support/helpers')
 
 // loadDbRootPassword / saveDbRootPassword
 describe('CredentialsService', function () {

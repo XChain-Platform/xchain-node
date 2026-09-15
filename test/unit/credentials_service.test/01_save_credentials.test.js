@@ -13,7 +13,7 @@
 const {
     sinon, expect, CREDS_DIR, CREDS_FILE,
     loadCredentialsService, makeFs
-} = require('./helpers')
+} = require('./support/helpers')
 
 // saveCredentials
 describe('CredentialsService', function () {
