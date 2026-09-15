@@ -26,7 +26,99 @@ const StatusService = proxyquire('../../src/services/status_service', {
     }
 })
 const { reduceDecoderReorgHalt, describeReorgHaltNote, reduceNodeCatchingUp, describeNodeCatchingUpNote,
-        reduceNodeUnreachable, describeNodeUnreachableNote, describeDuration } = StatusService
+        reduceNodeUnreachable, describeNodeUnreachableNote, describeDuration,
+        reduceIndexerStall, describeIndexerStallNote, reduceTrackerHalt, describeTrackerHaltNote } = StatusService
+
+// The indexer's surface carries `stallReason` (and `stallClass` on a build that
+// grades its own stalls). A BTC testnet indexer with no DOGE read sat at one
+// block for a day logging ROLLCALL PROOF UNAVAILABLE every five seconds while
+// its node, its decoder and `ps` all read fine. This is where it shows now.
+describe('ps: indexer STALL surface', function () {
+
+    it('reduces a wedged host fault to the reason, its word and the last commit as an instant', function () {
+        const r = reduceIndexerStall({ status: 'unhealthy', stallReason: 'rollcall_proof_unavailable', stallClass: 'wedged',
+            lastBlockCommittedAt: 1757869440000 })
+        expect(r).to.deep.equal({ stalled: true, reason: 'rollcall_proof_unavailable', word: 'rollcall_proof_unavailable',
+            stall_class: 'wedged', since: '2025-09-14T17:04:00.000Z' })
+        expect(reduceIndexerStall({ stallReason: 'x', lastBlockCommittedAt: null }).since).to.equal(null)
+    })
+
+    it('takes the word before the colon of a reason that carries prose', function () {
+        const r = reduceIndexerStall({ stallReason: 'train_activation_halt: manifest names v3, this build implements v2' })
+        expect(r.stalled).to.equal(true)
+        expect(r.word).to.equal('train_activation_halt')
+    })
+
+    it('shows a host fault at once, even inside the grace window', function () {
+        expect(reduceIndexerStall({ stallReason: 'rollcall_proof_unavailable', stallClass: 'barrier_defer' }).stalled).to.equal(true)
+        expect(reduceIndexerStall({ stallReason: 'vm_executor_unavailable', stallClass: 'barrier_defer' }).stalled).to.equal(true)
+    })
+
+    it('does not show the two stalls the indexer itself calls healthy', function () {
+        expect(reduceIndexerStall({ stallReason: 'price_sync_barrier', stallClass: 'barrier_defer' }).stalled).to.equal(false)
+        expect(reduceIndexerStall({ stallReason: 'price_sync_barrier', stallClass: 'future_block_wait' }).stalled).to.equal(false)
+        expect(reduceIndexerStall({ stallReason: 'price_sync_barrier', stallClass: 'wedged' }).stalled).to.equal(true)
+    })
+
+    it('reads an older image that names a reason but grades nothing as stalled, and no reason as advancing', function () {
+        expect(reduceIndexerStall({ stallReason: 'oracle_sync_barrier' }).stalled).to.equal(true)
+        expect(reduceIndexerStall({ status: 'healthy', stallReason: null }).stalled).to.equal(false)
+        expect(reduceIndexerStall({ status: 'healthy' }).stalled).to.equal(false)
+        expect(reduceIndexerStall({ stallReason: '  ' }).stalled).to.equal(false)
+        expect(reduceIndexerStall(null)).to.equal(null)
+        expect(reduceIndexerStall('garbage')).to.equal(null)
+    })
+
+    it('the roll-call note names the variable, the update command and the reason it defers', function () {
+        const note = describeIndexerStallNote('bitcoin', 'testnet',
+            { stalled: true, reason: 'rollcall_proof_unavailable', word: 'rollcall_proof_unavailable', stall_class: 'wedged', since: '2026-09-14T17:04:00Z' })
+        expect(note).to.match(/^bitcoin\/testnet xchain-indexer is STALLED \(rollcall_proof_unavailable\), no block committed since 2026-09-14T17:04:00Z: /)
+        expect(note).to.match(/silence as absence/)
+        expect(note).to.match(/DOGE_INDEXER_API_URL \(and DOGE_INDEXER_API_KEY\)/)
+        expect(note).to.match(/xchain-node update xchain-indexer bitcoin testnet/)
+    })
+
+    it('a barrier past its grace window gets the mirror line, and a decoder halt points at the decoder', function () {
+        const barrier = describeIndexerStallNote('litecoin', 'mainnet', { reason: 'match_sync_barrier', word: 'match_sync_barrier', since: null })
+        expect(barrier).to.match(/^litecoin\/mainnet xchain-indexer is STALLED \(match_sync_barrier\): a hub-mirror barrier/)
+        expect(barrier).to.match(/xchain-node logs xchain-indexer litecoin mainnet/)
+        const decoder = describeIndexerStallNote('bitcoin', 'mainnet', { reason: 'decoder_reorg_halt: decoder wrote a REORG_HALT marker', word: 'decoder_reorg_halt', since: null })
+        expect(decoder).to.match(/see the decoder's line/)
+    })
+})
+
+// The tracker's surface carries `halted` and `halt_reason` after an
+// unrecoverable reorg. The flag is in memory, /status answers 503, and no
+// restart clears it; the docker healthcheck failing is all `ps` showed.
+describe('ps: tracker HALTED surface', function () {
+
+    const DRAINED = "Can't delete a block from 'last blocks': list is empty (reorg exceeds tracked window). This index cannot be "
+        + "walked back onto the node's chain and has to be rebuilt. Under xchain-node run `xchain-node reset xchain-utxo-tracker "
+        + "<coin> <network>`, which drops the volume and takes the bulk-sync path; standalone, stop the tracker, empty its data "
+        + "directory and restart it."
+
+    it('reduces a halted payload, folding the reason to one line', function () {
+        const r = reduceTrackerHalt({ status: 'halted', halted: true, halt_reason: 'unrecoverable reorg\n  (rolled back past   the recovery window)' })
+        expect(r).to.deep.equal({ halted: true, reason: 'unrecoverable reorg' })
+        expect(reduceTrackerHalt({ halted: true, halt_reason: DRAINED }).reason).to.equal(DRAINED)
+    })
+
+    it('reads an older image with no halted field, a string flag and a running tracker as not halted', function () {
+        expect(reduceTrackerHalt({ status: 'healthy' }).halted).to.equal(false)
+        expect(reduceTrackerHalt({ halted: 'true' }).halted).to.equal(false)
+        expect(reduceTrackerHalt({ halted: false, halt_reason: null })).to.deep.equal({ halted: false, reason: null })
+        expect(reduceTrackerHalt(null)).to.equal(null)
+    })
+
+    it('the note says no restart clears it, quotes the reason and names the reset once', function () {
+        const note = describeTrackerHaltNote('bitcoin', 'testnet', { halted: true, reason: 'unrecoverable reorg (rolled back past the recovery window)' })
+        expect(note).to.match(/^bitcoin\/testnet xchain-utxo-tracker is HALTED and no restart clears it/)
+        expect(note).to.match(/unrecoverable reorg \(rolled back past the recovery window\)/)
+        expect(note.match(/xchain-node reset xchain-utxo-tracker bitcoin testnet/g)).to.have.lengthOf(1)
+        const drained = describeTrackerHaltNote('bitcoin', 'testnet', { halted: true, reason: DRAINED })
+        expect(drained.match(/xchain-node reset xchain-utxo-tracker/g)).to.have.lengthOf(1)
+    })
+})
 
 // The same surface carries `node_unreachable` while the service's most recent
 // call to its coin node failed. A decoder on a Pi sat five and a half days with

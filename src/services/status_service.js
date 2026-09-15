@@ -260,6 +260,95 @@ function describeReorgHaltNote(coin, network, reorgHalt) {
         + "`xchain-node clear-reorg-halt " + coin + " " + network + " --reason \"...\"`."
 }
 
+// The stall the indexer publishes on its health surface (`stallReason`, with
+// `stallClass` beside it on a build that grades its own stalls), or null for
+// anything that is not a payload. `stalled` is what the table shows. It is
+// false for the two stalls the indexer itself calls healthy: a wait for wall
+// clock to reach a future-stamped block, and a hub-mirror barrier still inside
+// its grace window, which a BTC mainnet indexer's price mirror defers on
+// almost every poll while the counter keeps advancing. A host fault (a
+// missing DOGE read, a VM executor down) shows at once, and so does any stall
+// the indexer graded wedged, or one an older image left ungraded.
+function reduceIndexerStall(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    const reason = typeof payload.stallReason === 'string' && payload.stallReason.trim() ? payload.stallReason.trim() : null
+    const stallClass = typeof payload.stallClass === 'string' ? payload.stallClass : null
+    const healthyDefer = stallClass === 'future_block_wait'
+        || (stallClass === 'barrier_defer' && /_barrier$/.test(reason || ''))
+    return {
+        stalled:     reason !== null && !healthyDefer,
+        reason,
+        // The reason word alone, for the table: 'train_activation_halt: ...' reads as train_activation_halt.
+        word:        reason ? reason.split(/[\s:]/)[0] : null,
+        stall_class: stallClass,
+        since:       describeCommitInstant(payload.lastBlockCommittedAt)
+    }
+}
+
+// The indexer stamps its last commit in epoch milliseconds; the note wants an
+// instant an operator can read. A string is passed through, anything else is null.
+function describeCommitInstant(value) {
+    if (typeof value === 'string' && value) return value
+    if (Number.isFinite(value) && value > 0) return new Date(value).toISOString()
+    return null
+}
+
+// What to do about each stall an indexer names, keyed by its reason word. A
+// reason with no entry gets the barrier line, since every hub-mirror barrier
+// is named `<something>_barrier` and they all clear the same way.
+const INDEXER_STALL_HINTS = {
+    rollcall_proof_unavailable: (coin, network) =>
+        "it cannot prove on Dogecoin who signed the roll call, so it defers the epoch close rather than read silence as absence."
+        + " Set DOGE_INDEXER_API_URL (and DOGE_INDEXER_API_KEY) in the host .env to a reachable dogecoin " + network + " indexer"
+        + " and run `xchain-node update xchain-indexer " + coin + " " + network + "`; if it is already set, check that the URL answers.",
+    anchor_reward_proof_unavailable: () =>
+        "it cannot read the Dogecoin anchor it must prove a reward against; check that DOGE_INDEXER_API_URL answers.",
+    vm_executor_unavailable: (coin, network) =>
+        "the VM executor is not answering; `xchain-node logs xchain-indexer " + coin + " " + network + "` names the host fault.",
+    decoder_reorg_halt: () =>
+        "its decoder carries a REORG_HALT marker (see the decoder's line); the indexer follows once the decoder is resynced or cleared.",
+    train_activation_halt: (coin, network) =>
+        "the signed release manifest names a rule set this build does not implement; `xchain-node update xchain-indexer " + coin + " " + network + "`.",
+    reorg_rollback: () =>
+        "a reorg rollback is in progress; it resumes on its own once the rolled-back range is re-parsed."
+}
+
+// The line `ps` prints under the table for a stalled indexer: the reason, how
+// long no block has committed, and the remedy for that reason.
+function describeIndexerStallNote(coin, network, stall) {
+    const hint = INDEXER_STALL_HINTS[stall.word] || ((c, n) =>
+        "a hub-mirror barrier (" + stall.reason + ") has held the head block past the grace window; check that the hub is answering"
+        + " and its mirror stream is advancing, then `xchain-node logs xchain-indexer " + c + " " + n + "`.")
+    return coin + "/" + network + " xchain-indexer is STALLED (" + stall.reason + ")"
+        + (stall.since ? ", no block committed since " + stall.since : "")
+        + ": " + hint(coin, network)
+}
+
+// The halt a tracker publishes after an unrecoverable reorg (`halted`, with
+// `halt_reason`), or null for anything that is not a payload. Strict
+// `=== true` on the flag, as for the decoder: an older image without the
+// field reads as running rather than as a halt. The reason is folded to one
+// line because the tracker writes it as a paragraph.
+function reduceTrackerHalt(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    const reason = typeof payload.halt_reason === 'string' ? payload.halt_reason.split(/\r?\n/)[0].replace(/\s+/g, ' ').trim() : ''
+    return {
+        halted: payload.halted === true,
+        reason: reason || null
+    }
+}
+
+// The line `ps` prints under the table for a halted tracker: that no restart
+// clears it, why it halted, and the one recovery.
+function describeTrackerHaltNote(coin, network, halt) {
+    // The tracker's own reason names the reset when the window ran dry; say it once.
+    const namesReset = /xchain-node reset/.test(halt.reason || "")
+    return coin + "/" + network + " xchain-utxo-tracker is HALTED and no restart clears it: it stopped polling after an unrecoverable reorg"
+        + " and answers 503 until it is rebuilt."
+        + (halt.reason ? " " + halt.reason : "")
+        + (namesReset ? "" : " Recovery: `xchain-node reset xchain-utxo-tracker " + coin + " " + network + "`, which drops the store and takes the bulk-sync path.")
+}
+
 async function getStatus(coin, network, printStatus = false, checkVersions = false) {
     if (isStatusUpdated()) {
         if (printStatus) logger.info(getLastPrintedStatus())
@@ -396,8 +485,17 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                             // own tip (a bootstrap restored next to a fresh node): the
                             // container is healthy and idle, which without this line
                             // reads as a service that has stopped following the chain.
+                            //
+                            // The indexer's surface carries its stall (`stallReason`) and
+                            // the tracker's carries its halt (`halted`), and neither
+                            // reaches docker: a BTC indexer deferring every block for want
+                            // of a DOGE read, or a tracker halted on a reorg past its undo
+                            // window, kept a healthy node, a healthy decoder and a clean
+                            // `ps` for days. Same posture as the decoder's marker: read
+                            // for running containers, advisory, note names the remedy.
                             const probesHealthSurface = nextModule === XChainService.XCHAIN_DECODER
                                 || nextModule === XChainService.XCHAIN_UTXO_TRACKER
+                                || nextModule === XChainService.XCHAIN_INDEXER
                             if (probesHealthSurface && containerStatus["State"]["Status"] === "running") {
                                 let payload = null
                                 try {
@@ -409,6 +507,20 @@ async function getStatus(coin, network, printStatus = false, checkVersions = fal
                                     isChurning = true
                                     nextCoinNetworkModules[nextModule]["reorg_halt"] = reorgHalt
                                     notes.push(describeReorgHaltNote(nextCoin, nextCoinNetwork, reorgHalt))
+                                }
+                                const stall = nextModule === XChainService.XCHAIN_INDEXER ? reduceIndexerStall(payload) : null
+                                if (stall && stall.stalled) {
+                                    state += " STALL " + stall.word
+                                    isChurning = true
+                                    nextCoinNetworkModules[nextModule]["stall"] = stall
+                                    notes.push(describeIndexerStallNote(nextCoin, nextCoinNetwork, stall))
+                                }
+                                const trackerHalt = nextModule === XChainService.XCHAIN_UTXO_TRACKER ? reduceTrackerHalt(payload) : null
+                                if (trackerHalt && trackerHalt.halted) {
+                                    state += " HALTED"
+                                    isChurning = true
+                                    nextCoinNetworkModules[nextModule]["halt"] = trackerHalt
+                                    notes.push(describeTrackerHaltNote(nextCoin, nextCoinNetwork, trackerHalt))
                                 }
                                 const wait = reduceNodeCatchingUp(payload)
                                 if (wait) {
@@ -563,5 +675,9 @@ module.exports = {
     describeNodeCatchingUpNote,
     reduceNodeUnreachable,
     describeNodeUnreachableNote,
-    describeDuration
+    describeDuration,
+    reduceIndexerStall,
+    describeIndexerStallNote,
+    reduceTrackerHalt,
+    describeTrackerHaltNote
 }
