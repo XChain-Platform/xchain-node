@@ -54,6 +54,66 @@ const { getHostArch } = require('./github_downloader/host_arch.js');
 
 const SHA256_RE = /^[a-f0-9]{64}$/i;
 
+// Picks the release asset built for linux on the host architecture, or
+// throws when the release has none.
+function selectHostLinuxAsset(release) {
+  const arch = getHostArch();
+  const asset = release.assets.find(a => {
+    const name = a.name.toLowerCase();
+    return name.includes(arch) && name.includes('linux');
+  });
+
+  if (!asset) {
+    throw new Error(`Couldn't find an asset compatible with (linux, ${arch}) in the release ${release.tag_name}`);
+  }
+  return asset;
+}
+
+// Extracts files by extension
+function extractArchive(downloadPath, outputPath, fileExtension) {
+  if (fileExtension === 'gz' || fileExtension === 'tgz') {
+    // Refuse archives whose member paths could escape outputPath (absolute
+    // paths or '..' segments). Checked explicitly so safety doesn't depend
+    // on the host tar implementation's defaults.
+    const listing = spawnSync('tar', ['-tzf', downloadPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    if (listing.status !== 0) throw new Error(`tar exited with code ${listing.status}`);
+    assertSafeArchiveMemberNames(listing.stdout, downloadPath);
+    const result = spawnSync('tar', ['-xzf', downloadPath, '-C', outputPath], { stdio: 'inherit' });
+    if (result.status !== 0) throw new Error(`tar exited with code ${result.status}`);
+    fs.unlinkSync(downloadPath);
+  } else if (fileExtension === 'zip') {
+    // Refuse archives whose member paths could escape outputPath (absolute
+    // paths or '..' segments), mirroring the tar branch above, so safety
+    // doesn't depend on the host unzip implementation's defaults.
+    const listing = spawnSync('unzip', ['-Z1', downloadPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    if (listing.status !== 0) throw new Error(`unzip listing exited with code ${listing.status}`);
+    assertSafeArchiveMemberNames(listing.stdout, downloadPath);
+    const result = spawnSync('unzip', [downloadPath, '-d', outputPath], { stdio: 'inherit' });
+    if (result.status !== 0) throw new Error(`unzip exited with code ${result.status}`);
+    fs.unlinkSync(downloadPath);
+  } else {
+    logger.warn(`Unrecognized file extension: ${fileExtension}. Will not extract.`);
+  }
+}
+
+// Handles directories structure after extracting the files
+function flattenSingleTopLevelDir(outputPath) {
+  const extractedDirs = fs.readdirSync(outputPath).filter(f =>
+    fs.statSync(path.join(outputPath, f)).isDirectory()
+  );
+
+  if (extractedDirs.length === 1) {
+    const tempPath = path.join(outputPath, extractedDirs[0]);
+    fs.readdirSync(tempPath).forEach(file => {
+      fs.renameSync(
+        path.join(tempPath, file),
+        path.join(outputPath, file)
+      );
+    });
+    fs.rmdirSync(tempPath);
+  }
+}
+
 class GitHubDownloader {
   constructor(hashesFilePath = './github_hashes.json') {
     this.hashesFilePath = path.resolve(hashesFilePath);
@@ -209,15 +269,7 @@ class GitHubDownloader {
    * "aarch64") and "linux" (one of the prebuilt linux-gnu tarballs).
    */
   async downloadReleaseAsset(release, outputPath, repoKey, version, verifyHash) {
-    const arch = getHostArch();
-    const asset = release.assets.find(a => {
-      const name = a.name.toLowerCase();
-      return name.includes(arch) && name.includes('linux');
-    });
-
-    if (!asset) {
-      throw new Error(`Couldn't find an asset compatible with (linux, ${arch}) in the release ${release.tag_name}`);
-    }
+    const asset = selectHostLinuxAsset(release);
 
     try {
       if (!fs.existsSync(outputPath)) {
@@ -244,46 +296,9 @@ class GitHubDownloader {
         await this.verifyRepositoryHash(repoKey, version, downloadPath);
       }
 
-      // Extracts files by extension
-      if (fileExtension === 'gz' || fileExtension === 'tgz') {
-        // Refuse archives whose member paths could escape outputPath (absolute
-        // paths or '..' segments). Checked explicitly so safety doesn't depend
-        // on the host tar implementation's defaults.
-        const listing = spawnSync('tar', ['-tzf', downloadPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-        if (listing.status !== 0) throw new Error(`tar exited with code ${listing.status}`);
-        assertSafeArchiveMemberNames(listing.stdout, downloadPath);
-        const result = spawnSync('tar', ['-xzf', downloadPath, '-C', outputPath], { stdio: 'inherit' });
-        if (result.status !== 0) throw new Error(`tar exited with code ${result.status}`);
-        fs.unlinkSync(downloadPath);
-      } else if (fileExtension === 'zip') {
-        // Refuse archives whose member paths could escape outputPath (absolute
-        // paths or '..' segments), mirroring the tar branch above, so safety
-        // doesn't depend on the host unzip implementation's defaults.
-        const listing = spawnSync('unzip', ['-Z1', downloadPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-        if (listing.status !== 0) throw new Error(`unzip listing exited with code ${listing.status}`);
-        assertSafeArchiveMemberNames(listing.stdout, downloadPath);
-        const result = spawnSync('unzip', [downloadPath, '-d', outputPath], { stdio: 'inherit' });
-        if (result.status !== 0) throw new Error(`unzip exited with code ${result.status}`);
-        fs.unlinkSync(downloadPath);
-      } else {
-        logger.warn(`Unrecognized file extension: ${fileExtension}. Will not extract.`);
-      }
+      extractArchive(downloadPath, outputPath, fileExtension);
 
-      // Handles directories structure after extracting the files
-      const extractedDirs = fs.readdirSync(outputPath).filter(f =>
-        fs.statSync(path.join(outputPath, f)).isDirectory()
-      );
-
-      if (extractedDirs.length === 1) {
-        const tempPath = path.join(outputPath, extractedDirs[0]);
-        fs.readdirSync(tempPath).forEach(file => {
-          fs.renameSync(
-            path.join(tempPath, file),
-            path.join(outputPath, file)
-          );
-        });
-        fs.rmdirSync(tempPath);
-      }
+      flattenSingleTopLevelDir(outputPath);
     } catch (error) {
       throw new Error(`Error downloading asset: ${error.message}`);
     }
