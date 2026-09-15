@@ -44,6 +44,7 @@ const releaseManifestService = require('./release_manifest_service')
 const stateModule            = require('../state')
 const validatorService       = require('./validator_service')
 const hubConsensusEnvGuard   = require('./hub_consensus_env_guard')
+const rollcallWiring         = require('./rollcall_wiring')
 const versionService         = require('./version_service')
 const nodeService            = require('./node_service')
 const databaseService        = require('./database_service')
@@ -976,6 +977,16 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     // deploy with un-armed settings once XCHAIN_NODE_GO_LIVE=1.
     const { assertGoLiveReady } = goLiveGate
     assertGoLiveReady(module, coin, network, environmentVariables, dir)
+
+    // A BTC indexer or validator hub with no DOGE indexer read wedges at its
+    // first roll-call epoch close on any network with a ROLLCALL activation,
+    // days after the deploy, with every container reading healthy. Refuse here
+    // while nothing has been torn down. One-shot execution containers never
+    // close an epoch, so they are exempt.
+    if (!onlyExecution) {
+        const { assertDogeReadWired } = rollcallWiring
+        assertDogeReadWired(module, coin, network, environmentVariables)
+    }
 
     // Hub consensus-shaped settings (HUB_NETWORK, ORACLE_MIN_SUBMISSIONS,
     // ORACLE_ROUND_INTERVAL/SUBMISSION_WINDOW, XCHAIN_PRICE_INDEXER_DB_*, and

@@ -418,6 +418,7 @@ module.exports = {
     get TELEMETRY_IP_SALT() { return process.env.TELEMETRY_IP_SALT || "" },
     get TELEMETRY_RETENTION_DAYS() { return process.env.TELEMETRY_RETENTION_DAYS || 90 },
     get XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER() { return process.env.XCHAIN_NODE_ALLOW_DEGRADED_EXPLORER || '' },
+    get XCHAIN_NODE_ALLOW_NO_DOGE_READ() { return process.env.XCHAIN_NODE_ALLOW_NO_DOGE_READ || '' },
     get XCHAIN_NODE_AUTOHEAL_STATE_DIR() { return process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR },
     get XCHAIN_NODE_BLOCKS_DIR() { return process.env.XCHAIN_NODE_BLOCKS_DIR },
     get XCHAIN_NODE_BOOTSTRAP_MAX_LAG_BLOCKS() { return process.env.XCHAIN_NODE_BOOTSTRAP_MAX_LAG_BLOCKS },

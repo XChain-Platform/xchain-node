@@ -109,7 +109,11 @@ function makeConfigServiceStub(constantsOverride) {
             'EXPLORER_PORT_HTTPS': 18081,
             'EXPLORER_API_PORT_HTTPS': 8081,
             'SYNC_PORT': 3006,
-            'SYNC_API_PORT': 3006
+            'SYNC_API_PORT': 3006,
+            // A BTC mainnet indexer deploys only with its DOGE read wired (the
+            // ROLLCALL wiring guard refuses one without it); the buildAndUp
+            // suites here exercise the deploy, not the refusal.
+            'DOGE_INDEXER_API_URL': 'http://xchain-node-dogecoin-mainnet-xchain-indexer:3004'
         })
     }
 }
@@ -326,7 +330,7 @@ function registerVenueHooks() {
 
 module.exports = {
     sinon, configStub, expect, proxyquire, modulesUrls, XChainService,
-    DEFAULT_NODE_PREFIX, DEPENDENCY_HEALTH_START_PERIOD, makeStubs,
+    DEFAULT_NODE_PREFIX, DEPENDENCY_HEALTH_START_PERIOD, makeStubs, makeConfigServiceStub,
     loadModuleService, stubDockerCreate, runArgsOf, inspectMemoryBytes,
     captureConsole, proxyquireCallThru, moduleSuite
 }

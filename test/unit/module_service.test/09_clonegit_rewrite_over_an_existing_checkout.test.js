@@ -201,7 +201,8 @@ moduleSuite('buildAndUp(): hub consensus-env drift guard wiring', function () {
                 'REGTEST_MINER_PORT': 3005, 'REGTEST_MINER_API_PORT': 3005,
                 'HUB_PORT': 10000, 'EXPLORER_PORT_HTTP': 18080, 'EXPLORER_API_PORT_HTTP': 8080,
                 'EXPLORER_PORT_HTTPS': 18081, 'EXPLORER_API_PORT_HTTPS': 8081,
-                'SYNC_PORT': 3006, 'SYNC_API_PORT': 3006
+                'SYNC_PORT': 3006, 'SYNC_API_PORT': 3006,
+                'DOGE_INDEXER_API_URL': 'http://xchain-node-dogecoin-mainnet-xchain-indexer:3004'
             })
         })
 
