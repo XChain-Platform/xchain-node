@@ -364,6 +364,18 @@
       "test/unit/validator_service.test/15_hub_env_wiring.test.js",
       "test/unit/validator_service.test/16_rollcall_status_reporting.test.js",
       "test/unit/validator_service.test/17_capability_drift_probe.test.js"
+    ],
+    "test/regression/regression.test.js": [
+      "test/regression/regression.test.js",
+      "test/regression/regression.test/01_configuration_generation.test.js",
+      "test/regression/regression.test/02_docker_command_construction.test.js",
+      "test/regression/regression.test/03_security.test.js",
+      "test/regression/regression.test/04_service_lifecycle.test.js",
+      "test/regression/regression.test/05_state_data_integrity.test.js",
+      "test/regression/regression.test/06_e2e_lifecycle_workflows.test.js",
+      "test/regression/regression.test/07_config_parsing_boundaries.test.js",
+      "test/regression/regression.test/08_precheck_error_handling.test.js",
+      "test/regression/regression.test/09_utility_functions.test.js"
     ]
   }
 }
