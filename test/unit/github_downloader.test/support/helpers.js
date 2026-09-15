@@ -49,10 +49,16 @@ function loadDownloader(opts = {}) {
     const axiosStub = opts.axios || makeAxiosStub()
     const spawnSyncStub = opts.spawnSync || sinon.stub().returns({ status: 0 })
 
+    // The hash checks live in a part the class installs on its prototype, so
+    // the part is loaded with the same fs stub and handed to the entry.
+    const hashVerification = proxyquire('../../../../src/services/github_downloader/hash_verification.js', {
+        'fs': fsStub
+    })
     const GitHubDownloader = proxyquire('../../../../src/services/github_downloader', {
         'fs': fsStub,
         'axios': axiosStub,
-        'child_process': { spawnSync: spawnSyncStub }
+        'child_process': { spawnSync: spawnSyncStub },
+        './github_downloader/hash_verification.js': hashVerification
     })
 
     return { GitHubDownloader, fsStub, axiosStub, spawnSyncStub }
