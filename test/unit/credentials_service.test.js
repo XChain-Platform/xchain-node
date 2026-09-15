@@ -10,38 +10,10 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const sinon      = require('sinon')
-const { expect } = require('chai')
-const proxyquire = require('proxyquire').noCallThru()
-const path       = require('path')
-const os         = require('os')
-
-// Helpers
-
-// Homedir used by tests (never the real home)
-const FAKE_HOME = '/tmp/test-xchain-home'
-const CREDS_DIR  = path.join(FAKE_HOME, '.xchain-node')
-const CREDS_FILE = path.join(CREDS_DIR, 'credentials.json')
-
-// Build a CredentialsService loaded with stubbed fs and os modules
-function loadCredentialsService(fsStub, osStub) {
-    return proxyquire('../../src/services/credentials_service', {
-        'fs': fsStub,
-        'os': osStub || { homedir: () => FAKE_HOME, userInfo: () => ({ username: 'testuser' }) }
-    })
-}
-
-// Typical fs stub; all operations succeed by default
-function makeFs(overrides = {}) {
-    return {
-        existsSync:    sinon.stub().returns(false),
-        readFileSync:  sinon.stub().returns('{}'),
-        writeFileSync: sinon.stub(),
-        mkdirSync:     sinon.stub(),
-        chmodSync:     sinon.stub(),
-        ...overrides
-    }
-}
+const {
+    sinon, expect, FAKE_HOME, CREDS_DIR, CREDS_FILE,
+    loadCredentialsService, makeFs
+} = require('./credentials_service.test/helpers')
 
 // Tests
 describe('CredentialsService', function () {
@@ -62,8 +34,11 @@ describe('CredentialsService', function () {
             expect(cs.getCredentialsPath()).to.equal(CREDS_FILE)
         })
     })
+})
 
-    // sanitizeForMariaDb
+// sanitizeForMariaDb
+describe('CredentialsService', function () {
+
     describe('sanitizeForMariaDb()', function () {
 
         it('passes through alphanumeric + underscore unchanged', function () {
@@ -93,8 +68,11 @@ describe('CredentialsService', function () {
             expect(cs.sanitizeForMariaDb('')).to.equal('user')
         })
     })
+})
 
-    // getOsUserDbName
+// getOsUserDbName
+describe('CredentialsService', function () {
+
     describe('getOsUserDbName()', function () {
 
         it('returns xchain_node_<sanitized-username>', function () {
@@ -121,8 +99,11 @@ describe('CredentialsService', function () {
             expect(name).to.equal('xchain_node_' + 'a'.repeat(60))
         })
     })
+})
 
-    // generatePassword
+// generatePassword
+describe('CredentialsService', function () {
+
     describe('generatePassword()', function () {
 
         it('returns a non-empty base64url string', function () {
@@ -145,8 +126,11 @@ describe('CredentialsService', function () {
             expect(pwd.length).to.be.greaterThan(0)
         })
     })
+})
 
-    // hasCredentials
+// hasCredentials
+describe('CredentialsService', function () {
+
     describe('hasCredentials()', function () {
 
         it('returns true when credentials file exists', function () {
@@ -169,8 +153,11 @@ describe('CredentialsService', function () {
             expect(cs.hasCredentials()).to.be.false
         })
     })
+})
 
-    // loadCredentials
+// loadCredentials
+describe('CredentialsService', function () {
+
     describe('loadCredentials()', function () {
 
         it('returns parsed object with user and password', function () {
@@ -221,335 +208,6 @@ describe('CredentialsService', function () {
             })
             const cs = loadCredentialsService(fs)
             expect(cs.loadCredentials()).to.be.null
-        })
-    })
-
-    // saveCredentials
-    describe('saveCredentials()', function () {
-
-        it('creates dir if it does not exist', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(false)
-            })
-            const cs = loadCredentialsService(fs)
-            cs.saveCredentials({ user: 'u', password: 'test-pass', database: 'xchain_node' })
-            expect(fs.mkdirSync.calledOnce).to.be.true
-            expect(fs.mkdirSync.firstCall.args[0]).to.equal(CREDS_DIR)
-            expect(fs.mkdirSync.firstCall.args[1]).to.deep.equal({ recursive: true, mode: 0o700 })
-        })
-
-        it('does not create dir when it already exists', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(true)
-            })
-            const cs = loadCredentialsService(fs)
-            cs.saveCredentials({ user: 'u', password: 'test-pass', database: 'xchain_node' })
-            expect(fs.mkdirSync.called).to.be.false
-        })
-
-        it('writes JSON to credentials file with mode 0600', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(true)
-            })
-            const cs = loadCredentialsService(fs)
-            const creds = { user: 'u', password: 'test-pass', database: 'xchain_node' }
-            cs.saveCredentials(creds)
-            expect(fs.writeFileSync.calledOnce).to.be.true
-            const [filePath, content, opts] = fs.writeFileSync.firstCall.args
-            expect(filePath).to.equal(CREDS_FILE)
-            expect(JSON.parse(content)).to.deep.equal(creds)
-            expect(opts.mode).to.equal(0o600)
-        })
-
-        it('calls chmodSync on file after writing', function () {
-            const fs = makeFs({ existsSync: sinon.stub().returns(true) })
-            const cs = loadCredentialsService(fs)
-            cs.saveCredentials({ user: 'u', password: 'test-pass', database: 'xchain_node' })
-            expect(fs.chmodSync.calledWith(CREDS_FILE, 0o600)).to.be.true
-        })
-
-        it('silently ignores chmodSync errors (Windows compat)', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(true),
-                chmodSync: sinon.stub().throws(new Error('EPERM'))
-            })
-            const cs = loadCredentialsService(fs)
-            // Should not throw
-            expect(() => cs.saveCredentials({ user: 'u', password: 'test-pass', database: 'xchain_node' })).to.not.throw()
-        })
-
-        // Regression guard for uuid:7ed329f7: saveCredentials() used to
-        // fs.writeFileSync(creds) wholesale, destroying any sibling key
-        // (notably the externalDb block written moments earlier by
-        // saveExternalDbConfig() in the same provisioning run). It must now
-        // read-modify-write like its sibling.
-        it('preserves the externalDb block written by saveExternalDbConfig', function () {
-            const existingContent = JSON.stringify({
-                externalDb: { host: 'db.example.com', port: 3306, root_user: 'root', root_password: 'r' }
-            })
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(true),
-                readFileSync: sinon.stub().returns(existingContent)
-            })
-            const cs = loadCredentialsService(fs)
-            cs.saveCredentials({ user: 'u', password: 'test-pass', database: 'xchain_node' })
-
-            expect(fs.writeFileSync.calledOnce).to.be.true
-            const [filePath, content, opts] = fs.writeFileSync.firstCall.args
-            expect(filePath).to.equal(CREDS_FILE)
-            const written = JSON.parse(content)
-            expect(written.externalDb).to.deep.equal({ host: 'db.example.com', port: 3306, root_user: 'root', root_password: 'r' })
-            expect(written.user).to.equal('u')
-            expect(written.password).to.equal('test-pass')
-            expect(written.database).to.equal('xchain_node')
-            expect(opts.mode).to.equal(0o600)
-        })
-    })
-
-    // loadDbRootPassword / saveDbRootPassword
-    describe('loadDbRootPassword() / saveDbRootPassword()', function () {
-
-        it('loadDbRootPassword returns null when the file or key is absent', function () {
-            const noFile = loadCredentialsService(makeFs({
-                readFileSync: sinon.stub().throws(new Error('ENOENT'))
-            }))
-            expect(noFile.loadDbRootPassword()).to.be.null
-
-            const noKey = loadCredentialsService(makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({ user: 'u', password: 'p' }))
-            }))
-            expect(noKey.loadDbRootPassword()).to.be.null
-        })
-
-        it('loadDbRootPassword returns the stored value and rejects non-string/empty shapes', function () {
-            const stored = loadCredentialsService(makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({ dbRootPassword: 'root-pw' }))
-            }))
-            expect(stored.loadDbRootPassword()).to.equal('root-pw')
-
-            const empty = loadCredentialsService(makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({ dbRootPassword: '' }))
-            }))
-            expect(empty.loadDbRootPassword()).to.be.null
-
-            const wrongType = loadCredentialsService(makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({ dbRootPassword: 42 }))
-            }))
-            expect(wrongType.loadDbRootPassword()).to.be.null
-        })
-
-        it('saveDbRootPassword read-modify-writes with mode 0600, preserving sibling keys', function () {
-            const existingContent = JSON.stringify({
-                user: 'u', password: 'p', database: 'xchain_node',
-                externalDb: { host: 'db.example.com', port: 3306, root_user: 'root', root_password: 'r' }
-            })
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(true),
-                readFileSync: sinon.stub().returns(existingContent)
-            })
-            const cs = loadCredentialsService(fs)
-            cs.saveDbRootPassword('new-root-pw')
-
-            expect(fs.writeFileSync.calledOnce).to.be.true
-            const [filePath, content, opts] = fs.writeFileSync.firstCall.args
-            expect(filePath).to.equal(CREDS_FILE)
-            const written = JSON.parse(content)
-            expect(written.dbRootPassword).to.equal('new-root-pw')
-            expect(written.user).to.equal('u')
-            expect(written.externalDb.host).to.equal('db.example.com')
-            expect(opts.mode).to.equal(0o600)
-            expect(fs.chmodSync.calledWith(CREDS_FILE, 0o600)).to.be.true
-        })
-
-        it('saveDbRootPassword creates the 0700 dir when missing', function () {
-            const fs = makeFs({ existsSync: sinon.stub().returns(false) })
-            const cs = loadCredentialsService(fs)
-            cs.saveDbRootPassword('pw')
-            expect(fs.mkdirSync.calledOnce).to.be.true
-            expect(fs.mkdirSync.firstCall.args[1]).to.deep.equal({ recursive: true, mode: 0o700 })
-        })
-    })
-
-    // hasExternalDbConfig
-    describe('hasExternalDbConfig()', function () {
-
-        it('returns true when credentials.json has a well-formed externalDb block', function () {
-            const extDb = {
-                host: '127.0.0.1',
-                port: 3306,
-                root_user: 'root',
-                root_password: 'test-pass'
-            }
-            const fs = makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({ externalDb: extDb }))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.hasExternalDbConfig()).to.be.true
-        })
-
-        it('returns false when externalDb block is absent', function () {
-            const fs = makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({ user: 'u', password: 'p' }))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.hasExternalDbConfig()).to.be.false
-        })
-
-        it('returns false when host is not a string', function () {
-            const fs = makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({
-                    externalDb: { host: 123, port: 3306, root_user: 'root', root_password: 'p' }
-                }))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.hasExternalDbConfig()).to.be.false
-        })
-
-        it('returns false when port is not a number', function () {
-            const fs = makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({
-                    externalDb: { host: '127.0.0.1', port: '3306', root_user: 'root', root_password: 'p' }
-                }))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.hasExternalDbConfig()).to.be.false
-        })
-
-        it('returns false when root_user is not a string', function () {
-            const fs = makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({
-                    externalDb: { host: '127.0.0.1', port: 3306, root_user: null, root_password: 'p' }
-                }))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.hasExternalDbConfig()).to.be.false
-        })
-
-        it('returns false when root_password is not a string', function () {
-            const fs = makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({
-                    externalDb: { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: undefined }
-                }))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.hasExternalDbConfig()).to.be.false
-        })
-
-        it('returns false when readFileSync throws', function () {
-            const fs = makeFs({
-                readFileSync: sinon.stub().throws(new Error('ENOENT'))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.hasExternalDbConfig()).to.be.false
-        })
-    })
-
-    // loadExternalDbConfig
-    describe('loadExternalDbConfig()', function () {
-
-        it('returns the externalDb block when present', function () {
-            const extDb = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' }
-            const fs = makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({ externalDb: extDb }))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.loadExternalDbConfig()).to.deep.equal(extDb)
-        })
-
-        it('returns null when externalDb is absent', function () {
-            const fs = makeFs({
-                readFileSync: sinon.stub().returns(JSON.stringify({}))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.loadExternalDbConfig()).to.be.null
-        })
-
-        it('returns null when file cannot be parsed', function () {
-            const fs = makeFs({
-                readFileSync: sinon.stub().throws(new Error('ENOENT'))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(cs.loadExternalDbConfig()).to.be.null
-        })
-    })
-
-    // saveExternalDbConfig
-    describe('saveExternalDbConfig()', function () {
-
-        it('creates dir if it does not exist', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(false),
-                readFileSync: sinon.stub().throws(new Error('ENOENT'))
-            })
-            const cs = loadCredentialsService(fs)
-            const cfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' }
-            cs.saveExternalDbConfig(cfg)
-            expect(fs.mkdirSync.calledOnce).to.be.true
-        })
-
-        it('merges externalDb into existing credentials.json', function () {
-            const existingCreds = { user: 'u', password: 'test-pass', database: 'xchain_node' }
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(true),
-                readFileSync: sinon.stub().returns(JSON.stringify(existingCreds))
-            })
-            const cs = loadCredentialsService(fs)
-            const cfg = { host: 'db.host', port: 5506, root_user: 'admin', root_password: 'test-root-pass' }
-            cs.saveExternalDbConfig(cfg)
-
-            const [, written] = fs.writeFileSync.firstCall.args
-            const parsed = JSON.parse(written)
-            // Original fields preserved
-            expect(parsed.user).to.equal('u')
-            expect(parsed.password).to.equal('test-pass')
-            // externalDb merged in
-            expect(parsed.externalDb.host).to.equal('db.host')
-            expect(parsed.externalDb.port).to.equal(5506)
-            expect(parsed.externalDb.root_user).to.equal('admin')
-            expect(parsed.externalDb.root_password).to.equal('test-root-pass')
-        })
-
-        it('coerces types: host/root_user/root_password to string, port to number', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(true),
-                readFileSync: sinon.stub().throws(new Error('ENOENT'))
-            })
-            const cs = loadCredentialsService(fs)
-            cs.saveExternalDbConfig({ host: 127, port: '3306', root_user: 42, root_password: true })
-            const [, written] = fs.writeFileSync.firstCall.args
-            const parsed = JSON.parse(written)
-            expect(parsed.externalDb.host).to.equal('127')
-            expect(parsed.externalDb.port).to.equal(3306)
-            expect(parsed.externalDb.root_user).to.equal('42')
-            expect(parsed.externalDb.root_password).to.equal('true')
-        })
-
-        it('writes file with mode 0600', function () {
-            const fs = makeFs({ existsSync: sinon.stub().returns(true) })
-            const cs = loadCredentialsService(fs)
-            cs.saveExternalDbConfig({ host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' })
-            const [, , opts] = fs.writeFileSync.firstCall.args
-            expect(opts.mode).to.equal(0o600)
-        })
-
-        it('silently ignores chmodSync errors', function () {
-            const fs = makeFs({
-                existsSync: sinon.stub().returns(true),
-                chmodSync: sinon.stub().throws(new Error('EPERM'))
-            })
-            const cs = loadCredentialsService(fs)
-            expect(() => cs.saveExternalDbConfig({
-                host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass'
-            })).to.not.throw()
-        })
-    })
-
-    // XCHAIN_NODE_DB constant
-    describe('XCHAIN_NODE_DB', function () {
-
-        it('equals "xchain_node"', function () {
-            const cs = loadCredentialsService(makeFs())
-            expect(cs.XCHAIN_NODE_DB).to.equal('xchain_node')
         })
     })
 })
