@@ -12,8 +12,7 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-
-const { makeStubs, loadModuleService } = require('./process_resilience_chaos.test/helpers')
+const { makeStubs, loadModuleService } = require('./helpers')
 
 describe('Chaos: Process Resilience', function () {
 
@@ -21,30 +20,32 @@ describe('Chaos: Process Resilience', function () {
         sinon.restore()
     })
 
-    // Experiment 11: Async error propagation (SIG-04)
-    describe('Experiment 11: Async error propagation', function () {
+describe('Experiment 11: Async error propagation', function () {
 
-        it('propagates rejection from docker build failure', async function () {
+        it('handles rejection from killContainer during overwrite gracefully', async function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
+            const containerId = 'b'.repeat(64)
 
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let cb
                 if (typeof rest[0] === 'function') cb = rest[0]
                 else cb = rest[1]
                 if (args[0] === 'build') {
-                    cb(new Error('Unexpected build error'))
+                    cb(null)
+                } else if (args[0] === 'run') {
+                    cb(null, containerId + '\n')
                 }
             })
-            const ms = loadModuleService(stubs)
 
-            try {
-                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest')
-                expect.fail('should have rejected')
-            } catch (err) {
-                expect(err).to.include('Error creating Docker image')
-                expect(err).to.include('Unexpected build error')
-            }
+            const ms = loadModuleService(stubs, {
+                killContainer: sinon.stub().rejects(new Error('container not running')),
+                removeContainer: sinon.stub().resolves(true)
+            })
+
+            // killContainer failure should be caught (container may not be running)
+            const result = await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest', 'old-container-id')
+            expect(result).to.equal(containerId)
         })
     })
 })

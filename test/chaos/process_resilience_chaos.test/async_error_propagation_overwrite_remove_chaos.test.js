@@ -12,8 +12,7 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-
-const { makeStubs, loadModuleService } = require('./process_resilience_chaos.test/helpers')
+const { makeStubs, loadModuleService } = require('./helpers')
 
 describe('Chaos: Process Resilience', function () {
 
@@ -21,10 +20,9 @@ describe('Chaos: Process Resilience', function () {
         sinon.restore()
     })
 
-    // Experiment 11: Async error propagation (SIG-04)
-    describe('Experiment 11: Async error propagation', function () {
+describe('Experiment 11: Async error propagation', function () {
 
-        it('propagates rejection from docker build failure', async function () {
+        it('propagates rejection from removeContainer during overwrite', async function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
 
@@ -33,17 +31,20 @@ describe('Chaos: Process Resilience', function () {
                 if (typeof rest[0] === 'function') cb = rest[0]
                 else cb = rest[1]
                 if (args[0] === 'build') {
-                    cb(new Error('Unexpected build error'))
+                    cb(null)
                 }
             })
-            const ms = loadModuleService(stubs)
+
+            const ms = loadModuleService(stubs, {
+                killContainer: sinon.stub().resolves(true),
+                removeContainer: sinon.stub().rejects(new Error('container in use'))
+            })
 
             try {
-                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest')
+                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest', 'old-container-id')
                 expect.fail('should have rejected')
             } catch (err) {
-                expect(err).to.include('Error creating Docker image')
-                expect(err).to.include('Unexpected build error')
+                expect(err.message).to.equal('container in use')
             }
         })
     })
