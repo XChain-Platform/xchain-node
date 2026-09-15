@@ -79,7 +79,9 @@ describe('rebase-completeness sweep', function () {
             assert.strictEqual(r.pass, true);
         });
     });
+});
 
+describe('rebase-completeness sweep', function () {
     describe('it cannot say yes by accident', function () {
 
         it('an epoch marker does NOT rescue a stale table (the vacuous-marker case)', async function () {
@@ -116,7 +118,11 @@ describe('rebase-completeness sweep', function () {
             assert.strictEqual(r.pass, false);
             assert.strictEqual(r.code, sweep.NO_TABLES_CHECKED);
         });
+    });
+});
 
+describe('rebase-completeness sweep', function () {
+    describe('it cannot say yes by accident', function () {
         it('an unreadable store FAILS rather than skipping', async function () {
             const r = await sweep.sweepStore(store(), {
                 windowOpenMs: WINDOW_MS,
@@ -144,7 +150,9 @@ describe('rebase-completeness sweep', function () {
             assert.strictEqual(r.checked, 2, 'the other two tables were still checked');
         });
     });
+});
 
+describe('rebase-completeness sweep', function () {
     describe('timestamp handling', function () {
         it('accepts Date, ISO, MariaDB DATETIME text, seconds and milliseconds', function () {
             const expect = Date.parse('2026-08-01T02:30:00Z');
@@ -167,7 +175,9 @@ describe('rebase-completeness sweep', function () {
                                Date.parse('2026-08-01T00:00:00Z'));
         });
     });
+});
 
+describe('rebase-completeness sweep', function () {
     describe('fleet sweep', function () {
         const cfg = (stores) => ({ window_open: WINDOW_OPEN, batch_tag: 'rebase-2026-08', stores });
 
@@ -218,7 +228,9 @@ describe('rebase-completeness sweep', function () {
             assert.match(sweep.formatReport(res), /RESULT: PASS/);
         });
     });
+});
 
+describe('rebase-completeness sweep', function () {
     describe('the SQL shape', function () {
         it('binds one placeholder per table plus the schema, so no name is interpolated', function () {
             const sql = sweep.createTimeSql(3);
