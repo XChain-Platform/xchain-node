@@ -154,6 +154,69 @@
       "test/unit/status_service.test/get_status_branch_column.test.js",
       "test/unit/status_service.test/get_status_commit_column.test.js",
       "test/unit/status_service.test/advisory_remote_version_check.test.js"
+    ],
+    "test/smoke/smoke.test.js": [
+      "test/smoke/smoke.test.js",
+      "test/smoke/smoke.test/s_smoke_002_commander_cli_registration.test.js",
+      "test/smoke/smoke.test/s_smoke_003_global_options_registration.test.js",
+      "test/smoke/smoke.test/s_smoke_004_constants_and_enum_integrity.test.js",
+      "test/smoke/smoke.test/s_smoke_005_config_template_file_integrity.test.js",
+      "test/smoke/smoke.test/s_smoke_006_config_composition.test.js",
+      "test/smoke/smoke.test/s_smoke_007_docker_command_construction.test.js",
+      "test/smoke/smoke.test/s_smoke_008_parameter_expansion.test.js",
+      "test/smoke/smoke.test/s_smoke_009_state_module_initialization.test.js",
+      "test/smoke/smoke.test/s_smoke_010_crypto_node_dockerfile_existence.test.js"
+    ],
+    "test/unit/bootstrap_service.test.js": [
+      "test/unit/bootstrap_service.test.js",
+      "test/unit/bootstrap_service.test/download_bootstrap.test.js",
+      "test/unit/bootstrap_service.test/download_bootstrap_2.test.js",
+      "test/unit/bootstrap_service.test/bootstrap_restore_is_reported_not_just_logged.test.js",
+      "test/unit/bootstrap_service.test/ensure_bootstrap_maria_db.test.js",
+      "test/unit/bootstrap_service.test/bootstrap_archive_cleanup_after_a_restore_attempt.test.js",
+      "test/unit/bootstrap_service.test/maria_db_module_freshness.test.js",
+      "test/unit/bootstrap_service.test/restore_bootstrap_utxo_tracker_fresh_extract.test.js",
+      "test/unit/bootstrap_service.test/restore_bootstrap_maria_db_happy_path.test.js",
+      "test/unit/bootstrap_service.test/ensure_dir_writable_docker_fallback_dir_exists_not_wri.test.js",
+      "test/unit/bootstrap_service.test/make_bootstrap_utxo_tracker_happy_path.test.js",
+      "test/unit/bootstrap_service.test/make_bootstrap_utxo_tracker_happy_path_2.test.js",
+      "test/unit/bootstrap_service.test/make_bootstrap_maria_db_happy_path.test.js",
+      "test/unit/bootstrap_service.test/bootstrap_listing_and_staging_safety.test.js"
+    ],
+    "test/unit/config_service.test.js": [
+      "test/unit/config_service.test.js",
+      "test/unit/config_service.test/helpers.test.js",
+      "test/unit/config_service.test/get_default_config_regtest.test.js",
+      "test/unit/config_service.test/with_coin_and_network.test.js",
+      "test/unit/config_service.test/database_credentials.test.js",
+      "test/unit/config_service.test/service_routes.test.js",
+      "test/unit/config_service.test/sidecar_and_bootstrap.test.js",
+      "test/unit/config_service.test/rollcall_and_mirror.test.js",
+      "test/unit/config_service.test/encoder_and_leveldb.test.js",
+      "test/unit/config_service.test/shared_service_config.test.js",
+      "test/unit/config_service.test/shared_service_guards.test.js",
+      "test/unit/config_service.test/ensure_hub_api_key.test.js",
+      "test/unit/config_service.test/filter_command_parameters.test.js",
+      "test/unit/config_service.test/resolve_args.test.js"
+    ],
+    "test/unit/release_manifest_service.test.js": [
+      "test/unit/release_manifest_service.test.js",
+      "test/unit/release_manifest_service.test/resolve_install_target.test.js",
+      "test/unit/release_manifest_service.test/the_provenance_gate.test.js",
+      "test/unit/release_manifest_service.test/the_shipped_manifest.test.js"
+    ],
+    "test/unit/release_signature_service.test.js": [
+      "test/unit/release_signature_service.test.js",
+      "test/unit/release_signature_service.test/assert_digest_matches.test.js",
+      "test/unit/release_signature_service.test/parse_sha256sums.test.js",
+      "test/unit/release_signature_service.test/verify_detached_signature.test.js",
+      "test/unit/release_signature_service.test/verify_git_tag_signature.test.js",
+      "test/unit/release_signature_service.test/verify_manifest_for_tag.test.js"
+    ],
+    "test/unit/validator_stake_service.test.js": [
+      "test/unit/validator_stake_service.test.js",
+      "test/unit/validator_stake_service.test/stake_validator.test.js",
+      "test/unit/validator_stake_service.test/unstake_validator.test.js"
     ]
   }
 }
