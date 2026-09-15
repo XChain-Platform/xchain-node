@@ -12,8 +12,7 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-
-const { makeAxiosStub, loadDownloader } = require('./download_resilience_chaos.test/helpers')
+const { validHash, validHashesData, makeAxiosStub, loadDownloader } = require('./helpers')
 
 describe('Chaos: Download Resilience', function () {
 
@@ -21,13 +20,13 @@ describe('Chaos: Download Resilience', function () {
         sinon.restore()
     })
 
-    // Experiment 8: GitHub API errors (NET-01)
-    describe('Experiment 8: GitHub API unreachable', function () {
+    // Experiment 8b: GitHub rate limiting (NET-02)
+    describe('Experiment 8b: GitHub rate limiting', function () {
 
-        it('throws descriptive error on connection refused', async function () {
+        it('throws descriptive error on HTTP 403 (rate limit)', async function () {
             const axiosStub = makeAxiosStub()
-            const err = new Error('connect ECONNREFUSED 127.0.0.1:443')
-            err.code = 'ECONNREFUSED'
+            const err = new Error('Request failed with status code 403')
+            err.response = { status: 403, data: { message: 'API rate limit exceeded' } }
             axiosStub.get.rejects(err)
 
             const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
@@ -41,10 +40,10 @@ describe('Chaos: Download Resilience', function () {
             }
         })
 
-        it('throws descriptive error on DNS resolution failure', async function () {
+        it('throws descriptive error on HTTP 429 (too many requests)', async function () {
             const axiosStub = makeAxiosStub()
-            const err = new Error('getaddrinfo ENOTFOUND api.github.com')
-            err.code = 'ENOTFOUND'
+            const err = new Error('Request failed with status code 429')
+            err.response = { status: 429 }
             axiosStub.get.rejects(err)
 
             const { GitHubDownloader } = loadDownloader({ axios: axiosStub })
@@ -55,7 +54,6 @@ describe('Chaos: Download Resilience', function () {
                 expect.fail('should have thrown')
             } catch (e) {
                 expect(e.message).to.include('GitHub API Error')
-                expect(e.message).to.include('ENOTFOUND')
             }
         })
     })
