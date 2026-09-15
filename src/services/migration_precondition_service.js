@@ -53,11 +53,11 @@
  ********************************************************************/
 
 const fs   = require('fs')
-const path = require('path')
 
 const { XChainService, EXTERNAL_DB } = require('../config')
 const { tableCountSql, tableExistsSql } = require('../db/information_schema')
 const { appliedMigrationsSql } = require('../db/migrations')
+const { migrationsDirOf, migrationFiles } = require('../utils/migration_files')
 const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName } = require('./config_service')
 const config = require('../config');
 const { getLogger } = require('../observability/logger');
@@ -134,20 +134,14 @@ function migrationMode(raw) {
  * screen rather than left for the operator to discover.
  */
 function pendingManualMigrations(dir, applied) {
-    let files
-    try {
-        files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort()
-    } catch {
-        return []
-    }
-    return files.filter(f => {
+    return migrationFiles(dir).filter(([f, file]) => {
         if (applied && applied.has(f)) return false
         try {
-            return migrationMode(fs.readFileSync(path.join(dir, f), 'utf8')) === 'manual'
+            return migrationMode(fs.readFileSync(file, 'utf8')) === 'manual'
         } catch {
             return false
         }
-    })
+    }).map(([f]) => f)
 }
 
 /**
@@ -182,19 +176,13 @@ async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
  * declares no preconditions, which is not an error.
  */
 function listDeployPreconditionMigrations(dir) {
-    let files
-    try {
-        files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort()
-    } catch {
-        return []
-    }
-    return files.filter(f => {
+    return migrationFiles(dir).filter(([, file]) => {
         try {
-            return migrationDeclaresDeployPrecondition(fs.readFileSync(path.join(dir, f), 'utf8'))
+            return migrationDeclaresDeployPrecondition(fs.readFileSync(file, 'utf8'))
         } catch {
             return false
         }
-    })
+    }).map(([f]) => f)
 }
 
 /**
@@ -358,7 +346,7 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
     let required
     try {
         await cloneGitDep(module, false, true, branch)
-        required = listRequired(path.join(getModuleTmpDir(module), 'src', 'sql', 'migrations'))
+        required = listRequired(migrationsDirOf(getModuleTmpDir(module)))
     } catch (err) {
         logger.warn(`Migration precondition guard: could not read ${module}'s migrations ` +
             `(${err && err.message ? err.message : err}); guard not applied.`)
@@ -400,7 +388,7 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
         let pendingManual   = []
         try {
             supportsPerFile = await probe(container, deps)
-            pendingManual   = listPending(path.join(getModuleTmpDir(module), 'src', 'sql', 'migrations'), result.applied)
+            pendingManual   = listPending(migrationsDirOf(getModuleTmpDir(module)), result.applied)
         } catch {
             supportsPerFile = null
         }

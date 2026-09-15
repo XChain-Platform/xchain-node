@@ -38,7 +38,7 @@ const UNTAGGED = '-- xchain:migration mode=manual\nALTER TABLE pubkeys MODIFY pu
 // renamed tree, while an absent checkout is a standalone install with no
 // sibling to compare against.
 const INDEXER_DIR        = path.join(__dirname, '../../../xchain-indexer')
-const INDEXER_MIGRATIONS = path.join(INDEXER_DIR, 'src/sql/migrations')
+const INDEXER_MIGRATIONS = require('../../src/utils/migration_files').migrationsDirOf(INDEXER_DIR)
 const INDEXER_PRESENT    = fs.existsSync(INDEXER_DIR)
 const REQUIRE_SIBLINGS   = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
 
