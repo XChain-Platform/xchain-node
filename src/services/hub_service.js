@@ -17,121 +17,12 @@
 
 const {
     HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-    EXTERNAL_DB, SERVICE_REGISTRY, XChainService, DEFAULT_MODULE_BRANCH
+    EXTERNAL_DB, XChainService, DEFAULT_MODULE_BRANCH
 } = require('../config')
-
-// Build the hub/explorer per-module config descriptor from the table-driven
-// SERVICE_REGISTRY (constants.js) instead of a hand-maintained switch/case.
-// Returns null for modules that contribute no hub config (hub/explorer/sync
-// themselves, e2e-test) so the caller skips them, matching the old
-// switch's default-no-op. The database descriptor is external-vs-dockerized
-// and resolved from `ctx`; every other descriptor is a straight field map
-// read from the coin/network default config.
-function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
-    const hubConfig = (SERVICE_REGISTRY[nextModule] || {}).hubConfig
-    // A module with no hub-config descriptor contributes nothing to the hub, so skip it.
-    if (!hubConfig) return null
-
-    if (hubConfig.type === 'database') {
-        // External DB has no container; point the hub at the configured
-        // external host so its module-config view reflects reality.
-        return ctx.EXTERNAL_DB
-            ? { host: ctx.externalDbCfg.host, port: ctx.externalDbCfg.port }
-            : { host: 'mariadb', port: 3306 }
-    }
-
-    const config = {}
-    for (const [outKey, envKey] of Object.entries(hubConfig.fields)) {
-        config[outKey] = defaultConfigCoinNetwork[envKey]
-    }
-    return config
-}
-
-// The explorer's checkpoint/proof/cross-chain routes
-// read state_checkpoints / capability_snapshots / cross_chain_matches from a
-// LOCAL schema (config database.checkpoint), because xchain-sync deliberately
-// never replicates those hub-mirrored tables. A deployment with no externally-
-// maintained hub schema colocated with the explorer needs one the explorer's
-// own HubMirrorSyncManager self-provisions and keeps live over the hub's
-// /hub-db feed instead (self_sync: true). Wired in below behind the
-// EXPLORER_CHECKPOINT_SELF_SYNC opt-in (paired with the HUB_API_URL
-// passthrough in ConfigService, which the mirror writer needs to reach the
-// hub); a deployment that already points database.checkpoint at a real hub
-// schema by hand, or wants the routes to just 500 (ALLOW_NO_COLOCATED_HUB_DB),
-// leaves this env unset and is unaffected.
-//
-// db.js's _checkpointSource only honours an entry whose host/port/user/pass
-// EXACTLY match the indexer DB (db.js:481), so this reads the SAME
-// defaultConfigCoinNetwork fields buildHubModuleConfig('xchain-indexer', ...)
-// reads above, rather than re-deriving them, to guarantee byte-identical
-// values instead of two independent paths that could drift apart.
-//
-// hub_url ships IN this block, beside self_sync, so the pairing is structural:
-// whatever condition produces self_sync produces the URL with it. Emitted by
-// separate conditions, an explorer opted in after its container exists is told
-// to self-sync with no hub URL to sync from, warns once at startup and then
-// serves the frozen mirror indefinitely. This block reaches the explorer over
-// the hub's config push; HUB_API_URL is a container env ConfigService writes at
-// install/recreate time from the same host env var, and the explorer falls back
-// to it for hand-written config.json deployments.
-function buildCheckpointConfig(defaultConfigCoinNetwork) {
-    return {
-        hub_url: config.HUB_API_URL ||
-            ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" +
-             defaultConfigCoinNetwork.HUB_PORT),
-        db_host:   defaultConfigCoinNetwork.INDEXER_DB_HOST,
-        db_port:   defaultConfigCoinNetwork.INDEXER_DB_PORT,
-        user:      defaultConfigCoinNetwork.INDEXER_DB_USER,
-        pass:      defaultConfigCoinNetwork.INDEXER_DB_PASS,
-        // A dedicated schema beside the indexer DB, never the indexer schema
-        // itself: HubMirrorPool.ensureDatabase() runs CREATE DATABASE IF NOT
-        // EXISTS on this name under the same indexer DB user, which must
-        // therefore be able to create it (or it must already exist, pre-granted).
-        name:      defaultConfigCoinNetwork.INDEXER_DB_NAME + '_HubMirror',
-        self_sync: true
-    }
-}
-
-// Is the self-synced checkpoint mirror opted in for THIS deployment?
-//
-// EXPLORER_CHECKPOINT_SELF_SYNC is a host env read at command time, but the
-// checkpoint blocks it produces are written per coin/network into stores that are
-// only ever upserted, never reconciled. So the opt-in has to outlive the shell that
-// first set it, and as a bare `process.env` read it did not: a coin installed later
-// from a shell that never exported the env (a second terminal, a cron-driven update,
-// an operator who sourced a different env file) got NO checkpoint block, while the
-// coins installed earlier kept theirs. The explorer then serves exactly one coin's
-// hub-mirrored routes as a fail-loud 500 - price_snapshots, oracle_prices,
-// state_checkpoints, capability_snapshots, cross_chain_matches - while every sibling
-// coin answers normally, which reads as a broken query rather than the config gap it
-// is (and with ALLOW_NO_COLOCATED_HUB_DB=1 the explorer boots anyway, so nothing at
-// startup says so either). Measured on a regtest venue whose LTC leg 500'd on
-// /RLTC/api/price_snapshots/FINALIZED/status while RBTC and RDOGE were fine.
-//
-// The installed explorer container's own env is the durable record of the earlier
-// opt-in: ConfigService writes HUB_API_URL into the explorer ONLY inside the same
-// opt-in branch, so its presence there means self-sync was chosen for this
-// deployment. Reading it back makes every later push emit the block for every
-// installed coin, so the gap self-heals on the next mutation instead of needing a
-// hand-edit. Tolerant by design: no explorer container, or an unreadable one, is
-// simply "not opted in".
-async function isCheckpointSelfSyncEnabled(deps = {}) {
-    const env = deps.env || config.CHECKPOINT_SELF_SYNC_ENV
-    // An opt-in exported in the invoking shell counts on its own, before any container is read.
-    if (env.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && env.EXPLORER_CHECKPOINT_SELF_SYNC !== "") return true
-
-    const readEnv = deps.readContainerEnv || readContainerEnv
-    const containerEnv = await readEnv(getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""), deps)
-    // No explorer container, or one whose environment cannot be read, means self-sync was not chosen.
-    if (!containerEnv) return false
-
-    return (containerEnv.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && containerEnv.EXPLORER_CHECKPOINT_SELF_SYNC !== "") ||
-           (containerEnv.HUB_API_URL !== undefined && containerEnv.HUB_API_URL !== "")
-}
 const { db, getLastStatus, isStatusUpdated, isVerbose } = require('../state')
 const { sleep, redactSecrets }                 = require('../utils/helpers')
 const { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = require('./config_service')
-const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./status_service')
+const { getStatus, getInstalledCoinsAndNetworks } = require('./status_service')
 const { addContainerToNetwork }                = require('./docker_service')
 const { cloneGit, buildAndUp }                 = require('./module_service')
 const { addUserPasswordToDatabase, getExternalDbConfig } = require('./database_service')
@@ -144,154 +35,21 @@ const ExplorerConnector                        = require('./explorer_connector.j
 // Destructured where they are used, so each call reads the export at that moment.
 const dockerService                            = require('./docker_service')
 const releaseManifestService                   = require('./release_manifest_service')
-const config = require('../config');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
-
-async function updateHubOrExplorer(module) {
-    // Only the hub and the explorer accept a pushed config; refuse anything else before a connector is built.
-    if (![HUB_MODULE_NAME, EXPLORER_MODULE_NAME].includes(module)) {
-        throw "Only the xchain-hub or the xchain-explorer could be updated"
-    }
-
-    const defaultConfig = await getDefaultConfig(module, null, null)
-    let moduleConnector = null
-
-    if (module === HUB_MODULE_NAME) {
-        moduleConnector = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
-    } else {
-        moduleConnector = new ExplorerConnector("127.0.0.1", defaultConfig["EXPLORER_PORT"])
-    }
-
-    await getStatus(null, null, false)
-
-    // The pushed config is built from live container status, so refuse to push from a status that did not refresh.
-    if (!isStatusUpdated()) {
-        throw "The status is not updated"
-    }
-
-    const lastStatus = getLastStatus()
-    let jsonConfig = {}
-
-    // Resolved once, outside the loops: in external-DB mode the module-config view
-    // must report the host/port the pool actually opened against, which comes from
-    // getExternalDbConfig() (env → saved credentials.json), not the load-time
-    // EXTERNAL_DB_HOST/PORT constants. Those default to 127.0.0.1:3306, so a host
-    // saved at the first-run prompt would be misreported to the hub (uuid:52c5b5f1).
-    const externalDbCfg = EXTERNAL_DB ? await getExternalDbConfig() : null
-
-    // Resolved once per push, for the same reason: the answer is a property of the
-    // deployment, not of the coin/network being emitted, so every installed coin gets
-    // the same verdict and none is silently left without a checkpoint block.
-    const checkpointSelfSync = await isCheckpointSelfSyncEnabled()
-
-    if (module === "xchain-explorer") {
-        jsonConfig["configs"] = []
-        jsonConfig = jsonConfig["configs"]
-    }
-
-    for (const nextCoin in lastStatus) {
-        for (const nextNetwork in lastStatus[nextCoin]) {
-            const defaultConfigCoinNetwork = await getDefaultConfig("", nextCoin, nextNetwork)
-            let nextConfigObject = null
-
-            if (module === "xchain-explorer") {
-                nextConfigObject = { "coin": nextCoin, "network": nextNetwork }
-                jsonConfig.push(nextConfigObject)
-            }
-
-            for (const nextModule in lastStatus[nextCoin][nextNetwork]) {
-                const config = buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, { EXTERNAL_DB, externalDbCfg })
-
-                if (config != null) {
-                    if (module === "xchain-explorer") {
-                        nextConfigObject[nextModule] = config
-                    } else {
-                        if (!(nextCoin in jsonConfig)) jsonConfig[nextCoin] = {}
-                        if (!(nextNetwork in jsonConfig[nextCoin])) jsonConfig[nextCoin][nextNetwork] = {}
-                        jsonConfig[nextCoin][nextNetwork][nextModule] = config
-                    }
-                }
-            }
-
-            // Advertise a self-synced checkpoint schema for this coin/
-            // network once an indexer is actually installed for it (the
-            // checkpoint config needs the indexer's own DB host/port/user/pass)
-            // and the operator opted in (once, at any point in this deployment's
-            // life: see isCheckpointSelfSyncEnabled). See buildCheckpointConfig above.
-            if (checkpointSelfSync && XChainService.XCHAIN_INDEXER in lastStatus[nextCoin][nextNetwork]) {
-                const checkpointConfig = buildCheckpointConfig(defaultConfigCoinNetwork)
-                if (module === "xchain-explorer") {
-                    nextConfigObject.checkpoint = checkpointConfig
-                } else {
-                    if (!(nextCoin in jsonConfig)) jsonConfig[nextCoin] = {}
-                    if (!(nextNetwork in jsonConfig[nextCoin])) jsonConfig[nextCoin][nextNetwork] = {}
-                    jsonConfig[nextCoin][nextNetwork].checkpoint = checkpointConfig
-                }
-            }
-        }
-    }
-
-    if (module === "xchain-explorer") {
-        const explorerContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
-        // getModuleContainer returns null on a registry miss rather than
-        // throwing, so an uninstalled explorer is refused here by name. Passed
-        // on to stringToDockerContainerFile(null, ...) it would surface as the
-        // same generic "problem trying to update a config" error as a real
-        // failure, masking the actual cause.
-        if (!explorerContainerId) {
-            throw "xchain-explorer module is not installed; cannot update its config"
-        }
-        try {
-            const { stringToDockerContainerFile } = dockerService
-            await stringToDockerContainerFile(explorerContainerId, JSON.stringify(jsonConfig), "/XChainExplorer/src/config.json")
-        } catch {
-            throw "There was a problem trying to update a config in the " + module + " module"
-        }
-    } else {
-        let hubUpdated = false
-        let tries = 10
-        // Keep the last failure. updateConfig is an HTTP call to the module's own
-        // API, so when the container is crash-looping every attempt fails with a
-        // connection error and this loop reports only "there was a problem" - which
-        // hides the fact that the CONFIG is fine and the SERVICE never came up. That
-        // misdirection cost real debugging time: the true cause was in the
-        // container's own log, not here.
-        let lastErr = null
-        while (!hubUpdated) {
-            try {
-                hubUpdated = await moduleConnector.updateConfig(jsonConfig)
-            } catch (err) { lastErr = err }
-
-            // A FALSY RETURN is a failure too, and it was the one reported with no
-            // cause at all. callRpc() catches its own transport errors and returns
-            // null, so a 401 from a key-enforcing hub never reaches the catch above
-            // and lastErr stays null - which is precisely the case that printed
-            // "There was a problem trying to update a config" and nothing else, on
-            // the single most informative fact about the failure. The connector
-            // already records why each endpoint failed, for exactly this purpose.
-            if (!hubUpdated && !lastErr
-                && Array.isArray(moduleConnector.lastFailures)
-                && moduleConnector.lastFailures.length) {
-                lastErr = moduleConnector.lastFailures.join('; ')
-            }
-
-            tries--
-            // Out of retries: give up, naming the last concrete error instead of a generic failure.
-            if (tries <= 0) {
-                throw "There was a problem trying to update a config in the " + module + " module" +
-                    (lastErr ? " (last error: " + redactSecrets(lastErr) + "; if this is a connection failure, check `docker logs` for the module - the service is not starting)" : "")
-            }
-            if (!hubUpdated) {
-                logger.info("There was a problem trying to update a config in the " + module + " module" +
-                    (lastErr ? " (" + redactSecrets(lastErr) + ")" : "") + ". Trying again in 3 seconds...")
-                await sleep(3000)
-            }
-        }
-    }
-
-    return true
-}
+const {
+    buildHubModuleConfig, buildCheckpointConfig, isCheckpointSelfSyncEnabled
+} = require('./hub_service/hub_module_config.js')
+const {
+    updateHubOrExplorer, configureUpdateHubOrExplorer
+} = require('./hub_service/update_hub_or_explorer.js')
+configureUpdateHubOrExplorer({
+    HUB_MODULE_NAME, EXPLORER_MODULE_NAME, EXTERNAL_DB, XChainService,
+    db, getLastStatus, isStatusUpdated, sleep, redactSecrets, getDefaultConfig,
+    getStatus, getExternalDbConfig, readContainerEnv, HubConnector,
+    ExplorerConnector, dockerService, buildHubModuleConfig, buildCheckpointConfig,
+    isCheckpointSelfSyncEnabled, logger
+})
 
 // Attach one shared container to every installed coin/network, recording the
 // ones that stay unreachable. addContainerToNetwork is idempotent (it no-ops
@@ -371,6 +129,34 @@ async function updateHub({ skipConfigPush = false } = {}) {
     return true
 }
 
+async function useInstalledHub(hubConnector) {
+    logger.info("Checking if xchain-hub module is installed")
+    if (!isStatusUpdated()) return false
+
+    const lastStatus = getLastStatus()
+    const hubStatus = lastStatus?.[""]?.[""]?.[HUB_MODULE_NAME]
+    if (hubStatus === undefined) return false
+
+    if (hubStatus["status"]["State"]["Status"] === "exited") {
+        logger.info("The hub module container status is 'exited'. Restarting it...")
+        const { restartContainer } = dockerService
+        const restarted = await restartContainer(hubStatus["container_id"])
+        // An exited hub that will not restart cannot receive the config, so stop here.
+        if (restarted !== true) {
+            throw false
+        }
+        logger.info("Waiting for the xchain-hub to respond")
+        let restartTries = 10
+        while (restartTries > 0) {
+            const ping = await hubConnector.ping()
+            if (ping) break
+            restartTries--
+            await sleep(2000)
+        }
+    }
+    return true
+}
+
 // `branch` is the ref the invoking command named, threaded down from preCheck,
 // or null for every command that names none (which is most of them, and their
 // behaviour is unchanged).
@@ -390,32 +176,7 @@ async function installHubModule(branch = null) {
     const pingHub = await hubConnector.ping()
     if (pingHub) return true
 
-    logger.info("Checking if xchain-hub module is installed")
-    if (isStatusUpdated()) {
-        const lastStatus = getLastStatus()
-        const hubStatus = lastStatus?.[""]?.[""]?.[HUB_MODULE_NAME]
-
-        if (hubStatus !== undefined) {
-            if (hubStatus["status"]["State"]["Status"] === "exited") {
-                logger.info("The hub module container status is 'exited'. Restarting it...")
-                const { restartContainer } = dockerService
-                const restarted = await restartContainer(hubStatus["container_id"])
-                // An exited hub that will not restart cannot receive the config, so stop here.
-                if (restarted !== true) {
-                    throw false
-                }
-                logger.info("Waiting for the xchain-hub to respond")
-                let restartTries = 10
-                while (restartTries > 0) {
-                    const ping = await hubConnector.ping()
-                    if (ping) break
-                    restartTries--
-                    await sleep(2000)
-                }
-            }
-            return true
-        }
-    }
+    if (await useInstalledHub(hubConnector)) return true
 
     logger.info("Downloading xchain-hub...")
     // Pinned like the generic path: a release install must stage the manifest's
