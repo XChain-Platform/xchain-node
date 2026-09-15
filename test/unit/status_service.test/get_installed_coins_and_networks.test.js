@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
-const { configStub } = require('../helpers/config_stub')
+const { configStub } = require('../../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -54,7 +54,7 @@ function loadStatusService(state, overrides = {}) {
     const updateExplorerStub          = overrides.updateExplorer || sinon.stub().resolves()
     const getModuleBranchStub         = overrides.getModuleBranch || sinon.stub().resolves('master')
 
-    return proxyquire('../../src/services/status_service', {
+    return proxyquire('../../../src/services/status_service', {
         '../config': configStub({
             NODE_MODULE_NAME: 'node',
             SEP:              '-',
@@ -81,101 +81,82 @@ function loadStatusService(state, overrides = {}) {
     })
 }
 
-describe('StatusService: statusChanged()', function () {
+describe('StatusService: getInstalledCoinsAndNetworks()', function () {
 
-    it('sets statusUpdated to false and calls updateHub + updateExplorer', async function () {
-        const state = makeStateStub()
-        const updateHub     = sinon.stub().resolves()
-        const updateExplorer = sinon.stub().resolves()
-
-        const ss = loadStatusService(state, { updateHub, updateExplorer })
-        await ss.statusChanged()
-
-        expect(state.setStatusUpdated.calledWith(false)).to.be.true
-        expect(updateHub.calledOnce).to.be.true
-        expect(updateExplorer.calledOnce).to.be.true
-    })
-
-    // updateHub() rejects on an unreachable coin network now (it used to
-    // swallow the docker error and return true). These two pin that the
-    // rejection is reported without taking the unrelated explorer push down
-    // with it, which a plain sequential await would have done.
-    it('still pushes explorer config when updateHub rejects, then rethrows', async function () {
-        const state = makeStateStub()
-        const updateHub      = sinon.stub().rejects(new Error('xchain-hub -> bitcoin/mainnet'))
-        const updateExplorer = sinon.stub().resolves()
-
-        const ss = loadStatusService(state, { updateHub, updateExplorer })
-        let threw = null
-        try { await ss.statusChanged() } catch (err) { threw = err }
-
-        expect(threw).to.be.an('error')
-        expect(threw.message).to.equal('xchain-hub -> bitcoin/mainnet')
-        expect(updateExplorer.calledOnce).to.be.true
-    })
-
-    it('reports the hub failure first when both pushes reject', async function () {
-        const state = makeStateStub()
-        const updateHub      = sinon.stub().rejects(new Error('hub attach failed'))
-        const updateExplorer = sinon.stub().rejects(new Error('explorer push failed'))
-
-        const ss = loadStatusService(state, { updateHub, updateExplorer })
-        let threw = null
-        try { await ss.statusChanged() } catch (err) { threw = err }
-
-        expect(threw).to.be.an('error')
-        expect(threw.message).to.equal('hub attach failed')
-        expect(updateExplorer.calledOnce).to.be.true
-    })
-})
-
-describe('StatusService: getStatus() cache hit', function () {
-
-    it('returns cached status immediately when isStatusUpdated is true', async function () {
-        const cachedStatus = { bitcoin: { mainnet: {} } }
-        const state = makeStateStub({
-            isStatusUpdated: sinon.stub().returns(true),
-            getLastStatus:   sinon.stub().returns(cachedStatus)
-        })
-
-        const ss = loadStatusService(state)
-        const result = await ss.getStatus('bitcoin', 'mainnet', false)
-
-        expect(result).to.equal(cachedStatus)
-        expect(state.db.getAllModuleContainers.called).to.be.false
-    })
-
-    it('prints cached status when printStatus=true and cache is hot', async function () {
-        const cachedStatus = {}
-        const state = makeStateStub({
-            isStatusUpdated:      sinon.stub().returns(true),
-            getLastStatus:        sinon.stub().returns(cachedStatus),
-            getLastPrintedStatus: sinon.stub().returns('printed output')
-        })
-        const consoleSpy = sinon.stub(console, 'log')
-        try {
-            const ss = loadStatusService(state)
-            await ss.getStatus(null, null, true)
-            expect(consoleSpy.calledWith('printed output')).to.be.true
-        } finally {
-            consoleSpy.restore()
-        }
-    })
-})
-
-describe('StatusService: getStatus() DB not ready', function () {
-
-    it('returns empty object when db is not ready', async function () {
+    it('returns coins and networks filtered by known Coin/Network values', async function () {
+        // getStatus will call loadInstalledModules which calls db.getAllModuleContainers
+        const installedModulesObj = {}
         const state = makeStateStub({
             isStatusUpdated: sinon.stub().returns(false),
+            getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+            resetInstalledModules: sinon.stub().callsFake(() => {
+                for (const k of Object.keys(installedModulesObj)) delete installedModulesObj[k]
+            }),
             db: {
-                isReady:               sinon.stub().returns(false),
+                isReady: sinon.stub().returns(true),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-encoder', coin: 'bitcoin',  network: 'mainnet', container_id: 'jjj' },
+                    { module: 'xchain-encoder', coin: 'dogecoin', network: 'testnet', container_id: 'kkk' }
+                ])
+            }
+        })
+
+        const containerStatus = makeContainerStatus('running')
+        const ss = loadStatusService(state, {
+            getStatusFromContainer: sinon.stub().resolves(containerStatus)
+        })
+        const result = await ss.getInstalledCoinsAndNetworks()
+
+        expect(result).to.have.property('bitcoin')
+        expect(result.bitcoin).to.include('mainnet')
+        expect(result).to.have.property('dogecoin')
+        expect(result.dogecoin).to.include('testnet')
+        expect(result.ethereum).to.be.undefined
+    })
+})
+
+describe('StatusService: getInstalledCoinsAndNetworks()', function () {
+
+    it('ignores coins that are not in the Coin enum', async function () {
+        const installedModulesObj = {}
+        const state = makeStateStub({
+            isStatusUpdated: sinon.stub().returns(false),
+            getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+            resetInstalledModules: sinon.stub().callsFake(() => {
+                for (const k of Object.keys(installedModulesObj)) delete installedModulesObj[k]
+            }),
+            db: {
+                isReady: sinon.stub().returns(true),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-encoder', coin: 'ethereum', network: 'mainnet', container_id: 'lll' }
+                ])
+            }
+        })
+
+        const containerStatus = makeContainerStatus('running')
+        const ss = loadStatusService(state, {
+            getStatusFromContainer: sinon.stub().resolves(containerStatus)
+        })
+        const result = await ss.getInstalledCoinsAndNetworks()
+        expect(result).to.not.have.property('ethereum')
+    })
+})
+
+describe('StatusService: getInstalledCoinsAndNetworks()', function () {
+
+    it('returns empty object when no modules are installed', async function () {
+        const state = makeStateStub({
+            isStatusUpdated: sinon.stub().returns(false),
+            getInstalledModules: sinon.stub().returns({}),
+            resetInstalledModules: sinon.stub(),
+            db: {
+                isReady: sinon.stub().returns(true),
                 getAllModuleContainers: sinon.stub().resolves([])
             }
         })
 
         const ss = loadStatusService(state)
-        const result = await ss.getStatus(null, null, false)
+        const result = await ss.getInstalledCoinsAndNetworks()
         expect(result).to.deep.equal({})
     })
 })

@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon      = require('sinon')
-const { configStub } = require('../helpers/config_stub')
+const { configStub } = require('../../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 
@@ -54,7 +54,7 @@ function loadStatusService(state, overrides = {}) {
     const updateExplorerStub          = overrides.updateExplorer || sinon.stub().resolves()
     const getModuleBranchStub         = overrides.getModuleBranch || sinon.stub().resolves('master')
 
-    return proxyquire('../../src/services/status_service', {
+    return proxyquire('../../../src/services/status_service', {
         '../config': configStub({
             NODE_MODULE_NAME: 'node',
             SEP:              '-',
@@ -81,101 +81,92 @@ function loadStatusService(state, overrides = {}) {
     })
 }
 
-describe('StatusService: statusChanged()', function () {
-
-    it('sets statusUpdated to false and calls updateHub + updateExplorer', async function () {
-        const state = makeStateStub()
-        const updateHub     = sinon.stub().resolves()
-        const updateExplorer = sinon.stub().resolves()
-
-        const ss = loadStatusService(state, { updateHub, updateExplorer })
-        await ss.statusChanged()
-
-        expect(state.setStatusUpdated.calledWith(false)).to.be.true
-        expect(updateHub.calledOnce).to.be.true
-        expect(updateExplorer.calledOnce).to.be.true
+// Two containers of the SAME service, built from different commits. Every other
+// column agrees (same service, same state, same versions), which is exactly how a
+// container running a stale tree passed for a fresh one: the deployed commit was
+// the one fact nothing on this screen carried.
+function stateWithTwoContainers() {
+    const installedModulesObj = {}
+    return makeStateStub({
+        isStatusUpdated: sinon.stub().returns(false),
+        getInstalledModules: sinon.stub().callsFake(() => installedModulesObj),
+        resetInstalledModules: sinon.stub().callsFake(() => {
+            for (const k of Object.keys(installedModulesObj)) delete installedModulesObj[k]
+        }),
+        db: {
+            isReady: sinon.stub().returns(true),
+            getAllModuleContainers: sinon.stub().resolves([
+                { module: 'xchain-indexer', coin: 'bitcoin',  network: 'regtest', container_id: 'aaa' },
+                { module: 'xchain-indexer', coin: 'dogecoin', network: 'regtest', container_id: 'bbb' }
+            ])
+        },
+        getLastPrintedStatus: sinon.stub().returns('')
     })
+}
 
-    // updateHub() rejects on an unreachable coin network now (it used to
-    // swallow the docker error and return true). These two pin that the
-    // rejection is reported without taking the unrelated explorer push down
-    // with it, which a plain sequential await would have done.
-    it('still pushes explorer config when updateHub rejects, then rethrows', async function () {
-        const state = makeStateStub()
-        const updateHub      = sinon.stub().rejects(new Error('xchain-hub -> bitcoin/mainnet'))
-        const updateExplorer = sinon.stub().resolves()
+function labelled(commit) {
+    return {
+        State: { Status: 'running' },
+        NetworkSettings: { Ports: {} },
+        Config: { Labels: commit ? { 'xchain.source.commit': commit } : {} }
+    }
+}
 
-        const ss = loadStatusService(state, { updateHub, updateExplorer })
-        let threw = null
-        try { await ss.statusChanged() } catch (err) { threw = err }
+describe('StatusService: getStatus() commit column', function () {
 
-        expect(threw).to.be.an('error')
-        expect(threw.message).to.equal('xchain-hub -> bitcoin/mainnet')
-        expect(updateExplorer.calledOnce).to.be.true
-    })
+    it('prints the commit each container was built from, per container', async function () {
+        const fresh = '2'.repeat(40)
+        const stale = '9'.repeat(40)
+        const state = stateWithTwoContainers()
+        let capturedOutput = ''
+        state.setLastPrintedStatus = sinon.stub().callsFake(v => { capturedOutput = v })
 
-    it('reports the hub failure first when both pushes reject', async function () {
-        const state = makeStateStub()
-        const updateHub      = sinon.stub().rejects(new Error('hub attach failed'))
-        const updateExplorer = sinon.stub().rejects(new Error('explorer push failed'))
+        const getStatusFromContainer = sinon.stub()
+        getStatusFromContainer.withArgs('aaa').resolves(labelled(fresh))
+        getStatusFromContainer.withArgs('bbb').resolves(labelled(stale))
 
-        const ss = loadStatusService(state, { updateHub, updateExplorer })
-        let threw = null
-        try { await ss.statusChanged() } catch (err) { threw = err }
+        const ss = loadStatusService(state, { getStatusFromContainer })
+        await ss.getStatus(null, null, false)
 
-        expect(threw).to.be.an('error')
-        expect(threw.message).to.equal('hub attach failed')
-        expect(updateExplorer.calledOnce).to.be.true
-    })
-})
-
-describe('StatusService: getStatus() cache hit', function () {
-
-    it('returns cached status immediately when isStatusUpdated is true', async function () {
-        const cachedStatus = { bitcoin: { mainnet: {} } }
-        const state = makeStateStub({
-            isStatusUpdated: sinon.stub().returns(true),
-            getLastStatus:   sinon.stub().returns(cachedStatus)
-        })
-
-        const ss = loadStatusService(state)
-        const result = await ss.getStatus('bitcoin', 'mainnet', false)
-
-        expect(result).to.equal(cachedStatus)
-        expect(state.db.getAllModuleContainers.called).to.be.false
-    })
-
-    it('prints cached status when printStatus=true and cache is hot', async function () {
-        const cachedStatus = {}
-        const state = makeStateStub({
-            isStatusUpdated:      sinon.stub().returns(true),
-            getLastStatus:        sinon.stub().returns(cachedStatus),
-            getLastPrintedStatus: sinon.stub().returns('printed output')
-        })
-        const consoleSpy = sinon.stub(console, 'log')
-        try {
-            const ss = loadStatusService(state)
-            await ss.getStatus(null, null, true)
-            expect(consoleSpy.calledWith('printed output')).to.be.true
-        } finally {
-            consoleSpy.restore()
-        }
+        expect(capturedOutput).to.include('COMMIT')
+        expect(capturedOutput).to.include(fresh.slice(0, 12))
+        expect(capturedOutput).to.include(stale.slice(0, 12))
     })
 })
 
-describe('StatusService: getStatus() DB not ready', function () {
+describe('StatusService: getStatus() commit column', function () {
 
-    it('returns empty object when db is not ready', async function () {
-        const state = makeStateStub({
-            isStatusUpdated: sinon.stub().returns(false),
-            db: {
-                isReady:               sinon.stub().returns(false),
-                getAllModuleContainers: sinon.stub().resolves([])
-            }
+    it('omits the commit column when no image carries a source stamp', async function () {
+        const state = stateWithTwoContainers()
+        let capturedOutput = ''
+        state.setLastPrintedStatus = sinon.stub().callsFake(v => { capturedOutput = v })
+
+        const ss = loadStatusService(state, {
+            getStatusFromContainer: sinon.stub().resolves(labelled(null))
         })
+        await ss.getStatus(null, null, false)
 
-        const ss = loadStatusService(state)
-        const result = await ss.getStatus(null, null, false)
-        expect(result).to.deep.equal({})
+        expect(capturedOutput).to.not.include('COMMIT')
+    })
+})
+
+describe('StatusService: getStatus() commit column', function () {
+
+    it('never shows the module checkout as a container commit', async function () {
+        // The checkout is one shared directory that moves with every update, so
+        // sourcing this column from it would claim today's code for a container built
+        // days ago: the same lie the version column already tells.
+        const state = stateWithTwoContainers()
+        let capturedOutput = ''
+        state.setLastPrintedStatus = sinon.stub().callsFake(v => { capturedOutput = v })
+
+        const checkoutCommit = '7'.repeat(40)
+        const ss = loadStatusService(state, {
+            getStatusFromContainer: sinon.stub().resolves(labelled(null)),
+            getModuleCommit: sinon.stub().resolves(checkoutCommit)
+        })
+        await ss.getStatus(null, null, false)
+
+        expect(capturedOutput).to.not.include(checkoutCommit.slice(0, 12))
     })
 })
