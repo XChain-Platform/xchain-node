@@ -75,6 +75,24 @@ function loadModuleService() {
     })
 }
 
+const ENV = {
+    DECODER_PORT: 3002, DECODER_API_PORT: 3002, DECODER_BOOTSTRAP_VOLUME: '/b/dec',
+    ENCODER_PORT: 3003, ENCODER_API_PORT: 3003,
+    UTXO_TRACKER_PORT: 3001, UTXO_TRACKER_API_PORT: 3001, UTXO_TRACKER_BOOTSTRAP_VOLUME: '/b/utxo',
+    INDEXER_PORT: 3004, INDEXER_API_PORT: 3004,
+    REGTEST_MINER_PORT: 3005, REGTEST_MINER_API_PORT: 3005,
+    HUB_PORT: 10000,
+    EXPLORER_PORT_HTTP: 18080, EXPLORER_API_PORT_HTTP: 8080,
+    EXPLORER_PORT_HTTPS: 18081, EXPLORER_API_PORT_HTTPS: 8081,
+    SYNC_PORT: 3006, SYNC_API_PORT: 3006
+}
+
+let ms
+
+function reloadModuleService() {
+    ms = loadModuleService()
+}
+
 describe('SERVICE_REGISTRY', function () {
 
     describe('coverage parity with canonical service enums', function () {
@@ -105,6 +123,12 @@ describe('SERVICE_REGISTRY', function () {
             // yield empty run-args, matching the old switch default.
             expect(entry === undefined || entry.docker === undefined).to.be.true
         })
+    })
+})
+
+describe('SERVICE_REGISTRY', function () {
+
+    describe('coverage parity with canonical service enums', function () {
 
         it('has a hubConfig facet for every module the hub reports on', function () {
             // The old HubService switch produced a config descriptor for exactly
@@ -144,23 +168,12 @@ describe('SERVICE_REGISTRY', function () {
             }
         })
     })
+})
+
+describe('SERVICE_REGISTRY', function () {
 
     describe('buildModuleDockerArgs()', function () {
-
-        const ENV = {
-            DECODER_PORT: 3002, DECODER_API_PORT: 3002, DECODER_BOOTSTRAP_VOLUME: '/b/dec',
-            ENCODER_PORT: 3003, ENCODER_API_PORT: 3003,
-            UTXO_TRACKER_PORT: 3001, UTXO_TRACKER_API_PORT: 3001, UTXO_TRACKER_BOOTSTRAP_VOLUME: '/b/utxo',
-            INDEXER_PORT: 3004, INDEXER_API_PORT: 3004,
-            REGTEST_MINER_PORT: 3005, REGTEST_MINER_API_PORT: 3005,
-            HUB_PORT: 10000,
-            EXPLORER_PORT_HTTP: 18080, EXPLORER_API_PORT_HTTP: 8080,
-            EXPLORER_PORT_HTTPS: 18081, EXPLORER_API_PORT_HTTPS: 8081,
-            SYNC_PORT: 3006, SYNC_API_PORT: 3006
-        }
-
-        let ms
-        beforeEach(function () { ms = loadModuleService() })
+        beforeEach(reloadModuleService)
 
         it('decoder: conditional port + unconditional bootstrap volume', function () {
             const r = ms.buildModuleDockerArgs(XChainService.XCHAIN_DECODER, ENV, 'bitcoin', 'mainnet')
@@ -193,6 +206,13 @@ describe('SERVICE_REGISTRY', function () {
             // No HUB_CAPABILITY_CONFIG in env and no signer dir env => no volumes.
             expect(r.volumeArgs).to.deep.equal([])
         })
+    })
+})
+
+describe('SERVICE_REGISTRY', function () {
+
+    describe('buildModuleDockerArgs()', function () {
+        beforeEach(reloadModuleService)
 
         // The DIRECTORY holding capabilities.json is mounted, never the file:
         // a single-file bind mount makes `docker cp` against this container fail
@@ -221,6 +241,13 @@ describe('SERVICE_REGISTRY', function () {
             // No mount arg may end in a file name: that is the shape that breaks docker cp.
             expect(r.volumeArgs.some(a => /capabilities\.json:/.test(a))).to.be.false
         })
+    })
+})
+
+describe('SERVICE_REGISTRY', function () {
+
+    describe('buildModuleDockerArgs()', function () {
+        beforeEach(reloadModuleService)
 
         it('hub: mounts the generated DOGE signer (ro) with this package\'s node_modules beside it', function () {
             const path = require('path')
@@ -252,6 +279,13 @@ describe('SERVICE_REGISTRY', function () {
             // Read-only, both of them: the hub must not be able to alter the signer or its key file.
             expect(r.volumeArgs.filter(a => a.includes('operator-signer')).every(a => a.endsWith(':ro'))).to.be.true
         })
+    })
+})
+
+describe('SERVICE_REGISTRY', function () {
+
+    describe('buildModuleDockerArgs()', function () {
+        beforeEach(reloadModuleService)
 
         it('hub: a mount refusal from ValidatorService fails the build instead of silently dropping the config', function () {
             const ms2 = proxyquire('../../src/services/module_service', {
@@ -278,6 +312,13 @@ describe('SERVICE_REGISTRY', function () {
                 HUB_MODULE_NAME, { HUB_PORT: 10000, HUB_CAPABILITY_CONFIG: '/validator/capabilities.json' }, '', ''
             )).to.throw(/refusing to mount/)
         })
+    })
+})
+
+describe('SERVICE_REGISTRY', function () {
+
+    describe('buildModuleDockerArgs()', function () {
+        beforeEach(reloadModuleService)
 
         it('explorer: singleton with two unconditional port mappings', function () {
             const r = ms.buildModuleDockerArgs(EXPLORER_MODULE_NAME, ENV, '', '')
