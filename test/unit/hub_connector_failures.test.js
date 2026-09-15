@@ -71,6 +71,15 @@ describe('HubConnector: a non-throwing failure still records why', () => {
         expect(ok).to.equal(false)
         expect(c.lastFailures.join('; ')).to.match(/ECONNREFUSED|ECONNRESET|socket hang up/)
     })
+})
+
+describe('HubConnector: a non-throwing failure still records why', () => {
+    let srv
+
+    afterEach(async () => {
+        if (srv) await new Promise((r) => srv.close(r))
+        srv = null
+    })
 
     it('names every endpoint it tried, so a multi-endpoint failure is diagnosable', async () => {
         srv = await server((req, res) => { res.writeHead(401); res.end('nope') })

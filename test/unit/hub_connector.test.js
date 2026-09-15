@@ -62,6 +62,9 @@ describe('HubConnector', function () {
             expect(connector.urls[0]).to.equal('http://192.168.1.100:3000')
         })
     })
+})
+
+describe('HubConnector', function () {
 
     // ping()
     describe('ping()', function () {
@@ -98,6 +101,12 @@ describe('HubConnector', function () {
             const result = await connector.ping()
             expect(result).to.be.false
         })
+    })
+})
+
+describe('HubConnector', function () {
+
+    describe('ping()', function () {
 
         it('returns false on network error', async function () {
             const axiosStub = makeAxiosStub()
@@ -129,6 +138,9 @@ describe('HubConnector', function () {
             expect(result).to.be.true
         })
     })
+})
+
+describe('HubConnector', function () {
 
     // callRpc(): degraded-response handling
     describe('callRpc()', function () {
@@ -162,6 +174,9 @@ describe('HubConnector', function () {
             expect(result).to.be.null
         })
     })
+})
+
+describe('HubConnector', function () {
 
     // updateConfig()
     describe('updateConfig()', function () {
