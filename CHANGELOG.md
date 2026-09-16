@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `XCHAIN_CONFIRMATIONS_BTC/LTC/DOGE` pass through the host env to the hub container (the hub clamps them up to its per-coin default off regtest), and the nightly litecoin and dogecoin legs pin them to 1 so the bridged gas lock finalizes on the next block.
+- The nightly litecoin and dogecoin legs hand the coin's indexer the bitcoin indexer's address (`BTC_INDEXER_API_URL`), so the bridged gas credit's escrow proof can be fetched instead of holding the block at the bridge proof barrier.
+
 ## [0.19.0] - 2026-09-16
 
 ### Added
@@ -21,10 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The advisory remote-version check no longer aborts a deploy when it is unreachable, and the price fence is cleared on an older hub.
 - `buildAndUp` refuses a bitcoin indexer or a validator-mode hub on a roll-call-armed network with no Dogecoin read (`DOGE_INDEXER_API_URL` or `DOGE_INDEXER_URL`), naming the armed height and the close it must prove, downgradable with `XCHAIN_NODE_ALLOW_NO_DOGE_READ=1`; `ps` now shows a stalled indexer or a halted tracker beside the decoder's halt instead of reporting three healthy rows.
 - The e2e-test container receives the hub API key on a keyed (validator-mode) host, so its `getallconfigs` credential discovery no longer 401s.
-
-### Fixed
-- The e2e-test container receives the hub API key on a keyed (validator-mode) host, so its `getallconfigs` credential discovery no longer 401s.
-- `XCHAIN_CONFIRMATIONS_BTC/LTC/DOGE` pass through the host env to the hub container (the hub clamps them up to its per-coin default off regtest), and the nightly litecoin and dogecoin legs pin them to 1 so the bridged gas lock finalizes on the next block.
 
 ## [0.18.0] - 2026-09-11
 
