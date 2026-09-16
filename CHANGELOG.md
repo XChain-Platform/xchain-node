@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.19.0] - 2026-09-16
 
 ### Added
+- Major train carrier: the release manifest pins the v0.19.0 component set (eleven components move, xchain-contracts keeps v0.17.0) and arms the platform-train boundary at testnet BTC 152787 (`trainActivation`, rule set 0.19.0, classification major); mainnet stays at the sentinel.
 - A regression test proves the bridge schema migration needs no source change.
 
 ### Changed
