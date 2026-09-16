@@ -282,9 +282,16 @@ jobs:
 
           echo "XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD=$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" >> "$GITHUB_ENV"
 
+          # max_connections: the image default is 151. Every service holds a pool of
+          # about ten (indexer, decoder, hub, the explorer's per-coin pools, the e2e
+          # runner's pool per rail), which one coin stack fits under and two do not:
+          # the first two-stack litecoin leg (run 35109600216) died in initialCheck
+          # with `Too many connections` while opening the BTC rail's indexer pool.
+          # 1000 is headroom, not a measurement; this container is per-run and
+          # runner-local, so the cap protects nothing here.
           docker run -d --name xchain-ci-db \
             -e MARIADB_ROOT_PASSWORD="$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" \
-            -p 3306:3306 mariadb:11
+            -p 3306:3306 mariadb:11 --max-connections=1000
           # Wait for readiness before xchain-node tries to connect.
           for i in $(seq 1 30); do
             if docker exec xchain-ci-db mariadb-admin -uroot -p"$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" ping 2>/dev/null | grep -q "is alive"; then
