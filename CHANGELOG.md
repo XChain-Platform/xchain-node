@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-09-16
+
 ### Fixed
 - The pinned bootstrap signing public key is resolved from `src/config/` again, so a signed-bootstrap restore verifies instead of refusing as unsigned and syncing from genesis.
+- The release manifest repins `xchain-sync` to v0.19.1 (its SQL-directory boot fix); every other component keeps its v0.19.0 pin and the armed activation heights are unchanged.
 
 ## [0.19.0] - 2026-09-16
 
