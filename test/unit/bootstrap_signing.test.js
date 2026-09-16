@@ -279,6 +279,62 @@ describe('Bootstrap signing', function () {
     beforeEach(setupBootstrapSigningTest)
     afterEach(teardownBootstrapSigningTest)
 
+    // Every other case in this file pins XCHAIN_NODE_BOOTSTRAP_PUBKEY at a key
+    // the test itself wrote, so none of them ever touched the repo-pinned
+    // default. The code-structure pass moved the service a directory deeper and
+    // left the key path one level short, and the whole suite stayed green while
+    // the shipped trust anchor was unreachable. These cases exercise the DEFAULT
+    // path, with real fs and no override, which is the install-path behaviour.
+    describe('the repo-pinned default public key', function () {
+
+        // Derived from the repo root, independently of the module's own
+        // __dirname arithmetic, so the two have to agree on where the key is.
+        const repoPinnedKeyPath = path.join(__dirname, '..', '..', 'src', 'config', 'bootstrap_signing_pubkey.pem')
+
+        it('ships at src/config/bootstrap_signing_pubkey.pem', function () {
+            expect(fs.existsSync(repoPinnedKeyPath), `pinned key missing at ${repoPinnedKeyPath}`).to.be.true
+        })
+
+        it('loads with no env override and parses as an ed25519 public key', function () {
+            expect(process.env.XCHAIN_NODE_BOOTSTRAP_PUBKEY, 'override must be unset for this case').to.be.undefined
+
+            const key = svc.loadBootstrapPublicKey()
+            expect(key, 'loadBootstrapPublicKey() returned null: the default path does not resolve to the pinned key').to.not.be.null
+            expect(key.type).to.equal('public')
+            expect(key.asymmetricKeyType).to.equal('ed25519')
+        })
+
+        it('is the same key the repository ships, not some other file', function () {
+            const loaded   = svc.loadBootstrapPublicKey()
+            const onDisk   = crypto.createPublicKey(fs.readFileSync(repoPinnedKeyPath, 'utf8'))
+            const loadedDer = loaded.export({ type: 'spki', format: 'der' })
+            const onDiskDer = onDisk.export({ type: 'spki', format: 'der' })
+            expect(loadedDer.equals(onDiskDer), 'default path resolved to a different key than the pinned one').to.be.true
+        })
+
+        it('verifies a real signature end to end through checkBootstrapSignature()', async function () {
+            // Sign with the private half of the pinned key is impossible (the
+            // secret never lives here), so instead prove the default anchor is
+            // what the policy path actually consults: a .sig made by another key
+            // must be REFUSED by the pinned default, with no override in play.
+            await svc.signBootstrapArchive(archivePath, privPath)
+
+            let threw = false
+            try {
+                await svc.checkBootstrapSignature(archivePath)
+            } catch (err) {
+                threw = true
+                expect(err.message).to.match(/signature verification FAILED/)
+            }
+            expect(threw, 'the pinned default key must reject a foreign signature').to.be.true
+        })
+    })
+})
+
+describe('Bootstrap signing', function () {
+    beforeEach(setupBootstrapSigningTest)
+    afterEach(teardownBootstrapSigningTest)
+
     describe('downloadBootstrap(): companion signature fetch', function () {
 
         function loadServiceWithAxios(axiosStub) {

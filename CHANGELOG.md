@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- The pinned bootstrap signing public key is resolved from `src/config/` again, so a signed-bootstrap restore verifies instead of refusing as unsigned and syncing from genesis.
 - `XCHAIN_CONFIRMATIONS_BTC/LTC/DOGE` pass through the host env to the hub container (the hub clamps them up to its per-coin default off regtest), and the nightly litecoin and dogecoin legs pin them to 1 so the bridged gas lock finalizes on the next block.
 - The nightly litecoin and dogecoin legs hand the coin's indexer the bitcoin indexer's address (`BTC_INDEXER_API_URL`), so the bridged gas credit's escrow proof can be fetched instead of holding the block at the bridge proof barrier.
 
