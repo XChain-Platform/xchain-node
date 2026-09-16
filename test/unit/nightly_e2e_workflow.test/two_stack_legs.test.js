@@ -60,9 +60,14 @@ function parseConfigFile(file) {
 // Runs one step's `run` script under bash in a scratch checkout with a `node`
 // stub that appends its argv to a log, so an install is observed rather than
 // performed. Returns the scratch dir, the stub's call log and the step output.
+//
+// The scratch checkout has NO config/ directory, like a real one: every file
+// under config/ is gitignored, so actions/checkout never materializes it, and
+// the first dispatch of this step died on exactly that (run 35108669606,
+// "config/litecoin-regtest: No such file or directory").
 function runStep(step, env) {
     const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nightly-e2e-')), 'checkout')
-    fs.mkdirSync(path.join(dir, 'config'), { recursive: true })
+    fs.mkdirSync(dir, { recursive: true })
     const bin = path.join(dir, 'stub-bin')
     fs.mkdirSync(bin)
     const log = path.join(dir, 'node-calls.log')
