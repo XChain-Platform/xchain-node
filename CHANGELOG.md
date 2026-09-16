@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Bumped the `@dankest-llc/xchain-sdk` dependency from 0.11.1 to 0.18.0.
 
+### Fixed
+- The e2e-test container receives the hub API key on a keyed (validator-mode) host, so its `getallconfigs` credential discovery no longer 401s.
+
 ## [0.18.0] - 2026-09-11
 
 ### Fixed

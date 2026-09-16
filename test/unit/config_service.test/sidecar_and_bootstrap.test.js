@@ -84,6 +84,42 @@ function hubApiKeySidecar() {
 
 }
 
+// The harness reads every rail's credentials through the hub's getallconfigs,
+// which a keyed hub gates; the validator-mode matrix legs 401'd there while the
+// hub, indexer and sync on the same host all carried the key (run 35120852486).
+function hubApiKeyReachesTheE2eContainer() {
+    const SIDECAR_FIXTURE = 'sidecar-fixture-value-not-a-credential'
+    let saved
+
+    beforeEach(function () {
+        saved = process.env.HUB_API_KEY
+        delete process.env.HUB_API_KEY
+    })
+    afterEach(function () {
+        if (saved === undefined) delete process.env.HUB_API_KEY
+        else process.env.HUB_API_KEY = saved
+    })
+
+    it('gives the e2e-test container the sidecar key, so its config discovery is not the one keyless hub client', async function () {
+        const { cs } = makeMemoryConfigService({ [hubSidecar]: 'HUB_API_KEY=' + SIDECAR_FIXTURE + '\n' })
+        const e2eCfg = await cs.getDefaultConfig(XChainService.XCHAIN_E2E_TEST, 'dogecoin', 'regtest')
+        expect(e2eCfg['HUB_API_KEY']).to.equal(SIDECAR_FIXTURE)
+    })
+
+    it('prefers a host-env key over the sidecar for the e2e-test container too', async function () {
+        process.env.HUB_API_KEY = 'host-env-fixture-value'
+        const { cs } = makeMemoryConfigService({ [hubSidecar]: 'HUB_API_KEY=' + SIDECAR_FIXTURE + '\n' })
+        const e2eCfg = await cs.getDefaultConfig(XChainService.XCHAIN_E2E_TEST, 'dogecoin', 'regtest')
+        expect(e2eCfg['HUB_API_KEY']).to.equal('host-env-fixture-value')
+    })
+
+    it('leaves a keyless host keyless (a standalone regtest leg must not start sending a key nothing checks)', async function () {
+        const { cs } = makeMemoryConfigService()
+        const e2eCfg = await cs.getDefaultConfig(XChainService.XCHAIN_E2E_TEST, 'dogecoin', 'regtest')
+        expect(e2eCfg['HUB_API_KEY']).to.equal(undefined)
+    })
+}
+
 function feeDestinationInjection() {
     const FEE_ENV = 'XCHAIN_FEE_DESTINATION_BTC_REGTEST'
     let savedPerCoin, savedGeneric
@@ -206,6 +242,7 @@ describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('with coin and network (coin-specific config)', function () {
             describe('HUB_API_KEY from the shared hub sidecar', hubApiKeySidecar)
+            describe('HUB_API_KEY reaches the e2e-test container', hubApiKeyReachesTheE2eContainer)
         })
     })
 })
