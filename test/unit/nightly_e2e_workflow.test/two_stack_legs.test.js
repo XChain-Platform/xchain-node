@@ -177,7 +177,16 @@ describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the 
                 expect(calls[0]).to.match(/^src\/index\.js validator init --oracle-epoch-start \d+ --capabilities [a-z_,]+$/)
                 expect(calls[0].split('--capabilities ')[1].split(',')).to.include('cross_chain')
                 expect(calls[calls.length - 1]).to.equal('src/index.js validator status')
-                expect(exported).to.deep.equal({ HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1', XDEX_SEED_LOCAL_VALIDATOR: '1' })
+                // The indexer URLs ride the same export: the hub's cross-chain
+                // engines resolve them once at start, before either stack exists
+                // on this runner, so the configs table cannot supply them in time.
+                const code = { litecoin: 'LTC', dogecoin: 'DOGE' }[coin]
+                expect(exported).to.deep.equal({
+                    HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1', XDEX_SEED_LOCAL_VALIDATOR: '1',
+                    BTC_INDEXER_API_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
+                    BTC_INDEXER_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
+                    [code + '_INDEXER_URL']: 'http://xchain-node-' + coin + '-regtest-xchain-indexer:3004',
+                })
             })
         }
 
