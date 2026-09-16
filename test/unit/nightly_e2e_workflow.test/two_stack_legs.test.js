@@ -43,7 +43,7 @@ function loadSteps() {
         if (!step) throw new Error('workflow step not found: ' + prefix)
         return step
     }
-    return { ports: find('Publish distinct host ports'), boot: find('Boot the regtest stack') }
+    return { ports: find('Publish distinct host ports'), boot: find('Boot the regtest stack'), db: find('Start headless MariaDB') }
 }
 
 // Parses KEY=VALUE lines the way ConfigService.getDefaultConfig reads a
@@ -87,6 +87,14 @@ describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the 
 
     it('gates the ports step off the bitcoin leg, whose single-stack shape stays as it was', function () {
         expect(steps.ports.if).to.equal("env.COIN != 'bitcoin'")
+    })
+
+    it('raises the runner DB connection cap above what two stacks of ten-connection pools need', function () {
+        // mariadb:11 defaults to 151, which the first two-stack leg exhausted while
+        // opening the BTC rail's indexer pool (run 35109600216).
+        const m = /mariadb:11 --max-connections=(\d+)/.exec(steps.db.run)
+        expect(m, 'docker run mariadb:11 --max-connections=N').to.not.equal(null)
+        expect(parseInt(m[1], 10)).to.be.at.least(400)
     })
 
     for (const coin of ['litecoin', 'dogecoin']) {
