@@ -406,6 +406,9 @@ jobs:
             } > "$file"
             echo "--- $file"; cat "$file"
           }
+          # Every file under config/ is gitignored, so a fresh checkout has no
+          # such directory at all; ConfigService reads it by path, never creates it.
+          mkdir -p config
           write_ports "config/$COIN-regtest" "$BASE" "BTC_SERVICE_HOST=$XCHAIN_NODE_EXTERNAL_DB_HOST"
           write_ports config/bitcoin-regtest 3020
 
