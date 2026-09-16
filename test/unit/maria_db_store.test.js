@@ -1,0 +1,395 @@
+'use strict'
+
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+const { expect } = require('chai')
+const { configStub } = require('../helpers/config_stub');
+const proxyquire = require('proxyquire').noCallThru()
+
+/**
+ * Minimal in-memory SQL fake covering the queries MariaDbStore issues.
+ * Lets us exercise the real MariaDbStore logic without a live MariaDB.
+ */
+function dispatchFakeSql(rows, sql, params = []) {
+    const trimmed = sql.replace(/\s+/g, ' ').trim()
+
+    if (/^CREATE TABLE IF NOT EXISTS modules/i.test(trimmed)) return undefined
+    if (/^SELECT COUNT\(\*\) AS cnt FROM modules/i.test(trimmed)) return [{ cnt: rows.size }]
+    if (/^SELECT module, coin, network, container_id FROM modules$/i.test(trimmed)) {
+        return Array.from(rows.values()).map(r => ({ ...r }))
+    }
+    if (/^SELECT module, coin, network, container_id FROM modules WHERE/i.test(trimmed)) {
+        const [coin, network] = params
+        const out = []
+        for (const r of rows.values()) {
+            if ((r.coin === coin && r.network === network) || (r.coin === '' && r.network === '')) out.push({ ...r })
+        }
+        return out
+    }
+    if (/^SELECT container_id FROM modules WHERE/i.test(trimmed)) {
+        const [module, coin, network] = params
+        const r = rows.get(`${module}|${coin}|${network}`)
+        return r ? [{ container_id: r.container_id }] : []
+    }
+    if (/^INSERT INTO modules/i.test(trimmed)) {
+        const [module, coin, network, container_id] = params
+        rows.set(`${module}|${coin}|${network}`, { module, coin, network, container_id })
+        return undefined
+    }
+    if (/^DELETE FROM modules WHERE/i.test(trimmed)) {
+        const [module, coin, network] = params
+        rows.delete(`${module}|${coin}|${network}`)
+        return undefined
+    }
+    throw new Error(`buildFakeMariadbModule: unhandled SQL: ${trimmed}`)
+}
+
+function buildFakeConnection(dispatch) {
+    return {
+        query: async (sql, params) => dispatch(sql, params),
+        release: () => {}
+    }
+}
+
+function buildFakePool(fakeConn, dispatch) {
+    return {
+        getConnection: async () => fakeConn,
+        query: async (sql, params) => dispatch(sql, params),
+        end: async () => {}
+    }
+}
+
+function buildFakeMariadbModule() {
+    const rows = new Map()  // key: `${module}|${coin}|${network}` → { module, coin, network, container_id }
+    const dispatch = (sql, params) => dispatchFakeSql(rows, sql, params)
+    const fakeConn = buildFakeConnection(dispatch)
+    const fakePool = buildFakePool(fakeConn, dispatch)
+    return {
+        module: { createPool: () => fakePool },
+        rows
+    }
+}
+
+function loadStore() {
+    const fake = buildFakeMariadbModule()
+    const MariaDbStore = proxyquire('../../src/db', { 'mariadb': fake.module })
+    return { MariaDbStore, rows: fake.rows }
+}
+
+let store
+let rows
+
+const config = {
+    host: '127.0.0.1', port: 3306,
+    user: 'u', password: 'p', database: 'xchain_node'
+}
+
+function registerStoreHooks() {
+    beforeEach(async function () {
+        const ctx = loadStore()
+        store = new ctx.MariaDbStore()
+        rows = ctx.rows
+        await store.createDatabase(config)
+    })
+
+    afterEach(async function () {
+        await store.close()
+    })
+}
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
+    describe('createDatabase() / isReady() / close()', function () {
+
+        it('opens the pool and reports ready', function () {
+            expect(store.isReady()).to.be.true
+        })
+
+        it('reports not ready before createDatabase', function () {
+            const { MariaDbStore } = loadStore()
+            const fresh = new MariaDbStore()
+            expect(fresh.isReady()).to.be.false
+        })
+
+        it('reports not ready after close', async function () {
+            await store.close()
+            expect(store.isReady()).to.be.false
+        })
+
+        it('throws when createDatabase is called without config', async function () {
+            const { MariaDbStore } = loadStore()
+            const bare = new MariaDbStore()
+            try {
+                await bare.createDatabase()
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.match(/needs config/)
+            }
+        })
+
+        it('is idempotent: second createDatabase returns the existing pool', async function () {
+            const first  = await store.createDatabase()
+            const second = await store.createDatabase()
+            expect(second).to.equal(first)
+        })
+    })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
+    describe('createDatabase() connection retry', function () {
+
+        const config = {
+            host: '127.0.0.1', port: 3306,
+            user: 'u', password: 'p', database: 'xchain_node'
+        }
+
+        // Load a store whose pool.getConnection() rejects `failCount` times
+        // before succeeding, with helpers.sleep swapped for a counter so the
+        // 2s backoff between attempts costs no real wall-clock time.
+        function loadStoreWithFlakyConnect(failCount) {
+            let attempts = 0
+            let sleepCalls = 0
+            const fakeConn = { query: async () => undefined, release: () => {} }
+            const fakePool = {
+                getConnection: async () => {
+                    attempts++
+                    if (attempts <= failCount) throw new Error('ECONNREFUSED')
+                    return fakeConn
+                },
+                query: async () => undefined,
+                end: async () => {}
+            }
+            const MariaDbStore = proxyquire('../../src/db', {
+                'mariadb': { createPool: () => fakePool },
+                '../utils/helpers': { sleep: async () => { sleepCalls++ } }
+            })
+            return { MariaDbStore, getAttempts: () => attempts, getSleepCalls: () => sleepCalls }
+        }
+
+        it('retries and succeeds after transient connection failures', async function () {
+            const { MariaDbStore, getAttempts, getSleepCalls } = loadStoreWithFlakyConnect(2)
+            const store = new MariaDbStore()
+            await store.createDatabase(config)
+            expect(store.isReady()).to.be.true
+            expect(getAttempts()).to.equal(3)     // 2 failed + 1 successful
+            expect(getSleepCalls()).to.equal(2)   // one backoff per failure
+            await store.close()
+        })
+
+        it('throws after 6 failed connection attempts', async function () {
+            const { MariaDbStore, getAttempts, getSleepCalls } = loadStoreWithFlakyConnect(99)
+            const store = new MariaDbStore()
+            try {
+                await store.createDatabase(config)
+                expect.fail('should have thrown')
+            } catch (err) {
+                expect(err.message).to.match(/Couldn't open\/create MariaDB database/)
+            }
+            expect(getAttempts()).to.equal(6)     // loop caps at 6 attempts
+            expect(getSleepCalls()).to.equal(6)   // backoff after each failure
+            await store.close()
+        })
+    })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
+    describe('setModuleContainer() + getModuleContainer()', function () {
+
+        it('stores and retrieves a container ID', async function () {
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'abc123def456')
+            const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(id).to.equal('abc123def456')
+        })
+
+        it('returns null for non-existent key', async function () {
+            const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(id).to.be.null
+        })
+
+        it('overwrites existing entry on re-insert', async function () {
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'old-id')
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'new-id')
+            const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(id).to.equal('new-id')
+        })
+
+        it('stores shared modules with empty coin/network', async function () {
+            await store.setModuleContainer('xchain-hub', '', '', 'hub-container-id')
+            const id = await store.getModuleContainer('xchain-hub', '', '')
+            expect(id).to.equal('hub-container-id')
+        })
+    })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
+    describe('setModuleContainer() + getModuleContainer()', function () {
+
+        it('keeps separate entries for different coin/network combos', async function () {
+            await store.setModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'btc-main')
+            await store.setModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'doge-test')
+            const btc  = await store.getModuleContainer('xchain-encoder', 'bitcoin',  'mainnet')
+            const doge = await store.getModuleContainer('xchain-encoder', 'dogecoin', 'testnet')
+            expect(btc).to.equal('btc-main')
+            expect(doge).to.equal('doge-test')
+        })
+
+        it('returns true on successful insert', async function () {
+            const result = await store.setModuleContainer('xchain-hub', '', '', 'id123')
+            expect(result).to.be.true
+        })
+
+        it('insert is a no-op (returns false) when pool is not ready', async function () {
+            const { MariaDbStore } = loadStore()
+            const bare = new MariaDbStore()
+            const result = await bare.setModuleContainer('xchain-hub', '', '', 'id123')
+            expect(result).to.be.false
+        })
+
+        it('get returns null when pool is not ready', async function () {
+            const { MariaDbStore } = loadStore()
+            const bare = new MariaDbStore()
+            const id = await bare.getModuleContainer('xchain-hub', '', '')
+            expect(id).to.be.null
+        })
+
+        it('coerces null coin/network to empty string for keying', async function () {
+            await store.setModuleContainer('xchain-hub', null, null, 'hub-id')
+            const id = await store.getModuleContainer('xchain-hub', '', '')
+            expect(id).to.equal('hub-id')
+        })
+    })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
+    describe('deleteModuleContainer()', function () {
+
+        it('removes an existing entry and returns the container ID', async function () {
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'container-abc')
+            const result = await store.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(result).to.equal('container-abc')
+        })
+
+        it('entry is no longer retrievable after removal', async function () {
+            await store.setModuleContainer('xchain-encoder', 'bitcoin', 'mainnet', 'container-abc')
+            await store.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            const id = await store.getModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(id).to.be.null
+        })
+
+        it('returns true for non-existent key (idempotent delete)', async function () {
+            const result = await store.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(result).to.equal(true)
+        })
+
+        it('does not affect other entries', async function () {
+            await store.setModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'btc-main')
+            await store.setModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'doge-test')
+            await store.deleteModuleContainer('xchain-encoder', 'bitcoin', 'mainnet')
+            const doge = await store.getModuleContainer('xchain-encoder', 'dogecoin', 'testnet')
+            expect(doge).to.equal('doge-test')
+        })
+
+        it('returns false when pool is not ready', async function () {
+            const { MariaDbStore } = loadStore()
+            const bare = new MariaDbStore()
+            const result = await bare.deleteModuleContainer('xchain-hub', '', '')
+            expect(result).to.be.false
+        })
+    })
+})
+
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
+    describe('getAllModuleContainers()', function () {
+
+        beforeEach(async function () {
+            await store.setModuleContainer('xchain-encoder', 'bitcoin',  'mainnet', 'enc-btc-main')
+            await store.setModuleContainer('xchain-decoder', 'bitcoin',  'mainnet', 'dec-btc-main')
+            await store.setModuleContainer('xchain-encoder', 'dogecoin', 'testnet', 'enc-doge-test')
+            await store.setModuleContainer('xchain-hub',     '',         '',        'hub-id')
+        })
+
+        it('returns all entries when no filters', async function () {
+            const modules = await store.getAllModuleContainers(null, null)
+            expect(modules).to.have.length(4)
+        })
+
+        it('filters by coin and network and includes shared modules', async function () {
+            const modules = await store.getAllModuleContainers('bitcoin', 'mainnet')
+            const coinSpecific = modules.filter(m => m.coin === 'bitcoin' && m.network === 'mainnet')
+            const shared       = modules.filter(m => m.coin === '' && m.network === '')
+            expect(coinSpecific.length).to.equal(2)
+            expect(shared.length).to.equal(1)
+        })
+
+        it('always includes shared modules in filtered results', async function () {
+            const modules = await store.getAllModuleContainers('dogecoin', 'testnet')
+            const shared = modules.filter(m => m.coin === '' && m.network === '')
+            expect(shared.length).to.equal(1)
+            expect(shared[0].module).to.equal('xchain-hub')
+        })
+
+        it('returns rows shaped as { module, coin, network, container_id }', async function () {
+            const modules = await store.getAllModuleContainers(null, null)
+            const encoder = modules.find(m => m.module === 'xchain-encoder' && m.coin === 'bitcoin')
+            expect(encoder).to.exist
+            expect(encoder.network).to.equal('mainnet')
+            expect(encoder.container_id).to.equal('enc-btc-main')
+        })
+
+        it('returns empty array when no rows', async function () {
+            const { MariaDbStore } = loadStore()
+            const empty = new MariaDbStore()
+            await empty.createDatabase(config)
+            const modules = await empty.getAllModuleContainers(null, null)
+            expect(modules).to.deep.equal([])
+            await empty.close()
+        })
+
+        it('returns empty array when pool is not ready', async function () {
+            const { MariaDbStore } = loadStore()
+            const bare = new MariaDbStore()
+            const modules = await bare.getAllModuleContainers(null, null)
+            expect(modules).to.deep.equal([])
+        })
+    })
+})
+
+// The empty array above is why a probe against an uninitialized
+// singleton read as "the node lost track of its whole stack". Reads can live
+// with it; callers that ACT on the row set need a distinguishable signal.
+describe('MariaDbStore', function () {
+    registerStoreHooks()
+
+    describe('assertReady()', function () {
+
+        it('throws on an unconfigured store, naming the operation', function () {
+            const { MariaDbStore } = loadStore()
+            const bare = new MariaDbStore()
+            expect(() => bare.assertReady('autoheal')).to.throw(/not connected.*autoheal/)
+        })
+
+        it('passes once the pool is open', function () {
+            expect(() => store.assertReady('module discovery')).to.not.throw()
+        })
+    })
+
+})

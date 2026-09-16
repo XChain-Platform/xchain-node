@@ -12,3 +12,9 @@
 
 # Vendored coins-registry byte-identity: BTC/LTC/DOGE/index/consensus_pin.
 xchain-hub
+# The deploy-precondition migration scan (MigrationPreconditionService reads
+# the indexer's real migrations tree) and the ROLLCALL arming-height mirror
+# (src/services/rollcall_wiring/arming_heights.js is held to
+# src/rollcall_activation.js). Both guards throw under XCHAIN_REQUIRE_SIBLINGS=1
+# when this checkout is absent, which is exactly what CI run 35020607785 did.
+xchain-indexer

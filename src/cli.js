@@ -19,8 +19,8 @@ const { Command }  = require('commander')
 const { version }  = require('../package.json')
 const { preCheck } = require('./precheck')
 const { setVerbose } = require('./state')
-const { filterCommandParameters, resolveArgs } = require('./services/ConfigService')
-const { HUB_MODULE_NAME } = require('./config/constants')
+const { filterCommandParameters, resolveArgs } = require('./services/config_service')
+const { HUB_MODULE_NAME } = require('./config')
 const { redactSecrets } = require('./utils/helpers')
 const {
     installModules,
@@ -38,20 +38,20 @@ const {
     shellModule,
     runE2ETest,
     resetModules
-} = require('./operations/moduleOperations')
-const { getStatus }            = require('./services/StatusService')
-const { scanAndRegisterModules } = require('./services/DiscoveryService')
-const { maybeReportTelemetry } = require('./services/TelemetryService')
-const { makeBootstrap, listServedBootstrapCombos } = require('./services/BootstrapService')
-const { listRepublishDue } = require('./services/BootstrapRepublishLedger')
+} = require('./operations/module_operations')
+const { getStatus }            = require('./services/status_service')
+const { scanAndRegisterModules } = require('./services/discovery_service')
+const { maybeReportTelemetry } = require('./services/telemetry_service')
+const { makeBootstrap, listServedBootstrapCombos } = require('./services/bootstrap_service')
+const { listRepublishDue } = require('./services/bootstrap_republish_ledger')
 const { initValidator, getValidatorSettings, isInitialized, getCapabilityConfigHostPath,
         readWallets, publicWalletInfo, getSignerMountDir, COIN_NETWORKS, WALLETS_FILE,
         getRollcallStatus, capabilityDriftReport, capabilityDriftExitCode,
-        formatCapabilityDrift } = require('./services/ValidatorService')
-const { stakeValidator, unstakeValidator } = require('./services/ValidatorStakeService')
+        formatCapabilityDrift } = require('./services/validator_service')
+const { stakeValidator, unstakeValidator } = require('./services/validator_stake_service')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
-const { acquireCommandLock } = require('./utils/commandLock')
-const { noticeNewerRelease } = require('./services/SelfUpdateService')
+const { acquireCommandLock } = require('./utils/command_lock')
+const { noticeNewerRelease } = require('./services/self_update_service')
 
 // Commander's action handlers are async, but program.parse() is synchronous:
 // anything an action rejects with escapes as an unhandled rejection, which Node
@@ -166,9 +166,9 @@ function commandRepairsHub(commandName, actionCommand) {
  * release node and no self-update on a branch node.
  */
 async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
-    const { isReleaseRef, resolveLatestReleaseTag } = deps.manifest || require('./services/ReleaseManifestService')
-    const { resolveUpdateTarget } = deps.installTarget || require('./services/InstallTargetService')
-    const selfUpdate = deps.selfUpdate || require('./services/SelfUpdateService')
+    const { isReleaseRef, resolveLatestReleaseTag } = deps.manifest || require('./services/release_manifest_service')
+    const { resolveUpdateTarget } = deps.installTarget || require('./services/install_target_service')
+    const selfUpdate = deps.selfUpdate || require('./services/self_update_service')
 
     let resolved
     try {
@@ -586,7 +586,7 @@ opt-in would have skipped them.`)
         .description('Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe')
         .option('--dry-run', 'report restart candidates without acting')
         .action(async (options) => {
-            const { runAutoheal } = require('./services/AutohealService')
+            const { runAutoheal } = require('./services/autoheal_service')
             const result = await runAutoheal({ dryRun: options.dryRun ?? false })
             // Exit non-zero ONLY when a restart was attempted and failed, so a
             // timer unit can alert on real remediation failures without paging
@@ -660,7 +660,7 @@ opt-in would have skipped them.`)
         .description('Clear a decoder\'s durable REORG_HALT marker after verifying the database is intact; the reason is recorded in its events table')
         .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet, testnet, regtest)')
-        .requiredOption('--reason <text>', 'Why this database is known good (recorded with the clear)')
+        .option('--reason <text>', 'Why this database is known good (recorded with the clear; required unless --dry-run)')
         .option('--force', 'Clear a database that has held dispenser state; you have compared its dispensers table against a known-good replica')
         .option('--dry-run', 'Run the checks and report the verdict without writing the clear')
         .action(async (chain, network, options) => {

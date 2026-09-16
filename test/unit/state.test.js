@@ -12,30 +12,31 @@
 
 const { expect } = require('chai')
 
+// We need a fresh copy of state for each test to avoid cross-test pollution.
+// state.js instantiates singletons (db, gitHubDownloader) that require disk access.
+// We only test the getter/setter functions, not the singletons.
+const {
+    getDbRootPassword, setDbRootPassword,
+    getInstalledModules, setInstalledModules, resetInstalledModules,
+    getRemoteModuleVersions, setRemoteModuleVersion,
+    isStatusUpdated, setStatusUpdated,
+    getLastStatus, setLastStatus,
+    getLastPrintedStatus, setLastPrintedStatus, appendLastPrintedStatus,
+    isVerbose, setVerbose
+} = require('../../src/state')
+
+function resetState() {
+    // Reset to defaults
+    setDbRootPassword(null)
+    resetInstalledModules()
+    setStatusUpdated(false)
+    setLastStatus(null)
+    setLastPrintedStatus('')
+    setVerbose(false)
+}
+
 describe('state', function () {
-
-    // We need a fresh copy of state for each test to avoid cross-test pollution.
-    // state.js instantiates singletons (db, gitHubDownloader) that require disk access.
-    // We only test the getter/setter functions, not the singletons.
-
-    const {
-        getDbRootPassword, setDbRootPassword,
-        getInstalledModules, setInstalledModules, resetInstalledModules,
-        getRemoteModuleVersions, setRemoteModuleVersion,
-        isStatusUpdated, setStatusUpdated,
-        getLastStatus, setLastStatus,
-        getLastPrintedStatus, setLastPrintedStatus, appendLastPrintedStatus,
-        isVerbose, setVerbose
-    } = require('../../src/state')
-
-    afterEach(function () {
-        setDbRootPassword(null)
-        resetInstalledModules()
-        setStatusUpdated(false)
-        setLastStatus(null)
-        setLastPrintedStatus('')
-        setVerbose(false)
-    })
+    afterEach(resetState)
 
     describe('dbRootPassword', function () {
         it('defaults to null', function () {
@@ -53,6 +54,10 @@ describe('state', function () {
             expect(getDbRootPassword()).to.be.null
         })
     })
+})
+
+describe('state', function () {
+    afterEach(resetState)
 
     describe('installedModules', function () {
         it('defaults to empty object', function () {
@@ -72,6 +77,10 @@ describe('state', function () {
             expect(getInstalledModules()).to.deep.equal({})
         })
     })
+})
+
+describe('state', function () {
+    afterEach(resetState)
 
     describe('remoteModuleVersions', function () {
         it('can set and retrieve individual versions', function () {
@@ -87,6 +96,10 @@ describe('state', function () {
             expect(versions['xchain-decoder']).to.equal('2.0.0')
         })
     })
+})
+
+describe('state', function () {
+    afterEach(resetState)
 
     describe('statusUpdated', function () {
         it('defaults to false', function () {
@@ -98,6 +111,10 @@ describe('state', function () {
             expect(isStatusUpdated()).to.be.true
         })
     })
+})
+
+describe('state', function () {
+    afterEach(resetState)
 
     describe('lastStatus', function () {
         it('defaults to null', function () {
@@ -110,6 +127,10 @@ describe('state', function () {
             expect(getLastStatus()).to.deep.equal(status)
         })
     })
+})
+
+describe('state', function () {
+    afterEach(resetState)
 
     describe('lastPrintedStatus', function () {
         it('defaults to empty string after reset', function () {
@@ -128,6 +149,10 @@ describe('state', function () {
             expect(getLastPrintedStatus()).to.equal('line1\nline2\n')
         })
     })
+})
+
+describe('state', function () {
+    afterEach(resetState)
 
     describe('verbose', function () {
         it('defaults to false', function () {

@@ -1,0 +1,59 @@
+DEAD-CODE SWEEP, xchain-node, 2026-09-13
+========================================
+
+VERDICT: ZERO deletions. Every one of the 56 tracked src/*.js files is held by
+something that still runs.
+
+METHOD. Two independent readings, because either one alone gives a wrong
+verdict:
+
+  1. bin/reachability.js, run with the sibling sweep ON against the surrounding
+     tree, so a module another service requires by relative path out of this
+     checkout cannot read as deletable. Runtime roots for this repo are the
+     package `bin` map and `main` (a CLI is entered through `bin`, not a
+     Dockerfile) plus every `node <file>` an npm script runs.
+  2. A literal text sweep with the system grep over every sibling checkout and
+     the surrounding tree's tooling, for each candidate the walk produced. The
+     editor-layer search honours ignore files and comes back falsely empty, so
+     it plays no part in a deletion verdict.
+
+TOOL OUTPUT
+-----------
+src/*.js tracked:                    56
+runtime entry points:                src/index.js, test/benchmarks/harness.js
+tooling entry points:                7
+test entry points:                   116
+declared dynamic edges:              0
+reachable from this repo runtime:    54
+NOT reachable from that runtime:     2
+test-only:                           0
+unreferenced across the platform:    0
+
+THE TWO CANDIDATES, AND WHAT HOLDS THEM
+---------------------------------------
+src/services/GatedFileFieldScan.js
+  held by: scripts/scan-nine-field-files.js:37 (require), plus
+           test/unit/GatedFileFieldScan.test.js:24 and
+           test/unit/scanNineFieldFiles.test.js:24
+  verdict: KEEP. An operator command is a real caller, not a production one,
+           which is why it shows outside the runtime closure; deleting it takes
+           the command down with it.
+
+src/services/RebaseCompletenessSweep.js
+  held by: scripts/check-rebase-completeness.js:65 (require), plus
+           test/unit/RebaseCompletenessSweep.test.js:25 and
+           test/unit/checkRebaseCompleteness.test.js:31
+  verdict: KEEP. Same shape as the file above.
+
+Neither is test-only, so CODE-STYLE's "a test that only exercises a file no
+runtime path reaches is a signal the file is dead" does not apply to either.
+
+FALSIFICATION OF THE SWEEP ITSELF
+---------------------------------
+A file requiring nothing and required by nothing was planted at
+src/planted_dead_module.js, staged so the tracked-files walk could see it, and
+the sweep re-run. It reported "unreferenced across the platform: 1" and named
+the file with "NOTHING: unreferenced across the platform", while both real
+candidates kept their holders. The planted file was then removed and the tree
+re-read clean. A sweep that cannot name a dead file is not evidence that there
+are none.
