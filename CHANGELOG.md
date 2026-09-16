@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - The advisory remote-version check no longer aborts a deploy when it is unreachable, and the price fence is cleared on an older hub.
 - `buildAndUp` refuses a bitcoin indexer or a validator-mode hub on a roll-call-armed network with no Dogecoin read (`DOGE_INDEXER_API_URL` or `DOGE_INDEXER_URL`), naming the armed height and the close it must prove, downgradable with `XCHAIN_NODE_ALLOW_NO_DOGE_READ=1`; `ps` now shows a stalled indexer or a halted tracker beside the decoder's halt instead of reporting three healthy rows.
+- The e2e-test container receives the hub API key on a keyed (validator-mode) host, so its `getallconfigs` credential discovery no longer 401s.
 
 ## [0.18.0] - 2026-09-11
 

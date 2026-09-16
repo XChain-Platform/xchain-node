@@ -643,6 +643,22 @@ async function getDefaultConfig(module, coin, network) {
             if (validatorSettings && validatorSettings.pubkey) {
                 defaultValues["VALIDATOR_PUBKEY"] = validatorSettings.pubkey
             }
+
+            // The harness discovers every rail's node and indexer credentials through
+            // the hub's getallconfigs (test/helpers/chainRail.js), and a keyed hub
+            // gates that read behind HUB_API_KEY. A validator-mode host is keyed
+            // (`validator init` mints the key into the hub sidecar), so without this
+            // passthrough the e2e container was the one hub client on the host still
+            // calling keyless: the litecoin and dogecoin matrix legs 401'd in
+            // initialCheck's beforeAll (`[chainRail] hub has no config for
+            // bitcoin/regtest`, run 35120852486) while the standalone bitcoin leg,
+            // whose hub has no key, never noticed. Host env first, then the sidecar,
+            // exactly as the indexer and the shared services resolve it; a keyless
+            // host stays keyless.
+            if (config.HUB_API_KEY !== undefined && config.HUB_API_KEY !== "") {
+                defaultValues.HUB_API_KEY = config.HUB_API_KEY
+            }
+            await applyHubApiKeyFromSidecar(defaultValues)
         }
 
         // Genesis-ledger bootstrap env (xchain-indexer only). The indexer binds its
