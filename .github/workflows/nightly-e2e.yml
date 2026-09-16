@@ -355,6 +355,60 @@ jobs:
           # settings file; the 0600 signing.key is not echoed).
           node src/index.js validator status
 
+      # WHY THE LITECOIN AND DOGECOIN LEGS ALSO BOOT A BITCOIN STACK. Since
+      # xchain-e2e-test 8df86bb (2026-09-12) the only way XCHAIN gas reaches a
+      # non-BTC chain is the bridge: the suite MINTs on BTC and locks it across with
+      # an XBRIDGE v0 (gasHelper.bridgeGasIn), because the bridge's supply-path
+      # closure refuses a local ISSUE of the gas tick off BTC even on regtest. A
+      # single-coin stack has no bitcoin hub config, so both legs failed in
+      # initialCheck's beforeAll with `[chainRail] hub has no config for
+      # bitcoin/regtest` on every dispatch after that commit (last green legs: run
+      # 34690792431, three hours before it). The bitcoin leg is unchanged: it
+      # still boots one stack and gasses in with a local MINT.
+      #
+      # Two stacks on one runner need two things the single-stack leg never did:
+      #
+      #   1. Distinct HOST ports. With no config/<coin>-regtest file every coin
+      #      publishes the same default block (tracker 3001, decoder 3002, encoder
+      #      3003, indexer 3004, miner 3005), and the second install refuses at
+      #      the collision check. The blocks below are the ones the e2e suite's
+      #      chainRail.js DEFAULT_PORTS already expects (BTC 3020-3025, DOGE
+      #      3120-3125, LTC 3220-3225), the same files the operator rail carries.
+      #   2. A route from the e2e container to the bitcoin rail. chainRail reaches
+      #      every BTC service through ONE host (BTC_SERVICE_HOST) at those
+      #      published ports, so container DNS names cannot serve it; the docker
+      #      bridge gateway can, and it is the address the spawned containers
+      #      already reach the runner's MariaDB on. Every key in the coin's config
+      #      file is injected into that coin's containers, the e2e runner included,
+      #      which is how this one variable reaches the suite.
+      #
+      # Only ports and that host go in the files: credentials are generated into the
+      # untracked .local sidecars by the install itself, exactly as before.
+      - name: Publish distinct host ports for the two-stack legs
+        if: env.COIN != 'bitcoin'
+        run: |
+          case "$COIN" in
+            litecoin) BASE=3220 ;;
+            dogecoin) BASE=3120 ;;
+            *) echo "unexpected coin $COIN"; exit 1 ;;
+          esac
+          write_ports() {
+            # $1 = file, $2 = first port of the block, $3... = extra lines
+            local file="$1" base="$2"; shift 2
+            {
+              echo "NODE_EXPOSED_PORT=$base"
+              echo "UTXO_TRACKER_PORT=$((base + 1))"
+              echo "DECODER_PORT=$((base + 2))"
+              echo "ENCODER_PORT=$((base + 3))"
+              echo "INDEXER_PORT=$((base + 4))"
+              echo "REGTEST_MINER_PORT=$((base + 5))"
+              for line in "$@"; do echo "$line"; done
+            } > "$file"
+            echo "--- $file"; cat "$file"
+          }
+          write_ports "config/$COIN-regtest" "$BASE" "BTC_SERVICE_HOST=$XCHAIN_NODE_EXTERNAL_DB_HOST"
+          write_ports config/bitcoin-regtest 3020
+
       - name: Boot the regtest stack (clones every service at ${{ github.event.inputs.ref || 'develop' }})
         # First heavy step - repo clones + docker image builds + coin daemon.
         # Watch disk and image-build time here (the 120-min job timeout covers it).
@@ -362,10 +416,20 @@ jobs:
         # already proven - it creates the xchain-node DB on 172.17.0.1:3306 before
         # this step. Service→DB networking (spawned containers → host DB) is the
         # remaining thing to confirm once the stack boots.
+        #
+        # The coin under test is installed first so the leg is byte-identical to
+        # the single-stack shape up to that point; the bitcoin gas rail follows
+        # on the non-BTC legs (see the ports step above for why). `install` is
+        # idempotent for the shared hub and explorer, so the second call adds the
+        # bitcoin coin stack and pushes both coins' config to the one hub.
         run: |
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
           echo "Installing the stack at ref: $STACK_REF"
           node src/index.js install "$STACK_REF" all "$COIN" regtest
+          if [ "$COIN" != "bitcoin" ]; then
+            echo "Installing the bitcoin gas rail beside $COIN at ref: $STACK_REF"
+            node src/index.js install "$STACK_REF" all bitcoin regtest
+          fi
 
       - name: Run the e2e action suite
         # Now exits non-zero on failure (cli.js e2etest propagates the suite's
