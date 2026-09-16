@@ -41,27 +41,50 @@ describe('ROLLCALL arming mirror', function () {
     })
 })
 
-// The mirror is a copy of consensus constants the CLI only reads. With the
-// sibling indexer checkout present, hold it to the source; a standalone deploy
-// skips, and XCHAIN_REQUIRE_SIBLINGS=1 turns the skip into a failure.
-describe('ROLLCALL arming mirror agrees with xchain-indexer/src/rollcall_activation.js', function () {
-    const INDEXER_DIR      = process.env.XCHAIN_INDEXER_DIR || path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer')
-    const SOURCE_FILE      = path.join(INDEXER_DIR, 'src', 'rollcall_activation.js')
-    const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
+// The mirror is a copy of consensus constants the CLI only reads. As of the
+// indexer's registry push (2026-09-15) rollcall_activation.js is a shim
+// (`copy('rollcall_activation.NAME')`) and the literals live in the SHARED
+// gate registry rows spread across xchain-indexer/src/protocol_changes/
+// shared_rows*.js, one `addGate('rollcall_activation.NAME', kind, {...})`
+// call per constant. With the sibling indexer checkout present, hold this
+// mirror to those rows; a standalone deploy skips, and
+// XCHAIN_REQUIRE_SIBLINGS=1 turns every miss (absent dir, no shared_rows
+// files, or a name no file carries) into a failure instead of a silent
+// null-vs-null pass.
+describe('ROLLCALL arming mirror agrees with xchain-indexer gate registry rows for rollcall_activation', function () {
+    const INDEXER_DIR          = process.env.XCHAIN_INDEXER_DIR || path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer')
+    const PROTOCOL_CHANGES_DIR = path.join(INDEXER_DIR, 'src', 'protocol_changes')
+    const REQUIRE_SIBLINGS     = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
     let source = null
 
     before(function () {
-        if (!fs.existsSync(SOURCE_FILE)) {
-            if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but ' + SOURCE_FILE + ' is absent')
+        if (!fs.existsSync(PROTOCOL_CHANGES_DIR)) {
+            if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but ' + PROTOCOL_CHANGES_DIR + ' is absent')
             this.skip()
+            return
         }
-        source = fs.readFileSync(SOURCE_FILE, 'utf8')
+        // The rows are spread over several parts (shared_rows.js, shared_rows_1.js,
+        // ...); concatenate every part so a literal can live in any of them.
+        const parts = fs.readdirSync(PROTOCOL_CHANGES_DIR).filter((f) => /^shared_rows.*\.js$/.test(f))
+        if (parts.length === 0) {
+            if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but no shared_rows*.js files under ' + PROTOCOL_CHANGES_DIR)
+            this.skip()
+            return
+        }
+        source = parts.map((f) => fs.readFileSync(path.join(PROTOCOL_CHANGES_DIR, f), 'utf8')).join('\n')
     })
 
-    // Read the literals out of the source text rather than requiring the file:
-    // it reads process.env at require time and prints on a garbage value.
+    // Read the literals out of the source text rather than requiring the shim:
+    // the registry resolves at require time and a mismatch there is exactly
+    // what this test exists to catch, not something to route around.
     const literal = (name, network) => {
-        const m = source.match(new RegExp(name + '\\s*=\\s*\\{[^}]*\\b' + network + ':\\s*(\\d+)'))
+        const addGateRe = new RegExp("addGate\\('rollcall_activation\\." + name + "',")
+        if (!addGateRe.test(source)) {
+            if (REQUIRE_SIBLINGS) throw new Error("XCHAIN_REQUIRE_SIBLINGS=1 but no addGate('rollcall_activation." + name + "', ...) row was found under " + PROTOCOL_CHANGES_DIR)
+            return null
+        }
+        const valueRe = new RegExp("addGate\\('rollcall_activation\\." + name + "',\\s*'[^']*',\\s*\\{[^}]*\\b" + network + ':\\s*(\\d+)')
+        const m = source.match(valueRe)
         return m ? parseInt(m[1], 10) : null
     }
 

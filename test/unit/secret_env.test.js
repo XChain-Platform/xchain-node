@@ -82,9 +82,23 @@ const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
 // reads from it: a present checkout missing the pinned tool is a moved or
 // renamed file, while an absent checkout is a standalone install with no
 // platform tree to compare against.
-const PLATFORM_DIR    = path.resolve(__dirname, '..', '..', '..', 'claude')
+//
+// The platform tree is not a sibling repo, so XCHAIN_REQUIRE_SIBLINGS cannot
+// vouch for it the way it vouches for xchain-hub and xchain-indexer: CI stages
+// only the public repos .ci-siblings names, cloned BESIDE this checkout, while
+// the platform tree is private and sits as this checkout's PARENT. On a runner
+// it is therefore always absent, and a guard that threw there would keep the
+// gate red for a layout no roster line can fix (CI run 35020607785). This one
+// guard takes its own switch instead: XCHAIN_REQUIRE_PLATFORM=1, exported by
+// the venue that runs from the platform root (bin/ci-all.sh), turns an absent
+// checkout into a failure; anywhere else the test is reported PENDING with the
+// reason printed, never as a pass. XCHAIN_PLATFORM_ROOT relocates the root the
+// same way the platform's own bin/ scripts accept it.
+const PLATFORM_ROOT    = process.env.XCHAIN_PLATFORM_ROOT || path.resolve(__dirname, '..', '..', '..')
+const PLATFORM_DIR     = path.join(PLATFORM_ROOT, 'claude')
 const AUDIT_TOOL       = path.join(PLATFORM_DIR, 'bin', 'env-secret-name-audit.js')
 const PLATFORM_PRESENT = fs.existsSync(PLATFORM_DIR)
+const REQUIRE_PLATFORM = process.env.XCHAIN_REQUIRE_PLATFORM === '1'
 
 describe('secret-env', function () {
 
@@ -137,8 +151,14 @@ describe('secret-env', function () {
             // The platform's env-secret-name audit tool prints "rename X to Y". Y has
             // to be a name this module reads, or following the gate breaks the stack.
             if (!PLATFORM_PRESENT) {
-                if (REQUIRE_SIBLINGS)
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the platform checkout is not present at ' + PLATFORM_DIR)
+                if (REQUIRE_PLATFORM)
+                    throw new Error('XCHAIN_REQUIRE_PLATFORM=1 but the platform checkout is not present at ' + PLATFORM_DIR)
+                // A visible skip: the reason goes to the log and mocha counts the
+                // test as pending, so a run without the platform tree can never
+                // read as having proven this agreement.
+                console.log('SKIP: secret-env platform audit-gate agreement - the platform checkout is not present at '
+                    + PLATFORM_DIR + '; run from the platform root, or set XCHAIN_PLATFORM_ROOT, to run this guard '
+                    + '(XCHAIN_REQUIRE_PLATFORM=1 makes its absence a failure)')
                 this.skip()     // platform repo not checked out
                 return
             }
