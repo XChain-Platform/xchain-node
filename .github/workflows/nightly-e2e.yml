@@ -331,7 +331,16 @@ jobs:
           fi
 
       - name: Initialize the validator identity (opt-in; must precede install)
-        if: github.event.inputs.validator == 'true'
+        # The litecoin and dogecoin legs run in validator mode WITHOUT the input.
+        # Their only gas path is the bridge lock from BTC (see the two-stack note
+        # below), and a standalone hub never finalizes that transfer: startCrossChain
+        # returns before constructing CrossChainBridgeEngine when there is no
+        # peerManager, so the lock was `valid` and debited on BTC while the credit
+        # never landed on the destination (runs 35115449692 and 35115452598, hub
+        # log "Capability registry initialized (no identity; peer-receive only)").
+        # The bitcoin leg keeps the opt-in shape: it gasses in with a local MINT and
+        # needs no bridge, and the price-regime caveat on the input still applies.
+        if: github.event.inputs.validator == 'true' || env.COIN != 'bitcoin'
         # MUST run before install: ConfigService reads the settings this writes
         # when it generates the hub's container env (getValidatorEnv) and the
         # e2e container's VALIDATOR_PUBKEY. Initializing afterwards would leave
@@ -358,6 +367,15 @@ jobs:
             echo "HUB_NETWORK=regtest"
             echo "ORACLE_MIN_SUBMISSIONS=1"
           } >> "$GITHUB_ENV"
+          # An identity alone does not finalize a bridge transfer: the engine signs
+          # against the cross_chain capability set, which is EMPTY on a fresh regtest
+          # until something STAKEs, and an empty set fails closed. This host-env
+          # passthrough (ConfigService hubPassthroughVars) makes the hub seed itself
+          # as the single validator on an empty set; the hub honours it on regtest
+          # only. Non-bitcoin legs only, so the bitcoin opt-in keeps its regime.
+          if [ "$COIN" != "bitcoin" ]; then
+            echo "XDEX_SEED_LOCAL_VALIDATOR=1" >> "$GITHUB_ENV"
+          fi
           # Prints the pubkey and never the seed (validator status reads the
           # settings file; the 0600 signing.key is not echoed).
           node src/index.js validator status
