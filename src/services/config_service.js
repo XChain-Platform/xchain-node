@@ -1148,6 +1148,15 @@ async function getDefaultConfig(module, coin, network) {
             "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
             "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
             "XDEX_SEED_LOCAL_VALIDATOR", "XDEX_SNAPSHOT_BLOCK",
+            // Per-coin confirmation depth the hub's cross-chain engines wait for
+            // before proposing a source leg (coins/index.js resolveConfirmations).
+            // A regtest venue pins these to 1 so a bridge lock finalizes on the
+            // next block instead of six BTC blocks nothing is mining (the nightly
+            // two-stack legs sat on "not proposing BTC:3 (below depth 6)" until
+            // the 120 s credit wait gave up). Inert on mainnet and testnet: the
+            // hub clamps a value below the per-coin default UP to that default
+            // off regtest, so this can only raise the depth on a real network.
+            "XCHAIN_CONFIRMATIONS_BTC", "XCHAIN_CONFIRMATIONS_LTC", "XCHAIN_CONFIRMATIONS_DOGE",
             // Reverse-proxy trust for the hub's express API (rate-limiter IP
             // keying). Default 'loopback' suits the Apache-on-same-host prod
             // topology; containerized hubs see the docker bridge as the peer,

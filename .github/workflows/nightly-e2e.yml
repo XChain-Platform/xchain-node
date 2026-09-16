@@ -383,6 +383,13 @@ jobs:
           # the hub joins every stack's docker network, so the in-network container
           # names on the indexer's own port 3004 are reachable once the stacks are
           # up; the same shape a regtest rail's .env gives its hub.
+          # The engine then proposes a source leg only at the hub's per-coin
+          # confirmation depth, six blocks on BTC by default, and nothing on this
+          # runner mines six BTC blocks behind a lock: run 35124072478 reached
+          # "CrossChainBridge: not proposing BTC:3 (below depth 6)" and the suite
+          # gave up on the credit 120 s later. The depths are pinned to 1 the way a
+          # regtest rail pins them; the hub clamps them back up to the default off
+          # regtest, so the same three names are inert on any real network.
           if [ "$COIN" != "bitcoin" ]; then
             echo "XDEX_SEED_LOCAL_VALIDATOR=1" >> "$GITHUB_ENV"
             code=$(case "$COIN" in litecoin) echo LTC ;; dogecoin) echo DOGE ;; esac)
@@ -390,6 +397,9 @@ jobs:
               echo "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
               echo "BTC_INDEXER_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
               echo "${code}_INDEXER_URL=http://xchain-node-$COIN-regtest-xchain-indexer:3004"
+              echo "XCHAIN_CONFIRMATIONS_BTC=1"
+              echo "XCHAIN_CONFIRMATIONS_LTC=1"
+              echo "XCHAIN_CONFIRMATIONS_DOGE=1"
             } >> "$GITHUB_ENV"
           fi
           # Prints the pubkey and never the seed (validator status reads the

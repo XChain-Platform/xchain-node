@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The e2e-test container receives the hub API key on a keyed (validator-mode) host, so its `getallconfigs` credential discovery no longer 401s.
+- `XCHAIN_CONFIRMATIONS_BTC/LTC/DOGE` pass through the host env to the hub container (the hub clamps them up to its per-coin default off regtest), and the nightly litecoin and dogecoin legs pin them to 1 so the bridged gas lock finalizes on the next block.
 
 ## [0.18.0] - 2026-09-11
 

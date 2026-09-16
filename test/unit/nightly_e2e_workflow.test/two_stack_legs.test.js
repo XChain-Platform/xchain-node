@@ -181,11 +181,16 @@ describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the 
                 // engines resolve them once at start, before either stack exists
                 // on this runner, so the configs table cannot supply them in time.
                 const code = { litecoin: 'LTC', dogecoin: 'DOGE' }[coin]
+                // The confirmation depths ride it too: at the hub's default six
+                // BTC blocks nothing on the runner mines behind the lock, so the
+                // engine held the leg "below depth 6" for the whole credit wait
+                // (run 35124072478). The hub clamps these up off regtest.
                 expect(exported).to.deep.equal({
                     HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1', XDEX_SEED_LOCAL_VALIDATOR: '1',
                     BTC_INDEXER_API_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
                     BTC_INDEXER_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
                     [code + '_INDEXER_URL']: 'http://xchain-node-' + coin + '-regtest-xchain-indexer:3004',
+                    XCHAIN_CONFIRMATIONS_BTC: '1', XCHAIN_CONFIRMATIONS_LTC: '1', XCHAIN_CONFIRMATIONS_DOGE: '1',
                 })
             })
         }

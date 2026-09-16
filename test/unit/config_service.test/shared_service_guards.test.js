@@ -200,10 +200,68 @@ function attestOverridePassthrough() {
 
 }
 
+// The per-coin confirmation depth the hub's cross-chain engines gate a source
+// leg on. A regtest venue pins it to 1 so a bridge lock finalizes on the next
+// block; the hub clamps a value below the per-coin default up to that default
+// off regtest, so the passthrough is inert on mainnet and testnet. This suite
+// pins that the three names reach the hub config from the host env and that an
+// unset one leaves the hub on its own default.
+function confirmationsPassthrough() {
+    const CONFIRMATION_VARS = [
+        'XCHAIN_CONFIRMATIONS_BTC', 'XCHAIN_CONFIRMATIONS_LTC', 'XCHAIN_CONFIRMATIONS_DOGE'
+    ]
+    let saved
+    beforeEach(function () {
+        saved = {}
+        for (const k of CONFIRMATION_VARS) { saved[k] = process.env[k]; delete process.env[k] }
+    })
+    afterEach(function () {
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k]
+            else process.env[k] = v
+        }
+    })
+
+    it('injects all three XCHAIN_CONFIRMATIONS_* depths from host env into the hub config', async function () {
+        process.env.XCHAIN_CONFIRMATIONS_BTC = '1'
+        process.env.XCHAIN_CONFIRMATIONS_LTC = '1'
+        process.env.XCHAIN_CONFIRMATIONS_DOGE = '1'
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+        expect(config['XCHAIN_CONFIRMATIONS_BTC']).to.equal('1')
+        expect(config['XCHAIN_CONFIRMATIONS_LTC']).to.equal('1')
+        expect(config['XCHAIN_CONFIRMATIONS_DOGE']).to.equal('1')
+    })
+
+    it('injects only the one depth set, leaving the other two absent', async function () {
+        process.env.XCHAIN_CONFIRMATIONS_BTC = '2'
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+        expect(config['XCHAIN_CONFIRMATIONS_BTC']).to.equal('2')
+        expect(config).to.not.have.property('XCHAIN_CONFIRMATIONS_LTC')
+        expect(config).to.not.have.property('XCHAIN_CONFIRMATIONS_DOGE')
+    })
+
+    it('leaves all three depths absent when the host env carries none (hub default unchanged)', async function () {
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig(HUB_MODULE_NAME, null, null)
+        for (const k of CONFIRMATION_VARS) expect(config).to.not.have.property(k)
+    })
+
+}
+
 describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('without coin/network (shared service config)', function () {
             describe('hub keyless declaration', hubKeylessDeclaration)
+        })
+    })
+})
+
+describe('ConfigService', function () {
+    describe('getDefaultConfig()', function () {
+        describe('without coin/network (shared service config)', function () {
+            describe('XCHAIN_CONFIRMATIONS_* passthrough', confirmationsPassthrough)
         })
     })
 })
