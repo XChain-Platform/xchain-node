@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The pinned bootstrap signing public key is resolved from `src/config/` again, so a signed-bootstrap restore verifies instead of refusing as unsigned and syncing from genesis.
+
 ## [0.19.0] - 2026-09-16
 
 ### Added

@@ -71,7 +71,11 @@ function configureDependencies(dependencies) {
 // multi-GB archives never need to be buffered).
 
 const BOOTSTRAP_SIG_SUFFIX = '.sig'
-const DEFAULT_BOOTSTRAP_PUBKEY_PATH = path.join(__dirname, '../config/bootstrap_signing_pubkey.pem')
+// Two levels up, not one: this module lives in src/services/bootstrap_service/,
+// so the pinned key at src/config/ is __dirname/../../config. A single '..' aims
+// at src/services/config/, which does not exist, and loadBootstrapPublicKey()
+// then returns null and every restore refuses as "unsigned".
+const DEFAULT_BOOTSTRAP_PUBKEY_PATH = path.join(__dirname, '..', '..', 'config', 'bootstrap_signing_pubkey.pem')
 
 // A restore that stops because the archive failed its provenance/integrity
 // gates is the gate WORKING, not the tool breaking. Left as a bare Error it
