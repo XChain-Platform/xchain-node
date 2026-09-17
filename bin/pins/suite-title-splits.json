@@ -398,6 +398,13 @@
       "test/unit/module_operations.test/17_module_error_paths.test.js",
       "test/unit/module_operations.test/18_sync_shared_services_after_install.test.js",
       "test/unit/module_operations.test/19_e2e_image_siblings.test.js"
+    ],
+    "test/unit/migration_precondition_service.test.js": [
+      "test/unit/migration_precondition_service.test.js",
+      "test/unit/migration_precondition_service.test/01_migration_metadata.test.js",
+      "test/unit/migration_precondition_service.test/02_migration_inventory.test.js",
+      "test/unit/migration_precondition_service.test/03_applied_ledger.test.js",
+      "test/unit/migration_precondition_service.test/04_guard_outcomes.test.js"
     ]
   }
 }
