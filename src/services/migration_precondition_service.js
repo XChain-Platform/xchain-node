@@ -131,7 +131,7 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
 
     const cloneGitDep  = deps.cloneGit || require('./module_service').cloneGit
     const listRequired = deps.listDeployPreconditionMigrations || listDeployPreconditionMigrations
-    const readApplied  = deps.readAppliedMigrations || defaultReadAppliedMigrations
+    const readApplied  = deps.readAppliedMigrations || readAppliedMigrations
 
     // Clone the target source and read ITS migrations: the constraint must come
     // from the code that is about to run. The tmp tree is NOT reused from the skew

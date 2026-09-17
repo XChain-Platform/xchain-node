@@ -13,6 +13,7 @@
 const fs         = require('fs')
 const os         = require('os')
 const path       = require('path')
+const proxyquire = require('proxyquire').noCallThru()
 const sinon      = require('sinon')
 const { expect } = require('chai')
 
@@ -278,6 +279,29 @@ describe('MigrationPreconditionService', () => {
     })
 
     describe('assertRequiredMigrationsApplied', () => {
+
+        it('uses the moved default migration reader when no deps are passed', async () => {
+            const cloneGit = sinon.stub().resolves()
+            const listRequired = sinon.stub().returns([GATED])
+            const readApplied = sinon.stub().resolves({ state: 'ledger', applied: new Set([GATED]) })
+            const migrationScan = require('../../src/services/migration_precondition_service/migration_scan')
+            const service = proxyquire('../../src/services/migration_precondition_service', {
+                './module_service': { cloneGit },
+                './migration_precondition_service/migration_scan': {
+                    ...migrationScan,
+                    listDeployPreconditionMigrations: listRequired,
+                    readAppliedMigrations: readApplied
+                }
+            })
+
+            const res = await service.assertRequiredMigrationsApplied(
+                XChainService.XCHAIN_INDEXER, 'bitcoin', 'mainnet', 'master')
+
+            expect(res.ok).to.equal(true)
+            expect(cloneGit.calledOnce).to.equal(true)
+            expect(listRequired.calledOnce).to.equal(true)
+            expect(readApplied.calledOnce).to.equal(true)
+        })
 
         it('is inert for a module that ships no migrations', async () => {
             const deps = makeDeps()
