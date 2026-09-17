@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `XC_MIRROR_ADMISSION_ACTIVATION` passes through to both the hub and the regtest indexer, so a rail venue can arm the admission-map mirror producer, consumer and anchor-attest barrier together at one height.
+
 ### Fixed
 - `XCHAIN_CONFIRMATIONS_BTC/LTC/DOGE` pass through the host env to the hub container (the hub clamps them up to its per-coin default off regtest), and the nightly litecoin and dogecoin legs pin them to 1 so the bridged gas lock finalizes on the next block.
 - The nightly litecoin and dogecoin legs hand the coin's indexer the bitcoin indexer's address (`BTC_INDEXER_API_URL`), so the bridged gas credit's escrow proof can be fetched instead of holding the block at the bridge proof barrier.

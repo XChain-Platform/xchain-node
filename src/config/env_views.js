@@ -59,6 +59,7 @@ const LIST_VIEWS = {
         "XCHAIN_PRICE_CONFIRMATION_BUFFER", "XCHAIN_PRICE_BOOTSTRAP_SATS",
         "XCHAIN_PRICE_MIN_BTC_VOLUME", "HUB_ALLOW_UNAUTHENTICATED",
         "XC_ROLLCALL_REGTEST_ACTIVATION", "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
+        "XC_MIRROR_ADMISSION_ACTIVATION",
         "XCHAIN_PRICE_INDEXER_DB_SECRET"
     ]],
     // The indexer's regtest genesis bootstrap (ConfigService genesisPassthroughVars).
@@ -73,7 +74,8 @@ const LIST_VIEWS = {
     INDEXER_ROLLCALL_ENV: ['indexer rollcall', [
         "DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY", "XC_ROLLCALL_REGTEST_ACTIVATION",
         "XC_ROLLCALL_GATES_REGTEST_ACTIVATION", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
-        "HUB_PRICE_SYNC_TIMEOUT_MS", "XCHAIN_COINPAY_EXPIRATION_S"
+        "HUB_PRICE_SYNC_TIMEOUT_MS", "XCHAIN_COINPAY_EXPIRATION_S",
+        "XC_MIRROR_ADMISSION_ACTIVATION"
     ]],
     // The hub-sync watermark graces a regtest indexer is handed (hubSyncRegtestGraceVars).
     HUB_SYNC_GRACE_ENV: ['hub sync grace', [

@@ -772,11 +772,17 @@ async function getDefaultConfig(module, coin, network) {
             // XC_ROLLCALL_GATES_REGTEST_ACTIVATION follows XC_ROLLCALL_REGTEST_ACTIVATION's
             // same env-derived regtest shape (D84): it arms ROLLCALL v1 and the rules-aware
             // attestation set separately from the rail, so a venue can drive v0 as its control.
+            //
+            // XC_MIRROR_ADMISSION_ACTIVATION rides the same regtest-only shape: without a
+            // path here the indexer side of the admission-map mirror can never be armed on
+            // regtest (row 24x), and it must arm together with the hub's copy above or the
+            // admission-era canonical refuses a legacy-map row and halts the block loop.
             if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
                                                                           "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
                                                                           "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
                                                                           "HUB_PRICE_SYNC_TIMEOUT_MS",
-                                                                          "XCHAIN_COINPAY_EXPIRATION_S")
+                                                                          "XCHAIN_COINPAY_EXPIRATION_S",
+                                                                          "XC_MIRROR_ADMISSION_ACTIVATION")
             for (const varName of rollcallPassthroughVars) {
                 if (config.INDEXER_ROLLCALL_ENV[varName] !== undefined && config.INDEXER_ROLLCALL_ENV[varName] !== "") {
                     defaultValues[varName] = config.INDEXER_ROLLCALL_ENV[varName]
@@ -1290,7 +1296,12 @@ async function getDefaultConfig(module, coin, network) {
             // no-network-gate reasoning: it arms ROLLCALL v1 and the rules-aware
             // attestation set separately from the rail, so a venue can drive v0 as its
             // control, and the hub's own rollcall_gates_activation.js gates it for real.
-            "XC_ROLLCALL_GATES_REGTEST_ACTIVATION"
+            "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
+            // XC_MIRROR_ADMISSION_ACTIVATION follows the same no-network-gate shape
+            // (D84 precedent): it arms the admission-map mirror and its consumer and
+            // barrier gates together, so a venue arms as a unit; the hub's own
+            // mirror-admission gate module gates it for real.
+            "XC_MIRROR_ADMISSION_ACTIVATION"
         ]
         for (const varName of hubPassthroughVars) {
             // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
