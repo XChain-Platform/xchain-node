@@ -43,8 +43,7 @@ function catFor(files) {
     })
 }
 
-describe('indexer migrate CLI location', () => {
-
+function registerPathPrecedenceTests() {
     // Pins the full candidate list, newest first, so a future indexer layout
     // move that edits MIGRATE_CLI_PATHS without adding the new path (or drops
     // an old one a still-supported build carries) fails here first, rather
@@ -88,7 +87,9 @@ describe('indexer migrate CLI location', () => {
             expect(migrateCliPathFor('c-gone')).to.equal(MIGRATE_CLI_PATHS[0])
         })
     })
+}
 
+function registerCapabilityDetectionTests() {
     describe('runningBuildSupportsPerFileMigrations', () => {
         it('sees --file support on a build from before the move', async () => {
             const deps = { getDockerContainerFileCat: catFor({ [OLD_PATH]: WITH_FILE }) }
@@ -110,7 +111,9 @@ describe('indexer migrate CLI location', () => {
             expect(await runningBuildSupportsPerFileMigrations('c-probe-none', deps)).to.equal(null)
         })
     })
+}
 
+function registerRefusalBehaviorTests() {
     describe('refusal remedy', () => {
         let warnStub
         beforeEach(() => { warnStub = sinon.stub(console, 'warn') })
@@ -162,4 +165,10 @@ describe('indexer migrate CLI location', () => {
             expect(message).to.contain('node ' + NEWEST_PATH)
         })
     })
+}
+
+describe('indexer migrate CLI location', () => {
+    registerPathPrecedenceTests()
+    registerCapabilityDetectionTests()
+    registerRefusalBehaviorTests()
 })
