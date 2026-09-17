@@ -345,7 +345,9 @@ describe('BootstrapService', function () {
     afterEach(restoreRequireSignedBootstrapSetting)
     describe('utxoTrackerVolumeFreshness()', function () {
         it('uses a listing command that exits non-zero when the listing fails', async function () {
+            const fs = require('fs')
             const os = require('os')
+            const path = require('path')
             const { spawnSync } = require('child_process')
             const stubs = makeStubs()
             let lastArgs = null
@@ -365,10 +367,17 @@ describe('BootstrapService', function () {
             expect(failed.status).to.not.equal(0)
 
             // A healthy directory must still succeed, or every probe answers unknown.
-            const healthy = spawnSync('/bin/sh',
-                ['-c', bs.UTXO_TRACKER_LISTING_COMMAND.replace('/data', os.tmpdir())],
-                { encoding: 'utf8' })
-            expect(healthy.status).to.equal(0)
+            // Use a dir this test creates, not the shared OS tmpdir: a crowded
+            // TMPDIR makes `ls -A` outrun the mocha timeout on a long-lived box.
+            const healthyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-freshness-probe-'))
+            try {
+                const healthy = spawnSync('/bin/sh',
+                    ['-c', bs.UTXO_TRACKER_LISTING_COMMAND.replace('/data', healthyDir)],
+                    { encoding: 'utf8' })
+                expect(healthy.status).to.equal(0)
+            } finally {
+                fs.rmSync(healthyDir, { recursive: true, force: true })
+            }
         })
     })
 })
