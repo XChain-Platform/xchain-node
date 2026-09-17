@@ -86,10 +86,9 @@ function runStep(step, env) {
     return { dir, calls, stdout }
 }
 
-describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the bitcoin rail)', function () {
-    let steps
-    before(function () { steps = loadSteps() })
+let steps
 
+function registerSharedWorkflowChecks() {
     it('gates the ports step off the bitcoin leg, whose single-stack shape stays as it was', function () {
         expect(steps.ports.if).to.equal("env.COIN != 'bitcoin'")
     })
@@ -101,63 +100,65 @@ describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the 
         expect(m, 'docker run mariadb:11 --max-connections=N').to.not.equal(null)
         expect(parseInt(m[1], 10)).to.be.at.least(400)
     })
+}
 
-    for (const coin of ['litecoin', 'dogecoin']) {
-        describe(coin + ' leg', function () {
-            const env = { COIN: coin, STACK_REF: 'release/vX.Y.Z', XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1' }
+function registerCoinLegChecks(coin) {
+    describe(coin + ' leg', function () {
+        const env = { COIN: coin, STACK_REF: 'release/vX.Y.Z', XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1' }
 
-            it('writes the coin and bitcoin config files with the chainRail port blocks', function () {
-                const { dir } = runStep(steps.ports, env)
-                const own = parseConfigFile(path.join(dir, 'config', coin + '-regtest'))
-                const btc = parseConfigFile(path.join(dir, 'config', 'bitcoin-regtest'))
-                for (const [key, port] of Object.entries(CHAIN_RAIL_DEFAULT_PORTS[coin])) expect(own[key], coin + ' ' + key).to.equal(String(port))
-                for (const [key, port] of Object.entries(CHAIN_RAIL_DEFAULT_PORTS.bitcoin)) expect(btc[key], 'bitcoin ' + key).to.equal(String(port))
-                // Same host block twice would collide at the second install's port check.
-                expect(new Set([...Object.values(own), ...Object.values(btc)].filter(v => /^\d+$/.test(v))).size).to.equal(12)
-            })
-
-            it('routes the e2e container to the bitcoin rail through the docker bridge gateway', function () {
-                const { dir } = runStep(steps.ports, env)
-                const own = parseConfigFile(path.join(dir, 'config', coin + '-regtest'))
-                const btc = parseConfigFile(path.join(dir, 'config', 'bitcoin-regtest'))
-                expect(own.BTC_SERVICE_HOST).to.equal('172.17.0.1')
-                // The bitcoin stack's own containers need no such route.
-                expect(btc).to.not.have.property('BTC_SERVICE_HOST')
-            })
-
-            it('routes the coin indexer to the bitcoin indexer for the bridge escrow proof', function () {
-                // The destination indexer fetches the escrow proof from the origin
-                // chain's indexer at BTC_INDEXER_API_URL before it credits a bridged
-                // transfer, and holds the block at the proof barrier when nothing is
-                // wired (run 35140173657: 900 s at bridge_proof_barrier, 143 blocks
-                // behind). The bitcoin indexer joins the coin's docker network, so
-                // its container name on the indexer's own port is the route.
-                const { dir } = runStep(steps.ports, env)
-                const own = parseConfigFile(path.join(dir, 'config', coin + '-regtest'))
-                const btc = parseConfigFile(path.join(dir, 'config', 'bitcoin-regtest'))
-                expect(own.BTC_INDEXER_API_URL).to.equal('http://xchain-node-bitcoin-regtest-xchain-indexer:3004')
-                expect(btc).to.not.have.property('BTC_INDEXER_API_URL')
-            })
-
-            it('never writes a credential into either file (the install generates those into the .local sidecars)', function () {
-                const { dir } = runStep(steps.ports, env)
-                for (const file of [coin + '-regtest', 'bitcoin-regtest']) {
-                    const keys = Object.keys(parseConfigFile(path.join(dir, 'config', file)))
-                    expect(keys.filter(k => /USER|PASS|SECRET|KEY/.test(k)), file).to.deep.equal([])
-                }
-            })
-
-            it('installs the coin under test first, then the bitcoin gas rail, both at the same ref', function () {
-                const { calls, dir } = runStep(steps.boot, Object.assign({ XCHAIN_NODE_DATA_DIR: path.join(os.tmpdir(), 'nightly-e2e-data-' + process.pid) }, env))
-                expect(calls).to.deep.equal([
-                    'src/index.js install release/vX.Y.Z all ' + coin + ' regtest',
-                    'src/index.js install release/vX.Y.Z all bitcoin regtest',
-                ])
-                expect(dir).to.be.a('string')
-            })
+        it('writes the coin and bitcoin config files with the chainRail port blocks', function () {
+            const { dir } = runStep(steps.ports, env)
+            const own = parseConfigFile(path.join(dir, 'config', coin + '-regtest'))
+            const btc = parseConfigFile(path.join(dir, 'config', 'bitcoin-regtest'))
+            for (const [key, port] of Object.entries(CHAIN_RAIL_DEFAULT_PORTS[coin])) expect(own[key], coin + ' ' + key).to.equal(String(port))
+            for (const [key, port] of Object.entries(CHAIN_RAIL_DEFAULT_PORTS.bitcoin)) expect(btc[key], 'bitcoin ' + key).to.equal(String(port))
+            // Same host block twice would collide at the second install's port check.
+            expect(new Set([...Object.values(own), ...Object.values(btc)].filter(v => /^\d+$/.test(v))).size).to.equal(12)
         })
-    }
 
+        it('routes the e2e container to the bitcoin rail through the docker bridge gateway', function () {
+            const { dir } = runStep(steps.ports, env)
+            const own = parseConfigFile(path.join(dir, 'config', coin + '-regtest'))
+            const btc = parseConfigFile(path.join(dir, 'config', 'bitcoin-regtest'))
+            expect(own.BTC_SERVICE_HOST).to.equal('172.17.0.1')
+            // The bitcoin stack's own containers need no such route.
+            expect(btc).to.not.have.property('BTC_SERVICE_HOST')
+        })
+
+        it('routes the coin indexer to the bitcoin indexer for the bridge escrow proof', function () {
+            // The destination indexer fetches the escrow proof from the origin
+            // chain's indexer at BTC_INDEXER_API_URL before it credits a bridged
+            // transfer, and holds the block at the proof barrier when nothing is
+            // wired (run 35140173657: 900 s at bridge_proof_barrier, 143 blocks
+            // behind). The bitcoin indexer joins the coin's docker network, so
+            // its container name on the indexer's own port is the route.
+            const { dir } = runStep(steps.ports, env)
+            const own = parseConfigFile(path.join(dir, 'config', coin + '-regtest'))
+            const btc = parseConfigFile(path.join(dir, 'config', 'bitcoin-regtest'))
+            expect(own.BTC_INDEXER_API_URL).to.equal('http://xchain-node-bitcoin-regtest-xchain-indexer:3004')
+            expect(btc).to.not.have.property('BTC_INDEXER_API_URL')
+        })
+
+        it('never writes a credential into either file (the install generates those into the .local sidecars)', function () {
+            const { dir } = runStep(steps.ports, env)
+            for (const file of [coin + '-regtest', 'bitcoin-regtest']) {
+                const keys = Object.keys(parseConfigFile(path.join(dir, 'config', file)))
+                expect(keys.filter(k => /USER|PASS|SECRET|KEY/.test(k)), file).to.deep.equal([])
+            }
+        })
+
+        it('installs the coin under test first, then the bitcoin gas rail, both at the same ref', function () {
+            const { calls, dir } = runStep(steps.boot, Object.assign({ XCHAIN_NODE_DATA_DIR: path.join(os.tmpdir(), 'nightly-e2e-data-' + process.pid) }, env))
+            expect(calls).to.deep.equal([
+                'src/index.js install release/vX.Y.Z all ' + coin + ' regtest',
+                'src/index.js install release/vX.Y.Z all bitcoin regtest',
+            ])
+            expect(dir).to.be.a('string')
+        })
+    })
+}
+
+function registerValidatorModeChecks() {
     // The bridged credit needs a hub that FINALIZES transfers, which a standalone
     // hub never does: startCrossChain returns before constructing
     // CrossChainBridgeEngine without a peerManager, and even with an identity the
@@ -215,7 +216,9 @@ describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the 
             expect(exported).to.deep.equal({ HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1' })
         })
     })
+}
 
+function registerBitcoinLegChecks() {
     describe('bitcoin leg', function () {
         it('boots exactly one stack, unchanged from the single-stack shape', function () {
             const { calls } = runStep(steps.boot, {
@@ -225,4 +228,13 @@ describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the 
             expect(calls).to.deep.equal(['src/index.js install develop all bitcoin regtest'])
         })
     })
+}
+
+describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the bitcoin rail)', function () {
+    before(function () { steps = loadSteps() })
+
+    registerSharedWorkflowChecks()
+    for (const coin of ['litecoin', 'dogecoin']) registerCoinLegChecks(coin)
+    registerValidatorModeChecks()
+    registerBitcoinLegChecks()
 })
