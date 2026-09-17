@@ -179,12 +179,12 @@ function configureE2e(defaultValues, module, coin) {
 // path here the indexer side of the admission-map mirror can never be armed on
 // regtest (row 24x), and it must arm together with the hub's copy above or the
 // admission-era canonical refuses a legacy-map row and halts the block loop.
-// The indexer pushes chain tips / config to the hub (HUB_API_URL); when that
-// hub enforces HUB_API_KEY, the indexer must present the same key or its writes
-// 401. Sourced from host env (.env) so it persists across `update`, then from the
-// shared hub sidecar so an indexer co-located with a validator hub picks up the
-// key `validator init` generated. Neither set leaves the indexer sending no key
-// (keyless, the prior default).
+// The indexer pushes chain tips to HUB_API_URL; when that hub enforces
+// HUB_API_KEY, the indexer must present the same key or its writes 401.
+// Sourced from host env so it persists across `update`, then from the shared
+// hub sidecar so an indexer co-located with a private hub picks up its key.
+// Preserve that private credential separately for getallconfigs before a
+// per-coin sidecar can override HUB_API_KEY with the feed credential.
 function configureIndexerBeforeHubKey(defaultValues, module, network) {
     if (module === XChainService.XCHAIN_INDEXER) {
         const genesisPassthroughVars = [
@@ -277,6 +277,9 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
 // resolveWatermarkGrace, regtest-overridable only).
 function configureIndexerAfterHubKey(defaultValues, module, network) {
     if (module === XChainService.XCHAIN_INDEXER) {
+        if (defaultValues.HUB_API_KEY) {
+            defaultValues.HUB_CONFIG_API_KEY = defaultValues.HUB_API_KEY
+        }
         if (config.INDEXER_API_KEY !== undefined && config.INDEXER_API_KEY !== "") {
             defaultValues.INDEXER_API_KEY = config.INDEXER_API_KEY
         } else if (network === Network.REGTEST) {

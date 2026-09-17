@@ -39,13 +39,11 @@ function configure(dependencies) {
 // (test/initialCheck.test.js), not INDEXER_DB_HOST/PORT. Default them here so
 // the EXTERNAL_DB rewrite below can repoint them; on a host-native-DB box the
 // docker DNS name "mariadb" doesn't resolve and the suite fails at bootstrap.
-// The indexer's hub client keys ENTIRELY off HUB_API_URL (hub_client.js:
-// `this.enabled = !!this.hubUrl`). HUB_API_HOST above is set but read by
-// nothing in xchain-indexer, so without this the client stayed disabled on
-// every installed stack and no push ever left the indexer: chain tips,
-// config, and in particular the PRICE v1 oracle_price pushes that a FIAT
-// dispenser later prices against. Prod sets HUB_API_URL by hand in the
-// per-coin config file, which is why this went unnoticed.
+// HUB_API_URL is the indexer's write endpoint. An operator may point it at a
+// validator feed, so the config poll gets its own URL for the managed private
+// hub. Otherwise getallconfigs follows the feed override to a port that does
+// not expose private methods. A per-coin HUB_CONFIG_URL still overrides this
+// default during the config-file merge below.
 //
 // Composed from the same container name + port as HUB_API_HOST/HUB_PORT, so
 // it resolves on the docker network exactly as the sibling *_API_HOST vars
@@ -106,6 +104,7 @@ function createCoinDefaults(module, coin, network) {
         "HUB_API_HOST":      getDockerContainerImageName(HUB_MODULE_NAME, "", ""),
         "HUB_PORT":          10000,
         "HUB_API_URL":       "http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":10000",
+        "HUB_CONFIG_URL":    "http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":10000",
         "HUB_DB_HOST":       "mariadb",
         "HUB_DB_PORT":       3306,
         "HUB_DB_USER":       "xchain" + DB_SEP + "hub",
