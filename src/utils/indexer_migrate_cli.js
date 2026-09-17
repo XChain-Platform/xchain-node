@@ -17,11 +17,12 @@
  * found.
  ********************************************************************/
 
-// Newest first. The indexer moved the CLI from the top of src/ into its
-// feature directory. The deploy guard reads the container being REPLACED,
-// which can run a build from either side of that move, so both spellings stay
-// readable for as long as a supported indexer build carries the old one.
-const MIGRATE_CLI_PATHS = ['src/migration/migrate.js', 'src/migrate.js']
+// Newest first. The indexer has moved the CLI twice: from the top of src/ to
+// src/migration/, then (v0.19.0) into src/db/migration/ alongside the rest of
+// the db layer. The deploy guard reads the container being REPLACED, which
+// can run a build from any of the three layouts, so every spelling stays
+// readable for as long as a supported indexer build carries it.
+const MIGRATE_CLI_PATHS = ['src/db/migration/migrate.js', 'src/migration/migrate.js', 'src/migrate.js']
 
 // Container name -> the path its last successful read answered at. The remedy
 // the refusal prints runs on THAT build, so it has to name the path the read
