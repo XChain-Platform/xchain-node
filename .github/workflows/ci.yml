@@ -89,6 +89,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Re-runs the same suite the `ci` job runs, so it needs the same
+      # sibling checkout that job's shared workflow does elsewhere.
+      # Mirrored verbatim (same roster, same clone) so they cannot drift.
+      - name: Check out declared sibling repositories
+        id: siblings
+        env:
+          SIBLINGS_REF: ${{ github.ref == 'refs/heads/master' && 'master' || 'develop' }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          if [ ! -f .ci-siblings ]; then
+            echo "no .ci-siblings in this repo; single-repo layout"
+            exit 0
+          fi
+          repos=$(sed 's/#.*//' .ci-siblings | tr -d '\r' | awk 'NF')
+          cd "$GITHUB_WORKSPACE/.."
+          for repo in $repos; do
+            rm -rf "$repo"
+            url="https://github.com/$OWNER/$repo.git"
+            git clone --quiet --depth 1 --branch "$SIBLINGS_REF" "$url" "$repo" 2>/dev/null \
+              || git clone --quiet --depth 1 "$url" "$repo"
+            echo "sibling $repo @ $(git -C "$repo" rev-parse --abbrev-ref HEAD) $(git -C "$repo" rev-parse --short HEAD)"
+            if [ -f "$repo/package.json" ]; then
+              ( cd "$repo" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 ) \
+                || ( cd "$repo" && npm install --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 ) \
+                || echo "sibling $repo: dependency install failed, guards needing its modules will say so"
+            fi
+          done
+          echo "checked-out=1" >> "$GITHUB_OUTPUT"
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -104,7 +134,12 @@ jobs:
       # pool, so the fetch 403s, installModules throws a ReleaseIntegrityError
       # before the bootstrap summary is ever reported, and the failure surfaces as
       # an unrelated "expected false to be true" on a stub assertion.
+      #
+      # Armed only when the step above actually checked siblings out,
+      # so a repo with none still reports real coverage instead of
+      # failing on an environment gap coverage:check did not create.
       - name: Coverage thresholds (c8 --check-coverage)
         env:
+          XCHAIN_REQUIRE_SIBLINGS: ${{ steps.siblings.outputs.checked-out == '1' && '1' || '' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: npm run coverage:check
