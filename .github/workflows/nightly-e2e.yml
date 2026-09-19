@@ -13,7 +13,7 @@ name: E2E (regtest)
 # "which chain". A suite filter is appended only when one is set, so the common
 # full-suite run stays short.
 run-name: >-
-  E2E ${{ github.event_name == 'schedule' && 'all coins' || inputs.coin }} regtest @ ${{ inputs.ref || 'develop' }}${{ inputs.suite && format(' [{0} only]', inputs.suite) || '' }}
+  E2E ${{ (github.event_name == 'schedule' || inputs.coin == 'all') && 'all coins' || inputs.coin }} regtest @ ${{ inputs.ref || 'develop' }}${{ inputs.suite && format(' [{0} only]', inputs.suite) || '' }}
 
 # Cross-component integration gate. Boots the FULL XChain stack on regtest via
 # xchain-node - which clones every service repo at the REF THIS RUN NAMES and
@@ -68,9 +68,15 @@ on:
   workflow_dispatch:
     inputs:
       coin:
-        description: 'Coin to test'
+        # 'all' expands to the same three-coin array the schedule uses, so a
+        # dispatch can name a ref (release/vX.Y.Z) AND cover all three coins in
+        # one run - the schedule can name all three coins but never a ref, and
+        # a single-coin dispatch can name a ref but never more than one coin;
+        # this is the third combination, needed only for the release-freeze
+        # acceptance gate (MT3), which the other two cannot satisfy together.
+        description: 'Coin to test, or "all" for bitcoin+litecoin+dogecoin in one run'
         type: choice
-        options: [bitcoin, litecoin, dogecoin]
+        options: [bitcoin, litecoin, dogecoin, all]
         default: bitcoin
       suite:
         # ONE suite instead of the whole action set, so fixing a defect costs a boot
@@ -140,10 +146,16 @@ jobs:
     # chosen coin, because a subset proves a fix and must not pretend to be a train.
     # The three legs are independent stacks, so fail-fast would throw away two
     # answers to report one; a release needs all three verdicts, not the first.
+    #
+    # coin: 'all' is the third case: a dispatch names a ref a schedule can never
+    # name, and needs to cover all three coins the way a schedule does. It reuses
+    # the identical three-coin literal so the expanded matrix is byte-identical
+    # to the schedule case; anything else falls through to the single-coin shape,
+    # defaulting to bitcoin the same way an absent input always has.
     strategy:
       fail-fast: false
       matrix:
-        coin: ${{ fromJSON(github.event_name == 'schedule' && '["bitcoin","litecoin","dogecoin"]' || format('["{0}"]', github.event.inputs.coin || 'bitcoin')) }}
+        coin: ${{ fromJSON(github.event_name == 'schedule' && '["bitcoin","litecoin","dogecoin"]' || github.event.inputs.coin == 'all' && '["bitcoin","litecoin","dogecoin"]' || format('["{0}"]', github.event.inputs.coin || 'bitcoin')) }}
     # A BTC full action suite alone runs ~1h50m of wall clock, and the security
     # and performance suites are sequenced AFTER it, so at 120 the two of them
     # shared whatever minutes the action suite happened to leave - usually none.
