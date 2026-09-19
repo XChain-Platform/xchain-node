@@ -10,9 +10,9 @@
 
 // Where the indexer's operator migration CLI is read from inside a container.
 // The deploy guard reads the container being REPLACED, which can run an indexer
-// build from before or after the CLI moved into src/migration/, so the probe
-// has to answer for both layouts and the refusal has to print the path that
-// running build really carries.
+// build from any of three layouts (top of src/, src/migration/, or the
+// v0.19.0+ src/db/migration/), so the probe has to answer for all of them and
+// the refusal has to print the path that running build really carries.
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
@@ -24,9 +24,10 @@ const {
     assertRequiredMigrationsApplied
 } = require('../../../src/services/migration_precondition_service')
 
-const GATED    = '2026-07-24-pubkeys-widen-uncompressed.sql'
-const NEW_PATH = 'src/migration/migrate.js'
-const OLD_PATH = 'src/migrate.js'
+const GATED        = '2026-07-24-pubkeys-widen-uncompressed.sql'
+const NEWEST_PATH  = 'src/db/migration/migrate.js'
+const NEW_PATH     = 'src/migration/migrate.js'
+const OLD_PATH     = 'src/migrate.js'
 
 // Source text for a CLI that parses --file, and for one that predates it.
 const WITH_FILE    = "if(a === '--file' || a === '-f'){ push(argv[i + 1]) }"
@@ -44,12 +45,29 @@ function catFor(files) {
 
 describe('indexer migrate CLI location', () => {
 
+    // Pins the full candidate list, newest first, so a future indexer layout
+    // move that edits MIGRATE_CLI_PATHS without adding the new path (or drops
+    // an old one a still-supported build carries) fails here first, rather
+    // than silently reappearing as the 'could not be read' refusal on the
+    // next roll.
+    it('pins every known CLI layout, newest first', () => {
+        expect(MIGRATE_CLI_PATHS).to.deep.equal([NEWEST_PATH, NEW_PATH, OLD_PATH])
+    })
+
     describe('readMigrateCli', () => {
-        it('reads the moved CLI before the pre-move path', async () => {
+        it('reads the v0.19.0+ db/migration layout before either older path', async () => {
+            const cat = catFor({ [NEWEST_PATH]: WITH_FILE, [NEW_PATH]: WITHOUT_FILE, [OLD_PATH]: WITHOUT_FILE })
+            const found = await readMigrateCli(cat, 'c-newest')
+            expect(found).to.deep.equal({ cliPath: NEWEST_PATH, source: WITH_FILE })
+            expect(cat.firstCall.args[1]).to.equal(NEWEST_PATH)
+            expect(migrateCliPathFor('c-newest')).to.equal(NEWEST_PATH)
+        })
+
+        it('reads the moved CLI before the pre-move path on a build without the newest layout', async () => {
             const cat = catFor({ [NEW_PATH]: WITH_FILE, [OLD_PATH]: WITHOUT_FILE })
             const found = await readMigrateCli(cat, 'c-both')
             expect(found).to.deep.equal({ cliPath: NEW_PATH, source: WITH_FILE })
-            expect(cat.firstCall.args[1]).to.equal(NEW_PATH)
+            expect(cat.firstCall.args[1]).to.equal(NEWEST_PATH)
             expect(migrateCliPathFor('c-both')).to.equal(NEW_PATH)
         })
 
@@ -127,6 +145,21 @@ describe('indexer migrate CLI location', () => {
             expect(message, 'the deploy must be refused').to.not.equal(null)
             expect(message).to.contain('node ' + NEW_PATH + ' --file ' + GATED)
             expect(message).to.not.contain('node ' + OLD_PATH)
+        })
+
+        it('names the v0.19.0+ db/migration CLI path when the running build carries that', async () => {
+            const message = await refusalFor({ [NEWEST_PATH]: WITH_FILE })
+            expect(message, 'the deploy must be refused').to.not.equal(null)
+            expect(message).to.contain('node ' + NEWEST_PATH + ' --file ' + GATED)
+            expect(message).to.not.contain('node ' + NEW_PATH)
+            expect(message).to.not.contain('node ' + OLD_PATH)
+        })
+
+        it('still refuses, naming the newest layout as the remedy, when the container answers at none of the known paths', async () => {
+            const message = await refusalFor({})
+            expect(message, 'the deploy must be refused').to.not.equal(null)
+            expect(message).to.contain('could not be read')
+            expect(message).to.contain('node ' + NEWEST_PATH)
         })
     })
 })

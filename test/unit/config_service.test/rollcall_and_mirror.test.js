@@ -183,6 +183,68 @@ function rollcallPassthrough3() {
     })
 }
 
+// XC_MIRROR_ADMISSION_ACTIVATION (D84 precedent, row 24x): follows the same
+// env-derived regtest shape as the ROLLCALL gates above. It arms the
+// admission-map mirror producer, consumer and the anchor-attest barrier
+// together at one height, so a venue arms as a unit the same way ROLLCALL does.
+function mirrorAdmissionPassthrough() {
+    const MIRROR_ADMISSION_VARS = ['XC_MIRROR_ADMISSION_ACTIVATION']
+
+    let saved
+
+    beforeEach(function () {
+        saved = {}
+        for (const v of MIRROR_ADMISSION_VARS) { saved[v] = process.env[v]; delete process.env[v] }
+    })
+
+    afterEach(function () {
+        for (const v of MIRROR_ADMISSION_VARS) {
+            if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v]
+        }
+    })
+
+    it('arms the indexer on regtest when the host opts in', async function () {
+        process.env.XC_MIRROR_ADMISSION_ACTIVATION = '5124'
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+        expect(config['XC_MIRROR_ADMISSION_ACTIVATION']).to.equal('5124')
+    })
+
+    it('NEVER arms a shared-ledger indexer, whatever the host env says', async function () {
+        process.env.XC_MIRROR_ADMISSION_ACTIVATION = '5124'
+        const cs = makeServiceWithConfig('')
+        for (const net of ['mainnet', 'testnet']) {
+            const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', net)
+            expect(config, net).to.not.have.property('XC_MIRROR_ADMISSION_ACTIVATION')
+        }
+    })
+
+    it('does NOT inject the var into a non-indexer coin module (decoder)', async function () {
+        process.env.XC_MIRROR_ADMISSION_ACTIVATION = '5124'
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'regtest')
+        expect(config).to.not.have.property('XC_MIRROR_ADMISSION_ACTIVATION')
+    })
+
+    // One variable arms producer, consumer and the anchor-attest barrier
+    // together; the hub carries the producer side, so it must take the same
+    // variable or the indexer's consumer arms with no producer to match it.
+    it('arms the container hub from the same variable, so the venue arms as a unit', async function () {
+        process.env.XC_MIRROR_ADMISSION_ACTIVATION = '5124'
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig('xchain-hub', null, null)
+        expect(config['XC_MIRROR_ADMISSION_ACTIVATION']).to.equal('5124')
+    })
+
+    it('omits the var when unset, so a venue ships INERT', async function () {
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+        expect(config).to.not.have.property('XC_MIRROR_ADMISSION_ACTIVATION')
+        const hub = await cs.getDefaultConfig('xchain-hub', null, null)
+        expect(hub).to.not.have.property('XC_MIRROR_ADMISSION_ACTIVATION')
+    })
+}
+
 // Regtest mirror arming: the regtest indexer's hub-mirror connection, unset
 // before this row, and the three watermark graces that must be zeroed alongside
 // it or an armed regtest venue wedges every freshly mined block (the price-grace
@@ -274,6 +336,14 @@ describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('with coin and network (coin-specific config)', function () {
             describe('regtest mirror arming', regtestMirrorArming)
+        })
+    })
+})
+
+describe('ConfigService', function () {
+    describe('getDefaultConfig()', function () {
+        describe('with coin and network (coin-specific config)', function () {
+            describe('MIRROR ADMISSION passthrough', mirrorAdmissionPassthrough)
         })
     })
 })

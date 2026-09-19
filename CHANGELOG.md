@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-17
+
+### Added
+- `XC_MIRROR_ADMISSION_ACTIVATION` passes through to the hub and regtest indexer containers.
+
+### Changed
+- Nightly Litecoin and Dogecoin jobs provision validator configuration, API access, database headroom, and a Bitcoin gas rail.
+
+### Fixed
+- Confirmation overrides pass through to the hub for nightly bridged-gas finalization.
+- Litecoin and Dogecoin indexers receive the Bitcoin indexer URL needed for bridge escrow proofs.
+- Bootstrap restores resolve the signing public key from its relocated configuration path.
+- Migration preflight accepts the v0.19.0 and later `db/migration` CLI layout.
+- Coverage checks derive sibling requirements from the repository roster.
+
 ## [0.19.1] - 2026-09-16
 
 ### Fixed

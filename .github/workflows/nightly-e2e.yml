@@ -383,6 +383,13 @@ jobs:
           # the hub joins every stack's docker network, so the in-network container
           # names on the indexer's own port 3004 are reachable once the stacks are
           # up; the same shape a regtest rail's .env gives its hub.
+          # The engine then proposes a source leg only at the hub's per-coin
+          # confirmation depth, six blocks on BTC by default, and nothing on this
+          # runner mines six BTC blocks behind a lock: run 35124072478 reached
+          # "CrossChainBridge: not proposing BTC:3 (below depth 6)" and the suite
+          # gave up on the credit 120 s later. The depths are pinned to 1 the way a
+          # regtest rail pins them; the hub clamps them back up to the default off
+          # regtest, so the same three names are inert on any real network.
           if [ "$COIN" != "bitcoin" ]; then
             echo "XDEX_SEED_LOCAL_VALIDATOR=1" >> "$GITHUB_ENV"
             code=$(case "$COIN" in litecoin) echo LTC ;; dogecoin) echo DOGE ;; esac)
@@ -390,6 +397,9 @@ jobs:
               echo "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
               echo "BTC_INDEXER_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
               echo "${code}_INDEXER_URL=http://xchain-node-$COIN-regtest-xchain-indexer:3004"
+              echo "XCHAIN_CONFIRMATIONS_BTC=1"
+              echo "XCHAIN_CONFIRMATIONS_LTC=1"
+              echo "XCHAIN_CONFIRMATIONS_DOGE=1"
             } >> "$GITHUB_ENV"
           fi
           # Prints the pubkey and never the seed (validator status reads the
@@ -422,9 +432,20 @@ jobs:
       #      already reach the runner's MariaDB on. Every key in the coin's config
       #      file is injected into that coin's containers, the e2e runner included,
       #      which is how this one variable reaches the suite.
+      #   3. A route from the coin's INDEXER to the bitcoin indexer. Before it
+      #      credits a bridged transfer the destination indexer fetches the escrow
+      #      proof from the origin chain's indexer, resolved from its own env as
+      #      BTC_INDEXER_API_URL (xchain-indexer bridge_proof_client transport,
+      #      the hub's three-tier idiom); with nothing wired it holds the block at
+      #      the bridge proof barrier instead of guessing. Run 35140173657 (the
+      #      first leg past the depth gate) sat there for the 900 s hold ceiling,
+      #      "no origin-chain indexer endpoint is configured for the escrow proof",
+      #      while the chain ran 143 blocks ahead. The install attaches the bitcoin
+      #      indexer to the coin's docker network, so its container name on the
+      #      indexer's own port serves, the same value the hub is handed above.
       #
-      # Only ports and that host go in the files: credentials are generated into the
-      # untracked .local sidecars by the install itself, exactly as before.
+      # Only ports and those two routes go in the files: credentials are generated
+      # into the untracked .local sidecars by the install itself, exactly as before.
       - name: Publish distinct host ports for the two-stack legs
         if: env.COIN != 'bitcoin'
         run: |
@@ -450,7 +471,9 @@ jobs:
           # Every file under config/ is gitignored, so a fresh checkout has no
           # such directory at all; ConfigService reads it by path, never creates it.
           mkdir -p config
-          write_ports "config/$COIN-regtest" "$BASE" "BTC_SERVICE_HOST=$XCHAIN_NODE_EXTERNAL_DB_HOST"
+          write_ports "config/$COIN-regtest" "$BASE" \
+            "BTC_SERVICE_HOST=$XCHAIN_NODE_EXTERNAL_DB_HOST" \
+            "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
           write_ports config/bitcoin-regtest 3020
 
       - name: Boot the regtest stack (clones every service at ${{ github.event.inputs.ref || 'develop' }})

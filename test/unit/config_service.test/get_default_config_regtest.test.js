@@ -33,7 +33,8 @@ function regtestOnlyPassthrough() {
         'XC_ROLLCALL_GATES_REGTEST_ACTIVATION',
         'HUB_SYNC_ANCHOR_ATTEST_GRACE_S',
         'HUB_PRICE_SYNC_TIMEOUT_MS',
-        'XCHAIN_COINPAY_EXPIRATION_S'
+        'XCHAIN_COINPAY_EXPIRATION_S',
+        'XC_MIRROR_ADMISSION_ACTIVATION'
     ]
 
     let saved

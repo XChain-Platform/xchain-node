@@ -772,11 +772,17 @@ async function getDefaultConfig(module, coin, network) {
             // XC_ROLLCALL_GATES_REGTEST_ACTIVATION follows XC_ROLLCALL_REGTEST_ACTIVATION's
             // same env-derived regtest shape (D84): it arms ROLLCALL v1 and the rules-aware
             // attestation set separately from the rail, so a venue can drive v0 as its control.
+            //
+            // XC_MIRROR_ADMISSION_ACTIVATION rides the same regtest-only shape: without a
+            // path here the indexer side of the admission-map mirror can never be armed on
+            // regtest (row 24x), and it must arm together with the hub's copy above or the
+            // admission-era canonical refuses a legacy-map row and halts the block loop.
             if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
                                                                           "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
                                                                           "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
                                                                           "HUB_PRICE_SYNC_TIMEOUT_MS",
-                                                                          "XCHAIN_COINPAY_EXPIRATION_S")
+                                                                          "XCHAIN_COINPAY_EXPIRATION_S",
+                                                                          "XC_MIRROR_ADMISSION_ACTIVATION")
             for (const varName of rollcallPassthroughVars) {
                 if (config.INDEXER_ROLLCALL_ENV[varName] !== undefined && config.INDEXER_ROLLCALL_ENV[varName] !== "") {
                     defaultValues[varName] = config.INDEXER_ROLLCALL_ENV[varName]
@@ -1148,6 +1154,15 @@ async function getDefaultConfig(module, coin, network) {
             "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
             "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
             "XDEX_SEED_LOCAL_VALIDATOR", "XDEX_SNAPSHOT_BLOCK",
+            // Per-coin confirmation depth the hub's cross-chain engines wait for
+            // before proposing a source leg (coins/index.js resolveConfirmations).
+            // A regtest venue pins these to 1 so a bridge lock finalizes on the
+            // next block instead of six BTC blocks nothing is mining (the nightly
+            // two-stack legs sat on "not proposing BTC:3 (below depth 6)" until
+            // the 120 s credit wait gave up). Inert on mainnet and testnet: the
+            // hub clamps a value below the per-coin default UP to that default
+            // off regtest, so this can only raise the depth on a real network.
+            "XCHAIN_CONFIRMATIONS_BTC", "XCHAIN_CONFIRMATIONS_LTC", "XCHAIN_CONFIRMATIONS_DOGE",
             // Reverse-proxy trust for the hub's express API (rate-limiter IP
             // keying). Default 'loopback' suits the Apache-on-same-host prod
             // topology; containerized hubs see the docker bridge as the peer,
@@ -1281,7 +1296,12 @@ async function getDefaultConfig(module, coin, network) {
             // no-network-gate reasoning: it arms ROLLCALL v1 and the rules-aware
             // attestation set separately from the rail, so a venue can drive v0 as its
             // control, and the hub's own rollcall_gates_activation.js gates it for real.
-            "XC_ROLLCALL_GATES_REGTEST_ACTIVATION"
+            "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
+            // XC_MIRROR_ADMISSION_ACTIVATION follows the same no-network-gate shape
+            // (D84 precedent): it arms the admission-map mirror and its consumer and
+            // barrier gates together, so a venue arms as a unit; the hub's own
+            // mirror-admission gate module gates it for real.
+            "XC_MIRROR_ADMISSION_ACTIVATION"
         ]
         for (const varName of hubPassthroughVars) {
             // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also

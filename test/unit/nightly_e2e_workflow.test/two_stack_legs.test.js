@@ -125,6 +125,20 @@ describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the 
                 expect(btc).to.not.have.property('BTC_SERVICE_HOST')
             })
 
+            it('routes the coin indexer to the bitcoin indexer for the bridge escrow proof', function () {
+                // The destination indexer fetches the escrow proof from the origin
+                // chain's indexer at BTC_INDEXER_API_URL before it credits a bridged
+                // transfer, and holds the block at the proof barrier when nothing is
+                // wired (run 35140173657: 900 s at bridge_proof_barrier, 143 blocks
+                // behind). The bitcoin indexer joins the coin's docker network, so
+                // its container name on the indexer's own port is the route.
+                const { dir } = runStep(steps.ports, env)
+                const own = parseConfigFile(path.join(dir, 'config', coin + '-regtest'))
+                const btc = parseConfigFile(path.join(dir, 'config', 'bitcoin-regtest'))
+                expect(own.BTC_INDEXER_API_URL).to.equal('http://xchain-node-bitcoin-regtest-xchain-indexer:3004')
+                expect(btc).to.not.have.property('BTC_INDEXER_API_URL')
+            })
+
             it('never writes a credential into either file (the install generates those into the .local sidecars)', function () {
                 const { dir } = runStep(steps.ports, env)
                 for (const file of [coin + '-regtest', 'bitcoin-regtest']) {
@@ -181,11 +195,16 @@ describe('nightly-e2e.yml two-stack legs (litecoin and dogecoin gas in over the 
                 // engines resolve them once at start, before either stack exists
                 // on this runner, so the configs table cannot supply them in time.
                 const code = { litecoin: 'LTC', dogecoin: 'DOGE' }[coin]
+                // The confirmation depths ride it too: at the hub's default six
+                // BTC blocks nothing on the runner mines behind the lock, so the
+                // engine held the leg "below depth 6" for the whole credit wait
+                // (run 35124072478). The hub clamps these up off regtest.
                 expect(exported).to.deep.equal({
                     HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1', XDEX_SEED_LOCAL_VALIDATOR: '1',
                     BTC_INDEXER_API_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
                     BTC_INDEXER_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
                     [code + '_INDEXER_URL']: 'http://xchain-node-' + coin + '-regtest-xchain-indexer:3004',
+                    XCHAIN_CONFIRMATIONS_BTC: '1', XCHAIN_CONFIRMATIONS_LTC: '1', XCHAIN_CONFIRMATIONS_DOGE: '1',
                 })
             })
         }

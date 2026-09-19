@@ -62,10 +62,29 @@ need_sib() {
   done
 }
 
-need_sib xchain-hub
+# Read the roster ci-reusable.yml's own sibling-checkout step reads
+# (.ci-siblings) with the same parse, instead of a second hard-coded
+# list the two could drift behind.
+CI_SIBLINGS_FILE="$SELF/.ci-siblings"
+DECLARED_SIBLINGS=()
+if [ -f "$CI_SIBLINGS_FILE" ]; then
+  while IFS= read -r s; do
+    DECLARED_SIBLINGS+=("$s")
+  done < <(sed 's/#.*//' "$CI_SIBLINGS_FILE" | tr -d '\r' | awk 'NF')
+fi
+if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
+  need_sib "${DECLARED_SIBLINGS[@]}"
+fi
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
-run_tier "ci" npm run ci
+# ci-reusable.yml arms XCHAIN_REQUIRE_SIBLINGS whenever it checked
+# siblings out, so every sibling guard fails loud on a miss instead of
+# skipping; match that here for a true local twin.
+if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
+  run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+else
+  run_tier "ci" npm run ci
+fi
 
 # --- job: drift-guards -------------------------------------------------------
 # Run FROM the parent so sync-coins.sh sees the canonical + vendored pair the
