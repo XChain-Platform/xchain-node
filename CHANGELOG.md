@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-17
+
 ### Added
-- `XC_MIRROR_ADMISSION_ACTIVATION` passes through to both the hub and the regtest indexer, so a rail venue can arm the admission-map mirror producer, consumer and anchor-attest barrier together at one height.
+- `XC_MIRROR_ADMISSION_ACTIVATION` passes through to the hub and regtest indexer containers.
+
+### Changed
+- Nightly Litecoin and Dogecoin jobs provision validator configuration, API access, database headroom, and a Bitcoin gas rail.
 
 ### Fixed
-- `XCHAIN_CONFIRMATIONS_BTC/LTC/DOGE` pass through the host env to the hub container (the hub clamps them up to its per-coin default off regtest), and the nightly litecoin and dogecoin legs pin them to 1 so the bridged gas lock finalizes on the next block.
-- The nightly litecoin and dogecoin legs hand the coin's indexer the bitcoin indexer's address (`BTC_INDEXER_API_URL`), so the bridged gas credit's escrow proof can be fetched instead of holding the block at the bridge proof barrier.
+- Confirmation overrides pass through to the hub for nightly bridged-gas finalization.
+- Litecoin and Dogecoin indexers receive the Bitcoin indexer URL needed for bridge escrow proofs.
+- Bootstrap restores resolve the signing public key from its relocated configuration path.
+- Migration preflight accepts the v0.19.0 and later `db/migration` CLI layout.
+- Coverage checks derive sibling requirements from the repository roster.
 
 ## [0.19.1] - 2026-09-16
 
