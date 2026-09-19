@@ -19,7 +19,8 @@ const { version }  = require('../package.json')
 const { preCheck } = require('./precheck')
 const { setVerbose } = require('./state')
 const { filterCommandParameters, resolveArgs } = require('./services/config_service')
-const { HUB_MODULE_NAME } = require('./config')
+const config = require('./config')
+const { HUB_MODULE_NAME } = config
 const { redactSecrets } = require('./utils/helpers')
 const {
     installModules,
@@ -147,7 +148,7 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
     } catch {
         return { moved: false, reason: 'unparsed-args' } // the action reports it
     }
-    if (process.env.XCHAIN_NODE_UPDATE_TARGET) return { moved: false, reason: 'already-reexecuted' }
+    if (config.XCHAIN_NODE_UPDATE_TARGET) return { moved: false, reason: 'already-reexecuted' }
     if (selfUpdate.selfUpdateDisabled()) return { moved: false, reason: 'disabled' }
 
     let tag = null
@@ -180,7 +181,7 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
     }
     // The run continues in this process at the resolved tag: hand it on so
     // updateModules does not resolve the latest release a second time.
-    if (outcome && !outcome.moved) process.env.XCHAIN_NODE_UPDATE_TARGET = tag
+    if (outcome && !outcome.moved) config.XCHAIN_NODE_UPDATE_TARGET = tag
     return outcome
 }
 
@@ -198,7 +199,7 @@ async function parseCommand() {
         formatCapabilityDrift, stakeValidator, unstakeValidator,
         restoreBootstrapInterface, startInterface, acquireCommandLock,
         noticeNewerRelease, refForPreCheck, commandRepairsHub,
-        maybeSelfUpdateBeforeUpdate, loadModule
+        maybeSelfUpdateBeforeUpdate, loadModule, config
     })
 }
 

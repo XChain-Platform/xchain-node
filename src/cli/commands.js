@@ -15,7 +15,7 @@
  * Commander setup and command definitions
  ********************************************************************/
 function registerInstall(program, deps) {
-    const { filterCommandParameters, resolveArgs, installModules, syncSharedServicesAfterInstall } = deps
+    const { filterCommandParameters, resolveArgs, installModules, syncSharedServicesAfterInstall, config } = deps
     program
         .command('install')
         .description('Installs XChain services')
@@ -34,7 +34,7 @@ function registerInstall(program, deps) {
             // commander assigns a flag matching a global option to the global, so reading
             // the install command's own opts would always see the default. Skips the
             // auto-download/restore and syncs from scratch.
-            if (program.opts().bootstrap === false) process.env.XCHAIN_NODE_NO_BOOTSTRAP = '1'
+            if (program.opts().bootstrap === false) config.XCHAIN_NODE_NO_BOOTSTRAP = '1'
             // defaultBranch null: an absent ref must reach installModules as null
             // so it resolves the latest release. Substituting 'master' here would
             // make the documented default install a branch install forever.

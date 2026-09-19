@@ -15,7 +15,7 @@
  * Commander setup and command definitions
  ********************************************************************/
 
-function dispatchSettings() {
+function dispatchSettings(config) {
     const commandsNeedingVersions = ['install', 'update', 'reinstall']
     // Read-only commands only display state and never change which services
     // are installed/running, so they don't need to push local config to the
@@ -34,11 +34,11 @@ function dispatchSettings() {
     // How long a non-mutating command blocks for a lock-holding mutator before
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.
-    const LOCK_WAIT_MS = parseInt(process.env.XCHAIN_NODE_LOCK_WAIT_MS || '15000', 10) || 15000
+    const LOCK_WAIT_MS = parseInt(config.XCHAIN_NODE_LOCK_WAIT_MS || '15000', 10) || 15000
     // How long a MUTATING command blocks for a lock holder before refusing. Zero
     // keeps the interactive contract below; an unattended caller sets it so a
     // scheduled run waits out a deploy instead of losing its work.
-    const MUTATING_LOCK_WAIT_MS = parseInt(process.env.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS || '0', 10) || 0
+    const MUTATING_LOCK_WAIT_MS = parseInt(config.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS || '0', 10) || 0
     return { commandsNeedingVersions, readOnlyCommands, mutatingCommands, LOCK_WAIT_MS, MUTATING_LOCK_WAIT_MS }
 }
 
@@ -170,7 +170,7 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
 }
 
 function installDispatch(program, deps) {
-    const settings = dispatchSettings()
+    const settings = dispatchSettings(deps.config)
     program.hook('preAction', (thisCommand, actionCommand) =>
         beforeAction(thisCommand, actionCommand, settings, deps))
 }

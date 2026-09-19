@@ -236,7 +236,9 @@ module.exports = {
     get XCHAIN_NODE_GO_LIVE() { return process.env.XCHAIN_NODE_GO_LIVE },
     get XCHAIN_NODE_GPG_BIN() { return process.env.XCHAIN_NODE_GPG_BIN || 'gpg' },
     get XCHAIN_NODE_HUB_SIGNER_DIR() { return process.env.XCHAIN_NODE_HUB_SIGNER_DIR },
+    get XCHAIN_NODE_LOCK_WAIT_MS() { return process.env.XCHAIN_NODE_LOCK_WAIT_MS },
     get XCHAIN_NODE_LOCK_DIR() { return process.env.XCHAIN_NODE_LOCK_DIR },
+    get XCHAIN_NODE_MUTATING_LOCK_WAIT_MS() { return process.env.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS },
     get XCHAIN_NODE_NO_BOOTSTRAP() { return process.env.XCHAIN_NODE_NO_BOOTSTRAP },
     get XCHAIN_NODE_NO_TELEMETRY() { return process.env.XCHAIN_NODE_NO_TELEMETRY || '' },
     get XCHAIN_NODE_REINDEX_LEDGER_DIR() { return process.env.XCHAIN_NODE_REINDEX_LEDGER_DIR },
@@ -248,6 +250,10 @@ module.exports = {
     get XCHAIN_NODE_STAKE_WIF() { return process.env.XCHAIN_NODE_STAKE_WIF },
     get XCHAIN_NODE_STOP_TIMEOUT_SECONDS() { return process.env.XCHAIN_NODE_STOP_TIMEOUT_SECONDS },
     get XCHAIN_NODE_TELEMETRY_URL() { return process.env.XCHAIN_NODE_TELEMETRY_URL },
+    get XCHAIN_NODE_UPDATE_TARGET() { return process.env.XCHAIN_NODE_UPDATE_TARGET },
+    set XCHAIN_NODE_NO_BOOTSTRAP(value) { process.env.XCHAIN_NODE_NO_BOOTSTRAP = value },
+    set XCHAIN_NODE_UPDATE_TARGET(value) { process.env.XCHAIN_NODE_UPDATE_TARGET = value },
+    hostEnv() { return process.env },
     ...require('./env_views').bindEnvViews({ read: (name) => process.env[name], copy: () => ({ ...process.env }) }),
     // Below this line, one entry per environment variable this service reads.
     // They are passed straight through rather than parsed, because almost all

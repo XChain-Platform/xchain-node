@@ -188,8 +188,8 @@ function printValidatorConfiguration(s, deps) {
         console.log('  stake wallet : ' + w.stakeAddress + '  (' + coins.stakeCoin + ' for fees, holds the XCHAIN stake)')
         console.log('  DOGE wallet  : ' + w.dogeAddress + '  (' + coins.dogeCoin + ' for price rounds and anchors)')
         console.log('  keys file    : ' + WALLETS_FILE + ' (mode 0600; back it up)')
-        console.log('  DOGE signer  : ' + (process.env.XCHAIN_NODE_HUB_SIGNER_DIR
-            ? process.env.XCHAIN_NODE_HUB_SIGNER_DIR + ' (operator-supplied, XCHAIN_NODE_HUB_SIGNER_DIR)'
+        console.log('  DOGE signer  : ' + (deps.config.XCHAIN_NODE_HUB_SIGNER_DIR
+            ? deps.config.XCHAIN_NODE_HUB_SIGNER_DIR + ' (operator-supplied, XCHAIN_NODE_HUB_SIGNER_DIR)'
             : (getSignerMountDir() || '(missing; re-run validator init)')))
     } else {
         console.log('  wallets      : (none; re-run validator init, or run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR)')

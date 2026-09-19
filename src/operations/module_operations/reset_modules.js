@@ -103,7 +103,7 @@ async function resolveResetPaths(context) {
             console.log(`No ${NODE_MODULE_NAME} container is installed for ${coin} ${network}; there is no node data to clear.`)
         } else {
             const envState = config.XCHAIN_NODE_DATA_DIR && config.XCHAIN_NODE_DATA_DIR.trim() !== ''
-                ? `set to ${process.env.XCHAIN_NODE_DATA_DIR}`
+                ? `set to ${config.XCHAIN_NODE_DATA_DIR}`
                 : 'UNSET in this shell (non-interactive shells do not source the profile)'
             console.log(`Aborted: cannot resolve the ${coin} ${network} node datadir. No data was touched.`)
             console.log(`  Container ${resolved.containerName} reported no /root/.${coin} bind mount `

@@ -1,9 +1,9 @@
 'use strict'
 
-let DB_MODULE_NAME, HUB_MODULE_NAME, NODE_MODULE_NAME, SEP, SYNC_MODULE_NAME, assertHubNotBehind, assertRequiredMigrationsApplied, db, getModuleBranch, installModule, installTargetService, releaseManifestService, stateModule, validatorService, versionService, withInstallTarget
+let DB_MODULE_NAME, HUB_MODULE_NAME, NODE_MODULE_NAME, SEP, SYNC_MODULE_NAME, assertHubNotBehind, assertRequiredMigrationsApplied, config, db, getModuleBranch, installModule, installTargetService, releaseManifestService, stateModule, validatorService, versionService, withInstallTarget
 
 function configure(dependencies) {
-    ({ DB_MODULE_NAME, HUB_MODULE_NAME, NODE_MODULE_NAME, SEP, SYNC_MODULE_NAME, assertHubNotBehind, assertRequiredMigrationsApplied, db, getModuleBranch, installModule, installTargetService, releaseManifestService, stateModule, validatorService, versionService, withInstallTarget } = dependencies)
+    ({ DB_MODULE_NAME, HUB_MODULE_NAME, NODE_MODULE_NAME, SEP, SYNC_MODULE_NAME, assertHubNotBehind, assertRequiredMigrationsApplied, config, db, getModuleBranch, installModule, installTargetService, releaseManifestService, stateModule, validatorService, versionService, withInstallTarget } = dependencies)
 }
 
 /**
@@ -47,8 +47,8 @@ async function updateModules(servicesList, ref = null, opts = {}) {
     }
 
     // No ref: the update target is remembered from the last install/update, or classified from the checkouts on a node an older CLI installed.
-    const target = process.env.XCHAIN_NODE_UPDATE_TARGET
-        ? { kind: 'release', ref: process.env.XCHAIN_NODE_UPDATE_TARGET, inferred: false }
+    const target = config.XCHAIN_NODE_UPDATE_TARGET
+        ? { kind: 'release', ref: config.XCHAIN_NODE_UPDATE_TARGET, inferred: false }
         : await resolveUpdateTarget()
 
     if (target.kind === 'branch') {
@@ -58,7 +58,7 @@ async function updateModules(servicesList, ref = null, opts = {}) {
     }
 
     // A release node with no ref: the LATEST release (the recorded tag is where the node is, not where it is going), never a branch fallback. A lookup failure stops the run with nothing changed. The re-executed child of a CLI self-update already knows the tag its parent resolved.
-    const releaseRef = process.env.XCHAIN_NODE_UPDATE_TARGET || null
+    const releaseRef = config.XCHAIN_NODE_UPDATE_TARGET || null
     return withInstallTarget(releaseRef, async () => updateModulesOnBranch(list, null, runOpts), { fallbackToBranch: false })
 }
 
