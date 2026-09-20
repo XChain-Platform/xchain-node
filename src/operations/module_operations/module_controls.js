@@ -128,7 +128,7 @@ async function startModules(servicesList) {
 
 // Audited clear of a decoder's durable REORG_HALT marker, run inside the decoder
 // container so it uses the service's own DB credentials and code
-// (xchain-decoder/src/clear-reorg-halt.js checks the database is intact, then
+// (xchain-decoder/src/clear_reorg_halt.js checks the database is intact, then
 // records the clear as an events row with the reason). One decoder per
 // coin/network; `servicesList` is the filtered map the CLI builds. Returns true
 // only when every targeted decoder answered exit 0.
@@ -139,7 +139,7 @@ async function clearDecoderReorgHalt(servicesList, { reason, force = false, dryR
         console.log('clear-reorg-halt: --reason must say, in at least 8 characters, why this database is known good; it is recorded with the clear.')
         return false
     }
-    const args = ['node', 'src/clear-reorg-halt.js']
+    const args = ['node', 'src/clear_reorg_halt.js']
     if (reasonText) args.push('--reason', reasonText)
     if (force) args.push('--force')
     if (dryRun) args.push('--dry-run')
