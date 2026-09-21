@@ -220,7 +220,7 @@ async function installHubAtRef(moduleRef) {
         // Preserve the cause. A bare `catch {}` here would discard the ONLY description
         // of what actually went wrong and replace it with a message that names no
         // reason, so every hub install failure would look identical and be undebuggable
-        // without editing this file first.
+        // without editing this file first. That failure mode cost two debugging cycles.
         // Secrets are redacted because installHubModule handles DB credentials.
         throw new Error("There was an error trying to install the hub module: " + redactSecrets(err), { cause: err })
     }
