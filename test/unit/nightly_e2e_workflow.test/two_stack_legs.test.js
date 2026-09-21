@@ -189,7 +189,7 @@ function registerValidatorModeChecks() {
         for (const coin of ['litecoin', 'dogecoin']) {
             it(coin + ': inits a cross_chain-capable identity and exports the seed so the hub finalizes the gas lock', function () {
                 const { calls, exported } = runValidatorStep(coin)
-                expect(calls[0]).to.match(/^src\/index\.js validator init --oracle-epoch-start \d+ --capabilities [a-z_,]+$/)
+                expect(calls[0]).to.match(/^src\/index\.js validator init --network regtest --oracle-epoch-start \d+ --capabilities [a-z_,]+$/)
                 expect(calls[0].split('--capabilities ')[1].split(',')).to.include('cross_chain')
                 expect(calls[calls.length - 1]).to.equal('src/index.js validator status')
                 // The indexer URLs ride the same export: the hub's cross-chain
@@ -212,6 +212,7 @@ function registerValidatorModeChecks() {
 
         it('bitcoin (opt-in): keeps the identity but never seeds, so the input changes nothing beyond the price regime it documents', function () {
             const { calls, exported } = runValidatorStep('bitcoin')
+            expect(calls[0]).to.match(/^src\/index\.js validator init --network regtest --oracle-epoch-start \d+ --capabilities [a-z_,]+$/)
             expect(calls[calls.length - 1]).to.equal('src/index.js validator status')
             expect(exported).to.deep.equal({ HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1' })
         })

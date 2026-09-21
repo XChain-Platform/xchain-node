@@ -15,9 +15,14 @@ const { configStub } = require('../../helpers/config_stub')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
+// ValidatorService loads the SDK lazily, but this suite exercises real wallet
+// generation. Pay the SDK's module-load cost while Mocha loads the test file,
+// outside the timed test body, so the 10-second verify timeout measures init.
+require('@dankest-llc/xchain-sdk')
 // Fake config dir (never touches the real filesystem)
 const FAKE_CONFIG_DIR = '/tmp/test-xchain-config'
 const FAKE_VALIDATOR_DIR = path.join(FAKE_CONFIG_DIR, 'validator')
+const FAKE_SETTINGS_FILE  = path.join(FAKE_VALIDATOR_DIR, 'validator.json')
 // The capability config lives in its OWN directory: that directory is what the
 // hub container bind-mounts, and a single-FILE bind mount breaks `docker cp`
 // against the container for every path. signing.key must stay outside it.
@@ -184,6 +189,29 @@ describe('ValidatorService', function () {
             expect(result.P2P_PORT).to.equal(10002)
             expect(result.network).to.equal('testnet')
             expect(result.SEED_NODES).to.deep.equal(['01','02','03','04','05'].map(n => 'ws://validator' + n + '.xchain.io:10002'))
+        })
+
+        it('records regtest on its local port without mainnet federation seeds', async function () {
+            const fs = makeFs()
+            const vs = loadValidatorService(fs)
+            const result = await vs.initValidator({ network: 'regtest', wallets: false })
+            expect(result.network).to.equal('regtest')
+            expect(result.P2P_PORT).to.equal(10003)
+            expect(result.P2P_VALIDATOR_ADDR).to.equal('0.0.0.0:10003')
+            expect(result.SEED_NODES).to.deep.equal([])
+            const write = fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_SETTINGS_FILE)
+            const recorded = JSON.parse(write.args[1])
+            expect(recorded.network).to.equal('regtest')
+            expect(recorded.P2P_PORT).to.equal(10003)
+            expect(recorded.P2P_VALIDATOR_ADDR).to.equal('0.0.0.0:10003')
+            expect(recorded.SEED_NODES).to.deep.equal([])
+        })
+
+        it('recognizes P2P port 10003 as regtest without federation seeds', async function () {
+            const vs = loadValidatorService(makeFs())
+            const result = await vs.initValidator({ p2pPort: '10003', wallets: false })
+            expect(result.network).to.equal('regtest')
+            expect(result.SEED_NODES).to.deep.equal([])
         })
     })
 })

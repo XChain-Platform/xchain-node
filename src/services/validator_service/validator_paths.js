@@ -115,10 +115,10 @@ let SIGNER_MODULES_DIR   = path.join(SIGNER_DIR, 'node_modules')
 const SIGNER_CONTAINER_DIR = '/XChainHub/operator-signer'
 const SIGNER_CONTAINER_PATH = SIGNER_CONTAINER_DIR + '/signer.js'
 
-// The P2P port names the federation: one host can serve both networks later,
+// The P2P port names the federation: one host can serve multiple networks later,
 // so the port is the declared split rather than anything the protocol enforces.
-const NETWORK_BY_P2P_PORT = { 10001: 'mainnet', 10002: 'testnet' }
-const P2P_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 }
+const NETWORK_BY_P2P_PORT = { 10001: 'mainnet', 10002: 'testnet', 10003: 'regtest' }
+const P2P_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002, regtest: 10003 }
 
 // Oracle round-numbering anchor per federation. A hub with a different value
 // computes different round numbers and its submissions never line up, so the
