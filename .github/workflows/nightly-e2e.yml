@@ -373,6 +373,7 @@ jobs:
         # federation; this venue is a single hub, so the run's own clock is fine.
         run: |
           node src/index.js validator init \
+            --network regtest \
             --oracle-epoch-start "$(date -u +%s)000" \
             --capabilities price,cross_chain,oracle_publish,attestation
           {
