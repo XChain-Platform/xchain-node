@@ -191,6 +191,16 @@ describe('ValidatorService', function () {
             expect(result.SEED_NODES).to.deep.equal(['01','02','03','04','05'].map(n => 'ws://validator' + n + '.xchain.io:10002'))
         })
 
+    })
+})
+
+// Its own block, not a fifth case inside 'coin wallets': that describe was
+// already at the readability limit for a single function, and regtest init is
+// a separate federation shape rather than another wallet assertion.
+describe('ValidatorService', function () {
+
+    describe('regtest initialization', function () {
+
         it('records regtest on its local port without mainnet federation seeds', async function () {
             const fs = makeFs()
             const vs = loadValidatorService(fs)
