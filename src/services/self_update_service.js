@@ -47,6 +47,7 @@ const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 
 const { dataDir, SELF_UPDATE_ENV, childProcessEnv } = require('../config')
+const { getLogger } = require('../observability/logger')
 
 const CARRIER_ROOT      = path.join(__dirname, '../..')
 const TARGET_ENV        = 'XCHAIN_NODE_UPDATE_TARGET'
@@ -54,6 +55,15 @@ const NO_SELF_UPDATE_ENV = 'XCHAIN_NODE_NO_SELF_UPDATE'
 const CHECK_CACHE_FILE  = 'release-check.json'
 const CHECK_TTL_MS      = 60 * 60 * 1000
 const CHECK_TIMEOUT_MS  = 5000
+
+function defaultLogger() {
+    const logger = getLogger()
+    return {
+        log: logger.info.bind(logger),
+        warn: logger.warn.bind(logger),
+        error: logger.error.bind(logger)
+    }
+}
 
 function currentVersion() {
     return require('../../package.json').version
@@ -147,7 +157,7 @@ async function installCarrierDependencies(deps) {
  */
 async function selfUpdateAndReexec({ tag, childArgs, deps = {} }) {
     const env     = deps.env || SELF_UPDATE_ENV
-    const logger  = deps.logger || console
+    const logger  = deps.logger || defaultLogger()
     const version = deps.currentVersion ? deps.currentVersion() : currentVersion()
 
     if (env[TARGET_ENV]) return { moved: false, reason: 'already-reexecuted' }
@@ -271,7 +281,7 @@ async function latestReleaseTagCached(deps = {}) {
  */
 async function noticeNewerRelease(deps = {}) {
     const env    = deps.env || SELF_UPDATE_ENV
-    const logger = deps.logger || console
+    const logger = deps.logger || defaultLogger()
     if (env[TARGET_ENV]) return null
     try {
         const version = deps.currentVersion ? deps.currentVersion() : currentVersion()

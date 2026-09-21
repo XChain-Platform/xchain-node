@@ -14,6 +14,13 @@
  * XChain Node - Validator Stake Operations
  ********************************************************************/
 
+const { getLogger } = require('../../observability/logger')
+
+function defaultLog() {
+    const logger = getLogger()
+    return logger.info.bind(logger)
+}
+
 function logStakeBalances(log, network, coins, pubkey, address, amount, state, plan, STAKE_TICK) {
     log('')
     log('Validator stake plan (' + network + ')')
@@ -153,10 +160,10 @@ function createStakeValidator(helpers) {
 
     /**
      * Run the stake command. `deps` lets tests inject an SDK factory and a
-     * logger; production uses the real SDK and console.
+     * logger; production uses the real SDK and service logger.
      */
     return async function stakeValidator(opts = {}, deps = {}) {
-        const log = deps.log || console.log
+        const log = deps.log || defaultLog()
         const { network, coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
         const amount = parseInt(opts.amount) || DEFAULT_STAKE_AMOUNT
         const timing = stakeTiming(coins, network)

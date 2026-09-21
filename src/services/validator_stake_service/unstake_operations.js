@@ -14,6 +14,13 @@
  * XChain Node - Validator Unstake Operations
  ********************************************************************/
 
+const { getLogger } = require('../../observability/logger')
+
+function defaultLog() {
+    const logger = getLogger()
+    return logger.info.bind(logger)
+}
+
 function logUnstakePlan(log, pubkey, address, active, timing, STAKE_TICK, paren) {
     log('')
     log('Validator unstake plan')
@@ -68,7 +75,7 @@ function createUnstakeValidator({
      * an operator stops being that.
      */
     return async function unstakeValidator(opts = {}, deps = {}) {
-        const log = deps.log || console.log
+        const log = deps.log || defaultLog()
         const { network, coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
         const timing = stakeTiming(coins, network)
 
