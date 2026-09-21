@@ -20,6 +20,10 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
+const fs         = require('fs')
+const os         = require('os')
+const path       = require('path')
+const { configStub } = require('../helpers/config_stub')
 
 const {
     SERVICE_REGISTRY, XChainService,
@@ -32,25 +36,26 @@ const {
 // via ModuleService's export, and the hub descriptor via SERVICE_REGISTRY
 // data + a tiny local re-implementation mirror is NOT used; instead we assert
 // the registry shape directly plus drive the real docker builder.
-function loadModuleService() {
+function loadValidatorFixture(configDir) {
+    return proxyquire('../../src/services/validator_service', {
+        '../config': configStub({ configDir }),
+        './config_service': {
+            ensureHubApiKey: async () => ({ generated: false }),
+            readHubApiKey: async () => ({ present: false })
+        }
+    })
+}
+
+function loadModuleService(validatorService) {
     return proxyquire('../../src/services/module_service', {
         // ModuleService only pulls ValidatorService in lazily (hub caps), and
         // its top-level requires resolve fine without a live DB when we don't
         // call installModule. buildModuleDockerArgs itself has no side effects.
         //
-        // ValidatorService is stubbed to a machine with NO validator state. Left
-        // unstubbed, the lazy require reads config/validator/ off the REAL
-        // filesystem, and on any box that has run `validator init` the hub
-        // volume assertions below then see that machine's signer mount (the
-        // "no static volumes when unconfigured" case failed exactly that way on
-        // an operator checkout, 2026-09-11) while CI, which has no such
-        // directory, passes. Tests that WANT a mount stub their own.
-        './validator_service': {
-            getCapabilityConfigMountDir: () => null,
-            getSignerMountDir: () => null,
-            CAPS_CONTAINER_DIR: '/validator',
-            SIGNER_CONTAINER_DIR: '/XChainHub/operator-signer'
-        },
+        // Use the real validator config reader against the test fixture. This
+        // keeps an initialized config directory on the test host out of the
+        // unconfigured hub case while still exercising signer discovery.
+        './validator_service': validatorService,
         './config_service': {
             getModuleDir: (m) => '/modules/' + m,
             getModuleTmpDir: (m) => '/tmp/' + m,
@@ -88,10 +93,23 @@ const ENV = {
 }
 
 let ms
+let validatorFixtureDir
+let validatorFixtureService
 
 function reloadModuleService() {
-    ms = loadModuleService()
+    validatorFixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-service-registry-'))
+    validatorFixtureService = loadValidatorFixture(validatorFixtureDir)
+    ms = loadModuleService(validatorFixtureService)
 }
+
+function removeValidatorFixture() {
+    if (!validatorFixtureDir) return
+    fs.rmSync(validatorFixtureDir, { recursive: true, force: true })
+    validatorFixtureDir = null
+    validatorFixtureService = null
+}
+
+afterEach(removeValidatorFixture)
 
 describe('SERVICE_REGISTRY', function () {
 
@@ -200,10 +218,13 @@ describe('SERVICE_REGISTRY', function () {
         })
 
         it('hub: singleton, unconditional single port, no static volumes when unconfigured', function () {
+            const signerLookup = sinon.spy(validatorFixtureService, 'getSignerMountDir')
             const r = ms.buildModuleDockerArgs(HUB_MODULE_NAME, ENV, 'bitcoin', 'mainnet')
             expect(r.singleton).to.equal(true)
             expect(r.portArgs).to.deep.equal(['-p', '10000:10000'])
-            // No HUB_CAPABILITY_CONFIG in env and no signer dir env => no volumes.
+            expect(validatorFixtureService.VALIDATOR_DIR).to.equal(path.join(validatorFixtureDir, 'validator'))
+            expect(signerLookup.calledOnce).to.equal(true)
+            // No HUB_CAPABILITY_CONFIG in env and no signer in the fixture means no volumes.
             expect(r.volumeArgs).to.deep.equal([])
         })
     })
@@ -250,7 +271,6 @@ describe('SERVICE_REGISTRY', function () {
         beforeEach(reloadModuleService)
 
         it('hub: mounts the generated DOGE signer (ro) with this package\'s node_modules beside it', function () {
-            const path = require('path')
             const ms2 = proxyquire('../../src/services/module_service', {
                 './config_service': {
                     getUtxoTrackerVolumeName: () => 'v', getModuleDir: (m) => '/m/' + m,
