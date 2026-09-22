@@ -22,6 +22,7 @@ const fs        = require('fs')
 const readline  = require('readline')
 const { execFile } = require('child_process')
 const { promisify } = require('util')
+const { AsyncLocalStorage } = require('async_hooks')
 const execFileAsync = promisify(execFile)
 const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, XChainService, SEP, dataDir, EXTERNAL_DB, Coin, CoinTickerSymbol, Network, DEFAULT_MODULE_BRANCH } = require('../config')
 const { db }                 = require('../state')
@@ -59,6 +60,97 @@ const uninstallOperations = require('./module_operations/uninstall_modules')
 const moduleControls      = require('./module_operations/module_controls')
 const resetOperations     = require('./module_operations/reset_modules')
 
+const updateAllProgress = new AsyncLocalStorage()
+
+function moduleKey(module, coin, network) {
+    return JSON.stringify([module, coin, network])
+}
+
+function moduleLabel(module, coin, network) {
+    return coin && network ? `${module} (${coin} ${network})` : module
+}
+
+function updateAllEntries(servicesList) {
+    const shared = (servicesList[''] && servicesList['']['']) || []
+    const orderedShared = [
+        HUB_MODULE_NAME,
+        SYNC_MODULE_NAME,
+        ...shared.filter(module => module !== HUB_MODULE_NAME && module !== SYNC_MODULE_NAME)
+    ]
+    const entries = orderedShared.map(module => ({ module, coin: '', network: '' }))
+    for (const coin of Object.keys(servicesList)) {
+        if (coin === '') continue
+        for (const network of Object.keys(servicesList[coin])) {
+            for (const module of servicesList[coin][network]) {
+                entries.push({ module, coin, network })
+            }
+        }
+    }
+    return entries
+}
+
+function moveUnmoveSummary(entries, progress) {
+    const moved = entries.filter(entry => progress.moved.has(moduleKey(entry.module, entry.coin, entry.network)))
+    const unmoved = entries.filter(entry => !progress.moved.has(moduleKey(entry.module, entry.coin, entry.network)))
+    return '\nupdate all moved: ' + (moved.length ? moved.map(entry => moduleLabel(entry.module, entry.coin, entry.network)).join(', ') : 'none')
+        + '\nupdate all unmoved: ' + (unmoved.length ? unmoved.map(entry => moduleLabel(entry.module, entry.coin, entry.network)).join(', ') : 'none')
+}
+
+function updateAllRefused(result) {
+    if (result == null || result === false) return true
+    if (result.refused === true || result.ok === false || result.success === false) return true
+    return !Array.isArray(result.updated) || result.updated.length === 0
+}
+
+function installMoved(result) {
+    return result === true || (typeof result === 'string' && result.length > 0)
+}
+
+async function installModuleWithProgress(...args) {
+    const result = await installModule(...args)
+    const progress = updateAllProgress.getStore()
+    if (progress && args[3] === true) {
+        if (installMoved(result)) {
+            progress.moved.add(moduleKey(args[0], args[1], args[2]))
+        } else {
+            progress.refused = true
+        }
+    }
+    return result
+}
+
+async function installModules(servicesList, ref = null) {
+    let installRef = ref
+    if (!installRef) {
+        const target = await installTargetService.resolveUpdateTarget()
+        if (target.kind === 'branch') installRef = target.ref
+    }
+    return sharedServices.installModules(servicesList, installRef)
+}
+
+async function updateModules(servicesList, ref = null, opts = {}) {
+    if (!opts.all) return updateOperations.updateModules(servicesList, ref, opts)
+
+    const entries = updateAllEntries(servicesList)
+    const progress = { moved: new Set(), refused: false }
+    let result
+    try {
+        result = await updateAllProgress.run(progress, () => updateOperations.updateModules(servicesList, ref, opts))
+    } catch (err) {
+        const summary = moveUnmoveSummary(entries, progress)
+        if (err && typeof err === 'object' && typeof err.message === 'string') {
+            err.message += summary
+            throw err
+        }
+        throw new Error(String(err) + summary)
+    }
+
+    if (entries.length > 0 && (progress.refused || updateAllRefused(result))) {
+        console.log(moveUnmoveSummary(entries, progress))
+    }
+    return result
+}
+
 const dependencies = {
     path, fs, readline, execFileAsync,
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
@@ -72,7 +164,7 @@ const dependencies = {
     stopModuleContainer, buildDatabaseModule, resetDatabases,
     clearHubPriceIngestWatermark, purgeHubCrossChainRows,
     manualHubCrossChainPurgeStatements, getDatabaseContainerId,
-    pingExternalDatabase, getModuleBranch, installModule, uninstallModule,
+    pingExternalDatabase, getModuleBranch, installModule: installModuleWithProgress, uninstallModule,
     assertHubNotBehind, assertRequiredMigrationsApplied, statusChanged,
     reindexAffectedModules, recordReindex, config, bootstrapService,
     databaseService, explorerService, hubService, installTargetService,
@@ -97,9 +189,9 @@ dependencies.restartResetModules = moduleControls.restartResetModules
 resetOperations.configure(dependencies)
 
 module.exports = {
-    installModules: sharedServices.installModules,
+    installModules,
     syncSharedServicesAfterInstall: sharedServices.syncSharedServicesAfterInstall,
-    updateModules: updateOperations.updateModules,
+    updateModules,
     recreateModules: recreateOperations.recreateModules,
     uninstallModules: uninstallOperations.uninstallModules,
     logModules: moduleControls.logModules,
