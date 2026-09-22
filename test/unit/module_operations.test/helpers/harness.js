@@ -91,6 +91,10 @@ function makeStubs() {
         assertHubNotBehind: sinon.stub().resolves({ checked: false, reason: 'not-hub-dependent' }),
         assertRequiredMigrationsApplied: sinon.stub().resolves({ checked: false, reason: 'no-migrations' }),
         statusChanged: sinon.stub().resolves(),
+        readline: {
+            createInterface: sinon.stub()
+        },
+        resolveBlocksDir: sinon.stub().resolves(null),
         execFile: sinon.stub(),
         fs: {
             existsSync: sinon.stub().returns(false)
@@ -183,12 +187,16 @@ function loadOperations(stubs, constantsOverrides = null) {
         '../services/status_service': {
             statusChanged: stubs.statusChanged
         },
+        '../services/node_service': {
+            resolveBlocksDir: stubs.resolveBlocksDir
+        },
         '../services/bootstrap_service': stubs.bootstrapService,
         '../services/bootstrap_republish_ledger': {
             reindexAffectedModules: stubs.republishLedger.reindexAffectedModules,
             recordReindex:          stubs.republishLedger.recordReindex
         },
         'child_process': { execFile: stubs.execFile },
+        'readline': stubs.readline,
         'fs': stubs.fs,
         'util': {
             promisify: (fn) => async (...args) => {
