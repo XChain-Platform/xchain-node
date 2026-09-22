@@ -38,11 +38,10 @@ sudo apt update
 sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
 ```
 
-`docker-buildx-plugin` is required, not optional: the module images only build
-under BuildKit, and `xchain-node install` refuses to build without it. Ubuntu's
-own `docker.io` package ships without the plugin, so a Docker installed from the
-Ubuntu archive needs `sudo apt install docker-buildx-plugin` before any module
-install.
+Buildx is required: the module images only build under BuildKit, and
+`xchain-node install` refuses to build without it. Install `docker-buildx-plugin`
+when using Docker's repository as above, or install `docker-buildx` when using
+the Ubuntu archive's `docker.io` package.
 
 ### Add your user to the docker group 
 ```
