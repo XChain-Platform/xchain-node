@@ -28,7 +28,7 @@ const { NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME,
 const { db }                 = require('../state')
 const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork } = require('../services/config_service')
-const { createDockerNetwork, probeContainerPresenceByName, stopContainer, stopContainerByName, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts, removeContainer } = require('../services/docker_service')
+const { createDockerNetwork, probeContainerPresenceByName, stopContainer, stopContainerByName, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts, getContainerStopSettings, removeContainer } = require('../services/docker_service')
 const { stopModuleContainer } = require('../services/stop_budget_service')
 const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, purgeHubCrossChainRows, manualHubCrossChainPurgeStatements, getDatabaseContainerId, pingExternalDatabase } = require('../services/database_service')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/module_service')
@@ -160,7 +160,7 @@ const dependencies = {
     createDockerNetwork, probeContainerPresenceByName, stopContainer,
     stopContainerByName, startContainer, restartContainer, execContainer,
     shellContainer, logContainer, startDockerMonitor, waitContainer,
-    saveContainerLogs, getContainerBindMounts, removeContainer,
+    saveContainerLogs, getContainerBindMounts, getContainerStopSettings, removeContainer,
     stopModuleContainer, buildDatabaseModule, resetDatabases,
     clearHubPriceIngestWatermark, purgeHubCrossChainRows,
     manualHubCrossChainPurgeStatements, getDatabaseContainerId,

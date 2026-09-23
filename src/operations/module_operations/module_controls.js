@@ -1,9 +1,9 @@
 'use strict'
 
-let XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, restartContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainerByName, stopModuleContainer
+let XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, restartContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainerByName, stopModuleContainer, getContainerStopSettings
 
 function configure(dependencies) {
-    ({ XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, restartContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainerByName, stopModuleContainer } = dependencies)
+    ({ XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, restartContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainerByName, stopModuleContainer, getContainerStopSettings } = dependencies)
 }
 
 async function logModules(servicesList, follow = true) {
@@ -99,7 +99,8 @@ async function stopModules(servicesList) {
                     // With the service's budget, not docker's ten seconds: a bare
                     // `docker stop` on a container created before the budget was
                     // stamped on it is a coin flip for a service mid-block.
-                    await stopModuleContainer(stopContainerByName, nextModule, nextCoin, nextNetwork, containerId)
+                    await stopModuleContainer(stopContainerByName, nextModule, nextCoin, nextNetwork, containerId,
+                        undefined, getContainerStopSettings)
                 } catch (err) {
                     console.log(err)
                 }

@@ -71,6 +71,67 @@ function stopTimeoutArgs(module, env = MODULE_STOP_TIMEOUT_ENV) {
     return ['--stop-timeout', String(moduleStopTimeoutSeconds(module, env))]
 }
 
+// Gap between a service's own hard-exit timer and docker's SIGKILL, so a drain
+// that runs out of time still exits itself and logs why before the kill.
+const STOP_DRAIN_MARGIN_MS = 20000
+
+function isDefaultStopBudget(module, seconds) {
+    const fallback = MODULE_STOP_TIMEOUT_SECONDS[module] ?? DEFAULT_MODULE_STOP_TIMEOUT_SECONDS
+    return seconds === fallback
+}
+
+// SHUTDOWN_TIMEOUT_MS the node hands a service, derived from its stop budget
+// so the service's own hard exit always lands inside it: 120 s gives 100000,
+// the decoder's and tracker's own default. Below 40 s the drain gets half the
+// budget instead, since the margin would leave it nothing. Null for the coin
+// node and for a service on the plain default budget, which keeps its own.
+function moduleShutdownTimeoutMs(module, env = MODULE_STOP_TIMEOUT_ENV) {
+    if (module === 'node') return null
+    return shutdownTimeoutMsForBudget(module, moduleStopTimeoutSeconds(module, env))
+}
+
+function shutdownTimeoutMsForBudget(module, seconds) {
+    if (module === 'node') return null
+    const listed = Object.prototype.hasOwnProperty.call(MODULE_STOP_TIMEOUT_SECONDS, module)
+    if (!listed && isDefaultStopBudget(module, seconds)) return null
+    const budgetMs = seconds * 1000
+    return Math.max(budgetMs - STOP_DRAIN_MARGIN_MS, Math.floor(budgetMs / 2))
+}
+
+// The container env entry that carries the derived drain budget. An explicit
+// SHUTDOWN_TIMEOUT_MS in the module config wins and nothing is added, and so
+// does a null module (a one-shot run has no stop budget to derive from).
+function shutdownTimeoutEnv(module, moduleConfig, env = MODULE_STOP_TIMEOUT_ENV) {
+    if (!module) return {}
+    const configured = moduleConfig ? moduleConfig.SHUTDOWN_TIMEOUT_MS : undefined
+    if (configured !== undefined && configured !== null && String(configured).trim() !== '') return {}
+    const derived = moduleShutdownTimeoutMs(module, env)
+    return derived === null ? {} : { SHUTDOWN_TIMEOUT_MS: String(derived) }
+}
+
+// Why a running service's own drain may not follow its current budget: the
+// container carries a different stamped budget, or it predates the forwarded
+// SHUTDOWN_TIMEOUT_MS while an override is set. Null when nothing drifted, the
+// container could not be read, or neither side involves a forwarded drain.
+function describeStopBudgetDrift(module, coin, network, settings, budgetSeconds) {
+    if (!settings || module === 'node') return null
+    const forwards = shutdownTimeoutMsForBudget(module, budgetSeconds) !== null
+    if (!forwards && settings.shutdownTimeoutMs === null) return null
+    const where = coin && network ? ` (${coin} ${network})` : ''
+    let created
+    if (settings.stopTimeout !== budgetSeconds) {
+        created = Number.isInteger(settings.stopTimeout)
+            ? `under a ${settings.stopTimeout} s stop budget` : 'without a stop budget'
+    } else if (settings.shutdownTimeoutMs === null && !isDefaultStopBudget(module, budgetSeconds)) {
+        created = 'before the node forwarded SHUTDOWN_TIMEOUT_MS'
+    } else {
+        return null
+    }
+    return `WARNING: ${module}${where} was created ${created}, so its own drain timer does not follow ` +
+        `${moduleStopTimeoutEnvName(module)} (now ${budgetSeconds} s). Recreate it (xchain-node recreate) so the ` +
+        'node forwards SHUTDOWN_TIMEOUT_MS from the current budget.'
+}
+
 // SIGTERM's default action (128 + 15): a process with no drain registered,
 // or npm relaying its child's, which is how a drainless service always stops.
 const EXIT_ON_SIGTERM_DEFAULT = 143
@@ -94,14 +155,16 @@ function describeModuleStopOutcome(module, coin, network, outcome, budgetSeconds
     const where = coin && network ? ` (${coin} ${network})` : ''
     if (outcome.killed) {
         return `WARNING: ${module}${where} did not exit within the ${budgetSeconds} s budget and was killed. ` +
-            `Raise ${moduleStopTimeoutEnvName(module)} if this service needs longer to finish its block, ` +
-            'and keep the service\'s own SHUTDOWN_TIMEOUT_MS below it where the service reads one.'
+            `Raise ${moduleStopTimeoutEnvName(module)} if this service needs longer to finish its block; the node ` +
+            'derives the service\'s own SHUTDOWN_TIMEOUT_MS from it when the container is next recreated, unless ' +
+            'the module config sets one.'
     }
     if (stoppedUnclean(outcome)) {
         return `WARNING: ${module}${where} exited with code ${outcome.exitCode} after ${outcome.seconds} s, inside the ` +
             `${budgetSeconds} s budget, so its shutdown drain did not complete: it overran the service's own ` +
             'hard-exit timer (SHUTDOWN_TIMEOUT_MS where the service reads one) or failed. Check the service log. ' +
-            `Raising ${moduleStopTimeoutEnvName(module)} alone does not give that drain more time.`
+            `Raising ${moduleStopTimeoutEnvName(module)} gives that drain more time only once the container is ` +
+            'recreated, and not while the module config sets SHUTDOWN_TIMEOUT_MS.'
     }
     return `Stopped ${module}${where} cleanly in ${outcome.seconds} s (budget ${budgetSeconds} s).`
 }
@@ -109,9 +172,17 @@ function describeModuleStopOutcome(module, coin, network, outcome, budgetSeconds
 // One stop for every CLI path that takes a service container down: stop with
 // the budget, say what happened, return the outcome so the caller can decide
 // whether a kill matters to it. `stopContainerByName` accepts an id as well
-// as a name (docker echoes back whatever it was given).
-async function stopModuleContainer(stopContainerByName, module, coin, network, containerRef, env = MODULE_STOP_TIMEOUT_ENV) {
+// as a name (docker echoes back whatever it was given). `readStopSettings`,
+// when given, reads the container first so a drain that predates the current
+// budget is named before the stop rather than after a kill.
+async function stopModuleContainer(stopContainerByName, module, coin, network, containerRef,
+    env = MODULE_STOP_TIMEOUT_ENV, readStopSettings = null) {
     const budget = moduleStopTimeoutSeconds(module, env)
+    if (typeof readStopSettings === 'function' && module !== 'node') {
+        const settings = await Promise.resolve().then(() => readStopSettings(containerRef)).catch(() => null)
+        const drift = describeStopBudgetDrift(module, coin, network, settings, budget)
+        if (drift) logger.warn(drift)
+    }
     const outcome = await stopContainerByName(containerRef, budget)
     const line = describeModuleStopOutcome(module, coin, network, outcome, budget)
     if (line) {
@@ -127,6 +198,10 @@ module.exports = {
     moduleStopTimeoutEnvName,
     moduleStopTimeoutSeconds,
     stopTimeoutArgs,
+    STOP_DRAIN_MARGIN_MS,
+    moduleShutdownTimeoutMs,
+    shutdownTimeoutEnv,
+    describeStopBudgetDrift,
     stoppedUnclean,
     describeModuleStopOutcome,
     stopModuleContainer

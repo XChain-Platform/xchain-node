@@ -248,6 +248,33 @@ async function getContainerBindMounts(name) {
     })
 }
 
+// A container's stamped stop budget and the SHUTDOWN_TIMEOUT_MS it was created
+// with, as { stopTimeout, shutdownTimeoutMs } (each null when absent). The
+// rest of its env carries secrets and never leaves this function. Resolves
+// null when docker cannot answer, so a caller treats that as "unknown".
+async function getContainerStopSettings(name) {
+    return new Promise((resolve) => {
+        execFile('docker', ['inspect', '--format', '{{json .Config}}', name], (error, stdout) => {
+            if (error) {
+                resolve(null)
+                return
+            }
+            try {
+                const containerConfig = JSON.parse(String(stdout).trim()) || {}
+                const prefix = 'SHUTDOWN_TIMEOUT_MS='
+                const entry = (Array.isArray(containerConfig.Env) ? containerConfig.Env : [])
+                    .find(e => String(e).startsWith(prefix))
+                resolve({
+                    stopTimeout: Number.isInteger(containerConfig.StopTimeout) ? containerConfig.StopTimeout : null,
+                    shutdownTimeoutMs: entry ? String(entry).slice(prefix.length) : null
+                })
+            } catch {
+                resolve(null)
+            }
+        })
+    })
+}
+
 async function waitContainer(containerId) {
     return new Promise((resolve, reject) => {
         execFile('docker', ['wait', containerId], (error, stdout) => {
@@ -280,6 +307,7 @@ module.exports = {
     removeContainer,
     killContainer,
     getContainerBindMounts,
+    getContainerStopSettings,
     forceRemoveContainerByName,
     probeContainerPresenceByName,
     execContainer,

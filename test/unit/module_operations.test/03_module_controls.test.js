@@ -138,6 +138,20 @@ describe('moduleOperations', function () {
             expect(stubs.stopContainerByName.calledWith('container-id-123', 30)).to.be.true
             expect(stubs.stopContainer.called).to.be.false
         })
+
+        it('reads the container before the stop so a drain that predates the budget is named', async function () {
+            const stubs = makeStubs()
+            stubs.getContainerStopSettings.resolves({ stopTimeout: 300, shutdownTimeoutMs: '280000' })
+            const warn = sinon.stub(console, 'warn')
+            try {
+                await loadOperations(stubs).stopModules({ bitcoin: { mainnet: ['xchain-decoder'] } })
+                expect(stubs.getContainerStopSettings.calledOnceWith('container-id-123')).to.be.true
+                expect(stubs.getContainerStopSettings.calledBefore(stubs.stopContainerByName)).to.be.true
+                expect(warn.args.some(a => /xchain-decoder \(bitcoin mainnet\) was created under a 300 s stop budget/.test(String(a[0])))).to.be.true
+            } finally {
+                warn.restore()
+            }
+        })
     })
 })
 

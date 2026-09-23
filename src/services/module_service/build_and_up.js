@@ -24,7 +24,7 @@ let { HUB_MODULE_NAME, LIBRARY_BUNDLES } = require('../../config')
 let { db } = require('../../state')
 let { getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('../config_service')
 let { stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable } = require('../docker_service')
-let { stopModuleContainer, stopTimeoutArgs } = require('../stop_budget_service')
+let { stopModuleContainer, stopTimeoutArgs, shutdownTimeoutEnv } = require('../stop_budget_service')
 let { statusChanged } = require('../status_service')
 let { setHubDatabaseParameters } = require('../database_service')
 let { redactSecrets } = require('../../utils/helpers')
@@ -236,12 +236,12 @@ function resolveSourceMetadata(reuseImage, dir) {
 // `docker run` error.message (which upstream logging prints, and an operator
 // pastes into a bug report). Mirrors DatabaseService's MYSQL_ROOT_PASSWORD
 // treatment. The value reaches the container identically; only argv changes.
-// The observability names resolved above join the map here so they travel
-// the same value-out-of-argv path.
-function resolveContainerEnvironment(environmentVariables) {
+// The observability names resolved above and the drain derived for drainModule
+// (null on a one-shot run, which gets none) join the map here, off argv too.
+function resolveContainerEnvironment(environmentVariables, drainModule) {
     const envArgs = []
     const dockerEnv = config.childProcessEnv()
-    const containerEnv = { ...environmentVariables, ...resolveObservabilityEnv(environmentVariables) }
+    const containerEnv = { ...environmentVariables, ...resolveObservabilityEnv(environmentVariables), ...shutdownTimeoutEnv(drainModule, environmentVariables) }
     for (const key in containerEnv) {
         envArgs.push('--env', key)
         dockerEnv[key] = String(containerEnv[key])
@@ -389,7 +389,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     await assertNoHostPortConflicts(dockerOptions.portArgs, containerPrefix)
     await assertReusableImage(reuseImage, containerPrefix, module, coin, network)
     const sourceMetadata = resolveSourceMetadata(reuseImage, dir)
-    const containerEnvironment = resolveContainerEnvironment(environmentVariables)
+    const containerEnvironment = resolveContainerEnvironment(environmentVariables, onlyExecution ? null : module)
     return launchContainer({
         module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs,
         reuseImage, environmentVariables, dir, containerPrefix,

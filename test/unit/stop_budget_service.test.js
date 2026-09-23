@@ -109,7 +109,7 @@ describe('StopBudgetService', function () {
             const warning = warnStub.args.map(a => String(a[0])).find(l => /exited with code 1/.test(l))
             expect(warning).to.match(/xchain-decoder \(bitcoin mainnet\) exited with code 1 after 100 s, inside the 120 s budget/)
             expect(warning).to.match(/SHUTDOWN_TIMEOUT_MS/)
-            expect(warning).to.match(/XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER alone does not/)
+            expect(warning).to.match(/XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER gives that drain more time only once the container is recreated/)
             expect(logStub.args.some(a => /cleanly/.test(String(a[0])))).to.be.false
         })
 
@@ -127,6 +127,108 @@ describe('StopBudgetService', function () {
             await sbs.stopModuleContainer(stop, 'xchain-encoder', 'bitcoin', 'mainnet', 'gone', {})
             expect(logStub.called).to.be.false
             expect(warnStub.called).to.be.false
+        })
+    })
+})
+
+// The node owns the drain: the service's own hard-exit timer is derived from
+// the same budget docker kills at, so it always fires first.
+describe('StopBudgetService', function () {
+    beforeEach(prepareConsoleStubs)
+    afterEach(restoreConsoleStubs)
+
+    const DECODER_300 = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: '300' }
+
+    describe('moduleShutdownTimeoutMs()', function () {
+        it('reproduces the decoder and tracker default of 100000 ms from the default 120 s budget', function () {
+            expect(sbs.moduleShutdownTimeoutMs('xchain-decoder', {})).to.equal(100000)
+            expect(sbs.moduleShutdownTimeoutMs('xchain-utxo-tracker', {})).to.equal(100000)
+        })
+
+        it('moves with an override in both directions and stays strictly under the budget', function () {
+            expect(sbs.moduleShutdownTimeoutMs('xchain-decoder', DECODER_300)).to.equal(280000)
+            const lowered = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: '60' }
+            expect(sbs.moduleShutdownTimeoutMs('xchain-decoder', lowered)).to.equal(40000)
+            for (const seconds of ['1', '5', '20', '21', '39', '40', '41']) {
+                const env = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: seconds }
+                const ms = sbs.moduleShutdownTimeoutMs('xchain-decoder', env)
+                expect(ms, seconds).to.be.greaterThan(0).and.lessThan(parseInt(seconds, 10) * 1000)
+            }
+        })
+
+        it('leaves a service on the plain default budget, and the coin node, to their own defaults', function () {
+            expect(sbs.moduleShutdownTimeoutMs('xchain-explorer', {})).to.equal(null)
+            expect(sbs.moduleShutdownTimeoutMs('node', {})).to.equal(null)
+            const raised = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_EXPLORER: '90' }
+            expect(sbs.moduleShutdownTimeoutMs('xchain-explorer', raised)).to.equal(70000)
+        })
+    })
+
+    describe('shutdownTimeoutEnv()', function () {
+        it('adds the derived value unless the module config sets its own', function () {
+            expect(sbs.shutdownTimeoutEnv('xchain-decoder', {}, {})).to.deep.equal({ SHUTDOWN_TIMEOUT_MS: '100000' })
+            expect(sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: '45000' }, DECODER_300)).to.deep.equal({})
+            expect(sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: ' ' }, DECODER_300))
+                .to.deep.equal({ SHUTDOWN_TIMEOUT_MS: '280000' })
+            expect(sbs.shutdownTimeoutEnv('xchain-encoder', {}, {})).to.deep.equal({})
+            expect(sbs.shutdownTimeoutEnv(null, {}, DECODER_300), 'a one-shot run').to.deep.equal({})
+        })
+    })
+})
+
+describe('StopBudgetService', function () {
+    beforeEach(prepareConsoleStubs)
+    afterEach(restoreConsoleStubs)
+
+    const DECODER_300 = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: '300' }
+    const driftLine = () => warnStub.args.map(a => String(a[0])).find(l => /was created/.test(l))
+    const cleanStop = () => sinon.stub().resolves({ stopped: true, seconds: 5, killed: false, exitCode: 0 })
+
+    describe('stopModuleContainer() on a container that predates its budget', function () {
+        it('warns before the stop when the container was stamped with another budget', async function () {
+            const read = sinon.stub().resolves({ stopTimeout: 120, shutdownTimeoutMs: '100000' })
+            const stop = cleanStop()
+            await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', DECODER_300, read)
+            expect(read.calledOnceWith('abc123')).to.be.true
+            expect(read.calledBefore(stop)).to.be.true
+            expect(driftLine()).to.match(/xchain-decoder \(bitcoin mainnet\) was created under a 120 s stop budget/)
+            expect(driftLine()).to.match(/XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER \(now 300 s\)/)
+            expect(driftLine()).to.match(/xchain-node recreate/)
+        })
+
+        it('warns when an override is set but the container never got SHUTDOWN_TIMEOUT_MS', async function () {
+            const read = sinon.stub().resolves({ stopTimeout: 300, shutdownTimeoutMs: null })
+            await sbs.stopModuleContainer(cleanStop(), 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', DECODER_300, read)
+            expect(driftLine()).to.match(/was created before the node forwarded SHUTDOWN_TIMEOUT_MS/)
+        })
+
+        it('stays quiet for a container that matches its budget, at the default or recreated', async function () {
+            const atDefault = sinon.stub().resolves({ stopTimeout: 120, shutdownTimeoutMs: null })
+            await sbs.stopModuleContainer(cleanStop(), 'xchain-decoder', 'bitcoin', 'mainnet', 'a', {}, atDefault)
+            const recreated = sinon.stub().resolves({ stopTimeout: 300, shutdownTimeoutMs: '280000' })
+            await sbs.stopModuleContainer(cleanStop(), 'xchain-decoder', 'bitcoin', 'mainnet', 'b', DECODER_300, recreated)
+            const unreadable = sinon.stub().rejects(new Error('docker gone'))
+            await sbs.stopModuleContainer(cleanStop(), 'xchain-decoder', 'bitcoin', 'mainnet', 'c', DECODER_300, unreadable)
+            expect(warnStub.called).to.be.false
+        })
+
+        it('stays quiet for a default-budget service that never carried a forwarded drain', async function () {
+            const read = sinon.stub().resolves({ stopTimeout: null, shutdownTimeoutMs: null })
+            await sbs.stopModuleContainer(cleanStop(), 'xchain-explorer', 'bitcoin', 'mainnet', 'abc123', {}, read)
+            expect(warnStub.called).to.be.false
+        })
+
+        it('warns when an override was dropped but the container still carries the drain it derived', async function () {
+            const read = sinon.stub().resolves({ stopTimeout: 90, shutdownTimeoutMs: '70000' })
+            await sbs.stopModuleContainer(cleanStop(), 'xchain-explorer', 'bitcoin', 'mainnet', 'abc123', {}, read)
+            expect(driftLine()).to.match(/xchain-explorer \(bitcoin mainnet\) was created under a 90 s stop budget/)
+            expect(driftLine()).to.match(/\(now 30 s\)/)
+        })
+
+        it('never reads the coin node, whose budget is a flush and not a drain', async function () {
+            const read = sinon.stub().resolves({ stopTimeout: 1, shutdownTimeoutMs: '1' })
+            await sbs.stopModuleContainer(cleanStop(), 'node', 'bitcoin', 'mainnet', 'abc123', {}, read)
+            expect(read.called).to.be.false
         })
     })
 })
