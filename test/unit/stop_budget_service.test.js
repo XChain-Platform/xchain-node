@@ -102,6 +102,26 @@ describe('StopBudgetService', function () {
             expect(warning).to.match(/XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_UTXO_TRACKER/)
         })
 
+        it('warns when the service exited non-zero inside the budget, naming its own drain timer', async function () {
+            const stop = sinon.stub().resolves({ stopped: true, seconds: 100, killed: false, exitCode: 1 })
+            const outcome = await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', {})
+            expect(outcome.killed).to.be.false
+            const warning = warnStub.args.map(a => String(a[0])).find(l => /exited with code 1/.test(l))
+            expect(warning).to.match(/xchain-decoder \(bitcoin mainnet\) exited with code 1 after 100 s, inside the 120 s budget/)
+            expect(warning).to.match(/SHUTDOWN_TIMEOUT_MS/)
+            expect(warning).to.match(/XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER alone does not/)
+            expect(logStub.args.some(a => /cleanly/.test(String(a[0])))).to.be.false
+        })
+
+        it('still reports a clean stop for exit 0 and for a drainless service ended by SIGTERM (143)', async function () {
+            for (const exitCode of [0, 143, null]) {
+                const stop = sinon.stub().resolves({ stopped: true, seconds: 3, killed: false, exitCode })
+                await sbs.stopModuleContainer(stop, 'xchain-sdk', 'bitcoin', 'mainnet', 'abc123', {})
+            }
+            expect(logStub.args.filter(a => /Stopped xchain-sdk \(bitcoin mainnet\) cleanly in 3 s/.test(String(a[0])))).to.have.length(3)
+            expect(warnStub.called).to.be.false
+        })
+
         it('says nothing when there was nothing to stop', async function () {
             const stop = sinon.stub().resolves({ stopped: false, seconds: 0, killed: false })
             await sbs.stopModuleContainer(stop, 'xchain-encoder', 'bitcoin', 'mainnet', 'gone', {})

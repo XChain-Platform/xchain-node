@@ -82,24 +82,24 @@ describe('DockerService', function () {
 })
 
 
+// `docker stop` exits 0 whether the daemon left on SIGTERM or was killed
+// at the budget; the container's exit code is what tells them apart.
+function stopThenInspect(stubs, { stopErr = null, stopOut = 'xchain-node-bitcoin-mainnet-node\n', exitCode = '0', inspectErr = null } = {}) {
+    const calls = []
+    stubs.execFile.callsFake((cmd, args, ...rest) => {
+        const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+        calls.push(args)
+        if (args[0] === 'stop') return cb(stopErr, stopOut)
+        if (args[0] === 'inspect') return cb(inspectErr, exitCode + '\n')
+        cb(new Error('unexpected ' + args.join(' ')))
+    })
+    return calls
+}
+
 describe('DockerService', function () {
 
 
     describe('stopContainerByName()', function () {
-        // `docker stop` exits 0 whether the daemon left on SIGTERM or was killed
-        // at the budget; the container's exit code is what tells them apart.
-        function stopThenInspect(stubs, { stopErr = null, stopOut = 'xchain-node-bitcoin-mainnet-node\n', exitCode = '0', inspectErr = null } = {}) {
-            const calls = []
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                calls.push(args)
-                if (args[0] === 'stop') return cb(stopErr, stopOut)
-                if (args[0] === 'inspect') return cb(inspectErr, exitCode + '\n')
-                cb(new Error('unexpected ' + args.join(' ')))
-            })
-            return calls
-        }
-
         it('runs docker stop -t <budget> <name> and reads the exit code after it', async function () {
             const stubs = makeStubs()
             const calls = stopThenInspect(stubs)
@@ -118,6 +118,17 @@ describe('DockerService', function () {
             const ds = loadDockerService(stubs)
             const outcome = await ds.stopContainerByName('xchain-node-bitcoin-mainnet-node', 600)
             expect(outcome).to.include({ stopped: true, killed: true })
+        })
+
+        it('carries a non-zero self exit out as exitCode without calling it a kill', async function () {
+            const stubs = makeStubs()
+            stopThenInspect(stubs, { exitCode: '1' })
+            const ds = loadDockerService(stubs)
+            const outcome = await ds.stopContainerByName('xchain-node-bitcoin-mainnet-node', 600)
+            expect(outcome).to.include({ stopped: true, killed: false, exitCode: 1 })
+            stopThenInspect(stubs, { inspectErr: new Error('daemon unreachable') })
+            const unread = await ds.stopContainerByName('xchain-node-bitcoin-mainnet-node', 600)
+            expect(unread).to.include({ stopped: true, killed: false, exitCode: null })
         })
 
         it('reports not stopped, and does not inspect, when docker did not confirm the stop', async function () {

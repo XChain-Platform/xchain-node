@@ -71,16 +71,37 @@ function stopTimeoutArgs(module, env = MODULE_STOP_TIMEOUT_ENV) {
     return ['--stop-timeout', String(moduleStopTimeoutSeconds(module, env))]
 }
 
+// SIGTERM's default action (128 + 15): a process with no drain registered,
+// or npm relaying its child's, which is how a drainless service always stops.
+const EXIT_ON_SIGTERM_DEFAULT = 143
+
+// A stop inside the budget that still ended non-zero. The drains exit 1 when
+// their own hard-exit timer fires or the drain throws, so work was cut off
+// even though docker never had to kill anything.
+function stoppedUnclean(outcome) {
+    return Boolean(outcome && outcome.stopped && !outcome.killed &&
+        Number.isInteger(outcome.exitCode) && outcome.exitCode !== 0 &&
+        outcome.exitCode !== EXIT_ON_SIGTERM_DEFAULT)
+}
+
 // What the operator reads after a service was stopped. A stop that ran out of
 // budget is a kill, and a killed decoder may have been mid-rollback; that is
-// worth a warning line, not silence. Returns null when there was nothing to
-// stop (already gone), because the caller's remove or run surfaces that.
+// worth a warning line, not silence, and so is a drain the service cut off
+// itself. Returns null when there was nothing to stop (already gone), because
+// the caller's remove or run surfaces that.
 function describeModuleStopOutcome(module, coin, network, outcome, budgetSeconds) {
     if (!outcome || !outcome.stopped) return null
     const where = coin && network ? ` (${coin} ${network})` : ''
     if (outcome.killed) {
         return `WARNING: ${module}${where} did not exit within the ${budgetSeconds} s budget and was killed. ` +
-            `Raise ${moduleStopTimeoutEnvName(module)} if this service needs longer to finish its block.`
+            `Raise ${moduleStopTimeoutEnvName(module)} if this service needs longer to finish its block, ` +
+            'and keep the service\'s own SHUTDOWN_TIMEOUT_MS below it where the service reads one.'
+    }
+    if (stoppedUnclean(outcome)) {
+        return `WARNING: ${module}${where} exited with code ${outcome.exitCode} after ${outcome.seconds} s, inside the ` +
+            `${budgetSeconds} s budget, so its shutdown drain did not complete: it overran the service's own ` +
+            'hard-exit timer (SHUTDOWN_TIMEOUT_MS where the service reads one) or failed. Check the service log. ' +
+            `Raising ${moduleStopTimeoutEnvName(module)} alone does not give that drain more time.`
     }
     return `Stopped ${module}${where} cleanly in ${outcome.seconds} s (budget ${budgetSeconds} s).`
 }
@@ -94,7 +115,7 @@ async function stopModuleContainer(stopContainerByName, module, coin, network, c
     const outcome = await stopContainerByName(containerRef, budget)
     const line = describeModuleStopOutcome(module, coin, network, outcome, budget)
     if (line) {
-        if (outcome.killed) logger.warn(line)
+        if (outcome.killed || stoppedUnclean(outcome)) logger.warn(line)
         else logger.info(line)
     }
     return { ...outcome, budget }
@@ -106,6 +127,7 @@ module.exports = {
     moduleStopTimeoutEnvName,
     moduleStopTimeoutSeconds,
     stopTimeoutArgs,
+    stoppedUnclean,
     describeModuleStopOutcome,
     stopModuleContainer
 }
