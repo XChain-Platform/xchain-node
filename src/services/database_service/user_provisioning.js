@@ -18,7 +18,6 @@
 
 let { execFile } = require('child_process')
 let { HUB_MODULE_NAME, XChainService, EXTERNAL_DB } = require('../../config')
-let { db } = require('../../state')
 let { redactSecrets } = require('../../utils/helpers')
 let { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../../utils/sql_safety')
 let { schemaExistsSql } = require('../../db/information_schema')
@@ -31,7 +30,7 @@ let { executeNativeMariaDbCommand, askMariadbRootPassword, executeDockerMariaDbC
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
     if (dependencies.execFile === nativeExecFile) return
-    ;({ execFile, HUB_MODULE_NAME, XChainService, EXTERNAL_DB, db, redactSecrets, assertSafeDbIdentifier, escapeSqlStringLiteral, schemaExistsSql, getLogger, logger } = dependencies)
+    ;({ execFile, HUB_MODULE_NAME, XChainService, EXTERNAL_DB, redactSecrets, assertSafeDbIdentifier, escapeSqlStringLiteral, schemaExistsSql, getLogger, logger } = dependencies)
 }
 
 // Fail fast when the DB container is missing or not ready, instead of
@@ -204,7 +203,6 @@ async function addUserPasswordToDatabase(module, coin, network, databaseName, us
     assertSafeDbIdentifier(databaseName, 'database name')
     assertSafeDbIdentifier(user, 'database user')
     const mariadbRootPassword = await askMariadbRootPassword(coin, network)
-    const moduleContainerId = await db.getModuleContainer(module, coin, network)
 
     // Host is '%' so cross-network shared services (xchain-explorer, xchain-hub)
     // can authenticate against per-coin indexer/decoder DBs. Earlier code derived

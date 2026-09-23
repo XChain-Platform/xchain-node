@@ -36,6 +36,7 @@ let rollcallWiring = require('../rollcall_wiring')
 let { readCheckoutIdentityFromDisk } = require('./git_checkout')
 let { cloneGit, resolveBundledLibRef } = require('./clone_and_refs')
 let { assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs } = require('./docker_args')
+const { parsePortSpec } = require('./docker_args')
 let { attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings } = require('./container_networks')
 const { getLogger } = require('../../observability/logger');
 let logger = getLogger();
@@ -177,16 +178,15 @@ async function resolveMemoryOptions(module, coin, network, onlyExecution) {
         memoryLimitMb: memory.args.length > 0 ? memory.mb : null
     }
 }
-// Validate all port values.
+// Validate all port values, parsed with the conflict check's grammar; refuse a
+// host-interface (IP-scoped) spec, which no configured module port may carry.
 function validatePortArgs(portArgs) {
     for (let i = 0; i < portArgs.length; i++) {
         if (portArgs[i] !== '-p') continue
         const pair = portArgs[i + 1]
-        const colonIdx = pair.indexOf(':')
-        if (colonIdx === -1) continue
-        const hostPort = pair.substring(0, colonIdx)
-        const containerPort = pair.substring(colonIdx + 1)
-        if (!validatePort(hostPort) || !validatePort(containerPort)) {
+        if (typeof pair === 'string' && !pair.includes(':')) continue
+        const spec = parsePortSpec(pair)
+        if (!spec || spec.ip !== '' || !validatePort(spec.hostPort) || !validatePort(spec.containerPort)) {
             throw "Invalid port value in configuration: " + pair
         }
     }
@@ -397,4 +397,4 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     })
 }
 
-module.exports = { configureDependencies, buildAndUp }
+module.exports = { configureDependencies, buildAndUp, validatePortArgs }
