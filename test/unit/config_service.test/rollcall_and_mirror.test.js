@@ -245,15 +245,20 @@ function mirrorAdmissionPassthrough() {
     })
 }
 
+// Every watermark grace the indexer's hub mirror resolves, each of which must be
+// zeroed on regtest or an armed venue wedges every freshly mined block (the
+// price-grace failure the regtest mirror wedge records).
+const GRACE_VARS = [
+    'HUB_SYNC_PRICE_GRACE_S', 'HUB_SYNC_ORACLE_GRACE_S', 'HUB_SYNC_ATTEST_RESPONSE_GRACE_S',
+    'HUB_SYNC_MATCH_GRACE_S', 'HUB_SYNC_CALL_GRACE_S', 'HUB_SYNC_ANCHOR_ATTEST_GRACE_S',
+    // The bridge-family pair. Missing here, a venue with one finalized XBRIDGE
+    // transfer held every later block about 130 s at the 120 s frozen grace.
+    'HUB_SYNC_BRIDGE_GRACE_S', 'HUB_SYNC_POLICY_GRACE_S'
+]
+
 // Regtest mirror arming: the regtest indexer's hub-mirror connection, unset
-// before this row, and the three watermark graces that must be zeroed alongside
-// it or an armed regtest venue wedges every freshly mined block (the price-grace
-// failure the regtest mirror wedge records).
+// before this row, and the GRACE_VARS above zeroed alongside it.
 function regtestMirrorArming() {
-    const GRACE_VARS = [
-        'HUB_SYNC_PRICE_GRACE_S', 'HUB_SYNC_ORACLE_GRACE_S', 'HUB_SYNC_ATTEST_RESPONSE_GRACE_S',
-        'HUB_SYNC_MATCH_GRACE_S', 'HUB_SYNC_CALL_GRACE_S', 'HUB_SYNC_ANCHOR_ATTEST_GRACE_S'
-    ]
     let saved
     beforeEach(function () {
         saved = {}
@@ -276,7 +281,7 @@ function regtestMirrorArming() {
         expect(config['HUB_DB_PASS']).to.equal(config['INDEXER_DB_PASS'])
     })
 
-    it('defaults all three watermark graces to 0 on regtest when the host sets none of them', async function () {
+    it('defaults every watermark grace to 0 on regtest when the host sets none of them', async function () {
         const cs = makeServiceWithConfig('')
         const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
         for (const v of GRACE_VARS) expect(config[v], v).to.equal('0')

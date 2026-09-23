@@ -275,6 +275,14 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
 // barrier, then again on the anchor-reward attestation barrier once
 // match was cleared (hub_db_sync.js reads all of them through
 // resolveWatermarkGrace, regtest-overridable only).
+// The bridge and policy pair joined the indexer after this list was written
+// and was missed. Their barriers stay open while no transfer is finalized, so a
+// bitcoin-only venue never paid for it; the litecoin and dogecoin legs get gas
+// over the bridge, so after the first transfer every block whose time passed
+// the newest effective_time waited out the 120 s grace. Measured on the
+// 2026-09-23 nightly (run 35829816064): 8 deferrals, about 2m10s, per affected
+// block on the DOGE indexer, and every e2e step there took about 130 s where
+// the bitcoin leg's took about 10 s.
 function configureIndexerAfterHubKey(defaultValues, module, network) {
     if (module === XChainService.XCHAIN_INDEXER) {
         if (defaultValues.HUB_API_KEY) {
@@ -291,7 +299,8 @@ function configureIndexerAfterHubKey(defaultValues, module, network) {
         if (network === Network.REGTEST) {
             const hubSyncRegtestGraceVars = [
                 "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S",
-                "HUB_SYNC_MATCH_GRACE_S", "HUB_SYNC_CALL_GRACE_S", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S"
+                "HUB_SYNC_MATCH_GRACE_S", "HUB_SYNC_CALL_GRACE_S", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
+                "HUB_SYNC_BRIDGE_GRACE_S", "HUB_SYNC_POLICY_GRACE_S"
             ]
             for (const varName of hubSyncRegtestGraceVars) {
                 defaultValues[varName] = (config.HUB_SYNC_GRACE_ENV[varName] !== undefined && config.HUB_SYNC_GRACE_ENV[varName] !== "")

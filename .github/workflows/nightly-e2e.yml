@@ -199,6 +199,16 @@ jobs:
       # per-node value forks settlement - so this cannot leak onto a shared ledger even
       # if it is copied somewhere it does not belong.
       HUB_SYNC_ANCHOR_ATTEST_GRACE_S: "2"
+      # The same cadence mismatch on the two bridge-family barriers, which only the
+      # litecoin and dogecoin legs arm: their gas arrives over the bridge, and once
+      # one transfer is finalized every block past its effective_time waits for the
+      # watermark to reach blockTime + 120. Measured on run 35829816064: about 2m10s
+      # per affected block on both of their indexers and on the bitcoin gas rail
+      # beside them, so every e2e step there took about 130 s against about 10 s on
+      # the bitcoin leg. 2s for the reason given above; regtest-only in the indexer
+      # for the same reason, and needs xchain-node's passthrough of both names.
+      HUB_SYNC_BRIDGE_GRACE_S: "2"
+      HUB_SYNC_POLICY_GRACE_S: "2"
       # Bounds ONE mirror-barrier attempt. On expiry the block is DEFERRED and
       # retried, never committed uncertified - the indexer says so outright
       # ("purely operational: it opens no barrier and commits no block") - so a
