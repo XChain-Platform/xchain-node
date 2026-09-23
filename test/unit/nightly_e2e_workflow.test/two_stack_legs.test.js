@@ -37,7 +37,9 @@ const CHAIN_RAIL_DEFAULT_PORTS = {
 
 function loadSteps() {
     const doc = yaml.load(fs.readFileSync(WORKFLOW, 'utf8'))
-    const steps = doc.jobs.e2e.steps
+    // The stack steps live on the shard job since the action suite was sharded;
+    // `e2e` is now the per-coin aggregate, which boots nothing.
+    const steps = doc.jobs['e2e-shard'].steps
     const find = (prefix) => {
         const step = steps.find(s => typeof s.name === 'string' && s.name.startsWith(prefix))
         if (!step) throw new Error('workflow step not found: ' + prefix)
