@@ -50,10 +50,11 @@ describe('ROLLCALL wiring guard: the refusal', function () {
         expect(warnStub.called).to.equal(false)
     })
 
-    it('names the public explorer read for testnet, keyed by the federation read key, and the self-hosted alternative', () => {
+    it('names the public explorer read for testnet, with no key, and the self-hosted alternative', () => {
         const message = refusal(INDEXER, 'bitcoin', 'testnet', {}).message
         expect(message).to.contain('DOGE_INDEXER_API_URL=https://explorer.xchain.io/TDOGE/api/')
-        expect(message).to.match(/DOGE_INDEXER_API_KEY set to the federation read key this validator was issued/)
+        expect(message).to.match(/with no DOGE_INDEXER_API_KEY/)
+        expect(message).to.not.match(/federation read key/)
         expect(message).to.match(/running its own dogecoin testnet indexer points at that instead/)
         expect(message).to.not.contain('/DOGE/api/')
     })
