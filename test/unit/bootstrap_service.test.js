@@ -258,7 +258,6 @@ describe('BootstrapService', function () {
     })
 })
 
-
     // A daemon that cannot be reached says nothing about the volume.
 describe('BootstrapService', function () {
     beforeEach(saveRequireSignedBootstrapSetting)
@@ -332,7 +331,6 @@ describe('BootstrapService', function () {
     })
 })
 
-
     // The decisive assertion for this probe is about the SHELL, and no stub
     // can make it: the test above stubs a REJECTED exec, which is the one
     // shape a failed `ls` never produced. `ls -A /data 2>/dev/null | head -1`
@@ -345,6 +343,8 @@ describe('BootstrapService', function () {
     afterEach(restoreRequireSignedBootstrapSetting)
     describe('utxoTrackerVolumeFreshness()', function () {
         it('uses a listing command that exits non-zero when the listing fails', async function () {
+            // Cold macOS proxyquire setup can exceed the suite's 2-second timeout.
+            this.timeout(10000)
             const fs = require('fs')
             const os = require('os')
             const path = require('path')
