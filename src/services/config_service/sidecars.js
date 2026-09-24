@@ -80,9 +80,11 @@ function upsertSidecarValues(localFilePath, values) {
         // renamed to the redaction-safe `*_SECRET` form must not sprout the legacy
         // twin again on the next rotation: two names for one credential is exactly
         // the ambiguity foldSecretEnvAliases() refuses to guess through, so the
-        // rotation would leave the stack unable to start.
+        // rotation would leave the stack unable to start. When the legacy name is
+        // not on disk either, there is nothing to preserve, so a brand new key goes
+        // straight to its redaction-safe name.
         const alias = preferredSecretEnvName(k)
-        merged[alias && alias in merged ? alias : k] = values[k]
+        merged[alias && !(k in merged) ? alias : k] = values[k]
     }
     persistSidecarCreds(localFilePath, merged, { overwrite: true })
 }
@@ -279,7 +281,13 @@ function generateRpcCredentials(defaultConfig, localFilePath) {
         generated["NODE_USER"] = defaultConfig["NODE_USER"] = crypto.randomBytes(12).toString('hex')
     }
     if (!("NODE_PASSWORD" in defaultConfig)) {
-        generated["NODE_PASSWORD"] = defaultConfig["NODE_PASSWORD"] = crypto.randomBytes(24).toString('hex')
+        // Absent under NODE_PASSWORD means absent under NODE_SECRET too, since the
+        // fold above already collapsed either spelling onto this key. Nothing on
+        // disk to preserve, so the new credential goes straight to its
+        // redaction-safe name.
+        const value = crypto.randomBytes(24).toString('hex')
+        defaultConfig["NODE_PASSWORD"] = value
+        generated[preferredSecretEnvName("NODE_PASSWORD")] = value
     }
     if (Object.keys(generated).length) persistSidecarCreds(localFilePath, generated)
 }
