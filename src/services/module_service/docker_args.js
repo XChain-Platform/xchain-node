@@ -34,6 +34,21 @@ function configureDependencies(dependencies) {
     } = dependencies)
 }
 
+// Split a `-p` value on its last colon into [IP:]HOST:CONTAINER fields (ip is
+// '' when absent); null for a non-string or colon-less value.
+function parsePortSpec(pair) {
+    if (typeof pair !== 'string') return null
+    const colonIdx = pair.lastIndexOf(':')
+    if (colonIdx === -1) return null
+    const beforeContainer = pair.substring(0, colonIdx)
+    const hostIdx = beforeContainer.lastIndexOf(':')
+    return {
+        ip: hostIdx === -1 ? '' : beforeContainer.substring(0, hostIdx),
+        hostPort: beforeContainer.substring(hostIdx + 1),
+        containerPort: pair.substring(colonIdx + 1)
+    }
+}
+
 // Fail fast on host-port collisions before `docker run`. On a single-stack
 // host this is a no-op; on a multi-stack host (two NODE_PREFIX stacks, or a
 // service container hand-created outside xchain-node) two containers can request
@@ -46,15 +61,8 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
     const requested = []
     for (let i = 0; i < portArgs.length; i++) {
         if (portArgs[i] === '-p') {
-            const pair = portArgs[i + 1]
-            if (typeof pair !== 'string') continue
-            const colonIdx = pair.lastIndexOf(':')
-            if (colonIdx === -1) continue
-            // "-p HOST:CONTAINER" or "-p IP:HOST:CONTAINER": the host port is the
-            // field before the final colon; take the last colon-separated pair's left side.
-            const beforeContainer = pair.substring(0, colonIdx)
-            const hostPort = beforeContainer.substring(beforeContainer.lastIndexOf(':') + 1)
-            if (/^\d+$/.test(hostPort)) requested.push(hostPort)
+            const spec = parsePortSpec(portArgs[i + 1])
+            if (spec && /^\d+$/.test(spec.hostPort)) requested.push(spec.hostPort)
         }
     }
     if (requested.length === 0) return
@@ -381,5 +389,6 @@ module.exports = {
     resolveObservabilityEnv,
     buildHealthcheckArgs,
     buildModuleDockerArgs,
+    parsePortSpec,
     assertNoHostPortConflicts
 }

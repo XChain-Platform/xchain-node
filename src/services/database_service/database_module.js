@@ -61,7 +61,6 @@ async function verifyExternalDatabase() {
         throw new Error("Cannot reach external MariaDB at " + cfg.host + ":" + cfg.port + ": " + (err.message || err))
     }
     return true
-    return true
 }
 
 // Cap json-file log growth so a long-running node cannot fill the host

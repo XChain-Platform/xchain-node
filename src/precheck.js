@@ -18,7 +18,7 @@
 const fs = require('fs')
 
 const { dataDir, moduleDir, tmpDir, containersFilesDir,
-        EXTERNAL_DB } = require('./config')
+        EXTERNAL_DB, hostEnv } = require('./config')
 const { db, isVerbose }                = require('./state')
 const { redactSecrets }                = require('./utils/helpers')
 const { checkDockerInstalledAndReachable, createDockerNetwork, checkContainerdDataRootRelocation, checkMemoryLimitSupport } = require('./services/docker_service')
@@ -220,7 +220,7 @@ async function installHubAtRef(moduleRef) {
         // Preserve the cause. A bare `catch {}` here would discard the ONLY description
         // of what actually went wrong and replace it with a message that names no
         // reason, so every hub install failure would look identical and be undebuggable
-        // without editing this file first.
+        // without editing this file first. That failure mode cost two debugging cycles.
         // Secrets are redacted because installHubModule handles DB credentials.
         throw new Error("There was an error trying to install the hub module: " + redactSecrets(err), { cause: err })
     }
@@ -308,7 +308,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     // state-changing command after it did the same. Same precedence as the container
     // env: a host-env HUB_API_KEY still wins, the sidecar only fills an empty one, and
     // this never mints (a host with no sidecar stays keyless exactly as before).
-    await applyHubApiKeyFromSidecar(process.env)
+    await applyHubApiKeyFromSidecar(hostEnv())
 
     await installHubAtRef(moduleRef)
 

@@ -51,6 +51,7 @@
 
 const crypto   = require('crypto')
 const config = require('../config');
+const { getLogger } = require('../observability/logger')
 const {
     PLATFORM_KEY_FINGERPRINT,
     KEY_PATH,
@@ -64,6 +65,15 @@ const {
     verifyGitTagSignature,
     assertStatusIsGood
 } = require('./release_signature_service/gpg_verification.js')
+
+function defaultLogger() {
+    const logger = getLogger()
+    return {
+        log: logger.info.bind(logger),
+        warn: logger.warn.bind(logger),
+        error: logger.error.bind(logger)
+    }
+}
 
 function signatureCheckDisabled() {
     return /^(0|false|no)$/i.test(config.XCHAIN_NODE_REQUIRE_SIGNED_RELEASE)
@@ -167,7 +177,7 @@ function assertDigestMatches({ sumsText, bytes, name }) {
  * @returns {Promise<{verified: boolean, fingerprint?: string, reason?: string}>}
  */
 async function verifyManifestForTag({
-    tag, manifestBytes, fetchAsset, logger = console,
+    tag, manifestBytes, fetchAsset, logger = defaultLogger(),
     keyPath = KEY_PATH, fingerprint = PLATFORM_KEY_FINGERPRINT
 }) {
     const disabled = signatureCheckDisabled()

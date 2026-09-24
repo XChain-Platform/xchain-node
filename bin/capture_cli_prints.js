@@ -13,7 +13,7 @@
  *
  * The CLI print contract: what this tool exists to prove.
  *
- * The four user-facing paths below print straight to the console on purpose,
+ * The user-facing paths below print straight to the console on purpose,
  * because their console IS the product a human reads. A restructure that
  * moves those files, renames their methods or routes anything through a logger
  * must leave every one of those prints saying exactly what it said before. A
@@ -46,9 +46,9 @@ const { execFileSync } = require('child_process');
 
 const REPO = path.resolve(__dirname, '..');
 
-// The four user-facing paths whose prints go to the console, not the logger.
+// The user-facing paths whose prints go to the console, not the logger.
 // A path that is a directory contributes every .js file under it.
-const PRINT_PATHS = ['src/ui', 'src/cli.js', 'src/operations', 'src/precheck.js'];
+const PRINT_PATHS = ['src/ui', 'src/cli.js', 'src/cli', 'src/operations', 'src/precheck.js'];
 
 const CONSOLE_METHOD = /console\s*\.\s*([A-Za-z]+)\s*\(/g;
 
@@ -180,7 +180,10 @@ function collectPrints() {
  * each in a child process and keep the bytes.
  */
 function driveHelp() {
-    const cliSrc = fs.readFileSync(path.join(REPO, 'src/cli.js'), 'utf8');
+    const cliSrc = ['src/cli.js', 'src/cli']
+        .flatMap(expandPath)
+        .map(rel => fs.readFileSync(path.join(REPO, rel), 'utf8'))
+        .join('\n');
     const names  = [...cliSrc.matchAll(/\.command\(\s*'([a-z0-9:-]+)'/g)].map(x => x[1]);
     const targets = ['--help', ...[...new Set(names)].sort().map(n => `${n} --help`)];
     const chunks = [];

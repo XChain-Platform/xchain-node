@@ -138,28 +138,30 @@ describe('moduleOperations', function () {
         describe('the regtest re-genesis hub purge', function () {
 
             it('names the hub rows in the confirmation for a regtest node reset', async function () {
-                const readline = require('readline')
                 const isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
                 Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
-                const createInterface = sinon.stub(readline, 'createInterface').returns({
-                    question: (_q, cb) => cb('yes'),
-                    close() {}
-                })
                 const warned = []
                 const warn = sinon.stub(console, 'warn').callsFake((...a) => warned.push(a.join(' ')))
                 try {
                     const stubs = makeStubs()
+                    stubs.readline.createInterface.returns({
+                        question: (_q, cb) => cb('yes'),
+                        close() {}
+                    })
                     stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
                     const ops = loadOperations(stubs)
                     expect(await ops.resetModules('node', 'bitcoin', 'regtest', false)).to.be.true
 
                     const mainnetStubs = makeStubs()
+                    mainnetStubs.readline.createInterface.returns({
+                        question: (_q, cb) => cb('yes'),
+                        close() {}
+                    })
                     mainnetStubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
                     const mainnetOps = loadOperations(mainnetStubs)
                     expect(await mainnetOps.resetModules('node', 'bitcoin', 'mainnet', false)).to.be.true
                 } finally {
                     warn.restore()
-                    createInterface.restore()
                     if (isTTYDescriptor) Object.defineProperty(process.stdin, 'isTTY', isTTYDescriptor)
                     else delete process.stdin.isTTY
                 }

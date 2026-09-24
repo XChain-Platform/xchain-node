@@ -194,6 +194,17 @@ describe("NodeService: buildCryptoNode()", function () {
                 expect(warning).to.match(/XCHAIN_NODE_STOP_TIMEOUT_SECONDS/)
             })
 
+            it('warns when the daemon exited non-zero inside the budget instead of calling it clean', async function () {
+                const stubs = makeNodeServiceStubs()
+                stubs.stopContainerByName = sinon.stub().resolves({ stopped: true, seconds: 30, killed: false, exitCode: 1 })
+                await build(stubs, { envBlocksDir: null })
+                const warning = warnStub.args.map(a => String(a[0])).find(l => /exited with code 1/.test(l))
+                expect(warning).to.match(/the bitcoin mainnet daemon exited with code 1 after 30 s/)
+                expect(warning).to.match(/debug\.log/)
+                expect(warning).to.not.match(/SHUTDOWN_TIMEOUT_MS/)
+                expect(logStub.args.some(a => /daemon cleanly/.test(String(a[0])))).to.be.false
+            })
+
             it('says nothing about the stop when there was no previous daemon', async function () {
                 const stubs = makeNodeServiceStubs()
                 stubs.stopContainerByName = sinon.stub().resolves({ stopped: false, seconds: 0, killed: false })

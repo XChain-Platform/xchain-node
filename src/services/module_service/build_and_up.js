@@ -24,7 +24,7 @@ let { HUB_MODULE_NAME, LIBRARY_BUNDLES } = require('../../config')
 let { db } = require('../../state')
 let { getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('../config_service')
 let { stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable } = require('../docker_service')
-let { stopModuleContainer, stopTimeoutArgs } = require('../stop_budget_service')
+let { stopModuleContainer, stopTimeoutArgs, shutdownTimeoutEnv } = require('../stop_budget_service')
 let { statusChanged } = require('../status_service')
 let { setHubDatabaseParameters } = require('../database_service')
 let { redactSecrets } = require('../../utils/helpers')
@@ -36,6 +36,7 @@ let rollcallWiring = require('../rollcall_wiring')
 let { readCheckoutIdentityFromDisk } = require('./git_checkout')
 let { cloneGit, resolveBundledLibRef } = require('./clone_and_refs')
 let { assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs } = require('./docker_args')
+const { parsePortSpec } = require('./docker_args')
 let { attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings } = require('./container_networks')
 const { getLogger } = require('../../observability/logger');
 let logger = getLogger();
@@ -177,16 +178,15 @@ async function resolveMemoryOptions(module, coin, network, onlyExecution) {
         memoryLimitMb: memory.args.length > 0 ? memory.mb : null
     }
 }
-// Validate all port values.
+// Validate all port values, parsed with the conflict check's grammar; refuse a
+// host-interface (IP-scoped) spec, which no configured module port may carry.
 function validatePortArgs(portArgs) {
     for (let i = 0; i < portArgs.length; i++) {
         if (portArgs[i] !== '-p') continue
         const pair = portArgs[i + 1]
-        const colonIdx = pair.indexOf(':')
-        if (colonIdx === -1) continue
-        const hostPort = pair.substring(0, colonIdx)
-        const containerPort = pair.substring(colonIdx + 1)
-        if (!validatePort(hostPort) || !validatePort(containerPort)) {
+        if (typeof pair === 'string' && !pair.includes(':')) continue
+        const spec = parsePortSpec(pair)
+        if (!spec || spec.ip !== '' || !validatePort(spec.hostPort) || !validatePort(spec.containerPort)) {
             throw "Invalid port value in configuration: " + pair
         }
     }
@@ -236,12 +236,12 @@ function resolveSourceMetadata(reuseImage, dir) {
 // `docker run` error.message (which upstream logging prints, and an operator
 // pastes into a bug report). Mirrors DatabaseService's MYSQL_ROOT_PASSWORD
 // treatment. The value reaches the container identically; only argv changes.
-// The observability names resolved above join the map here so they travel
-// the same value-out-of-argv path.
-function resolveContainerEnvironment(environmentVariables) {
+// The observability names resolved above and the drain derived for drainModule
+// (null on a one-shot run, which gets none) join the map here, off argv too.
+function resolveContainerEnvironment(environmentVariables, drainModule) {
     const envArgs = []
     const dockerEnv = config.childProcessEnv()
-    const containerEnv = { ...environmentVariables, ...resolveObservabilityEnv(environmentVariables) }
+    const containerEnv = { ...environmentVariables, ...resolveObservabilityEnv(environmentVariables), ...shutdownTimeoutEnv(drainModule, environmentVariables) }
     for (const key in containerEnv) {
         envArgs.push('--env', key)
         dockerEnv[key] = String(containerEnv[key])
@@ -389,7 +389,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     await assertNoHostPortConflicts(dockerOptions.portArgs, containerPrefix)
     await assertReusableImage(reuseImage, containerPrefix, module, coin, network)
     const sourceMetadata = resolveSourceMetadata(reuseImage, dir)
-    const containerEnvironment = resolveContainerEnvironment(environmentVariables)
+    const containerEnvironment = resolveContainerEnvironment(environmentVariables, onlyExecution ? null : module)
     return launchContainer({
         module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs,
         reuseImage, environmentVariables, dir, containerPrefix,
@@ -397,4 +397,4 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     })
 }
 
-module.exports = { configureDependencies, buildAndUp }
+module.exports = { configureDependencies, buildAndUp, validatePortArgs }

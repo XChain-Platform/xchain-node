@@ -56,12 +56,24 @@ function describeNodeStopOutcome(coin, network, outcome, budgetSeconds) {
             `It will come back at its last flushed state and re-validate from there, which can take hours on a large dbcache. ` +
             `Raise ${NODE_STOP_TIMEOUT_ENV} above the time this daemon needs to flush before the next update.`
     }
+    if (nodeStoppedUnclean(outcome)) {
+        return `WARNING: the ${coin} ${network} daemon exited with code ${outcome.exitCode} after ${outcome.seconds} s ` +
+            `(budget ${budgetSeconds} s), not cleanly. Check its debug.log before assuming the chainstate was flushed.`
+    }
     return `Stopped the ${coin} ${network} daemon cleanly in ${outcome.seconds} s (budget ${budgetSeconds} s).`
+}
+
+// A daemon that left inside the budget with a non-zero code exited on an
+// error, not a clean flush.
+function nodeStoppedUnclean(outcome) {
+    return Boolean(outcome && outcome.stopped && !outcome.killed &&
+        Number.isInteger(outcome.exitCode) && outcome.exitCode !== 0)
 }
 
 module.exports = {
     DEFAULT_NODE_STOP_TIMEOUT_SECONDS,
     NODE_STOP_TIMEOUT_ENV,
     nodeStopTimeoutSeconds,
-    describeNodeStopOutcome
+    describeNodeStopOutcome,
+    nodeStoppedUnclean
 }

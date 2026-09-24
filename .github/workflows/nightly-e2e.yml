@@ -13,7 +13,7 @@ name: E2E (regtest)
 # "which chain". A suite filter is appended only when one is set, so the common
 # full-suite run stays short.
 run-name: >-
-  E2E ${{ github.event_name == 'schedule' && 'all coins' || inputs.coin }} regtest @ ${{ inputs.ref || 'develop' }}${{ inputs.suite && format(' [{0} only]', inputs.suite) || '' }}
+  E2E ${{ (github.event_name == 'schedule' || inputs.coin == 'all') && 'all coins' || inputs.coin }} regtest @ ${{ inputs.ref || 'develop' }}${{ inputs.suite && format(' [{0} only]', inputs.suite) || '' }}
 
 # Cross-component integration gate. Boots the FULL XChain stack on regtest via
 # xchain-node - which clones every service repo at the REF THIS RUN NAMES and
@@ -68,9 +68,15 @@ on:
   workflow_dispatch:
     inputs:
       coin:
-        description: 'Coin to test'
+        # 'all' expands to the same three-coin array the schedule uses, so a
+        # dispatch can name a ref (release/vX.Y.Z) AND cover all three coins in
+        # one run - the schedule can name all three coins but never a ref, and
+        # a single-coin dispatch can name a ref but never more than one coin;
+        # this is the third combination, needed only for the release-freeze
+        # acceptance gate (MT3), which the other two cannot satisfy together.
+        description: 'Coin to test, or "all" for bitcoin+litecoin+dogecoin in one run'
         type: choice
-        options: [bitcoin, litecoin, dogecoin]
+        options: [bitcoin, litecoin, dogecoin, all]
         default: bitcoin
       suite:
         # ONE suite instead of the whole action set, so fixing a defect costs a boot
@@ -130,40 +136,115 @@ on:
 permissions:
   contents: read
 
+# WHY THE ACTION SUITE IS SHARDED. One coin's full pass was a single job: boot a
+# stack, then run ~110 action files, security and performance back to back.
+# Measured on run 35605562229 the bitcoin action step alone took 3h14m, and the
+# litecoin and dogecoin legs, which boot two stacks and wait on the bridge, ran
+# into the 360-minute job ceiling, so the three-coin MT3 matrix cost about four
+# hours of wall clock at every release cut.
+#
+# Each coin now runs as three kinds of job, still in ONE run:
+#
+#   plan                      once per run: clones xchain-e2e-test at the ref
+#                             under test and splits test/actions into
+#                             E2E_SHARDS groups by measured weight
+#                             (scripts/e2e_shard_plan.js). One plan, so every
+#                             shard agrees on who owns which suite.
+#   e2e-shard (<coin>, <n>)   one fresh stack per shard, running only its
+#                             groups; shard 1 also runs security and perf.
+#                             Uploads e2e-shard-<coin>-<n>.
+#   e2e (<coin>)              the aggregate. Same name as the old per-coin job,
+#                             and it uploads the same e2e-logs-<coin> artifact,
+#                             so the cut kit (preflight.js, judge-matrix.js)
+#                             reads this run exactly as it read an unsharded one.
+#                             It fails its coin unless every planned shard ran
+#                             nonzero tests with zero failures
+#                             (scripts/e2e_shard_merge.js).
+#
+# A shard is a fresh stack, so every suite already had to be runnable alone
+# (the `suite` input has always relied on that); sharding adds no new ordering
+# assumption. Five shards bring the bitcoin weights to ~42 minutes of action
+# per shard, about an hour per job with setup and boot.
 jobs:
-  e2e:
+  plan:
     runs-on: ubuntu-latest
-    # WHY THE COIN LIST IS EVENT-DEPENDENT. A scheduled run carries NO inputs, so
-    # without this it would silently test bitcoin alone and the nightly would be
-    # two thirds blind: the litecoin and dogecoin legs are where the chain-specific
-    # breakage actually lands. A dispatch keeps exactly its old behaviour, one
-    # chosen coin, because a subset proves a fix and must not pretend to be a train.
-    # The three legs are independent stacks, so fail-fast would throw away two
-    # answers to report one; a release needs all three verdicts, not the first.
+    timeout-minutes: 10
+    outputs:
+      coins: ${{ steps.coins.outputs.coins }}
+      shards: ${{ steps.plan.outputs.shards }}
+      plan: ${{ steps.plan.outputs.plan }}
+    env:
+      STACK_REF: ${{ github.event.inputs.ref || 'develop' }}
+      SUITE: ${{ github.event.inputs.suite || '' }}
+      # Sized off run 35605562229: ~204 minutes of bitcoin action weight over 5
+      # shards is ~42 each. Raise it here if the suite grows; nothing else
+      # hardcodes the count. Three coins at 5 shards is 15 concurrent runners.
+      E2E_SHARDS: '5'
+    steps:
+      # The plan and merge scripts come from THIS workflow's commit, not from
+      # the ref under test, so an older ref (a published vX.Y.Z) that predates
+      # them can still be graded.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # WHY THE COIN LIST IS EVENT-DEPENDENT. A scheduled run carries NO inputs, so
+      # without this it would silently test bitcoin alone and the nightly would be
+      # two thirds blind. A dispatch keeps exactly its old behaviour, one chosen
+      # coin; coin 'all' reuses the identical three-coin literal. The e2e-shard
+      # and e2e matrices both read this one output.
+      - name: Resolve the coin list
+        id: coins
+        env:
+          COINS: ${{ github.event_name == 'schedule' && '["bitcoin","litecoin","dogecoin"]' || github.event.inputs.coin == 'all' && '["bitcoin","litecoin","dogecoin"]' || format('["{0}"]', github.event.inputs.coin || 'bitcoin') }}
+        run: |
+          echo "coins=$COINS"
+          echo "coins=$COINS" >> "$GITHUB_OUTPUT"
+
+      - name: Clone the e2e suite at the ref under test
+        run: git clone --depth 1 --branch "$STACK_REF" https://github.com/XChain-Platform/xchain-e2e-test.git "$RUNNER_TEMP/e2e"
+
+      - name: Plan the action-suite shards
+        id: plan
+        run: |
+          node scripts/e2e_shard_plan.js --e2e-dir "$RUNNER_TEMP/e2e" --shards "$E2E_SHARDS" \
+            --suite "$SUITE" --weights scripts/e2e_shard_weights.json > "$RUNNER_TEMP/plan.json"
+          PLAN="$RUNNER_TEMP/plan.json" node -e '
+            const p = JSON.parse(require("fs").readFileSync(process.env.PLAN, "utf8"))
+            console.log(`xchain-e2e-test ${p.version}: ${p.groups.length} groups over ${p.shard_count} shard(s)`)
+            if (p.unweighted && p.unweighted.length) console.log(`::warning::no measured weight for ${p.unweighted.join(", ")}; scheduled at the default`)
+            for (const n of p.shards) {
+              const s = p.plan[n]
+              console.log(`shard ${n}: ~${s.weight_s === null ? "?" : Math.round(s.weight_s / 60)} min, ${s.groups.length} groups${s.extras.length ? " + " + s.extras.join(" + ") : ""}: ${s.groups.join(" ")}`)
+            }'
+          echo "plan=$(cat "$RUNNER_TEMP/plan.json")" >> "$GITHUB_OUTPUT"
+          echo "shards=$(PLAN="$RUNNER_TEMP/plan.json" node -p 'JSON.stringify(JSON.parse(require("fs").readFileSync(process.env.PLAN, "utf8")).shards)')" >> "$GITHUB_OUTPUT"
+
+  e2e-shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    # The three legs are independent stacks, and so are the shards within a leg,
+    # so fail-fast would throw away answers; a release needs every verdict.
     strategy:
       fail-fast: false
       matrix:
-        coin: ${{ fromJSON(github.event_name == 'schedule' && '["bitcoin","litecoin","dogecoin"]' || format('["{0}"]', github.event.inputs.coin || 'bitcoin')) }}
-    # A BTC full action suite alone runs ~1h50m of wall clock, and the security
-    # and performance suites are sequenced AFTER it, so at 120 the two of them
-    # shared whatever minutes the action suite happened to leave - usually none.
-    # They had never once executed, and no amount of fixing the action suite
-    # could have changed that: the budget, not the tests, was the binding
-    # constraint.
-    #
-    # 360 is the platform ceiling for a hosted job, i.e. this sets no limit the
-    # runner would not impose anyway. That is deliberate: the two suites behind
-    # the action pass have never run, so there is no measured duration to size
-    # headroom against, and guessing low would re-create the same invisible
-    # truncation one tier further along. The cost is that a WEDGED run (a hung
-    # container, a stalled indexer poll) now takes the full 6 hours to report
-    # instead of failing earlier - so if that starts happening, add a
-    # `timeout-minutes` to the individual suite steps rather than clawing this
-    # number back down; a per-step bound catches a hang without also capping a
-    # legitimately long pass.
-    timeout-minutes: 360
+        coin: ${{ fromJSON(needs.plan.outputs.coins) }}
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    # 360 was the unsharded ceiling, set because a whole coin pass had no
+    # measured duration to size against. A shard does: ~42 minutes of action
+    # plus ~15 of setup and boot on bitcoin, somewhat more on the two-stack
+    # legs. 240 is four times that, so a slow leg is never truncated, while a
+    # WEDGED shard (a hung container, a stalled indexer poll) reports in four
+    # hours instead of six.
+    timeout-minutes: 240
     env:
       COIN: ${{ matrix.coin }}
+      SHARD: ${{ matrix.shard }}
+      PLAN_JSON: ${{ needs.plan.outputs.plan }}
       # The anchor-reward attestation barrier holds each block until the hub-mirror
       # stream watermark is 120s past that block's own timestamp. On a shared ledger
       # that is free, because blocks are ten minutes apart and the watermark is long
@@ -187,6 +268,16 @@ jobs:
       # per-node value forks settlement - so this cannot leak onto a shared ledger even
       # if it is copied somewhere it does not belong.
       HUB_SYNC_ANCHOR_ATTEST_GRACE_S: "2"
+      # The same cadence mismatch on the two bridge-family barriers, which only the
+      # litecoin and dogecoin legs arm: their gas arrives over the bridge, and once
+      # one transfer is finalized every block past its effective_time waits for the
+      # watermark to reach blockTime + 120. Measured on run 35829816064: about 2m10s
+      # per affected block on both of their indexers and on the bitcoin gas rail
+      # beside them, so every e2e step there took about 130 s against about 10 s on
+      # the bitcoin leg. 2s for the reason given above; regtest-only in the indexer
+      # for the same reason, and needs xchain-node's passthrough of both names.
+      HUB_SYNC_BRIDGE_GRACE_S: "2"
+      HUB_SYNC_POLICY_GRACE_S: "2"
       # Bounds ONE mirror-barrier attempt. On expiry the block is DEFERRED and
       # retried, never committed uncertified - the indexer says so outright
       # ("purely operational: it opens no barrier and commits no block") - so a
@@ -361,6 +452,7 @@ jobs:
         # federation; this venue is a single hub, so the run's own clock is fine.
         run: |
           node src/index.js validator init \
+            --network regtest \
             --oracle-epoch-start "$(date -u +%s)000" \
             --capabilities price,cross_chain,oracle_publish,attestation
           {
@@ -498,21 +590,52 @@ jobs:
             node src/index.js install "$STACK_REF" all bitcoin regtest
           fi
 
-      - name: Run the e2e action suite
-        # Now exits non-zero on failure (cli.js e2etest propagates the suite's
-        # exit code), so this step natively gates the job.
-        run: node src/index.js e2etest "$COIN" $SUITE --ref "$STACK_REF"
+      - name: Select this shard's action suites
+        # The plan job owns the split; this only reads this shard's entry, so the
+        # pattern run here is the one the aggregate later checks it against.
+        run: |
+          PATTERN=$(node -p 'JSON.parse(process.env.PLAN_JSON).plan[process.env.SHARD].pattern')
+          GROUPS_LINE=$(node -p 'JSON.parse(process.env.PLAN_JSON).plan[process.env.SHARD].groups.join(" ")')
+          echo "shard $SHARD of $(node -p 'JSON.parse(process.env.PLAN_JSON).shard_count'): $GROUPS_LINE"
+          echo "SHARD_PATTERN=$PATTERN" >> "$GITHUB_ENV"
+
+      - name: Run the e2e action suite (this shard's groups)
+        # The pattern is e2etest's testName argument: runE2ETest makes it
+        # test/actions/<pattern>.test.js and mocha brace-expands it (see
+        # scripts/e2e_shard_plan.js). Quoted so the shell never expands it.
+        # The exit code and the log path are kept for the shard status file,
+        # which is what the aggregate reads; the step still exits non-zero on a
+        # failure, so a red shard is red in the run list too.
+        run: |
+          set +e
+          node src/index.js e2etest "$COIN" "$SHARD_PATTERN" --ref "$STACK_REF" 2>&1 | tee "$RUNNER_TEMP/action.out"
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > "$RUNNER_TEMP/action.exit"
+          exit "$rc"
 
       - name: Run the e2e Security suite (test/security)
-        if: env.SUITE == ''
-        # Stack-dependent on-chain security suite (VM sandbox-escape / gas-bomb /
-        # deploy-reject). Driven via the e2etest --script option.
-        run: node src/index.js e2etest "$COIN" --script test:security --ref "$STACK_REF"
+        # Shard 1 only, after its action subset: the same "after an action pass"
+        # order the unsharded job ran it in, and the plan loads shard 1 lighter
+        # to pay for it. Stack-dependent on-chain security suite (VM
+        # sandbox-escape / gas-bomb / deploy-reject). Driven via the e2etest
+        # --script option.
+        if: env.SUITE == '' && matrix.shard == 1
+        run: |
+          set +e
+          node src/index.js e2etest "$COIN" --script test:security --ref "$STACK_REF" 2>&1 | tee "$RUNNER_TEMP/security.out"
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > "$RUNNER_TEMP/security.exit"
+          exit "$rc"
 
       - name: Run the e2e Performance suite (test/perf)
-        if: env.SUITE == ''
+        if: env.SUITE == '' && matrix.shard == 1
         # Live-stack per-service latency budgets (regression ceilings).
-        run: node src/index.js e2etest "$COIN" --script test:perf:budget --ref "$STACK_REF"
+        run: |
+          set +e
+          node src/index.js e2etest "$COIN" --script test:perf:budget --ref "$STACK_REF" 2>&1 | tee "$RUNNER_TEMP/performance.out"
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > "$RUNNER_TEMP/performance.exit"
+          exit "$rc"
 
       # What the stack itself said, which is the one thing a failure here has never
       # carried off the runner. The suite log records that a service answered
@@ -591,10 +714,87 @@ jobs:
 
           echo "captured $(ls -1 "$OUT" | wc -l) diagnostic files"
 
+      # What this shard ran and how each suite exited, for the aggregate. Runs on
+      # every outcome: a shard that never reached a suite still records that, and
+      # the aggregate reads the absence as a failure rather than as a skip.
+      - name: Record the shard status
+        if: always()
+        run: |
+          OUT="$XCHAIN_NODE_DATA_DIR/e2e-logs"
+          mkdir -p "$OUT"
+          OUT="$OUT" node -e '
+            const fs = require("fs"), path = require("path"), tmp = process.env.RUNNER_TEMP
+            const read = f => { try { return fs.readFileSync(path.join(tmp, f), "utf8") } catch { return null } }
+            const logOf = leg => {
+              const out = read(leg + ".out")
+              const saved = out ? [...out.matchAll(/^Logs saved to: (.+)$/gm)].pop() : null
+              return saved ? path.basename(saved[1].trim()) : null
+            }
+            const exitOf = leg => { const e = read(leg + ".exit"); return e === null ? null : e.trim() }
+            const status = { coin: process.env.COIN, shard: Number(process.env.SHARD), pattern: process.env.SHARD_PATTERN || null, stack_ref: process.env.STACK_REF }
+            for (const leg of ["action", "security", "performance"]) { status[leg + "_exit"] = exitOf(leg); status[leg + "_log"] = logOf(leg) }
+            fs.writeFileSync(path.join(process.env.OUT, "shard-status.json"), JSON.stringify(status, null, 2) + "\n")
+            console.log(JSON.stringify(status, null, 2))'
+
+      - name: Upload the shard logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-shard-${{ env.COIN }}-${{ matrix.shard }}
+          path: ${{ env.XCHAIN_NODE_DATA_DIR }}/e2e-logs/
+          if-no-files-found: ignore
+
+  # The per-coin verdict. Named `e2e (<coin>)` and uploading e2e-logs-<coin>, the
+  # job and artifact names the unsharded workflow had, so the cut kit's
+  # preflight (job names) and judge-matrix (artifact layout) need no change.
+  #
+  # `needs` cannot name one coin's slice of a matrix, so every aggregate waits
+  # for all shards; the wall clock is the slowest shard either way. It runs even
+  # when a shard failed (!cancelled()), because the verdict is per coin: it
+  # downloads only its own coin's shards and fails when any of them is missing,
+  # red, or ran no tests, so a bitcoin shard failure fails e2e (bitcoin) and
+  # leaves the other two coins' verdicts standing.
+  e2e:
+    needs: [plan, e2e-shard]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        coin: ${{ fromJSON(needs.plan.outputs.coins) }}
+    env:
+      COIN: ${{ matrix.coin }}
+      PLAN_JSON: ${{ needs.plan.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # A shard that never uploaded simply has no artifact here; the merge names
+      # it as missing, so a failed download is not allowed to stop the job first.
+      - name: Download this coin's shard logs
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-shard-${{ matrix.coin }}-*
+          path: ${{ runner.temp }}/shards
+
+      - name: Verify every shard and merge the logs
+        run: |
+          printf '%s' "$PLAN_JSON" > "$RUNNER_TEMP/plan.json"
+          mkdir -p "$RUNNER_TEMP/shards"
+          node scripts/e2e_shard_merge.js --coin "$COIN" --plan "$RUNNER_TEMP/plan.json" \
+            --shards-dir "$RUNNER_TEMP/shards" --out "$RUNNER_TEMP/e2e-logs-$COIN"
+
       - name: Upload e2e logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs-${{ env.COIN }}
-          path: ${{ env.XCHAIN_NODE_DATA_DIR }}/e2e-logs/
+          path: ${{ runner.temp }}/e2e-logs-${{ env.COIN }}/
           if-no-files-found: ignore

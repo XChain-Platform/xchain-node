@@ -138,6 +138,20 @@ describe('moduleOperations', function () {
             expect(stubs.stopContainerByName.calledWith('container-id-123', 30)).to.be.true
             expect(stubs.stopContainer.called).to.be.false
         })
+
+        it('reads the container before the stop so a drain that predates the budget is named', async function () {
+            const stubs = makeStubs()
+            stubs.getContainerStopSettings.resolves({ stopTimeout: 300, shutdownTimeoutMs: '280000' })
+            const warn = sinon.stub(console, 'warn')
+            try {
+                await loadOperations(stubs).stopModules({ bitcoin: { mainnet: ['xchain-decoder'] } })
+                expect(stubs.getContainerStopSettings.calledOnceWith('container-id-123')).to.be.true
+                expect(stubs.getContainerStopSettings.calledBefore(stubs.stopContainerByName)).to.be.true
+                expect(warn.args.some(a => /xchain-decoder \(bitcoin mainnet\) was created under a 300 s stop budget/.test(String(a[0])))).to.be.true
+            } finally {
+                warn.restore()
+            }
+        })
     })
 })
 
@@ -207,7 +221,7 @@ describe('moduleOperations', function () {
             expect(ok).to.be.true
             expect(stubs.db.getModuleContainer.calledWith('xchain-decoder', 'bitcoin', 'mainnet')).to.be.true
             expect(stubs.execContainer.calledWith('container-id-123',
-                ['node', 'src/clear-reorg-halt.js', '--reason', REASON])).to.be.true
+                ['node', 'src/clear_reorg_halt.js', '--reason', REASON])).to.be.true
         })
 
         it('passes --force and --dry-run through', async function () {
@@ -215,7 +229,7 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: REASON, force: true, dryRun: true })
             expect(stubs.execContainer.firstCall.args[1]).to.deep.equal(
-                ['node', 'src/clear-reorg-halt.js', '--reason', REASON, '--force', '--dry-run'])
+                ['node', 'src/clear_reorg_halt.js', '--reason', REASON, '--force', '--dry-run'])
         })
 
         it('refuses a trivial reason without touching any container', async function () {
@@ -246,7 +260,7 @@ describe('moduleOperations', function () {
             const ok = await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { dryRun: true })
             expect(ok).to.be.true
             expect(stubs.execContainer.firstCall.args[1]).to.deep.equal(
-                ['node', 'src/clear-reorg-halt.js', '--dry-run'])
+                ['node', 'src/clear_reorg_halt.js', '--dry-run'])
         })
 
         it('refuses a real clear with no reason at all without touching any container', async function () {

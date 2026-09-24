@@ -70,13 +70,8 @@ const CONTAINER_ID = 'a'.repeat(64)
 const coinSidecar = path.resolve(configDir, 'bitcoin-mainnet') + '.local'
 const coinMain    = path.resolve(configDir, 'bitcoin-mainnet')
 
-// xchain-hub as a checkout, not just the one file this suite reads from it: a
-// present repo missing the pinned table is a moved or renamed file, while an
-// absent repo is a standalone install with no sibling to compare against.
-const HUB_DIR         = path.join(__dirname, '../../../xchain-hub')
-const HUB_TABLE       = path.join(HUB_DIR, 'src/secret_env.js')
-const HUB_PRESENT     = fs.existsSync(HUB_DIR)
-const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
+// Hard pin: a missing sibling or table path is a test failure.
+const HUB_TABLE       = path.join(__dirname, '../../../xchain-hub/src/secret_env.js')
 
 // The platform checkout as a directory, not just the one script this suite
 // reads from it: a present checkout missing the pinned tool is a moved or
@@ -129,17 +124,8 @@ describe('secret-env', function () {
         it('agrees with the xchain-hub table on every key both own', function () {
             // xchain-node composes the hub container's env, so if the two tables
             // disagreed on a name the hub would boot without its DB password.
-            if (!HUB_PRESENT) {
-                if (REQUIRE_SIBLINGS)
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-hub is not checked out at ' + HUB_DIR)
-                this.skip()      // sibling repo not checked out
-                return
-            }
-            // A checked-out hub with no table at the pinned path is a moved or
-            // renamed file, not a missing sibling, and skipping here would hide
-            // exactly the drift this test exists to catch.
-            expect(fs.existsSync(HUB_TABLE), 'xchain-hub is checked out at ' + HUB_DIR
-                + ' but has no secret-env table at ' + HUB_TABLE).to.equal(true)
+            expect(fs.existsSync(HUB_TABLE),
+                'xchain-hub secret-env table is missing at pinned path ' + HUB_TABLE).to.equal(true)
             const hubAliases = require(HUB_TABLE).SECRET_ENV_ALIASES
             for (const [legacy, preferred] of Object.entries(hubAliases)) {
                 expect(secretEnv.SECRET_ENV_ALIASES[legacy], 'xchain-node is missing ' + legacy)

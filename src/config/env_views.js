@@ -80,7 +80,8 @@ const LIST_VIEWS = {
     // The hub-sync watermark graces a regtest indexer is handed (hubSyncRegtestGraceVars).
     HUB_SYNC_GRACE_ENV: ['hub sync grace', [
         "HUB_SYNC_PRICE_GRACE_S", "HUB_SYNC_ORACLE_GRACE_S", "HUB_SYNC_ATTEST_RESPONSE_GRACE_S",
-        "HUB_SYNC_MATCH_GRACE_S", "HUB_SYNC_CALL_GRACE_S", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S"
+        "HUB_SYNC_MATCH_GRACE_S", "HUB_SYNC_CALL_GRACE_S", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
+        "HUB_SYNC_BRIDGE_GRACE_S", "HUB_SYNC_POLICY_GRACE_S"
     ]],
     // The explorer's published host ports.
     EXPLORER_PORT_ENV: ['explorer port', ["EXPLORER_PORT_HTTP", "EXPLORER_PORT_HTTPS", "EXPLORER_PORT"]],

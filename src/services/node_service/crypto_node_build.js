@@ -39,7 +39,7 @@ const configService = require('../config_service')
 const peers = require('../peer_services').bindPeerServices((file) => require(path.join('..', file)))
 const { getLogger } = require('../../observability/logger');
 const logger = getLogger();
-const { nodeStopTimeoutSeconds, describeNodeStopOutcome } = require('./node_stop.js')
+const { nodeStopTimeoutSeconds, describeNodeStopOutcome, nodeStoppedUnclean } = require('./node_stop.js')
 
 // Whether the coin's pinned daemon honors `-blocksdir`. Dogecoin Core (v1.14.x)
 // is based on a pre-0.18 Bitcoin Core and silently ignores the flag (added
@@ -231,7 +231,7 @@ async function prepareExistingContainer(containerPrefix, coin, network, storage,
     const stopOutcome = await stopContainerByName(containerPrefix, stopBudgetSeconds)
     const stopLine = describeNodeStopOutcome(coin, network, stopOutcome, stopBudgetSeconds)
     if (stopLine) {
-        if (stopOutcome.killed) logger.warn(stopLine)
+        if (stopOutcome.killed || nodeStoppedUnclean(stopOutcome)) logger.warn(stopLine)
         else logger.info(stopLine)
     }
 

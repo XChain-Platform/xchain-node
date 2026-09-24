@@ -76,6 +76,36 @@ function serviceRoutes1() {
     })
 }
 
+function hubSplitRoutes() {
+    it('keeps config polling on the private hub when HUB_API_URL points at a feed', async function () {
+        const cs = makeServiceWithConfig('HUB_API_URL=http://feed:10002\n')
+        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'testnet')
+        expect(config['HUB_API_URL']).to.equal('http://feed:10002')
+        expect(config['HUB_CONFIG_URL']).to.equal(
+            'http://' + config['HUB_API_HOST'] + ':' + config['HUB_PORT'])
+    })
+
+    it('uses the private hub key for config polling while preserving a feed key override', async function () {
+        const { cs } = makeMemoryConfigService({
+            [coinMain]: 'HUB_API_URL=http://feed:10002\n',
+            [coinSidecar]: 'HUB_API_KEY=feed-key-fixture\n',
+            [hubSidecar]: 'HUB_API_KEY=private-key-fixture\n'
+        })
+        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
+        expect(config['HUB_API_KEY']).to.equal('feed-key-fixture')
+        expect(config['HUB_CONFIG_API_KEY']).to.equal('private-key-fixture')
+    })
+
+    it('honours an explicit config-poll key from the credential sidecar', async function () {
+        const { cs } = makeMemoryConfigService({
+            [coinSidecar]: 'HUB_API_KEY=feed-key-fixture\nHUB_CONFIG_API_KEY=config-key-fixture\n',
+            [hubSidecar]: 'HUB_API_KEY=private-key-fixture\n'
+        })
+        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
+        expect(config['HUB_CONFIG_API_KEY']).to.equal('config-key-fixture')
+    })
+}
+
 function serviceRoutes2() {
     it('does not include REGTEST_MINER_URL for testnet', async function () {
         const cs = makeServiceWithConfig('')
@@ -132,5 +162,11 @@ describe('ConfigService', function () {
 describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('with coin and network (coin-specific config)', serviceRoutes2)
+    })
+})
+
+describe('ConfigService', function () {
+    describe('getDefaultConfig()', function () {
+        describe('hub feed and private config routes', hubSplitRoutes)
     })
 })
