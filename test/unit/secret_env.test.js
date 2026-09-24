@@ -20,13 +20,32 @@
 // credential it was supposed to have rotated away from.
 
 const { expect } = require('chai')
-const { configStub } = require('../helpers/config_stub')
 const proxyquire = require('proxyquire').noCallThru()
 const path       = require('path')
 const fs         = require('fs')
+const os         = require('os')
 const { Readable } = require('stream')
 
+// src/config resolves its config and data dirs from the environment at load
+// time; pointing them at a scratch root keeps the sidecar paths this suite
+// builds off the operator's real config directory.
+const SCRATCH_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-secret-env-'))
+const PRIOR_DIRS = {
+    XCHAIN_NODE_CONFIG_DIR: process.env.XCHAIN_NODE_CONFIG_DIR,
+    XCHAIN_NODE_DATA_DIR:   process.env.XCHAIN_NODE_DATA_DIR
+}
+process.env.XCHAIN_NODE_CONFIG_DIR = path.join(SCRATCH_ROOT, 'config')
+process.env.XCHAIN_NODE_DATA_DIR   = path.join(SCRATCH_ROOT, 'data')
+const { configStub } = require('../helpers/config_stub')
 const { SEP, configDir } = require('../../src/config')
+for (const [key, value] of Object.entries(PRIOR_DIRS)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+}
+process.on('exit', () => {
+    try { fs.rmSync(SCRATCH_ROOT, { recursive: true, force: true }) } catch { /* best effort cleanup */ }
+})
+
 const secretEnv = require('../../src/config/secret_env')
 
 function streamFromString(str) {
@@ -70,25 +89,19 @@ const CONTAINER_ID = 'a'.repeat(64)
 const coinSidecar = path.resolve(configDir, 'bitcoin-mainnet') + '.local'
 const coinMain    = path.resolve(configDir, 'bitcoin-mainnet')
 
-// Hard pin: a missing sibling or table path is a test failure.
-const HUB_TABLE       = path.join(__dirname, '../../../xchain-hub/src/secret_env.js')
+// Local runs may omit sibling repositories. Ratchet tiers require them.
+const HUB_TABLE         = path.join(__dirname, '../../../xchain-hub/src/secret_env.js')
+const HUB_TABLE_PRESENT = fs.existsSync(HUB_TABLE)
+const REQUIRE_SIBLINGS  = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
 
 // The platform checkout as a directory, not just the one script this suite
 // reads from it: a present checkout missing the pinned tool is a moved or
 // renamed file, while an absent checkout is a standalone install with no
 // platform tree to compare against.
 //
-// The platform tree is not a sibling repo, so XCHAIN_REQUIRE_SIBLINGS cannot
-// vouch for it the way it vouches for xchain-hub and xchain-indexer: CI stages
-// only the public repos .ci-siblings names, cloned BESIDE this checkout, while
-// the platform tree is private and sits as this checkout's PARENT. On a runner
-// it is therefore always absent, and a guard that threw there would keep the
-// gate red for a layout no roster line can fix (CI run 35020607785). This one
-// guard takes its own switch instead: XCHAIN_REQUIRE_PLATFORM=1, exported by
-// the venue that runs from the platform root (bin/ci-all.sh), turns an absent
-// checkout into a failure; anywhere else the test is reported PENDING with the
-// reason printed, never as a pass. XCHAIN_PLATFORM_ROOT relocates the root the
-// same way the platform's own bin/ scripts accept it.
+// The private platform tree is not a declared sibling. A platform-root hand
+// run can require it with XCHAIN_REQUIRE_PLATFORM=1, and XCHAIN_PLATFORM_ROOT
+// can relocate the checkout.
 const PLATFORM_ROOT    = process.env.XCHAIN_PLATFORM_ROOT || path.resolve(__dirname, '..', '..', '..')
 const PLATFORM_DIR     = path.join(PLATFORM_ROOT, 'claude')
 const AUDIT_TOOL       = path.join(PLATFORM_DIR, 'bin', 'env-secret-name-audit.js')
@@ -124,8 +137,15 @@ describe('secret-env', function () {
         it('agrees with the xchain-hub table on every key both own', function () {
             // xchain-node composes the hub container's env, so if the two tables
             // disagreed on a name the hub would boot without its DB password.
-            expect(fs.existsSync(HUB_TABLE),
-                'xchain-hub secret-env table is missing at pinned path ' + HUB_TABLE).to.equal(true)
+            if (!HUB_TABLE_PRESENT) {
+                if (REQUIRE_SIBLINGS)
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-hub secret-env table not found at ' + HUB_TABLE)
+                console.log('SKIP: secret-env xchain-hub alias-table agreement - xchain-hub is not checked out beside '
+                    + 'this repo at ' + HUB_TABLE + '; set XCHAIN_REQUIRE_SIBLINGS=1 with the sibling checked out to '
+                    + 'run this guard')
+                this.skip()
+                return
+            }
             const hubAliases = require(HUB_TABLE).SECRET_ENV_ALIASES
             for (const [legacy, preferred] of Object.entries(hubAliases)) {
                 expect(secretEnv.SECRET_ENV_ALIASES[legacy], 'xchain-node is missing ' + legacy)
