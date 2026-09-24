@@ -135,7 +135,7 @@ run_tier "drift: coin consensus-pin conformance" node -e '
 run_tier "identity pin (vendored coin bytes)" node bin/pin_identity.js --compare bin/pins/identity.json
 
 # --- job: coverage -----------------------------------------------------------
-run_tier "coverage ratchet (coverage:check)" npm run coverage:check
+run_tier "coverage ratchet (coverage:check)" env XCHAIN_REQUIRE_SIBLINGS=1 npm run coverage:check
 
 echo
 # >>> ci-tier summary (generated) >>>
