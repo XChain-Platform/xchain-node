@@ -227,6 +227,17 @@ describe('SERVICE_REGISTRY', function () {
             // No HUB_CAPABILITY_CONFIG in env and no signer in the fixture means no volumes.
             expect(r.volumeArgs).to.deep.equal([])
         })
+
+        it('hub: the P2P_PORT row is non-always, so it publishes in validator mode only', function () {
+            const row = SERVICE_REGISTRY[HUB_MODULE_NAME].docker.ports.find(p => p.host === 'P2P_PORT')
+            expect(row).to.deep.equal({ host: 'P2P_PORT', container: 'P2P_PORT' })
+
+            const standalone = ms.buildModuleDockerArgs(HUB_MODULE_NAME, ENV, 'bitcoin', 'mainnet')
+            expect(standalone.portArgs).to.deep.equal(['-p', '10000:10000'])
+
+            const validator = ms.buildModuleDockerArgs(HUB_MODULE_NAME, { ...ENV, P2P_PORT: 10002 }, 'bitcoin', 'mainnet')
+            expect(validator.portArgs).to.deep.equal(['-p', '10000:10000', '-p', '10002:10002'])
+        })
     })
 })
 
