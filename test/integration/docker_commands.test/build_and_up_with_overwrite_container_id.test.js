@@ -26,9 +26,13 @@ dockerSuite('buildAndUp with overwriteContainerId', function (fixture) {
 
         await ModuleService.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', oldContainerId, true)
 
-        const killCmds = capture.findCommands(/docker kill/)
-        expect(killCmds).to.have.length(1)
-        expect(killCmds[0].command).to.include(oldContainerId)
+        // The old container is stopped with the per-module stop budget
+        // (`docker stop -t <seconds>`), never `docker kill`; the budget itself
+        // is pinned by test/unit/stop_budget_service.test.js.
+        expect(capture.findCommands(/docker kill/)).to.have.length(0)
+        const stopCmds = capture.findCommands(/docker stop -t \d+ /)
+        expect(stopCmds).to.have.length(1)
+        expect(stopCmds[0].command).to.include(oldContainerId)
 
         // Two `docker rm`s, not one: the explicit overwriteContainerId removal
         // above is id-keyed, plus buildAndUp also runs a name-keyed

@@ -29,7 +29,7 @@ function configureCapture(capture) {
         const parts = cmd.trim().split(/\s+/)
         return { stdout: parts[parts.length - 1] }
     }
-    capture.when(/docker kill/).respondsWith(extractId)
+    capture.when(/docker (kill|stop)/).respondsWith(extractId)
     capture.when(/docker rm/).respondsWith(extractId)
     // `git clone` is mocked out (no real network/process runs), but
     // buildAndUp's LIBRARY_BUNDLES staging (ea43475) does a REAL

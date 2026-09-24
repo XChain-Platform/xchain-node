@@ -23,7 +23,7 @@ dockerSuite('docker build working directory', function (fixture) {
         const { ModuleService } = makeBuildAndUp()
         await ModuleService.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, true)
 
-        const buildCmd = capture.findCommands(/docker build/)[0]
+        const buildCmd = capture.findCommands(/docker build /)[0]
         expect(buildCmd.options.cwd).to.include('xchain-encoder')
     })
 })
