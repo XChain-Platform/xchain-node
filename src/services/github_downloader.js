@@ -54,6 +54,12 @@ const { getHostArch } = require('./github_downloader/host_arch.js');
 
 const SHA256_RE = /^[a-f0-9]{64}$/i;
 
+function installMethods(target, methods) {
+  const descriptors = Object.getOwnPropertyDescriptors(methods);
+  for (const key of Reflect.ownKeys(descriptors)) descriptors[key].enumerable = false;
+  Object.defineProperties(target, descriptors);
+}
+
 // Picks the release asset built for linux on the host architecture, or
 // throws when the release has none.
 function selectHostLinuxAsset(release) {
@@ -305,6 +311,6 @@ class GitHubDownloader {
   }
 }
 
-Object.assign(GitHubDownloader.prototype, require('./github_downloader/hash_verification.js'));
+installMethods(GitHubDownloader.prototype, require('./github_downloader/hash_verification.js'));
 
 module.exports = GitHubDownloader;

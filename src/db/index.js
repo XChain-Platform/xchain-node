@@ -29,6 +29,12 @@ const mariadb = require('mariadb')
 const { sleep } = require('../utils/helpers')
 const { CREATE_MODULES_TABLE_SQL, modulesMixin } = require('./modules')
 
+function installMethods(target, methods) {
+    const descriptors = Object.getOwnPropertyDescriptors(methods)
+    for (const key of Reflect.ownKeys(descriptors)) descriptors[key].enumerable = false
+    Object.defineProperties(target, descriptors)
+}
+
 class MariaDbStore {
     constructor(config = null) {
         this.config = config
@@ -118,6 +124,6 @@ class MariaDbStore {
 // Every query against the registry table, installed onto the prototype so a
 // call site cannot tell the split happened. One place to add a table family:
 // a new file beside this one, and its row here.
-Object.assign(MariaDbStore.prototype, modulesMixin)
+installMethods(MariaDbStore.prototype, modulesMixin)
 
 module.exports = MariaDbStore
