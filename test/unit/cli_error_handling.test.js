@@ -109,6 +109,19 @@ describe('CLI `update` exit code', function () {
         expect(exitStub.calledWith(0)).to.be.true
         expect(exitStub.calledWith(1)).to.be.false
     })
+
+    it('reports both halves when part of the run updated and part refused', async function () {
+        const program = loadUpdateAction(sinon.stub().resolves({
+            updated: [{ module: 'xchain-indexer', coin: 'dogecoin', network: 'regtest' }],
+            skipped: [],
+            failed: [{ module: 'xchain-indexer', coin: 'bitcoin', network: 'regtest', reason: 'Refusing to rotate the bitcoin regtest MariaDB accounts' }]
+        }))
+        await runUpdate(program)
+        expect(errorStub.calledWithMatch(/updated: xchain-indexer \(dogecoin regtest\)/)).to.be.true
+        expect(errorStub.calledWithMatch(/failed: xchain-indexer \(bitcoin regtest\).*Refusing to rotate/)).to.be.true
+        expect(exitStub.calledWith(1)).to.be.true
+        expect(exitStub.calledWith(0)).to.be.false
+    })
 })
 
 // Same shape as the `update` no-op above: `recreate` printed "recreate does not

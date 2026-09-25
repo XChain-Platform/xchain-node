@@ -129,18 +129,32 @@ function recordInstallOutcome(outcome, result, module, coin, network) {
     }
 }
 
-/**
- * Runs the update over every requested module and REPORTS what it did.
- *
- * The report exists because the old `return true` made "updated three
- * containers" and "matched nothing at all" indistinguishable to the caller, so
- * a run that changed nothing still exited 0 and read as a landed deploy. The
- * caller (cli `update`) turns an empty `updated` list into a non-zero exit.
- *
- * @returns {Promise<{updated: Array, skipped: Array}>}
- */
+function credentialDriftScope(err) {
+    if (!err || err.code !== 'DB_CREDENTIAL_DRIFT') return null
+    const match = String(err.message || '').match(/^Refusing to rotate the (\S+) (\S+) MariaDB accounts:/)
+    return match ? { coin: match[1], network: match[2] } : null
+}
+
+async function recordCredentialPartialOutcome(outcome, err, module, coin, network, previousContainerId) {
+    const reason = err && err.message ? err.message : String(err)
+    const driftScope = credentialDriftScope(err)
+    if (!driftScope || (driftScope.coin === coin && driftScope.network === network)) throw err
+
+    let currentContainerId
+    try {
+        currentContainerId = await db.getModuleContainer(module, coin, network)
+    } catch {
+        throw err
+    }
+    if (!currentContainerId || currentContainerId === previousContainerId) throw err
+
+    console.warn(`update: ${module} (${coin} ${network}) was rebuilt, but credential reconciliation failed for ${driftScope.coin} ${driftScope.network}: ${reason}`)
+    outcome.updated.push({ module, coin, network })
+    outcome.failed.push({ module, coin: driftScope.coin, network: driftScope.network, reason })
+}
+
 async function updateModulesOnBranch(servicesList, branch = null, { skipCurrentNode = false, quietNotInstalled = false } = {}) {
-    const outcome = { updated: [], skipped: [] }
+    const outcome = { updated: [], skipped: [], failed: [] }
     try {
         await updateModulesInto(outcome, servicesList, branch, { skipCurrentNode, quietNotInstalled })
     } finally {
@@ -187,21 +201,24 @@ async function updateModulesInto(outcome, servicesList, branch, { skipCurrentNod
                         outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-installed' })
                         continue
                     }
-                    let moduleBranch = branch
-                    if (!moduleBranch) {
-                        try { moduleBranch = await getModuleBranch(nextModule) } catch { /* use default */ }
-                        // A pinned checkout is detached and answers `HEAD`, which is not a branch anything can clone. Under a release update the manifest pin decides the ref anyway; for a component the manifest does not carry, null means the default branch, the same thing `install` would do.
-                        if (moduleBranch === 'HEAD') moduleBranch = null
+                    try {
+                        let moduleBranch = branch
+                        if (!moduleBranch) {
+                            try { moduleBranch = await getModuleBranch(nextModule) } catch { /* use default */ }
+                            // A pinned checkout is detached and answers `HEAD`, which is not a branch anything can clone. Under a release update the manifest pin decides the ref anyway; for a component the manifest does not carry, null means the default branch, the same thing `install` would do.
+                            if (moduleBranch === 'HEAD') moduleBranch = null
+                        }
+                        // remoteUpdate=true so installModule actually rebuilds the container. Without it, the `if (!containerNodeVersion || remoteUpdate)` guard short-circuits for any already-installed service and `update` becomes a silent no-op.  Version-skew guard: a hub-dependent service whose new source declares `xchainRequiresHub` in its package.json is REFUSED when the installed hub is behind that version, before anything is torn down. Under a pinned update the guard must read the PINNED source's package.json, not the branch tip: it clones into a tmp tree to find `xchainRequiresHub`, and reading that from a different ref than the one about to be installed is how a skew guard blesses a version it never saw.
+                        const { resolveComponentRef } = releaseManifestService
+                        const pin = resolveComponentRef(nextModule, moduleBranch)
+                        await assertHubNotBehind(nextModule, pin.ref)
+                        await assertRequiredMigrationsApplied(nextModule, nextCoin, nextNetwork, pin.ref)
+                        // moduleBranch MUST be threaded through: installModule re-clones the module on the remoteUpdate path (cloneGit with this `branch`), so a null branch here re-clones the default branch and clobbers the branch the operator asked for (the cause of `update <svc> <chain> <net> <branch>` silently deploying master). installModule does the clone, so no separate cloneGit is needed here.
+                        const rebuilt = await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId, false, moduleBranch)
+                        recordInstallOutcome(outcome, rebuilt, nextModule, nextCoin, nextNetwork)
+                    } catch (err) {
+                        await recordCredentialPartialOutcome(outcome, err, nextModule, nextCoin, nextNetwork, moduleContainerId)
                     }
-                    // remoteUpdate=true so installModule actually rebuilds the container. Without it, the `if (!containerNodeVersion || remoteUpdate)` guard short-circuits for any already-installed service and `update` becomes a silent no-op.  Version-skew guard: a hub-dependent service whose new source declares `xchainRequiresHub` in its package.json is REFUSED when the installed hub is behind that version, before anything is torn down. Throws out of updateModules so the update fails closed with nothing modified for this module. Under a pinned update the guard must read the PINNED source's package.json, not the branch tip: it clones into a tmp tree to find `xchainRequiresHub`, and reading that from a different ref than the one about to be installed is how a skew guard blesses a version it never saw.
-                    const { resolveComponentRef } = releaseManifestService
-                    const pin = resolveComponentRef(nextModule, moduleBranch)
-                    await assertHubNotBehind(nextModule, pin.ref)
-                    // Migration-precondition guard: a service whose new source asserts a GATED (mode=manual) migration at startup is REFUSED when the database it will use has not applied that migration, before anything is torn down. Without it the only thing that discovers the requirement is the recreated container crash-looping - which is exactly how a routine indexer deploy took all three mainnet indexers down on 2026-08-09. Reads the same PINNED ref as the skew guard above, for the same reason: a precondition read from a different ref than the one being installed is a check that blessed a version it never saw.
-                    await assertRequiredMigrationsApplied(nextModule, nextCoin, nextNetwork, pin.ref)
-                    // moduleBranch MUST be threaded through: installModule re-clones the module on the remoteUpdate path (cloneGit with this `branch`), so a null branch here re-clones the default branch and clobbers the branch the operator asked for (the cause of `update <svc> <chain> <net> <branch>` silently deploying master). installModule does the clone, so no separate cloneGit is needed here.
-                    const rebuilt = await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId, false, moduleBranch)
-                    recordInstallOutcome(outcome, rebuilt, nextModule, nextCoin, nextNetwork)
                 }
             }
         }
