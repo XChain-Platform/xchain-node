@@ -29,13 +29,7 @@ const MIGRATE_CLI_PATHS = ['src/db/migration/migrate.js', 'src/migrate.js']
 // found there rather than the layout of the source about to be deployed.
 const foundPaths = new Map()
 
-/**
- * Read the migrate CLI's source out of `container` through
- * `cat(container, path)`, trying each known path in order. A path that throws
- * or reads empty counts as absent on that build. Returns { cliPath, source }
- * for the first path that answers, or null when none does (a stopped
- * container, docker unreachable, or a build with no CLI at a known path).
- */
+/** Locate the first readable migrate CLI path known for this container build. */
 async function readMigrateCli(cat, container) {
     for (const cliPath of MIGRATE_CLI_PATHS) {
         let source = null

@@ -85,26 +85,41 @@ function pendingManualMigrations(dir, applied) {
     }).map(([f]) => f)
 }
 
-/**
- * Does the build CURRENTLY RUNNING in the target container understand per-file
- * migration targeting (`--file`)?
- *
- * This matters because the remedy an operator is about to run executes inside
- * that container, on its build, not on the one being deployed. A build without
- * the flag does not reject it: it ignores it and applies every pending manual
- * migration, which on a live database can mean a data backfill and a
- * dedup-then-unique nobody authorised.
- *
- * Returns true, false, or null when the container could not be read at all
- * (stopped, absent, docker unreachable). Callers must treat null like false:
- * an unverified capability is not a capability, and the cost of being wrong is
- * asymmetric.
- */
+/** Verify the running container's migrate CLI through its read-only status contract. */
 async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
     try {
         const cat = deps.getDockerContainerFileCat || require('../docker_service').getDockerContainerFileCat
         const found = await readMigrateCli(cat, container)
-        return found ? /['"]--file['"]/.test(found.source) : null
+        if (!found) return null
+
+        const execContainer = deps.execContainer || require('../docker_service').execContainer
+        let raw
+        try {
+            raw = await execContainer(container, ['node', found.cliPath, '--status', '--json'])
+        } catch {
+            return false
+        }
+
+        let status
+        try {
+            status = JSON.parse(String(raw))
+        } catch {
+            return false
+        }
+        if (!status || Array.isArray(status) || typeof status !== 'object') return false
+        if (typeof status.database !== 'string' || status.database.length === 0) return false
+        if (!Array.isArray(status.migrations)) return false
+        for (const row of status.migrations) {
+            if (!row || Array.isArray(row) || typeof row !== 'object') return false
+            if (typeof row.file !== 'string' || row.file.length === 0) return false
+            if (typeof row.applied !== 'boolean') return false
+        }
+
+        const counts = ['total', 'applied', 'pending']
+        if (!counts.every(k => Number.isInteger(status[k]) && status[k] >= 0)) return false
+        const applied = status.migrations.filter(row => row.applied).length
+        return status.total === status.migrations.length &&
+            status.applied === applied && status.pending === status.total - applied
     } catch {
         return null
     }
@@ -233,7 +248,7 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
             : missing
         instructions = 'DO NOT run `node ' + migrateCliPathFor(container) + '` inside ' + container + '. ' +
             (remedy.supportsPerFile === false
-                ? 'That container runs a build with no per-file targeting: it ignores --file'
+                ? 'That container did not return a valid --status --json response, so --file support is not verified'
                 : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +
             ' and apply EVERY pending manual migration on ' + dbName + ', which is ' +
             wouldApply.length + ' file(s):\n' +
