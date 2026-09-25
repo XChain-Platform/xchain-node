@@ -228,7 +228,7 @@ async function chainedInputs(sdk, address, prevTxid, timeoutMs) {
     const deadline = Date.now() + (timeoutMs || 90000)
     for (;;) {
         let utxos = null
-        try { utxos = await sdk._requireEncoder().getUTXOs(address) } catch { /* transient; retry */ }
+        try { utxos = await sdk.requireEncoder().getUTXOs(address) } catch { /* transient; retry */ }
         const outs = ((utxos && utxos.utxos) || []).filter(o => (o.fullTxid || o.txid) === prevTxid)
         if (outs.length) return outs
         const left = deadline - Date.now()

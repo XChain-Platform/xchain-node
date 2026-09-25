@@ -80,7 +80,7 @@ function makeSdk(chain = {}) {
         }),
         // The chain link: each broadcast leaves a change output the next action
         // is funded from. Keyed by txid so the service's filter is exercised.
-        _requireEncoder: () => ({
+        requireEncoder: () => ({
             getUTXOs: async () => ({ utxos: chain.noChange ? [] : [
                 { txid: prevTxidRef.value || 'seed', fullTxid: prevTxidRef.value || 'seed', vout: 1, value: '150000', confirmations: 0 }
             ] })
