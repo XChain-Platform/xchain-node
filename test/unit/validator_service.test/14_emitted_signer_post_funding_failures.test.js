@@ -80,7 +80,7 @@ function loadEmittedSigner(source, encoder) {
             if (id === 'path')   return path
             if (id === 'dotenv') return { config: () => ({}) }
             if (id === '@dankest-llc/xchain-sdk') return { XChainSDK: function () {
-                this._requireEncoder = () => encoder
+                this.requireEncoder = () => encoder
                 this.wallet = {
                     signPsbt:       () => ({ txHex: 'hex-1', txid: PHASE1 }),
                     signRevealPsbt: () => ({ txHex: 'hex-2', txid: 'e'.repeat(64) })
