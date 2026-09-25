@@ -66,21 +66,24 @@ ci_tier_deferred() {
   return 1
 }
 # <<< ci-tier <<<
+# >>> ci-tier timer (generated block; re-run the tier wirer to update) >>>
 run_tier() {
   ci_tier_deferred "$1" && return 0  # ci-tier guard (generated)
   local name="$1"; shift
+  local __ci_tier_t0=$SECONDS
   echo; echo "ci:full ===== $name ====="
   local root
   root="$(mktemp -d "${TMPDIR:-/tmp}/xchain-node-ci-full.XXXXXX")"
   mkdir -p "$root/config" "$root/data"
   if ( export XCHAIN_NODE_CONFIG_DIR="$root/config" XCHAIN_NODE_DATA_DIR="$root/data"; "$@" ); then
-    echo "ci:full ----- $name PASS"
+    echo "ci:full ----- $name PASS ($(( SECONDS - __ci_tier_t0 ))s)"
   else
     FAILED="$FAILED [$name]"
-    echo "ci:full ----- $name FAIL"
+    echo "ci:full ----- $name FAIL ($(( SECONDS - __ci_tier_t0 ))s)"
   fi
   rm -rf -- "$root"
 }
+# <<< ci-tier timer <<<
 need_sib() {
   local s
   for s in "$@"; do
