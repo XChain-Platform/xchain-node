@@ -219,10 +219,11 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
 
             const moduleOps = proxyquire('../../src/operations/module_operations', {
                 '../services/docker_service': {
-                    stopContainer: async (id) => {
-                        capture._history.push({ command: 'docker stop ' + id, type: 'exec', options: {} })
-                        return true
+                    stopContainerByName: async (id, seconds) => {
+                        capture._history.push({ command: 'docker stop -t ' + seconds + ' ' + id, type: 'exec', options: {} })
+                        return { stopped: true, seconds: 1, killed: false, exitCode: 0 }
                     },
+                    getContainerStopSettings: async () => null,
                     createDockerNetwork: async () => true,
                     startContainer: async () => true,
                     restartContainer: async () => true,
@@ -262,10 +263,11 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
 
             const moduleOps = proxyquire('../../src/operations/module_operations', {
                 '../services/docker_service': {
-                    stopContainer: async (id) => {
-                        capture._history.push({ command: 'docker stop ' + id, type: 'exec', options: {} })
-                        return true
+                    stopContainerByName: async (id, seconds) => {
+                        capture._history.push({ command: 'docker stop -t ' + seconds + ' ' + id, type: 'exec', options: {} })
+                        return { stopped: true, seconds: 1, killed: false, exitCode: 0 }
                     },
+                    getContainerStopSettings: async () => null,
                     createDockerNetwork: async () => true,
                     startContainer: async () => true,
                     restartContainer: async () => true,
