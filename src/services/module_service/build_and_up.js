@@ -297,7 +297,7 @@ function buildContainerRunArgs(context) {
     const healthcheckArgs = onlyExecution ? [] : buildHealthcheckArgs(module, environmentVariables)
     const logOptArgs = onlyExecution ? [] : ['--log-opt', 'max-size=50m', '--log-opt', 'max-file=4']
     return [
-        'run', '-d', ...restartArgs, ...stopBudgetArgs, '--name', containerPrefix, '--hostname', containerPrefix,
+        'run', '-d', '--init', ...restartArgs, ...stopBudgetArgs, '--name', containerPrefix, '--hostname', containerPrefix,
         ...logOptArgs, ...volumeArgs, ...ulimitArgs, ...memoryArgs, ...healthcheckArgs,
         '--network', getDockerNetwork(coin, network), ...envArgs, ...portArgs,
         '-t', containerPrefix, ...(dockerCmdArgs ?? [])

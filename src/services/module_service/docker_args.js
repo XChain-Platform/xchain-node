@@ -270,11 +270,11 @@ function buildHealthcheckArgs(module, environmentVariables) {
         // dead port. Pick per descriptor: a service whose ping already carries the
         // real verdict (explorer) stays on ping.
         const method = hc.probe === 'jsonrpc_health' ? 'health' : 'ping'
-        cmd = `wget -qO- --post-data='{"jsonrpc":"2.0","method":"${method}","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
+        cmd = `wget -T ${parseInt(hc.timeout, 10)} -qO- --post-data='{"jsonrpc":"2.0","method":"${method}","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
     } else {
         // Default: plain HTTP GET on /status; descriptors override via `path`
         // where /status is too expensive to double as a liveness probe (sync).
-        cmd = `wget -qO- http://localhost:${port}${hc.path || '/status'} || exit 1`
+        cmd = `wget -T ${parseInt(hc.timeout, 10)} -qO- http://localhost:${port}${hc.path || '/status'} || exit 1`
     }
 
     return [
