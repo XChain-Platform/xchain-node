@@ -134,7 +134,7 @@ const ORACLE_EPOCH_START_BY_NETWORK = { mainnet: 1788220800000, testnet: 1787875
 const COIN_NETWORKS = {
     mainnet: { stake: 'bitcoin-mainnet', doge: 'dogecoin-mainnet', stakeCoin: 'BTC',  dogeCoin: 'DOGE'  },
     testnet: { stake: 'bitcoin-testnet', doge: 'dogecoin-testnet', stakeCoin: 'TBTC', dogeCoin: 'TDOGE' },
-    regtest: { stake: 'bitcoin-regtest', doge: 'dogecoin-regtest', stakeCoin: 'BTC',  dogeCoin: 'DOGE'  }
+    regtest: { stake: 'bitcoin-regtest', doge: 'dogecoin-regtest', stakeCoin: 'RBTC', dogeCoin: 'RDOGE' }
 }
 const PUBLIC_ENCODER_BASE = 'https://encoder.xchain.io/'
 

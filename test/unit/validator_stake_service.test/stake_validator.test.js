@@ -95,9 +95,10 @@ function makeSdk(chain = {}) {
 function run(opts, chain, settingsExtra = {}) {
     const { sdk, calls } = makeSdk(chain)
     const logged = []
+    const network = settingsExtra.network || 'testnet'
     const deps = {
         settings: { enabled: true, pubkey: PUBKEY, network: 'testnet', P2P_PORT: 10002, ...settingsExtra },
-        wallets:  { NETWORK: 'testnet', STAKE_ADDRESS: ADDRESS, STAKE_WIF_SECRET: 'cFakeWif' },
+        wallets:  { NETWORK: network, STAKE_ADDRESS: ADDRESS, STAKE_WIF_SECRET: 'cFakeWif' },
         makeSdk:  () => sdk,
         sdk:      { XChainSDK: function () { throw new Error('makeSdk should be used') } },
         log:      m => logged.push(String(m))
@@ -222,6 +223,22 @@ describe('ValidatorStakeService', function () {
             expect(calls.stake[0].opts.waitForIndexer).to.be.false
             expect(result.staked).to.be.true
             expect(logged.join('\n')).to.include('Broadcast. Watch it land at')
+        })
+
+        it('prints the complete validator URL for every network', async function () {
+            const cases = [
+                ['mainnet', 10001, 'BTC'],
+                ['testnet', 10002, 'TBTC'],
+                ['regtest', 10003, 'RBTC']
+            ]
+            for (const [network, port, coin] of cases) {
+                const { logged } = await run(
+                    { broadcast: true, wait: false },
+                    { xchain: 30000, coin: '0.001' },
+                    { network, P2P_PORT: port })
+                expect(logged.join('\n'), network).to.include(
+                    'Broadcast. Watch it land at https://explorer.xchain.io/' + coin + '/validator/' + PUBKEY)
+            }
         })
 
         it('passes --fee-per-kb through to the encoder', async function () {

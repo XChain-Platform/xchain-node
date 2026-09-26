@@ -95,9 +95,10 @@ function makeSdk(chain = {}) {
 function runUnstake(opts, chain, settingsExtra = {}) {
     const { sdk, calls } = makeSdk(chain)
     const logged = []
+    const network = settingsExtra.network || 'testnet'
     const deps = {
         settings: { enabled: true, pubkey: PUBKEY, network: 'testnet', P2P_PORT: 10002, ...settingsExtra },
-        wallets:  { NETWORK: 'testnet', STAKE_ADDRESS: ADDRESS, STAKE_WIF_SECRET: 'cFakeWif' },
+        wallets:  { NETWORK: network, STAKE_ADDRESS: ADDRESS, STAKE_WIF_SECRET: 'cFakeWif' },
         makeSdk:  () => sdk,
         sdk:      {},
         log:      m => logged.push(String(m))
@@ -163,6 +164,22 @@ describe('ValidatorStakeService', function () {
             expect(out).to.include('leave the active set 6 blocks (roughly 60 minutes) after the block')
             expect(out).to.include('stays locked for 1000 blocks (roughly 7 days)')
             expect(out).to.include('cooldown sweep credits it back')
+        })
+
+        it('prints the complete validator URL for every network', async function () {
+            const cases = [
+                ['mainnet', 10001, 'BTC'],
+                ['testnet', 10002, 'TBTC'],
+                ['regtest', 10003, 'RBTC']
+            ]
+            for (const [network, port, coin] of cases) {
+                const { logged } = await runUnstake(
+                    { broadcast: true },
+                    { existing: STAKED },
+                    { network, P2P_PORT: port })
+                expect(logged.join('\n'), network).to.include(
+                    'Watch it at https://explorer.xchain.io/' + coin + '/validator/' + PUBKEY)
+            }
         })
 
         // The old text promised spendability at the activation delay. Nothing in
