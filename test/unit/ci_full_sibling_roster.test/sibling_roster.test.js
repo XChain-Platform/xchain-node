@@ -102,8 +102,9 @@ describe('.github/workflows/ci.yml coverage job', () => {
     it('checks declared siblings out before re-running the unit suite for coverage', () => {
         const siblingStep = steps.find((s) => s.id === 'siblings')
         expect(siblingStep, 'coverage job has no sibling-checkout step').to.exist
-        expect(siblingStep.run).to.include('.ci-siblings')
-        expect(siblingStep.run).to.include('GITHUB_OUTPUT')
+        // The shared action reads .ci-siblings and publishes checked-out; an inline
+        // copy here would drift from the roster every other repo checks out.
+        expect(siblingStep.uses).to.match(/^XChain-Platform\/\.github\/actions\/checkout-siblings@/)
     })
 
     it('arms XCHAIN_REQUIRE_SIBLINGS for coverage:check only when the checkout actually happened', () => {
