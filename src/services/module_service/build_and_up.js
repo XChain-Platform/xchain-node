@@ -344,8 +344,8 @@ async function createContainer(context, resolve, reject) {
     }
 }
 
-// The module Dockerfiles only build under BuildKit. Refuse before the build
-// and pin DOCKER_BUILDKIT=1 so a host override cannot select the legacy builder.
+// The module Dockerfiles only build under BuildKit (refused earlier, in
+// buildAndUp); pin DOCKER_BUILDKIT=1 so a host override cannot select it.
 function buildOrCreateContainer(context, resolve, reject) {
     const { reuseImage, module, coin, network, sourceLabels, buildLabelArgs,
         containerPrefix, dir } = context
@@ -354,21 +354,16 @@ function buildOrCreateContainer(context, resolve, reject) {
         createContainer(context, resolve, reject)
         return
     }
-    const buildKitProbe = typeof checkBuildKitAvailable === 'function'
-        ? checkBuildKitAvailable()
-        : Promise.resolve(true)
-    buildKitProbe.then(() => {
-        logger.info("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
-            + (sourceLabels.commit ? " from " + sourceLabels.commit.slice(0, 12) + " (" + (sourceLabels.ref || 'detached') + ")" : ""))
-        const buildEnv = { ...config.childProcessEnv(), DOCKER_BUILDKIT: '1' }
-        execFile('docker', ['build', ...buildLabelArgs, '.', '-t', containerPrefix], { cwd: dir, env: buildEnv }, (error) => {
-            if (error) {
-                reject("Error creating Docker image: " + redactSecrets(error.message))
-                return
-            }
-            createContainer(context, resolve, reject)
-        })
-    }).catch((err) => reject("Error creating Docker image: " + err))
+    logger.info("Building image of module " + module + (coin && network ? " in " + coin + " " + network : "")
+        + (sourceLabels.commit ? " from " + sourceLabels.commit.slice(0, 12) + " (" + (sourceLabels.ref || 'detached') + ")" : ""))
+    const buildEnv = { ...config.childProcessEnv(), DOCKER_BUILDKIT: '1' }
+    execFile('docker', ['build', ...buildLabelArgs, '.', '-t', containerPrefix], { cwd: dir, env: buildEnv }, (error) => {
+        if (error) {
+            reject("Error creating Docker image: " + redactSecrets(error.message))
+            return
+        }
+        createContainer(context, resolve, reject)
+    })
 }
 
 function launchContainer(context) {
@@ -377,6 +372,11 @@ function launchContainer(context) {
 async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null, options = {}) {
     if (!checkIfModuleExists(module)) throw "module not found"
     const reuseImage = options.reuseImage === true
+    if (!reuseImage && typeof checkBuildKitAvailable === 'function') {
+        try {
+            await checkBuildKitAvailable()
+        } catch (err) { throw "Error creating Docker image: " + err }
+    }
     const environmentVariables = await getDefaultConfig(module, coin, network)
     const dir = getModuleDir(module)
     await assertDeploymentReady(module, coin, network, environmentVariables, dir, onlyExecution)
