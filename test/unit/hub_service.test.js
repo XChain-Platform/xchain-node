@@ -30,6 +30,7 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire')
 
 const { HUB_MODULE_NAME, SYNC_MODULE_NAME } = require('../../src/config')
+const { updateHubOrExplorer } = require('../../src/services/hub_service/update_hub_or_explorer')
 
 function loadHubService({ addContainerToNetwork } = {}) {
     const getModuleContainer = sinon.stub()
@@ -46,6 +47,31 @@ function loadHubService({ addContainerToNetwork } = {}) {
     })
 
     return { svc, attach }
+}
+
+function configDeliveryDependencies({ updateConfig = sinon.stub().resolves(true), lastStatus = {} } = {}) {
+    return {
+        HUB_MODULE_NAME: 'xchain-hub',
+        EXPLORER_MODULE_NAME: 'xchain-explorer',
+        EXTERNAL_DB: false,
+        XChainService: { XCHAIN_INDEXER: 'xchain-indexer' },
+        db: { getModuleContainer: sinon.stub().resolves('explorer-container') },
+        getLastStatus: () => lastStatus,
+        isStatusUpdated: () => true,
+        sleep: sinon.stub().resolves(),
+        redactSecrets: value => String(value && value.message ? value.message : value),
+        getDefaultConfig: sinon.stub().resolves({ HUB_PORT: 10000, EXPLORER_PORT: 10001 }),
+        getStatus: sinon.stub().resolves(),
+        getExternalDbConfig: sinon.stub().resolves(null),
+        readContainerEnv: sinon.stub().resolves(null),
+        HubConnector: class { constructor() { this.updateConfig = updateConfig } },
+        ExplorerConnector: class {},
+        dockerService: { stringToDockerContainerFile: sinon.stub().resolves(true) },
+        buildHubModuleConfig: sinon.stub().returns(null),
+        buildCheckpointConfig: sinon.stub().returns({}),
+        isCheckpointSelfSyncEnabled: sinon.stub().resolves(false),
+        logger: { info: sinon.stub() }
+    }
 }
 
 describe('HubService.updateHub network attachment', function () {
@@ -77,6 +103,55 @@ describe('HubService.updateHub network attachment', function () {
         expect(threw).to.be.an('error')
         expect(threw.message).to.match(/xchain-sync -> bitcoin\/mainnet/)
         expect(attach.callCount).to.equal(2)
+    })
+})
+
+describe('HubService.updateHubOrExplorer config delivery', function () {
+    it('retries a rejected hub update and succeeds on the next attempt', async function () {
+        const updateConfig = sinon.stub()
+        updateConfig.onFirstCall().rejects(new Error('connection refused'))
+        updateConfig.onSecondCall().resolves(true)
+        const deps = configDeliveryDependencies({ updateConfig })
+
+        expect(await updateHubOrExplorer('xchain-hub', deps)).to.be.true
+        expect(updateConfig.callCount).to.equal(2)
+        sinon.assert.calledOnceWithExactly(deps.sleep, 3000)
+    })
+
+    it('exhausts ten attempts and reports the last hub error', async function () {
+        const updateConfig = sinon.stub().rejects(new Error('earlier refusal'))
+        updateConfig.onCall(9).rejects(new Error('final refusal'))
+        const deps = configDeliveryDependencies({ updateConfig })
+
+        let thrown
+        try {
+            await updateHubOrExplorer('xchain-hub', deps)
+        } catch (err) {
+            thrown = err
+        }
+
+        expect(updateConfig.callCount).to.equal(10)
+        expect(deps.sleep.callCount).to.equal(9)
+        expect(thrown).to.include('last error: final refusal')
+        expect(thrown).not.to.include('earlier refusal')
+    })
+
+    it('writes the explorer payload to config.json in its registered container', async function () {
+        const lastStatus = { bitcoin: { mainnet: { 'xchain-encoder': {} } } }
+        const deps = configDeliveryDependencies({ lastStatus })
+        deps.buildHubModuleConfig.returns({ enabled: true })
+
+        expect(await updateHubOrExplorer('xchain-explorer', deps)).to.be.true
+        sinon.assert.calledOnceWithExactly(
+            deps.dockerService.stringToDockerContainerFile,
+            'explorer-container',
+            JSON.stringify([{
+                coin: 'bitcoin',
+                network: 'mainnet',
+                'xchain-encoder': { enabled: true }
+            }]),
+            '/XChainExplorer/src/config.json'
+        )
     })
 })
 
