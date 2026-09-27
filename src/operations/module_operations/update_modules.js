@@ -34,6 +34,8 @@ async function updateModules(servicesList, ref = null, opts = {}) {
     const list = opts.all ? includeSharedServicesForUpdate(servicesList) : servicesList
     const runOpts = { skipCurrentNode: !!opts.all, quietNotInstalled: !!opts.all }
 
+    assertNodeDataDirSetForUpdate(list)
+
     await repairValidatorConfigBeforeHubUpdate(list)
 
     if (isReleaseRef(ref)) {
@@ -60,6 +62,15 @@ async function updateModules(servicesList, ref = null, opts = {}) {
     // A release node with no ref: the LATEST release (the recorded tag is where the node is, not where it is going), never a branch fallback. A lookup failure stops the run with nothing changed. The re-executed child of a CLI self-update already knows the tag its parent resolved.
     const releaseRef = config.XCHAIN_NODE_UPDATE_TARGET || null
     return withInstallTarget(releaseRef, async () => updateModulesOnBranch(list, null, runOpts), { fallbackToBranch: false })
+}
+
+function assertNodeDataDirSetForUpdate(servicesList) {
+    const includesNode = Object.values(servicesList).some(networks =>
+        Object.values(networks).some(modules => modules.includes(NODE_MODULE_NAME)))
+    const dataDir = config.XCHAIN_NODE_DATA_DIR
+    if (includesNode && (!dataDir || dataDir.trim() === '')) {
+        throw new Error('Refusing to update a node while XCHAIN_NODE_DATA_DIR is unset. Set it to the existing stack data root before retrying.')
+    }
 }
 
 /**
