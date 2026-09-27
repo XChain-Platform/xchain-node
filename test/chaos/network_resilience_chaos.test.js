@@ -160,7 +160,7 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             expect(data.jsonrpc).to.equal('2.0')
             expect(data.method).to.equal('updateconfig')
             expect(data.params.config).to.deep.equal(configPayload)
-            expect(opts.timeout).to.equal(10000)
+            expect(opts.timeout).to.equal(60000)
         })
     })
 })
@@ -293,7 +293,7 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             expect(result).to.be.false
         })
 
-        it('hub returns false when result is false', async function () {
+        it('reports the hub reachable when a false result is present', async function () {
             const axiosStub = {
                 post: sinon.stub().resolves({ data: { result: false } })
             }
@@ -301,7 +301,8 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             const hub = new HubConnector('127.0.0.1', 10000)
 
             const result = await hub.ping()
-            expect(result).to.be.false
+            // Pinned by hub_connector.test.js: returns true when a response contains a result.
+            expect(result).to.be.true
         })
 
         it('hub returns false when result is null', async function () {

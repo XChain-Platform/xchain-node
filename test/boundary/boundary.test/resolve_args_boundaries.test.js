@@ -72,15 +72,14 @@ describeBoundaryTests('ConfigService: resolveArgs boundaries', function () {
     })
 })
 describeBoundaryTests('ConfigService: resolveArgs boundaries', function () {
-    it('does not set branch when expectBranch is false', function () {
-        const result = resolveArgs(['unknownarg', 'bitcoin', 'mainnet'], { expectBranch: false })
-        expect(result.branch).to.be.null
+    it('rejects an unrecognized argument when expectBranch is false', function () {
+        expect(() => resolveArgs(['unknownarg', 'bitcoin', 'mainnet'], { expectBranch: false }))
+            .to.throw("Unrecognized argument 'unknownarg'")
     })
 
-    it('only takes the first unrecognized arg as branch', function () {
-        const result = resolveArgs(['mybranch', 'otherbranch', 'bitcoin'], { expectBranch: true })
-        expect(result.branch).to.equal('mybranch')
-        // 'otherbranch' is silently ignored
+    it('rejects a second unrecognized argument after filling the branch slot', function () {
+        expect(() => resolveArgs(['mybranch', 'otherbranch', 'bitcoin'], { expectBranch: true }))
+            .to.throw("Unrecognized argument 'otherbranch'")
     })
 
     it('handles empty args array', function () {

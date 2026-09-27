@@ -44,7 +44,7 @@ describe('Chaos: Config Resilience', function () {
             const cs = makeConfigService()
             const config = await cs.getDefaultConfig('xchain-hub', null, null)
 
-            expect(config).to.have.property('HUB_HOST', '127.0.0.1')
+            expect(config).to.have.property('HUB_HOST', '0.0.0.0')
             expect(config).to.have.property('HUB_PORT', 10000)
             expect(config).to.not.have.property('DECODER_DB_HOST')
         })
