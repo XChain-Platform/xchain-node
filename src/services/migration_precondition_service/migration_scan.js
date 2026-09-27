@@ -91,6 +91,7 @@ async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
         const cat = deps.getDockerContainerFileCat || require('../docker_service').getDockerContainerFileCat
         const found = await readMigrateCli(cat, container)
         if (!found) return null
+        if (!/(['"])--status\1/.test(found.source)) return false
 
         const execContainer = deps.execContainer || require('../docker_service').execContainer
         let raw

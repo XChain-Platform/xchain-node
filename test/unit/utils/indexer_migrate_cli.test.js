@@ -28,7 +28,7 @@ const GATED        = '2026-07-24-pubkeys-widen-uncompressed.sql'
 const NEWEST_PATH  = 'src/db/migration/migrate.js'
 const OLD_PATH     = 'src/migrate.js'
 
-const CLI_SOURCE = 'main()'
+const CLI_SOURCE = "const STATUS = '--status'; const JSON_OUTPUT = '--json'; main()"
 const VALID_STATUS = JSON.stringify({
     database: 'XChain_BTC_Mainnet_Indexer',
     total: 2,
