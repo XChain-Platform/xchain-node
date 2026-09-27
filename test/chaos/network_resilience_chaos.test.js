@@ -301,6 +301,7 @@ describe('Chaos: Network Resilience (Hub/Explorer)', function () {
             const hub = new HubConnector('127.0.0.1', 10000)
 
             const result = await hub.ping()
+            // Pinned by hub_connector.test.js: returns true when a response contains a result.
             expect(result).to.be.true
         })
 
