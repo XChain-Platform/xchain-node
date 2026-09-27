@@ -54,7 +54,7 @@ describe('Chaos: Config Resilience', function () {
                 await cs.getDefaultConfig('xchain-encoder', '../../etc', 'passwd')
                 expect.fail('should have thrown')
             } catch (err) {
-                expect(err.message).to.include('path traversal')
+                expect(err.message).to.equal("Unknown coin '../../etc'; cannot derive a database name")
             }
         })
 
@@ -71,7 +71,7 @@ describe('Chaos: Config Resilience', function () {
                 await cs.getDefaultConfig('xchain-encoder', '../..', 'etc/passwd')
                 expect.fail('should have thrown')
             } catch (err) {
-                expect(err.message).to.include('path traversal')
+                expect(err.message).to.equal("Unknown coin '../..'; cannot derive a database name")
             }
         })
     })
