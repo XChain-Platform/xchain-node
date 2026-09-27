@@ -12,20 +12,23 @@
 
 const { expect, makeStubs, loadOperations, registerLifecycleHooks } = require('../module_operations.test/helpers/harness')
 
-describe('Node update data directory preflight', function () {
-    let originalDataDir
+let originalDataDir
 
+function clearConfiguredDataDir() {
+    originalDataDir = process.env.XCHAIN_NODE_DATA_DIR
+    delete process.env.XCHAIN_NODE_DATA_DIR
+}
+
+function restoreConfiguredDataDir() {
+    if (originalDataDir === undefined) delete process.env.XCHAIN_NODE_DATA_DIR
+    else process.env.XCHAIN_NODE_DATA_DIR = originalDataDir
+}
+
+describe('Node update data directory preflight', function () {
     registerLifecycleHooks(() => {})
 
-    beforeEach(function () {
-        originalDataDir = process.env.XCHAIN_NODE_DATA_DIR
-        delete process.env.XCHAIN_NODE_DATA_DIR
-    })
-
-    afterEach(function () {
-        if (originalDataDir === undefined) delete process.env.XCHAIN_NODE_DATA_DIR
-        else process.env.XCHAIN_NODE_DATA_DIR = originalDataDir
-    })
+    beforeEach(clearConfiguredDataDir)
+    afterEach(restoreConfiguredDataDir)
 
     it('refuses a node update with no configured data directory before replacement begins', async function () {
         const stubs = makeStubs()
