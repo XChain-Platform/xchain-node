@@ -66,6 +66,11 @@ ci_tier_deferred() {
   return 1
 }
 # <<< ci-tier <<<
+fast_defer() {
+  DEFERRED="$DEFERRED [$1]"
+  echo; echo "ci:full ===== $1 DEFERRED (CI_TIER=fast, runs in the full sweep) ====="
+}
+
 # >>> ci-tier timer (generated block; re-run the tier wirer to update) >>>
 run_tier() {
   ci_tier_deferred "$1" && return 0  # ci-tier guard (generated)
@@ -111,14 +116,52 @@ if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
   need_sib "${DECLARED_SIBLINGS[@]}"
 fi
 
+FAST_SELECTOR_MODE="full"
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  FAST_PLAN=""
+  FAST_SELECTOR_REASON=""
+  if [ ! -f bin/ci_fast_select.js ]; then
+    FAST_SELECTOR_REASON="helper missing"
+  elif FAST_PLAN="$(node bin/ci_fast_select.js --plan 2>&1)"; then
+    FAST_PLAN_HEADER="${FAST_PLAN%%$'\n'*}"
+    case "$FAST_PLAN_HEADER" in
+      "consensus 0") FAST_SELECTOR_MODE="changed" ;;
+      "consensus 1") FAST_SELECTOR_MODE="consensus" ;;
+      *) FAST_SELECTOR_REASON="selector returned no consensus decision" ;;
+    esac
+    if [ -z "$FAST_SELECTOR_REASON" ]; then
+      printf '%s\n' "$FAST_PLAN"
+    fi
+  else
+    FAST_SELECTOR_STATUS=$?
+    FAST_SELECTOR_REASON="exit $FAST_SELECTOR_STATUS: ${FAST_PLAN//$'\n'/; }"
+  fi
+  if [ -n "$FAST_SELECTOR_REASON" ]; then
+    echo "ci:full: fast selector unavailable ($FAST_SELECTOR_REASON); running the full unit tier"
+  fi
+fi
+
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
 # ci-reusable.yml arms XCHAIN_REQUIRE_SIBLINGS whenever it checked
 # siblings out, so every sibling guard fails loud on a miss instead of
 # skipping; match that here for a true local twin.
-if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
-  run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+if [ "${CI_TIER:-full}" != "fast" ] || [ "$FAST_SELECTOR_MODE" != "changed" ]; then
+  if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
+    run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+  else
+    run_tier "ci" npm run ci
+  fi
 else
-  run_tier "ci" npm run ci
+  if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
+    run_tier "ci (changed tests)" env XCHAIN_REQUIRE_SIBLINGS=1 node bin/ci_fast_select.js --run
+  else
+    run_tier "ci (changed tests)" node bin/ci_fast_select.js --run
+  fi
+  fast_defer "ci"
+fi
+
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  run_tier "fast-tier selector self-test" ./node_modules/.bin/mocha --no-config --timeout 20000 --exit bin/test/ci_fast_select.test.js
 fi
 
 # --- job: drift-guards -------------------------------------------------------
