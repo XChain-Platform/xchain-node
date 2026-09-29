@@ -11,6 +11,26 @@
 // contact legal@dankest.llc.
 
 const { sinon, expect, makeStubs, loadOperations, registerLifecycleHooks, requireFromUnit } = require('./helpers/harness')
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+
+function registerNodeDataDirHooks() {
+    let dataDir, previousDataDir
+    beforeEach(function () {
+        previousDataDir = process.env.XCHAIN_NODE_DATA_DIR
+        dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-update-'))
+        process.env.XCHAIN_NODE_DATA_DIR = dataDir
+    })
+    afterEach(function () {
+        try {
+            fs.rmSync(dataDir, { recursive: true, force: true })
+        } finally {
+            if (previousDataDir === undefined) delete process.env.XCHAIN_NODE_DATA_DIR
+            else process.env.XCHAIN_NODE_DATA_DIR = previousDataDir
+        }
+    })
+}
 
 
 
@@ -20,6 +40,7 @@ const { sinon, expect, makeStubs, loadOperations, registerLifecycleHooks, requir
 
 
 describe('moduleOperations', function () {
+    registerNodeDataDirHooks()
     let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
     registerLifecycleHooks(stubs => {
         ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
@@ -69,6 +90,7 @@ describe('moduleOperations', function () {
 })
 
 describe('moduleOperations', function () {
+    registerNodeDataDirHooks()
     let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
     registerLifecycleHooks(stubs => {
         ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
@@ -117,6 +139,7 @@ describe('moduleOperations', function () {
 })
 
 describe('moduleOperations', function () {
+    registerNodeDataDirHooks()
     let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
     registerLifecycleHooks(stubs => {
         ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
@@ -162,6 +185,7 @@ describe('moduleOperations', function () {
 })
 
 describe('moduleOperations', function () {
+    registerNodeDataDirHooks()
     let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
     registerLifecycleHooks(stubs => {
         ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
@@ -211,6 +235,7 @@ describe('moduleOperations', function () {
 })
 
 describe('moduleOperations', function () {
+    registerNodeDataDirHooks()
     let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
     registerLifecycleHooks(stubs => {
         ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
