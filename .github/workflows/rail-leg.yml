@@ -41,6 +41,10 @@ on:
         description: 'Ref every service repo is installed and cloned at'
         type: string
         default: develop
+      repo_refs:
+        description: 'JSON map repo -> ref overriding stack_ref for the rail-root source clone'
+        type: string
+        default: '{}'
       limit_minutes:
         description: 'Per-leg bound passed to rail_leg_drive.js --limit-minutes'
         type: string
@@ -192,6 +196,7 @@ jobs:
       - name: Build the rail root (e2e at ${{ matrix.e2e_ref }}, services at the stack ref)
         env:
           E2E_REF: ${{ matrix.e2e_ref }}
+          REPO_REFS: ${{ inputs.repo_refs || '{}' }}
         run: |
           ROOT="$RUNNER_TEMP/rail"
           mkdir -p "$ROOT"
@@ -202,11 +207,11 @@ jobs:
           git -C "$ROOT/xchain-e2e-test" checkout -q FETCH_HEAD
           echo "e2e at $(git -C "$ROOT/xchain-e2e-test" rev-parse HEAD) ($E2E_REF)"
           for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer xchain-documentation xchain-contracts; do
-            git clone -q --depth 1 --branch "$STACK_REF" "https://github.com/XChain-Platform/$r.git" "$ROOT/$r" &
+            git clone -q --depth 1 --branch "$(node -e 'const m=JSON.parse(process.env.REPO_REFS||"{}");process.stdout.write(m[process.argv[1]]||process.env.STACK_REF)' "$r")" "https://github.com/XChain-Platform/$r.git" "$ROOT/$r" &
           done
           wait
           for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer xchain-documentation xchain-contracts; do
-            echo "$r at $(git -C "$ROOT/$r" rev-parse --short HEAD)"
+            echo "$r at $(git -C "$ROOT/$r" rev-parse --short HEAD) ($(git -C "$ROOT/$r" rev-parse --abbrev-ref HEAD))"
           done
           ln -sfn ../xchain-vm "$ROOT/xchain-indexer/xchain-vm"
           for s in xchain-hub xchain-sdk xchain-vm; do ln -sfn "../$s" "$ROOT/xchain-e2e-test/$s"; done
