@@ -280,12 +280,30 @@ jobs:
           mkdir -p "$J"
           echo "JOURNAL_DIR=$J" >> "$GITHUB_ENV"
           set +e
-          env DOGE_INDEXER_API_PORT=3124 \
+          # Shape watchdog: a wiring fault (a hostname the host cannot resolve, a
+          # runtime the VM refuses, a missing module) otherwise surfaces only as a
+          # 30-minute wait inside a case. The drive runs in its own process group;
+          # once a fault signature repeats in the drive or venue logs, that group
+          # alone is ended and the job fails naming it.
+          setsid env DOGE_INDEXER_API_PORT=3124 \
             NODE_PATH="$RAIL_ROOT" BRIDGE_RAIL_REPO_ROOT="$RAIL_ROOT" \
             BRIDGE_RAIL_MINER_PAUSE_FILE="$RUNNER_TEMP/btc-loop.pause" \
             BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE="$RUNNER_TEMP/doge-loop.pause" \
-            node scripts/rail_leg_drive.js "$DRIVE" "$LEG" --journal-dir "$J" --limit-minutes "$LIMIT_MINUTES" 2>&1 | tee "$J/drive.log"
-          rc=${PIPESTATUS[0]}
+            node scripts/rail_leg_drive.js "$DRIVE" "$LEG" --journal-dir "$J" --limit-minutes "$LIMIT_MINUTES" > "$J/drive.log" 2>&1 &
+          pgid=$!
+          SHAPE='EAI_AGAIN|ENOTFOUND|CONSENSUS RUNTIME MISMATCH|Cannot find module'
+          while kill -0 "$pgid" 2>/dev/null; do
+            sleep 60
+            hits=$(cat "$J"/*.log 2>/dev/null | grep -cE "$SHAPE")
+            if [ "$hits" -ge 5 ]; then
+              echo "::error::venue shape fault ($hits hits): $(cat "$J"/*.log | grep -m1 -oE ".{0,160}($SHAPE).{0,120}")"
+              kill -TERM -- "-$pgid" 2>/dev/null; sleep 30; kill -KILL -- "-$pgid" 2>/dev/null
+              break
+            fi
+          done
+          wait "$pgid"; rc=$?
+          [ "${hits:-0}" -ge 5 ] && rc=97
+          cat "$J/drive.log"
           echo "drive exit $rc"
           test -s "$J/case-journal.jsonl" && node scripts/rail_journal_triage.js "$J/case-journal.jsonl" 2>/dev/null | tail -5 || true
           exit "$rc"
