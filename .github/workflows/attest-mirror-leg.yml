@@ -58,9 +58,11 @@ jobs:
           LEGS_INPUT: ${{ inputs.legs }}
           EVENT: ${{ github.event_name }}
         run: |
+          DRIVE=.github/attest-mirror/run-leg.sh
+          test -f "$DRIVE" || { echo "::error::missing drive script: $DRIVE"; exit 1; }
           if [ "$EVENT" = schedule ]; then
             E2E_REF=develop
-            LEGS_INPUT=$(node -e 'const l=require("./.github/rail-legs.json").filter(x=>x.drive===".github/attest-mirror/run-leg.sh").map(x=>x.leg);if(!l.length)throw new Error("no scheduled attest-mirror legs");process.stdout.write(l.join(","))')
+            LEGS_INPUT=$(node -e 'const fs=require("fs");const drive=process.argv[1];const l=require("./.github/rail-legs.json");if(!l.length)throw new Error("no scheduled attest-mirror legs");for(const x of l){if(x.drive!==drive)throw new Error("unsupported scheduled drive: "+x.drive);if(!fs.existsSync(x.drive)||!fs.statSync(x.drive).isFile())throw new Error("missing scheduled drive script: "+x.drive)}process.stdout.write(l.map(x=>x.leg).join(","))' "$DRIVE")
           fi
           echo "e2e_ref=$E2E_REF" >> "$GITHUB_OUTPUT"
           git clone -q https://github.com/XChain-Platform/xchain-e2e-test.git e2e
