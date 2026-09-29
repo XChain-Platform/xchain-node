@@ -581,6 +581,10 @@ jobs:
         # on the non-BTC legs (see the ports step above for why). `install` is
         # idempotent for the shared hub and explorer, so the second call adds the
         # bitcoin coin stack and pushes both coins' config to the one hub.
+        # The installer's api.github.com reads share a 60 per hour anonymous quota per
+        # runner IP, which a busy day exhausts; the job token raises it to 5000.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
           echo "Installing the stack at ref: $STACK_REF"
