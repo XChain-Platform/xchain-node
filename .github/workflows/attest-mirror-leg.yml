@@ -20,6 +20,12 @@ run-name: >-
 # venue logs; the leg's verdict is its exit code, as on the venue.
 
 on:
+  # A push to a gh-rail/** branch that edits .github/attest-mirror-run.json runs the
+  # legs that file names; it also registers this workflow for dispatch off the
+  # default branch.
+  push:
+    branches: ['gh-rail/**']
+    paths: ['.github/attest-mirror-run.json']
   workflow_dispatch:
     inputs:
       e2e_ref:
@@ -44,13 +50,23 @@ jobs:
     timeout-minutes: 5
     outputs:
       legs: ${{ steps.legs.outputs.legs }}
+      e2e_ref: ${{ steps.legs.outputs.e2e_ref }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
       - name: List the legs
         id: legs
         env:
           E2E_REF: ${{ inputs.e2e_ref || 'develop' }}
           LEGS_INPUT: ${{ inputs.legs }}
+          EVENT: ${{ github.event_name }}
         run: |
+          if [ "$EVENT" = push ]; then
+            E2E_REF=$(node -p 'require("./.github/attest-mirror-run.json").e2e_ref')
+            LEGS_INPUT=$(node -p 'require("./.github/attest-mirror-run.json").legs.join(",")')
+          fi
+          echo "e2e_ref=$E2E_REF" >> "$GITHUB_OUTPUT"
           git clone -q https://github.com/XChain-Platform/xchain-e2e-test.git e2e
           git -C e2e fetch -q origin "$E2E_REF" && git -C e2e checkout -q FETCH_HEAD
           if [ -n "$LEGS_INPUT" ]; then
@@ -72,7 +88,7 @@ jobs:
     timeout-minutes: 240
     env:
       STACK_REF: ${{ inputs.stack_ref || 'develop' }}
-      E2E_REF: ${{ inputs.e2e_ref || 'develop' }}
+      E2E_REF: ${{ needs.plan.outputs.e2e_ref }}
       XCHAIN_NODE_EXTERNAL_DB: '1'
       XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1'
       XCHAIN_NODE_EXTERNAL_DB_PORT: '3306'
@@ -138,7 +154,7 @@ jobs:
           docker images --format '{{.Repository}}' | grep '^xchain-node-' | sort
           docker ps --format '{{.Names}} {{.Status}}'
 
-      - name: Build the source root (e2e at ${{ inputs.e2e_ref || 'develop' }})
+      - name: Build the source root (e2e at ${{ needs.plan.outputs.e2e_ref }})
         run: |
           ROOT="$RUNNER_TEMP/rail"
           mkdir -p "$ROOT"
