@@ -208,6 +208,24 @@ jobs:
           mkdir -p "$RAIL_ROOT/xchain-e2e-test/drill-keys"
           chmod 700 "$RAIL_ROOT/xchain-e2e-test/drill-keys"
 
+      # The self-hosted rails were seeded once with the four-source ROLLCALL
+      # federation (test/tools/rollcallSeedFederation.test.js), whose keys the
+      # harness can sign for; the bridge drives reuse that seated set. A fresh
+      # chain has an EMPTY capability set, and the policy bootstrap only places
+      # new signers in gaps between seated keys, so with nothing seated it stakes
+      # nothing. Seeding here gives the runner the same shape the rails have. The
+      # mnemonic is generated per job, masked, and dies with the runner: it
+      # guards nothing but this ephemeral chain.
+      - name: Seed the rail federation (ephemeral mnemonic)
+        working-directory: ${{ env.RAIL_ROOT }}/xchain-e2e-test
+        run: |
+          M=$(node -e 'console.log(require("bip39").generateMnemonic())')
+          echo "::add-mask::$M"
+          echo "XC_ROLLCALL_FEDERATION_MNEMONIC=$M" >> "$GITHUB_ENV"
+          env XC_ROLLCALL_FEDERATION_MNEMONIC="$M" COIN=bitcoin NETWORK=regtest NODE_PATH="$RAIL_ROOT" \
+            ./node_modules/.bin/mocha --no-config --timeout 0 --exit \
+            --require ./test/initialCheck.test.js test/tools/rollcallSeedFederation.test.js
+
       - name: Drive ${{ matrix.drive }} ${{ matrix.leg }}
         id: drive
         working-directory: ${{ env.RAIL_ROOT }}/xchain-e2e-test
