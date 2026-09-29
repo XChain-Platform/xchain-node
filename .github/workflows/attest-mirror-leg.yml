@@ -99,7 +99,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.22.3'
 
       - name: Reclaim runner disk
         run: |
@@ -176,6 +176,10 @@ jobs:
           wait
           (cd "$ROOT/xchain-indexer" && npm ci --no-audit --no-fund --silent)
           (cd "$ROOT/xchain-e2e-test" && npm ci --no-audit --no-fund --silent)
+          # The in-process venue indexers refuse any runtime but the fleet's pinned
+          # one (xchain-vm/src/consensus-runtime.js: v8, icu, unicode, cldr, ABI 127),
+          # so check the job's Node against that pin before spending a drive on it.
+          node -e 'const c=require(process.argv[1]+"/xchain-vm/src/consensus-runtime.js"); const r=c.checkConsensusRuntime(); console.log("node "+process.version+" consensus runtime: "+c.describeMismatch(r)); process.exit(r.ok?0:1)' "$ROOT"
 
       - name: Stage the stack root
         run: |
