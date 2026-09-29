@@ -150,9 +150,8 @@ jobs:
           node src/index.js install "$STACK_REF" all bitcoin regtest
           node src/index.js install "$STACK_REF" all litecoin regtest
           node src/index.js install "$STACK_REF" all dogecoin regtest
-          # The isolated stacks bring their own coin services; keep only the
-          # standing hub and explorer (the leg reads the explorer on 18080, as on test02).
-          for c in $(docker ps --format '{{.Names}}' | grep -E '^xchain-node-(litecoin|dogecoin)-regtest-'); do docker stop "$c" >/dev/null; done
+          # The standing stacks stay up, as on test02: legs read the standing
+          # explorer (18080) and the standing LTC/DOGE indexers (at0-anti-wedge reads 3224).
           docker pull -q mariadb:10.11 && docker tag mariadb:10.11 xchain-node-database
           docker images --format '{{.Repository}}' | grep '^xchain-node-' | sort
           docker ps --format '{{.Names}} {{.Status}}'
