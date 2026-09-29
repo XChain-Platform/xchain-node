@@ -126,6 +126,10 @@ jobs:
           done
 
       - name: Build the service images (install the three regtest stacks)
+        # Authenticated API reads: the anonymous limit (60 an hour per runner IP) is
+        # shared by every job on the runner pool.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           npm ci
           git config --global url."https://github.com/".insteadOf "git@github.com:"

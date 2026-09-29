@@ -121,6 +121,10 @@ jobs:
           done
 
       - name: Install xchain-node deps
+        # Authenticated API reads: the anonymous limit (60 an hour per runner IP) is
+        # shared by every job on the runner pool.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           npm ci
           git config --global url."https://github.com/".insteadOf "git@github.com:"
@@ -174,6 +178,10 @@ jobs:
           write_ports config/bitcoin-regtest 3020
 
       - name: Boot the two regtest stacks at ${{ inputs.stack_ref || 'develop' }}
+        # Authenticated API reads: the anonymous limit (60 an hour per runner IP) is
+        # shared by every job on the runner pool.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
           set -a; . "$RUNNER_TEMP/stack.env"; set +a
