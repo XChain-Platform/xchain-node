@@ -232,15 +232,33 @@ jobs:
             ./node_modules/.bin/mocha --no-config --timeout 0 --exit \
             --require ./test/initialCheck.test.js test/tools/rollcallSeedFederation.test.js
 
-      - name: Read the seated capability sets
-        continue-on-error: true
+      # Fail fast when the seeded federation is not a member of the sets the drive
+      # resolves its quorum from, instead of 25 s into the drive. Reads the BTC
+      # indexer the way the seed tool does: getstakeweightsbycapability at the tip.
+      - name: Check the seated capability sets
         run: |
-          for cap in oracle_publish cross_chain price attestation; do
-            out=$(curl -s -m 10 -X POST -H 'Content-Type: application/json' \
-              -d "{\"jsonrpc\":\"2.0\",\"method\":\"getstakeweightsbycapability\",\"params\":{\"capability\":\"$cap\"},\"id\":1}" \
-              http://127.0.0.1:3024/)
-            echo "$cap: $(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);const r=j.result||{};const v=r.validators||r.weights||r.rows||r;console.log(JSON.stringify({error:j.error&&j.error.message,members:Array.isArray(v)?v.length:undefined,total:r.total_weight||r.totalStake||r.total,block:r.block_index}))}catch(e){console.log("unparsed "+s.slice(0,200))}})')"
-          done
+          node - <<'JS'
+          const rpc = async (method, params) => {
+            const r = await fetch('http://127.0.0.1:3024/', { method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
+            const j = await r.json()
+            if (j.error) throw new Error(method + ': ' + JSON.stringify(j.error))
+            return j.result
+          }
+          ;(async () => {
+            const tip = Number((await rpc('getblockhashes', {})).block_index)
+            let crossChain = null
+            for (const capability of ['oracle_publish', 'cross_chain', 'price', 'attestation']) {
+              const res = await rpc('getstakeweightsbycapability', { capability, block_index: tip })
+              if (!res || !Array.isArray(res.validators)) { console.log(capability + ': unexpected shape ' + JSON.stringify(res).slice(0, 300)); continue }
+              const v = res.validators
+              const weight = v.reduce((sum, x) => sum + Number(x.weight || 0), 0)
+              console.log(capability + ' at block ' + tip + ': ' + v.length + ' member(s), weight ' + weight)
+              if (capability === 'cross_chain') crossChain = v.length
+            }
+            if (crossChain === 0) { console.log('::error::cross_chain is empty after seeding; the drive cannot resolve a quorum'); process.exit(1) }
+          })().catch((e) => { console.log('::error::' + e.message); process.exit(1) })
+          JS
 
       - name: Drive ${{ matrix.drive }} ${{ matrix.leg }}
         id: drive
