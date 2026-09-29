@@ -97,15 +97,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.22.3'
-
       - name: Reclaim runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android "$AGENT_TOOLSDIRECTORY" || true
           docker system prune -af || true
           df -h /; nproc; free -g
+
+      # AFTER the reclaim, which deletes the tool cache setup-node installs into;
+      # before it, later steps silently fell back to the image's own Node (v22.23.2
+      # on some images, v22.23.3 on others, the latter failing the consensus pin).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
 
       - name: Start headless MariaDB (for the image-building install)
         run: |
