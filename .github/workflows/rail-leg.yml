@@ -185,11 +185,11 @@ jobs:
           git -C "$ROOT/xchain-e2e-test" fetch -q origin "$E2E_REF"
           git -C "$ROOT/xchain-e2e-test" checkout -q FETCH_HEAD
           echo "e2e at $(git -C "$ROOT/xchain-e2e-test" rev-parse HEAD) ($E2E_REF)"
-          for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer; do
+          for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer xchain-documentation xchain-contracts; do
             git clone -q --depth 1 --branch "$STACK_REF" "https://github.com/XChain-Platform/$r.git" "$ROOT/$r" &
           done
           wait
-          for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer; do
+          for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer xchain-documentation xchain-contracts; do
             echo "$r at $(git -C "$ROOT/$r" rev-parse --short HEAD)"
           done
           ln -sfn ../xchain-vm "$ROOT/xchain-indexer/xchain-vm"
