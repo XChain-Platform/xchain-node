@@ -244,6 +244,7 @@ async function hasBitcoinIndexer(network) {
 // (D84 precedent): it arms the admission-map mirror and its consumer and
 // barrier gates together, so a venue arms as a unit; the hub's own
 // mirror-admission gate module gates it for real.
+// XC_ANCHOR_FOLD_REGTEST_ACTIVATION rides beside it: the hub and the regtest indexer arm the fold together.
 // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
 // accepted from the host env under their redaction-safe `*_SECRET` spelling;
 // everything else resolves to a plain process.env read.
@@ -288,7 +289,8 @@ function configureHubBeforeKey(defaultValues, module) {
             "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED",
             "XC_ROLLCALL_REGTEST_ACTIVATION",
             "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
-            "XC_MIRROR_ADMISSION_ACTIVATION"
+            "XC_MIRROR_ADMISSION_ACTIVATION",
+            "XC_ANCHOR_FOLD_REGTEST_ACTIVATION"
         ]
         for (const varName of hubPassthroughVars) {
             const value = readSecretHostEnv(varName)

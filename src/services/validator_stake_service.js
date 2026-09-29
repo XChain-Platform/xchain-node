@@ -200,6 +200,10 @@ function explorerUrl(coins, pathPart) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
+function requireEncoder(sdk) {
+    return typeof sdk.requireEncoder === 'function' ? sdk.requireEncoder() : sdk['_requireEncoder']()
+}
+
 /**
  * The outputs of `prevTxid` that belong to this address, once the encoder can
  * see them. Seconds (mempool visibility), not a block.
@@ -228,7 +232,7 @@ async function chainedInputs(sdk, address, prevTxid, timeoutMs) {
     const deadline = Date.now() + (timeoutMs || 90000)
     for (;;) {
         let utxos = null
-        try { utxos = await sdk.requireEncoder().getUTXOs(address) } catch { /* transient; retry */ }
+        try { utxos = await requireEncoder(sdk).getUTXOs(address) } catch { /* transient; retry */ }
         const outs = ((utxos && utxos.utxos) || []).filter(o => (o.fullTxid || o.txid) === prevTxid)
         if (outs.length) return outs
         const left = deadline - Date.now()

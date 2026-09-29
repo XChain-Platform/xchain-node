@@ -121,12 +121,16 @@ for (const [name, value] of [['DOGE_NETWORK', NETWORK], ['DOGE_WIF', WIF], ['DOG
 
 const sdk = new XChainSDK({ network: NETWORK, encoderUrl: ENCODER });
 
+function requireEncoder() {
+    return typeof sdk.requireEncoder === 'function' ? sdk.requireEncoder() : sdk['_requireEncoder']();
+}
+
 module.exports = {
     // Full publish pipeline for a raw wire payload string -> { txid }. The
     // returned txid is the phase-2 (reveal) txid when two-phase encoding is
     // used; that is the transaction indexers decode.
     async broadcast(payload) {
-        const encoder = sdk.requireEncoder();
+        const encoder = requireEncoder();
 
         const txParams = { data: payload, pubkey: ADDRESS, change: ADDRESS, encoding: 'P2SH' };
         if (FEE_PER_KB !== undefined) txParams.feePerKb = FEE_PER_KB;
