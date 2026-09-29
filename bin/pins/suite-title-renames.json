@@ -188,6 +188,9 @@
       "MariaDbStore removeModuleContainer() returns false when pool is not ready": "MariaDbStore deleteModuleContainer() returns false when pool is not ready",
       "MariaDbStore removeModuleContainer() returns true for non-existent key (idempotent delete)": "MariaDbStore deleteModuleContainer() returns true for non-existent key (idempotent delete)"
     },
+    "test/unit/migration_precondition_service.test.js": {
+      "MigrationPreconditionService migrationMode returns null when no mode is declared": "MigrationPreconditionService migrationMode defaults to manual when no recognized mode is declared"
+    },
     "test/unit/module_service.test.js": {
       "ModuleService buildAndUp(): module-specific port/volume branches rejects when insertModuleContainer returns false": "ModuleService buildAndUp(): module-specific port/volume branches rejects when setModuleContainer returns false",
       "ModuleService uninstallModule(): removeModuleContainer returns false throws when removeModuleContainer returns false after successful container removal": "ModuleService uninstallModule(): deleteModuleContainer returns false throws when deleteModuleContainer returns false after successful container removal"

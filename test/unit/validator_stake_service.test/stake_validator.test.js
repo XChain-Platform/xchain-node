@@ -13,98 +13,7 @@
 const { expect } = require('chai')
 
 const { stakeValidator } = require('../../../src/services/validator_stake_service')
-const sinon = require('sinon')
-
-const PUBKEY  = 'ab'.repeat(32)
-const ADDRESS = 'mStakeAddress'
-
-function makeExplorer(chain) {
-    return {
-        getAddress: sinon.stub().resolves({ balances: { confirmed: chain.coin ?? '0.001', pending: '0' } }),
-        getToken:   chain.tokenMissing
-            ? sinon.stub().rejects(Object.assign(
-                new Error('Explorer returned HTTP 404 for /RBTC/api/token/XCHAIN'),
-                { code: 'EXPLORER_HTTP_404', details: { status: 404 } }))
-            : sinon.stub().resolves({ mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000 } }),
-        // The whole validator set, which is the method the SDK actually has.
-        // Carries an unrelated validator too, so the pubkey filter is exercised
-        // rather than "the only row wins".
-        getValidators: chain.validatorsThrow
-            ? sinon.stub().rejects(new Error(chain.validatorsThrow))
-            : sinon.stub().resolves({ data: [
-                { status: 'valid', signing_pubkey: 'ff'.repeat(32), amount: '25000', action_index: '1', activation_block: '1' },
-                ...(chain.existing ? [chain.existing] : [])
-            ] })
-    }
-}
-
-function trackPreviousOutput(session, prevTxidRef) {
-    return () => {
-        const s = session()
-        const inner = s.submit
-        s.submit = async (a, e, o) => { const r = await inner(a, e, o); prevTxidRef.value = r.txid; return r }
-        return s
-    }
-}
-
-// A fake SDK shaped like the parts the command touches: explorer reads,
-// balances, and a session whose mint/stake record what they were asked.
-function makeSdk(chain = {}) {
-    const calls = { mint: [], stake: [] }
-    const sdk = {
-        explorer: makeExplorer(chain),
-        // The mints credit once they index. Modelled by reporting the post-mint
-        // balance after they have been sent, so the fallback path can finish.
-        getBalances: async () => {
-            const base = chain.xchain !== undefined ? chain.xchain : 0
-            const credited = calls.mint.length && chain.mintsNeverIndex !== true
-                ? base + calls.mint.reduce((s, c) => s + Number(c.params.AMOUNT), 0)
-                : base
-            return { data: [{ tick: 'XCHAIN', amount: String(credited) }] }
-        },
-        // Every action goes through session.submit; the convenience wrappers
-        // (mint/stake) are sugar over it, and the service calls submit directly
-        // so one code path handles the funding chain.
-        session: () => ({
-            address: ADDRESS,
-            submit: async (actionData, enc, opts) => {
-                const rec = { params: actionData.params, enc, opts }
-                if (actionData.action === 'MINT') calls.mint.push(rec)
-                if (actionData.action === 'STAKE') calls.stake.push(rec)
-                const txid = actionData.action === 'STAKE' ? 'staketx' : 'mint' + calls.mint.length
-                // Report the inputs the encoder was told to use, so the chain
-                // assertion in the service sees a real answer.
-                const spentInputs = (enc.utxos || []).map(u => ({ txid: u.txid, vout: u.vout }))
-                return { txid, spentInputs }
-            }
-        }),
-        // The chain link: each broadcast leaves a change output the next action
-        // is funded from. Keyed by txid so the service's filter is exercised.
-        requireEncoder: () => ({
-            getUTXOs: async () => ({ utxos: chain.noChange ? [] : [
-                { txid: prevTxidRef.value || 'seed', fullTxid: prevTxidRef.value || 'seed', vout: 1, value: '150000', confirmations: 0 }
-            ] })
-        })
-    }
-    // The fake encoder answers with an output of whatever was broadcast last.
-    const prevTxidRef = { value: null }
-    sdk.session = trackPreviousOutput(sdk.session, prevTxidRef)
-    return { sdk, calls }
-}
-
-function run(opts, chain, settingsExtra = {}) {
-    const { sdk, calls } = makeSdk(chain)
-    const logged = []
-    const network = settingsExtra.network || 'testnet'
-    const deps = {
-        settings: { enabled: true, pubkey: PUBKEY, network: 'testnet', P2P_PORT: 10002, ...settingsExtra },
-        wallets:  { NETWORK: network, STAKE_ADDRESS: ADDRESS, STAKE_WIF_SECRET: 'cFakeWif' },
-        makeSdk:  () => sdk,
-        sdk:      { XChainSDK: function () { throw new Error('makeSdk should be used') } },
-        log:      m => logged.push(String(m))
-    }
-    return stakeValidator(opts, deps).then(result => ({ result, calls, logged }))
-}
+const { PUBKEY, ADDRESS, makeSdk, run } = require('../../helpers/stake_harness')
 
 describe('ValidatorStakeService', function () {
 
@@ -175,7 +84,12 @@ describe('ValidatorStakeService', function () {
             expect(calls.mint[2].enc.utxos.map(u => u.txid)).to.deep.equal(['mint2'])
             expect(calls.stake[0].enc.utxos.map(u => u.txid)).to.deep.equal(['mint3'])
         })
+    })
+})
 
+describe('ValidatorStakeService', function () {
+
+    describe('stakeValidator()', function () {
         it('waits for the mints to index when no chain can be formed, rather than racing the STAKE', async function () {
             const { calls, logged, result } = await run(
                 { broadcast: true, chainTimeoutMs: 5, balancePollMs: 5 },
@@ -185,6 +99,41 @@ describe('ValidatorStakeService', function () {
             expect(calls.stake, 'the stake still goes out, after the wait').to.have.length(1)
             expect(calls.stake[0].enc.utxos, 'funded freely once ordering stops mattering').to.be.undefined
             expect(result.chained).to.be.false
+        })
+
+        // The STAKE's own link is the only chained hop of a single-mint run, so a
+        // miss there must wait the mint out rather than broadcast an unchained STAKE.
+        it('waits for a single mint to index when only the STAKE hop cannot chain', async function () {
+            const { calls, logged, result } = await run(
+                { broadcast: true, chainTimeoutMs: 5, balancePollMs: 5 },
+                { xchain: 15000, coin: '0.001', noChangeFor: ['mint1'] })
+            expect(calls.mint).to.have.length(1)
+            expect(logged.join('\n')).to.include('cannot chain')
+            expect(logged.join('\n')).to.include('the funding chain broke')
+            expect(calls.stake).to.have.length(1)
+            expect(calls.stake[0].enc.utxos, 'funded freely once the mint indexed').to.be.undefined
+            expect(result.staked).to.be.true
+            expect(result.chained).to.be.false
+        })
+
+        it('keeps the mints chained and waits when only the last MINT to STAKE hop breaks', async function () {
+            const { calls, logged, result } = await run(
+                { broadcast: true, chainTimeoutMs: 5, balancePollMs: 5 },
+                { xchain: 0, coin: '0.001', noChangeFor: ['mint3'] })
+            expect(calls.mint[1].enc.utxos.map(u => u.txid)).to.deep.equal(['mint1'])
+            expect(calls.mint[2].enc.utxos.map(u => u.txid)).to.deep.equal(['mint2'])
+            expect(logged.join('\n')).to.include('the funding chain broke')
+            expect(calls.stake[0].enc.utxos).to.be.undefined
+            expect(result.chained).to.be.false
+        })
+
+        it('sends no STAKE when the STAKE hop breaks and the mint never indexes', async function () {
+            const { calls, logged, result } = await run(
+                { broadcast: true, chainTimeoutMs: 5, balancePollMs: 5, timeout: 0.0001 },
+                { xchain: 15000, coin: '0.001', noChangeFor: ['mint1'], mintsNeverIndex: true })
+            expect(calls.stake, 'never broadcast a STAKE that can land ahead of its funding').to.have.length(0)
+            expect(result.pendingMints).to.be.true
+            expect(logged.join('\n')).to.include('re-run this command to send the STAKE')
         })
     })
 })
@@ -326,7 +275,7 @@ describe('ValidatorStakeService', function () {
         it('calls explorer methods that the published SDK actually exposes', function () {
             const { XChainSDK } = require('@dankest-llc/xchain-sdk')
             const sdk = new XChainSDK({ network: 'bitcoin-testnet' })   // offline: no network I/O in the constructor
-            for (const m of ['getValidators', 'getAddress', 'getToken'])
+            for (const m of ['getValidators', 'getAddress', 'getToken', 'getDelegations', 'getStatus'])
                 expect(sdk.explorer[m], 'sdk.explorer.' + m).to.be.a('function')
             for (const m of ['getBalances', 'session'])
                 expect(sdk[m], 'sdk.' + m).to.be.a('function')

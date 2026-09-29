@@ -32,10 +32,10 @@ const LEDGER_TABLE = 'schema_migrations'
  * body prose or a data literal. Widening that to the whole file is how a
  * migration that merely DISCUSSES the convention would start refusing deploys.
  *
- * Twin of xchain-indexer's Database.migrationDeclaresDeployPrecondition. It is
- * duplicated rather than shared because this tool reads these files out of a
- * source tree it has only cloned, with that tree's dependencies uninstalled, so
- * requiring the module is not available to it. Keep the two in step.
+ * Twin of xchain-indexer src/db/database/migration_registry.js and xchain-decoder
+ * src/db/migration_preconditions.js (both Database.migrationDeclaresDeployPrecondition).
+ * Duplicated, not shared: this tool reads a cloned source tree whose dependencies are
+ * not installed, so it cannot require either module. Keep all three in step.
  */
 function migrationDeclaresDeployPrecondition(raw) {
     const prologue = []
@@ -48,13 +48,14 @@ function migrationDeclaresDeployPrecondition(raw) {
 }
 
 /**
- * The `mode=` a migration header declares, or null when it declares none.
- * Prologue-anchored exactly like migrationDeclaresDeployPrecondition, so a token
- * in body prose or a data literal cannot answer for the file.
+ * The `mode=` a migration header declares: 'auto', or 'manual' for anything else,
+ * because the runners gate every non-auto file and an unscoped operator run applies it.
+ * Prologue-anchored like migrationDeclaresDeployPrecondition, so a token in body prose
+ * or a data literal cannot answer for the file.
  *
- * Twin of the modules' own Database._migrationMode, duplicated for the reason
- * given above: this tool reads a cloned tree whose dependencies are not
- * installed. Keep them in step.
+ * Twin of Database.prototype.migrationMode in xchain-indexer src/db/database/migration_scan.js
+ * and xchain-decoder src/db/migration_statements.js, duplicated for the reason given
+ * above. Keep the scan, the tag regex and the default in step.
  */
 function migrationMode(raw) {
     const prologue = []
@@ -63,12 +64,12 @@ function migrationMode(raw) {
         if (trimmed === '' || trimmed.startsWith('--')) { prologue.push(line); continue }
         break
     }
-    const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*([A-Za-z]+)/im)
-    return m ? m[1].toLowerCase() : null
+    const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im)
+    return m ? m[1].toLowerCase() : 'manual'
 }
 
 /**
- * Every gated (mode=manual) migration in `dir` that the ledger has not recorded,
+ * Every gated (not mode=auto) migration in `dir` that the ledger has not recorded,
  * sorted. This is the blast radius of an UNSCOPED migrate run against that
  * database: the runner applies every pending manual file, not just the one an
  * operator names. The refusal names that whole set, so the consequence is on

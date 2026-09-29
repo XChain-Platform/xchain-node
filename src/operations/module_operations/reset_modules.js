@@ -1,10 +1,10 @@
 'use strict'
 
-let confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer
+let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer
 let RESETTABLE_SERVICES
 
 function configure(dependencies) {
-    ({ confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer } = dependencies)
+    ({ askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer } = dependencies)
     RESETTABLE_SERVICES = [
         'all',
         NODE_MODULE_NAME,
@@ -172,6 +172,14 @@ async function checkResetDatabase(context) {
             const dbContainerId = await getDatabaseContainerId()
             if (!dbContainerId) {
                 console.log('Aborted: MariaDB container not found; install the database first. No data was touched.')
+                return false
+            }
+            // Resolve the root password now, not in resetDatabases after the wipes: a stale root after a rotation, or a
+            // non-TTY run with no usable copy, must refuse here. The value is cached, so resetDatabases asks nothing again.
+            try {
+                await askMariadbRootPassword(coin, network)
+            } catch (err) {
+                console.log(`Aborted: cannot resolve the MariaDB root password (${failureReason(err)}). No data was touched.`)
                 return false
             }
         }

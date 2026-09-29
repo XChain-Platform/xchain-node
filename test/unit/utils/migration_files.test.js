@@ -5,11 +5,11 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// The deploy-precondition guard reads migrations out of a cloned module tree
-// whose layout depends on the ref: flat src/sql/migrations/ for the decoder and
-// for indexer refs cut before the SQL home moved, bucketed src/db/sql/migrations/
-// after. A reader that assumes one layout reads an empty directory on the other
-// and waves a gated deploy through, so both layouts are pinned here.
+// The deploy-precondition guard reads migrations out of a cloned module tree.
+// The indexer and decoder keep them flat under src/sql/migrations/ today; the
+// bucketed src/db/sql/migrations/ layout is pinned as forward-compat, so a reader
+// that assumed one layout never reads an empty directory and waves a gated deploy
+// through if the indexer moves.
 
 const fs         = require('fs')
 const os         = require('os')
@@ -42,7 +42,7 @@ describe('migration_files', () => {
             expect(migrationsDirOf(root)).to.equal(path.join(root, 'src', 'db', 'sql', 'migrations'))
         })
 
-        it('falls back to the flat home for a tree cut before the move, or the decoder', () => {
+        it('reads the flat home the indexer and decoder use today', () => {
             write(root, 'src/sql/migrations/2026-05-30-a.sql', AUTO)
             expect(migrationsDirOf(root)).to.equal(path.join(root, 'src', 'sql', 'migrations'))
         })

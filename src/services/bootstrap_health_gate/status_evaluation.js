@@ -65,7 +65,8 @@ function evaluateContainerState(raw, { now = Date.now() } = {}) {
 // Interpret a decoder/indexer/utxo-tracker health payload. Pure, so the policy
 // is unit-testable without docker. Field names differ per service, which is why
 // every known spelling is checked rather than one canonical key:
-//   decoder  health: status, lag_blocks/blockLag, reorg_halted, reorg_halt_checked_at
+//   decoder  health: status, lag_blocks/blockLag, reorg_halted, reorg_halt_checked_at,
+//                    reorg_halt_parked
 //   indexer  health: status, lag, decoderReorgHalted, stallClass
 //   tracker  health: lag, synced, halted
 //   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'unhealthy')
@@ -113,6 +114,7 @@ function statusFlagReasons(payload) {
         && (payload.reorg_halt_checked_at === null || payload.reorg_halt_checked_at === undefined))
         reasons.push('the decoder has never completed a REORG_HALT marker probe (reorg_halt_checked_at is ' +
             'null), so its "not halted" report is an untested default rather than a reading')
+    reasons.push(...reorgParkReasons(payload))
     if (payload.decoderReorgHalted === true)
         reasons.push('the upstream decoder carries a durable REORG_HALT marker, so this database is frozen behind it')
     // The indexer's own single-field verdict on its block counter:
@@ -134,6 +136,16 @@ function statusFlagReasons(payload) {
         reasons.push('the service cannot see the node tip (stale node height), so its lag is unknown')
 
     return reasons
+}
+
+// Refuse a decoder parked on a REORG_HALT whatever reorg_halted says: a failed marker
+// write leaves no row, so the next probe reports false and only reorg_halt_parked tells
+// the truth. Strict equality, so an image publishing no such field keeps today's behavior.
+function reorgParkReasons(payload) {
+    if (payload.reorg_halt_parked !== true) return []
+    return ['the decoder\'s parse loop is PARKED on a REORG_HALT (reorg_halt_parked is true), so nothing is ' +
+        'being parsed and this database is frozen at the halt' +
+        (payload.reorg_halt_parked_at ? ` since ${payload.reorg_halt_parked_at}` : '')]
 }
 
 // Refusal reasons from the first lag field the payload publishes, checked

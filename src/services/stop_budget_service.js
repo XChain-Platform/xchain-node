@@ -98,21 +98,47 @@ function shutdownTimeoutMsForBudget(module, seconds) {
     return Math.max(budgetMs - STOP_DRAIN_MARGIN_MS, Math.floor(budgetMs / 2))
 }
 
+// A SHUTDOWN_TIMEOUT_MS the service would honour (parsed as the services parse
+// it) that is at or above the stop budget, so docker's kill always lands first.
+// Null when the value is under the budget or one the service would ignore.
+function overBudgetShutdownMs(value, budgetSeconds) {
+    if (value === undefined || value === null) return null
+    const ms = parseInt(value, 10)
+    return Number.isFinite(ms) && ms > 0 && ms >= budgetSeconds * 1000 ? ms : null
+}
+
 // The container env entry that carries the derived drain budget. An explicit
 // SHUTDOWN_TIMEOUT_MS in the module config wins and nothing is added, and so
 // does a null module (a one-shot run has no stop budget to derive from).
+// Warn when that explicit value is not under the budget (docker kills first).
 function shutdownTimeoutEnv(module, moduleConfig, env = MODULE_STOP_TIMEOUT_ENV) {
     if (!module) return {}
     const configured = moduleConfig ? moduleConfig.SHUTDOWN_TIMEOUT_MS : undefined
-    if (configured !== undefined && configured !== null && String(configured).trim() !== '') return {}
+    if (configured !== undefined && configured !== null && String(configured).trim() !== '') {
+        if (module !== 'node') {
+            const budget = moduleStopTimeoutSeconds(module, env)
+            const over = overBudgetShutdownMs(configured, budget)
+            if (over !== null) logger.warn(overBudgetShutdownLine(module, '', over, budget, 'the module config sets'))
+        }
+        return {}
+    }
     const derived = moduleShutdownTimeoutMs(module, env)
     return derived === null ? {} : { SHUTDOWN_TIMEOUT_MS: String(derived) }
 }
 
+// The operator line for a drain timer at or above its stop budget.
+function overBudgetShutdownLine(module, where, ms, budgetSeconds, source) {
+    return `WARNING: ${module}${where}: ${source} SHUTDOWN_TIMEOUT_MS=${ms}, at or above its ${budgetSeconds} s stop ` +
+        'budget, so a drain that runs long is killed by docker before the service\'s own timer can end it. Lower ' +
+        `SHUTDOWN_TIMEOUT_MS in the module config below ${budgetSeconds * 1000} (or remove it so the node derives it), ` +
+        `or raise ${moduleStopTimeoutEnvName(module)}, then recreate the container (xchain-node recreate).`
+}
+
 // Why a running service's own drain may not follow its current budget: the
-// container carries a different stamped budget, or it predates the forwarded
-// SHUTDOWN_TIMEOUT_MS while an override is set. Null when nothing drifted, the
-// container could not be read, or neither side involves a forwarded drain.
+// container carries a different stamped budget, it predates the forwarded
+// SHUTDOWN_TIMEOUT_MS while an override is set, or it carries a drain timer at
+// or above the budget. Null when nothing drifted, the container could not be
+// read, or neither side involves a forwarded drain.
 function describeStopBudgetDrift(module, coin, network, settings, budgetSeconds) {
     if (!settings || module === 'node') return null
     const forwards = shutdownTimeoutMsForBudget(module, budgetSeconds) !== null
@@ -125,7 +151,9 @@ function describeStopBudgetDrift(module, coin, network, settings, budgetSeconds)
     } else if (settings.shutdownTimeoutMs === null && !isDefaultStopBudget(module, budgetSeconds)) {
         created = 'before the node forwarded SHUTDOWN_TIMEOUT_MS'
     } else {
-        return null
+        // Flag a drain timer docker's kill would beat, before the stop rather than after it
+        const over = overBudgetShutdownMs(settings.shutdownTimeoutMs, budgetSeconds)
+        return over === null ? null : overBudgetShutdownLine(module, where, over, budgetSeconds, 'the container carries')
     }
     return `WARNING: ${module}${where} was created ${created}, so its own drain timer does not follow ` +
         `${moduleStopTimeoutEnvName(module)} (now ${budgetSeconds} s). Recreate it (xchain-node recreate) so the ` +

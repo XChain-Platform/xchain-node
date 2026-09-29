@@ -10,6 +10,27 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
+const fs   = require('fs')
+const path = require('path')
+
+// The three copies of migrationMode: this tool's, and the two runners' it mirrors.
+const MODE_TWINS = {
+    node:    path.join(__dirname, '../../../src/services/migration_precondition_service/migration_scan.js'),
+    indexer: path.join(__dirname, '../../../../xchain-indexer/src/db/database/migration_scan.js'),
+    decoder: path.join(__dirname, '../../../../xchain-decoder/src/db/migration_statements.js')
+}
+const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
+
+// Pull the mode tag regex and the no-match fallback out of one copy's source text.
+function modeRule(source, file) {
+    const regex    = source.match(/\.match\((\/[^\n]*\\bmode\\s\*=[^\n]*\/[a-z]*)\)/)
+    const fallback = source.match(/return m \? m\[1\]\.toLowerCase\(\) : ([^;\n]+?);?[ \t]*$/m)
+    if (!regex || !fallback)
+        throw new Error('could not find the migrationMode tag regex or fallback in ' + file +
+            '; re-read that copy and update this parity test rather than skipping it')
+    return { regex: regex[1], fallback: fallback[1].trim() }
+}
+
 function registerMigrationDirectiveTests({ expect, migrationDeclaresDeployPrecondition, TAGGED, UNTAGGED }) {
     describe('migrationDeclaresDeployPrecondition', () => {
         it('reads the tag off the xchain:migration directive line', () => {
@@ -45,14 +66,33 @@ function registerMigrationModeTests({ expect, migrationMode, TAGGED }) {
             expect(migrationMode('-- xchain:migration mode=auto\nSELECT 1;\n')).to.equal('auto')
         })
 
-        it('returns null when no mode is declared', () => {
-            expect(migrationMode('-- just a comment\nSELECT 1;\n')).to.equal(null)
+        it('defaults to manual when no recognized mode is declared', () => {
+            // The runners gate every non-auto file, so an unscoped run applies these too.
+            expect(migrationMode('-- just a comment\nSELECT 1;\n')).to.equal('manual')
+            expect(migrationMode('-- xchain:migration deploy-precondition=required\nSELECT 1;\n')).to.equal('manual')
+            expect(migrationMode('-- xchain:migration mode=automatic\nSELECT 1;\n')).to.equal('manual')
+            expect(migrationMode('-- xchain:migration mode=auto2\nSELECT 1;\n')).to.equal('manual')
+            expect(migrationMode('-- xchain:migration mode=bogus\n-- xchain:migration mode=auto\nSELECT 1;\n')).to.equal('auto')
         })
 
         it('ignores a mode token that appears after the prologue', () => {
             // Body prose and data literals must not be able to answer for the file.
             const body = '-- header\nSELECT 1;\n-- xchain:migration mode=auto\n'
-            expect(migrationMode(body)).to.equal(null)
+            expect(migrationMode(body)).to.equal('manual')
+        })
+
+        it('matches the indexer and decoder runners\' rule', function () {
+            // The copies are duplicated by necessity; this is what keeps them in step.
+            const twins = { indexer: MODE_TWINS.indexer, decoder: MODE_TWINS.decoder }
+            const present = Object.entries(twins).filter(([, file]) => fs.existsSync(file))
+            if (present.length < 2) {
+                if (REQUIRE_SIBLINGS)
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but a runner twin is missing: ' + Object.values(twins).join(', '))
+                return this.skip()      // sibling repos not checked out
+            }
+            const ours = modeRule(fs.readFileSync(MODE_TWINS.node, 'utf8'), MODE_TWINS.node)
+            for (const [, file] of present)
+                expect(modeRule(fs.readFileSync(file, 'utf8'), file), file).to.deep.equal(ours)
         })
     })
 }

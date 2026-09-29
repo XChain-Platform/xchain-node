@@ -55,16 +55,21 @@ describe('DockerService', function () {
 
         it('rejects when docker exec fails', async function () {
             const stubs = makeStubs()
+            // The callback form of execFile hands stdout and stderr to the callback, never to the error.
+            const failure = Object.assign(new Error('exec failed'), { code: 4 })
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cb(new Error('exec failed'))
+                cb(failure, 'live marker line\n', 'REFUSED line\n')
             })
             const ds = loadDockerService(stubs)
             try {
                 await ds.execContainer('abc123', ['ls'])
                 expect.fail()
             } catch (err) {
-                expect(err).to.be.an.instanceOf(Error)
+                expect(err).to.equal(failure)
+                expect(err.code).to.equal(4)
+                expect(err.stdout).to.equal('live marker line\n')
+                expect(err.stderr).to.equal('REFUSED line\n')
             }
         })
     })

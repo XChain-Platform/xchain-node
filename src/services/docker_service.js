@@ -144,8 +144,11 @@ async function startContainer(containerId) {
 
 async function execContainer(containerId, commandArgs) {
     return new Promise((resolve, reject) => {
-        execFile('docker', ['exec', '-i', containerId, ...commandArgs], (error, stdout) => {
+        execFile('docker', ['exec', '-i', containerId, ...commandArgs], (error, stdout, stderr) => {
             if (error) {
+                // Attach the child's output, which the callback form of execFile leaves off the error.
+                error.stdout = stdout
+                error.stderr = stderr
                 reject(error)
             } else {
                 resolve(stdout.trim())

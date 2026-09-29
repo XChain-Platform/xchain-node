@@ -18,3 +18,7 @@ xchain-hub
 # src/rollcall_activation.js). Both guards throw under XCHAIN_REQUIRE_SIBLINGS=1
 # when this checkout is absent, which is exactly what CI run 35020607785 did.
 xchain-indexer
+# The migrationMode parity guard (migration_precondition_service.test) holds
+# this tool's copy to the decoder runner's src/db/migration_statements.js, and
+# throws under XCHAIN_REQUIRE_SIBLINGS=1 when this checkout is absent.
+xchain-decoder

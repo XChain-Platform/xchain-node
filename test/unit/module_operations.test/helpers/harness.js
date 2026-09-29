@@ -71,6 +71,8 @@ function makeStubs() {
         saveContainerLogs: sinon.stub().resolves(true),
         buildDatabaseModule: sinon.stub().resolves(true),
         resetDatabases: sinon.stub().resolves(true),
+        // Docker-mode reset resolves root before any stop; resolves by default so only the tests about it fail it.
+        askMariadbRootPassword: sinon.stub().resolves('stub-root'),
         clearHubPriceIngestWatermark: sinon.stub().resolves(true),
         // The regtest re-genesis purge of the hub's cross-chain relic rows. The
         // statements helper feeds the never-fatal catch's operator message.
@@ -158,6 +160,7 @@ function loadOperations(stubs, constantsOverrides = null) {
         '../services/database_service': {
             buildDatabaseModule: stubs.buildDatabaseModule,
             resetDatabases: stubs.resetDatabases,
+            askMariadbRootPassword: stubs.askMariadbRootPassword,
             clearHubPriceIngestWatermark: stubs.clearHubPriceIngestWatermark,
             purgeHubCrossChainRows: stubs.purgeHubCrossChainRows,
             manualHubCrossChainPurgeStatements: stubs.manualHubCrossChainPurgeStatements,

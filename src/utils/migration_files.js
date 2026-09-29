@@ -13,11 +13,14 @@
  **********************************************************************
  * Where a cloned module tree keeps its tracked migrations, and what they are.
  *
- * The indexer keeps them under src/db/sql/migrations/, grouped into bucket
- * directories of at most twenty files. The decoder, and every indexer ref cut
- * before that move, keep them flat under src/sql/migrations/. One xchain-node
- * release has to deploy refs from both sides of the move, so the cloned tree
- * answers for itself rather than this tool assuming one layout.
+ * The indexer and the decoder both keep them flat under src/sql/migrations/, and
+ * the indexer's three readers (src/db/database/migration_runner.js,
+ * src/db/database/schema_setup.js and src/db/migration/migrate.js) list only that
+ * directory's top-level .sql files, so a subdirectory is invisible to them. The
+ * src/db/sql/migrations/ preference and the one-bucket-down walk below are
+ * forward-compat only: no indexer ref ships that layout. If the indexer ever moves
+ * or buckets its migrations, all three readers must change in the same release,
+ * or this listing and the set its runner applies silently diverge.
  *
  * A schema_migrations ledger row is keyed by the migration's basename alone,
  * so the listing below returns basenames and keeps the path beside each one;
@@ -30,9 +33,10 @@ const fs   = require('fs')
 const path = require('path')
 
 /**
- * The migrations directory of a module checkout at `root`: the moved home when
- * the tree carries it, otherwise the flat one. The flat path is returned even
- * when it does not exist, so a caller's missing-directory handling still runs.
+ * The migrations directory of a module checkout at `root`: a future moved home
+ * when the tree carries it, otherwise the flat one every ref uses today. The flat
+ * path is returned even when it does not exist, so a caller's missing-directory
+ * handling still runs.
  */
 function migrationsDirOf(root) {
     const moved = path.join(root, 'src', 'db', 'sql', 'migrations')

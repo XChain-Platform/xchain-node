@@ -13,10 +13,13 @@
 const { expect } = require('chai')
 
 const { unstakeValidator } = require('../../../src/services/validator_stake_service')
+const { classifyUnstakeRows } = require('../../../src/services/validator_stake_service/unstake_operations')
+const { COIN_NETWORKS } = require('../../../src/services/validator_service')
 const sinon = require('sinon')
 
 const PUBKEY  = 'ab'.repeat(32)
 const ADDRESS = 'mStakeAddress'
+const TIP     = 150400
 
 function makeExplorer(chain) {
     return {
@@ -33,8 +36,14 @@ function makeExplorer(chain) {
             ? sinon.stub().rejects(new Error(chain.validatorsThrow))
             : sinon.stub().resolves({ data: [
                 { status: 'valid', signing_pubkey: 'ff'.repeat(32), amount: '25000', action_index: '1', activation_block: '1' },
-                ...(chain.existing ? [chain.existing] : [])
-            ] })
+                ...(chain.existing ? [chain.existing] : []),
+                ...(chain.rows || [])
+            ] }),
+        // The explorer's indexed tip, under every stake coin so each network's run can read it.
+        getStatus: chain.statusThrow
+            ? sinon.stub().rejects(new Error(chain.statusThrow))
+            : sinon.stub().resolves({ last_block: Object.fromEntries(
+                Object.values(COIN_NETWORKS).map(c => [c.stake, chain.tip ?? TIP])) })
     }
 }
 
@@ -242,6 +251,102 @@ describe('ValidatorStakeService', function () {
             let err = null
             try { await unstakeValidator({}, { settings: null }) } catch (e) { err = e }
             expect(err.message).to.match(/no validator configured/)
+        })
+    })
+})
+
+// The explorer keeps status='valid' on a row after UNSTAKE or eviction; only
+// deactivation_block moves. Each case below is one the indexer rejects, so it
+// must reach no broadcast even with --broadcast.
+describe('ValidatorStakeService', function () {
+
+    describe('unstakeValidator() stake lifecycle', function () {
+
+        const DEACTIVATED = { ...STAKED, deactivation_block: '150350' }
+
+        it('reports an unstake already in progress and sends nothing', async function () {
+            const { result, unstakeCalls, logged } = await runUnstake({ broadcast: true }, { existing: DEACTIVATED })
+            expect(unstakeCalls).to.have.length(0)
+            expect(result.alreadyUnstaking).to.be.true
+            expect(result.deactivationBlock).to.equal(150350)
+            // UNSTAKE landed at 150350 - 6; cooldown runs 1000 blocks from there.
+            expect(result.cooldownEndBlock).to.equal(151344)
+            const out = logged.join('\n')
+            expect(out).to.include('already withdrawn')
+            expect(out).to.include('cooldown ends at block 151344')
+            expect(out).to.not.include('active stake   :')
+        })
+
+        it('sends nothing for a stake unstaked and cooled down long ago', async function () {
+            const old = { ...STAKED, activation_block: '1000', deactivation_block: '1100' }
+            const { result, unstakeCalls } = await runUnstake({ broadcast: true }, { existing: old })
+            expect(unstakeCalls).to.have.length(0)
+            expect(result.alreadyUnstaking).to.be.true
+        })
+
+        it('refuses a stake still inside its activation delay', async function () {
+            const pending = { ...STAKED, activation_block: String(TIP + 5) }
+            let err = null
+            let sent = null
+            try {
+                const r = await runUnstake({ broadcast: true }, { existing: pending })
+                sent = r.unstakeCalls
+            } catch (e) { err = e }
+            expect(sent).to.equal(null)
+            expect(err).to.exist
+            expect(err.message).to.match(/not active yet/)
+            expect(err.message).to.include('block ' + (TIP + 5))
+            expect(err.message).to.include('Nothing was sent')
+        })
+
+        it('refuses the partial-unstake shape: old rows deactivated, residual still pending', async function () {
+            const residual = { ...STAKED, action_index: '60', amount: '5000', activation_block: String(TIP + 3) }
+            let err = null
+            try { await runUnstake({ broadcast: true }, { existing: DEACTIVATED, rows: [residual] }) } catch (e) { err = e }
+            expect(err).to.exist
+            expect(err.message).to.match(/not active yet/)
+        })
+    })
+})
+
+describe('ValidatorStakeService', function () {
+
+    describe('unstakeValidator() stake lifecycle', function () {
+
+        it('refuses when the chain tip cannot be read', async function () {
+            let err = null
+            try { await runUnstake({ broadcast: true }, { existing: STAKED, statusThrow: 'explorer 503' }) } catch (e) { err = e }
+            expect(err).to.exist
+            expect(err.message).to.match(/could not read the chain tip/)
+        })
+
+        it('withdraws only the admissible rows and reports their sum', async function () {
+            const second = { ...STAKED, action_index: '61', amount: '5000', activation_block: '150320' }
+            const { result, unstakeCalls, logged } = await runUnstake({ broadcast: true },
+                { existing: STAKED, rows: [second, { ...STAKED, action_index: '12', deactivation_block: '140000' }] })
+            expect(unstakeCalls).to.have.length(1)
+            expect(result.unstaked).to.be.true
+            expect(logged.join('\n')).to.include('active stake   : 30000 XCHAIN (action 44, 61')
+        })
+
+        it('reports that sum exactly where a float would round it away', async function () {
+            const big = { ...STAKED, amount: '900000000.00000001' }
+            const dust = { ...STAKED, action_index: '61', amount: '0.00000001', activation_block: '150320' }
+            const { logged } = await runUnstake({}, { existing: big, rows: [dust] })
+            expect(logged.join('\n')).to.include('active stake   : 900000000.00000002 XCHAIN')
+        })
+
+        it('classifyUnstakeRows sorts every lifecycle state', function () {
+            const rows = [
+                { activation_block: '10' },
+                { activation_block: '10', deactivation_block: '20' },
+                { activation_block: '101' },
+                { activation_block: '102' }
+            ]
+            const c = classifyUnstakeRows(rows, 101)
+            expect(c.admissible.map(r => r.activation_block)).to.deep.equal(['10', '101'])
+            expect(c.pending.map(r => r.activation_block)).to.deep.equal(['102'])
+            expect(c.deactivated).to.have.length(1)
         })
     })
 })

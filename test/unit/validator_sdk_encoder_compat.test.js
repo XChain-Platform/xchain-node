@@ -107,7 +107,9 @@ function makeExplorer(chain) {
     return {
         getAddress: sinon.stub().resolves({ balances: { confirmed: chain.coin, pending: '0' } }),
         getToken: sinon.stub().resolves({ mints: { max: 10000, address_max: 50000 } }),
-        getValidators: sinon.stub().resolves({ data: [] })
+        getValidators: sinon.stub().resolves({ data: [] }),
+        // No delegation holds the key; without an answer the stake command refuses to send.
+        getDelegations: sinon.stub().resolves({ total: 0, data: [] })
     }
 }
 

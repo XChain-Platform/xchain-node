@@ -30,7 +30,9 @@ function dispatchSettings(config) {
     // invocation is refused with a clear message instead of interleaving.
     // `e2etest` is included: its action does its own docker build/run/rm, so it
     // must stay serialized against install/update the same way the others are.
-    const mutatingCommands = ['install', 'update', 'recreate', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest']
+    // `clear-reorg-halt` is included, dry runs too: its database-intact check and
+    // the audited clear it writes must not interleave with reset, restore or recreate.
+    const mutatingCommands = ['install', 'update', 'recreate', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt']
     // How long a non-mutating command blocks for a lock-holding mutator before
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.
@@ -47,6 +49,7 @@ function skipsPreAction(actionCommand) {
     // `validator` subcommands are offline (key generation + local config
     // file writes). They must NOT trigger the Docker/MariaDB precheck, so an
     // operator can prepare their validator identity before any stack is up.
+    // Writers still lock: init to exit (validatorLockLabel), stake/unstake sends (validatorSendLock).
     const parentName = actionCommand.parent && actionCommand.parent.name()
     if (commandName === 'validator' || parentName === 'validator') return true
     // `rollback` is declared but unimplemented: its action only names the
@@ -67,6 +70,38 @@ function skipsPreAction(actionCommand) {
     return commandName === 'bootstrap-republish-due'
 }
 
+// Name the lock for a validator subcommand that must serialize, or null for one
+// that need not. `init` writes the signing key, settings, capabilities and wallets
+// one file at a time, and a concurrent `install`/`update xchain-hub` mounts them.
+function validatorLockLabel(actionCommand) {
+    const parentName = actionCommand.parent && actionCommand.parent.name()
+    if (parentName !== 'validator') return null
+    return actionCommand.name() === 'init' ? 'validator init' : null
+}
+
+// Build the lock `validator stake|unstake --broadcast` holds only while it sends.
+// The service hands it back before the indexer wait (up to --timeout), so a long
+// wait blocks no deploy; it refuses a held lock the way any mutator does.
+function validatorSendLock(command, deps) {
+    const { MUTATING_LOCK_WAIT_MS } = dispatchSettings(deps.config || {})
+    let release = null
+    const onExit = () => { if (release) release() }
+    return {
+        hold() {
+            if (release) return
+            release = deps.acquireCommandLock({ command, waitMs: MUTATING_LOCK_WAIT_MS })
+            process.on('exit', onExit)
+        },
+        release() {
+            if (!release) return
+            const drop = release
+            release = null
+            process.removeListener('exit', onExit)
+            drop()
+        }
+    }
+}
+
 // preCheck provisions shared containers/DB/hub (buildDatabaseModule,
 // ensureXchainNodeAccess, scanAndRegisterModules, installHubModule) for
 // EVERY non-validator command, not just the mutating ones. Running that
@@ -80,8 +115,8 @@ function skipsPreAction(actionCommand) {
 // the lock only across preCheck, releasing it right after, so a
 // long-running `monitor`/`tail`/`logs` does not pin the lock for its
 // lifetime; it waits a bounded time for a busy mutator, then errors.
-function commandLock(commandName, settings, acquireCommandLock) {
-    const holdThroughAction = settings.mutatingCommands.includes(commandName)
+function commandLock(commandName, settings, acquireCommandLock,
+    holdThroughAction = settings.mutatingCommands.includes(commandName)) {
     let release
     try {
         release = acquireCommandLock({
@@ -135,6 +170,12 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
     setVerbose(thisCommand.opts().verbose ?? false)
     if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
     const commandName = actionCommand.name()
+    // Hold the lock to exit for a validator file writer, still skipping preCheck.
+    const validatorLabel = validatorLockLabel(actionCommand)
+    if (validatorLabel) {
+        commandLock(validatorLabel, settings, acquireCommandLock, true)
+        return
+    }
     if (skipsPreAction(actionCommand)) return
 
     if (commandName === 'update') {
@@ -175,4 +216,4 @@ function installDispatch(program, deps) {
         beforeAction(thisCommand, actionCommand, settings, deps))
 }
 
-module.exports = { installDispatch }
+module.exports = { installDispatch, validatorSendLock }

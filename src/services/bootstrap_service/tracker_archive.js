@@ -36,6 +36,8 @@ let { declareEncoderMaintenance, clearEncoderMaintenance } = require('../encoder
 const { redactSecrets } = require('../../utils/helpers')
 let { maybeSignBootstrap } = require('./archive_signing')
 let { startProgress, buildDateTimeString, getWorkDir, assertBootstrapCapacity, ensureDir, ensureDirWritable } = require('./workspace')
+const trackerHeight = require('./tracker_height')
+const { readTrackerCommittedHeight, readTrackerHeightAfterRestart, chooseArchiveHeight } = trackerHeight
 const { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 
@@ -55,6 +57,7 @@ function configureDependencies(dependencies) {
     ;({ maybeSignBootstrap } = dependencies.archiveSigning)
     ;({ startProgress, buildDateTimeString, getWorkDir, assertBootstrapCapacity, ensureDir, ensureDirWritable } = dependencies.workspace)
     logger = dependencies.logger
+    trackerHeight.configureDependencies(dependencies)
 }
 
 // Where the pre-compress hardlink snapshot of the tracker volume lives.
@@ -183,6 +186,9 @@ async function makeBootstrapUtxoTracker(coin, network) {
     try {
         const snapshotTaken = await takeTrackerSnapshot(context, endMaintenanceWindow)
         await compressTrackerArchive(context, snapshotTaken)
+        // Fallback path: the store is archived, so bring the tracker back before the wrap and sign, and read its height there.
+        if (!snapshotTaken) await restartTrackerAndReadHeight(context, endMaintenanceWindow)
+        context.archiveHeight = chooseArchiveHeight(context.preStopHeight, context.postRestartHeight)
         await finalizeTrackerArchive(coin, network, context)
     } finally {
         await cleanupTrackerArchive(context.volumeName, context.containerId, context.containerRestored, endMaintenanceWindow)
@@ -206,9 +212,11 @@ async function prepareTrackerArchive(coin, network) {
     context.containerId = await db.getModuleContainer(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     if (!context.containerId) throw new Error(`utxo-tracker container not found for ${coin}/${network}`)
 
-    // The height the archive will end at, read from the tracker's own status while it is still running (the store is LevelDB, nothing else can tell).
-    // Best-effort: an archive without a height still restores, it just cannot be compared with the coin node at restore time (BootstrapNodeTipGuard).
-    context.archiveHeight = await readTrackerCommittedHeight(coin, network, context.containerId)
+    // A floor for the archive height, read while the tracker still runs: blocks it commits before the stop completes are in the archive
+    // but not in this reading, so the recorded height is taken again after the restart (chooseArchiveHeight). Best-effort: an archive
+    // without a height still restores, it just cannot be compared with the coin node at restore time (BootstrapNodeTipGuard).
+    context.preStopHeight = await readTrackerCommittedHeight(coin, network, context.containerId)
+    context.postRestartHeight = null
 
     // Staging and output dirs are prepared before the stop for the same reason as the capacity check: a read-only mount or a missing parent should not be
     // discovered with the tracker already dark.
@@ -292,12 +300,19 @@ async function takeTrackerSnapshot(context, endMaintenanceWindow) {
     // encoder correctly published as tracker_reachable:false.
     if (snapshotTaken) {
         logger.info(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container (compressing from the snapshot)...`)
-        await startContainer(context.containerId)
-        context.containerRestored = true
-        await endMaintenanceWindow()
+        await restartTrackerAndReadHeight(context, endMaintenanceWindow)
     }
 
     return snapshotTaken
+}
+
+// Restart the tracker, end the maintenance window, and read the committed height it comes back at.
+// The restarted store is the archived store plus whatever it commits since, so this reading sits at or above the archived data.
+async function restartTrackerAndReadHeight(context, endMaintenanceWindow) {
+    await startContainer(context.containerId)
+    context.containerRestored = true
+    await endMaintenanceWindow()
+    context.postRestartHeight = await readTrackerHeightAfterRestart(context.coin, context.network, context.containerId)
 }
 
 async function compressTrackerArchive(context, snapshotTaken) {
@@ -369,31 +384,11 @@ async function cleanupTrackerArchive(volumeName, containerId, containerRestored,
         await endMaintenanceWindow()
 }
 
-// The tracker's committed height from its status surface, or null. Asked
-// before the container is stopped for the compress.
-async function readTrackerCommittedHeight(coin, network, containerId) {
-    try {
-        const { probeServiceStatus, MODULE_API_PORT_KEY } = bootstrapHealthGate
-        if (typeof probeServiceStatus !== 'function') return null
-        const config = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
-        const port = config && config[MODULE_API_PORT_KEY[XChainService.XCHAIN_UTXO_TRACKER]]
-        if (!port) return null
-        const runner = (cmd, args) => execFileAsync(cmd, args, { timeout: 15000 })
-        const payload = await probeServiceStatus(containerId, port, runner)
-        const candidates = ['committed_height', 'tracker_height']
-        for (const key of candidates) {
-            const value = Number(payload && payload[key])
-            if (Number.isInteger(value) && value >= 0) return value
-        }
-        return null
-    } catch (err) {
-        logger.info(`Could not read the tracker height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
-        return null
-    }
-}
-
 module.exports = {
     configureDependencies,
     makeBootstrapUtxoTracker,
-    readTrackerCommittedHeight
+    readTrackerCommittedHeight,
+    // Exported for tests
+    chooseArchiveHeight,
+    readTrackerHeightAfterRestart
 }

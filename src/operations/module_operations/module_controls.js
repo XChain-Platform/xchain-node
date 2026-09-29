@@ -127,6 +127,29 @@ async function startModules(servicesList) {
     return true
 }
 
+// The decoder's clear tool, relative to the decoder container's working directory.
+// Decoder releases before v0.19.0 ship it only as src/clear-reorg-halt.js.
+const CLEAR_TOOL_PATH = 'src/clear_reorg_halt.js'
+// Exit code of the probe below when the container is up and the tool file is absent.
+const CLEAR_TOOL_ABSENT = 3
+
+// Print why a decoder's clear failed, and name an update when the tool itself is missing.
+async function reportClearFailure(containerId, coin, network, err) {
+    // execContainer attaches the child's stdout (the live halt it measured) and stderr (the refusal).
+    const text = [err && err.stdout, err && err.stderr].filter(Boolean).join('\n').trim()
+    console.log(text || ('clear-reorg-halt: failed for ' + coin + ' ' + network + ': ' + (err && err.message)))
+    // Exit 2-5 are the tool's own refusals, so only a generic exit 1 can mean the tool is not there.
+    if (!err || err.code !== 1) return
+    const probe = 'process.exit(require("fs").existsSync(' + JSON.stringify(CLEAR_TOOL_PATH) + ') ? 0 : ' + CLEAR_TOOL_ABSENT + ')'
+    try {
+        await execContainer(containerId, ['node', '-e', probe])
+    } catch (probeErr) {
+        if (!probeErr || probeErr.code !== CLEAR_TOOL_ABSENT) return
+        console.log('clear-reorg-halt: the xchain-decoder for ' + coin + ' ' + network + ' has no ' + CLEAR_TOOL_PATH
+            + ', so it predates decoder v0.19.0; update the decoder, then run this command again.')
+    }
+}
+
 // Audited clear of a decoder's durable REORG_HALT marker, run inside the decoder
 // container so it uses the service's own DB credentials and code
 // (xchain-decoder/src/clear_reorg_halt.js checks the database is intact, then
@@ -140,8 +163,9 @@ async function clearDecoderReorgHalt(servicesList, { reason, force = false, dryR
         console.log('clear-reorg-halt: --reason must say, in at least 8 characters, why this database is known good; it is recorded with the clear.')
         return false
     }
-    const args = ['node', 'src/clear_reorg_halt.js']
-    if (reasonText) args.push('--reason', reasonText)
+    const args = ['node', CLEAR_TOOL_PATH]
+    // Send the reason as one argument: the decoder refuses a separate --reason value that starts with '-'.
+    if (reasonText) args.push('--reason=' + reasonText)
     if (force) args.push('--force')
     if (dryRun) args.push('--dry-run')
     let targeted = 0
@@ -160,10 +184,8 @@ async function clearDecoderReorgHalt(servicesList, { reason, force = false, dryR
                 const out = await execContainer(containerId, args)
                 if (out) console.log(out)
             } catch (err) {
-                // The script prints its refusal on stderr and exits non-zero; docker
-                // exec surfaces that as an error whose stdout/stderr carry the text.
-                const text = [err && err.stdout, err && err.stderr].filter(Boolean).join('\n').trim()
-                console.log(text || ('clear-reorg-halt: failed for ' + nextCoin + ' ' + nextNetwork + ': ' + (err && err.message)))
+                // The script prints its refusal on stderr and exits non-zero.
+                await reportClearFailure(containerId, nextCoin, nextNetwork, err)
                 ok = false
             }
         }
@@ -256,13 +278,30 @@ async function bounceResetModules(context) {
     if (bounceCandidates.length > 0) {
         await sleep(5000)
         for (const module of bounceCandidates) {
+            // Skip a module the start pass already reported, so one failure is not listed twice.
+            if (startFailures.some((f) => f.module === module)) continue
+            let containerId = null
             try {
-                const containerId = await db.getModuleContainer(module, coin, network)
-                // Latent today only because the catch below hides a null-arg failure; guard explicitly so a future narrower catch stays correct (uuid:fd7cc224 sibling site).
-                if (!containerId) continue
-                // restartContainer = docker stop + docker start; sufficient to re-enter Node's bootstrap with the freshly-created DB ready.
+                containerId = await db.getModuleContainerStrict(module, coin, network)
+            } catch (err) {
+                // A failed read is not "not installed": the bounce did not happen, so report it like a start failure.
+                startFailures.push({ module, error: `registry lookup failed before the post-reset bounce (${failureReason(err)})` })
+                continue
+            }
+            if (!containerId) continue /* not installed, skip */
+            // restartContainer = docker stop + docker start; sufficient to re-enter Node's bootstrap with the freshly-created DB ready.
+            // A failed restart can leave the wiped service stopped, so it gets the start pass's one retry and is then reported, never swallowed.
+            try {
                 await restartContainer(containerId)
-            } catch { /* not installed, skip */ }
+            } catch (firstErr) {
+                console.warn(`Failed to restart ${module} (${firstErr && firstErr.message}); retrying in 3s...`)
+                await sleep(3000)
+                try {
+                    await restartContainer(containerId)
+                } catch (retryErr) {
+                    startFailures.push({ module, error: `post-reset restart failed (${(retryErr && retryErr.message) || String(retryErr)})` })
+                }
+            }
         }
     }
 

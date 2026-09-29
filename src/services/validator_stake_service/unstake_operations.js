@@ -15,6 +15,10 @@
  ********************************************************************/
 
 const { getLogger } = require('../../observability/logger')
+// Reads /validators to the end: one unpaged read drops every stake past the newest 100 rows.
+const { readValidatorSet } = require('./validator_set_read')
+const { sumAmounts } = require('./free_key')
+const { sendLockFor, releaseOnIndexWait } = require('./send_lock')
 
 function defaultLog() {
     const logger = getLogger()
@@ -61,6 +65,104 @@ function logUnstakeSuccess(log, active, timing, coins, pubkey, STAKE_TICK, paren
     log('')
 }
 
+// An empty deactivation_block is a stake no UNSTAKE or ROLLCALL eviction has touched.
+function isUndeactivated(row) {
+    return row.deactivation_block === null || row.deactivation_block === undefined || row.deactivation_block === ''
+}
+
+// Sort rows as the indexer admits an UNSTAKE landing at landBlock: undeactivated AND activation_block <= landBlock.
+// The explorer keeps status='valid' on deactivated rows, so status alone never means "active".
+function classifyUnstakeRows(rows, landBlock) {
+    const live = rows.filter(isUndeactivated)
+    return {
+        deactivated: rows.filter(r => !isUndeactivated(r)),
+        admissible:  live.filter(r => Number(r.activation_block) <= landBlock),
+        pending:     live.filter(r => !(Number(r.activation_block) <= landBlock))
+    }
+}
+
+// The stake being withdrawn: the one admissible row as-is, or several summed, since the indexer withdraws them all.
+function withdrawnStake(admissible) {
+    if (admissible.length === 1) return admissible[0]
+    // Sum in exact 1e-8 units; a float sum drifts and prints tiny totals as '1e-8'.
+    const exact = sumAmounts(admissible)
+    const total = admissible.reduce((s, r) => s + Number(r.amount), 0)
+    return {
+        amount: exact !== null ? exact : String(Math.round(total * 1e8) / 1e8),
+        action_index: admissible.map(r => r.action_index).join(', '),
+        activation_block: String(Math.max(...admissible.map(r => Number(r.activation_block))))
+    }
+}
+
+// The explorer's indexed tip for the stake coin; unreadable means refuse, never guess.
+async function readTip(sdk, coins, fail) {
+    let tip
+    try {
+        const status = await sdk.explorer.getStatus()
+        tip = Number(status && status.last_block && status.last_block[coins.stake])
+    } catch (e) {
+        throw fail('could not read the chain tip (' + e.message + '), so this run cannot tell ' +
+                   'whether the stake is active yet. Nothing was sent.')
+    }
+    if (!Number.isInteger(tip) || tip < 0) {
+        throw fail('the explorer reported no last block for ' + coins.stake + ', so this run cannot tell ' +
+                   'whether the stake is active yet. Nothing was sent.')
+    }
+    return tip
+}
+
+/**
+ * Decide what an UNSTAKE would withdraw, before anything is sent. Returns
+ * { active } when the indexer would admit one, or { done } with the result to
+ * return when there is nothing to withdraw; throws when it would reject.
+ */
+async function resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, fail, paren, STAKE_TICK }) {
+    // Read the set rather than a per-pubkey lookup (see readChainState): the
+    // SDK exposes no getValidator, and a lookup failure must not read as
+    // "nothing staked" when that is the very thing being acted on.
+    let rows = []
+    try {
+        const v = await readValidatorSet(sdk)
+        rows = ((v && v.data) || []).filter(r => r && r.status === 'valid' &&
+            String(r.signing_pubkey || '').toLowerCase() === pubkey)
+    } catch (e) {
+        throw fail('could not read the validator set (' + e.message + '), so this run cannot tell ' +
+                   'whether there is a stake to withdraw. Nothing was sent.')
+    }
+
+    if (!rows.length) {
+        logUnstakePlan(log, pubkey, address, null, timing, STAKE_TICK, paren)
+        log('')
+        log('  This pubkey carries no valid stake. Nothing to withdraw.')
+        log('')
+        return { done: { unstaked: false, nothingStaked: true } }
+    }
+
+    // Stop when every row is already deactivated: the indexer rejects a second UNSTAKE.
+    if (!rows.some(isUndeactivated)) {
+        const deactivationBlock = Math.max(...rows.map(r => Number(r.deactivation_block)))
+        const cooldownEndBlock = deactivationBlock - timing.activationBlocks + timing.cooldownBlocks
+        logUnstakePlan(log, pubkey, address, null, timing, STAKE_TICK, paren)
+        log('')
+        log('  This stake is already withdrawn (an earlier UNSTAKE, or a ROLLCALL eviction).')
+        log('  It drops out of the active set at block ' + deactivationBlock +
+            ' and its cooldown ends at block ' + cooldownEndBlock + '. Nothing was sent.')
+        log('')
+        return { done: { unstaked: false, alreadyUnstaking: true, deactivationBlock, cooldownEndBlock } }
+    }
+
+    // The UNSTAKE lands no earlier than the next block, so that is the block admission is judged at.
+    const tip = await readTip(sdk, coins, fail)
+    const { admissible, pending } = classifyUnstakeRows(rows, tip + 1)
+    if (!admissible.length) {
+        const from = Math.min(...pending.map(r => Number(r.activation_block)))
+        throw fail('this stake is not active yet: an UNSTAKE can land from block ' +
+                   (Number.isFinite(from) ? from : '(unknown)') +
+                   ' (the explorer is at block ' + tip + '). Re-run then. Nothing was sent.')
+    }
+    return { active: withdrawnStake(admissible) }
+}
+
 function createUnstakeValidator({
     openValidatorSession, stakeTiming, fail, paren, explorerUrl, STAKE_TICK
 }) {
@@ -73,32 +175,30 @@ function createUnstakeValidator({
      * raises the federation's quorum threshold (CapabilitySnapshot.getQuorum) and
      * puts a hub that cannot answer into publisher elections. Standing down is how
      * an operator stops being that.
+     *
+     * `deps.sendLock` ({ hold, release }) serializes a --broadcast run's send on the command lock.
      */
     return async function unstakeValidator(opts = {}, deps = {}) {
+        const sendLock = sendLockFor(opts, deps)
+        try {
+            return await planAndUnstake(opts, deps, sendLock)
+        } finally {
+            sendLock.release()
+        }
+    }
+
+    async function planAndUnstake(opts, deps, sendLock) {
         const log = deps.log || defaultLog()
         const { network, coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
         const timing = stakeTiming(coins, network)
 
-        // Read the set rather than a per-pubkey lookup (see readChainState): the
-        // SDK exposes no getValidator, and a lookup failure must not read as
-        // "nothing staked" when that is the very thing being acted on.
-        let active = null
-        try {
-            const v = await sdk.explorer.getValidators()
-            active = ((v && v.data) || []).find(r => r && r.status === 'valid' &&
-                String(r.signing_pubkey || '').toLowerCase() === pubkey) || null
-        } catch (e) {
-            throw fail('could not read the validator set (' + e.message + '), so this run cannot tell ' +
-                       'whether there is a stake to withdraw. Nothing was sent.')
-        }
+        // Take the lock before reading the stake, so no other broadcast sends between this read and this send.
+        sendLock.hold()
+        const target = await resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, fail, paren, STAKE_TICK })
+        if (target.done) return target.done
+        const active = target.active
 
         logUnstakePlan(log, pubkey, address, active, timing, STAKE_TICK, paren)
-        if (!active) {
-            log('')
-            log('  This pubkey carries no valid stake. Nothing to withdraw.')
-            log('')
-            return { unstaked: false, nothingStaked: true }
-        }
         if (!opts.broadcast) {
             log('')
             log('  Dry run: nothing sent. Re-run with --broadcast to withdraw.')
@@ -113,12 +213,14 @@ function createUnstakeValidator({
 
         log('')
         log('  Sending UNSTAKE v0...')
+        // Hand the command lock back once the UNSTAKE is broadcast and the SDK starts its indexer wait.
         const r = await session.submit({ action: 'UNSTAKE', params: { VERSION: 0, SIGNING_PUBKEY: pubkey } }, enc,
-            { waitForIndexer: opts.wait !== false, timeout: timeoutMs, pollInterval: 15000 })
+            { waitForIndexer: opts.wait !== false, timeout: timeoutMs, pollInterval: 15000,
+                onProgress: releaseOnIndexWait(sendLock) })
         log('    txid ' + r.txid + (opts.wait !== false ? '  (indexed)' : '  (broadcast)'))
         logUnstakeSuccess(log, active, timing, coins, pubkey, STAKE_TICK, paren, explorerUrl)
         return { unstaked: true, txid: r.txid }
     }
 }
 
-module.exports = { createUnstakeValidator }
+module.exports = { createUnstakeValidator, classifyUnstakeRows }

@@ -19,15 +19,20 @@ function registerPendingManualMigrations({ fs, os, path, expect, pendingManualMi
             fs.writeFileSync(path.join(dir, 'a-manual.sql'), TAGGED)
             fs.writeFileSync(path.join(dir, 'b-auto.sql'), '-- xchain:migration mode=auto\nSELECT 1;\n')
             fs.writeFileSync(path.join(dir, 'c-manual.sql'), '-- xchain:migration mode=manual\nSELECT 1;\n')
+            // The runners gate an untagged or misspelt file as manual, so an unscoped run applies it.
+            fs.writeFileSync(path.join(dir, 'd-untagged.sql'), '-- plain comment\nSELECT 1;\n')
+            fs.writeFileSync(path.join(dir, 'e-typo.sql'), '-- xchain:migration mode=manually\nSELECT 1;\n')
         })
         afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
 
         it('lists only manual migrations the ledger has not recorded', () => {
-            expect(pendingManualMigrations(dir, new Set())).to.deep.equal(['a-manual.sql', 'c-manual.sql'])
+            expect(pendingManualMigrations(dir, new Set()))
+                .to.deep.equal(['a-manual.sql', 'c-manual.sql', 'd-untagged.sql', 'e-typo.sql'])
         })
 
         it('excludes what the ledger already carries', () => {
-            expect(pendingManualMigrations(dir, new Set(['a-manual.sql']))).to.deep.equal(['c-manual.sql'])
+            expect(pendingManualMigrations(dir, new Set(['a-manual.sql'])))
+                .to.deep.equal(['c-manual.sql', 'd-untagged.sql', 'e-typo.sql'])
         })
 
         it('yields nothing for a missing directory rather than throwing', () => {
