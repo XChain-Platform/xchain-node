@@ -84,10 +84,6 @@ jobs:
       COIN: dogecoin
       STACK_REF: ${{ inputs.stack_ref || 'develop' }}
       LIMIT_MINUTES: ${{ inputs.limit_minutes || '200' }}
-      HUB_SYNC_ANCHOR_ATTEST_GRACE_S: "2"
-      HUB_SYNC_BRIDGE_GRACE_S: "2"
-      HUB_SYNC_POLICY_GRACE_S: "2"
-      HUB_PRICE_SYNC_TIMEOUT_MS: "10000"
       XCHAIN_NODE_EXTERNAL_DB: '1'
       XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1'
       XCHAIN_NODE_EXTERNAL_DB_PORT: '3306'
@@ -130,7 +126,11 @@ jobs:
           git config --global url."https://github.com/".insteadOf "git@github.com:"
 
       # Same shape as the nightly's dogecoin shard: a local validator hub, DOGE
-      # stack on 3120-3125 with the bitcoin stack beside it on 3020-3025.
+      # stack on 3120-3125 with the bitcoin stack beside it on 3020-3025. The stack
+      # settings go to a file the install step sources, NOT to GITHUB_ENV: they
+      # carry docker hostnames (xchain-node-bitcoin-regtest-xchain-indexer), and the
+      # drive's in-process venue hubs inherit the job env, so a leaked
+      # BTC_INDEXER_API_URL left every venue hub unable to read its capability set.
       - name: Initialize the validator identity
         run: |
           node src/index.js validator init \
@@ -139,6 +139,10 @@ jobs:
             --capabilities price,cross_chain,oracle_publish,attestation
           {
             echo "HUB_NETWORK=regtest"
+            echo "HUB_SYNC_ANCHOR_ATTEST_GRACE_S=2"
+            echo "HUB_SYNC_BRIDGE_GRACE_S=2"
+            echo "HUB_SYNC_POLICY_GRACE_S=2"
+            echo "HUB_PRICE_SYNC_TIMEOUT_MS=10000"
             echo "ORACLE_MIN_SUBMISSIONS=1"
             echo "XDEX_SEED_LOCAL_VALIDATOR=1"
             echo "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
@@ -147,7 +151,7 @@ jobs:
             echo "XCHAIN_CONFIRMATIONS_BTC=1"
             echo "XCHAIN_CONFIRMATIONS_LTC=1"
             echo "XCHAIN_CONFIRMATIONS_DOGE=1"
-          } >> "$GITHUB_ENV"
+          } > "$RUNNER_TEMP/stack.env"
 
       - name: Publish the two-stack host ports
         run: |
@@ -172,6 +176,7 @@ jobs:
       - name: Boot the two regtest stacks at ${{ inputs.stack_ref || 'develop' }}
         run: |
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
+          set -a; . "$RUNNER_TEMP/stack.env"; set +a
           node src/index.js install "$STACK_REF" all dogecoin regtest
           node src/index.js install "$STACK_REF" all bitcoin regtest
           docker ps --format '{{.Names}} {{.Status}} {{.Ports}}'
