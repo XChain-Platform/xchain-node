@@ -1,0 +1,249 @@
+name: Bridge rail leg (regtest)
+
+run-name: >-
+  Rail legs ${{ inputs.legs || 'from .github/rail-legs.json' }} @ stack ${{ inputs.stack_ref || 'develop' }}
+
+# Runs xchain-e2e-test bridge rail acceptance legs (scripts/rail_leg_drive.js) on
+# GitHub-hosted runners, one leg per job, many in parallel, beside the three
+# self-hosted rails (DankServer, test01, test02) whose single drive slot per venue
+# is the release push's bottleneck.
+#
+# WHY A HOSTED RUNNER CAN CARRY A LEG. A leg needs a BTC and a DOGE regtest stack,
+# a hub and indexers; the nightly's dogecoin shard already boots exactly that
+# two-stack shape (DOGE on host ports 3120-3125, BTC on 3020-3025, hub 10000) in
+# about five minutes. The drive then runs on the runner HOST, like on the rails:
+# it spawns its own in-process venue hubs and indexers from sibling source trees
+# under BRIDGE_RAIL_REPO_ROOT and reaches the standing services through their
+# published ports, via a host .env that scripts/rail_leg_env.js derives from the
+# running containers. A fresh chain needs no operator secret: the bridge
+# capability set is near empty and XCHAIN MINT is an open faucet far below
+# MAX_SUPPLY, so the harness stakes its own quorum.
+#
+# EVIDENCE. Each job uploads the leg's journal dir (case-journal.jsonl plus the
+# venue logs) as artifact rail-<row>-<leg>, so a row verify reads it with
+# `gh run download <run-id> -R XChain-Platform/xchain-node -n rail-<row>-<leg> -D <journal dir>`.
+#
+# Triggers: workflow_dispatch with a legs JSON, or a push to a gh-rail/** branch
+# that edits .github/rail-legs.json (a dispatch needs the file on the default
+# branch, and this workflow is proven on a side branch first).
+
+on:
+  push:
+    branches: ['gh-rail/**']
+    paths: ['.github/rail-legs.json']
+  workflow_dispatch:
+    inputs:
+      legs:
+        description: 'JSON array of {"row","drive","leg","e2e_ref"}; empty reads .github/rail-legs.json'
+        type: string
+        default: ''
+      stack_ref:
+        description: 'Ref every service repo is installed and cloned at'
+        type: string
+        default: develop
+      limit_minutes:
+        description: 'Per-leg bound passed to rail_leg_drive.js --limit-minutes'
+        type: string
+        default: '200'
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      legs: ${{ steps.legs.outputs.legs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+      - name: Resolve the leg list
+        id: legs
+        env:
+          LEGS_INPUT: ${{ inputs.legs }}
+        run: |
+          if [ -n "$LEGS_INPUT" ]; then printf '%s' "$LEGS_INPUT" > "$RUNNER_TEMP/legs.json"
+          else cp .github/rail-legs.json "$RUNNER_TEMP/legs.json"; fi
+          LEGS=$(node -e 'const l=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!Array.isArray(l)||!l.length) throw new Error("empty leg list"); for (const x of l) for (const k of ["row","drive","leg","e2e_ref"]) if(!x[k]) throw new Error("leg missing "+k+": "+JSON.stringify(x)); console.log(JSON.stringify(l))' "$RUNNER_TEMP/legs.json")
+          echo "$LEGS"
+          echo "legs=$LEGS" >> "$GITHUB_OUTPUT"
+
+  leg:
+    needs: plan
+    name: ${{ matrix.row }} ${{ matrix.drive }} ${{ matrix.leg }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.legs) }}
+    timeout-minutes: 350
+    env:
+      COIN: dogecoin
+      STACK_REF: ${{ inputs.stack_ref || 'develop' }}
+      LIMIT_MINUTES: ${{ inputs.limit_minutes || '200' }}
+      HUB_SYNC_ANCHOR_ATTEST_GRACE_S: "2"
+      HUB_SYNC_BRIDGE_GRACE_S: "2"
+      HUB_SYNC_POLICY_GRACE_S: "2"
+      HUB_PRICE_SYNC_TIMEOUT_MS: "10000"
+      XCHAIN_NODE_EXTERNAL_DB: '1'
+      XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1'
+      XCHAIN_NODE_EXTERNAL_DB_PORT: '3306'
+      XCHAIN_NODE_EXTERNAL_DB_ROOT_USER: 'root'
+      XCHAIN_NODE_DATA_DIR: ${{ github.workspace }}/.xchain-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android "$AGENT_TOOLSDIRECTORY" || true
+          docker system prune -af || true
+          df -h /; nproc; free -g
+
+      - name: Start headless MariaDB
+        run: |
+          XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD"
+          echo "XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD=$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" >> "$GITHUB_ENV"
+          docker run -d --name xchain-ci-db \
+            -e MARIADB_ROOT_PASSWORD="$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" \
+            -p 3306:3306 mariadb:11 --max-connections=2000
+          for i in $(seq 1 30); do
+            if docker exec xchain-ci-db mariadb-admin -uroot -p"$XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD" ping 2>/dev/null | grep -q "is alive"; then
+              echo "MariaDB ready"; break
+            fi
+            sleep 3
+          done
+
+      - name: Install xchain-node deps
+        run: |
+          npm ci
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      # Same shape as the nightly's dogecoin shard: a local validator hub, DOGE
+      # stack on 3120-3125 with the bitcoin stack beside it on 3020-3025.
+      - name: Initialize the validator identity
+        run: |
+          node src/index.js validator init \
+            --network regtest \
+            --oracle-epoch-start "$(date -u +%s)000" \
+            --capabilities price,cross_chain,oracle_publish,attestation
+          {
+            echo "HUB_NETWORK=regtest"
+            echo "ORACLE_MIN_SUBMISSIONS=1"
+            echo "XDEX_SEED_LOCAL_VALIDATOR=1"
+            echo "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
+            echo "BTC_INDEXER_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
+            echo "DOGE_INDEXER_URL=http://xchain-node-dogecoin-regtest-xchain-indexer:3004"
+            echo "XCHAIN_CONFIRMATIONS_BTC=1"
+            echo "XCHAIN_CONFIRMATIONS_LTC=1"
+            echo "XCHAIN_CONFIRMATIONS_DOGE=1"
+          } >> "$GITHUB_ENV"
+
+      - name: Publish the two-stack host ports
+        run: |
+          write_ports() {
+            local file="$1" base="$2"; shift 2
+            {
+              echo "NODE_EXPOSED_PORT=$base"
+              echo "UTXO_TRACKER_PORT=$((base + 1))"
+              echo "DECODER_PORT=$((base + 2))"
+              echo "ENCODER_PORT=$((base + 3))"
+              echo "INDEXER_PORT=$((base + 4))"
+              echo "REGTEST_MINER_PORT=$((base + 5))"
+              for line in "$@"; do echo "$line"; done
+            } > "$file"
+          }
+          mkdir -p config
+          write_ports config/dogecoin-regtest 3120 \
+            "BTC_SERVICE_HOST=$XCHAIN_NODE_EXTERNAL_DB_HOST" \
+            "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
+          write_ports config/bitcoin-regtest 3020
+
+      - name: Boot the two regtest stacks at ${{ inputs.stack_ref || 'develop' }}
+        run: |
+          mkdir -p "$XCHAIN_NODE_DATA_DIR"
+          node src/index.js install "$STACK_REF" all dogecoin regtest
+          node src/index.js install "$STACK_REF" all bitcoin regtest
+          docker ps --format '{{.Names}} {{.Status}} {{.Ports}}'
+
+      - name: Build the rail root (e2e at ${{ matrix.e2e_ref }}, services at the stack ref)
+        env:
+          E2E_REF: ${{ matrix.e2e_ref }}
+        run: |
+          ROOT="$RUNNER_TEMP/rail"
+          mkdir -p "$ROOT"
+          echo "RAIL_ROOT=$ROOT" >> "$GITHUB_ENV"
+          ln -sfn "$GITHUB_WORKSPACE" "$ROOT/xchain-node"
+          git clone -q https://github.com/XChain-Platform/xchain-e2e-test.git "$ROOT/xchain-e2e-test"
+          git -C "$ROOT/xchain-e2e-test" fetch -q origin "$E2E_REF"
+          git -C "$ROOT/xchain-e2e-test" checkout -q FETCH_HEAD
+          echo "e2e at $(git -C "$ROOT/xchain-e2e-test" rev-parse HEAD) ($E2E_REF)"
+          for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer; do
+            git clone -q --depth 1 --branch "$STACK_REF" "https://github.com/XChain-Platform/$r.git" "$ROOT/$r" &
+          done
+          wait
+          for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer; do
+            echo "$r at $(git -C "$ROOT/$r" rev-parse --short HEAD)"
+          done
+          ln -sfn ../xchain-vm "$ROOT/xchain-indexer/xchain-vm"
+          for s in xchain-hub xchain-sdk xchain-vm; do ln -sfn "../$s" "$ROOT/xchain-e2e-test/$s"; done
+          for r in xchain-vm xchain-hub xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder; do
+            (cd "$ROOT/$r" && npm ci --no-audit --no-fund --silent > "$RUNNER_TEMP/npm-$r.log" 2>&1 || { echo "npm ci failed in $r"; tail -30 "$RUNNER_TEMP/npm-$r.log"; exit 1; }) &
+          done
+          wait
+          (cd "$ROOT/xchain-indexer" && npm ci --no-audit --no-fund --silent)
+          (cd "$ROOT/xchain-e2e-test" && npm ci --no-audit --no-fund --silent)
+          node -e 'require(process.argv[1] + "/xchain-indexer/node_modules/xchain-vm"); console.log("xchain-indexer loads xchain-vm")' "$ROOT"
+
+      - name: Write the host .env for the drive
+        run: |
+          node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" bitcoin
+          mkdir -p "$RAIL_ROOT/xchain-e2e-test/drill-keys"
+          chmod 700 "$RAIL_ROOT/xchain-e2e-test/drill-keys"
+
+      - name: Drive ${{ matrix.drive }} ${{ matrix.leg }}
+        id: drive
+        working-directory: ${{ env.RAIL_ROOT }}/xchain-e2e-test
+        env:
+          ROW: ${{ matrix.row }}
+          DRIVE: ${{ matrix.drive }}
+          LEG: ${{ matrix.leg }}
+        run: |
+          J="$RUNNER_TEMP/journal/$ROW/$LEG"
+          mkdir -p "$J"
+          echo "JOURNAL_DIR=$J" >> "$GITHUB_ENV"
+          set +e
+          env DOGE_INDEXER_API_PORT=3124 \
+            NODE_PATH="$RAIL_ROOT" BRIDGE_RAIL_REPO_ROOT="$RAIL_ROOT" \
+            BRIDGE_RAIL_MINER_PAUSE_FILE="$RUNNER_TEMP/btc-loop.pause" \
+            BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE="$RUNNER_TEMP/doge-loop.pause" \
+            node scripts/rail_leg_drive.js "$DRIVE" "$LEG" --journal-dir "$J" --limit-minutes "$LIMIT_MINUTES" 2>&1 | tee "$J/drive.log"
+          rc=${PIPESTATUS[0]}
+          echo "drive exit $rc"
+          test -s "$J/case-journal.jsonl" && node scripts/rail_journal_triage.js "$J/case-journal.jsonl" 2>/dev/null | tail -5 || true
+          exit "$rc"
+
+      - name: Capture stack diagnostics
+        if: always()
+        run: |
+          OUT="${JOURNAL_DIR:-$RUNNER_TEMP/journal}/stack"
+          mkdir -p "$OUT"
+          docker ps -a > "$OUT/docker-ps.txt" 2>&1 || true
+          for c in $(docker ps -a --format '{{.Names}}'); do docker logs --tail 3000 "$c" > "$OUT/log-$c.txt" 2>&1 || true; done
+          df -h / > "$OUT/df.txt"; free -m > "$OUT/free.txt"
+
+      - name: Upload the leg journal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rail-${{ matrix.row }}-${{ matrix.leg }}
+          path: ${{ runner.temp }}/journal/
+          if-no-files-found: warn
+          retention-days: 30
