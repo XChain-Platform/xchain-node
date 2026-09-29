@@ -4,9 +4,8 @@ run-name: >-
   Rail legs ${{ inputs.legs }} @ stack ${{ inputs.stack_ref || 'develop' }}
 
 # Runs xchain-e2e-test bridge rail acceptance legs (scripts/rail_leg_drive.js) on
-# GitHub-hosted runners, one leg per job, many in parallel, beside the three
-# self-hosted rails (DankServer, test01, test02) whose single drive slot per venue
-# is the release push's bottleneck.
+# GitHub-hosted runners, one leg per job, many in parallel, beside the
+# self-hosted rails whose single drive slot per venue is the release bottleneck.
 #
 # WHY A HOSTED RUNNER CAN CARRY A LEG. A leg needs a BTC and a DOGE regtest stack,
 # a hub and indexers; the nightly's dogecoin shard already boots exactly that

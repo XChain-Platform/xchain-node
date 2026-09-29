@@ -9,9 +9,9 @@ run-name: >-
 # with scripts/attest-mirror-stack-driver.sh), instead of three legs at a time on
 # one venue disk.
 #
-# The stack root in .github/attest-mirror/ is test02's pb-v020-at7 root (compose.yml,
-# setup-stack.sh, run-leg.sh, seed-stack-config.js, wait-indexer-schema.js) with
-# only its host paths made relative: the driver boots an isolated BTC+LTC+DOGE
+# The stack root in .github/attest-mirror/ contains compose.yml, setup-stack.sh,
+# run-leg.sh, seed-stack-config.js and wait-indexer-schema.js. Its host paths are
+# relative, so the driver boots an isolated BTC+LTC+DOGE
 # compose stack per leg from the xchain-node images, which this job builds first by
 # installing the three regtest stacks. The federation mnemonic the venue keeps in
 # at7.env is generated per job and masked.
@@ -151,7 +151,7 @@ jobs:
           node src/index.js install "$STACK_REF" all bitcoin regtest
           node src/index.js install "$STACK_REF" all litecoin regtest
           node src/index.js install "$STACK_REF" all dogecoin regtest
-          # The standing stacks stay up, as on test02: legs read the standing
+          # The standing stacks stay up: legs read the standing
           # explorer (18080) and the standing LTC/DOGE indexers (at0-anti-wedge reads 3224).
           docker pull -q mariadb:10.11 && docker tag mariadb:10.11 xchain-node-database
           docker images --format '{{.Repository}}' | grep '^xchain-node-' | sort
