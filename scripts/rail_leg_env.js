@@ -1,0 +1,135 @@
+#!/usr/bin/env node
+'use strict'
+
+// Write the host-side xchain-e2e-test .env a bridge rail drive reads, from the
+// stack this runner just booted.
+//
+// WHY THIS EXISTS. The nightly runs its suites INSIDE the e2e container on the
+// stack's docker network, where xchain-node hands it the environment. A bridge rail
+// drive cannot run there: it spawns in-process hubs and indexers from source trees
+// and reaches the standing services through their host-published ports, exactly as
+// established host-driven rails do from a hand-kept .env. This script
+// derives that same file from the running containers (the credentials each service
+// actually booted with) plus xchain-node's sidecars, with every host rewritten to
+// the loopback and every port to its published host port.
+//
+// Usage: node scripts/rail_leg_env.js <out .env path> [coin]
+// Prints key names only; values never reach the log.
+
+const fs = require('fs')
+const path = require('path')
+const { execFileSync } = require('child_process')
+
+const CONFIG_DIR = path.resolve(__dirname, '..', 'config')
+
+function containerEnv (name) {
+    try {
+        const out = execFileSync('docker', ['inspect', name, '--format', '{{json .Config.Env}}'], { encoding: 'utf8' })
+        const env = {}
+        for (const line of JSON.parse(out) || []) {
+            const i = line.indexOf('=')
+            if (i > 0) env[line.slice(0, i)] = line.slice(i + 1)
+        }
+        return env
+    } catch (e) {
+        return {}
+    }
+}
+
+function hostPort (name, containerPort) {
+    try {
+        const out = execFileSync('docker', ['port', name, String(containerPort) + '/tcp'], { encoding: 'utf8' })
+        const m = out.match(/:(\d+)\s*$/m)
+        return m ? m[1] : null
+    } catch (e) {
+        return null
+    }
+}
+
+function sidecar (file) {
+    const p = path.join(CONFIG_DIR, file)
+    const values = {}
+    if (!fs.existsSync(p)) return values
+    for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
+        const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/)
+        if (m) values[m[1]] = m[2].replace(/^["']|["']$/g, '')
+    }
+    return values
+}
+
+function first (...values) {
+    return values.find((v) => v !== undefined && v !== null && v !== '')
+}
+
+function main () {
+    const out = process.argv[2]
+    const coin = process.argv[3] || 'bitcoin'
+    if (!out) throw new Error('usage: rail_leg_env.js <out .env path> [coin]')
+    const stack = 'xchain-node-' + coin + '-regtest-'
+    const hubName = 'xchain-node-xchain-hub'
+    const node = containerEnv(stack + 'node')
+    const tracker = containerEnv(stack + 'xchain-utxo-tracker')
+    const decoder = containerEnv(stack + 'xchain-decoder')
+    const indexer = containerEnv(stack + 'xchain-indexer')
+    const hub = containerEnv(hubName)
+    const coinSidecar = sidecar(coin + '-regtest.local')
+    const hubSidecar = sidecar('hub.local')
+    const dbPort = process.env.XCHAIN_NODE_EXTERNAL_DB_PORT || '3306'
+
+    const env = {
+        COIN: coin,
+        NETWORK: 'regtest',
+        NODE_URL: 'localhost',
+        NODE_PORT: hostPort(stack + 'node', first(tracker.NODE_PORT, '18444')) || '3020',
+        NODE_USER: first(tracker.NODE_USER, indexer.NODE_USER, coinSidecar.NODE_USER),
+        NODE_PASSWORD: first(tracker.NODE_PASSWORD, tracker.NODE_SECRET, indexer.NODE_PASSWORD,
+            coinSidecar.NODE_PASSWORD, coinSidecar.NODE_SECRET),
+        DATABASE_URL: '127.0.0.1',
+        DATABASE_PORT: dbPort,
+        UTXO_TRACKER_URL: 'localhost',
+        UTXO_TRACKER_API_PORT: hostPort(stack + 'xchain-utxo-tracker', 3001),
+        ENCODER_URL: 'localhost',
+        ENCODER_API_PORT: hostPort(stack + 'xchain-encoder', 3003),
+        DECODER_URL: 'localhost',
+        DECODER_API_PORT: hostPort(stack + 'xchain-decoder', 3002),
+        EXPLORER_URL: 'localhost',
+        EXPLORER_API_PORT: hostPort('xchain-node-xchain-explorer', 8080) || '18080',
+        INDEXER_URL: 'localhost',
+        INDEXER_API_PORT: hostPort(stack + 'xchain-indexer', 3004),
+        INDEXER_DB_NAME: indexer.INDEXER_DB_NAME,
+        INDEXER_DB_USER: indexer.INDEXER_DB_USER,
+        INDEXER_DB_PASS: indexer.INDEXER_DB_PASS,
+        REGTEST_MINER_URL: 'localhost',
+        REGTEST_MINER_API_PORT: hostPort(stack + 'xchain-regtest-miner', 3005),
+        HUB_URL: 'localhost',
+        HUB_PORT: hostPort(hubName, 10000) || '10000',
+        HUB_API_KEY: first(process.env.HUB_API_KEY, hubSidecar.HUB_API_KEY, hub.HUB_API_KEY),
+        HUB_DB_HOST: '127.0.0.1',
+        HUB_DB_PORT: dbPort,
+        HUB_DB_USER: hub.HUB_DB_USER,
+        HUB_DB_PASS: hub.HUB_DB_PASS,
+        HUB_SOURCE_DB_NAME: hub.HUB_DB_NAME,
+        HUB_DB_NAME: indexer.INDEXER_DB_NAME,
+        DECODER_DB_HOST: '127.0.0.1',
+        DECODER_DB_PORT: dbPort,
+        DECODER_DB_NAME: decoder.DECODER_DB_NAME,
+        DECODER_DB_USER: decoder.DECODER_DB_USER,
+        DECODER_DB_PASS: decoder.DECODER_DB_PASS,
+        XCHAIN_NODE_CONFIG_DIR: CONFIG_DIR,
+    }
+    const lines = []
+    const missing = []
+    for (const [k, v] of Object.entries(env)) {
+        if (v === undefined || v === null || v === '') { missing.push(k); continue }
+        lines.push(k + '=' + v)
+    }
+    fs.writeFileSync(out, lines.join('\n') + '\n', { mode: 0o600 })
+    console.log('rail_leg_env: wrote ' + out + ' keys: ' + Object.keys(env).filter((k) => !missing.includes(k)).join(' '))
+    if (missing.length) console.log('::warning::rail_leg_env: no value for ' + missing.join(' '))
+    // Mask every secret-shaped value in the job log for the rest of the run.
+    for (const [k, v] of Object.entries(env)) {
+        if (v && /PASS|KEY|SECRET|USER/.test(k)) console.log('::add-mask::' + v)
+    }
+}
+
+main()

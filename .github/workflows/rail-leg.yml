@@ -26,13 +26,17 @@ on:
   workflow_dispatch:
     inputs:
       legs:
-        description: 'JSON array of {"row","drive","leg","e2e_ref"}'
+        description: 'JSON leg array; requires row, drive, leg, e2e_ref; stacks defaults to btc,doge'
         type: string
         required: true
       stack_ref:
         description: 'Ref every service repo is installed and cloned at'
         type: string
         default: develop
+      repo_refs:
+        description: 'JSON map repo -> ref overriding stack_ref for the rail-root source clone'
+        type: string
+        default: '{}'
       limit_minutes:
         description: 'Per-leg bound passed to rail_leg_drive.js --limit-minutes'
         type: string
@@ -76,6 +80,7 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       COIN: dogecoin
       STACK_REF: ${{ inputs.stack_ref || 'develop' }}
+      STACKS: ${{ matrix.stacks || 'btc,doge' }}
       LIMIT_MINUTES: ${{ inputs.limit_minutes || '200' }}
       XCHAIN_NODE_EXTERNAL_DB: '1'
       XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1'
@@ -145,6 +150,9 @@ jobs:
             echo "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
             echo "BTC_INDEXER_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
             echo "DOGE_INDEXER_URL=http://xchain-node-dogecoin-regtest-xchain-indexer:3004"
+            case ",${STACKS:-btc,doge}," in
+              *,ltc,*) echo "LTC_INDEXER_URL=http://xchain-node-litecoin-regtest-xchain-indexer:3004" ;;
+            esac
             echo "XCHAIN_CONFIRMATIONS_BTC=1"
             echo "XCHAIN_CONFIRMATIONS_LTC=1"
             echo "XCHAIN_CONFIRMATIONS_DOGE=1"
@@ -169,6 +177,13 @@ jobs:
             "BTC_SERVICE_HOST=$XCHAIN_NODE_EXTERNAL_DB_HOST" \
             "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
           write_ports config/bitcoin-regtest 3020
+          case ",${STACKS:-btc,doge}," in
+            *,ltc,*)
+              write_ports config/litecoin-regtest 3220 \
+                "BTC_SERVICE_HOST=$XCHAIN_NODE_EXTERNAL_DB_HOST" \
+                "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
+              ;;
+          esac
 
       - name: Boot the two regtest stacks at ${{ inputs.stack_ref || 'develop' }}
         # Authenticated API reads: the anonymous limit (60 an hour per runner IP) is
@@ -180,11 +195,15 @@ jobs:
           set -a; . "$RUNNER_TEMP/stack.env"; set +a
           node src/index.js install "$STACK_REF" all dogecoin regtest
           node src/index.js install "$STACK_REF" all bitcoin regtest
+          case ",${STACKS:-btc,doge}," in
+            *,ltc,*) node src/index.js install "$STACK_REF" all litecoin regtest ;;
+          esac
           docker ps --format '{{.Names}} {{.Status}} {{.Ports}}'
 
       - name: Build the rail root (e2e at ${{ matrix.e2e_ref }}, services at the stack ref)
         env:
           E2E_REF: ${{ matrix.e2e_ref }}
+          REPO_REFS: ${{ inputs.repo_refs || '{}' }}
         run: |
           ROOT="$RUNNER_TEMP/rail"
           mkdir -p "$ROOT"
@@ -195,11 +214,11 @@ jobs:
           git -C "$ROOT/xchain-e2e-test" checkout -q FETCH_HEAD
           echo "e2e at $(git -C "$ROOT/xchain-e2e-test" rev-parse HEAD) ($E2E_REF)"
           for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer xchain-documentation xchain-contracts; do
-            git clone -q --depth 1 --branch "$STACK_REF" "https://github.com/XChain-Platform/$r.git" "$ROOT/$r" &
+            git clone -q --depth 1 --branch "$(node -e 'const m=JSON.parse(process.env.REPO_REFS||"{}");process.stdout.write(m[process.argv[1]]||process.env.STACK_REF)' "$r")" "https://github.com/XChain-Platform/$r.git" "$ROOT/$r" &
           done
           wait
           for r in xchain-hub xchain-indexer xchain-vm xchain-sdk xchain-decoder xchain-utxo-tracker xchain-encoder xchain-explorer xchain-documentation xchain-contracts; do
-            echo "$r at $(git -C "$ROOT/$r" rev-parse --short HEAD)"
+            echo "$r at $(git -C "$ROOT/$r" rev-parse --short HEAD) ($(git -C "$ROOT/$r" rev-parse --abbrev-ref HEAD))"
           done
           ln -sfn ../xchain-vm "$ROOT/xchain-indexer/xchain-vm"
           for s in xchain-hub xchain-sdk xchain-vm; do ln -sfn "../$s" "$ROOT/xchain-e2e-test/$s"; done
