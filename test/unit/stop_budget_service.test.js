@@ -85,7 +85,7 @@ describe('StopBudgetService', function () {
     describe('stopModuleContainer()', function () {
         it('stops with the budget and reports a clean stop with the time it took', async function () {
             const stop = sinon.stub().resolves({ stopped: true, seconds: 7, killed: false })
-            const outcome = await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', {})
+            const outcome = await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', {}, null)
             expect(stop.calledOnceWith('abc123', sbs.MODULE_STOP_TIMEOUT_SECONDS['xchain-decoder'])).to.be.true
             expect(outcome.killed).to.be.false
             expect(outcome.budget).to.equal(sbs.MODULE_STOP_TIMEOUT_SECONDS['xchain-decoder'])
@@ -95,7 +95,7 @@ describe('StopBudgetService', function () {
 
         it('warns when the service ran out of budget and was killed, naming the override', async function () {
             const stop = sinon.stub().resolves({ stopped: true, seconds: 120, killed: true })
-            const outcome = await sbs.stopModuleContainer(stop, 'xchain-utxo-tracker', 'dogecoin', 'mainnet', 'abc123', {})
+            const outcome = await sbs.stopModuleContainer(stop, 'xchain-utxo-tracker', 'dogecoin', 'mainnet', 'abc123', {}, null)
             expect(outcome.killed).to.be.true
             const warning = warnStub.args.map(a => String(a[0])).find(l => /was killed/.test(l))
             expect(warning).to.match(/xchain-utxo-tracker \(dogecoin mainnet\) did not exit within the 120 s budget/)
@@ -104,7 +104,7 @@ describe('StopBudgetService', function () {
 
         it('warns when the service exited non-zero inside the budget, naming its own drain timer', async function () {
             const stop = sinon.stub().resolves({ stopped: true, seconds: 100, killed: false, exitCode: 1 })
-            const outcome = await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', {})
+            const outcome = await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', {}, null)
             expect(outcome.killed).to.be.false
             const warning = warnStub.args.map(a => String(a[0])).find(l => /exited with code 1/.test(l))
             expect(warning).to.match(/xchain-decoder \(bitcoin mainnet\) exited with code 1 after 100 s, inside the 120 s budget/)
@@ -116,7 +116,7 @@ describe('StopBudgetService', function () {
         it('still reports a clean stop for exit 0 and for a drainless service ended by SIGTERM (143)', async function () {
             for (const exitCode of [0, 143, null]) {
                 const stop = sinon.stub().resolves({ stopped: true, seconds: 3, killed: false, exitCode })
-                await sbs.stopModuleContainer(stop, 'xchain-sdk', 'bitcoin', 'mainnet', 'abc123', {})
+                await sbs.stopModuleContainer(stop, 'xchain-sdk', 'bitcoin', 'mainnet', 'abc123', {}, null)
             }
             expect(logStub.args.filter(a => /Stopped xchain-sdk \(bitcoin mainnet\) cleanly in 3 s/.test(String(a[0])))).to.have.length(3)
             expect(warnStub.called).to.be.false
@@ -124,7 +124,7 @@ describe('StopBudgetService', function () {
 
         it('says nothing when there was nothing to stop', async function () {
             const stop = sinon.stub().resolves({ stopped: false, seconds: 0, killed: false })
-            await sbs.stopModuleContainer(stop, 'xchain-encoder', 'bitcoin', 'mainnet', 'gone', {})
+            await sbs.stopModuleContainer(stop, 'xchain-encoder', 'bitcoin', 'mainnet', 'gone', {}, null)
             expect(logStub.called).to.be.false
             expect(warnStub.called).to.be.false
         })
@@ -276,5 +276,52 @@ describe('StopBudgetService', function () {
         const explorer = sinon.stub().resolves({ stopTimeout: 30, shutdownTimeoutMs: '45000' })
         await sbs.stopModuleContainer(cleanStop(), 'xchain-explorer', 'bitcoin', 'mainnet', 'abc123', {}, explorer)
         expect(overLine()).to.match(/xchain-explorer \(bitcoin mainnet\).*30 s stop budget/)
+    })
+})
+
+// A lowered override must not SIGKILL the drain timer an existing container still carries.
+describe('StopBudgetService', function () {
+    beforeEach(prepareConsoleStubs)
+    afterEach(restoreConsoleStubs)
+
+    const LOWERED = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: '60' }
+    const reader = (settings) => sinon.stub().resolves(settings)
+    const stopWith = async (module, env, settings, outcome) => {
+        const stop = sinon.stub().resolves(outcome || { stopped: true, seconds: 5, killed: false, exitCode: 0 })
+        const result = await sbs.stopModuleContainer(stop, module, 'bitcoin', 'mainnet', 'abc123', env, reader(settings))
+        return { seconds: stop.firstCall.args[1], result }
+    }
+
+    it('stops an old container with the budget it was stamped with after the override is lowered', async function () {
+        const killed = { stopped: true, seconds: 120, killed: true, exitCode: 137 }
+        const { seconds, result } = await stopWith('xchain-decoder', LOWERED, { stopTimeout: 120, shutdownTimeoutMs: '100000' }, killed)
+        expect(seconds).to.equal(120)
+        expect(result.budget).to.equal(120)
+        expect(warnStub.args.some(a => /within the 120 s budget/.test(String(a[0])))).to.be.true
+    })
+
+    it('uses the lowered budget once the container was recreated under it, and a raised one at once', async function () {
+        expect((await stopWith('xchain-decoder', LOWERED, { stopTimeout: 60, shutdownTimeoutMs: '40000' })).seconds).to.equal(60)
+        const raised = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: '300' }
+        expect((await stopWith('xchain-decoder', raised, { stopTimeout: 120, shutdownTimeoutMs: '100000' })).seconds).to.equal(300)
+    })
+
+    it('gives an unstamped decoder its default budget, and leaves unlisted and unreadable ones on the current one', async function () {
+        expect((await stopWith('xchain-decoder', LOWERED, { stopTimeout: null, shutdownTimeoutMs: null })).seconds).to.equal(120)
+        expect((await stopWith('xchain-explorer', {}, { stopTimeout: null, shutdownTimeoutMs: null })).seconds).to.equal(30)
+        expect((await stopWith('xchain-decoder', LOWERED, null)).seconds).to.equal(60)
+    })
+
+    it('reads the container through docker when the caller passes no reader, as update and uninstall do', async function () {
+        const docker = require('../../src/services/docker_service')
+        const read = sinon.stub(docker, 'getContainerStopSettings').resolves({ stopTimeout: 120, shutdownTimeoutMs: '100000' })
+        try {
+            const stop = sinon.stub().resolves({ stopped: true, seconds: 5, killed: false, exitCode: 0 })
+            await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', LOWERED)
+            expect(read.calledOnceWith('abc123')).to.be.true
+            expect(stop.calledOnceWith('abc123', 120)).to.be.true
+        } finally {
+            read.restore()
+        }
     })
 })

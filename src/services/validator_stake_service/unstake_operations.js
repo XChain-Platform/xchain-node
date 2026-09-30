@@ -111,6 +111,21 @@ async function readTip(sdk, coins, fail) {
     return tip
 }
 
+// Refuse unless `address` owns every undeactivated row: the indexer rejects an UNSTAKE v0
+// from any other SOURCE after its fee is spent, and matches the address exactly.
+function assertOwnsStake(live, address, fail) {
+    if (live.some(r => r.source === undefined || r.source === null || r.source === '')) {
+        throw fail('the validator set does not say which address owns this stake, so this run cannot ' +
+                   'confirm ' + address + ' may withdraw it. Nothing was sent.')
+    }
+    const owners = [...new Set(live.map(r => String(r.source)))].filter(o => o !== String(address))
+    if (owners.length) {
+        throw fail('this stake is owned by ' + owners.join(', ') + ', not ' + address + ', the address this run ' +
+                   'signs with. The indexer rejects an UNSTAKE from any address but the owner, after the fee ' +
+                   'is spent; run with the owning address\'s key. Nothing was sent.')
+    }
+}
+
 /**
  * Decide what an UNSTAKE would withdraw, before anything is sent. Returns
  * { active } when the indexer would admit one, or { done } with the result to
@@ -150,6 +165,8 @@ async function resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, 
         log('')
         return { done: { unstaked: false, alreadyUnstaking: true, deactivationBlock, cooldownEndBlock } }
     }
+
+    assertOwnsStake(rows.filter(isUndeactivated), address, fail)
 
     // The UNSTAKE lands no earlier than the next block, so that is the block admission is judged at.
     const tip = await readTip(sdk, coins, fail)

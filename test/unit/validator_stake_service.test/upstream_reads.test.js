@@ -86,3 +86,52 @@ describe('validator stake upstream reads', function () {
         expect(plan.reason).to.not.include('MAX_MINT is 0')
     })
 })
+
+// A /balances list paged 500 rows at a time by tick, with XCHAIN after `junk` earlier ticks.
+function pagedBalances(junk, { total = junk + 1, dropPage = null } = {}) {
+    const rows = []
+    for (let i = 0; i < junk; i++) rows.push({ tick: 'AAA' + String(i).padStart(4, '0'), amount: '1' })
+    rows.push({ tick: 'XCHAIN', amount: '25000' })
+    const pages = []
+    const getBalances = async (address, opts = {}) => {
+        pages.push(opts.page)
+        const start = ((opts.page || 1) - 1) * (opts.limit || 500)
+        const data = opts.page === dropPage ? [] : rows.slice(start, start + (opts.limit || 500))
+        return { total, data }
+    }
+    return { getBalances, pages }
+}
+
+describe('validator stake XCHAIN balance paging', function () {
+    const addr = { balances: { confirmed: '0.002', pending: '0' } }
+
+    it('finds an XCHAIN row that sits past the first page', async function () {
+        const paged = pagedBalances(600)
+        const sdk = Object.assign(fakeSdk(addr, TOKEN), { getBalances: paged.getBalances })
+        const state = await readChainState(sdk, ADDRESS, PUBKEY, KEY_CTX)
+        expect(state.tokenBal).to.equal(25000)
+        expect(paged.pages).to.deep.equal([1, 2])
+        expect(planMints('testnet', state.tokenBal, 25000, 10000, 50000, null).mints).to.have.length(0)
+    })
+
+    it('reads a truncated list as an unknown balance that blocks, never as zero', async function () {
+        const paged = pagedBalances(600, { dropPage: 2 })
+        const sdk = Object.assign(fakeSdk(addr, TOKEN), { getBalances: paged.getBalances })
+        const state = await readChainState(sdk, ADDRESS, PUBKEY, KEY_CTX)
+        expect(state.tokenBal).to.equal(null)
+        for (const network of ['testnet', 'mainnet']) {
+            const plan = planMints(network, state.tokenBal, 25000, 10000, 50000, null)
+            expect(plan.mints).to.have.length(0)
+            expect(stakeBlockers({ coinBal: 1 }, plan, COINS, ADDRESS).join(' ')).to.include('XCHAIN balance is unavailable')
+            expect(plan.reason).to.not.include('acquire')
+        }
+    })
+
+    it('prints an unknown XCHAIN balance as unavailable rather than "null held"', function () {
+        const logged = []
+        logStakeBalances(m => logged.push(m), 'testnet', COINS, PUBKEY, ADDRESS, 25000,
+            { coinBal: 1, coinPending: 0, tokenBal: null }, { short: null, mints: [], reason: 'x' }, 'XCHAIN')
+        expect(logged.join('\n')).to.include('XCHAIN').and.to.include('unavailable (balance list read incomplete)')
+        expect(logged.join('\n')).to.not.include('null held')
+    })
+})

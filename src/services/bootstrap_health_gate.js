@@ -34,8 +34,10 @@
  *     (events.code = 'REORG_HALT') or an uncleared xchain-sync divergence halt
  *     (sync_halt with cleared_at IS NULL). For an indexer source both its own
  *     database and the PAIRED DECODER's are read: REORG_HALT is written only in the
- *     decoder's (an indexer's own events table only ever carries code='REORG'),
- *     while xchain-sync writes sync_halt into either replica.
+ *     decoder's (an indexer's own events table carries REORG and TRAIN_ACTIVATION_HALT
+ *     rows, never REORG_HALT), while xchain-sync writes sync_halt into either replica.
+ *   - stopped on a train-activation halt (train_activation.status 'halt' on its
+ *     health surface; its durable row has no cleared marker, so it is not counted)
  *   - materially behind its node's tip
  *
  * FAIL CLOSED throughout. A probe that cannot be run, cannot be parsed, or
@@ -66,8 +68,8 @@ const { parseCountTokens, readHaltMarkers } = require('./bootstrap_health_gate/h
 
 // Which env key carries the container-internal API port for each module.
 // Mirrors ModuleService's SERVICE_HEALTHCHECK portKeys, deliberately: the probe
-// below runs the same request the Docker healthcheck runs, so if the probe
-// cannot run at all, neither can the healthcheck.
+// below targets the same container port the Docker healthcheck targets, so if
+// the probe cannot reach it at all, neither can the healthcheck.
 const MODULE_API_PORT_KEY = {
     [XChainService.XCHAIN_DECODER]:      'DECODER_API_PORT',
     [XChainService.XCHAIN_INDEXER]:      'INDEXER_API_PORT',
@@ -118,7 +120,8 @@ async function inspectContainer(containerId, runner) {
 
 // Ask the service itself. JSON-RPC `health` first because it is the richest
 // surface (lag + halt markers); GET /status is the fallback for an older image
-// or a shed health POST, and is exactly what the Docker healthcheck runs. A
+// or a shed health POST, and is what the indexer and utxo-tracker healthchecks run
+// (the decoder's runs GET /live, which this probe never calls). A
 // fallback body that carries no lag field still refuses in evaluateStatusPayload.
 async function probeServiceStatus(containerId, port, runner) {
     const rpcBody = JSON.stringify({ jsonrpc: '2.0', method: 'health', id: 1 })

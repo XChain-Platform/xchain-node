@@ -263,12 +263,6 @@ describe('ValidatorStakeService', function () {
             expect(err.message).to.match(/controls mSomeOtherAddress, not the mStakeAddress/)
         })
 
-        it('warns and keeps going when the validator set cannot be read, instead of reading the failure as "not staked"', async function () {
-            const { result, logged } = await run({}, { xchain: 25000, coin: '0.001', validatorsThrow: 'explorer 503' })
-            expect(logged.join('\n')).to.include('could not read the validator set (explorer 503)')
-            expect(result.dryRun).to.be.true
-        })
-
         // The guard above is only as good as the method name it calls: a stub
         // for a method the real SDK does not have passes every test here while
         // the live path throws into a catch and reports "not staked".
@@ -286,6 +280,32 @@ describe('ValidatorStakeService', function () {
             let err = null
             try { await stakeValidator({}, { settings: null }) } catch (e) { err = e }
             expect(err.message).to.match(/no validator configured/)
+        })
+    })
+})
+
+// An unreadable validator set is an unknown, not "not staked": the indexer rejects a
+// STAKE v1 on a staked key only after the MINT fees are spent.
+describe('ValidatorStakeService', function () {
+
+    describe('stakeValidator() with an unreadable validator set', function () {
+
+        it('refuses when the validator set cannot be read, instead of reading the failure as "not staked"', async function () {
+            const { result, logged } = await run({}, { xchain: 25000, coin: '0.001', validatorsThrow: 'explorer 503' })
+            expect(result.staked).to.be.false
+            expect(result.dryRun).to.not.equal(true)
+            expect(result.blockers.join(' ')).to.match(/could not read the validator set \(explorer 503\)/)
+            expect(logged.join('\n')).to.include('BLOCKED: could not read the validator set (explorer 503)')
+            expect(logged.join('\n')).to.not.include('before broadcasting')
+        })
+
+        it('sends no MINT and no STAKE with --broadcast', async function () {
+            const { result, calls } = await run({ broadcast: true },
+                { xchain: 0, coin: '0.001', validatorsThrow: 'explorer 503' })
+            expect(calls.mint).to.have.length(0)
+            expect(calls.stake).to.have.length(0)
+            expect(result.staked).to.be.false
+            expect(result.blockers).to.not.be.empty
         })
     })
 })

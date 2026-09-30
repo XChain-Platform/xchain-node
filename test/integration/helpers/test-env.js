@@ -75,6 +75,12 @@ class InMemoryStore {
         return v === undefined ? null : v
     }
 
+    // Mirrors MariaDbStore.getModuleContainerStrict: refuse when not connected.
+    async getModuleContainerStrict(module, coin, network) {
+        this.assertReady(`the ${module} registry lookup`)
+        return this.getModuleContainer(module, coin, network)
+    }
+
     async deleteModuleContainer(module, coin, network) {
         const key = this._key(module, coin, network)
         const value = this.modules.get(key)
@@ -143,7 +149,7 @@ class TestEnv {
         const methodNames = [
             'createDatabase', 'close', 'isReady', 'assertReady', 'getModuleCount',
             'getAllModuleContainers', 'setModuleContainer',
-            'getModuleContainer', 'deleteModuleContainer'
+            'getModuleContainer', 'getModuleContainerStrict', 'deleteModuleContainer'
         ]
 
         this._origDbMethods = {}

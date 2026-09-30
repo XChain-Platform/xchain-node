@@ -79,10 +79,9 @@ function validatorLockLabel(actionCommand) {
     return actionCommand.name() === 'init' ? 'validator init' : null
 }
 
-// Build the lock `validator stake|unstake --broadcast` holds only while it sends.
-// The service hands it back before the indexer wait (up to --timeout), so a long
-// wait blocks no deploy; it refuses a held lock the way any mutator does.
-function validatorSendLock(command, deps) {
+// Build a lock held only between hold() and release(), refusing a held lock the way
+// any mutator does; `validator stake|unstake --broadcast` and interactive menu actions use it.
+function scopedCommandLock(command, deps) {
     const { MUTATING_LOCK_WAIT_MS } = dispatchSettings(deps.config || {})
     let release = null
     const onExit = () => { if (release) release() }
@@ -101,6 +100,9 @@ function validatorSendLock(command, deps) {
         }
     }
 }
+
+// Hold the lock only while a validator stake/unstake sends, never through the indexer wait.
+const validatorSendLock = scopedCommandLock
 
 // preCheck provisions shared containers/DB/hub (buildDatabaseModule,
 // ensureXchainNodeAccess, scanAndRegisterModules, installHubModule) for
@@ -216,4 +218,4 @@ function installDispatch(program, deps) {
         beforeAction(thisCommand, actionCommand, settings, deps))
 }
 
-module.exports = { installDispatch, validatorSendLock }
+module.exports = { installDispatch, validatorSendLock, scopedCommandLock }

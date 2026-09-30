@@ -36,6 +36,7 @@ const {
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
 const { readKeyHolders } = require('./validator_stake_service/free_key')
+const { readTokenRow } = require('./validator_stake_service/token_balance_read')
 
 const STAKE_TICK = 'XCHAIN'
 // One stake that clears every capability floor at once. The highest is the hub's llm attestation
@@ -163,9 +164,14 @@ async function readChainState(sdk, address, pubkey, keyCtx) {
     const coinBal = native ? native.confirmed : null
     const coinPending = native ? native.pending : null
 
-    const bals = await sdk.getBalances(address)
-    const row  = ((bals && bals.data) || []).find(b => b && b.tick === STAKE_TICK)
-    const tokenBal = num(row && row.amount)
+    // Read an incomplete balance list as unknown (null), never as a zero to mint up from.
+    let tokenBal = null
+    try {
+        const row = await readTokenRow(sdk, address, STAKE_TICK)
+        tokenBal = num(row && row.amount)
+    } catch (e) {
+        if (!e || !e.incompleteRead) throw e
+    }
 
     // Read the faucet caps from the token's mints group; a token with no such
     // group is an unreadable answer, not a MAX_MINT of 0.
@@ -195,6 +201,11 @@ async function readChainState(sdk, address, pubkey, keyCtx) {
 // balance to `amount`. Pure, so it is testable without a network.
 // `mintUnreadable` names why the caps could not be read, so it is not reported as MAX_MINT 0.
 function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnreadable) {
+    if (tokenBal === null) {
+        return { short: null, mints: [], reason: 'the ' + STAKE_TICK + ' balance is unavailable (the explorer\'s ' +
+            'balance list could not be read to the end), so the shortfall is unknown. Retry, or check the ' +
+            'explorer; this does not mean the address holds none.' }
+    }
     const short = Math.max(0, amount - tokenBal)
     if (short === 0) return { short, mints: [], reason: null }
     if (network === 'mainnet') {
@@ -273,16 +284,16 @@ async function chainedInputs(sdk, address, prevTxid, timeoutMs) {
 async function waitForBalance(sdk, address, amount, timeoutMs, log, pollMs) {
     const deadline = Date.now() + (timeoutMs || 7200000)
     for (;;) {
-        let held = 0
+        let held = null
         try {
-            const b = await sdk.getBalances(address)
-            const row = ((b && b.data) || []).find(t => t && t.tick === STAKE_TICK)
+            const row = await readTokenRow(sdk, address, STAKE_TICK)
             held = num(row && row.amount)
-        } catch { /* transient; retry */ }
-        if (held >= amount) return true
+        } catch { /* transient or incomplete; retry */ }
+        if (held !== null && held >= amount) return true
         const left = deadline - Date.now()
         if (left <= 0) return false
-        log('    waiting for the mints to index (' + held + '/' + amount + ' ' + STAKE_TICK + ')...')
+        log('    waiting for the mints to index (' + (held === null ? 'balance unavailable' : held) + '/' +
+            amount + ' ' + STAKE_TICK + ')...')
         await sleep(Math.min(pollMs || 30000, left))
     }
 }

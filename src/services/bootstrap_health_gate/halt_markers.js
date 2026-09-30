@@ -233,8 +233,8 @@ async function readHaltMarkers(coin, network, module, deps, since) {
 
     // An xchain-indexer database structurally CANNOT carry the REORG_HALT marker, so
     // the REORG_HALT count above is a guaranteed zero for an indexer and this backstop had
-    // no reach there at all: the indexer only ever writes code='REORG' into its own
-    // events table and reads the halt marker out of the DECODER's connection, while
+    // no reach there at all: the indexer writes only REORG and TRAIN_ACTIVATION_HALT
+    // rows into its own events table and reads the halt marker out of the DECODER's connection, while
     // the marker row is written solely into the decoder database. Nothing else in the
     // gate covers the gap either - the indexer's decoderReorgHalted mirror defaults
     // false and keeps its last value on any probe fault, and its published lag is
