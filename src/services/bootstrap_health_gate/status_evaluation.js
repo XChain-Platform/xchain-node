@@ -118,6 +118,18 @@ function statusFlagReasons(payload) {
     reasons.push(...reorgParkReasons(payload))
     if (payload.decoderReorgHalted === true)
         reasons.push('the upstream decoder carries a durable REORG_HALT marker, so this database is frozen behind it')
+    reasons.push(...stallReasons(payload))
+    if (payload.block_fetch_desync)
+        reasons.push(`the service reports a block-fetch desync (${formatBlockFetchDesync(payload.block_fetch_desync)})`)
+    if (payload.node_height_stale === true)
+        reasons.push('the service cannot see the node tip (stale node height), so its lag is unknown')
+
+    return reasons
+}
+
+// Refusal reasons from the indexer's wedged-counter verdict and a train-activation halt.
+function stallReasons(payload) {
+    const reasons = []
     // The indexer's own single-field verdict on its block counter:
     // 'none' | 'future_block_wait' | 'barrier_defer' | 'wedged'. Only 'wedged' is a
     // refusal, and it needs its own leg: the indexer reports status "healthy"
@@ -140,11 +152,6 @@ function statusFlagReasons(payload) {
             (train.required_rule_set ? `: requires ${train.required_rule_set}` : '') +
             (train.required_at_height != null ? ` from height ${train.required_at_height}` : '') +
             (train.reason ? ` (${train.reason})` : ''))
-    if (payload.block_fetch_desync)
-        reasons.push(`the service reports a block-fetch desync (${formatBlockFetchDesync(payload.block_fetch_desync)})`)
-    if (payload.node_height_stale === true)
-        reasons.push('the service cannot see the node tip (stale node height), so its lag is unknown')
-
     return reasons
 }
 

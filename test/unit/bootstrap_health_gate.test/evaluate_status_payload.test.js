@@ -66,6 +66,15 @@ describe('BootstrapHealthGate', function () {
             expect(reasons[0]).to.match(/vm_executor_host_fault/)
         })
 
+    })
+})
+
+describe('BootstrapHealthGate', function () {
+
+    installEnvironmentHooks()
+
+    describe('evaluateStatusPayload()', function () {
+
         const trainPayload = (train) => ({ status: 'healthy', lag: 3, stallClass: 'none', train_activation: train })
 
         it('REFUSES an indexer stopped on a train-activation halt', function () {

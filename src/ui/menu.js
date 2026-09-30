@@ -34,6 +34,7 @@ const {
 } = require('../services/version_service')
 const { scanAndRegisterModules } = require('../services/discovery_service')
 const { restoreBootstrapInterface } = require('./menu/restore_bootstrap_prompt.js')
+const { buildModuleChoices }         = require('./menu/module_choices.js')
 const config                         = require('../config')
 const { acquireCommandLock }         = require('../utils/command_lock')
 const { scopedCommandLock }          = require('../cli/dispatch')
@@ -71,74 +72,6 @@ const ACTION_REINSTALL_REMOTE          = "Reinstall from remote"
 const ACTION_UPDATE_CONTAINER          = "Update Container"
 const ACTION_REINSTALL_CONTAINER       = "Reinstall"
 const ACTION_INSTALL_LOCAL_IN_CONTAINER = "Install Local Version in Container"
-
-// Lists the modules a network can run: its services plus the node and the database.
-function expectedModules(network) {
-    let allModules = Object.values(XChainService)
-
-    const e2eIndex = allModules.indexOf(XChainService.XCHAIN_E2E_TEST)
-    if (e2eIndex >= 0) allModules.splice(e2eIndex, 1)
-
-    if (network !== Network.REGTEST) {
-        const regtestIndex = allModules.indexOf(XChainService.XCHAIN_REGTEST_MINER)
-        if (regtestIndex >= 0) allModules.splice(regtestIndex, 1)
-    }
-
-    allModules.push(NODE_MODULE_NAME)
-    allModules.push(DB_MODULE_NAME)
-    return allModules
-}
-
-// Builds the module list choices and maps each choice key to its module and status.
-function buildModuleChoices(modulesStatus, coin, network) {
-    const moduleChoices = []
-    const actionModules = {}
-
-    let onlyOneModuleUsingDatabase = false
-
-    if ((coin in modulesStatus) && (network in modulesStatus[coin])) {
-        onlyOneModuleUsingDatabase = !((modulesStatus.length > 2) || (modulesStatus[coin].length > 1))
-
-        if (("" in modulesStatus) && ("" in modulesStatus[""]) && (DB_MODULE_NAME in modulesStatus[""][""])) {
-            modulesStatus[coin][network][DB_MODULE_NAME] = modulesStatus[""][""][DB_MODULE_NAME]
-        }
-
-        let allModules = expectedModules(network)
-
-        for (const mod in modulesStatus[coin][network]) {
-            const moduleStatus = modulesStatus[coin][network][mod]["status"]["State"]["Status"]
-            const color = moduleStatus === "exited" ? "\x1b[31m" : "\x1b[32m"
-            const key = color + mod + " (" + moduleStatus + ")" + "\x1b[37m"
-
-            moduleChoices.push({ name: key, value: mod })
-            actionModules[key] = {
-                "value": mod,
-                "container_id": modulesStatus[coin][network][mod]["container_id"],
-                "status": moduleStatus
-            }
-
-            const idx = allModules.indexOf(mod)
-            if (idx !== -1) allModules.splice(idx, 1)
-        }
-
-        for (const mod of allModules) {
-            const key = "\x1b[34m" + mod + " (missing)\x1b[37m"
-            moduleChoices.push({ name: key, value: mod })
-            actionModules[key] = { "value": mod, "status": "missing" }
-        }
-
-        moduleChoices.push({ name: "Uninstall all the modules", value: "Uninstall all the modules" })
-        moduleChoices.push({ name: "Return", value: "return" })
-    } else {
-        moduleChoices.push({ name: "Install the node", value: "Install the node" })
-        moduleChoices.push({ name: "Return", value: "return" })
-    }
-
-    if (network === Network.REGTEST) {
-        moduleChoices.splice(moduleChoices.length - 2, 0, { name: "Perform an E2E test", value: "e2etest" })
-    }
-    return { moduleChoices, actionModules }
-}
 
 // Reads the remote and local versions of a module, "0" for one that is unavailable.
 async function readModuleVersions(selectedValue, remoteModuleVersions, coin, network) {
