@@ -1,0 +1,639 @@
+services:
+  db:
+    image: xchain-node-database
+    command: ["--max-connections=1000", "--innodb-flush-log-at-trx-commit=2", "--innodb-doublewrite=0", "--innodb-buffer-pool-size=1G"]
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_PASSWORD}
+      MARIADB_ROOT_HOST: "%"
+    ports:
+      - "127.0.0.1:${DB_HOST_PORT}:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  db-init:
+    image: xchain-node-database
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_PASSWORD}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mariadb -h db -uroot -p"$${MARIADB_ROOT_PASSWORD}" -e "CREATE DATABASE IF NOT EXISTS XChain_BTC_Regtest_Decoder; CREATE DATABASE IF NOT EXISTS XChain_BTC_Regtest_Indexer; CREATE DATABASE IF NOT EXISTS XChain_Hub; CREATE DATABASE IF NOT EXISTS XChain_LTC_Regtest_Decoder; CREATE DATABASE IF NOT EXISTS XChain_LTC_Regtest_Indexer; CREATE DATABASE IF NOT EXISTS XChain_DOGE_Regtest_Decoder; CREATE DATABASE IF NOT EXISTS XChain_DOGE_Regtest_Indexer;"
+    restart: "no"
+
+  node:
+    image: xchain-node-bitcoin-regtest-node
+    environment:
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        sed -e "s|^rpcuser=.*|rpcuser=$${NODE_USER}|" -e "s|^rpcpassword=.*|rpcpassword=$${NODE_PASSWORD}|" /etc/bitcoin/bitcoin.conf > /run/bitcoin.conf
+        exec bitcoind -conf=/run/bitcoin.conf -datadir=/root/.bitcoin/
+    tmpfs:
+      - /run
+    ports:
+      - "127.0.0.1:${NODE_HOST_PORT}:18444"
+    volumes:
+      - node-data:/root/.bitcoin
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -conf=/run/bitcoin.conf -datadir=/root/.bitcoin/ getblockchaininfo >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    restart: unless-stopped
+
+  miner:
+    image: xchain-node-bitcoin-regtest-xchain-regtest-miner
+    depends_on:
+      node:
+        condition: service_healthy
+    environment:
+      NETWORK: bitcoin-regtest
+      NODE_URL: node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      REGTEST_MINER_API_PORT: 3005
+    ports:
+      - "127.0.0.1:${MINER_HOST_PORT}:3005"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const h=require('http');const q=h.request({host:'127.0.0.1',port:3005,method:'POST',headers:{'content-type':'application/json'}},r=>process.exit(r.statusCode===200?0:1));q.on('error',()=>process.exit(1));q.end(JSON.stringify({jsonrpc:'2.0',method:'health',id:1}))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  tracker:
+    image: xchain-node-bitcoin-regtest-xchain-utxo-tracker
+    depends_on:
+      node:
+        condition: service_healthy
+    environment:
+      COIN: bitcoin
+      NETWORK: bitcoin-regtest
+      NODE_URL: node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      UTXO_TRACKER_API_PORT: 3001
+      CORS_ORIGIN: "*"
+    ports:
+      - "127.0.0.1:${TRACKER_HOST_PORT}:3001"
+    volumes:
+      - tracker-data:/data/xchain-utxo-tracker
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  decoder:
+    image: xchain-node-bitcoin-regtest-xchain-decoder
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      node:
+        condition: service_healthy
+    environment:
+      COIN: bitcoin
+      NETWORK: bitcoin-regtest
+      NODE_URL: node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      DECODER_DB_HOST: db
+      DECODER_DB_PORT: 3306
+      DECODER_DB_NAME: XChain_BTC_Regtest_Decoder
+      DECODER_DB_USER: root
+      DECODER_DB_PASS: ${DB_PASSWORD}
+      DECODER_API_PORT: 3002
+    ports:
+      - "127.0.0.1:${DECODER_HOST_PORT}:3002"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3002/live >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  encoder:
+    image: xchain-node-bitcoin-regtest-xchain-encoder
+    depends_on:
+      node:
+        condition: service_healthy
+      tracker:
+        condition: service_healthy
+    environment:
+      NETWORK: bitcoin-regtest
+      NODE_URL: node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      UTXO_TRACKER_URL: tracker
+      UTXO_TRACKER_API_PORT: 3001
+      ENCODER_API_PORT: 3003
+      ENCODER_RATE_LIMIT_RPM: 99999
+      CORS_ORIGIN: "*"
+    ports:
+      - "127.0.0.1:${ENCODER_HOST_PORT}:3003"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3003/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  hub:
+    image: xchain-node-xchain-hub
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      HUB_HOST: 0.0.0.0
+      HUB_PORT: 10000
+      HUB_DB_HOST: db
+      HUB_DB_PORT: 3306
+      HUB_DB_NAME: XChain_Hub
+      HUB_DB_USER: root
+      HUB_DB_SECRET: ${DB_PASSWORD}
+      HUB_ALLOW_UNAUTHENTICATED: "true"
+      HUB_NETWORK: regtest
+      BTC_INDEXER_API_URL: http://indexer:3004
+    ports:
+      - "127.0.0.1:${HUB_HOST_PORT}:10000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --post-data='{\"jsonrpc\":\"2.0\",\"method\":\"health\",\"id\":1}' --header='Content-Type: application/json' http://127.0.0.1:10000/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  indexer:
+    image: xchain-node-bitcoin-regtest-xchain-indexer
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      decoder:
+        condition: service_healthy
+      tracker:
+        condition: service_healthy
+      hub:
+        condition: service_healthy
+    environment:
+      INDEXER_COIN: BTC
+      INDEXER_NETWORK: regtest
+      INDEXER_API_PORT: 3004
+      INDEXER_DB_HOST: db
+      INDEXER_DB_PORT: 3306
+      INDEXER_DB_NAME: XChain_BTC_Regtest_Indexer
+      INDEXER_DB_USER: root
+      INDEXER_DB_PASS: ${DB_PASSWORD}
+      DECODER_DB_HOST: db
+      DECODER_DB_PORT: 3306
+      DECODER_DB_NAME: XChain_BTC_Regtest_Decoder
+      DECODER_DB_USER: root
+      DECODER_DB_PASS: ${DB_PASSWORD}
+      UTXO_TRACKER_URL: tracker
+      UTXO_TRACKER_API_PORT: 3001
+      HUB_API_URL: http://hub:10000
+      HUB_DB_HOST: db
+      HUB_DB_PORT: 3306
+      HUB_DB_NAME: XChain_BTC_Regtest_Indexer
+      HUB_DB_USER: root
+      HUB_DB_PASS: ${DB_PASSWORD}
+      HUB_DB_SYNC_ENABLED: "true"
+      INDEXER_ALLOW_UNAUTHENTICATED: "true"
+      HUB_SYNC_PRICE_GRACE_S: 0
+      HUB_SYNC_ORACLE_GRACE_S: 0
+      HUB_SYNC_ATTEST_RESPONSE_GRACE_S: 0
+      HUB_SYNC_MATCH_GRACE_S: 0
+      HUB_SYNC_CALL_GRACE_S: 0
+      HUB_SYNC_ANCHOR_ATTEST_GRACE_S: 0
+    ports:
+      - "127.0.0.1:${INDEXER_HOST_PORT}:3004"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 120s
+    restart: unless-stopped
+
+  explorer:
+    image: xchain-node-xchain-explorer
+    depends_on:
+      hub:
+        condition: service_healthy
+      indexer:
+        condition: service_healthy
+    environment:
+      NETWORK: regtest
+      HUB_API_HOST: hub
+      HUB_PORT: 10000
+      EXPLORER_API_PORT_HTTP: 8080
+      EXPLORER_API_PORT_HTTPS: 8081
+      ALLOW_NO_COLOCATED_HUB_DB: 1
+    ports:
+      - "127.0.0.1:${EXPLORER_HTTP_HOST_PORT}:8080"
+      - "127.0.0.1:${EXPLORER_HTTPS_HOST_PORT}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --post-data='{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}' --header='Content-Type: application/json' http://127.0.0.1:8080/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 120s
+    restart: unless-stopped
+
+  ltc-node:
+    image: xchain-node-litecoin-regtest-node
+    environment:
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        sed -e "s|^rpcuser=.*|rpcuser=$${NODE_USER}|" -e "s|^rpcpassword=.*|rpcpassword=$${NODE_PASSWORD}|" /etc/litecoin/litecoin.conf > /run/litecoin.conf
+        exec litecoind -conf=/run/litecoin.conf -datadir=/root/.litecoin/
+    tmpfs:
+      - /run
+    ports:
+      - "127.0.0.1:${LTC_NODE_HOST_PORT}:18444"
+    volumes:
+      - ltc-node-data:/root/.litecoin
+    healthcheck:
+      test: ["CMD-SHELL", "litecoin-cli -conf=/run/litecoin.conf -datadir=/root/.litecoin/ getblockchaininfo >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    restart: unless-stopped
+
+  ltc-miner:
+    image: xchain-node-litecoin-regtest-xchain-regtest-miner
+    depends_on:
+      ltc-node:
+        condition: service_healthy
+    environment:
+      NETWORK: litecoin-regtest
+      NODE_URL: ltc-node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      REGTEST_MINER_API_PORT: 3005
+    ports:
+      - "127.0.0.1:${LTC_MINER_HOST_PORT}:3005"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const h=require('http');const q=h.request({host:'127.0.0.1',port:3005,method:'POST',headers:{'content-type':'application/json'}},r=>process.exit(r.statusCode===200?0:1));q.on('error',()=>process.exit(1));q.end(JSON.stringify({jsonrpc:'2.0',method:'health',id:1}))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  ltc-tracker:
+    image: xchain-node-litecoin-regtest-xchain-utxo-tracker
+    depends_on:
+      ltc-node:
+        condition: service_healthy
+    environment:
+      COIN: litecoin
+      NETWORK: litecoin-regtest
+      NODE_URL: ltc-node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      UTXO_TRACKER_API_PORT: 3001
+      CORS_ORIGIN: "*"
+    ports:
+      - "127.0.0.1:${LTC_TRACKER_HOST_PORT}:3001"
+    volumes:
+      - ltc-tracker-data:/data/xchain-utxo-tracker
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  ltc-decoder:
+    image: xchain-node-litecoin-regtest-xchain-decoder
+    depends_on:
+      db:
+        condition: service_healthy
+      ltc-node:
+        condition: service_healthy
+    environment:
+      COIN: litecoin
+      NETWORK: litecoin-regtest
+      NODE_URL: ltc-node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      DECODER_DB_HOST: db
+      DECODER_DB_PORT: 3306
+      DECODER_DB_NAME: XChain_LTC_Regtest_Decoder
+      DECODER_DB_USER: root
+      DECODER_DB_PASS: ${DB_PASSWORD}
+      DECODER_API_PORT: 3002
+    ports:
+      - "127.0.0.1:${LTC_DECODER_HOST_PORT}:3002"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3002/live >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  ltc-encoder:
+    image: xchain-node-litecoin-regtest-xchain-encoder
+    depends_on:
+      ltc-node:
+        condition: service_healthy
+      ltc-tracker:
+        condition: service_healthy
+    environment:
+      NETWORK: litecoin-regtest
+      NODE_URL: ltc-node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      UTXO_TRACKER_URL: ltc-tracker
+      UTXO_TRACKER_API_PORT: 3001
+      ENCODER_API_PORT: 3003
+      ENCODER_RATE_LIMIT_RPM: 99999
+      CORS_ORIGIN: "*"
+    ports:
+      - "127.0.0.1:${LTC_ENCODER_HOST_PORT}:3003"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3003/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  ltc-indexer:
+    image: xchain-node-litecoin-regtest-xchain-indexer
+    depends_on:
+      db:
+        condition: service_healthy
+      ltc-decoder:
+        condition: service_healthy
+      ltc-tracker:
+        condition: service_healthy
+      hub:
+        condition: service_healthy
+    environment:
+      INDEXER_COIN: LTC
+      INDEXER_NETWORK: regtest
+      INDEXER_API_PORT: 3004
+      INDEXER_DB_HOST: db
+      INDEXER_DB_PORT: 3306
+      INDEXER_DB_NAME: XChain_LTC_Regtest_Indexer
+      INDEXER_DB_USER: root
+      INDEXER_DB_PASS: ${DB_PASSWORD}
+      DECODER_DB_HOST: db
+      DECODER_DB_PORT: 3306
+      DECODER_DB_NAME: XChain_LTC_Regtest_Decoder
+      DECODER_DB_USER: root
+      DECODER_DB_PASS: ${DB_PASSWORD}
+      UTXO_TRACKER_URL: ltc-tracker
+      UTXO_TRACKER_API_PORT: 3001
+      HUB_API_URL: http://hub:10000
+      HUB_DB_HOST: db
+      HUB_DB_PORT: 3306
+      HUB_DB_NAME: XChain_LTC_Regtest_Indexer
+      HUB_DB_USER: root
+      HUB_DB_PASS: ${DB_PASSWORD}
+      HUB_DB_SYNC_ENABLED: "true"
+      INDEXER_ALLOW_UNAUTHENTICATED: "true"
+      HUB_SYNC_PRICE_GRACE_S: 0
+      HUB_SYNC_ORACLE_GRACE_S: 0
+      HUB_SYNC_ATTEST_RESPONSE_GRACE_S: 0
+      HUB_SYNC_MATCH_GRACE_S: 0
+      HUB_SYNC_CALL_GRACE_S: 0
+      HUB_SYNC_ANCHOR_ATTEST_GRACE_S: 0
+    ports:
+      - "127.0.0.1:${LTC_INDEXER_HOST_PORT}:3004"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 120s
+    restart: unless-stopped
+
+
+  doge-node:
+    image: xchain-node-dogecoin-regtest-node
+    environment:
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        sed -e "s|^rpcuser=.*|rpcuser=$${NODE_USER}|" -e "s|^rpcpassword=.*|rpcpassword=$${NODE_PASSWORD}|" /etc/dogecoin/dogecoin.conf > /run/dogecoin.conf
+        exec dogecoind -conf=/run/dogecoin.conf -datadir=/root/.dogecoin/
+    tmpfs:
+      - /run
+    ports:
+      - "127.0.0.1:${DOGE_NODE_HOST_PORT}:18444"
+    volumes:
+      - doge-node-data:/root/.dogecoin
+    healthcheck:
+      test: ["CMD-SHELL", "dogecoin-cli -conf=/run/dogecoin.conf -datadir=/root/.dogecoin/ getblockchaininfo >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    restart: unless-stopped
+
+  doge-miner:
+    image: xchain-node-dogecoin-regtest-xchain-regtest-miner
+    depends_on:
+      doge-node:
+        condition: service_healthy
+    environment:
+      NETWORK: dogecoin-regtest
+      NODE_URL: doge-node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      REGTEST_MINER_API_PORT: 3005
+    ports:
+      - "127.0.0.1:${DOGE_MINER_HOST_PORT}:3005"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const h=require('http');const q=h.request({host:'127.0.0.1',port:3005,method:'POST',headers:{'content-type':'application/json'}},r=>process.exit(r.statusCode===200?0:1));q.on('error',()=>process.exit(1));q.end(JSON.stringify({jsonrpc:'2.0',method:'health',id:1}))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  doge-tracker:
+    image: xchain-node-dogecoin-regtest-xchain-utxo-tracker
+    depends_on:
+      doge-node:
+        condition: service_healthy
+    environment:
+      COIN: dogecoin
+      NETWORK: dogecoin-regtest
+      NODE_URL: doge-node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      UTXO_TRACKER_API_PORT: 3001
+      CORS_ORIGIN: "*"
+    ports:
+      - "127.0.0.1:${DOGE_TRACKER_HOST_PORT}:3001"
+    volumes:
+      - doge-tracker-data:/data/xchain-utxo-tracker
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  doge-decoder:
+    image: xchain-node-dogecoin-regtest-xchain-decoder
+    depends_on:
+      db:
+        condition: service_healthy
+      doge-node:
+        condition: service_healthy
+    environment:
+      COIN: dogecoin
+      NETWORK: dogecoin-regtest
+      NODE_URL: doge-node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      DECODER_DB_HOST: db
+      DECODER_DB_PORT: 3306
+      DECODER_DB_NAME: XChain_DOGE_Regtest_Decoder
+      DECODER_DB_USER: root
+      DECODER_DB_PASS: ${DB_PASSWORD}
+      DECODER_API_PORT: 3002
+    ports:
+      - "127.0.0.1:${DOGE_DECODER_HOST_PORT}:3002"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3002/live >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  doge-encoder:
+    image: xchain-node-dogecoin-regtest-xchain-encoder
+    depends_on:
+      doge-node:
+        condition: service_healthy
+      doge-tracker:
+        condition: service_healthy
+    environment:
+      NETWORK: dogecoin-regtest
+      NODE_URL: doge-node
+      NODE_PORT: 18444
+      NODE_USER: ${RPC_USER}
+      NODE_PASSWORD: ${RPC_PASSWORD}
+      UTXO_TRACKER_URL: doge-tracker
+      UTXO_TRACKER_API_PORT: 3001
+      ENCODER_API_PORT: 3003
+      ENCODER_RATE_LIMIT_RPM: 99999
+      CORS_ORIGIN: "*"
+    ports:
+      - "127.0.0.1:${DOGE_ENCODER_HOST_PORT}:3003"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3003/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    restart: unless-stopped
+
+  doge-indexer:
+    image: xchain-node-dogecoin-regtest-xchain-indexer
+    depends_on:
+      db:
+        condition: service_healthy
+      doge-decoder:
+        condition: service_healthy
+      doge-tracker:
+        condition: service_healthy
+      hub:
+        condition: service_healthy
+    environment:
+      INDEXER_COIN: DOGE
+      INDEXER_NETWORK: regtest
+      INDEXER_API_PORT: 3004
+      INDEXER_DB_HOST: db
+      INDEXER_DB_PORT: 3306
+      INDEXER_DB_NAME: XChain_DOGE_Regtest_Indexer
+      INDEXER_DB_USER: root
+      INDEXER_DB_PASS: ${DB_PASSWORD}
+      DECODER_DB_HOST: db
+      DECODER_DB_PORT: 3306
+      DECODER_DB_NAME: XChain_DOGE_Regtest_Decoder
+      DECODER_DB_USER: root
+      DECODER_DB_PASS: ${DB_PASSWORD}
+      UTXO_TRACKER_URL: doge-tracker
+      UTXO_TRACKER_API_PORT: 3001
+      HUB_API_URL: http://hub:10000
+      HUB_DB_HOST: db
+      HUB_DB_PORT: 3306
+      HUB_DB_NAME: XChain_DOGE_Regtest_Indexer
+      HUB_DB_USER: root
+      HUB_DB_PASS: ${DB_PASSWORD}
+      HUB_DB_SYNC_ENABLED: "true"
+      INDEXER_ALLOW_UNAUTHENTICATED: "true"
+      HUB_SYNC_PRICE_GRACE_S: 0
+      HUB_SYNC_ORACLE_GRACE_S: 0
+      HUB_SYNC_ATTEST_RESPONSE_GRACE_S: 0
+      HUB_SYNC_MATCH_GRACE_S: 0
+      HUB_SYNC_CALL_GRACE_S: 0
+      HUB_SYNC_ANCHOR_ATTEST_GRACE_S: 0
+    ports:
+      - "127.0.0.1:${DOGE_INDEXER_HOST_PORT}:3004"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 120s
+    restart: unless-stopped
+
+
+volumes:
+  db-data:
+  node-data:
+  tracker-data:
+  ltc-node-data:
+  ltc-tracker-data:
+  doge-node-data:
+  doge-tracker-data:

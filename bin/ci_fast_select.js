@@ -115,16 +115,16 @@ function collectSourceData(changedSources, findRequirers) {
     }))
 }
 
-function consensusReasons(changedFiles, sourceData) {
+function consensusReasons(changedFiles, sourceData, consensusPrefixes) {
     const reasons = []
     for (const file of changedFiles) {
-        if (file === 'package.json' || startsWithAny(file, CONSENSUS) || startsWithAny(file, WIDEN)) {
+        if (file === 'package.json' || startsWithAny(file, consensusPrefixes) || startsWithAny(file, WIDEN)) {
             reasons.push(`consensus: ${file}`)
         }
     }
     for (const { file, requirers } of sourceData) {
         for (const importer of requirers) {
-            if (startsWithAny(importer, CONSENSUS) && requiresFile(importer, file)) {
+            if (startsWithAny(importer, consensusPrefixes) && requiresFile(importer, file)) {
                 reasons.push(`consensus importer: ${importer} requires ${file}`)
             }
         }
@@ -145,12 +145,16 @@ function selectedTestFiles(changedFiles, tests, sourceData, reasons) {
     return selected
 }
 
-function selectFastTests(changedFiles, { listTests, findRequirers }) {
+function selectFastTests(
+    changedFiles,
+    { listTests, findRequirers },
+    { consensusPrefixes = CONSENSUS } = {},
+) {
     const changed = splitLines(changedFiles)
     const tests = splitLines(listTests()).filter((file) => groupFor(file) && fs.existsSync(file))
     const sources = changed.filter((file) => file.startsWith('src/') && file.endsWith('.js'))
     const sourceData = collectSourceData(sources, findRequirers)
-    const reasons = consensusReasons(changed, sourceData)
+    const reasons = consensusReasons(changed, sourceData, consensusPrefixes)
     const selected = selectedTestFiles(changed, tests, sourceData, reasons)
     const consensus = reasons.some((reason) => reason.startsWith('consensus'))
     const planned = consensus ? [] : [...selected]
@@ -175,6 +179,150 @@ function findRequirers(basename) {
     if (result.status === 1) return []
     if (result.status !== 0) throw new Error((result.stderr || 'git grep failed').trim())
     return splitLines(result.stdout)
+}
+
+function selectionDependencies({ indexed = false } = {}) {
+    const files = listTrackedFiles()
+    if (indexed) {
+        const sources = files
+            .filter((file) => file.endsWith('.js') && fs.existsSync(file))
+            .map((file) => [file, sourceText(file)])
+        const cache = new Map()
+        return {
+            listTests: () => files,
+            findRequirers: (basename) => {
+                if (!cache.has(basename)) {
+                    cache.set(basename, sources
+                        .filter(([, source]) => source.includes(basename))
+                        .map(([file]) => file))
+                }
+                return cache.get(basename)
+            },
+        }
+    }
+    return { listTests: () => files, findRequirers }
+}
+
+function withoutConsensusPrefixes(prefixes) {
+    const removed = new Set(prefixes.flatMap((prefix) => {
+        const trimmed = prefix.trim()
+        if (!trimmed) return []
+        return [trimmed, trimmed.endsWith('/') ? trimmed.slice(0, -1) : `${trimmed}/`]
+    }))
+    return CONSENSUS.filter((prefix) => !removed.has(prefix))
+}
+
+function changedFilesForCommit(commit) {
+    const revision = splitLines(git(['rev-list', '--parents', '-n', '1', commit]))[0]
+    const [, parent] = revision.split(' ')
+    if (parent) return splitLines(git(['diff', '--name-only', `${parent}..${commit}`]))
+    return splitLines(git(['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', commit]))
+}
+
+function emptyReplayCounts() {
+    return { wholeUnit: 0, changedTests: 0, testOnly: 0, noTests: 0 }
+}
+
+function countReplayPlan(counts, changed, plan) {
+    if (plan.consensus) {
+        counts.wholeUnit++
+    } else if (plan.tests.length && changed.every((file) => file.startsWith('test/'))) {
+        counts.testOnly++
+    } else if (plan.tests.length) {
+        counts.changedTests++
+    } else {
+        counts.noTests++
+    }
+}
+
+function replayPlans(limit, narrowPrefixes) {
+    const commits = splitLines(git([
+        'log', '--first-parent', '-n', String(limit), '--format=%H', 'origin/develop',
+    ]))
+    const current = emptyReplayCounts()
+    const narrowed = emptyReplayCounts()
+    const consensusPrefixes = withoutConsensusPrefixes(narrowPrefixes)
+    const dependencies = selectionDependencies({ indexed: true })
+    for (const commit of commits) {
+        const changed = changedFilesForCommit(commit)
+        countReplayPlan(current, changed, selectFastTests(changed, dependencies))
+        countReplayPlan(narrowed, changed, selectFastTests(changed, dependencies, {
+            consensusPrefixes,
+        }))
+    }
+    return { commits, current, narrowed, consensusPrefixes, dependencies }
+}
+
+function fraction(value, total) {
+    return `${value}/${total}`
+}
+
+function printReplayRow(name, total, counts) {
+    console.log([
+        name,
+        total,
+        fraction(counts.wholeUnit, total),
+        fraction(counts.changedTests, total),
+        fraction(counts.testOnly, total),
+        fraction(counts.noTests, total),
+    ].join(' '))
+}
+
+function parseList(value) {
+    return value.split(',').map((item) => item.trim()).filter(Boolean)
+}
+
+function parseMustSelect(value) {
+    return parseList(value).map((pair) => {
+        const separator = pair.indexOf(':')
+        if (separator <= 0 || separator === pair.length - 1) {
+            throw new Error(`invalid --must-select pair: ${pair}`)
+        }
+        return { source: pair.slice(0, separator), test: pair.slice(separator + 1) }
+    })
+}
+
+function replayOptions(args) {
+    const limit = Number(args[0])
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+        throw new Error('--replay requires a positive integer')
+    }
+    const options = { limit, narrowPrefixes: [], mustSelect: [] }
+    for (let index = 1; index < args.length; index += 2) {
+        const flag = args[index]
+        const value = args[index + 1]
+        if (!value || (flag !== '--narrow' && flag !== '--must-select')) {
+            throw new Error(`invalid replay option: ${flag || ''}`.trim())
+        }
+        if (flag === '--narrow') options.narrowPrefixes.push(...parseList(value))
+        else options.mustSelect.push(...parseMustSelect(value))
+    }
+    return options
+}
+
+function runReplay(args) {
+    try {
+        const options = replayOptions(args)
+        const result = replayPlans(options.limit, options.narrowPrefixes)
+        console.log('plan commits consensus-1 changed-tests test-only no-tests')
+        printReplayRow('current', result.commits.length, result.current)
+        if (options.narrowPrefixes.length) {
+            printReplayRow('narrowed', result.commits.length, result.narrowed)
+        }
+        let failed = false
+        for (const pair of options.mustSelect) {
+            const plan = selectFastTests([pair.source], result.dependencies, {
+                consensusPrefixes: result.consensusPrefixes,
+            })
+            const selected = plan.tests.some((test) => test.file === pair.test)
+            console.log(`must-select ${selected ? 'PASS' : 'FAIL'} ${pair.source}:${pair.test}`)
+            if (!selected) failed = true
+        }
+        return failed ? 1 : 0
+    } catch (error) {
+        console.error(`replay-error ${error.message}`)
+        return 2
+    }
 }
 
 function resolvePlan() {
@@ -209,8 +357,10 @@ function runPlan(plan) {
 
 function main() {
     const mode = process.argv[2]
+    if (mode === '--replay') return runReplay(process.argv.slice(3))
     if (mode !== '--plan' && mode !== '--run') {
-        console.error('usage: node bin/ci_fast_select.js --plan|--run')
+        console.error('usage: node bin/ci_fast_select.js --plan|--run|--replay N ' +
+            '[--narrow prefix,...] [--must-select file:testfile,...]')
         return 2
     }
     let result
@@ -228,6 +378,6 @@ function main() {
     return mode === '--run' ? runPlan(result.plan) : 0
 }
 
-module.exports = { resolveBase, selectFastTests }
+module.exports = { replayPlans, resolveBase, selectFastTests }
 
 if (require.main === module) process.exitCode = main()
