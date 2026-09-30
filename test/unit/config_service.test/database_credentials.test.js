@@ -29,8 +29,8 @@ function databaseCredentials1() {
         const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
         expect(config['DECODER_DB_PASS']).to.equal('xchain' + SEP + 'password')
         expect(config['INDEXER_DB_PASS']).to.equal('xchain' + SEP + 'password')
-        expect(files[coinSidecar] || '').to.not.include('DECODER_DB_PASS=')
-        expect(files[coinSidecar] || '').to.not.include('INDEXER_DB_PASS=')
+        expect(files[coinSidecar] || '').to.not.include('DECODER_DB_SECRET=')
+        expect(files[coinSidecar] || '').to.not.include('INDEXER_DB_SECRET=')
     })
 
     it('generates per-install DB passwords when a DB container exists (rotation can apply them) and persists them', async function () {
@@ -39,8 +39,8 @@ function databaseCredentials1() {
         expect(config['DECODER_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
         expect(config['INDEXER_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
         expect(config['DECODER_DB_PASS']).to.not.equal('xchain' + SEP + 'password')
-        expect(files[coinSidecar]).to.include('DECODER_DB_PASS=')
-        expect(files[coinSidecar]).to.include('INDEXER_DB_PASS=')
+        expect(files[coinSidecar]).to.include('DECODER_DB_SECRET=')
+        expect(files[coinSidecar]).to.include('INDEXER_DB_SECRET=')
     })
 
     it('generates per-install DB passwords under EXTERNAL_DB (native-path rotation)', async function () {
@@ -107,7 +107,7 @@ function databaseCredentials2() {
         expect(coinCfg['HUB_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
         expect(coinCfg['HUB_DB_PASS']).to.not.equal('xchain' + SEP + 'password')
         expect(hubCfg['HUB_DB_PASS']).to.equal(coinCfg['HUB_DB_PASS'])
-        expect(files[hubSidecar]).to.include('HUB_DB_PASS=')
+        expect(files[hubSidecar]).to.include('HUB_DB_SECRET=')
     })
 
     // #2246: on the non-rotatable path INDEXER_DB_PASS is not yet in

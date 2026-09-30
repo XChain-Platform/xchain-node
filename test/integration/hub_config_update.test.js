@@ -86,7 +86,7 @@ hubConfigSuite('updateHubOrExplorer payload for hub', function (fixture) {
         // static "rpc"/"rpc" default (a well-known credential left on a
         // live stack). Seed both here so this test still asserts a known,
         // fixed value instead of a per-run random one.
-        env.writeConfigFile('bitcoin-mainnet', 'NODE_USER=rpc\nNODE_PASSWORD=rpc\n')
+        env.writeConfigFile('bitcoin-mainnet.local', 'NODE_USER=rpc\nNODE_PASSWORD=rpc\n')
         state.setStatusUpdated(true)
         state.setLastStatus({
             'bitcoin': {
@@ -106,7 +106,9 @@ hubConfigSuite('updateHubOrExplorer payload for hub', function (fixture) {
 
         const nodeConfig = config['bitcoin']['mainnet']['node']
         expect(nodeConfig).to.exist
-        expect(nodeConfig.host).to.equal('node')
+        // NODE_URL is the coin-scoped container name; pinned by
+        // test/unit/config_service.test/with_coin_and_network.test.js.
+        expect(nodeConfig.host).to.equal('xchain-node-bitcoin-mainnet-node')
         expect(nodeConfig.port).to.equal(8332)
         expect(nodeConfig.user).to.equal('rpc')
         expect(nodeConfig.pass).to.equal('rpc')

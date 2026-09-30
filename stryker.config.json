@@ -4,6 +4,7 @@
     "src/cli.js",
     "src/config/index.js",
     "src/services/config_service.js",
+    "src/services/config_service/**",
     "src/services/module_service.js",
     "src/services/docker_service.js",
     "src/services/database_service.js",
@@ -11,10 +12,13 @@
     "src/services/status_service.js"
   ],
   "testRunner": "mocha",
+  "testRunnerNodeArgs": [
+    "--import=data:text/javascript,process.mainModule??={}"
+  ],
   "mochaOptions": {
     "spec": [
-      "test/unit/**/*.test.js",
-      "test/integration/**/*.test.js"
+      "test/integration/**/*.test.js",
+      "test/unit/**/*.test.js"
     ],
     "no-config": true,
     "no-opts": true
@@ -37,7 +41,7 @@
     "break": 60
   },
   "concurrency": 4,
-  "tempDirName": ".stryker-tmp",
+  "tempDirName": "stryker-tmp",
   "mutator": {
     "excludedMutations": [
       "StringLiteral"

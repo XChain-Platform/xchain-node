@@ -32,10 +32,10 @@ const LEDGER_TABLE = 'schema_migrations'
  * body prose or a data literal. Widening that to the whole file is how a
  * migration that merely DISCUSSES the convention would start refusing deploys.
  *
- * Twin of xchain-indexer's Database.migrationDeclaresDeployPrecondition. It is
- * duplicated rather than shared because this tool reads these files out of a
- * source tree it has only cloned, with that tree's dependencies uninstalled, so
- * requiring the module is not available to it. Keep the two in step.
+ * Twin of xchain-indexer src/db/database/migration_registry.js and xchain-decoder
+ * src/db/migration_preconditions.js (both Database.migrationDeclaresDeployPrecondition).
+ * Duplicated, not shared: this tool reads a cloned source tree whose dependencies are
+ * not installed, so it cannot require either module. Keep all three in step.
  */
 function migrationDeclaresDeployPrecondition(raw) {
     const prologue = []
@@ -48,13 +48,14 @@ function migrationDeclaresDeployPrecondition(raw) {
 }
 
 /**
- * The `mode=` a migration header declares, or null when it declares none.
- * Prologue-anchored exactly like migrationDeclaresDeployPrecondition, so a token
- * in body prose or a data literal cannot answer for the file.
+ * The `mode=` a migration header declares: 'auto', or 'manual' for anything else,
+ * because the runners gate every non-auto file and an unscoped operator run applies it.
+ * Prologue-anchored like migrationDeclaresDeployPrecondition, so a token in body prose
+ * or a data literal cannot answer for the file.
  *
- * Twin of the modules' own Database._migrationMode, duplicated for the reason
- * given above: this tool reads a cloned tree whose dependencies are not
- * installed. Keep them in step.
+ * Twin of Database.prototype.migrationMode in xchain-indexer src/db/database/migration_scan.js
+ * and xchain-decoder src/db/migration_statements.js, duplicated for the reason given
+ * above. Keep the scan, the tag regex and the default in step.
  */
 function migrationMode(raw) {
     const prologue = []
@@ -63,12 +64,12 @@ function migrationMode(raw) {
         if (trimmed === '' || trimmed.startsWith('--')) { prologue.push(line); continue }
         break
     }
-    const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*([A-Za-z]+)/im)
-    return m ? m[1].toLowerCase() : null
+    const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im)
+    return m ? m[1].toLowerCase() : 'manual'
 }
 
 /**
- * Every gated (mode=manual) migration in `dir` that the ledger has not recorded,
+ * Every gated (not mode=auto) migration in `dir` that the ledger has not recorded,
  * sorted. This is the blast radius of an UNSCOPED migrate run against that
  * database: the runner applies every pending manual file, not just the one an
  * operator names. The refusal names that whole set, so the consequence is on
@@ -85,26 +86,42 @@ function pendingManualMigrations(dir, applied) {
     }).map(([f]) => f)
 }
 
-/**
- * Does the build CURRENTLY RUNNING in the target container understand per-file
- * migration targeting (`--file`)?
- *
- * This matters because the remedy an operator is about to run executes inside
- * that container, on its build, not on the one being deployed. A build without
- * the flag does not reject it: it ignores it and applies every pending manual
- * migration, which on a live database can mean a data backfill and a
- * dedup-then-unique nobody authorised.
- *
- * Returns true, false, or null when the container could not be read at all
- * (stopped, absent, docker unreachable). Callers must treat null like false:
- * an unverified capability is not a capability, and the cost of being wrong is
- * asymmetric.
- */
+/** Verify the running container's migrate CLI through its read-only status contract. */
 async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
     try {
         const cat = deps.getDockerContainerFileCat || require('../docker_service').getDockerContainerFileCat
         const found = await readMigrateCli(cat, container)
-        return found ? /['"]--file['"]/.test(found.source) : null
+        if (!found) return null
+        if (!/(['"])--status\1/.test(found.source)) return false
+
+        const execContainer = deps.execContainer || require('../docker_service').execContainer
+        let raw
+        try {
+            raw = await execContainer(container, ['node', found.cliPath, '--status', '--json'])
+        } catch {
+            return false
+        }
+
+        let status
+        try {
+            status = JSON.parse(String(raw))
+        } catch {
+            return false
+        }
+        if (!status || Array.isArray(status) || typeof status !== 'object') return false
+        if (typeof status.database !== 'string' || status.database.length === 0) return false
+        if (!Array.isArray(status.migrations)) return false
+        for (const row of status.migrations) {
+            if (!row || Array.isArray(row) || typeof row !== 'object') return false
+            if (typeof row.file !== 'string' || row.file.length === 0) return false
+            if (typeof row.applied !== 'boolean') return false
+        }
+
+        const counts = ['total', 'applied', 'pending']
+        if (!counts.every(k => Number.isInteger(status[k]) && status[k] >= 0)) return false
+        const applied = status.migrations.filter(row => row.applied).length
+        return status.total === status.migrations.length &&
+            status.applied === applied && status.pending === status.total - applied
     } catch {
         return null
     }
@@ -233,7 +250,7 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
             : missing
         instructions = 'DO NOT run `node ' + migrateCliPathFor(container) + '` inside ' + container + '. ' +
             (remedy.supportsPerFile === false
-                ? 'That container runs a build with no per-file targeting: it ignores --file'
+                ? 'That container did not return a valid --status --json response, so --file support is not verified'
                 : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +
             ' and apply EVERY pending manual migration on ' + dbName + ', which is ' +
             wouldApply.length + ' file(s):\n' +

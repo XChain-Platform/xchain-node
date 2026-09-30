@@ -181,7 +181,10 @@ const SERVICE_REGISTRY = {
     [HUB_MODULE_NAME]: {
         docker: {
             singleton: true,
-            ports:   [{ host: 'HUB_PORT', container: 'HUB_PORT', always: true }],
+            ports:   [
+                { host: 'HUB_PORT', container: 'HUB_PORT', always: true },
+                { host: 'P2P_PORT', container: 'P2P_PORT' }
+            ],
             volumes: [{ type: 'hubCapabilityConfig' }, { type: 'hubSignerDir' }]
         }
     },

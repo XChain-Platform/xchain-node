@@ -221,7 +221,11 @@ describe('moduleOperations', function () {
             expect(ok).to.be.true
             expect(stubs.db.getModuleContainer.calledWith('xchain-decoder', 'bitcoin', 'mainnet')).to.be.true
             expect(stubs.execContainer.calledWith('container-id-123',
-                ['node', 'src/clear_reorg_halt.js', '--reason', REASON])).to.be.true
+                ['node', 'src/clear_reorg_halt.js', '--reason=' + REASON])).to.be.true
+            // A reason that starts with '-' travels as one argument, so the decoder cannot read it as a flag.
+            await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: '-- verified against replica' })
+            expect(stubs.execContainer.secondCall.args[1]).to.deep.equal(
+                ['node', 'src/clear_reorg_halt.js', '--reason=-- verified against replica'])
         })
 
         it('passes --force and --dry-run through', async function () {
@@ -229,7 +233,7 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: REASON, force: true, dryRun: true })
             expect(stubs.execContainer.firstCall.args[1]).to.deep.equal(
-                ['node', 'src/clear_reorg_halt.js', '--reason', REASON, '--force', '--dry-run'])
+                ['node', 'src/clear_reorg_halt.js', '--reason=' + REASON, '--force', '--dry-run'])
         })
 
         it('refuses a trivial reason without touching any container', async function () {
@@ -272,7 +276,12 @@ describe('moduleOperations', function () {
 
         it('reports false when the script refuses (non-zero exit) and prints its text', async function () {
             const stubs = makeStubs()
-            stubs.execContainer.rejects(Object.assign(new Error('exit 4'), { stderr: 'clear-reorg-halt: REFUSED. dispenser state' }))
+            // The shape execContainer rejects with: execFile's error plus the child's attached output.
+            stubs.execContainer.rejects(Object.assign(new Error('Command failed: docker exec -i container-id-123 node src/clear_reorg_halt.js'), {
+                code: 4,
+                stdout: 'clear-reorg-halt: live REORG_HALT marker since 2026-09-17T00:00:00Z: reorg at 900000\n',
+                stderr: 'clear-reorg-halt: REFUSED. dispenser state\n'
+            }))
             const ops = loadOperations(stubs)
             const logged = []
             const orig = console.log
@@ -281,7 +290,9 @@ describe('moduleOperations', function () {
             try { ok = await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: REASON }) }
             finally { console.log = orig }
             expect(ok).to.be.false
-            expect(logged.some(l => /REFUSED/.test(l))).to.be.true
+            expect(logged.some(l => /live REORG_HALT marker since/.test(l) && /REFUSED/.test(l))).to.be.true
+            expect(logged.some(l => /Command failed/.test(l))).to.be.false
+            expect(stubs.execContainer.calledOnce).to.be.true
         })
 
         it('reports false when no decoder container is installed for the target', async function () {
@@ -307,6 +318,50 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             expect(await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-encoder'] } }, { reason: REASON })).to.be.false
             expect(stubs.execContainer.called).to.be.false
+        })
+    })
+})
+
+// Runs a clear whose tool exec fails with exit 1, the probe answering with probeResult.
+async function clearWithMissingTool(probeResult) {
+    const stubs = makeStubs()
+    const missing = Object.assign(new Error('Command failed: docker exec'), {
+        code: 1, stdout: '', stderr: "Error: Cannot find module '/app/src/clear_reorg_halt.js'"
+    })
+    stubs.execContainer.onFirstCall().rejects(missing)
+    if (probeResult === 'present') stubs.execContainer.onSecondCall().resolves('')
+    else stubs.execContainer.onSecondCall().rejects(Object.assign(new Error('probe'), { code: probeResult }))
+    const ops = loadOperations(stubs)
+    const logged = []
+    const orig = console.log
+    console.log = (l) => logged.push(String(l))
+    let ok
+    try { ok = await ops.clearDecoderReorgHalt({ bitcoin: { mainnet: ['xchain-decoder'] } }, { reason: REASON }) }
+    finally { console.log = orig }
+    return { ok, logged, stubs }
+}
+
+describe('moduleOperations', function () {
+    registerLifecycleHooks(() => {})
+
+    describe('clearDecoderReorgHalt(): decoder without the clear tool', function () {
+
+        it('names a decoder update when the container has no src/clear_reorg_halt.js', async function () {
+            const { ok, logged, stubs } = await clearWithMissingTool(3)
+            expect(ok).to.be.false
+            expect(stubs.execContainer.secondCall.args[1].slice(0, 2)).to.deep.equal(['node', '-e'])
+            expect(stubs.execContainer.secondCall.args[1][2]).to.include('"src/clear_reorg_halt.js"')
+            expect(logged.some(l => /Cannot find module/.test(l))).to.be.true
+            expect(logged.some(l => /predates decoder v0\.19\.0; update the decoder/.test(l))).to.be.true
+        })
+
+        it('adds no update hint when the probe finds the tool or cannot tell', async function () {
+            for (const probeResult of ['present', 1]) {
+                const { ok, logged, stubs } = await clearWithMissingTool(probeResult)
+                expect(ok).to.be.false
+                expect(stubs.execContainer.calledTwice).to.be.true
+                expect(logged.some(l => /update the decoder/.test(l))).to.be.false
+            }
         })
     })
 })

@@ -116,6 +116,16 @@ function registerUpdate(program, deps) {
                 console.error('update failed: nothing was updated' + (why ? ' - ' + why : ' (no requested service matched an installed container)'))
                 return process.exit(1)
             }
+            if (outcome && Array.isArray(outcome.failed) && outcome.failed.length > 0) {
+                const updated = outcome.updated
+                    .map(item => `${item.module} (${item.coin} ${item.network})`)
+                    .join('; ')
+                const why = outcome.failed
+                    .map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`)
+                    .join('; ')
+                console.error('update: partially failed - updated: ' + updated + '; failed: ' + redactSecrets(why))
+                return process.exit(1)
+            }
             return process.exit(0)
         })
 

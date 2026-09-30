@@ -38,7 +38,10 @@ function makeFixture() {
     fs.copyFileSync(CI_FULL, path.join(nodeDir, 'ci-full.sh'))
     fs.chmodSync(path.join(nodeDir, 'ci-full.sh'), 0o755)
     fs.writeFileSync(path.join(root, 'xchain-node', '.ci-siblings'), REAL_CI_SIBLINGS)
-    for (const sib of ['xchain-hub', 'xchain-indexer']) fs.mkdirSync(path.join(root, sib))
+    // Every sibling the roster declares, read from the roster itself so the fixture
+    // cannot drift from it the way a second hard-coded list would.
+    const declared = REAL_CI_SIBLINGS.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    for (const sib of declared) fs.mkdirSync(path.join(root, sib))
 
     const fakebin = path.join(root, 'fakebin')
     fs.mkdirSync(fakebin)
@@ -102,8 +105,9 @@ describe('.github/workflows/ci.yml coverage job', () => {
     it('checks declared siblings out before re-running the unit suite for coverage', () => {
         const siblingStep = steps.find((s) => s.id === 'siblings')
         expect(siblingStep, 'coverage job has no sibling-checkout step').to.exist
-        expect(siblingStep.run).to.include('.ci-siblings')
-        expect(siblingStep.run).to.include('GITHUB_OUTPUT')
+        // The shared action reads .ci-siblings and publishes checked-out; an inline
+        // copy here would drift from the roster every other repo checks out.
+        expect(siblingStep.uses).to.match(/^XChain-Platform\/\.github\/actions\/checkout-siblings@/)
     })
 
     it('arms XCHAIN_REQUIRE_SIBLINGS for coverage:check only when the checkout actually happened', () => {

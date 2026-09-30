@@ -35,10 +35,12 @@ const {
 } = require('./validator_service')
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
+const { readKeyHolders } = require('./validator_stake_service/free_key')
 
 const STAKE_TICK = 'XCHAIN'
-// One stake that clears every capability floor at once (llm attestation
-// provider is the highest at 25000); see the indexer's STAKING.CAPABILITIES.
+// One stake that clears every capability floor at once. The highest is the hub's llm attestation
+// provider floor (min_stake_xchain in xchain-hub/src/validators/provider_registry/defaults.js), not the
+// indexer's STAKING.CAPABILITIES (top 5000); governance can raise it per block, so this is a snapshot.
 const DEFAULT_STAKE_AMOUNT = 25000
 const PUBLIC_EXPLORER = 'https://explorer.xchain.io'
 
@@ -74,9 +76,10 @@ function paren(text) {
  *
  * They are separate clocks and they differ by more than two orders of magnitude,
  * which is exactly why both have to be printed. Both count from the same block,
- * the one the action lands in (xchain-indexer/src/actions/unstake.js:
- * deactivation_block = BLOCK_INDEX + ACTIVATION_DELAY_BLOCKS, COOLDOWN_END_BLOCK
- * = BLOCK_INDEX + COOLDOWN_BLOCKS):
+ * the one the action lands in (xchain-indexer/src/actions/unstake/index.js:
+ * deactivation_block = BLOCK_INDEX + ACTIVATION_DELAY_BLOCKS in sweepCapabilityStake,
+ * COOLDOWN_END_BLOCK = BLOCK_INDEX + COOLDOWN_BLOCKS; the STAKE side's activation
+ * delay is in xchain-indexer/src/actions/stake/capability_stake.js):
  *   activation: how long a STAKE waits before it counts, and how long an
  *     UNSTAKEd one keeps counting toward every capability before it drops out.
  *   cooldown:   how long the escrowed XCHAIN stays locked afterwards, until the
@@ -115,6 +118,23 @@ function num(x) {
     return Number.isFinite(n) ? n : 0
 }
 
+// Unwrap an explorer entity read: some deployments answer a one-element array
+// of the record rather than the record itself (the SDK's findToken handles both).
+function entity(body) {
+    return Array.isArray(body) ? body[0] : body
+}
+
+// Read the address's native balance, or null when the explorer could not.
+// A tracker outage answers confirmed: null with tracker_available: false, and
+// Number(null) is 0, so reading it as a number would tell a funded operator to fund it.
+function nativeBalance(addr) {
+    const balances = addr && addr.balances
+    if (!balances || addr.tracker_available === false) return null
+    const confirmed = balances.confirmed
+    if (confirmed === null || confirmed === undefined || !Number.isFinite(Number(confirmed))) return null
+    return { confirmed: Number(confirmed), pending: num(balances.pending) }
+}
+
 // getToken() throws a raw HTTP error when the tick has no token record at
 // all, which is exactly the state a freshly reset regtest venue is in (a
 // reset does not reissue XCHAIN). Left uncaught that surfaces as an
@@ -136,18 +156,23 @@ async function getStakeToken(sdk) {
 }
 
 // Read everything the plan needs from the explorer. Split out so the
-// broadcast path and the tests share one shape.
-async function readChainState(sdk, address, pubkey) {
-    const addr    = await sdk.explorer.getAddress(address)
-    const coinBal = num(addr && addr.balances && addr.balances.confirmed)
-    const coinPending = num(addr && addr.balances && addr.balances.pending)
+// broadcast path and the tests share one shape. `keyCtx` ({ network, coins,
+// cooldownBlocks }) is what the free-key rules are judged against.
+async function readChainState(sdk, address, pubkey, keyCtx) {
+    const native  = nativeBalance(entity(await sdk.explorer.getAddress(address)))
+    const coinBal = native ? native.confirmed : null
+    const coinPending = native ? native.pending : null
 
     const bals = await sdk.getBalances(address)
     const row  = ((bals && bals.data) || []).find(b => b && b.tick === STAKE_TICK)
     const tokenBal = num(row && row.amount)
 
-    const token = await getStakeToken(sdk)
-    const mints = (token && token.mints) || {}
+    // Read the faucet caps from the token's mints group; a token with no such
+    // group is an unreadable answer, not a MAX_MINT of 0.
+    const token = entity(await getStakeToken(sdk))
+    const mints = (token && token.mints && typeof token.mints === 'object') ? token.mints : null
+    const mintUnreadable = mints ? null : 'the ' + STAKE_TICK + ' token read returned an unexpected shape (no mints group), ' +
+        'so its faucet caps are unknown'
 
     // An existing stake on this pubkey means v1 would be rejected (the indexer
     // refuses a pubkey that already carries one); say so instead of spending.
@@ -157,28 +182,26 @@ async function readChainState(sdk, address, pubkey) {
     // and calling one that does not exist throws a TypeError that a catch here
     // would turn into "no existing stake" - a reassuring null that green-lights
     // a duplicate STAKE. A failed read is reported, never silently treated as
-    // an answer.
-    let existing = null
-    let existingUnknown = null
-    try {
-        const v = await sdk.explorer.getValidators()
-        const rows = (v && v.data) || []
-        existing = rows.find(r => r && r.status === 'valid' &&
-            String(r.signing_pubkey || '').toLowerCase() === pubkey) || null
-    } catch (e) {
-        existingUnknown = e.message
-    }
+    // an answer. The set is read page by page to the end (readValidatorSet), and
+    // a truncated read throws into the same catch rather than reading as absent.
+    // readKeyHolders also applies the reuse gate and reads the key's delegations.
+    const holders = await readKeyHolders(sdk, pubkey, keyCtx)
 
-    return { coinBal, coinPending, tokenBal, mintMax: num(mints.max), mintAddressMax: num(mints.address_max), existing, existingUnknown }
+    return { coinBal, coinPending, tokenBal, mintMax: num(mints && mints.max),
+        mintAddressMax: num(mints && mints.address_max), mintUnreadable, ...holders }
 }
 
 // Plan the mints: how many transactions, at what amount each, to lift the
 // balance to `amount`. Pure, so it is testable without a network.
-function planMints(network, tokenBal, amount, mintMax, mintAddressMax) {
+// `mintUnreadable` names why the caps could not be read, so it is not reported as MAX_MINT 0.
+function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnreadable) {
     const short = Math.max(0, amount - tokenBal)
     if (short === 0) return { short, mints: [], reason: null }
     if (network === 'mainnet') {
         return { short, mints: [], reason: 'XCHAIN is not mintable on mainnet: acquire ' + short + ' more and re-run.' }
+    }
+    if (mintUnreadable) {
+        return { short, mints: [], reason: mintUnreadable + '; cannot plan the mints for the shortfall. Retry, or check the explorer.' }
     }
     if (!(mintMax > 0)) {
         return { short, mints: [], reason: 'the ' + STAKE_TICK + ' token reports no open mint (MAX_MINT is 0); cannot mint the shortfall.' }
@@ -200,14 +223,19 @@ function explorerUrl(coins, pathPart) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
+function requireEncoder(sdk) {
+    return typeof sdk.requireEncoder === 'function' ? sdk.requireEncoder() : sdk['_requireEncoder']()
+}
+
 /**
  * The outputs of `prevTxid` that belong to this address, once the encoder can
  * see them. Seconds (mempool visibility), not a block.
  *
  * Handing these to the encoder as the ONLY candidate inputs is what lets the
  * whole run go out at once safely. The indexer resolves a STAKE's balance from
- * every ledger entry with a LOWER ACTION INDEX (`m.action_index < ?` in db.js
- * getAddressCreditDebit), and that index is global, so the mints count whether
+ * every ledger entry with a LOWER ACTION INDEX (`m.action_index < ?` in
+ * xchain-indexer/src/db/misc/index.js getAddressCreditDebit), and that index
+ * is global, so the mints count whether
  * they share the STAKE's block or sit in an earlier one. All that matters is
  * that they come FIRST, which the funding chain guarantees by construction:
  * consensus requires a parent transaction to precede its child, so a chain
@@ -228,7 +256,7 @@ async function chainedInputs(sdk, address, prevTxid, timeoutMs) {
     const deadline = Date.now() + (timeoutMs || 90000)
     for (;;) {
         let utxos = null
-        try { utxos = await sdk._requireEncoder().getUTXOs(address) } catch { /* transient; retry */ }
+        try { utxos = await requireEncoder(sdk).getUTXOs(address) } catch { /* transient; retry */ }
         const outs = ((utxos && utxos.utxos) || []).filter(o => (o.fullTxid || o.txid) === prevTxid)
         if (outs.length) return outs
         const left = deadline - Date.now()
@@ -302,5 +330,5 @@ const stakeValidator = createStakeValidator(operationHelpers)
 const unstakeValidator = createUnstakeValidator(operationHelpers)
 
 module.exports = {
-    stakeValidator, unstakeValidator, planMints, stakeTiming
+    stakeValidator, unstakeValidator, planMints, stakeTiming, readChainState
 }

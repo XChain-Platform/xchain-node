@@ -16,6 +16,9 @@
  ********************************************************************/
 
 let { execFile } = require('child_process')
+const assert = require('node:assert/strict')
+const os = require('node:os')
+const test = require('node:test')
 const { promisify } = require('util')
 let execFileAsync = promisify(execFile)
 let fs = require('fs')
@@ -35,14 +38,26 @@ function configureDependencies(dependencies) {
 const CLONE_STAGING_SUFFIX  = '.xchain-node-staging'
 const CLONE_PREVIOUS_SUFFIX = '.xchain-node-previous'
 
+async function localSourceIsDetached(url) {
+    if (!isLocalPathSource(url)) return false
+    try {
+        const { stdout } = await execFileAsync('git', ['-C', url, 'rev-parse', '--abbrev-ref', 'HEAD'])
+        return String(stdout || '').trim() === 'HEAD'
+    } catch {
+        return false
+    }
+}
+
 // Run `git clone` into `destination`. Rejects with the operator-facing string
 // the callers already surface; performs no filesystem cleanup of its own so
 // the caller owns the rollback decision.
-function runGitClone(module, branch, destination) {
+async function runGitClone(module, branch, destination) {
+    const gitUrl = modulesUrls[module]
+    const cloneBranch = branch && await localSourceIsDetached(gitUrl) ? null : branch
+
     return new Promise((resolve, reject) => {
-        const gitUrl = modulesUrls[module]
         const cloneArgs = ['clone']
-        if (branch) cloneArgs.push('-b', branch)
+        if (cloneBranch) cloneArgs.push('-b', cloneBranch)
         // Local-path sources (no ':' i.e. not a URL/SCP-style remote) on the
         // Parallels share can't hardlink between the two trees, so force
         // a copy instead of git's default object-linking.
@@ -237,6 +252,7 @@ async function verifyDeploySource(module, branch, dir, expectedCommit) {
     if (expectedCommit || !branch) return
 
     const url = modulesUrls[module]
+    if (await localSourceIsDetached(url)) return
     await warnIfSourceBranchIsBehind(module, url, branch)
 
     const tip = await readSourceBranchTip(url, branch)
@@ -292,4 +308,39 @@ module.exports = {
     warnIfSourceBranchIsBehind,
     verifyDeploySource,
     reportDeployedSource
+}
+
+if (require.main === module && process.argv.includes('--unit-test')) {
+    test('runGitClone deploys the exact detached HEAD of a local source', async (t) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-detached-clone-'))
+        const source = path.join(root, 'source')
+        const destination = path.join(root, 'destination')
+        const module = 'detached-head-unit-test'
+        const git = (args) => execFileAsync('git', args)
+        t.after(() => {
+            delete modulesUrls[module]
+            fs.rmSync(root, { recursive: true, force: true })
+        })
+
+        await git(['init', '--initial-branch=main', source])
+        await git(['-C', source, 'config', 'user.email', 'unit-test@example.invalid'])
+        await git(['-C', source, 'config', 'user.name', 'Unit Test'])
+        fs.writeFileSync(path.join(source, 'content.txt'), 'detached commit\n')
+        await git(['-C', source, 'add', 'content.txt'])
+        await git(['-C', source, 'commit', '-m', 'detached commit'])
+        const detachedCommit = String((await git(['-C', source, 'rev-parse', 'HEAD'])).stdout).trim()
+
+        fs.writeFileSync(path.join(source, 'content.txt'), 'branch tip\n')
+        await git(['-C', source, 'commit', '-am', 'branch tip'])
+        const branchTip = String((await git(['-C', source, 'rev-parse', 'main'])).stdout).trim()
+        await git(['-C', source, 'checkout', '--detach', detachedCommit])
+        modulesUrls[module] = source
+
+        await runGitClone(module, 'main', destination)
+        await verifyDeploySource(module, 'main', destination)
+
+        const deployedCommit = String((await git(['-C', destination, 'rev-parse', 'HEAD'])).stdout).trim()
+        assert.notStrictEqual(detachedCommit, branchTip)
+        assert.strictEqual(deployedCommit, detachedCommit)
+    })
 }

@@ -32,9 +32,10 @@
  *   - reporting an unhealthy/halted status on its own health surface
  *   - carrying a durable halt marker in its database: a decoder REORG_HALT row
  *     (events.code = 'REORG_HALT') or an uncleared xchain-sync divergence halt
- *     (sync_halt with cleared_at IS NULL). For an indexer source that means the
- *     PAIRED DECODER's database, which is the only place either marker is written;
- *     an indexer's own events table only ever carries code='REORG'.
+ *     (sync_halt with cleared_at IS NULL). For an indexer source both its own
+ *     database and the PAIRED DECODER's are read: REORG_HALT is written only in the
+ *     decoder's (an indexer's own events table only ever carries code='REORG'),
+ *     while xchain-sync writes sync_halt into either replica.
  *   - materially behind its node's tip
  *
  * FAIL CLOSED throughout. A probe that cannot be run, cannot be parsed, or
@@ -298,8 +299,8 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
         if (markers.syncHalt > 0)
             reasons.push('the database carries an uncleared xchain-sync divergence halt ' +
                 '(sync_halt with cleared_at IS NULL): its contents are known to diverge from the source of truth.')
-        // An indexer's own database cannot hold these rows; the paired decoder's can,
-        // and an indexer frozen behind a halted decoder is exactly as unfit to publish.
+        // Refuse on the paired decoder's markers too: REORG_HALT lives only there, and an
+        // indexer frozen behind a halted decoder is exactly as unfit to publish.
         if (markers.upstream && markers.upstream.reorgHalt > 0)
             reasons.push(`the paired decoder database ${markers.upstream.dbName} carries a durable REORG_HALT ` +
                 "marker (events.code='REORG_HALT'), so this indexer is frozen behind a decoder that aborted " +

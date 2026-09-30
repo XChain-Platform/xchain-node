@@ -49,6 +49,7 @@ describeBoundaryTests('ConfigService: config file parsing', function () {
             const fsStub = {
                 existsSync: sinon.stub().returns(true),
                 createReadStream: sinon.stub().callsFake(() => streamFromString('NODE_PASSWORD=p@ss=word=123\n')),
+                appendFileSync: sinon.stub(),
                 writeFileSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()

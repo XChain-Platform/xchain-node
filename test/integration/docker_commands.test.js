@@ -23,7 +23,7 @@ dockerSuite('xchain-encoder Docker run command', function (fixture) {
         const { ModuleService } = makeBuildAndUp()
         await ModuleService.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, true)
 
-        const buildCmds = capture.findCommands(/docker build/)
+        const buildCmds = capture.findCommands(/docker build /)
         expect(buildCmds).to.have.length(1)
         expect(buildCmds[0].command).to.include('-t xchain-node-bitcoin-mainnet-xchain-encoder')
 
@@ -55,11 +55,11 @@ dockerSuite('xchain-encoder Docker run command', function (fixture) {
         expect(runCmd).to.not.include('NETWORK=bitcoin-mainnet')
         expect(runCmd).to.not.include('NODE_PORT=8332')
         expect(runCmd).to.not.include('ENCODER_API_PORT=3003')
-        expect(runCmd).to.not.include('NODE_URL=node')
+        expect(runCmd).to.not.include('NODE_URL=xchain-node-bitcoin-mainnet-node')
         expect(runEnv.NETWORK).to.equal('bitcoin-mainnet')
         expect(runEnv.NODE_PORT).to.equal('8332')
         expect(runEnv.ENCODER_API_PORT).to.equal('3003')
-        expect(runEnv.NODE_URL).to.equal('node')
+        expect(runEnv.NODE_URL).to.equal('xchain-node-bitcoin-mainnet-node')
     })
 })
 

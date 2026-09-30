@@ -120,12 +120,11 @@ describe('Chaos: Config Resilience', function () {
             expect(result.branch).to.equal('feature/my-branch_v1.0')
         })
 
-        it('handles extremely long argument strings without crashing', function () {
+        it('refuses extremely long unrecognized argument strings without hanging', function () {
             const cs = makeConfigService()
             const longArg = 'a'.repeat(10000)
-            // Should not throw or hang; just treated as unknown arg
-            const result = cs.resolveArgs([longArg])
-            expect(result.service).to.equal('all')
+            expect(() => cs.resolveArgs([longArg]))
+                .to.throw("Unrecognized argument '" + longArg + "'")
         })
     })
 })

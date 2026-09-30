@@ -113,12 +113,12 @@ configureMariadbArchive({
 })
 configureRestoreArchive({
     fs, zlib, childProcess, config, state, configService, dockerService,
-    databaseService, archiveSigning, workspace, logger
+    databaseService, archiveSigning, archiveMeta, workspace, logger
 })
 configureFreshness({ childProcess, config, configService, databaseService, logger })
 configureDownload({ fs, axios, config, workspace, logger, staleAfterDays: BOOTSTRAP_STALE_AFTER_DAYS })
 configureEnsureRestored({
-    fs, config, configService, nodeTipGuard, restoreArchive, download, logger
+    fs, config, configService, nodeTipGuard, archiveSigning, restoreArchive, download, logger
 })
 
 const { XChainService } = config

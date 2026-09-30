@@ -51,7 +51,8 @@ function makeHubService(httpCapture, options = {}) {
             buildAndUp: async () => TestEnv.fakeContainerId('h')
         },
         '../utils/helpers': {
-            sleep: async () => {}
+            sleep: async () => {},
+            redactSecrets: require('../../../../src/utils/helpers').redactSecrets
         }
     })
 

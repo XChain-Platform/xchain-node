@@ -6,9 +6,9 @@
 # checks against it. An undeclared sibling is not a neutral omission - the gate
 # would fail loud (bin/ci-full.sh need_sib) rather than silently skip.
 #
-# ci-dispatch.sh ships each of these at its origin/master (falling back to local
-# HEAD) and REFUSES the push if one is not a checkout beside this repo, so a
-# declared sibling can never be silently absent.
+# ci-dispatch.sh ships each of these at its canonical origin head (falling back
+# to local HEAD) and REFUSES the push if one is not a checkout beside this repo,
+# so a declared sibling can never be silently absent.
 
 # Vendored coins-registry byte-identity: BTC/LTC/DOGE/index/consensus_pin.
 xchain-hub
@@ -18,3 +18,7 @@ xchain-hub
 # src/rollcall_activation.js). Both guards throw under XCHAIN_REQUIRE_SIBLINGS=1
 # when this checkout is absent, which is exactly what CI run 35020607785 did.
 xchain-indexer
+# The migrationMode parity guard (migration_precondition_service.test) holds
+# this tool's copy to the decoder runner's src/db/migration_statements.js, and
+# throws under XCHAIN_REQUIRE_SIBLINGS=1 when this checkout is absent.
+xchain-decoder

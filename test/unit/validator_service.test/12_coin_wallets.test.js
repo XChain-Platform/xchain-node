@@ -158,18 +158,25 @@ describe('ValidatorService', function () {
             delete process.env.XCHAIN_NODE_HUB_SIGNER_DIR
         })
 
-        it('points the signer at the DOGE wallet and the public testnet encoder', async function () {
-            const fs = makeFs()
-            const vs = loadValidatorService(fs)
-            await vs.initValidator({ network: 'testnet' })
-            const w = writtenWallets(fs)
-            const env = fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_SIGNER_ENV).args[1]
-            expect(env).to.include('DOGE_NETWORK=dogecoin-testnet')
-            expect(env).to.include('DOGE_ADDRESS=' + w.DOGE_ADDRESS)
-            expect(env).to.include('DOGE_WIF=' + w.DOGE_WIF_SECRET)
-            expect(env).to.include('DOGE_ENCODER_URL=https://encoder.xchain.io/TDOGE')
-            // The stake key is NOT in the mounted directory.
-            expect(env).to.not.include(w.STAKE_WIF_SECRET)
+        it('points the signer at the complete public encoder URL for every network', async function () {
+            const cases = [
+                ['mainnet', 'DOGE'],
+                ['testnet', 'TDOGE'],
+                ['regtest', 'RDOGE']
+            ]
+            for (const [network, coin] of cases) {
+                const fs = makeFs()
+                const vs = loadValidatorService(fs)
+                await vs.initValidator({ network })
+                const w = writtenWallets(fs)
+                const env = fs.writeFileSync.getCalls().find(c => c.args[0] === FAKE_SIGNER_ENV).args[1]
+                expect(env, network).to.include('DOGE_NETWORK=dogecoin-' + network)
+                expect(env, network).to.include('DOGE_ADDRESS=' + w.DOGE_ADDRESS)
+                expect(env, network).to.include('DOGE_WIF=' + w.DOGE_WIF_SECRET)
+                expect(env, network).to.include('DOGE_ENCODER_URL=https://encoder.xchain.io/' + coin)
+                // The stake key is NOT in the mounted directory.
+                expect(env, network).to.not.include(w.STAKE_WIF_SECRET)
+            }
         })
 
         it('fills oracle_publish in the fresh capabilities file from the DOGE wallet', async function () {

@@ -48,8 +48,8 @@ const DOGE_READ_URL_KEYS = ['DOGE_INDEXER_API_URL', 'DOGE_INDEXER_URL']
 
 // Where an outside validator without its own Dogecoin indexer points: the
 // public explorer serves the federation reads off its replicated indexer
-// databases, gated by the federation read key the validator was issued.
-// Regtest is private, so it has no public value to name.
+// databases with no key, like the rest of its API. Regtest is private, so it
+// has no public value to name.
 const PUBLIC_DOGE_READ_URL = Object.freeze({
     [Network.MAINNET]: 'https://explorer.xchain.io/DOGE/api/',
     [Network.TESTNET]: 'https://explorer.xchain.io/TDOGE/api/'
@@ -63,10 +63,10 @@ function describeWhereToPoint(network) {
         return 'Set ' + DOGE_READ_URL_KEYS[0] + ' (and DOGE_INDEXER_API_KEY) in the host .env to a reachable dogecoin '
             + network + ' indexer, then re-run.'
     }
-    return 'Set ' + DOGE_READ_URL_KEYS[0] + '=' + publicUrl + ' in the host .env, with DOGE_INDEXER_API_KEY set to the '
-        + 'federation read key this validator was issued (the public explorer serves the federation reads off its '
-        + 'replicated indexer databases); a validator running its own dogecoin ' + network
-        + ' indexer points at that instead. Then re-run.'
+    return 'Set ' + DOGE_READ_URL_KEYS[0] + '=' + publicUrl + ' in the host .env, with no DOGE_INDEXER_API_KEY '
+        + '(the public explorer serves the federation reads off its replicated indexer databases to anyone); '
+        + 'a validator running its own dogecoin ' + network
+        + ' indexer points at that instead, with that indexer\'s key. Then re-run.'
 }
 
 function isTruthyEnv(value) {

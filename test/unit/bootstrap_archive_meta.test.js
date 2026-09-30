@@ -193,3 +193,76 @@ describe('BootstrapArchiveMeta', function () {
         })
     })
 })
+
+// One raw 512-byte tar header block: only the fields parseTarHeader reads.
+function tarHeaderBlock(name, size, typeflag) {
+    const block = Buffer.alloc(512)
+    block.write(name, 0)
+    block.write(size.toString(8).padStart(11, '0') + ' ', 124)
+    block[156] = typeflag.charCodeAt(0)
+    return block
+}
+
+function padTo512(body) {
+    return Buffer.concat([body, Buffer.alloc((512 - (body.length % 512)) % 512)])
+}
+
+describe('BootstrapArchiveMeta', function () {
+    beforeEach(setupWorkDir)
+    afterEach(cleanupWorkDir)
+
+    describe('readLeadingArchiveMember(): extension header size cap', function () {
+        it('gives up at once on an extension header declaring more than the ceiling, without buffering the stream', async function () {
+            // The reader runs before the signature check, so a crafted pax header must not make it buffer the whole gunzip output.
+            const raw = Buffer.concat([tarHeaderBlock('PaxHeader', 1024 * 1024 * 1024, 'x'), Buffer.alloc(48 * 1024 * 1024, 0x41)])
+            const archive = path.join(dir, 'crafted.tar.gz')
+            fs.writeFileSync(archive, require('zlib').gzipSync(raw, { level: 1 }))
+            const timedOut = Symbol('timed out')
+            const result = await Promise.race([
+                meta.readLeadingArchiveMember(archive, 'bootstrap.json'),
+                new Promise(resolve => setTimeout(() => resolve(timedOut), 1000))
+            ])
+            expect(result).to.equal(null)
+        })
+
+        it('still skips a small pax header ahead of bootstrap.json', async function () {
+            const body = Buffer.from(JSON.stringify(meta.buildBootstrapMeta({ module: 'xchain-decoder', coin: 'bitcoin', network: 'mainnet', height: 42 })))
+            const pax  = Buffer.from('30 mtime=1759000000.000000000\n')
+            const raw  = Buffer.concat([
+                tarHeaderBlock('PaxHeader', pax.length, 'x'), padTo512(pax),
+                tarHeaderBlock('bootstrap.json', body.length, '0'), padTo512(body),
+                Buffer.alloc(1024)
+            ])
+            const archive = path.join(dir, 'pax.tar.gz')
+            fs.writeFileSync(archive, require('zlib').gzipSync(raw))
+            expect((await meta.readBootstrapArchiveMeta(archive)).height).to.equal(42)
+        })
+    })
+
+    describe('compareArchiveIdentity()', function () {
+        const target = { module: 'xchain-decoder', coin: 'bitcoin', network: 'mainnet' }
+        const full = { format: 1, module: 'xchain-decoder', coin: 'bitcoin', network: 'mainnet', height: 1, created: null }
+
+        it('matches an archive that declares the target identity', function () {
+            expect(meta.compareArchiveIdentity(full, target)).to.deep.equal({ status: 'match', mismatches: [], unchecked: [] })
+        })
+
+        it('reports a legacy archive with no metadata as unchecked, not as a mismatch', function () {
+            expect(meta.compareArchiveIdentity(null, target).status).to.equal('unchecked')
+        })
+
+        it('reports null coin/network (the classic-level converter shape) as unchecked while still checking the module', function () {
+            const converted = { ...full, coin: null, network: null }
+            expect(meta.compareArchiveIdentity(converted, target)).to.deep.equal({ status: 'unchecked', mismatches: [], unchecked: ['coin', 'network'] })
+            expect(meta.compareArchiveIdentity({ ...converted, module: 'xchain-utxo-tracker' }, target).status).to.equal('mismatch')
+        })
+
+        it('names each field that differs', function () {
+            for (const [field, value] of [['module', 'xchain-indexer'], ['coin', 'dogecoin'], ['network', 'testnet']]) {
+                const result = meta.compareArchiveIdentity({ ...full, [field]: value }, target)
+                expect(result.status).to.equal('mismatch')
+                expect(result.mismatches).to.deep.equal([{ field, archive: value, target: target[field] }])
+            }
+        })
+    })
+})

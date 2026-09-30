@@ -15,19 +15,27 @@ const path       = require('path')
 const fs         = require('fs')
 
 const ROOT = path.join(__dirname, '..', '..', '..')
-const ConfigService = require(path.join(ROOT, 'src/services/config_service'))
+const { configDir } = require(path.join(ROOT, 'src/config'))
+const proxyquire = require('proxyquire').noCallThru()
+
+let ConfigService
 
 describe('S-SMOKE-006 – Config Composition', function () {
+
+    // Reloaded with no stubs so the shared sidecar and database helpers are
+    // configured with the real fs, not one an earlier suite handed them.
+    before(function () {
+        ConfigService = proxyquire(path.join(ROOT, 'src/services/config_service'), {})
+    })
 
     it('getDefaultConfig returns populated config for bitcoin/mainnet', async function () {
         const config = await ConfigService.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
 
-        // NETWORK is computed (coin-prefixed for the decoder), so it holds with or
-        // without an operator file. NODE_EXPOSED_PORT and DUST_AMOUNT only ever come
-        // from the untracked config/bitcoin-mainnet file, so they are asserted only
-        // where that file exists (see S-SMOKE-005 for why it may not).
+        // NETWORK is computed, so it holds with or without a per-coin file.
+        // NODE_EXPOSED_PORT and DUST_AMOUNT come only from that file, so they
+        // are asserted only where the resolved config dir holds one.
         expect(config).to.have.property('NETWORK', 'bitcoin-mainnet')
-        if (fs.existsSync(path.join(ROOT, 'config', 'bitcoin-mainnet'))) {
+        if (fs.existsSync(path.join(configDir, 'bitcoin-mainnet'))) {
             expect(config).to.have.property('NODE_EXPOSED_PORT')
             expect(config).to.have.property('DUST_AMOUNT')
         }

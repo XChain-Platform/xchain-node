@@ -34,7 +34,8 @@ function regtestOnlyPassthrough() {
         'HUB_SYNC_ANCHOR_ATTEST_GRACE_S',
         'HUB_PRICE_SYNC_TIMEOUT_MS',
         'XCHAIN_COINPAY_EXPIRATION_S',
-        'XC_MIRROR_ADMISSION_ACTIVATION'
+        'XC_MIRROR_ADMISSION_ACTIVATION',
+        'XC_ANCHOR_FOLD_REGTEST_ACTIVATION'
     ]
 
     let saved

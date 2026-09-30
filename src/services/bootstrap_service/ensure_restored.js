@@ -25,6 +25,7 @@ let { getDefaultConfig } = require('../config_service')
 let { assessNodeTipForRestore } = require('../bootstrap_node_tip_guard')
 const { redactSecrets } = require('../../utils/helpers')
 const { BOOTSTRAP_SIG_SUFFIX } = require('./archive_signing')
+let { checkBootstrapSignature } = require('./archive_signing')
 let { restoreBootstrap } = require('./restore_archive')
 let { downloadBootstrap } = require('./download')
 const { getLogger } = require('../../observability/logger')
@@ -36,6 +37,7 @@ function configureDependencies(dependencies) {
     ;({ XChainService } = config)
     ;({ getDefaultConfig } = dependencies.configService)
     ;({ assessNodeTipForRestore } = dependencies.nodeTipGuard)
+    ;({ checkBootstrapSignature } = dependencies.archiveSigning)
     ;({ restoreBootstrap } = dependencies.restoreArchive)
     ;({ downloadBootstrap } = dependencies.download)
     logger = dependencies.logger
@@ -112,6 +114,13 @@ function reportBootstrapOutcomes() {
 // state db and the health gate, which these ensure paths otherwise do not.
 async function assessNodeTipBeforeRestore(coin, network, module, archivePath) {
     return assessNodeTipForRestore({ coin, network, module, archivePath })
+}
+
+// Verify the signature before a refusal retires the archive: the refusal rests on the unverified bootstrap.json height.
+// A tampered archive then throws into the caller's catch, which records the integrity failure and KEEPS the archive,
+// instead of being reported as node lag and deleted. Costs one hash pass, on the refuse branch only.
+async function verifyRefusedArchive(archivePath) {
+    await checkBootstrapSignature(archivePath)
 }
 
 // A restore that went ahead with the node still below the archive is reported
@@ -212,9 +221,10 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         archivePath = path.join(bootstrapDir, fileName)
         const tip = await assessNodeTipBeforeRestore(coin, network, XChainService.XCHAIN_UTXO_TRACKER, archivePath)
         if (tip.refuse) {
-            // Refused before any restore was attempted, so nothing needs the
-            // archive as evidence; see retireBootstrapArchive for why it goes
-            // anyway rather than waiting around for a re-run.
+            // Refused before any restore was attempted, and the archive is
+            // signature-verified first, so retiring it destroys no evidence;
+            // see retireBootstrapArchive for why it goes anyway.
+            await verifyRefusedArchive(archivePath)
             const bytes   = await statBootstrapArchiveBytes(archivePath)
             const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'node-behind', tip.detail, archive)
@@ -276,9 +286,10 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         archivePath = path.join(bootstrapDir, fileName)
         const tip = await assessNodeTipBeforeRestore(coin, network, module, archivePath)
         if (tip.refuse) {
-            // Refused before any restore was attempted, so nothing needs the
-            // archive as evidence; see retireBootstrapArchive for why it goes
-            // anyway rather than waiting around for a re-run.
+            // Refused before any restore was attempted, and the archive is
+            // signature-verified first, so retiring it destroys no evidence;
+            // see retireBootstrapArchive for why it goes anyway.
+            await verifyRefusedArchive(archivePath)
             const bytes   = await statBootstrapArchiveBytes(archivePath)
             const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
             recordBootstrapOutcome(module, 'node-behind', tip.detail, archive)

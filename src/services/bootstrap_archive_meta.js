@@ -31,9 +31,11 @@
  * size, so the restore learns the height before it touches the store.
  *
  * The member sits inside the signed wrapper, so its provenance is the
- * archive's. An archive published before this member existed reads as
- * "height unknown", never as an error: the restore still works, it just cannot
- * compare.
+ * archive's only once the caller has verified the wrapper's signature: a read
+ * before that is a claim, and no outcome may rest on it until the signature
+ * check has run (the restore paths verify before they act on it). An archive
+ * published before this member existed reads as "height unknown", never as an
+ * error: the restore still works, it just cannot compare.
  ********************************************************************/
 
 const fs   = require('fs')
@@ -129,7 +131,9 @@ function readLeadingArchiveMember(archivePath, memberName, { maxBytes = META_MAX
                 const header = parseTarHeader(buffered.subarray(offset, offset + 512))
                 if (!header) return finish(null)
                 if (TAR_EXTENSION_TYPES.has(header.typeflag)) {
-                    if (++skipped > maxSkippedEntries) return finish(null)
+                    // Cap the declared size too, not just the count: this runs before the signature check, and an
+                    // uncapped size makes the walk buffer whatever the gunzip emits (real pax headers are bytes).
+                    if (++skipped > maxSkippedEntries || header.size > maxBytes) return finish(null)
                     offset += 512 + Math.ceil(header.size / 512) * 512
                     continue
                 }
@@ -165,12 +169,30 @@ async function readBootstrapArchiveMeta(archivePath) {
     }
 }
 
+const ARCHIVE_IDENTITY_FIELDS = ['module', 'coin', 'network']
+
+// Compare an archive's embedded identity with the restore target: { status: 'match' | 'unchecked' | 'mismatch', mismatches, unchecked }.
+// Only a present field that differs is a mismatch. A null meta or field is unchecked, not a mismatch: legacy archives carry none, and
+// the tracker's convert-bootstrap-to-classiclevel.sh writes coin/network null when BOOTSTRAP_COIN/BOOTSTRAP_NETWORK are unset.
+function compareArchiveIdentity(meta, target) {
+    const mismatches = []
+    const unchecked  = []
+    for (const field of ARCHIVE_IDENTITY_FIELDS) {
+        const value = meta && typeof meta[field] === 'string' ? meta[field] : null
+        if (value === null) unchecked.push(field)
+        else if (value !== target[field]) mismatches.push({ field, archive: value, target: target[field] })
+    }
+    const status = mismatches.length > 0 ? 'mismatch' : unchecked.length > 0 ? 'unchecked' : 'match'
+    return { status, mismatches, unchecked }
+}
+
 module.exports = {
     BOOTSTRAP_META_MEMBER,
     BOOTSTRAP_META_FORMAT,
     buildBootstrapMeta,
     writeBootstrapMeta,
     readBootstrapArchiveMeta,
+    compareArchiveIdentity,
     // Exported for tests
     parseTarHeader,
     readLeadingArchiveMember

@@ -20,9 +20,9 @@ on:
 jobs:
   ci:
     uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@fd9160695d677f0538e959460ba5d8dfbb7f3c8e # pin: XChain-Platform/.github @ master 2026-08-31; bump deliberately
-    # Override the Node version for a repo if ever needed:
-    # with:
-    #   node-version: "20"
+    with:
+      # The fleet's consensus runtime; a floating "22" now resolves 22.23.3, which the VM runtime gate refuses.
+      node-version: "22.22.3"
 
   # Cross-repo drift guards: this repo vendors the canonical
   # coin registry from xchain-hub, and per-repo CI cannot see sibling repos, so
@@ -49,7 +49,7 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.3"
 
       - name: Coin-registry byte-identity vs canonical
         run: xchain-hub/bin/sync-coins.sh --check --only xchain-node
@@ -89,40 +89,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Re-runs the same suite the `ci` job runs, so it needs the same
-      # sibling checkout that job's shared workflow does elsewhere.
-      # Mirrored verbatim (same roster, same clone) so they cannot drift.
+      # Re-runs the same suite the `ci` job runs, so it needs the same siblings.
       - name: Check out declared sibling repositories
         id: siblings
-        env:
-          SIBLINGS_REF: ${{ github.ref == 'refs/heads/master' && 'master' || 'develop' }}
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          if [ ! -f .ci-siblings ]; then
-            echo "no .ci-siblings in this repo; single-repo layout"
-            exit 0
-          fi
-          repos=$(sed 's/#.*//' .ci-siblings | tr -d '\r' | awk 'NF')
-          cd "$GITHUB_WORKSPACE/.."
-          for repo in $repos; do
-            rm -rf "$repo"
-            url="https://github.com/$OWNER/$repo.git"
-            git clone --quiet --depth 1 --branch "$SIBLINGS_REF" "$url" "$repo" 2>/dev/null \
-              || git clone --quiet --depth 1 "$url" "$repo"
-            echo "sibling $repo @ $(git -C "$repo" rev-parse --abbrev-ref HEAD) $(git -C "$repo" rev-parse --short HEAD)"
-            if [ -f "$repo/package.json" ]; then
-              ( cd "$repo" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 ) \
-                || ( cd "$repo" && npm install --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 ) \
-                || echo "sibling $repo: dependency install failed, guards needing its modules will say so"
-            fi
-          done
-          echo "checked-out=1" >> "$GITHUB_OUTPUT"
+        uses: XChain-Platform/.github/actions/checkout-siblings@master # one definition for every call site; see the action for why this tracks master
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.3"
           cache: npm
 
       - name: Install dependencies

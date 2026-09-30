@@ -89,6 +89,12 @@ function describeBoundaryTests(title, defineTests) {
     })
 }
 
+function expectEnvPassedByName(args, opts, name, value) {
+    expect(args.some((arg, index) => arg === name && args[index - 1] === '--env')).to.be.true
+    expect(args.some(arg => String(arg).startsWith(`${name}=`))).to.be.false
+    expect(opts.env[name]).to.equal(String(value))
+}
+
 // 4. Docker env var escaping (Fix 3)
 describeBoundaryTests('ModuleService: Docker env var passing (execFile)', function () {
     it('passes double quotes in environment variable values unescaped', async function () {
@@ -106,7 +112,7 @@ describeBoundaryTests('ModuleService: Docker env var passing (execFile)', functi
             if (args[0] === 'build') {
                 cb(null, '')
             } else if (args[0] === 'run') {
-                expect(args).to.include('TEST_VAR=hello"world')
+                expectEnvPassedByName(args, opts, 'TEST_VAR', 'hello"world')
                 cb(null, 'a'.repeat(64) + '\n')
             }
         })
@@ -129,7 +135,7 @@ describeBoundaryTests('ModuleService: Docker env var passing (execFile)', functi
             if (args[0] === 'build') {
                 cb(null, '')
             } else if (args[0] === 'run') {
-                expect(args).to.include('PRICE=costs_$100')
+                expectEnvPassedByName(args, opts, 'PRICE', 'costs_$100')
                 cb(null, 'a'.repeat(64) + '\n')
             }
         })
@@ -153,7 +159,7 @@ describeBoundaryTests('ModuleService: Docker env var passing (execFile)', functi
             if (args[0] === 'build') {
                 cb(null, '')
             } else if (args[0] === 'run') {
-                expect(args).to.include('CMD=run `whoami`')
+                expectEnvPassedByName(args, opts, 'CMD', 'run `whoami`')
                 cb(null, 'a'.repeat(64) + '\n')
             }
         })
@@ -176,7 +182,7 @@ describeBoundaryTests('ModuleService: Docker env var passing (execFile)', functi
             if (args[0] === 'build') {
                 cb(null, '')
             } else if (args[0] === 'run') {
-                expect(args).to.include('PATH_VAR=C:\\Users\\test')
+                expectEnvPassedByName(args, opts, 'PATH_VAR', 'C:\\Users\\test')
                 cb(null, 'a'.repeat(64) + '\n')
             }
         })
@@ -201,7 +207,7 @@ describeBoundaryTests('ModuleService: Docker env var passing (execFile)', functi
             if (args[0] === 'build') {
                 cb(null, '')
             } else if (args[0] === 'run') {
-                expect(args).to.include('PORT=3002')
+                expectEnvPassedByName(args, opts, 'PORT', 3002)
                 cb(null, 'a'.repeat(64) + '\n')
             }
         })
@@ -224,7 +230,7 @@ describeBoundaryTests('ModuleService: Docker env var passing (execFile)', functi
             if (args[0] === 'build') {
                 cb(null, '')
             } else if (args[0] === 'run') {
-                expect(args).to.include('EXPLORER_API_USER=false')
+                expectEnvPassedByName(args, opts, 'EXPLORER_API_USER', false)
                 cb(null, 'a'.repeat(64) + '\n')
             }
         })

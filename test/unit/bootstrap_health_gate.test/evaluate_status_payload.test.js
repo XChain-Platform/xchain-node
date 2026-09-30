@@ -168,3 +168,30 @@ describe('BootstrapHealthGate', function () {
         })
     })
 })
+
+describe('BootstrapHealthGate', function () {
+
+    installEnvironmentHooks()
+
+    describe('evaluateStatusPayload()', function () {
+
+        // A parked decoder whose marker write failed reads reorg_halted false after its
+        // next probe; the lag ceiling is operator-raisable, so it must not be what refuses.
+        it('REFUSES a decoder parked on a REORG_HALT whose marker was never written, even under a raised lag ceiling', function () {
+            const gate = loadGate()
+            const parked = {
+                status: 'healthy', lag_blocks: 130, reorg_halted: false,
+                reorg_halt_checked_at: '2026-09-29T00:00:00.000Z',
+                reorg_halt_parked: true, reorg_halt_parked_at: '2026-09-28T23:59:00.000Z'
+            }
+            const reasons = gate.evaluateStatusPayload(parked, { maxLag: 1000 })
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/PARKED on a REORG_HALT/)
+            expect(reasons[0]).to.match(/since 2026-09-28T23:59:00\.000Z/)
+            for (const notParked of [false, undefined, null, 'true', 1]) {
+                expect(gate.evaluateStatusPayload({ ...parked, reorg_halt_parked: notParked }, { maxLag: 1000 }),
+                    `reorg_halt_parked=${JSON.stringify(notParked)}`).to.deep.equal([])
+            }
+        })
+    })
+})

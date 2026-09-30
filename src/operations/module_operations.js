@@ -30,7 +30,7 @@ const { sleep }              = require('../utils/helpers')
 const { getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork } = require('../services/config_service')
 const { createDockerNetwork, probeContainerPresenceByName, stopContainer, stopContainerByName, startContainer, restartContainer, execContainer, shellContainer, logContainer, startDockerMonitor, waitContainer, saveContainerLogs, getContainerBindMounts, getContainerStopSettings, removeContainer } = require('../services/docker_service')
 const { stopModuleContainer } = require('../services/stop_budget_service')
-const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, purgeHubCrossChainRows, manualHubCrossChainPurgeStatements, getDatabaseContainerId, pingExternalDatabase } = require('../services/database_service')
+const { buildDatabaseModule, resetDatabases, clearHubPriceIngestWatermark, purgeHubCrossChainRows, manualHubCrossChainPurgeStatements, getDatabaseContainerId, pingExternalDatabase, askMariadbRootPassword } = require('../services/database_service')
 const { getModuleBranch, installModule, uninstallModule } = require('../services/module_service')
 const { assertHubNotBehind } = require('../services/skew_guard_service')
 const { assertRequiredMigrationsApplied } = require('../services/migration_precondition_service')
@@ -164,6 +164,7 @@ const dependencies = {
     stopModuleContainer, buildDatabaseModule, resetDatabases,
     clearHubPriceIngestWatermark, purgeHubCrossChainRows,
     manualHubCrossChainPurgeStatements, getDatabaseContainerId,
+    askMariadbRootPassword,
     pingExternalDatabase, getModuleBranch, installModule: installModuleWithProgress, uninstallModule,
     assertHubNotBehind, assertRequiredMigrationsApplied, statusChanged,
     reindexAffectedModules, recordReindex, config, bootstrapService,

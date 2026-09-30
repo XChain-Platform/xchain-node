@@ -16,16 +16,13 @@ const fs         = require('fs')
 
 const ROOT = path.join(__dirname, '..', '..', '..')
 
-// The per-coin/network main config files are operator-authored and untracked
-// (7c03f7a stopped tracking them; ConfigService falls back to defaults when one
-// is absent), so this suite checks whichever of the nine exist on this machine
-// and marks the rest pending instead of failing a checkout that never ran an
-// install for that coin/network. Comment lines are allowed: the reader skips
-// any line without a KEY= prefix, and the restored regtest files open with a
-// comment block explaining where the credentials live.
+// The per-coin/network main config files are operator-authored and untracked,
+// so this suite reads the tracked fixture set under config/fixtures instead of
+// whatever an operator machine holds. Comment lines are allowed: the reader
+// skips any line without a KEY= prefix.
 describe('S-SMOKE-005 – Config Template File Integrity', function () {
 
-    const configDir = path.join(ROOT, 'config')
+    const configDir = path.join(ROOT, 'config', 'fixtures')
 
     const coins = ['bitcoin', 'litecoin', 'dogecoin']
     const networks = ['mainnet', 'testnet', 'regtest']

@@ -26,6 +26,7 @@
  */
 
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const { Readable } = require('stream')
 const proxyquire = require('proxyquire').noCallThru()
@@ -33,25 +34,28 @@ const MetricsCollector = require('./metrics_collector')
 
 const BASELINE_PATH = path.join(__dirname, '../baseline.json')
 
+// These keys match the scenario file basenames used by runScenario().
 const SCENARIO_FILES = [
-    'config-generation',
-    'filter-params',
-    'config-parsing-scale',
-    'resolve-args',
-    'naming-helpers'
+    'config_generation',
+    'filter_params',
+    'config_parsing_scale',
+    'resolve_args',
+    'naming_helpers'
 ]
 
-// --- Config file contents for mocking ---
-const CONFIG_FILES = {
-    'bitcoin-mainnet':   'NETWORK=bitcoin-mainnet\nNODE_EXPOSED_PORT=3000\nDUST_AMOUNT=546\n',
-    'bitcoin-testnet':   'NETWORK=bitcoin-testnet\nNODE_EXPOSED_PORT=3010\nDUST_AMOUNT=546\n',
-    'bitcoin-regtest':   'NETWORK=bitcoin-regtest\nNODE_EXPOSED_PORT=3020\nUTXO_TRACKER_PORT=3021\nDECODER_PORT=3022\nENCODER_PORT=3023\nINDEXER_PORT=3024\nREGTEST_MINER_PORT=3025\nDUST_AMOUNT=546\n',
-    'dogecoin-mainnet':  'NETWORK=dogecoin-mainnet\nNODE_EXPOSED_PORT=3030\nDUST_AMOUNT=100000000\n',
-    'dogecoin-testnet':  'NETWORK=dogecoin-testnet\nNODE_EXPOSED_PORT=3040\nDUST_AMOUNT=100000000\n',
-    'dogecoin-regtest':  'NETWORK=dogecoin-regtest\nNODE_EXPOSED_PORT=3050\nUTXO_TRACKER_PORT=3051\nDECODER_PORT=3052\nENCODER_PORT=3053\nINDEXER_PORT=3054\nREGTEST_MINER_PORT=3055\nDUST_AMOUNT=100000000\n',
-    'litecoin-mainnet':  'NETWORK=litecoin-mainnet\nNODE_EXPOSED_PORT=3060\nDUST_AMOUNT=546\n',
-    'litecoin-testnet':  'NETWORK=litecoin-testnet\nNODE_EXPOSED_PORT=3070\nDUST_AMOUNT=546\n',
-    'litecoin-regtest':  'NETWORK=litecoin-regtest\nNODE_EXPOSED_PORT=3080\nUTXO_TRACKER_PORT=3081\nDECODER_PORT=3082\nENCODER_PORT=3083\nINDEXER_PORT=3084\nREGTEST_MINER_PORT=3085\nDUST_AMOUNT=546\n'
+const BENCH_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-benchmark-'))
+process.env.XCHAIN_NODE_CONFIG_DIR = path.join(BENCH_ROOT, 'config')
+process.env.XCHAIN_NODE_DATA_DIR   = path.join(BENCH_ROOT, 'data')
+fs.mkdirSync(process.env.XCHAIN_NODE_CONFIG_DIR, { recursive: true })
+fs.mkdirSync(process.env.XCHAIN_NODE_DATA_DIR, { recursive: true })
+process.on('exit', () => {
+    try { fs.rmSync(BENCH_ROOT, { recursive: true, force: true }) } catch { /* best effort cleanup */ }
+})
+
+const FIXTURE_CONFIG_DIR = path.join(__dirname, '../../../config/fixtures')
+const CONFIG_FILES = {}
+for (const basename of fs.readdirSync(FIXTURE_CONFIG_DIR)) {
+    CONFIG_FILES[basename] = fs.readFileSync(path.join(FIXTURE_CONFIG_DIR, basename), 'utf8')
 }
 
 function parseArgs() {
@@ -115,9 +119,9 @@ Scenarios: ${SCENARIO_FILES.join(', ')}
  */
 function createMockedConfigService() {
     const realFs = require('fs')
-    const configDir = require('../../../src/config').configDir
 
     const fsStub = {
+        ...realFs,
         existsSync: (filePath) => {
             // Check if it's a config file path we know about
             const basename = path.basename(filePath)
@@ -131,9 +135,7 @@ function createMockedConfigService() {
                 return Readable.from(content)
             }
             return realFs.createReadStream(filePath)
-        },
-        rmSync: realFs.rmSync,
-        mkdirSync: realFs.mkdirSync
+        }
     }
 
     return proxyquire('../../../src/services/config_service', { fs: fsStub })
@@ -149,7 +151,7 @@ async function createContext() {
     return { ConfigService, constants, CONFIG_FILES }
 }
 
-async function destroyContext(_context) {
+async function destroyContext() {
     // No persistent resources to release in the current scenarios
 }
 
@@ -307,6 +309,13 @@ async function main() {
         }
     }
 
+    const failedScenarios = Object.entries(allResults.scenarios)
+        .filter(([, result]) => result && result.error)
+        .map(([name]) => name)
+    if (failedScenarios.length) {
+        process.exitCode = 1
+    }
+
     if (config.json) {
         console.log(JSON.stringify(allResults, null, 2))
     }
@@ -332,7 +341,11 @@ async function main() {
     }
 
     if (!config.json) {
-        console.log('\n=== Benchmark Complete ===')
+        if (failedScenarios.length) {
+            console.log(`\n=== Benchmark Complete (FAILED: ${failedScenarios.join(', ')}) ===`)
+        } else {
+            console.log('\n=== Benchmark Complete ===')
+        }
     }
 }
 

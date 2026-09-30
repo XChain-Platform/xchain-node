@@ -66,17 +66,29 @@ ci_tier_deferred() {
   return 1
 }
 # <<< ci-tier <<<
+fast_defer() {
+  DEFERRED="$DEFERRED [$1]"
+  echo; echo "ci:full ===== $1 DEFERRED (CI_TIER=fast, runs in the full sweep) ====="
+}
+
+# >>> ci-tier timer (generated block; re-run the tier wirer to update) >>>
 run_tier() {
   ci_tier_deferred "$1" && return 0  # ci-tier guard (generated)
   local name="$1"; shift
+  local __ci_tier_t0=$SECONDS
   echo; echo "ci:full ===== $name ====="
-  if "$@"; then
-    echo "ci:full ----- $name PASS"
+  local root
+  root="$(mktemp -d "${TMPDIR:-/tmp}/xchain-node-ci-full.XXXXXX")"
+  mkdir -p "$root/config" "$root/data"
+  if ( export XCHAIN_NODE_CONFIG_DIR="$root/config" XCHAIN_NODE_DATA_DIR="$root/data"; "$@" ); then
+    echo "ci:full ----- $name PASS ($(( SECONDS - __ci_tier_t0 ))s)"
   else
     FAILED="$FAILED [$name]"
-    echo "ci:full ----- $name FAIL"
+    echo "ci:full ----- $name FAIL ($(( SECONDS - __ci_tier_t0 ))s)"
   fi
+  rm -rf -- "$root"
 }
+# <<< ci-tier timer <<<
 need_sib() {
   local s
   for s in "$@"; do
@@ -104,14 +116,52 @@ if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
   need_sib "${DECLARED_SIBLINGS[@]}"
 fi
 
+FAST_SELECTOR_MODE="full"
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  FAST_PLAN=""
+  FAST_SELECTOR_REASON=""
+  if [ ! -f bin/ci_fast_select.js ]; then
+    FAST_SELECTOR_REASON="helper missing"
+  elif FAST_PLAN="$(node bin/ci_fast_select.js --plan 2>&1)"; then
+    FAST_PLAN_HEADER="${FAST_PLAN%%$'\n'*}"
+    case "$FAST_PLAN_HEADER" in
+      "consensus 0") FAST_SELECTOR_MODE="changed" ;;
+      "consensus 1") FAST_SELECTOR_MODE="consensus" ;;
+      *) FAST_SELECTOR_REASON="selector returned no consensus decision" ;;
+    esac
+    if [ -z "$FAST_SELECTOR_REASON" ]; then
+      printf '%s\n' "$FAST_PLAN"
+    fi
+  else
+    FAST_SELECTOR_STATUS=$?
+    FAST_SELECTOR_REASON="exit $FAST_SELECTOR_STATUS: ${FAST_PLAN//$'\n'/; }"
+  fi
+  if [ -n "$FAST_SELECTOR_REASON" ]; then
+    echo "ci:full: fast selector unavailable ($FAST_SELECTOR_REASON); running the full unit tier"
+  fi
+fi
+
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
 # ci-reusable.yml arms XCHAIN_REQUIRE_SIBLINGS whenever it checked
 # siblings out, so every sibling guard fails loud on a miss instead of
 # skipping; match that here for a true local twin.
-if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
-  run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+if [ "${CI_TIER:-full}" != "fast" ] || [ "$FAST_SELECTOR_MODE" != "changed" ]; then
+  if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
+    run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+  else
+    run_tier "ci" npm run ci
+  fi
 else
-  run_tier "ci" npm run ci
+  if [ "${#DECLARED_SIBLINGS[@]}" -gt 0 ]; then
+    run_tier "ci (changed tests)" env XCHAIN_REQUIRE_SIBLINGS=1 node bin/ci_fast_select.js --run
+  else
+    run_tier "ci (changed tests)" node bin/ci_fast_select.js --run
+  fi
+  fast_defer "ci"
+fi
+
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  run_tier "fast-tier selector self-test" ./node_modules/.bin/mocha --no-config --timeout 20000 --exit bin/test/ci_fast_select.test.js
 fi
 
 # --- job: drift-guards -------------------------------------------------------
@@ -128,14 +178,14 @@ run_tier "drift: coin consensus-pin conformance" node -e '
   console.log("consensus pin conformance OK (testnet, regtest)");
 '
 
-# --- identity pin (this gate only; no ci.yml job runs it) --------------------
-# bin/pins/identity.json holds the sha256 of every vendored coin file. Nothing
-# else reads it, so this tier re-hashes the tree against it and fails on any
-# moved, missing or unreadable file instead of letting the pin go stale.
+# --- identity pin (also the drift-guards job's identity pin step) ------------
+# bin/pins/identity.json holds the sha256 of every vendored coin file. This
+# tier re-hashes the tree against it and fails on any moved, missing or
+# unreadable file instead of letting the pin go stale.
 run_tier "identity pin (vendored coin bytes)" node bin/pin_identity.js --compare bin/pins/identity.json
 
 # --- job: coverage -----------------------------------------------------------
-run_tier "coverage ratchet (coverage:check)" npm run coverage:check
+run_tier "coverage ratchet (coverage:check)" env XCHAIN_REQUIRE_SIBLINGS=1 npm run coverage:check
 
 echo
 # >>> ci-tier summary (generated) >>>

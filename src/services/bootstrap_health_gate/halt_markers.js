@@ -223,7 +223,7 @@ async function readRaisedInWindow(readCount, name, since, found, hasSyncHalt) {
 // quietly carrying a stale halt marker, and the one that does not depend on
 // the running image being new enough to report the marker on its health
 // surface: read the marker rows straight out of the database being dumped - and,
-// for an indexer source, out of the paired decoder database that owns them.
+// for an indexer source, out of the paired decoder database that owns REORG_HALT.
 async function readHaltMarkers(coin, network, module, deps, since) {
     const run = sqlRunner(coin, network, deps)
     const readCount = countReader(run)
@@ -232,7 +232,7 @@ async function readHaltMarkers(coin, network, module, deps, since) {
     const markers = await probeDatabase(run, readCount, dbName, since && since.own)
 
     // An xchain-indexer database structurally CANNOT carry the REORG_HALT marker, so
-    // the probe above is a guaranteed zero for an indexer source and this backstop had
+    // the REORG_HALT count above is a guaranteed zero for an indexer and this backstop had
     // no reach there at all: the indexer only ever writes code='REORG' into its own
     // events table and reads the halt marker out of the DECODER's connection, while
     // the marker row is written solely into the decoder database. Nothing else in the

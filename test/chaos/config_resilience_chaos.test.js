@@ -55,7 +55,7 @@ describe('Chaos: Config Resilience', function () {
 
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'regtest')
 
-            expect(config).to.have.property('NETWORK', 'regtest')
+            expect(config).to.have.property('NETWORK', 'bitcoin-regtest')
             expect(config).to.have.property('NODE_PORT', 18444)
             expect(config).to.have.property('DECODER_DB_HOST', 'mariadb')
             expect(warnSpy.calledOnce).to.be.true

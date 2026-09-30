@@ -1,0 +1,41 @@
+# Scheduled Stryker mutation run over the modules listed in stryker.config.json.
+# Too slow for the push gate, so it runs weekly and on demand. The report is
+# uploaded even when the break threshold fails the run, so a score drop can be
+# inspected from the artifact.
+name: mutation
+
+permissions:
+  contents: read
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+jobs:
+  stryker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Stryker
+        run: npm run test:mutation
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: reports/mutation/
+          if-no-files-found: warn
+          retention-days: 30

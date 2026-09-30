@@ -232,3 +232,49 @@ describe('StopBudgetService', function () {
         })
     })
 })
+
+// An explicit drain timer the node cannot derive must still land under the budget.
+describe('StopBudgetService', function () {
+    beforeEach(prepareConsoleStubs)
+    afterEach(restoreConsoleStubs)
+
+    const DECODER_300 = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: '300' }
+    const overLine = () => warnStub.args.map(a => String(a[0])).find(l => /at or above/.test(l))
+    const cleanStop = () => sinon.stub().resolves({ stopped: true, seconds: 5, killed: false, exitCode: 0 })
+
+    it('keeps an explicit value at or above the budget but warns that docker will kill first', function () {
+        expect(sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: '150000' }, {})).to.deep.equal({})
+        expect(overLine()).to.match(/xchain-decoder: the module config sets SHUTDOWN_TIMEOUT_MS=150000, at or above its 120 s stop budget/)
+        expect(overLine()).to.match(/XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER/)
+        warnStub.resetHistory()
+        sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: '120000' }, {})
+        expect(overLine(), 'exactly at the budget').to.match(/120000/)
+        warnStub.resetHistory()
+        const lowered = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: '60' }
+        sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: '100000' }, lowered)
+        expect(overLine(), 'a budget lowered under a pinned value').to.match(/60 s stop budget/)
+        warnStub.resetHistory()
+        sbs.shutdownTimeoutEnv('xchain-explorer', { SHUTDOWN_TIMEOUT_MS: '45000' }, {})
+        expect(overLine(), 'a 30 s default-budget service').to.match(/xchain-explorer.*30 s stop budget/)
+    })
+
+    it('stays quiet for an explicit value under the budget or one the service would ignore', function () {
+        sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: '119000' }, {})
+        sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: '45000' }, DECODER_300)
+        sbs.shutdownTimeoutEnv('xchain-explorer', { SHUTDOWN_TIMEOUT_MS: '8000' }, {})
+        sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: 'slow' }, {})
+        expect(warnStub.called).to.be.false
+    })
+
+    it('warns before the stop when the container carries a drain timer at or above its budget', async function () {
+        const read = sinon.stub().resolves({ stopTimeout: 120, shutdownTimeoutMs: '150000' })
+        const stop = cleanStop()
+        await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', {}, read)
+        expect(read.calledBefore(stop)).to.be.true
+        expect(overLine()).to.match(/xchain-decoder \(bitcoin mainnet\): the container carries SHUTDOWN_TIMEOUT_MS=150000, at or above its 120 s stop budget/)
+        warnStub.resetHistory()
+        const explorer = sinon.stub().resolves({ stopTimeout: 30, shutdownTimeoutMs: '45000' })
+        await sbs.stopModuleContainer(cleanStop(), 'xchain-explorer', 'bitcoin', 'mainnet', 'abc123', {}, explorer)
+        expect(overLine()).to.match(/xchain-explorer \(bitcoin mainnet\).*30 s stop budget/)
+    })
+})

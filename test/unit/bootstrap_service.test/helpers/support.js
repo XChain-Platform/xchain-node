@@ -194,9 +194,13 @@ function makeBootstrapPolicyStubs() {
     // guard defaults to "unknown, do not refuse" so restore MECHANICS stay the
     // subject here. Both have their own suites (BootstrapArchiveMeta.test.js,
     // BootstrapNodeTipGuard.test.js).
+    // The restore-time reader defaults to "no metadata" (a legacy archive), so the identity check passes through and restore
+    // MECHANICS stay the subject; the comparison itself is the real one.
     const archiveMetaStub = {
         buildBootstrapMeta: require('../../../../src/services/bootstrap_archive_meta').buildBootstrapMeta,
-        writeBootstrapMeta: sinon.stub().resolves('bootstrap.json')
+        writeBootstrapMeta: sinon.stub().resolves('bootstrap.json'),
+        readBootstrapArchiveMeta: sinon.stub().resolves(null),
+        compareArchiveIdentity: require('../../../../src/services/bootstrap_archive_meta').compareArchiveIdentity
     }
     const nodeTipGuardStub = {
         assessNodeTipForRestore: sinon.stub().resolves({ verdict: 'unknown', refuse: false, detail: 'not compared in this test' })
@@ -326,8 +330,11 @@ function makeBootstrapOverrides(stubs, execFileCb) {
             ensureDatabasePool:           stubs.databaseService.ensureDatabasePool,
             askMariadbRootPassword:       stubs.databaseService.askMariadbRootPassword
         },
+        // The status probe is absent unless a suite sets one, so the tracker height reads null by default.
         './bootstrap_health_gate': {
-            assertBootstrapSourceHealthy: stubs.healthGate.assertBootstrapSourceHealthy
+            assertBootstrapSourceHealthy: stubs.healthGate.assertBootstrapSourceHealthy,
+            probeServiceStatus:           stubs.healthGate.probeServiceStatus,
+            MODULE_API_PORT_KEY:          stubs.healthGate.MODULE_API_PORT_KEY
         },
         './bootstrap_republish_ledger': {
             recordBootstrapPublished: stubs.republishLedger.recordBootstrapPublished
@@ -337,8 +344,10 @@ function makeBootstrapOverrides(stubs, execFileCb) {
             clearEncoderMaintenance:   stubs.encoderMaintenance.clearEncoderMaintenance
         },
         './bootstrap_archive_meta': {
-            buildBootstrapMeta: stubs.archiveMeta.buildBootstrapMeta,
-            writeBootstrapMeta: stubs.archiveMeta.writeBootstrapMeta
+            buildBootstrapMeta:       stubs.archiveMeta.buildBootstrapMeta,
+            writeBootstrapMeta:       stubs.archiveMeta.writeBootstrapMeta,
+            readBootstrapArchiveMeta: stubs.archiveMeta.readBootstrapArchiveMeta,
+            compareArchiveIdentity:   stubs.archiveMeta.compareArchiveIdentity
         },
         './bootstrap_node_tip_guard': {
             assessNodeTipForRestore: stubs.nodeTipGuard.assessNodeTipForRestore

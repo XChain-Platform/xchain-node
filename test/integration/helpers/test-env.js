@@ -243,7 +243,7 @@ class TestEnv {
         // This forces them to re-require constants with patched values.
         this._cachedModules = []
         for (const key of Object.keys(require.cache)) {
-            if (key.includes('ConfigService') || key.includes('ModuleService')) {
+            if (/[\/](config_service|module_service)([\/.]|$)/.test(key)) {
                 this._cachedModules.push({ key, module: require.cache[key] })
                 delete require.cache[key]
             }

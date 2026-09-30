@@ -32,6 +32,8 @@ let { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNa
 let databaseService = require('../database_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 let { checkBootstrapSignature, ensureVerifiedInnerArchive } = require('./archive_signing')
+const { BootstrapIntegrityError } = require('./archive_signing')
+let { readBootstrapArchiveMeta, compareArchiveIdentity } = require('../bootstrap_archive_meta')
 let { startProgress, getWorkDir } = require('./workspace')
 const { getLogger } = require('../../observability/logger')
 let logger = getLogger()
@@ -48,6 +50,7 @@ function configureDependencies(dependencies) {
     databaseService = dependencies.databaseService
     ;({ getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = databaseService)
     ;({ checkBootstrapSignature, ensureVerifiedInnerArchive } = dependencies.archiveSigning)
+    ;({ readBootstrapArchiveMeta, compareArchiveIdentity } = dependencies.archiveMeta)
     ;({ startProgress, getWorkDir } = dependencies.workspace)
     logger = dependencies.logger
 }
@@ -61,6 +64,25 @@ async function restoreBootstrap(coin, network, module, fileName) {
             return restoreBootstrapMariaDb(coin, network, module, fileName)
         default:
             throw new Error(`Unsupported module for bootstrap restore: ${module}`)
+    }
+}
+
+// Refuse an archive whose bootstrap.json names another module, coin or network than the restore target.
+// Runs after the signature check, so the identity compared is authenticated, and before any extract, stop or wipe. The signature
+// covers only the archive digest under one publisher key, so it proves who made the archive, not which slot it belongs to.
+async function assertArchiveIdentity(archivePath, target) {
+    const identity = compareArchiveIdentity(await readBootstrapArchiveMeta(archivePath), target)
+    const label = (id) => `${id.module} ${id.coin}/${id.network}`
+    if (identity.status === 'mismatch') {
+        const found = identity.mismatches.map(m => `${m.field} ${m.archive}`).join(', ')
+        throw new BootstrapIntegrityError(
+            `Bootstrap archive identity mismatch for ${archivePath}: the archive declares ${found} but the restore target is ${label(target)}. ` +
+            'Refusing to restore; nothing was stopped or wiped.'
+        )
+    }
+    // Legacy archives carry no identity: say it could not be checked, then restore as before.
+    if (identity.status === 'unchecked') {
+        logger.info(`Note: the bootstrap archive does not declare its ${identity.unchecked.join('/')}, so that part of its identity cannot be checked against ${label(target)}.`)
     }
 }
 
@@ -93,6 +115,7 @@ async function prepareTrackerRestore(coin, network, fileName) {
     // corruption (it ships inside the same archive). Provenance comes from the
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
+    await assertArchiveIdentity(archivePath, { module: XChainService.XCHAIN_UTXO_TRACKER, coin, network })
 
     // Extract and verify the inner archive against the checksum that
     // shipped inside the signature-verified outer archive (resumable, but the
@@ -196,6 +219,7 @@ async function prepareMariaRestore(coin, network, module, fileName) {
     // corruption (it ships inside the same archive). Provenance comes from the
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
+    await assertArchiveIdentity(archivePath, { module, coin, network })
 
     // Extract and verify the inner archive against the checksum that
     // shipped inside the signature-verified outer archive (resumable, but the

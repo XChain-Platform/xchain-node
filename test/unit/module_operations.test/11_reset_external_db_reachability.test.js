@@ -135,3 +135,77 @@ describe('moduleOperations', function () {
         })
     })
 })
+
+// A docker-mode DB reset first needed the MariaDB root password inside resetDatabases, after the
+// node datadir and tracker volume were already wiped, so a root it could not resolve left a half-reset stack down.
+
+// Every `docker run --rm -v <host>:/data` wipe this reset issued.
+function rootPrecheckWipeRuns(execFileStub) {
+    return execFileStub.getCalls()
+        .filter(c => c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1][0] === 'run')
+}
+
+// Run a reset with console.log captured, fake timers carrying it past the restart pass.
+async function runRootPrecheckReset(stubs, args, constantsOverrides = null) {
+    const ops = loadOperations(stubs, constantsOverrides)
+    const lines = []
+    const logStub = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+    const clock = sinon.useFakeTimers()
+    try {
+        const promise = ops.resetModules(...args)
+        await clock.tickAsync(20000)
+        return { result: await promise, output: lines.join('\n') }
+    } finally {
+        clock.restore()
+        logStub.restore()
+    }
+}
+
+describe('moduleOperations', function () {
+    registerLifecycleHooks(() => {})
+
+    describe('resetModules()', function () {
+        describe('docker-mode MariaDB root password precheck', function () {
+
+            it('aborts before anything is stopped or wiped when root cannot be resolved', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                stubs.askMariadbRootPassword.rejects(new Error('MariaDB root password required but no TTY to prompt on'))
+                const { result, output } = await runRootPrecheckReset(stubs, ['all', 'bitcoin', 'mainnet', true])
+                expect(result).to.equal(false)
+                expect(stubs.stopContainer.called).to.equal(false)
+                expect(stubs.resetDatabases.called).to.equal(false)
+                expect(rootPrecheckWipeRuns(stubs.execFile)).to.be.empty
+                expect(output).to.include('cannot resolve the MariaDB root password')
+                expect(output).to.include('No data was touched.')
+            })
+
+            it('resolves root before the first stop when it succeeds', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const { result } = await runRootPrecheckReset(stubs, ['all', 'bitcoin', 'mainnet', true])
+                expect(result).to.equal(true)
+                expect(stubs.askMariadbRootPassword.calledOnceWith('bitcoin', 'mainnet')).to.equal(true)
+                expect(stubs.askMariadbRootPassword.calledBefore(stubs.stopContainer)).to.equal(true)
+            })
+
+            it('asks for no root password when no database is being reset', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const { result } = await runRootPrecheckReset(stubs, ['xchain-utxo-tracker', 'bitcoin', 'mainnet', true])
+                expect(result, 'the tracker-only reset must run to completion').to.equal(true)
+                expect(stubs.stopContainer.called).to.equal(true)
+                expect(stubs.askMariadbRootPassword.called).to.equal(false)
+            })
+
+            it('leaves EXTERNAL_DB mode on its own reachability probe', async function () {
+                const stubs = makeStubs()
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const { result } = await runRootPrecheckReset(stubs, ['all', 'bitcoin', 'mainnet', true], { EXTERNAL_DB: true })
+                expect(result).to.equal(true)
+                expect(stubs.pingExternalDatabase.called).to.equal(true)
+                expect(stubs.askMariadbRootPassword.called).to.equal(false)
+            })
+        })
+    })
+})

@@ -17,7 +17,10 @@ dockerSuite('xchain-decoder Docker run command', function (fixture) {
 
     it('includes database env vars and bootstrap volume', async function () {
         const { env, capture, makeBuildAndUp } = fixture()
-        env.writeConfigFile('bitcoin-mainnet', '')
+        // DECODER_DB_PASS is generated per install unless the config file
+        // carries it (test/unit/config_service.test/database_credentials.test.js);
+        // seed it so the value asserted below is fixed.
+        env.writeConfigFile('bitcoin-mainnet', 'DECODER_DB_PASS=xchain-password\n')
         env.createFakeModule('xchain-decoder')
 
         const { ModuleService } = makeBuildAndUp()
