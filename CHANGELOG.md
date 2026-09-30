@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-29
+
+### Added
+- Published the hub peer port in validator mode.
+
+### Changed
+- Validated the running indexer's migration status before service use.
+- Passed the anchor fold arming variable to the regtest indexer and hub.
+
+### Fixed
+- Used regtest namespaces and the correct encoder URL in validator links.
+- Started module containers under an init process and bounded health-check requests.
+
 ## [0.20.1] - 2026-09-23
 
 ### Fixed
