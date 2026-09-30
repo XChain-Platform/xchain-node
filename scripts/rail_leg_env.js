@@ -8,7 +8,7 @@
 // stack's docker network, where xchain-node hands it the environment. A bridge rail
 // drive cannot run there: it spawns in-process hubs and indexers from source trees
 // and reaches the standing services through their host-published ports, exactly as
-// the DankServer, test01 and test02 rails do from a hand-kept .env. This script
+// established host-driven rails do from a hand-kept .env. This script
 // derives that same file from the running containers (the credentials each service
 // actually booted with) plus xchain-node's sidecars, with every host rewritten to
 // the loopback and every port to its published host port.
