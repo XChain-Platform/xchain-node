@@ -197,19 +197,38 @@ function describeModuleStopOutcome(module, coin, network, outcome, budgetSeconds
     return `Stopped ${module}${where} cleanly in ${outcome.seconds} s (budget ${budgetSeconds} s).`
 }
 
+// Return the -t for a stop: at least the budget the container was stamped with (its
+// drain timer was sized to it), or a listed service's default when it has no stamp.
+function effectiveStopBudgetSeconds(module, settings, budgetSeconds) {
+    if (!settings || module === 'node') return budgetSeconds
+    const floor = Number.isInteger(settings.stopTimeout) ? settings.stopTimeout : MODULE_STOP_TIMEOUT_SECONDS[module]
+    return Number.isInteger(floor) && floor > budgetSeconds ? floor : budgetSeconds
+}
+
+// Read a container's stamped stop settings, loading docker_service at call time.
+function readContainerStopSettings(containerRef) {
+    return require('./docker_service').getContainerStopSettings(containerRef)
+}
+
 // One stop for every CLI path that takes a service container down: stop with
 // the budget, say what happened, return the outcome so the caller can decide
 // whether a kill matters to it. `stopContainerByName` accepts an id as well
-// as a name (docker echoes back whatever it was given). `readStopSettings`,
-// when given, reads the container first so a drain that predates the current
-// budget is named before the stop rather than after a kill.
+// as a name (docker echoes back whatever it was given). The container is read
+// first (pass null to skip) so a drain that predates the current budget is named
+// before the stop and still gets the budget it was created under.
 async function stopModuleContainer(stopContainerByName, module, coin, network, containerRef,
-    env = MODULE_STOP_TIMEOUT_ENV, readStopSettings = null) {
-    const budget = moduleStopTimeoutSeconds(module, env)
+    env = MODULE_STOP_TIMEOUT_ENV, readStopSettings = readContainerStopSettings) {
+    let budget = moduleStopTimeoutSeconds(module, env)
     if (typeof readStopSettings === 'function' && module !== 'node') {
         const settings = await Promise.resolve().then(() => readStopSettings(containerRef)).catch(() => null)
         const drift = describeStopBudgetDrift(module, coin, network, settings, budget)
         if (drift) logger.warn(drift)
+        const effective = effectiveStopBudgetSeconds(module, settings, budget)
+        if (effective > budget) {
+            logger.info(`Stopping ${module} with ${effective} s, the budget its drain timer was sized to, not the ` +
+                `current ${budget} s, so its drain can finish; the current budget applies once it is recreated.`)
+            budget = effective
+        }
     }
     const outcome = await stopContainerByName(containerRef, budget)
     const line = describeModuleStopOutcome(module, coin, network, outcome, budget)
@@ -230,6 +249,7 @@ module.exports = {
     moduleShutdownTimeoutMs,
     shutdownTimeoutEnv,
     describeStopBudgetDrift,
+    effectiveStopBudgetSeconds,
     stoppedUnclean,
     describeModuleStopOutcome,
     stopModuleContainer

@@ -23,7 +23,7 @@ const TIP     = 150400
 
 // One stakes row per action, the shape /validators returns.
 function stakeRow(actionIndex, pubkey) {
-    return { status: 'valid', signing_pubkey: pubkey, amount: '25000',
+    return { status: 'valid', signing_pubkey: pubkey, source: ADDRESS, amount: '25000',
         action_index: String(actionIndex), activation_block: '1' }
 }
 

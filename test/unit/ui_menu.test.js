@@ -164,3 +164,53 @@ describe('ui/menu per-module action labels are all handled', function () {
         assert.deepStrictEqual(unhandled, [], 'these menu actions do nothing when selected: ' + unhandled.join(', '));
     });
 });
+
+// Menu actions mutate the stack like the CLI verbs, so each one holds the command
+// lock for its own run and an idle menu holds nothing.
+describe('ui/menu mutating actions hold the command lock', function () {
+    function loadLocked({ scan = async () => 1, holdError = null } = {}) {
+        const events = [];
+        const scopedCommandLock = (label) => ({
+            hold() { events.push('hold ' + label); if (holdError) throw holdError; },
+            release() { events.push('release ' + label); },
+        });
+        const mod = proxyquire('../../src/ui/menu.js', {
+            'enquirer': { Select: class { async run() { return 'Scan already installed modules'; } } },
+            '../services/status_service': { getStatus: async () => ({}), statusChanged: async () => events.push('status') },
+            '../services/discovery_service': { scanAndRegisterModules: async () => { events.push('scan'); return scan(); } },
+            '../cli/dispatch': { scopedCommandLock },
+        });
+        return { mod, events };
+    }
+
+    it('holds the lock around the scan and releases it after', async function () {
+        const { mod, events } = loadLocked();
+        const next = await mod.mainMenu();
+        assert.strictEqual(next.menuFunction, mod.mainMenu);
+        const label = 'interactive: scanAndRegisterModules';
+        assert.deepStrictEqual(events, ['hold ' + label, 'scan', 'status', 'release ' + label]);
+    });
+
+    it('releases the lock when the action throws', async function () {
+        const { mod, events } = loadLocked({ scan: async () => { throw new Error('docker gone'); } });
+        await mod.mainMenu();
+        assert.strictEqual(events[events.length - 1], 'release interactive: scanAndRegisterModules');
+    });
+
+    it('skips the action and stays in the menu when another command holds the lock', async function () {
+        const held = Object.assign(new Error('Another xchain-node instance holds the command lock'), { code: 'ELOCKHELD' });
+        const { mod, events } = loadLocked({ holdError: held });
+        const next = await mod.mainMenu();
+        assert.strictEqual(next.menuFunction, mod.mainMenu);
+        assert.deepStrictEqual(events, ['hold interactive: scanAndRegisterModules']);
+    });
+
+    it('never calls a mutating operation bare from a handler', function () {
+        const src = require('fs').readFileSync(require('path').join(__dirname, '../../src/ui/menu.js'), 'utf8');
+        const handlers = src.slice(src.indexOf('async function runInstalledModuleAction'), src.indexOf('module.exports'));
+        const ops = 'installModules|uninstallModules|updateModules|restartModules|installModule|installNode|' +
+            'makeBootstrap|restoreBootstrapInterface|runE2ETest|cloneGit|scanAndRegisterModules';
+        assert.ok(new RegExp('locked\\.(' + ops + ')\\(').test(handlers), 'expected locked calls in the handlers');
+        assert.deepStrictEqual(handlers.match(new RegExp('(?<![.\\w])(' + ops + ')\\(', 'g')), null);
+    });
+});

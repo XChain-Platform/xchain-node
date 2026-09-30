@@ -32,7 +32,8 @@ function logStakeBalances(log, network, coins, pubkey, address, amount, state, p
         ? 'unavailable (the explorer could not read it from its UTXO tracker)'
         : state.coinBal + ' confirmed' + (state.coinPending ? ' (+' + state.coinPending + ' pending)' : '')
     log('  ' + coins.stakeCoin.padEnd(15) + ': ' + coinLine + '  (pays the transaction fees)')
-    log('  ' + STAKE_TICK.padEnd(15) + ': ' + state.tokenBal + ' held, ' + amount + ' to stake' +
+    const tokenHeld = state.tokenBal === null ? 'unavailable (balance list read incomplete)' : state.tokenBal + ' held'
+    log('  ' + STAKE_TICK.padEnd(15) + ': ' + tokenHeld + ', ' + amount + ' to stake' +
         (plan.short ? ', short ' + plan.short : ''))
     if (state.mintMax) log('  faucet caps    : ' + state.mintMax + ' per MINT, ' + (state.mintAddressMax || 'no') + ' per address')
 }
@@ -74,6 +75,13 @@ function stakeBlockers(state, plan, coins, address) {
         blockers.push('could not confirm this signing pubkey is not delegated (' + state.delegationUnknown + '). ' +
             'An explorer that predates the /delegations/<pubkey>/pubkey lookup cannot answer it, and ' +
             'nothing is sent until one can.')
+    }
+    // Refuse when the validator set is unreadable: the indexer rejects a STAKE v1 on a key
+    // holding any stake row only after every MINT fee is spent, so an unknown is not a pass.
+    if (state.existingUnknown) {
+        blockers.push('could not read the validator set (' + state.existingUnknown + '), so this run cannot ' +
+            'confirm the signing pubkey is not already staked. Nothing is sent until the set can be read; ' +
+            'retry, or check the explorer.')
     }
     return blockers
 }
@@ -233,14 +241,6 @@ async function finishStake(context, progress, stakeInputs) {
     return { staked: true, sent: progress.sent, txid: r.txid, chained: progress.chain && !progress.chainBroken }
 }
 
-// Warn that the validator set could not be read, so an existing stake is unknown.
-function logSetUnreadable(log, reason, validatorUrl) {
-    log('')
-    log('  WARNING: could not read the validator set (' + reason + '),')
-    log('  so this run cannot tell whether the pubkey is already staked. Check')
-    log('  ' + validatorUrl + ' before broadcasting.')
-}
-
 // Say that a dry run sent nothing and how --broadcast would send the steps.
 function logDryRun(log, stepCount) {
     log('')
@@ -286,8 +286,6 @@ function createStakeValidator(helpers) {
                 ? { staked: false, existing: state.existing }
                 : { staked: false, delegated: state.delegated }
         }
-        if (state.existingUnknown) logSetUnreadable(log, state.existingUnknown, explorerUrl(coins, 'validator/' + pubkey))
-
         const steps = logStakeSteps(log, amount, pubkey, plan, timing, STAKE_TICK, paren)
         const blockers = stakeBlockers(state, plan, coins, address)
         if (blockers.length) {

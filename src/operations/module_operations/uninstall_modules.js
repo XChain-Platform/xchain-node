@@ -29,7 +29,17 @@ function configure(dependencies) {
  */
 function createUninstallOne(outcome, failures) {
     return async (nextModule, nextCoin, nextNetwork) => {
-        const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+        const fail = (why) => {
+            console.error(`uninstall: ${nextModule} (${nextCoin} ${nextNetwork}) FAILED: ${why}`)
+            failures.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: why })
+        }
+        // Read the registry strictly: a failed read is a failure, never "not installed".
+        let moduleContainerId
+        try {
+            moduleContainerId = await db.getModuleContainerStrict(nextModule, nextCoin, nextNetwork)
+        } catch (err) {
+            return fail(`module registry unreadable (${(err && err.message) ? err.message : String(err)})`)
+        }
         if (!moduleContainerId) {
             outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'not-installed' })
             return
@@ -38,9 +48,7 @@ function createUninstallOne(outcome, failures) {
             await uninstallModule(nextCoin, nextNetwork, nextModule)
             outcome.uninstalled.push({ module: nextModule, coin: nextCoin, network: nextNetwork })
         } catch (err) {
-            const why = (err && err.message) ? err.message : String(err)
-            console.error(`uninstall: ${nextModule} (${nextCoin} ${nextNetwork}) FAILED: ${why}`)
-            failures.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: why })
+            fail((err && err.message) ? err.message : String(err))
         }
     }
 }

@@ -34,6 +34,33 @@ const {
 } = require('../services/version_service')
 const { scanAndRegisterModules } = require('../services/discovery_service')
 const { restoreBootstrapInterface } = require('./menu/restore_bootstrap_prompt.js')
+const config                         = require('../config')
+const { acquireCommandLock }         = require('../utils/command_lock')
+const { scopedCommandLock }          = require('../cli/dispatch')
+
+// Run one mutating menu action under the command lock for that action only, so an idle
+// menu blocks no other shell; a held lock prints its holder and returns to the menu.
+async function withMutatingLock(label, fn) {
+    const lock = scopedCommandLock('interactive: ' + label, { acquireCommandLock, config })
+    try {
+        lock.hold()
+    } catch (err) {
+        console.log(redactSecrets(err && err.message ? err.message : err))
+        return undefined
+    }
+    try {
+        return await fn()
+    } finally {
+        lock.release()
+    }
+}
+
+// Every mutating operation the menu runs; handlers call these, never the bare imports.
+const locked = Object.fromEntries(Object.entries({
+    installModules, uninstallModules, updateModules, restartModules, installModule, installNode,
+    makeBootstrap, restoreBootstrapInterface, runE2ETest, cloneGit,
+    scanAndRegisterModules: async () => { await scanAndRegisterModules(); await statusChanged() }
+}).map(([name, op]) => [name, (...args) => withMutatingLock(name, () => op(...args))]))
 
 // Per-module action labels. enquirer's Select resolves to a choice's NAME, so the
 // label the menu offers and the string the handler branches on must be the same
@@ -191,27 +218,27 @@ async function runInstalledModuleAction(actionAnswer, selected, coin, network) {
         // ESC or Return: go back to module list
     } else if (actionAnswer === "Uninstall") {
         try {
-            await uninstallModules({ [coin]: { [network]: [selectedValue] } })
+            await locked.uninstallModules({ [coin]: { [network]: [selectedValue] } })
         } catch (err) {
             console.log(redactSecrets(err))
         }
     } else if (actionAnswer === "Restart") {
         try {
-            await restartModules({ [coin]: { [network]: [selectedValue] } })
+            await locked.restartModules({ [coin]: { [network]: [selectedValue] } })
         } catch (err) {
             console.log(redactSecrets(err))
         }
     } else if (actionAnswer === ACTION_UPDATE_LOCAL) {
-        await cloneGit(selectedValue, true, false)
+        await locked.cloneGit(selectedValue, true, false)
     } else if (actionAnswer === ACTION_UPDATE_CONTAINER
             || actionAnswer === ACTION_INSTALL_LOCAL_IN_CONTAINER
             || actionAnswer === ACTION_REINSTALL_CONTAINER) {
         // All three rebuild the container from the local checkout; they differ only
         // in how the menu describes the version relationship that led the operator here.
-        await installModule(selectedValue, coin, network, false, selected["container_id"])
+        await locked.installModule(selectedValue, coin, network, false, selected["container_id"])
     } else if (actionAnswer === "Make Bootstrap") {
         try {
-            await makeBootstrap(coin, network, selectedValue)
+            await locked.makeBootstrap(coin, network, selectedValue)
         } catch (err) {
             // A source-health refusal is an expected outcome here, so
             // print the reasons and stay in the menu rather than
@@ -221,7 +248,7 @@ async function runInstalledModuleAction(actionAnswer, selected, coin, network) {
         }
     } else if (actionAnswer === "Restore Bootstrap") {
         try {
-            await restoreBootstrapInterface(coin, network, selectedValue)
+            await locked.restoreBootstrapInterface(coin, network, selectedValue)
         } catch (err) {
             // Same contract as "Make Bootstrap" above: an integrity
             // refusal is an expected outcome, so report it and stay in
@@ -230,7 +257,7 @@ async function runInstalledModuleAction(actionAnswer, selected, coin, network) {
             else throw err
         }
     } else if (actionAnswer === ACTION_REINSTALL_REMOTE) {
-        await updateModules({ [coin]: { [network]: [selectedValue] } })
+        await locked.updateModules({ [coin]: { [network]: [selectedValue] } })
     } else if (actionAnswer === "Tail logs") {
         await logModules({ [coin]: { [network]: [selectedValue] } })
     }
@@ -264,7 +291,7 @@ async function offerMissingModule(selectedValue, localVersion, coin, network) {
     const actionAnswer = await promptModuleAction(moduleActions)
     if (actionAnswer === "Install" || actionAnswer === "Install from local") {
         try {
-            await installModules({ [coin]: { [network]: [selectedValue] } })
+            await locked.installModules({ [coin]: { [network]: [selectedValue] } })
         } catch (err) {
             console.log(redactSecrets(err))
         }
@@ -291,14 +318,14 @@ async function modulesSelectionInterface(coin, network) {
             .filter(mod => mod["status"] !== "missing" && mod["value"] !== DB_MODULE_NAME)
             .map(mod => mod["value"])
         try {
-            await uninstallModules({ [coin]: { [network]: modulesToUninstall } })
+            await locked.uninstallModules({ [coin]: { [network]: modulesToUninstall } })
         } catch (err) {
             console.log(redactSecrets(err))
         }
         return { menuFunction: modulesSelectionInterface, parameters: [coin, network] }
     } else if (moduleAnswer === "Install the node") {
         try {
-            await installNode(coin, network)
+            await locked.installNode(coin, network)
         } catch (err) {
             console.log("There was a problem installing the node")
             console.log(redactSecrets(err))
@@ -306,9 +333,11 @@ async function modulesSelectionInterface(coin, network) {
         return { menuFunction: modulesSelectionInterface, parameters: [coin, network] }
     } else if (moduleAnswer === "Perform an E2E test") {
         try {
-            const { logFile, exitCode } = await runE2ETest(coin, network)
-            console.log("E2E tests finished with exit code " + exitCode)
-            console.log("Logs saved to: " + logFile)
+            const result = await locked.runE2ETest(coin, network)
+            if (result) {
+                console.log("E2E tests finished with exit code " + result.exitCode)
+                console.log("Logs saved to: " + result.logFile)
+            }
         } catch (err) {
             console.log(redactSecrets(err))
         }
@@ -356,8 +385,7 @@ async function mainMenu() {
         return { menuFunction: exit, parameters: [] }
     } else if (answer === "Scan already installed modules") {
         try {
-            await scanAndRegisterModules()
-            await statusChanged()
+            await locked.scanAndRegisterModules()
         } catch (err) {
             console.log(redactSecrets(err))
         }

@@ -123,7 +123,8 @@ function runUnstake(opts, chain, settingsExtra = {}) {
     return unstakeValidator(opts, deps).then(result => ({ result, calls, unstakeCalls, logged }))
 }
 
-const STAKED = { status: 'valid', signing_pubkey: PUBKEY, amount: '25000', action_index: '44', activation_block: '150313' }
+const STAKED = { status: 'valid', signing_pubkey: PUBKEY, source: ADDRESS, amount: '25000', action_index: '44',
+    activation_block: '150313' }
 
 describe('ValidatorStakeService', function () {
 
@@ -347,6 +348,44 @@ describe('ValidatorStakeService', function () {
             expect(c.admissible.map(r => r.activation_block)).to.deep.equal(['10', '101'])
             expect(c.pending.map(r => r.activation_block)).to.deep.equal(['102'])
             expect(c.deactivated).to.have.length(1)
+        })
+    })
+})
+
+// The indexer admits an UNSTAKE v0 only from the stake's owner; the recorded address matches
+// the WIF here, so the owner check is the only guard that can refuse.
+describe('ValidatorStakeService', function () {
+
+    describe('unstakeValidator() stake ownership', function () {
+
+        const FOREIGN = { ...STAKED, source: 'mSomeoneElse' }
+        const refusal = chain => runUnstake({ broadcast: true }, chain).then(() => null, e => e)
+
+        it('refuses a stake owned by another address, dry run or broadcast', async function () {
+            for (const opts of [{ broadcast: true }, {}]) {
+                let err = null
+                try { await runUnstake(opts, { existing: FOREIGN }) } catch (e) { err = e }
+                expect(err, JSON.stringify(opts)).to.exist
+                expect(err.message).to.include('owned by mSomeoneElse, not ' + ADDRESS)
+                expect(err.message).to.include('Nothing was sent')
+            }
+        })
+
+        it('refuses a row that does not say who owns it', async function () {
+            const err = await refusal({ existing: { ...STAKED, source: null } })
+            expect(err.message).to.match(/does not say which address owns this stake/)
+        })
+
+        it('gives a foreign pending stake the ownership refusal, not "not active yet"', async function () {
+            const err = await refusal({ existing: { ...FOREIGN, activation_block: String(TIP + 5) } })
+            expect(err.message).to.include('owned by mSomeoneElse')
+        })
+
+        it('ignores a foreign deactivated row beside an owned live one', async function () {
+            const old = { ...FOREIGN, action_index: '12', deactivation_block: '140000' }
+            const { result } = await runUnstake({}, { existing: STAKED, rows: [old] })
+            expect(result.dryRun).to.be.true
+            expect(result.active.amount).to.equal('25000')
         })
     })
 })

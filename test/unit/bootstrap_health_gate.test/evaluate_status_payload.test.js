@@ -66,6 +66,24 @@ describe('BootstrapHealthGate', function () {
             expect(reasons[0]).to.match(/vm_executor_host_fault/)
         })
 
+        const trainPayload = (train) => ({ status: 'healthy', lag: 3, stallClass: 'none', train_activation: train })
+
+        it('REFUSES an indexer stopped on a train-activation halt', function () {
+            const gate = loadGate()
+            const reasons = gate.evaluateStatusPayload(trainPayload(
+                { status: 'halt', required_rule_set: 'rs-2', required_at_height: 900000, reason: 'build lacks rs-2' }))
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/train-activation halt/)
+            expect(reasons[0]).to.match(/rs-2/)
+        })
+
+        it('passes a pending, unevaluated, absent or malformed train_activation', function () {
+            const gate = loadGate()
+            for (const train of [{ status: 'pending' }, { status: 'unevaluated' }, { status: 'clear' }, null, 'halt'])
+                expect(gate.evaluateStatusPayload(trainPayload(train))).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({ status: 'healthy', lag: 3, stallClass: 'none' })).to.deep.equal([])
+        })
+
     })
 })
 
