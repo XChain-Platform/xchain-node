@@ -188,11 +188,7 @@ function rollcallPassthrough3() {
 // admission-map mirror producer, consumer and the anchor-attest barrier
 // together at one height, so a venue arms as a unit the same way ROLLCALL does.
 function mirrorAdmissionPassthrough() {
-    const MIRROR_ADMISSION_VARS = [
-        'XC_MIRROR_ADMISSION_ACTIVATION',
-        'ATTESTATION_ROUND_TIMEOUT_MS',
-        'ADMISSION_WATERMARK_SAMPLE_MS'
-    ]
+    const MIRROR_ADMISSION_VARS = ['XC_MIRROR_ADMISSION_ACTIVATION']
 
     let saved
 
@@ -240,6 +236,30 @@ function mirrorAdmissionPassthrough() {
         expect(config['XC_MIRROR_ADMISSION_ACTIVATION']).to.equal('5124')
     })
 
+    it('omits the var when unset, so a venue ships INERT', async function () {
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
+        expect(config).to.not.have.property('XC_MIRROR_ADMISSION_ACTIVATION')
+        const hub = await cs.getDefaultConfig('xchain-hub', null, null)
+        expect(hub).to.not.have.property('XC_MIRROR_ADMISSION_ACTIVATION')
+    })
+}
+
+function mirrorAdmissionPacingPassthrough() {
+    const PACING_VARS = ['ATTESTATION_ROUND_TIMEOUT_MS', 'ADMISSION_WATERMARK_SAMPLE_MS']
+    let saved
+
+    beforeEach(function () {
+        saved = {}
+        for (const v of PACING_VARS) { saved[v] = process.env[v]; delete process.env[v] }
+    })
+
+    afterEach(function () {
+        for (const v of PACING_VARS) {
+            if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v]
+        }
+    })
+
     it('passes host-set mirror pacing windows through to the hub defaults', async function () {
         process.env.ATTESTATION_ROUND_TIMEOUT_MS = '30000'
         process.env.ADMISSION_WATERMARK_SAMPLE_MS = '5000'
@@ -247,14 +267,6 @@ function mirrorAdmissionPassthrough() {
         const config = await cs.getDefaultConfig('xchain-hub', null, null)
         expect(config['ATTESTATION_ROUND_TIMEOUT_MS']).to.equal('30000')
         expect(config['ADMISSION_WATERMARK_SAMPLE_MS']).to.equal('5000')
-    })
-
-    it('omits the var when unset, so a venue ships INERT', async function () {
-        const cs = makeServiceWithConfig('')
-        const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'regtest')
-        expect(config).to.not.have.property('XC_MIRROR_ADMISSION_ACTIVATION')
-        const hub = await cs.getDefaultConfig('xchain-hub', null, null)
-        expect(hub).to.not.have.property('XC_MIRROR_ADMISSION_ACTIVATION')
     })
 }
 
@@ -362,6 +374,7 @@ describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('with coin and network (coin-specific config)', function () {
             describe('MIRROR ADMISSION passthrough', mirrorAdmissionPassthrough)
+            describe('MIRROR ADMISSION pacing passthrough', mirrorAdmissionPacingPassthrough)
         })
     })
 })
