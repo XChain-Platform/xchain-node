@@ -81,6 +81,7 @@ jobs:
       COIN: dogecoin
       STACK_REF: ${{ inputs.stack_ref || 'develop' }}
       STACKS: ${{ matrix.stacks || 'btc,doge' }}
+      XC_MIRROR_ADMISSION_ACTIVATION: ${{ matrix.drive == 'list_share' && 'armed' || '' }}
       LIMIT_MINUTES: ${{ inputs.limit_minutes || '200' }}
       XCHAIN_NODE_EXTERNAL_DB: '1'
       XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1'
