@@ -27,7 +27,8 @@ const { COIN_NETWORKS } = require('../../../src/services/validator_service')
 
 const PUBKEY  = 'ab'.repeat(32)
 const ADDRESS = 'mStakeAddress'
-const STAKED  = { status: 'valid', signing_pubkey: PUBKEY, amount: '25000', action_index: '44', activation_block: '150313' }
+const STAKED  = { status: 'valid', signing_pubkey: PUBKEY, source: ADDRESS, amount: '25000', action_index: '44',
+    activation_block: '150313' }
 
 let lockDir
 

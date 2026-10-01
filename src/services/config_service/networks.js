@@ -274,6 +274,7 @@ function configureHubBeforeKey(defaultValues, module) {
             "HUB_NETWORK",
             "ORACLE_MIN_SUBMISSIONS",
             "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
+            "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS",
             "ORACLE_BATCH_WINDOW_ROUNDS", "ORACLE_BATCH_GRACE_MS",
             "ORACLE_BATCH_SIGN_TIMEOUT_MS", "ORACLE_BATCH_BUFFER_MAX_ROUNDS",
             "ORACLE_BATCH_LANDING_RESERVE_MS",
@@ -292,8 +293,13 @@ function configureHubBeforeKey(defaultValues, module) {
             "XC_MIRROR_ADMISSION_ACTIVATION",
             "XC_ANCHOR_FOLD_REGTEST_ACTIVATION"
         ]
+        const hubAdmissionTimingVars = new Set([
+            "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS"
+        ])
         for (const varName of hubPassthroughVars) {
-            const value = readSecretHostEnv(varName)
+            const value = hubAdmissionTimingVars.has(varName)
+                ? config.childProcessEnv()[varName]
+                : readSecretHostEnv(varName)
             if (value !== undefined && value !== "") {
                 defaultValues[varName] = value
             }

@@ -131,7 +131,7 @@ describe('moduleOperations', function () {
 
         it('skips module when container ID is null', async function () {
             const stubs = makeStubs()
-            stubs.db.getModuleContainer.resolves(null)
+            stubs.db.getModuleContainerStrict.resolves(null)
             const ops = loadOperations(stubs)
             const result = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
             expect(result.uninstalled).to.deep.equal([])
@@ -139,6 +139,27 @@ describe('moduleOperations', function () {
                 { module: 'xchain-encoder', coin: 'bitcoin', network: 'mainnet', reason: 'not-installed' }
             ])
             expect(stubs.uninstallModule.called).to.be.false
+        })
+
+        it('fails a module whose registry read throws instead of skipping it', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainerStrict.rejects(new Error('modules table gone'))
+            const ops = loadOperations(stubs)
+            const err = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-encoder'] } }).then(() => null, e => e)
+            expect(err && err.message).to.contain('modules table gone')
+            expect(err.failures[0]).to.include({ module: 'xchain-encoder' })
+            expect(err.failures[0].reason).to.contain('registry unreadable')
+            expect(stubs.uninstallModule.called).to.be.false
+        })
+
+        it('still uninstalls the rest of the list after one registry read throws', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainerStrict.withArgs('xchain-decoder', 'bitcoin', 'mainnet').rejects(new Error('blip'))
+            const ops = loadOperations(stubs)
+            const err = await ops.uninstallModules({ bitcoin: { mainnet: ['xchain-decoder', 'xchain-encoder'] } })
+                .then(() => null, e => e)
+            expect(err).to.be.an('error')
+            expect(err.uninstalled.map(u => u.module)).to.deep.equal(['xchain-encoder'])
         })
     })
 })

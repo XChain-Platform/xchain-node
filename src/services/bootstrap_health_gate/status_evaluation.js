@@ -67,7 +67,7 @@ function evaluateContainerState(raw, { now = Date.now() } = {}) {
 // every known spelling is checked rather than one canonical key:
 //   decoder  health: status, lag_blocks/blockLag, reorg_halted, reorg_halt_checked_at,
 //                    reorg_halt_parked
-//   indexer  health: status, lag, decoderReorgHalted, stallClass
+//   indexer  health: status, lag, decoderReorgHalted, stallClass, train_activation.status
 //   tracker  health: lag, synced, halted
 //   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'unhealthy')
 function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}) {
@@ -101,7 +101,8 @@ function statusFlagReasons(payload) {
     // OWNING reorg_halted, and the pairing is per SURFACE rather than per image: the
     // decoder's JSON-RPC `health` result has always carried the timestamp, its GET
     // /status body did not until the field was added there (xchain-decoder
-    // src/api.js), and its /live body still publishes the boolean alone. Only the
+    // src/api.js), and its /live body carries it too on current images, beside
+    // reorg_halt_parked and the reorg_halt_cleared_at/_reason pair. Only the
     // first two are probed here (see probeServiceStatus, which tries JSON-RPC `health`
     // then GET /status and nothing else), so an image predating that /status field is
     // refused by this leg on the fallback path. That is the intended fail-closed
@@ -117,6 +118,18 @@ function statusFlagReasons(payload) {
     reasons.push(...reorgParkReasons(payload))
     if (payload.decoderReorgHalted === true)
         reasons.push('the upstream decoder carries a durable REORG_HALT marker, so this database is frozen behind it')
+    reasons.push(...stallReasons(payload))
+    if (payload.block_fetch_desync)
+        reasons.push(`the service reports a block-fetch desync (${formatBlockFetchDesync(payload.block_fetch_desync)})`)
+    if (payload.node_height_stale === true)
+        reasons.push('the service cannot see the node tip (stale node height), so its lag is unknown')
+
+    return reasons
+}
+
+// Refusal reasons from the indexer's wedged-counter verdict and a train-activation halt.
+function stallReasons(payload) {
+    const reasons = []
     // The indexer's own single-field verdict on its block counter:
     // 'none' | 'future_block_wait' | 'barrier_defer' | 'wedged'. Only 'wedged' is a
     // refusal, and it needs its own leg: the indexer reports status "healthy"
@@ -130,11 +143,15 @@ function statusFlagReasons(payload) {
     if (payload.stallClass === 'wedged')
         reasons.push('the service reports its block counter WEDGED (stallClass "wedged": no commit for longer ' +
             'than its stall grace window)' + (payload.stallReason ? `: ${payload.stallReason}` : ''))
-    if (payload.block_fetch_desync)
-        reasons.push(`the service reports a block-fetch desync (${formatBlockFetchDesync(payload.block_fetch_desync)})`)
-    if (payload.node_height_stale === true)
-        reasons.push('the service cannot see the node tip (stale node height), so its lag is unknown')
-
+    // Refuse only 'halt': the indexer stays "healthy" and never wedges after a restart while
+    // halted, and 'pending'/'unevaluated' are still correct data. Strict, so older images pass.
+    const train = payload.train_activation
+    if (train && typeof train === 'object' && train.status === 'halt')
+        reasons.push('the service has stopped on a train-activation halt (its build does not implement the rule set ' +
+            'the release manifest requires, so its data is frozen at the activation boundary)' +
+            (train.required_rule_set ? `: requires ${train.required_rule_set}` : '') +
+            (train.required_at_height != null ? ` from height ${train.required_at_height}` : '') +
+            (train.reason ? ` (${train.reason})` : ''))
     return reasons
 }
 
