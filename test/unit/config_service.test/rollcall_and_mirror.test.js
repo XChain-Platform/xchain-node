@@ -188,7 +188,11 @@ function rollcallPassthrough3() {
 // admission-map mirror producer, consumer and the anchor-attest barrier
 // together at one height, so a venue arms as a unit the same way ROLLCALL does.
 function mirrorAdmissionPassthrough() {
-    const MIRROR_ADMISSION_VARS = ['XC_MIRROR_ADMISSION_ACTIVATION']
+    const MIRROR_ADMISSION_VARS = [
+        'XC_MIRROR_ADMISSION_ACTIVATION',
+        'ATTESTATION_ROUND_TIMEOUT_MS',
+        'ADMISSION_WATERMARK_SAMPLE_MS'
+    ]
 
     let saved
 
@@ -234,6 +238,15 @@ function mirrorAdmissionPassthrough() {
         const cs = makeServiceWithConfig('')
         const config = await cs.getDefaultConfig('xchain-hub', null, null)
         expect(config['XC_MIRROR_ADMISSION_ACTIVATION']).to.equal('5124')
+    })
+
+    it('passes host-set mirror pacing windows through to the hub defaults', async function () {
+        process.env.ATTESTATION_ROUND_TIMEOUT_MS = '30000'
+        process.env.ADMISSION_WATERMARK_SAMPLE_MS = '5000'
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig('xchain-hub', null, null)
+        expect(config['ATTESTATION_ROUND_TIMEOUT_MS']).to.equal('30000')
+        expect(config['ADMISSION_WATERMARK_SAMPLE_MS']).to.equal('5000')
     })
 
     it('omits the var when unset, so a venue ships INERT', async function () {
