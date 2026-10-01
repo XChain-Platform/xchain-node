@@ -32,6 +32,32 @@ function bootStep (doc) {
     return step
 }
 
+function initializeStep (doc) {
+    const step = doc.jobs.leg.steps.find((candidate) => candidate.name === 'Initialize the validator identity')
+    if (!step) throw new Error('workflow validator identity step not found')
+    return step
+}
+
+function driveInitializeStep (activation) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rail-leg-mirror-admission-init-'))
+    const runnerTemp = path.join(dir, 'runner-temp')
+    const bin = path.join(dir, 'stub-bin')
+    fs.mkdirSync(runnerTemp)
+    fs.mkdirSync(bin)
+    fs.writeFileSync(path.join(bin, 'node'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 })
+    execFileSync('bash', ['-e', '-c', initializeStep(loadWorkflow()).run], {
+        cwd: dir,
+        env: {
+            PATH: bin + ':' + process.env.PATH,
+            RUNNER_TEMP: runnerTemp,
+            STACKS: 'btc,doge',
+            XC_MIRROR_ADMISSION_ACTIVATION: activation,
+        },
+        encoding: 'utf8',
+    })
+    return fs.readFileSync(path.join(runnerTemp, 'stack.env'), 'utf8').trim().split('\n')
+}
+
 function driveBootStep (activation) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rail-leg-mirror-admission-'))
     const runnerTemp = path.join(dir, 'runner-temp')
@@ -78,5 +104,17 @@ describe('rail-leg.yml mirror admission', function () {
             '|src/index.js install release/vX.Y.Z all dogecoin regtest',
             '|src/index.js install release/vX.Y.Z all bitcoin regtest',
         ])
+    })
+
+    it('uses regtest-length round windows only when mirror admission is armed', function () {
+        const pacing = [
+            'ORACLE_ROUND_INTERVAL=60000',
+            'ORACLE_SUBMISSION_WINDOW=20000',
+            'ATTESTATION_ROUND_TIMEOUT_MS=30000',
+            'ADMISSION_WATERMARK_SAMPLE_MS=5000',
+        ]
+        expect(driveInitializeStep('armed')).to.include.members(pacing)
+        const unarmed = driveInitializeStep('')
+        for (const line of pacing) expect(unarmed).to.not.include(line)
     })
 })

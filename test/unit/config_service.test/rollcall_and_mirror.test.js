@@ -245,6 +245,31 @@ function mirrorAdmissionPassthrough() {
     })
 }
 
+function mirrorAdmissionPacingPassthrough() {
+    const PACING_VARS = ['ATTESTATION_ROUND_TIMEOUT_MS', 'ADMISSION_WATERMARK_SAMPLE_MS']
+    let saved
+
+    beforeEach(function () {
+        saved = {}
+        for (const v of PACING_VARS) { saved[v] = process.env[v]; delete process.env[v] }
+    })
+
+    afterEach(function () {
+        for (const v of PACING_VARS) {
+            if (saved[v] === undefined) delete process.env[v]; else process.env[v] = saved[v]
+        }
+    })
+
+    it('passes host-set mirror pacing windows through to the hub defaults', async function () {
+        process.env.ATTESTATION_ROUND_TIMEOUT_MS = '30000'
+        process.env.ADMISSION_WATERMARK_SAMPLE_MS = '5000'
+        const cs = makeServiceWithConfig('')
+        const config = await cs.getDefaultConfig('xchain-hub', null, null)
+        expect(config['ATTESTATION_ROUND_TIMEOUT_MS']).to.equal('30000')
+        expect(config['ADMISSION_WATERMARK_SAMPLE_MS']).to.equal('5000')
+    })
+}
+
 // Every watermark grace the indexer's hub mirror resolves, each of which must be
 // zeroed on regtest or an armed venue wedges every freshly mined block (the
 // price-grace failure the regtest mirror wedge records).
@@ -349,6 +374,7 @@ describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('with coin and network (coin-specific config)', function () {
             describe('MIRROR ADMISSION passthrough', mirrorAdmissionPassthrough)
+            describe('MIRROR ADMISSION pacing passthrough', mirrorAdmissionPacingPassthrough)
         })
     })
 })

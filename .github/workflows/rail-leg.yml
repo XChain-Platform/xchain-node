@@ -157,6 +157,14 @@ jobs:
             echo "XCHAIN_CONFIRMATIONS_BTC=1"
             echo "XCHAIN_CONFIRMATIONS_LTC=1"
             echo "XCHAIN_CONFIRMATIONS_DOGE=1"
+            # Mirror admission publishes decoder-tip observations only after a round window.
+            # Short regtest windows keep the armed rail leg paced at its block cadence.
+            if [ "$XC_MIRROR_ADMISSION_ACTIVATION" = armed ]; then
+              echo "ORACLE_ROUND_INTERVAL=60000"
+              echo "ORACLE_SUBMISSION_WINDOW=20000"
+              echo "ATTESTATION_ROUND_TIMEOUT_MS=30000"
+              echo "ADMISSION_WATERMARK_SAMPLE_MS=5000"
+            fi
           } > "$RUNNER_TEMP/stack.env"
 
       - name: Publish the two-stack host ports
