@@ -77,7 +77,9 @@ describe('rail follower hash comparison', function () {
             heights: [{ height: 10, verdict: 'MISMATCH', fields: ['actions_hash'] }],
         })
     })
+})
 
+describe('rail follower hash comparison edge cases', function () {
     it('marks an absent height missing', function () {
         expect(compareFollowerHashes([row(10)], [], [10]).heights[0]).to.deep.equal({
             height: 10,
@@ -94,7 +96,9 @@ describe('rail follower hash comparison', function () {
     it('compares string block indexes to numeric heights', function () {
         expect(compareFollowerHashes([{ ...row(10), block_index: '10' }], [row(10)], [10]).ok).to.equal(true)
     })
+})
 
+describe('rail follower hash comparison CLI', function () {
     it('injects a control difference without mutating its input', function () {
         const input = [row(10)]
         const copy = injectDifference(input, 10)
