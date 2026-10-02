@@ -58,6 +58,7 @@ describe('BootstrapService', function () {
             const result = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')
             expect(result).to.be.true
             expect(stubs.dockerService.stopContainer.called).to.be.true
+            expect(stubs.dockerService.stopContainer.firstCall.args[1], 'the tracker stops with its 120 s budget').to.equal(120)
             expect(stubs.dockerService.startContainer.called).to.be.true
         })
     })

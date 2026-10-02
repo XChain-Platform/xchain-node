@@ -27,7 +27,8 @@ let execFileAsync         = promisify(execFile)
 let { XChainService, EXTERNAL_DB } = require('../../config')
 let { db } = require('../../state')
 let { getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = require('../config_service')
-let { stopContainer, startContainer } = require('../docker_service')
+let { stopContainer, startContainer, getContainerStopSettings } = require('../docker_service')
+const { stopModuleContainer } = require('../stop_budget_service')
 let { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('../database_service')
 let databaseService = require('../database_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
@@ -46,7 +47,7 @@ function configureDependencies(dependencies) {
     ;({ XChainService, EXTERNAL_DB } = dependencies.config)
     ;({ db } = dependencies.state)
     ;({ getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = dependencies.configService)
-    ;({ stopContainer, startContainer } = dependencies.dockerService)
+    ;({ stopContainer, startContainer, getContainerStopSettings } = dependencies.dockerService)
     databaseService = dependencies.databaseService
     ;({ getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = databaseService)
     ;({ checkBootstrapSignature, ensureVerifiedInnerArchive } = dependencies.archiveSigning)
@@ -90,7 +91,8 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     const context = await prepareTrackerRestore(coin, network, fileName)
 
     logger.info(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
-    await stopContainer(context.containerId)
+    // Stop with the service's budget, not docker's ten-second default; the volume is replaced next, so an unclean stop is reported, not refused.
+    await stopModuleContainer(stopContainer, XChainService.XCHAIN_UTXO_TRACKER, coin, network, context.containerId, undefined, getContainerStopSettings)
 
     await restoreTrackerVolume(context)
 
@@ -250,7 +252,7 @@ async function prepareMariaRestore(coin, network, module, fileName) {
     } catch { /* service not installed yet, proceed without stopping */ }
     if (serviceContainerId) {
         logger.info(`Stopping ${module} container...`)
-        await stopContainer(serviceContainerId)
+        await stopModuleContainer(stopContainer, module, coin, network, serviceContainerId, undefined, getContainerStopSettings)
     }
 
     return { dbContainerId, dbName, externalCfg, innerArchive, module, rootPassword, serviceContainerId, workDir }

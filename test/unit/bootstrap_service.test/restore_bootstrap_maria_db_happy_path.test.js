@@ -58,6 +58,8 @@ describe('BootstrapService', function () {
             const result = await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER, 'dump.sql.gz')
             expect(result).to.be.true
             expect(stubs.dockerService.stopContainer.calledWith('svc-container-id')).to.be.true
+            // The decoder drain gets its 120 s service budget, not docker's ten-second default.
+            expect(stubs.dockerService.stopContainer.firstCall.args).to.deep.equal(['svc-container-id', 120])
             expect(stubs.dockerService.startContainer.calledWith('svc-container-id')).to.be.true
 
             // The restore client must receive the root password via MYSQL_PWD env, never argv
