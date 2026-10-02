@@ -266,6 +266,10 @@ jobs:
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
           set -a; . "$RUNNER_TEMP/stack.env"; set +a
           node src/index.js install "$STACK_REF" all dogecoin regtest
+          # The standing hub pays for its anchors from the generated DOGE publisher, which
+          # nothing else funds; fund and confirm it before BTC checkpoints can call for an
+          # anchor. The script does nothing when no anchor arm input is set.
+          node scripts/rail_fund_publisher.js
           node src/index.js install "$STACK_REF" all bitcoin regtest
           case ",${STACKS:-btc,doge}," in
             *,ltc,*) node src/index.js install "$STACK_REF" all litecoin regtest ;;

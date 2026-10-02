@@ -79,7 +79,8 @@ function driveBootStep (activation) {
         },
         encoding: 'utf8',
     })
-    return fs.readFileSync(log, 'utf8').trim().split('\n')
+    // Only the stack installs carry the arm; helper scripts between them are not graded here.
+    return fs.readFileSync(log, 'utf8').trim().split('\n').filter((call) => / install /.test(call))
 }
 
 describe('rail-leg.yml mirror admission', function () {
