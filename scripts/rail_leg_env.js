@@ -14,6 +14,7 @@
 // the loopback and every port to its published host port.
 //
 // Usage: node scripts/rail_leg_env.js <out .env path> [coin]
+//        node scripts/rail_leg_env.js --resolve-anchor-arms <out env path>
 // Prints key names only; values never reach the log.
 
 const fs = require('fs')
@@ -21,6 +22,33 @@ const path = require('path')
 const { execFileSync } = require('child_process')
 
 const CONFIG_DIR = path.resolve(__dirname, '..', 'config')
+const ANCHOR_ARM_ENVS = Object.freeze([
+    'XC_ANCHOR_FOLD_REGTEST_ACTIVATION',
+    'XC_ANCHOR_STAKE_REGTEST_ACTIVATION',
+    'XC_ANCHOR_SLASH_REGTEST_ACTIVATION',
+])
+
+function anchorArmHeight (env = process.env) {
+    const configured = ANCHOR_ARM_ENVS
+        .map((name) => [name, env[name]])
+        .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
+        .map(([name, value]) => [name, String(value).trim()])
+    if (!configured.length) return null
+    for (const [name, value] of configured) {
+        if (!/^\d+$/.test(value)) throw new Error(name + ' must be a non-negative integer')
+    }
+    const heights = new Set(configured.map(([, value]) => BigInt(value).toString()))
+    if (heights.size !== 1) throw new Error('anchor arm activations must resolve to one height')
+    return heights.values().next().value
+}
+
+function writeAnchorArmEnv (out) {
+    if (!out) throw new Error('usage: rail_leg_env.js --resolve-anchor-arms <out env path>')
+    const height = anchorArmHeight()
+    const lines = height === null ? [] : ANCHOR_ARM_ENVS.map((name) => name + '=' + height)
+    fs.writeFileSync(out, lines.join('\n') + (lines.length ? '\n' : ''), { mode: 0o600 })
+    console.log('rail_leg_env: resolved anchor arm keys: ' + (height === null ? 'none' : ANCHOR_ARM_ENVS.join(' ')))
+}
 
 function containerEnv (name) {
     try {
@@ -62,6 +90,10 @@ function first (...values) {
 }
 
 function main () {
+    if (process.argv[2] === '--resolve-anchor-arms') {
+        writeAnchorArmEnv(process.argv[3])
+        return
+    }
     const out = process.argv[2]
     const coin = process.argv[3] || 'bitcoin'
     if (!out) throw new Error('usage: rail_leg_env.js <out .env path> [coin]')
@@ -117,6 +149,7 @@ function main () {
         DECODER_DB_PASS: decoder.DECODER_DB_PASS,
         XCHAIN_NODE_CONFIG_DIR: CONFIG_DIR,
     }
+    for (const name of ANCHOR_ARM_ENVS) env[name] = process.env[name]
     const lines = []
     const missing = []
     for (const [k, v] of Object.entries(env)) {
