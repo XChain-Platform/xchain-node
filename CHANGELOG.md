@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-10-02
+
+### Fixed
+
+- The release manifest pins xchain-indexer v0.21.2, which labels a shared list with the chain serving the token policy read.
+
 ## [0.21.1] - 2026-10-01
 
 ### Added
