@@ -43,6 +43,9 @@ function anchorArmHeight (env = process.env) {
     for (const [name, value] of configured) {
         if (!/^\d+$/.test(value)) throw new Error(name + ' must be a non-negative integer')
     }
+    for (const [name, value] of configured) {
+        if (BigInt(value) < 1n) throw new Error(name + ' must be an integer at least 1')
+    }
     const heights = new Set(configured.map(([, value]) => BigInt(value).toString()))
     if (heights.size !== 1) throw new Error('anchor arm activations must resolve to one height')
     return heights.values().next().value

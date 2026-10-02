@@ -35,6 +35,14 @@ function parseAssignments (file) {
     return values
 }
 
+// Output may carry generated masked credentials, so assert structure, not a digit substring.
+function expectNoActivationValues (output) {
+    for (const line of output.split(/\r?\n/)) {
+        for (const name of ARM_ENVS) expect(line, line).to.not.match(new RegExp(name + '\\s*[=:]'))
+        expect(line, line).to.not.match(/::add-mask::\s*\d+\s*$/)
+    }
+}
+
 function loadWorkflow () {
     return yaml.load(fs.readFileSync(WORKFLOW, 'utf8'))
 }
@@ -117,7 +125,8 @@ function defineResolutionTests () {
         const { out, result } = resolveArms({ XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '0042' })
         expect(result.status, result.stderr).to.equal(0)
         expect(parseAssignments(out)).to.deep.equal(Object.fromEntries(ARM_ENVS.map((name) => [name, '42'])))
-        expect(result.stdout).to.not.include('42')
+        expectNoActivationValues(result.stdout)
+        expect(ARM_ENVS.filter((name) => result.stdout.includes(name))).to.deep.equal(ARM_ENVS)
     })
 
     it('exports nothing when unset and rejects conflicting or invalid heights', function () {
@@ -135,6 +144,12 @@ function defineResolutionTests () {
         const invalid = resolveArms({ XC_ANCHOR_FOLD_REGTEST_ACTIVATION: 'later' })
         expect(invalid.result.status).to.not.equal(0)
         expect(invalid.result.stderr).to.include('must be a non-negative integer')
+
+        for (const zero of ['0', '000']) {
+            const refused = resolveArms({ XC_ANCHOR_STAKE_REGTEST_ACTIVATION: zero })
+            expect(refused.result.status, zero).to.not.equal(0)
+            expect(refused.result.stderr).to.include('must be an integer at least 1')
+        }
     })
 }
 
@@ -164,7 +179,8 @@ function defineDrivePropagationTests () {
         const values = Object.fromEntries(ARM_ENVS.map((name) => [name, '42']))
         const { out, output } = writeDriveEnv(values)
         expect(parseAssignments(out)).to.include(Object.fromEntries(ARM_ENVS.map((name) => [name, '42'])))
-        expect(output).to.not.include('42')
+        expectNoActivationValues(output)
+        expect(ARM_ENVS.filter((name) => output.includes(name))).to.deep.equal(ARM_ENVS)
     })
 
     it('leaves the drive environment and missing-value diagnostics unchanged when unset', function () {
