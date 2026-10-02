@@ -183,6 +183,10 @@ jobs:
       # BTC_INDEXER_API_URL left every venue hub unable to read its capability set.
       - name: Initialize the validator identity
         run: |
+          anchor_arm_values="${XC_ANCHOR_FOLD_REGTEST_ACTIVATION:-}${XC_ANCHOR_STAKE_REGTEST_ACTIVATION:-}${XC_ANCHOR_SLASH_REGTEST_ACTIVATION:-}"
+          if [ -n "$anchor_arm_values" ]; then
+            export DOGE_ENCODER_URL=http://xchain-node-dogecoin-regtest-xchain-encoder:3003
+          fi
           node src/index.js validator init \
             --network regtest \
             --oracle-epoch-start "$(date -u +%s)000" \
@@ -204,6 +208,10 @@ jobs:
             echo "XCHAIN_CONFIRMATIONS_BTC=1"
             echo "XCHAIN_CONFIRMATIONS_LTC=1"
             echo "XCHAIN_CONFIRMATIONS_DOGE=1"
+            if [ -n "$anchor_arm_values" ]; then
+              echo "DOGE_ENCODER_URL=$DOGE_ENCODER_URL"
+              echo "HUB_SIGNER_MODULE=/XChainHub/operator-signer/signer.js"
+            fi
             for name in XC_ANCHOR_FOLD_REGTEST_ACTIVATION XC_ANCHOR_STAKE_REGTEST_ACTIVATION XC_ANCHOR_SLASH_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_TIME XC_CONTRACTS_REGTEST_ACTIVATION; do
               value="${!name:-}"
               if [ -n "$value" ]; then echo "$name=$value"; fi
