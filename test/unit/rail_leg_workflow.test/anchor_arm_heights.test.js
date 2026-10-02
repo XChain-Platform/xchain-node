@@ -97,7 +97,7 @@ function driveSetupSteps (height) {
     return { dir, runnerTemp }
 }
 
-describe('rail-leg.yml anchor arm heights', function () {
+function defineWorkflowInputTests () {
     it('declares three optional inputs and resolves them before any stack install', function () {
         const doc = loadWorkflow()
         const inputs = doc.on.workflow_dispatch.inputs
@@ -110,7 +110,9 @@ describe('rail-leg.yml anchor arm heights', function () {
         expect(steps.indexOf(findStep(doc, 'Resolve the anchor arm height')))
             .to.be.lessThan(steps.indexOf(findStep(doc, 'Boot the two regtest stacks at ${{ inputs.stack_ref || \'develop\' }}')))
     })
+}
 
+function defineResolutionTests () {
     it('canonicalizes any populated input into one height for all three gates', function () {
         const { out, result } = resolveArms({ XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '0042' })
         expect(result.status, result.stderr).to.equal(0)
@@ -134,7 +136,9 @@ describe('rail-leg.yml anchor arm heights', function () {
         expect(invalid.result.status).to.not.equal(0)
         expect(invalid.result.stderr).to.include('must be a non-negative integer')
     })
+}
 
+function defineStackPropagationTests () {
     it('puts the same height in the standing stack and both indexer configs', function () {
         const setup = driveSetupSteps('42')
         const expected = Object.fromEntries(ARM_ENVS.map((name) => [name, '42']))
@@ -153,7 +157,9 @@ describe('rail-leg.yml anchor arm heights', function () {
             expect(parseAssignments(file)).to.not.have.any.keys(ARM_ENVS)
         }
     })
+}
 
+function defineDrivePropagationTests () {
     it('writes the resolved heights into the drive environment without logging values', function () {
         const values = Object.fromEntries(ARM_ENVS.map((name) => [name, '42']))
         const { out, output } = writeDriveEnv(values)
@@ -166,4 +172,11 @@ describe('rail-leg.yml anchor arm heights', function () {
         expect(parseAssignments(out)).to.not.have.any.keys(ARM_ENVS)
         for (const name of ARM_ENVS) expect(output).to.not.include(name)
     })
+}
+
+describe('rail-leg.yml anchor arm heights', function () {
+    defineWorkflowInputTests()
+    defineResolutionTests()
+    defineStackPropagationTests()
+    defineDrivePropagationTests()
 })
