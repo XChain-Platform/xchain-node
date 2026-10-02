@@ -201,6 +201,16 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
                 defaultValues[varName] = config.INDEXER_GENESIS_ENV[varName]
             }
         }
+        const originIndexerPassthroughVars = [
+            "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL",
+            "BTC_INDEXER_API_KEY", "LTC_INDEXER_API_KEY", "DOGE_INDEXER_API_KEY"
+        ]
+        for (const varName of originIndexerPassthroughVars) {
+            const value = readSecretHostEnv(varName)
+            if (value !== undefined && value !== "") {
+                defaultValues[varName] = value
+            }
+        }
         const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
         if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
                                                                       "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
