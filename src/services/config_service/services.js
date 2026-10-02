@@ -218,7 +218,9 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
                                                                       "HUB_PRICE_SYNC_TIMEOUT_MS",
                                                                       "XCHAIN_COINPAY_EXPIRATION_S",
                                                                       "XC_MIRROR_ADMISSION_ACTIVATION",
-                                                                      "XC_ANCHOR_FOLD_REGTEST_ACTIVATION")
+                                                                      "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
+                                                                      "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
+                                                                      "XC_ANCHOR_SLASH_REGTEST_ACTIVATION")
         for (const varName of rollcallPassthroughVars) {
             if (config.INDEXER_ROLLCALL_ENV[varName] !== undefined && config.INDEXER_ROLLCALL_ENV[varName] !== "") {
                 defaultValues[varName] = config.INDEXER_ROLLCALL_ENV[varName]
