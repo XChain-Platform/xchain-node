@@ -301,6 +301,9 @@ jobs:
       - name: Write the host .env for the drive
         run: |
           node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" bitcoin
+          for name in BTC_INDEXER_API_URL DOGE_INDEXER_API_URL DOGE_ENCODER_URL; do
+            grep -Eq "^${name}=http://127\\.0\\.0\\.1:[0-9]+$" "$RAIL_ROOT/xchain-e2e-test/.env"
+          done
           mkdir -p "$RAIL_ROOT/xchain-e2e-test/drill-keys"
           chmod 700 "$RAIL_ROOT/xchain-e2e-test/drill-keys"
 
