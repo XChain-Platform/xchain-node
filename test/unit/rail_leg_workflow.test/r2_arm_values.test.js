@@ -71,7 +71,7 @@ function findStep (doc, name) {
     return step
 }
 
-describe('rail-leg.yml R2 arm values', function () {
+describe('rail leg R2 arm resolver', function () {
     it('writes an empty file when no value is set', function () {
         const { out, result } = resolveArms({})
         expect(result.status, result.stderr).to.equal(0)
@@ -123,7 +123,9 @@ describe('rail-leg.yml R2 arm values', function () {
         expect(result.stderr).to.include('must be a non-negative integer')
         expect(result.stdout + result.stderr).to.not.include(badValue)
     })
+})
 
+describe('rail-leg.yml R2 arm values', function () {
     it('declares ten inputs and resolves the three optional R2 values beside the anchor step', function () {
         const doc = loadWorkflow()
         const inputs = doc.on.workflow_dispatch.inputs
