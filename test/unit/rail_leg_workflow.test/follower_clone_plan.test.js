@@ -18,7 +18,7 @@ const {
     cloneStatements,
 } = require('../../../scripts/rail_follower_clone')
 
-describe('rail follower clone plan', function () {
+describe('rail follower clone environment plan', function () {
     it('keeps source configuration order while dropping container defaults and redirecting the database', function () {
         const source = [
             'HOME=/root',
@@ -60,7 +60,9 @@ describe('rail follower clone plan', function () {
         expect(() => followerEnvLines(['INDEXER_DB_NAME=source_db'], 'source_db'))
             .to.throw('must differ')
     })
+})
 
+describe('rail follower clone container plan', function () {
     it('builds docker create arguments without publishing a port', function () {
         const args = followerCreateArgs({
             container: 'follower-indexer',
@@ -90,7 +92,9 @@ describe('rail follower clone plan', function () {
             expect(() => followerCreateArgs({ ...complete, [field]: '' })).to.throw(field + ' is required')
         }
     })
+})
 
+describe('rail follower clone database plan', function () {
     it('builds the database and two-table clone statements', function () {
         expect(cloneStatements('source_db', 'follower_db', ['blocks', 'transactions'])).to.deep.equal([
             'DROP DATABASE IF EXISTS `follower_db`;',
