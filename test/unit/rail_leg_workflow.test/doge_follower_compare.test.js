@@ -14,11 +14,12 @@ const { expect } = require('chai')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { execFileSync } = require('child_process')
+const { execFileSync, spawnSync } = require('child_process')
 const yaml = require('js-yaml')
 
 const ROOT = path.join(__dirname, '../../..')
 const WORKFLOW = path.join(ROOT, '.github/workflows/rail-leg.yml')
+const FOLLOWER_COMPARE = path.join(ROOT, 'scripts/rail_follower_compare.js')
 const ARM_INPUTS = [
     'XC_ANCHOR_FOLD_REGTEST_ACTIVATION',
     'XC_ANCHOR_STAKE_REGTEST_ACTIVATION',
@@ -37,6 +38,23 @@ function findStep (doc, name) {
 
 function assignments (file) {
     return Object.fromEntries(fs.readFileSync(file, 'utf8').trim().split('\n').map((line) => line.split('=')))
+}
+
+function followerRows (height) {
+    return [height - 1, height, height + 5].map((blockIndex) => ({
+        block_index: blockIndex,
+        ledger_hash: 'ledger-' + blockIndex,
+        actions_hash: 'actions-' + blockIndex,
+        contract_hash: 'contract-' + blockIndex,
+        state_hash: 'state-' + blockIndex,
+    }))
+}
+
+function runFollowerCompare (args) {
+    return spawnSync(process.execPath, [FOLLOWER_COMPARE, ...args], {
+        cwd: ROOT,
+        encoding: 'utf8',
+    })
 }
 
 describe('rail-leg.yml DOGE follower comparison', function () {
@@ -111,10 +129,35 @@ describe('rail-leg.yml DOGE follower comparison', function () {
     it('requires the injected-difference control to report a mismatch', function () {
         const compare = findStep(loadWorkflow(), 'Compare DOGE follower state hashes')
         const commands = compare.run.split('\n').filter((line) => line.includes('rail_follower_compare.js'))
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doge-follower-compare-'))
+        const standing = path.join(dir, 'standing.json')
+        const forward = path.join(dir, 'forward.json')
+        const height = 42
+        const rows = followerRows(height)
 
         expect(commands).to.have.length(2)
         expect(commands[0]).to.not.include('--control')
         expect(commands[1]).to.include('--control')
         expect(commands[1]).to.include('control.log')
+
+        fs.writeFileSync(standing, JSON.stringify(rows))
+        fs.writeFileSync(forward, JSON.stringify(rows))
+
+        const baseArgs = ['--a', standing, '--b', forward, '--arm-height', String(height)]
+        const match = runFollowerCompare(baseArgs)
+        expect(match.status, match.stderr).to.equal(0)
+        expect(match.stdout.trim().split('\n')).to.deep.equal([
+            'FOLLOWER 41 MATCH',
+            'FOLLOWER 42 MATCH',
+            'FOLLOWER 47 MATCH',
+        ])
+
+        const control = runFollowerCompare([...baseArgs, '--control'])
+        expect(control.status, control.stderr).to.equal(0)
+        expect(control.stdout.trim().split('\n')).to.deep.equal([
+            'FOLLOWER 41 MATCH',
+            'FOLLOWER 42 MISMATCH',
+            'FOLLOWER 47 MATCH',
+        ])
     })
 })
