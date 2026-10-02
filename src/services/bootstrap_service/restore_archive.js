@@ -314,6 +314,7 @@ async function restoreMariaDatabase({ dbContainerId, dbName, externalCfg, innerA
 }
 
 module.exports = {
+    assertArchiveIdentity,
     configureDependencies,
     restoreBootstrap
 }

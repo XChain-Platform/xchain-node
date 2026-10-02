@@ -126,10 +126,21 @@ function assertOwnsStake(live, address, fail) {
     }
 }
 
+// Refuse a partial exit: an UNSTAKE now withdraws only the active rows, and the indexer leaves these pending ones staked.
+function pendingTopUpRefusal(pending, tip, STAKE_TICK) {
+    const rows = pending.map(r => 'action ' + r.action_index + ' (' + r.amount + ' ' + STAKE_TICK +
+        ', activates at block ' + r.activation_block + ')').join(', ')
+    const from = Math.max(...pending.map(r => Number(r.activation_block)))
+    return 'part of this stake is not active yet: ' + rows + '. An UNSTAKE now would withdraw only the active ' +
+        'part, and the indexer leaves those rows staked, so this pubkey would stay in the active set once they ' +
+        'activate. An UNSTAKE covering the whole stake can land from block ' + from + ' (the explorer is at block ' +
+        tip + '). Re-run then. Nothing was sent.'
+}
+
 /**
  * Decide what an UNSTAKE would withdraw, before anything is sent. Returns
  * { active } when the indexer would admit one, or { done } with the result to
- * return when there is nothing to withdraw; throws when it would reject.
+ * return when there is nothing to withdraw; throws when it would reject or not be a full exit.
  */
 async function resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, fail, paren, STAKE_TICK }) {
     // Read the set rather than a per-pubkey lookup (see readChainState): the
@@ -177,6 +188,8 @@ async function resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, 
                    (Number.isFinite(from) ? from : '(unknown)') +
                    ' (the explorer is at block ' + tip + '). Re-run then. Nothing was sent.')
     }
+    // The indexer's UNSTAKE leaves a pending top-up undeactivated, so it would activate later and keep this key in N.
+    if (pending.length) throw fail(pendingTopUpRefusal(pending, tip, STAKE_TICK))
     return { active: withdrawnStake(admissible) }
 }
 

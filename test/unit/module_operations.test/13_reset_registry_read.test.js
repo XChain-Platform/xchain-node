@@ -77,8 +77,9 @@ describe('moduleOperations', function () {
                 const stubs = makeStubs()
                 stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
                 // node resolves and stops, the tracker read fails, and the
-                // rollback's own read fails the same way.
+                // rollback's own read fails the same way. Call 0 is the node datadir guard's read.
                 stubs.db.getModuleContainerStrict.onCall(0).resolves('container-id-123')
+                stubs.db.getModuleContainerStrict.onCall(1).resolves('container-id-123')
                 stubs.db.getModuleContainerStrict.rejects(new Error('registry unreachable'))
                 const ops = loadOperations(stubs)
                 const lines = []

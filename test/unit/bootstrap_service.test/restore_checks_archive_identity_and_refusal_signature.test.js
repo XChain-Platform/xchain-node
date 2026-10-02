@@ -208,3 +208,53 @@ describe('BootstrapService', function () {
         })
     })
 })
+
+describe('BootstrapService', function () {
+    beforeEach(allowUnsignedBootstrap)
+    afterEach(restoreRequireSignedBootstrapSetting)
+    describe('the node tip guard refusal checks the archive identity before the archive is retired', function () {
+
+        // Refuse on the node tip, then run the ensure path and return its result and the end-of-install summary.
+        async function refusedRun(meta, ensure) {
+            const stubs = makeStubs()
+            const finishDownload = stubDownloadedArchive(stubs)
+            stubs.nodeTipGuard.assessNodeTipForRestore.resolves({ verdict: 'behind-refuse', refuse: true, detail: 'node behind' })
+            stubs.archiveMeta.readBootstrapArchiveMeta.resolves(meta)
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+            const promise = ensure(bs)
+            setImmediate(finishDownload)
+            const result = await promise
+            const lines = []
+            const log = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+            try { bs.reportBootstrapOutcomes() } finally { log.restore() }
+            return { stubs, result, summary: lines.join('\n') }
+        }
+
+        it('keeps a refused tracker archive declaring another coin and records the mismatch, not node lag', async function () {
+            const { stubs, result, summary } = await refusedRun(declared(XChainService.XCHAIN_UTXO_TRACKER, 'litecoin'),
+                bs => bs.ensureBootstrapUtxoTracker(COIN, NETWORK))
+            expect(result).to.equal(false)
+            expect(archiveRemoved(stubs, TRACKER_ARCHIVE), 'a mis-published archive is evidence and must be kept').to.equal(false)
+            expect(summary).to.match(/xchain-utxo-tracker: NOT restored: Bootstrap archive identity mismatch .* declares coin litecoin/)
+            expect(summary).to.not.match(/the coin node is behind the archive/)
+        })
+
+        it('keeps a refused indexer archive offered to the decoder (module-only mismatch)', async function () {
+            const { stubs, result, summary } = await refusedRun(declared(XChainService.XCHAIN_INDEXER),
+                bs => bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER))
+            expect(result).to.equal(false)
+            expect(archiveRemoved(stubs, DECODER_ARCHIVE)).to.equal(false)
+            expect(summary).to.match(/declares module xchain-indexer but the restore target is xchain-decoder/)
+            expect(summary).to.not.match(/the coin node is behind the archive/)
+        })
+
+        it('still retires a refused archive whose identity matches, recording node-behind', async function () {
+            const { stubs, result, summary } = await refusedRun(declared(XChainService.XCHAIN_DECODER),
+                bs => bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER))
+            expect(result).to.equal(false)
+            expect(archiveRemoved(stubs, DECODER_ARCHIVE)).to.equal(true)
+            expect(summary).to.not.match(/identity mismatch/)
+        })
+    })
+})

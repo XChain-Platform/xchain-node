@@ -123,7 +123,7 @@ function registerValidatorStake(validator, deps) {
     validator
         .command('stake')
         .description('Mint XCHAIN if short (testnet) and broadcast the STAKE naming this validator\'s pubkey; dry run without --broadcast')
-        .option('--amount <xchain>',   'amount to stake (default 25000, clears every capability floor under default governance settings)')
+        .option('--amount <xchain>',   'whole XCHAIN to stake (default 25000, clears every capability floor under default governance settings)')
         .option('--broadcast',         'actually send the transactions (default: print the plan only)')
         .option('--no-wait',           'return once the STAKE is broadcast instead of waiting for it to index')
         .option('--serialize',         'send one action per block (default: chained back to back into one block)')

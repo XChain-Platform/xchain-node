@@ -86,11 +86,12 @@ async function resolveResetPaths(context) {
     // "Clearing node data" line was the only tell. "Not installed" stays a legitimate skip, and is stated out loud.
     let nodeDataPath = null
     if (resetNode) {
-        let nodeInstalled    = null
-        let registryReadable = true
+        let nodeInstalled = null
+        let registryError = null
         try {
-            nodeInstalled = await db.getModuleContainer(NODE_MODULE_NAME, coin, network)
-        } catch { registryReadable = false }
+            // Strict, as in validateDecoderPair: the lenient read answers null on a registry failure, which reads as "not installed" below.
+            nodeInstalled = await db.getModuleContainerStrict(NODE_MODULE_NAME, coin, network)
+        } catch (err) { registryError = err }
 
         const resolved = await resolveNodeDataPath(coin, network)
         if (resolved.path) {
@@ -99,13 +100,14 @@ async function resolveResetPaths(context) {
                 console.log(`Node datadir resolved from ${resolved.resolvedFrom}: ${nodeDataPath}`)
                 console.log(`  (XCHAIN_NODE_DATA_DIR in this shell would have pointed at ${resolved.configuredPath})`)
             }
-        } else if (registryReadable && !nodeInstalled) {
+        } else if (!registryError && !nodeInstalled) {
             console.log(`No ${NODE_MODULE_NAME} container is installed for ${coin} ${network}; there is no node data to clear.`)
         } else {
             const envState = config.XCHAIN_NODE_DATA_DIR && config.XCHAIN_NODE_DATA_DIR.trim() !== ''
                 ? `set to ${config.XCHAIN_NODE_DATA_DIR}`
                 : 'UNSET in this shell (non-interactive shells do not source the profile)'
             console.log(`Aborted: cannot resolve the ${coin} ${network} node datadir. No data was touched.`)
+            if (registryError) console.log(`  It could not read the ${NODE_MODULE_NAME} registry row (${failureReason(registryError)}), so it cannot tell whether a node is installed.`)
             console.log(`  Container ${resolved.containerName} reported no /root/.${coin} bind mount `
                 + '(it is absent, or docker is unreachable from here).')
             console.log(`  The configured path ${resolved.configuredPath} does not exist either.`)

@@ -66,6 +66,7 @@ const {
 } = require('./bootstrap_service/mariadb_archive')
 const {
     configureDependencies: configureRestoreArchive,
+    assertArchiveIdentity,
     restoreBootstrap
 } = require('./bootstrap_service/restore_archive')
 const {
@@ -98,7 +99,7 @@ const workspace = {
     assertBootstrapCapacity, buildDateTimeString, ensureDir, ensureDirWritable,
     getWorkDir, startProgress
 }
-const restoreArchive = { restoreBootstrap }
+const restoreArchive = { restoreBootstrap, assertArchiveIdentity }
 const download = { downloadBootstrap }
 
 configureArchiveSigning({ fs, childProcess, config, logger })
