@@ -89,6 +89,11 @@ function first (...values) {
     return values.find((v) => v !== undefined && v !== null && v !== '')
 }
 
+function hostServiceUrl (name, containerPort) {
+    const port = hostPort(name, containerPort)
+    return port ? 'http://127.0.0.1:' + port : null
+}
+
 function main () {
     if (process.argv[2] === '--resolve-anchor-arms') {
         writeAnchorArmEnv(process.argv[3])
@@ -128,6 +133,9 @@ function main () {
         EXPLORER_API_PORT: hostPort('xchain-node-xchain-explorer', 8080) || '18080',
         INDEXER_URL: 'localhost',
         INDEXER_API_PORT: hostPort(stack + 'xchain-indexer', 3004),
+        BTC_INDEXER_API_URL: hostServiceUrl('xchain-node-bitcoin-regtest-xchain-indexer', 3004),
+        DOGE_INDEXER_API_URL: hostServiceUrl('xchain-node-dogecoin-regtest-xchain-indexer', 3004),
+        DOGE_ENCODER_URL: hostServiceUrl('xchain-node-dogecoin-regtest-xchain-encoder', 3003),
         INDEXER_DB_NAME: indexer.INDEXER_DB_NAME,
         INDEXER_DB_USER: indexer.INDEXER_DB_USER,
         INDEXER_DB_PASS: indexer.INDEXER_DB_PASS,
