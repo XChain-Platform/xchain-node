@@ -53,6 +53,7 @@ const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 const { acquireCommandLock } = require('./utils/command_lock')
 const { noticeNewerRelease } = require('./services/self_update_service')
 const { runParseCommand } = require('./cli/parse_command')
+const { dispatchSettings } = require('./cli/dispatch')
 const { installUnhandledRejectionHandler, installUncaughtExceptionHandler } = require('./cli/errors')
 const loadModule = require
 
@@ -164,11 +165,10 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
     }
 
     // Serialized like every mutator, so two concurrent updates cannot both
-    // move the checkout. The lock is handed back right before the re-exec so
-    // the child, which takes its own lock in this same hook, is not refused
-    // by its parent.
+    // move the checkout. The lock is handed back right before the re-exec, and the
+    // child waits a bounded time for a mutator that takes it in between (lockSettingsFor).
     const lock = deps.acquireCommandLock || acquireCommandLock
-    const release = lock({ command: 'update (self-update)', waitMs: 0 })
+    const release = lock({ command: 'update (self-update)', waitMs: dispatchSettings(config).MUTATING_LOCK_WAIT_MS })
     let outcome
     try {
         outcome = await selfUpdate.selfUpdateAndReexec({

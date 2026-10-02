@@ -18,7 +18,7 @@ const sinon       = require('sinon')
 const { expect }  = require('chai')
 const { Command } = require('commander')
 
-const { installDispatch } = require('../../../src/cli/dispatch')
+const { installDispatch, SELF_UPDATE_HANDOFF_WAIT_MS } = require('../../../src/cli/dispatch')
 
 const SIGNALS = ['exit', 'SIGINT', 'SIGTERM']
 
@@ -78,8 +78,8 @@ function restoreListeners() {
     sinon.restore()
 }
 
-async function run(argv) {
-    const deps = makeDeps()
+async function run(argv, config = {}) {
+    const deps = Object.assign(makeDeps(), { config })
     await buildProgram(deps).parseAsync(argv, { from: 'user' })
     return deps
 }
@@ -108,6 +108,29 @@ describe('CLI dispatch: commands that hold the lock through their action', funct
         const deps = await run(['clear-reorg-halt', 'bitcoin', 'regtest', '--dry-run'])
         expect(deps.acquireCommandLock.calledOnceWith({ command: 'clear-reorg-halt', waitMs: 0 })).to.be.true
         expect(deps.release.called).to.be.false
+    })
+})
+
+describe('CLI dispatch: the release update a self-update re-executes', function () {
+    beforeEach(snapshotListeners)
+    afterEach(restoreListeners)
+
+    const TARGET = { XCHAIN_NODE_UPDATE_TARGET: 'v0.99.0' }
+
+    it('waits out a mutator that took the handed-back lock instead of refusing at once', async function () {
+        const deps = await run(['update', 'all', 'v0.99.0'], TARGET)
+        expect(deps.acquireCommandLock.calledOnceWith({ command: 'update', waitMs: SELF_UPDATE_HANDOFF_WAIT_MS })).to.be.true
+        expect(deps.release.called).to.be.false
+    })
+
+    it('keeps an operator wait longer than the handoff floor', async function () {
+        const deps = await run(['update', 'all', 'v0.99.0'], { ...TARGET, XCHAIN_NODE_MUTATING_LOCK_WAIT_MS: '90000' })
+        expect(deps.acquireCommandLock.calledOnceWith({ command: 'update', waitMs: 90000 })).to.be.true
+    })
+
+    it('gives no other mutator the floor, even with the target marker set', async function () {
+        const deps = await run(['install', 'xchain-hub'], TARGET)
+        expect(deps.acquireCommandLock.calledOnceWith({ command: 'install', waitMs: 0 })).to.be.true
     })
 })
 

@@ -15,6 +15,10 @@
  * Commander setup and command definitions
  ********************************************************************/
 
+// How long a release update re-taking the lock its self-update step handed back waits
+// at least, so a mutator that slipped into that gap delays the update instead of refusing it.
+const SELF_UPDATE_HANDOFF_WAIT_MS = 30000
+
 function dispatchSettings(config) {
     const commandsNeedingVersions = ['install', 'update', 'reinstall']
     // Read-only commands only display state and never change which services
@@ -104,6 +108,12 @@ function scopedCommandLock(command, deps) {
 // Hold the lock only while a validator stake/unstake sends, never through the indexer wait.
 const validatorSendLock = scopedCommandLock
 
+// Floor a release update's wait at the handoff wait, since its self-update step just released the lock.
+function lockSettingsFor(commandName, settings, config) {
+    if (commandName !== 'update' || !(config && config.XCHAIN_NODE_UPDATE_TARGET)) return settings
+    return { ...settings, MUTATING_LOCK_WAIT_MS: Math.max(settings.MUTATING_LOCK_WAIT_MS, SELF_UPDATE_HANDOFF_WAIT_MS) }
+}
+
 // preCheck provisions shared containers/DB/hub (buildDatabaseModule,
 // ensureXchainNodeAccess, scanAndRegisterModules, installHubModule) for
 // EVERY non-validator command, not just the mutating ones. Running that
@@ -189,7 +199,7 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
         }
     }
 
-    const lock = commandLock(commandName, settings, acquireCommandLock)
+    const lock = commandLock(commandName, lockSettingsFor(commandName, settings, deps.config), acquireCommandLock)
     if (!lock) return
     try {
         await preCheck(
@@ -218,4 +228,4 @@ function installDispatch(program, deps) {
         beforeAction(thisCommand, actionCommand, settings, deps))
 }
 
-module.exports = { installDispatch, validatorSendLock, scopedCommandLock }
+module.exports = { installDispatch, dispatchSettings, validatorSendLock, scopedCommandLock, SELF_UPDATE_HANDOFF_WAIT_MS }
