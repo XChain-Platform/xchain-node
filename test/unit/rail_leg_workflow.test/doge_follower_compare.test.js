@@ -57,7 +57,7 @@ function runFollowerCompare (args) {
     })
 }
 
-describe('rail-leg.yml DOGE follower comparison', function () {
+describe('rail-leg.yml DOGE follower comparison: arm wiring', function () {
     it('clones before the drive and compares after it only for an armed run', function () {
         const doc = loadWorkflow()
         const steps = doc.jobs.leg.steps
@@ -96,6 +96,9 @@ describe('rail-leg.yml DOGE follower comparison', function () {
         }
     })
 
+})
+
+describe('rail-leg.yml DOGE follower comparison: clone and reads', function () {
     it('clones the stopped standing database and launches an unexposed follower', function () {
         const clone = findStep(loadWorkflow(), 'Clone forward DOGE follower')
 
@@ -126,6 +129,9 @@ describe('rail-leg.yml DOGE follower comparison', function () {
         expect(compare.run).to.include('$JOURNAL_DIR/follower')
     })
 
+})
+
+describe('rail-leg.yml DOGE follower comparison: mismatch control', function () {
     it('requires the injected-difference control to report a mismatch', function () {
         const compare = findStep(loadWorkflow(), 'Compare DOGE follower state hashes')
         const commands = compare.run.split('\n').filter((line) => line.includes('rail_follower_compare.js'))
