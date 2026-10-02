@@ -15,6 +15,7 @@
 //
 // Usage: node scripts/rail_leg_env.js <out .env path> [coin]
 //        node scripts/rail_leg_env.js --resolve-anchor-arms <out env path>
+//        node scripts/rail_leg_env.js --resolve-r2-arms <out env path>
 // Prints key names only; values never reach the log.
 
 const fs = require('fs')
@@ -26,6 +27,11 @@ const ANCHOR_ARM_ENVS = Object.freeze([
     'XC_ANCHOR_FOLD_REGTEST_ACTIVATION',
     'XC_ANCHOR_STAKE_REGTEST_ACTIVATION',
     'XC_ANCHOR_SLASH_REGTEST_ACTIVATION',
+])
+const R2_ARM_ENVS = Object.freeze([
+    'XC_AMOUNTS_PRICE_REGTEST_ACTIVATION',
+    'XC_AMOUNTS_PRICE_REGTEST_TIME',
+    'XC_CONTRACTS_REGTEST_ACTIVATION',
 ])
 
 function anchorArmHeight (env = process.env) {
@@ -48,6 +54,20 @@ function writeAnchorArmEnv (out) {
     const lines = height === null ? [] : ANCHOR_ARM_ENVS.map((name) => name + '=' + height)
     fs.writeFileSync(out, lines.join('\n') + (lines.length ? '\n' : ''), { mode: 0o600 })
     console.log('rail_leg_env: resolved anchor arm keys: ' + (height === null ? 'none' : ANCHOR_ARM_ENVS.join(' ')))
+}
+
+function writeR2ArmEnv (out, env = process.env) {
+    if (!out) throw new Error('usage: rail_leg_env.js --resolve-r2-arms <out env path>')
+    const configured = R2_ARM_ENVS
+        .map((name) => [name, env[name]])
+        .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
+        .map(([name, value]) => [name, String(value).trim()])
+    for (const [name, value] of configured) {
+        if (!/^\d+$/.test(value)) throw new Error(name + ' must be a non-negative integer')
+    }
+    const lines = configured.map(([name, value]) => name + '=' + value)
+    fs.writeFileSync(out, lines.join('\n') + (lines.length ? '\n' : ''), { mode: 0o600 })
+    console.log('rail_leg_env: resolved R2 arm keys: ' + (lines.length ? configured.map(([name]) => name).join(' ') : 'none'))
 }
 
 function containerEnv (name) {
@@ -92,6 +112,10 @@ function first (...values) {
 function main () {
     if (process.argv[2] === '--resolve-anchor-arms') {
         writeAnchorArmEnv(process.argv[3])
+        return
+    }
+    if (process.argv[2] === '--resolve-r2-arms') {
+        writeR2ArmEnv(process.argv[3])
         return
     }
     const out = process.argv[2]
@@ -149,7 +173,7 @@ function main () {
         DECODER_DB_PASS: decoder.DECODER_DB_PASS,
         XCHAIN_NODE_CONFIG_DIR: CONFIG_DIR,
     }
-    for (const name of ANCHOR_ARM_ENVS) {
+    for (const name of [...ANCHOR_ARM_ENVS, ...R2_ARM_ENVS]) {
         if (process.env[name]) env[name] = process.env[name]
     }
     const lines = []

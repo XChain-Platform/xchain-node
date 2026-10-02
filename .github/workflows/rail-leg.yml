@@ -53,6 +53,18 @@ on:
         description: 'Optional common regtest height for the anchor slash rehearsal'
         type: string
         required: false
+      XC_AMOUNTS_PRICE_REGTEST_ACTIVATION:
+        description: 'Optional regtest height for the R2 amounts price arm'
+        type: string
+        required: false
+      XC_AMOUNTS_PRICE_REGTEST_TIME:
+        description: 'Optional Unix instant for the R2 amounts price arm'
+        type: string
+        required: false
+      XC_CONTRACTS_REGTEST_ACTIVATION:
+        description: 'Optional regtest height for the R2 contracts arm'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -130,6 +142,15 @@ jobs:
             echo "height=$XC_ANCHOR_FOLD_REGTEST_ACTIVATION" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve the R2 arm values
+        env:
+          XC_AMOUNTS_PRICE_REGTEST_ACTIVATION: ${{ inputs.XC_AMOUNTS_PRICE_REGTEST_ACTIVATION }}
+          XC_AMOUNTS_PRICE_REGTEST_TIME: ${{ inputs.XC_AMOUNTS_PRICE_REGTEST_TIME }}
+          XC_CONTRACTS_REGTEST_ACTIVATION: ${{ inputs.XC_CONTRACTS_REGTEST_ACTIVATION }}
+        run: |
+          node scripts/rail_leg_env.js --resolve-r2-arms "$RUNNER_TEMP/r2-arms.env"
+          cat "$RUNNER_TEMP/r2-arms.env" >> "$GITHUB_ENV"
+
       - name: Start headless MariaDB
         run: |
           XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD="$(openssl rand -hex 24)"
@@ -183,7 +204,7 @@ jobs:
             echo "XCHAIN_CONFIRMATIONS_BTC=1"
             echo "XCHAIN_CONFIRMATIONS_LTC=1"
             echo "XCHAIN_CONFIRMATIONS_DOGE=1"
-            for name in XC_ANCHOR_FOLD_REGTEST_ACTIVATION XC_ANCHOR_STAKE_REGTEST_ACTIVATION XC_ANCHOR_SLASH_REGTEST_ACTIVATION; do
+            for name in XC_ANCHOR_FOLD_REGTEST_ACTIVATION XC_ANCHOR_STAKE_REGTEST_ACTIVATION XC_ANCHOR_SLASH_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_TIME XC_CONTRACTS_REGTEST_ACTIVATION; do
               value="${!name:-}"
               if [ -n "$value" ]; then echo "$name=$value"; fi
             done
@@ -209,7 +230,7 @@ jobs:
               echo "INDEXER_PORT=$((base + 4))"
               echo "REGTEST_MINER_PORT=$((base + 5))"
               for line in "$@"; do echo "$line"; done
-              for name in XC_ANCHOR_FOLD_REGTEST_ACTIVATION XC_ANCHOR_STAKE_REGTEST_ACTIVATION XC_ANCHOR_SLASH_REGTEST_ACTIVATION; do
+              for name in XC_ANCHOR_FOLD_REGTEST_ACTIVATION XC_ANCHOR_STAKE_REGTEST_ACTIVATION XC_ANCHOR_SLASH_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_TIME XC_CONTRACTS_REGTEST_ACTIVATION; do
                 value="${!name:-}"
                 if [ -n "$value" ]; then echo "$name=$value"; fi
               done
