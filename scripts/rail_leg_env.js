@@ -149,7 +149,9 @@ function main () {
         DECODER_DB_PASS: decoder.DECODER_DB_PASS,
         XCHAIN_NODE_CONFIG_DIR: CONFIG_DIR,
     }
-    for (const name of ANCHOR_ARM_ENVS) env[name] = process.env[name]
+    for (const name of ANCHOR_ARM_ENVS) {
+        if (process.env[name]) env[name] = process.env[name]
+    }
     const lines = []
     const missing = []
     for (const [k, v] of Object.entries(env)) {

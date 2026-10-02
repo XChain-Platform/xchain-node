@@ -58,6 +58,19 @@ function resolveArms (values) {
     return { out, result }
 }
 
+function writeDriveEnv (values) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rail-leg-anchor-drive-'))
+    const bin = path.join(dir, 'stub-bin')
+    const out = path.join(dir, '.env')
+    fs.mkdirSync(bin)
+    fs.writeFileSync(path.join(bin, 'docker'), '#!/usr/bin/env bash\nif [ "$1" = port ]; then echo "127.0.0.1:3020"; else echo "[]"; fi\n', { mode: 0o755 })
+    const env = Object.assign({}, process.env, { PATH: bin + ':' + process.env.PATH })
+    for (const name of ARM_ENVS) delete env[name]
+    Object.assign(env, values)
+    const output = execFileSync(process.execPath, [ENV_WRITER, out, 'bitcoin'], { env, encoding: 'utf8' })
+    return { out, output }
+}
+
 function driveSetupSteps (height) {
     const doc = loadWorkflow()
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rail-leg-anchor-setup-'))
@@ -142,15 +155,15 @@ describe('rail-leg.yml anchor arm heights', function () {
     })
 
     it('writes the resolved heights into the drive environment without logging values', function () {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rail-leg-anchor-drive-'))
-        const bin = path.join(dir, 'stub-bin')
-        const out = path.join(dir, '.env')
-        fs.mkdirSync(bin)
-        fs.writeFileSync(path.join(bin, 'docker'), '#!/usr/bin/env bash\nif [ "$1" = port ]; then echo "127.0.0.1:3020"; else echo "[]"; fi\n', { mode: 0o755 })
-        const env = Object.assign({}, process.env, { PATH: bin + ':' + process.env.PATH })
-        for (const name of ARM_ENVS) env[name] = '42'
-        const output = execFileSync(process.execPath, [ENV_WRITER, out, 'bitcoin'], { env, encoding: 'utf8' })
+        const values = Object.fromEntries(ARM_ENVS.map((name) => [name, '42']))
+        const { out, output } = writeDriveEnv(values)
         expect(parseAssignments(out)).to.include(Object.fromEntries(ARM_ENVS.map((name) => [name, '42'])))
         expect(output).to.not.include('42')
+    })
+
+    it('leaves the drive environment and missing-value diagnostics unchanged when unset', function () {
+        const { out, output } = writeDriveEnv({})
+        expect(parseAssignments(out)).to.not.have.any.keys(ARM_ENVS)
+        for (const name of ARM_ENVS) expect(output).to.not.include(name)
     })
 })
