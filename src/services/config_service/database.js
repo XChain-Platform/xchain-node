@@ -120,6 +120,7 @@ function setIndexerHubPassword(defaultConfig, defaultValues, module) {
 }
 
 function mergeDefaults(defaultConfig, defaultValues) {
+    if (defaultValues.HUB_SEED_URLS) delete defaultConfig.HUB_API_URL
     for (const key in defaultValues) {
         if (!(key in defaultConfig)) defaultConfig[key] = defaultValues[key]
     }

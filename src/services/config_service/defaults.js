@@ -276,15 +276,33 @@ function configureSharedBeforeHubKey(defaultValues) {
 // hand to a remote address; a container-local
 // default that overrode it would point a working production
 // explorer at a hostname that does not resolve.
+function configureExplorerHubFeed(defaultValues, module) {
+    if (module !== EXPLORER_MODULE_NAME || config.EXPLORER_CHECKPOINT_SELF_SYNC === undefined ||
+        config.EXPLORER_CHECKPOINT_SELF_SYNC === "") return
+    if (config.HUB_SEED_URLS !== undefined && config.HUB_SEED_URLS !== "") {
+        defaultValues.HUB_SEED_URLS = config.HUB_SEED_URLS
+    } else {
+        defaultValues.HUB_API_URL = config.HUB_API_URL ||
+            ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" + defaultValues.HUB_PORT)
+    }
+    if (config.HUB_FEED_API_KEY !== undefined && config.HUB_FEED_API_KEY !== "") {
+        defaultValues.HUB_FEED_API_KEY = config.HUB_FEED_API_KEY
+    }
+}
+
+function configureManagedHubDiscovery(defaultValues, module) {
+    if (module !== HUB_MODULE_NAME) return
+    if (config.HUB_PUBLIC_API_URL !== undefined && config.HUB_PUBLIC_API_URL !== "") {
+        defaultValues.HUB_PUBLIC_API_URL = config.HUB_PUBLIC_API_URL
+    }
+}
+
 function configureSharedAfterHubKey(defaultValues, module) {
     if (config.CORS_ORIGIN !== undefined && config.CORS_ORIGIN !== "") {
         defaultValues.CORS_ORIGIN = config.CORS_ORIGIN
     }
+    configureExplorerHubFeed(defaultValues, module)
     if (module === EXPLORER_MODULE_NAME) {
-        if (config.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && config.EXPLORER_CHECKPOINT_SELF_SYNC !== "") {
-            defaultValues.HUB_API_URL = config.HUB_API_URL ||
-                ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" + defaultValues.HUB_PORT)
-        }
         if (config.EXPLORER_VM_QUERY_ENABLED !== undefined && config.EXPLORER_VM_QUERY_ENABLED !== "") {
             defaultValues.EXPLORER_VM_QUERY_ENABLED = config.EXPLORER_VM_QUERY_ENABLED
         }
@@ -331,6 +349,7 @@ function configureSharedAfterHubKey(defaultValues, module) {
             }
         }
     }
+    configureManagedHubDiscovery(defaultValues, module)
 }
 
 module.exports = {
