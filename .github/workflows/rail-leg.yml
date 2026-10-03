@@ -321,6 +321,11 @@ jobs:
             coin="$(node "$coin_helper" "$DRIVE" "$LEG")"
           fi
           node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" "$coin"
+          if [ "$coin" != bitcoin ]; then
+            # Steps that still run as COIN=bitcoin on this leg (the federation seed) load
+            # .env.btc instead of the leg's coin .env (xchain-e2e-test test/helpers/rail/coin_env.js).
+            node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env.btc" bitcoin
+          fi
           for name in BTC_INDEXER_API_URL DOGE_INDEXER_API_URL DOGE_ENCODER_URL; do
             grep -Eq "^${name}=http://127\\.0\\.0\\.1:[0-9]+$" "$RAIL_ROOT/xchain-e2e-test/.env"
           done

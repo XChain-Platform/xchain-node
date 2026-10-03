@@ -82,7 +82,10 @@ process.stdout.write(${JSON.stringify(helperCoin)})
     })
     try {
         execFileSync('bash', ['-e', '-c', driveEnvStep().run], { cwd: ROOT, env, encoding: 'utf8' })
-        return parseAssignments(path.join(e2e, '.env'))
+        const btc = path.join(e2e, '.env.btc')
+        return Object.assign(parseAssignments(path.join(e2e, '.env')), {
+            btcEnv: fs.existsSync(btc) ? parseAssignments(btc) : null,
+        })
     } finally {
         fs.rmSync(dir, { recursive: true, force: true })
     }
@@ -102,5 +105,18 @@ describe('rail-leg.yml drive environment coin', function () {
 
     it('defaults to bitcoin when the drive coin helper is absent', function () {
         expect(runDriveEnvStep().COIN).to.equal('bitcoin')
+    })
+
+    // The federation seed runs as COIN=bitcoin on every leg; on a dogecoin leg the e2e
+    // loader (test/helpers/rail/coin_env.js) takes .env.btc for it (R-3 attempt 5).
+    it('writes a bitcoin .env.btc beside a dogecoin leg env', function () {
+        const written = runDriveEnvStep('dogecoin')
+        expect(written.INDEXER_API_PORT).to.equal('3124')
+        expect(written.btcEnv).to.include({ COIN: 'bitcoin', INDEXER_API_PORT: '3024' })
+    })
+
+    it('writes no .env.btc on a bitcoin leg', function () {
+        expect(runDriveEnvStep().btcEnv).to.equal(null)
+        expect(runDriveEnvStep('bitcoin').btcEnv).to.equal(null)
     })
 })
