@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-10-03
+
+### Added
+- Published the hub peer port in validator mode.
+- Added an optional litecoin rail stack and admission-armed list share rail legs.
+
+### Changed
+- Validated the running indexer's migration status before service use.
+
+### Fixed
+- Used regtest namespaces and the correct encoder URL in validator links.
+- Started module containers under an init process and bounded health-check requests.
+
 ## [0.21.2] - 2026-10-02
 
 ### Fixed
