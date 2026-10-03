@@ -311,8 +311,16 @@ jobs:
           node -e 'require(process.argv[1] + "/xchain-indexer/node_modules/xchain-vm"); console.log("xchain-indexer loads xchain-vm")' "$ROOT"
 
       - name: Write the host .env for the drive
+        env:
+          DRIVE: ${{ matrix.drive }}
+          LEG: ${{ matrix.leg }}
         run: |
-          node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" bitcoin
+          coin=bitcoin
+          coin_helper="$RAIL_ROOT/xchain-e2e-test/test/helpers/rail_leg_coins.js"
+          if [ -f "$coin_helper" ]; then
+            coin="$(node "$coin_helper" "$DRIVE" "$LEG")"
+          fi
+          node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" "$coin"
           for name in BTC_INDEXER_API_URL DOGE_INDEXER_API_URL DOGE_ENCODER_URL; do
             grep -Eq "^${name}=http://127\\.0\\.0\\.1:[0-9]+$" "$RAIL_ROOT/xchain-e2e-test/.env"
           done
