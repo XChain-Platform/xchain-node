@@ -75,10 +75,7 @@ function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
 // install/recreate time from the same host env var, and the explorer falls back
 // to it for hand-written config.json deployments.
 function buildCheckpointConfig(defaultConfigCoinNetwork) {
-    return {
-        hub_url: config.HUB_API_URL ||
-            ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" +
-             defaultConfigCoinNetwork.HUB_PORT),
+    const checkpointConfig = {
         db_host:   defaultConfigCoinNetwork.INDEXER_DB_HOST,
         db_port:   defaultConfigCoinNetwork.INDEXER_DB_PORT,
         user:      defaultConfigCoinNetwork.INDEXER_DB_USER,
@@ -90,6 +87,17 @@ function buildCheckpointConfig(defaultConfigCoinNetwork) {
         name:      defaultConfigCoinNetwork.INDEXER_DB_NAME + '_HubMirror',
         self_sync: true
     }
+    if (config.HUB_SEED_URLS !== undefined && config.HUB_SEED_URLS !== '') {
+        checkpointConfig.hub_seed_urls = config.HUB_SEED_URLS
+    } else {
+        checkpointConfig.hub_url = config.HUB_API_URL ||
+            ("http://" + getDockerContainerImageName(HUB_MODULE_NAME, "", "") + ":" +
+             defaultConfigCoinNetwork.HUB_PORT)
+    }
+    if (config.HUB_FEED_API_KEY !== undefined && config.HUB_FEED_API_KEY !== '') {
+        checkpointConfig.hub_feed_api_key = config.HUB_FEED_API_KEY
+    }
+    return checkpointConfig
 }
 
 // Is the self-synced checkpoint mirror opted in for THIS deployment?
@@ -126,7 +134,8 @@ async function isCheckpointSelfSyncEnabled(deps = {}) {
     if (!containerEnv) return false
 
     return (containerEnv.EXPLORER_CHECKPOINT_SELF_SYNC !== undefined && containerEnv.EXPLORER_CHECKPOINT_SELF_SYNC !== "") ||
-           (containerEnv.HUB_API_URL !== undefined && containerEnv.HUB_API_URL !== "")
+           (containerEnv.HUB_API_URL !== undefined && containerEnv.HUB_API_URL !== "") ||
+           (containerEnv.HUB_SEED_URLS !== undefined && containerEnv.HUB_SEED_URLS !== "")
 }
 
 module.exports = { buildHubModuleConfig, buildCheckpointConfig, isCheckpointSelfSyncEnabled }

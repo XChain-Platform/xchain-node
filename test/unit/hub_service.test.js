@@ -375,3 +375,5 @@ describe('HubService.isCheckpointSelfSyncEnabled', function () {
         expect(enabled).to.be.false
     })
 })
+
+require('./hub_service_failover.test')
