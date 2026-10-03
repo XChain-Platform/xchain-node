@@ -224,7 +224,9 @@ jobs:
       # The token rides this step's env and nothing else: the image builds and the
       # standing stacks above never see it, and the leg forwards it only to its
       # venue hub children (at5 forwardedHubCredentialEnv). It is masked before any
-      # leg output and never printed.
+      # leg output and never printed. With the credential on, one probe turn with
+      # the hub's own argv names the CLI's verdict first, because the hub logs only
+      # stderr and the CLI reports an auth or vendor failure on stdout.
       - name: Run ${{ matrix.leg }}
         working-directory: ${{ env.RAIL_ROOT }}/xchain-e2e-test
         env:
@@ -233,6 +235,8 @@ jobs:
           HUB_CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.hub_llm == true && secrets.HUB_CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |
           if [ -n "$HUB_CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "::add-mask::$HUB_CLAUDE_CODE_OAUTH_TOKEN"; fi
+          node "$GITHUB_WORKSPACE/.github/attest-mirror/hub-llm-probe.js" | tee "$L004_LOG_DIR/hub-llm-probe.log" ||
+            echo "::warning::hub llm probe failed; llm cases on this leg will answer provider_error"
           set +e
           env L004_VENUE_ROOT="$RAIL_ROOT" ATTEST_MIRROR_CONCURRENCY=1 ATTEST_MIRROR_READY_TIMEOUT_MS=1200000 \
             ATTEST_MIRROR_STACK_ROOT="$AM_ROOT" ATTEST_MIRROR_STACK_PREFIX=xca7 \
