@@ -1,7 +1,7 @@
 name: Attest-mirror leg (regtest)
 
 run-name: >-
-  Attest-mirror legs @ e2e ${{ inputs.e2e_ref || 'develop' }} ${{ inputs.legs || '(all)' }}
+  Attest-mirror legs @ e2e ${{ inputs.e2e_ref || 'develop' }} ${{ inputs.legs || '(all)' }}${{ inputs.hub_llm && ' +llm' || '' }}
 
 # Runs L004-ACC's attest-mirror legs (`BF_STAMP_AHEAD_S=900 npm run test:attest-mirror`
 # in xchain-e2e-test) on GitHub-hosted runners, ONE leg per job, all in parallel,
@@ -36,6 +36,10 @@ on:
         description: 'Ref the service images and source roots are built at'
         type: string
         default: develop
+      hub_llm:
+        description: 'Give the venue hubs the HUB_CLAUDE_CODE_OAUTH_TOKEN secret so llm attestation cases run (regtest rail only)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -199,11 +203,36 @@ jobs:
           echo "L004_LOG_DIR=$RUNNER_TEMP/am-logs" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/am-logs"
 
+      # The llm attestation provider on the venue hubs, ONLY when the dispatch asks
+      # for it (hub_llm, off by default and off on the schedule). A validator on
+      # testnet or mainnet answers ATTEST with its own LLM setup, which the hub
+      # resolves through xchain-hub src/lib/hub_credentials.js: a HUB_CLAUDE_CONFIG_DIR
+      # the hub owns, and on this rail the session's HUB_CLAUDE_CODE_OAUTH_TOKEN
+      # paired with it. The venue refuses an llm case unless all three of its
+      # needs are on the box (attestMirrorVenue assertLlmAvailable): the directory,
+      # a credential the hub's resolver accepts, and `claude` on the PATH the hub
+      # children inherit, pinned to the hub image's CLI version (xchain-hub Dockerfile).
+      # The directory sits outside am-logs, so the uploaded artifact never holds
+      # what the CLI writes there.
+      - name: Install the hub llm CLI (hub_llm only)
+        if: inputs.hub_llm == true
+        run: |
+          npm install -g --no-audit --no-fund @anthropic-ai/claude-code@2.1.266
+          command -v claude
+          mkdir -m 700 -p "$RUNNER_TEMP/hub-claude"
+
+      # The token rides this step's env and nothing else: the image builds and the
+      # standing stacks above never see it, and the leg forwards it only to its
+      # venue hub children (at5 forwardedHubCredentialEnv). It is masked before any
+      # leg output and never printed.
       - name: Run ${{ matrix.leg }}
         working-directory: ${{ env.RAIL_ROOT }}/xchain-e2e-test
         env:
           LEG: ${{ matrix.leg }}
+          HUB_CLAUDE_CONFIG_DIR: ${{ inputs.hub_llm == true && format('{0}/hub-claude', runner.temp) || '' }}
+          HUB_CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.hub_llm == true && secrets.HUB_CLAUDE_CODE_OAUTH_TOKEN || '' }}
         run: |
+          if [ -n "$HUB_CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "::add-mask::$HUB_CLAUDE_CODE_OAUTH_TOKEN"; fi
           set +e
           env L004_VENUE_ROOT="$RAIL_ROOT" ATTEST_MIRROR_CONCURRENCY=1 ATTEST_MIRROR_READY_TIMEOUT_MS=1200000 \
             ATTEST_MIRROR_STACK_ROOT="$AM_ROOT" ATTEST_MIRROR_STACK_PREFIX=xca7 \
