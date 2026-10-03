@@ -151,6 +151,13 @@ jobs:
           node scripts/rail_leg_env.js --resolve-r2-arms "$RUNNER_TEMP/r2-arms.env"
           cat "$RUNNER_TEMP/r2-arms.env" >> "$GITHUB_ENV"
 
+      - name: Resolve the leg expect values
+        env:
+          LEG_EXPECT_JSON: ${{ toJSON(matrix.expect) }}
+        run: |
+          node scripts/rail_leg_env.js --resolve-leg-expect "$RUNNER_TEMP/leg-expect.env"
+          cat "$RUNNER_TEMP/leg-expect.env" >> "$GITHUB_ENV"
+
       - name: Start headless MariaDB
         run: |
           XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD="$(openssl rand -hex 24)"
@@ -183,6 +190,10 @@ jobs:
       # BTC_INDEXER_API_URL left every venue hub unable to read its capability set.
       - name: Initialize the validator identity
         run: |
+          anchor_arm_values="${XC_ANCHOR_FOLD_REGTEST_ACTIVATION:-}${XC_ANCHOR_STAKE_REGTEST_ACTIVATION:-}${XC_ANCHOR_SLASH_REGTEST_ACTIVATION:-}"
+          if [ -n "$anchor_arm_values" ]; then
+            export DOGE_ENCODER_URL=http://xchain-node-dogecoin-regtest-xchain-encoder:3003
+          fi
           node src/index.js validator init \
             --network regtest \
             --oracle-epoch-start "$(date -u +%s)000" \
@@ -204,6 +215,10 @@ jobs:
             echo "XCHAIN_CONFIRMATIONS_BTC=1"
             echo "XCHAIN_CONFIRMATIONS_LTC=1"
             echo "XCHAIN_CONFIRMATIONS_DOGE=1"
+            if [ -n "$anchor_arm_values" ]; then
+              echo "DOGE_ENCODER_URL=$DOGE_ENCODER_URL"
+              echo "HUB_SIGNER_MODULE=/XChainHub/operator-signer/signer.js"
+            fi
             for name in XC_ANCHOR_FOLD_REGTEST_ACTIVATION XC_ANCHOR_STAKE_REGTEST_ACTIVATION XC_ANCHOR_SLASH_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_TIME XC_CONTRACTS_REGTEST_ACTIVATION; do
               value="${!name:-}"
               if [ -n "$value" ]; then echo "$name=$value"; fi
@@ -258,6 +273,10 @@ jobs:
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
           set -a; . "$RUNNER_TEMP/stack.env"; set +a
           node src/index.js install "$STACK_REF" all dogecoin regtest
+          # The standing hub pays for its anchors from the generated DOGE publisher, which
+          # nothing else funds; fund and confirm it before BTC checkpoints can call for an
+          # anchor. The script does nothing when no anchor arm input is set.
+          node scripts/rail_fund_publisher.js
           node src/index.js install "$STACK_REF" all bitcoin regtest
           case ",${STACKS:-btc,doge}," in
             *,ltc,*) node src/index.js install "$STACK_REF" all litecoin regtest ;;
@@ -299,8 +318,21 @@ jobs:
           node -e 'require(process.argv[1] + "/xchain-indexer/node_modules/xchain-vm"); console.log("xchain-indexer loads xchain-vm")' "$ROOT"
 
       - name: Write the host .env for the drive
+        env:
+          DRIVE: ${{ matrix.drive }}
+          LEG: ${{ matrix.leg }}
         run: |
-          node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" bitcoin
+          coin=bitcoin
+          coin_helper="$RAIL_ROOT/xchain-e2e-test/test/helpers/rail_leg_coins.js"
+          if [ -f "$coin_helper" ]; then
+            coin="$(node "$coin_helper" "$DRIVE" "$LEG")"
+          fi
+          node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" "$coin"
+          if [ "$coin" != bitcoin ]; then
+            # Steps that still run as COIN=bitcoin on this leg (the federation seed) load
+            # .env.btc instead of the leg's coin .env (xchain-e2e-test test/helpers/rail/coin_env.js).
+            node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env.btc" bitcoin
+          fi
           for name in BTC_INDEXER_API_URL DOGE_INDEXER_API_URL DOGE_ENCODER_URL; do
             grep -Eq "^${name}=http://127\\.0\\.0\\.1:[0-9]+$" "$RAIL_ROOT/xchain-e2e-test/.env"
           done

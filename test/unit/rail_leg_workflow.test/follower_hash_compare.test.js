@@ -93,6 +93,23 @@ describe('rail follower hash comparison edge cases', function () {
         expect(compareFollowerHashes([row(10)], [empty], [10]).heights[0].verdict).to.equal('MISSING')
     })
 
+    for (const field of FIELDS) {
+        it('marks identical rows with a null ' + field + ' missing', function () {
+            const partial = { ...row(10), [field]: null }
+            const result = compareFollowerHashes([partial], [partial], [10])
+            expect(result.ok).to.equal(false)
+            expect(result.heights[0].verdict).to.equal('MISSING')
+        })
+
+        it('marks a one-sided undefined ' + field + ' missing', function () {
+            const partial = { ...row(10) }
+            delete partial[field]
+            const result = compareFollowerHashes([row(10)], [partial], [10])
+            expect(result.ok).to.equal(false)
+            expect(result.heights[0].verdict).to.equal('MISSING')
+        })
+    }
+
     it('compares string block indexes to numeric heights', function () {
         expect(compareFollowerHashes([{ ...row(10), block_index: '10' }], [row(10)], [10]).ok).to.equal(true)
     })

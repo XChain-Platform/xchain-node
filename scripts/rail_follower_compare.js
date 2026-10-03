@@ -44,8 +44,8 @@ function rowsByHeight (rows) {
     return result
 }
 
-function hasNoHashes (row) {
-    return HASH_FIELDS.every((field) => row[field] === null || row[field] === undefined)
+function lacksHash (row) {
+    return HASH_FIELDS.some((field) => row[field] === null || row[field] === undefined)
 }
 
 function compareFollowerHashes (a, b, heights) {
@@ -54,7 +54,7 @@ function compareFollowerHashes (a, b, heights) {
     const comparisons = heights.map((height) => {
         const aRow = aByHeight.get(Number(height))
         const bRow = bByHeight.get(Number(height))
-        if (!aRow || !bRow || hasNoHashes(aRow) || hasNoHashes(bRow)) {
+        if (!aRow || !bRow || lacksHash(aRow) || lacksHash(bRow)) {
             return { height, verdict: 'MISSING', fields: [] }
         }
         const fields = HASH_FIELDS.filter((field) => aRow[field] !== bRow[field])
