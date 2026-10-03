@@ -7,7 +7,7 @@ const {
     makeServiceWithConfig
 } = require('./helpers.test')
 
-describe('ConfigService hub failover environment', function () {
+function registerEnvCleanup() {
     const envNames = [
         'EXPLORER_CHECKPOINT_SELF_SYNC',
         'HUB_API_URL',
@@ -28,6 +28,10 @@ describe('ConfigService hub failover environment', function () {
             else process.env[name] = value
         }
     })
+}
+
+describe('ConfigService indexer hub failover environment', function () {
+    registerEnvCleanup()
 
     it('writes seed and feed credentials to every indexer without a pinned feed URL', async function () {
         process.env.HUB_SEED_URLS = 'default,http://seed.example:10002'
@@ -71,6 +75,10 @@ describe('ConfigService hub failover environment', function () {
         expect(config).not.to.have.property('HUB_SEED_URLS')
         expect(config).not.to.have.property('HUB_FEED_API_KEY')
     })
+})
+
+describe('ConfigService managed hub failover environment', function () {
+    registerEnvCleanup()
 
     it('writes seed and feed credentials to a self-syncing explorer without a pinned feed URL', async function () {
         process.env.EXPLORER_CHECKPOINT_SELF_SYNC = '1'
