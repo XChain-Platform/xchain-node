@@ -16,6 +16,7 @@
 // Usage: node scripts/rail_leg_env.js <out .env path> [coin]
 //        node scripts/rail_leg_env.js --resolve-anchor-arms <out env path>
 //        node scripts/rail_leg_env.js --resolve-r2-arms <out env path>
+//        node scripts/rail_leg_env.js --resolve-leg-expect <out env path>
 // Prints key names only; values never reach the log.
 
 const fs = require('fs')
@@ -32,6 +33,11 @@ const R2_ARM_ENVS = Object.freeze([
     'XC_AMOUNTS_PRICE_REGTEST_ACTIVATION',
     'XC_AMOUNTS_PRICE_REGTEST_TIME',
     'XC_CONTRACTS_REGTEST_ACTIVATION',
+])
+const LEG_EXPECT_ENVS = Object.freeze([
+    'XC_E2E_PRICE_FEE_BATCH_LANDED',
+    'XC_VOTE_CALLBACK_BINDING_EXPECT',
+    'XC_JSON_STRINGIFY_HOOK_EXPECT',
 ])
 
 function anchorArmHeight (env = process.env) {
@@ -71,6 +77,32 @@ function writeR2ArmEnv (out, env = process.env) {
     const lines = configured.map(([name, value]) => name + '=' + value)
     fs.writeFileSync(out, lines.join('\n') + (lines.length ? '\n' : ''), { mode: 0o600 })
     console.log('rail_leg_env: resolved R2 arm keys: ' + (lines.length ? configured.map(([name]) => name).join(' ') : 'none'))
+}
+
+function writeLegExpectEnv (out, input = process.env.LEG_EXPECT_JSON) {
+    if (!out) throw new Error('usage: rail_leg_env.js --resolve-leg-expect <out env path>')
+    let values
+    try {
+        values = JSON.parse(input)
+    } catch (e) {
+        throw new Error('LEG_EXPECT_JSON must be a JSON object')
+    }
+    if (values === null) values = {}
+    if (typeof values !== 'object' || Array.isArray(values)) {
+        throw new Error('LEG_EXPECT_JSON must be a JSON object')
+    }
+    for (const name of Object.keys(values)) {
+        if (!LEG_EXPECT_ENVS.includes(name)) throw new Error('unknown leg expect key: ' + name)
+        const allowed = name === 'XC_E2E_PRICE_FEE_BATCH_LANDED'
+            ? ['armed', 'off']
+            : ['armed', 'inert']
+        if (!allowed.includes(values[name])) throw new Error(name + ' must be one of: ' + allowed.join(', '))
+    }
+    const lines = LEG_EXPECT_ENVS
+        .filter((name) => Object.prototype.hasOwnProperty.call(values, name))
+        .map((name) => name + '=' + values[name])
+    fs.writeFileSync(out, lines.join('\n') + (lines.length ? '\n' : ''), { mode: 0o600 })
+    console.log('rail_leg_env: resolved leg expect keys: ' + (lines.length ? lines.map((line) => line.split('=')[0]).join(' ') : 'none'))
 }
 
 function containerEnv (name) {
@@ -124,6 +156,10 @@ function main () {
     }
     if (process.argv[2] === '--resolve-r2-arms') {
         writeR2ArmEnv(process.argv[3])
+        return
+    }
+    if (process.argv[2] === '--resolve-leg-expect') {
+        writeLegExpectEnv(process.argv[3])
         return
     }
     const out = process.argv[2]
@@ -202,4 +238,6 @@ function main () {
     }
 }
 
-main()
+if (require.main === module) main()
+
+module.exports = { writeLegExpectEnv }

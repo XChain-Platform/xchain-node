@@ -151,6 +151,13 @@ jobs:
           node scripts/rail_leg_env.js --resolve-r2-arms "$RUNNER_TEMP/r2-arms.env"
           cat "$RUNNER_TEMP/r2-arms.env" >> "$GITHUB_ENV"
 
+      - name: Resolve the leg expect values
+        env:
+          LEG_EXPECT_JSON: ${{ toJSON(matrix.expect) }}
+        run: |
+          node scripts/rail_leg_env.js --resolve-leg-expect "$RUNNER_TEMP/leg-expect.env"
+          cat "$RUNNER_TEMP/leg-expect.env" >> "$GITHUB_ENV"
+
       - name: Start headless MariaDB
         run: |
           XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD="$(openssl rand -hex 24)"
