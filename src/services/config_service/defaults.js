@@ -292,9 +292,6 @@ function configureExplorerHubFeed(defaultValues, module) {
 
 function configureManagedHubDiscovery(defaultValues, module) {
     if (module !== HUB_MODULE_NAME) return
-    if (config.HUB_FEED_API_KEY !== undefined && config.HUB_FEED_API_KEY !== "") {
-        defaultValues.HUB_FEED_API_KEY = config.HUB_FEED_API_KEY
-    }
     if (config.HUB_PUBLIC_API_URL !== undefined && config.HUB_PUBLIC_API_URL !== "") {
         defaultValues.HUB_PUBLIC_API_URL = config.HUB_PUBLIC_API_URL
     }

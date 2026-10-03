@@ -92,15 +92,15 @@ describe('ConfigService managed hub failover environment', function () {
         expect(config).not.to.have.property('HUB_API_URL')
     })
 
-    it('writes the feed key and public API URL to a managed hub', async function () {
+    it('writes only the public API URL to a managed hub', async function () {
         process.env.HUB_FEED_API_KEY = 'hub-feed-key-fixture'
         process.env.HUB_PUBLIC_API_URL = 'https://public-hub.example'
         const service = makeServiceWithConfig('')
         const hubConfig = await service.getDefaultConfig(HUB_MODULE_NAME, null, null)
         const explorerConfig = await service.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
 
-        expect(hubConfig.HUB_FEED_API_KEY).to.equal('hub-feed-key-fixture')
         expect(hubConfig.HUB_PUBLIC_API_URL).to.equal('https://public-hub.example')
+        expect(hubConfig).not.to.have.property('HUB_FEED_API_KEY')
         expect(explorerConfig).not.to.have.property('HUB_FEED_API_KEY')
         expect(explorerConfig).not.to.have.property('HUB_PUBLIC_API_URL')
     })
