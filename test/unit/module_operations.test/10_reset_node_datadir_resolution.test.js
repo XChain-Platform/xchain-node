@@ -138,6 +138,7 @@ describe('moduleOperations', function () {
                 stubs.getContainerBindMounts.resolves([])
                 stubs.fs.existsSync.returns(false)
                 stubs.db.getModuleContainer.withArgs('node', 'bitcoin', 'mainnet').resolves(null)
+                stubs.db.getModuleContainerStrict.withArgs('node', 'bitcoin', 'mainnet').resolves(null)
                 stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
                 const ops = loadOperations(stubs)
                 const lines = []
@@ -151,6 +152,71 @@ describe('moduleOperations', function () {
                 expect(result).to.be.true
                 expect(lines.join('\n')).to.include('no node data to clear')
                 expect(wipedHostPaths(stubs.execFile)).to.be.empty
+            })
+        })
+    })
+})
+
+// Fail only the FIRST node registry read, whichever lookup makes it: the non-strict read answers
+// null and the strict read throws, as db/modules.js does on a blip; later reads recover.
+function registryBlip(stubs) {
+    let blipped = false
+    const first = () => { const hit = !blipped; blipped = true; return hit }
+    stubs.db.getModuleContainer.withArgs('node', 'bitcoin', 'mainnet')
+        .callsFake(async () => (first() ? null : 'container-id-123'))
+    stubs.db.getModuleContainerStrict.withArgs('node', 'bitcoin', 'mainnet')
+        .callsFake(async () => { if (first()) throw new Error('ECONNRESET'); return 'container-id-123' })
+}
+
+// Run a forced node reset and capture what it printed.
+async function runReset(stubs) {
+    const ops = loadOperations(stubs)
+    const lines = []
+    const logStub = sinon.stub(console, 'log').callsFake((...args) => lines.push(args.join(' ')))
+    let result
+    try {
+        result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
+    } finally {
+        logStub.restore()
+    }
+    return { result, output: lines.join('\n') }
+}
+
+describe('moduleOperations', function () {
+    let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
+    registerLifecycleHooks(stubs => {
+        ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
+    })
+
+    describe('resetModules()', function () {
+        describe('node datadir resolution with an unreadable registry', function () {
+
+            it('refuses, rather than skips, when the node registry read fails and the datadir is unresolvable', async function () {
+                const stubs = makeStubs()
+                stubs.getContainerBindMounts.resolves([])
+                stubs.fs.existsSync.returns(false)
+                registryBlip(stubs)
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const { result, output } = await runReset(stubs)
+                expect(result).to.be.false
+                expect(output).to.include('Aborted: cannot resolve the bitcoin mainnet node datadir')
+                expect(output).to.include('could not read the node registry row')
+                expect(output).to.include('ECONNRESET')
+                expect(output).to.not.include('no node data to clear')
+                expect(stubs.stopContainer.called).to.be.false
+                expect(stubs.resetDatabases.called).to.be.false
+                expect(wipedHostPaths(stubs.execFile)).to.be.empty
+            })
+
+            it('still wipes a datadir it resolved when only the registry read fails', async function () {
+                const stubs = makeStubs()
+                stubs.fs.existsSync.returns(false)
+                registryBlip(stubs)
+                stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
+                const { result } = await runReset(stubs)
+                expect(result).to.be.true
+                expect(wipedHostPaths(stubs.execFile))
+                    .to.include('/srv/xchain/data/node/bitcoin/mainnet:/data')
             })
         })
     })

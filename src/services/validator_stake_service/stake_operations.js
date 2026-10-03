@@ -241,6 +241,19 @@ async function finishStake(context, progress, stakeInputs) {
     return { staked: true, sent: progress.sent, txid: r.txid, chained: progress.chain && !progress.chainBroken }
 }
 
+// Resolve --amount: the default only when it is absent, else whole XCHAIN above 0, refused rather than coerced.
+// Whole units only: the mint split is float arithmetic, so a fractional shortfall would send malformed MINT amounts.
+function resolveStakeAmount(raw, DEFAULT_STAKE_AMOUNT, fail, STAKE_TICK) {
+    if (raw === undefined || raw === null) return DEFAULT_STAKE_AMOUNT
+    const text = String(raw).trim()
+    const amount = Number(text)
+    if (!/^[0-9]+$/.test(text) || !Number.isSafeInteger(amount) || amount <= 0) {
+        throw fail('--amount must be a whole number of ' + STAKE_TICK + ' above 0, such as 25000 (got "' + raw +
+                   '"). Nothing was sent.')
+    }
+    return amount
+}
+
 // Say that a dry run sent nothing and how --broadcast would send the steps.
 function logDryRun(log, stepCount) {
     log('')
@@ -253,7 +266,7 @@ function logDryRun(log, stepCount) {
 
 function createStakeValidator(helpers) {
     const { openValidatorSession, stakeTiming, readChainState, planMints, explorerUrl,
-        chainedInputs, waitForBalance, paren, STAKE_TICK, DEFAULT_STAKE_AMOUNT } = helpers
+        chainedInputs, waitForBalance, fail, paren, STAKE_TICK, DEFAULT_STAKE_AMOUNT } = helpers
 
     /**
      * Run the stake command. `deps` lets tests inject an SDK factory and a
@@ -271,8 +284,9 @@ function createStakeValidator(helpers) {
 
     async function planAndStake(opts, deps, sendLock) {
         const log = deps.log || defaultLog()
+        // Before the session opens, so a bad amount refuses ahead of any WIF prompt or chain read.
+        const amount = resolveStakeAmount(opts.amount, DEFAULT_STAKE_AMOUNT, fail, STAKE_TICK)
         const { network, coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
-        const amount = parseInt(opts.amount) || DEFAULT_STAKE_AMOUNT
         const timing = stakeTiming(coins, network)
         // Take the lock before reading the plan, so no other broadcast sends between this read and these sends.
         sendLock.hold()

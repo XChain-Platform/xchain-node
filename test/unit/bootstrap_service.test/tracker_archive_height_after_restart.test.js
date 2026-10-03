@@ -114,6 +114,46 @@ describe('BootstrapService', function () {
 describe('BootstrapService', function () {
     beforeEach(saveRequireSignedBootstrapSetting)
     afterEach(restoreRequireSignedBootstrapSetting)
+    describe('makeBootstrapUtxoTracker(): an unclean tracker stop is never archived', function () {
+        it('stops the tracker with its 120 s service budget when the container carries no stamp', async function () {
+            const { stubs } = trackerStubsWithProbe([100, 101])
+            makeAutoSpawn(stubs)
+
+            const bs = loadBootstrapService(stubs)
+            expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+            expect(stubs.dockerService.stopContainer.firstCall.args).to.deep.equal([FAKE_CONTAINER_ID, 120])
+        })
+
+        for (const [label, outcome] of [
+            ['was killed at the budget', { stopped: true, seconds: 120, killed: true, exitCode: 137 }],
+            ['exited non-zero inside the budget', { stopped: true, seconds: 100, killed: false, exitCode: 1 }]
+        ]) {
+            it(`refuses to snapshot, compress or sign when the tracker ${label}, and restarts it`, async function () {
+                const { stubs } = trackerStubsWithProbe([100, 101])
+                const spawnCalls = makeAutoSpawn(stubs)
+                stubs.dockerService.stopContainer = sinon.stub().resolves(outcome)
+
+                const bs = loadBootstrapService(stubs)
+                let err = null
+                try { await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER) } catch (e) { err = e }
+
+                expect(err, 'an unclean stop must fail the create').to.not.equal(null)
+                expect(err.message).to.match(/did not shut down cleanly/)
+                expect(err.message).to.include(`exit code ${outcome.exitCode}`)
+                const snapshots = stubs.execFile.getCalls().filter(c => Array.isArray(c.args[1]) && c.args[1].includes('sh'))
+                expect(snapshots, 'no snapshot may be taken of an unclean store').to.have.length(0)
+                expect(spawnCalls, 'no compress or wrap may run').to.have.length(0)
+                expect(stubs.archiveMeta.writeBootstrapMeta.called).to.equal(false)
+                expect(stubs.dockerService.startContainer.calledOnceWithExactly(FAKE_CONTAINER_ID)).to.equal(true)
+                expect(stubs.encoderMaintenance.clearEncoderMaintenance.callCount).to.equal(1)
+            })
+        }
+    })
+})
+
+describe('BootstrapService', function () {
+    beforeEach(saveRequireSignedBootstrapSetting)
+    afterEach(restoreRequireSignedBootstrapSetting)
     describe('tracker archive height helpers', function () {
         const trackerArchive = require('../../../src/services/bootstrap_service/tracker_archive')
 

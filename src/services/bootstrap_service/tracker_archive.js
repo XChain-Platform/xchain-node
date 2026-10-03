@@ -28,7 +28,8 @@ let execFileAsync         = promisify(execFile)
 let { XChainService, SEP } = require('../../config')
 let { db } = require('../../state')
 let { getDefaultConfig, getUtxoTrackerVolumeName } = require('../config_service')
-let { stopContainer, startContainer } = require('../docker_service')
+let { stopContainer, startContainer, getContainerStopSettings } = require('../docker_service')
+const { stopModuleContainer, stoppedUnclean } = require('../stop_budget_service')
 let { assertBootstrapSourceHealthy } = require('../bootstrap_health_gate')
 let bootstrapHealthGate = require('../bootstrap_health_gate')
 let { buildBootstrapMeta, writeBootstrapMeta } = require('../bootstrap_archive_meta')
@@ -49,7 +50,7 @@ function configureDependencies(dependencies) {
     ;({ XChainService, SEP } = dependencies.config)
     ;({ db } = dependencies.state)
     ;({ getDefaultConfig, getUtxoTrackerVolumeName } = dependencies.configService)
-    ;({ stopContainer, startContainer } = dependencies.dockerService)
+    ;({ stopContainer, startContainer, getContainerStopSettings } = dependencies.dockerService)
     bootstrapHealthGate = dependencies.bootstrapHealthGate
     ;({ assertBootstrapSourceHealthy } = bootstrapHealthGate)
     ;({ buildBootstrapMeta, writeBootstrapMeta } = dependencies.archiveMeta)
@@ -180,10 +181,13 @@ async function makeBootstrapUtxoTracker(coin, network) {
     const endMaintenanceWindow = await beginTrackerMaintenance(coin, network)
 
     logger.info(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
-    await stopContainer(context.containerId)
+    const stop = await stopModuleContainer(stopContainer, XChainService.XCHAIN_UTXO_TRACKER, coin, network, context.containerId, undefined, getContainerStopSettings)
 
     context.containerRestored = false
     try {
+        // A killed or overrun drain never closed the store in order, so it is never archived or signed; the finally restarts the tracker.
+        if (stop.killed || stoppedUnclean(stop)) throw new Error(`utxo-tracker ${coin}/${network} did not shut down cleanly ` +
+            `(exit code ${stop.exitCode}, ${stop.budget} s budget); no archive was built or signed`)
         const snapshotTaken = await takeTrackerSnapshot(context, endMaintenanceWindow)
         await compressTrackerArchive(context, snapshotTaken)
         // Fallback path: the store is archived, so bring the tracker back before the wrap and sign, and read its height there.

@@ -57,6 +57,8 @@ describe('moduleOperations', function () {
             const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
             expect(result).to.be.true
             expect(stubs.stopContainer.called).to.be.true
+            // The tracker's drain gets its 120 s service budget, not docker's ten-second default.
+            expect(stubs.stopContainer.firstCall.args).to.deep.equal(['container-id-123', 120])
         })
     })
 })

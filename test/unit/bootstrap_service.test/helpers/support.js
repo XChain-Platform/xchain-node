@@ -138,7 +138,9 @@ function makeServiceStubs() {
 
     const dockerServiceStub = {
         stopContainer:  sinon.stub().resolves(),
-        startContainer: sinon.stub().resolves()
+        startContainer: sinon.stub().resolves(),
+        // No stamp read: the stop budget falls to the service default (120 s for the tracker).
+        getContainerStopSettings: sinon.stub().resolves(null)
     }
 
     const databaseServiceStub = {
@@ -322,7 +324,8 @@ function makeBootstrapOverrides(stubs, execFileCb) {
         },
         './docker_service':    {
             stopContainer:  stubs.dockerService.stopContainer,
-            startContainer: stubs.dockerService.startContainer
+            startContainer: stubs.dockerService.startContainer,
+            getContainerStopSettings: stubs.dockerService.getContainerStopSettings
         },
         './database_service': {
             getDatabaseContainerId:       stubs.databaseService.getDatabaseContainerId,

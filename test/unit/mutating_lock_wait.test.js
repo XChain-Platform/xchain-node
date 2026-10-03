@@ -31,12 +31,26 @@ function tearDownLock() {
 }
 
 function runAutoheal(extraEnv) {
+    return runCli(['autoheal'], extraEnv)
+}
+
+// Delete the lock from a separate process after ms, standing in for a holder that finishes.
+function releaseLockAfter(ms) {
+    const lockPath = path.join(tmpDir, 'command.lock')
+    require('child_process').spawn(
+        process.execPath,
+        ['-e', `setTimeout(()=>require('fs').rmSync(${JSON.stringify(lockPath)},{force:true}),${ms})`],
+        { detached: true, stdio: 'ignore' }
+    ).unref()
+}
+
+function runCli(argv, extraEnv) {
     const started = Date.now()
-    const res = spawnSync(process.execPath, [CLI, 'autoheal'], {
+    const res = spawnSync(process.execPath, [CLI, ...argv], {
         env: {
             ...process.env,
             XCHAIN_NODE_LOCK_DIR: tmpDir,
-            // The third case proceeds past the lock into a MUTATING action,
+            // Some cases proceed past the lock into a MUTATING action,
             // so pin Docker out of reach: no machine may act on real
             // containers from a unit test.
             DOCKER_HOST: 'unix:///nonexistent/xchain-node-test-docker.sock',
@@ -85,16 +99,30 @@ describe('mutating command lock wait', () => {
         // The release MUST come from a separate process: spawnSync below blocks
         // this one's event loop, so an in-process timer would not fire until the
         // child had already given up.
-        const lockPath = path.join(tmpDir, 'command.lock')
-        require('child_process').spawn(
-            process.execPath,
-            ['-e', `setTimeout(()=>require('fs').rmSync(${JSON.stringify(lockPath)},{force:true}),2000)`],
-            { detached: true, stdio: 'ignore' }
-        ).unref()
+        releaseLockAfter(2000)
         const { output } = runAutoheal({ XCHAIN_NODE_MUTATING_LOCK_WAIT_MS: '30000' })
         // It proceeds past the lock and on into preCheck (which fails here with
         // no Docker). Absence of the lock error is the assertion: it acquired
         // rather than timing out.
         assert.doesNotMatch(output, /holds the command lock/)
+    })
+})
+
+describe('mutating command lock wait', () => {
+    beforeEach(setUpLock)
+    afterEach(tearDownLock)
+
+    it('lets the re-executed release update outwait a mutator that took the lock in the self-update handoff', function () {
+        this.timeout(60000)
+        // The child the self-update step spawns: explicit release form, target marker set,
+        // no operator wait configured, and another mutator holding the lock it was handed.
+        releaseLockAfter(2000)
+        const { elapsed, output } = runCli(['update', 'all', 'all', 'all', 'v0.99.0'], {
+            XCHAIN_NODE_MUTATING_LOCK_WAIT_MS: '',
+            XCHAIN_NODE_UPDATE_TARGET: 'v0.99.0'
+        })
+        assert.doesNotMatch(output, /holds the command lock/)
+        // Lower bound only: it blocked on the held lock rather than failing before reaching it.
+        assert.ok(elapsed >= 1500, `expected to wait for the holder, took only ${elapsed}ms`)
     })
 })

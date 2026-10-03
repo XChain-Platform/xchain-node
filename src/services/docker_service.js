@@ -80,9 +80,15 @@ async function removeContainer(containerId) {
     })
 }
 
-async function stopContainer(containerId) {
-    return new Promise((resolve, reject) => {
-        execFile('docker', ['stop', containerId], (error, stdout) => {
+// Stop by id, rejecting with docker's own error so callers can tell a missing
+// container from a failed stop. Without a budget it resolves true. With one it
+// passes -t and resolves { stopped, seconds, killed, exitCode }, the outcome
+// stopModuleContainer reports and a caller about to read the data can refuse on.
+async function stopContainer(containerId, timeoutSeconds) {
+    const startedAt = Date.now()
+    const args = timeoutSeconds === undefined ? ['stop', containerId] : ['stop', '-t', String(timeoutSeconds), containerId]
+    await new Promise((resolve, reject) => {
+        execFile('docker', args, (error, stdout) => {
             if (error) {
                 reject(error)
             } else if (stdout.trim() === containerId) {
@@ -92,6 +98,21 @@ async function stopContainer(containerId) {
             }
         })
     })
+    if (timeoutSeconds === undefined) return true
+    return readStopOutcome(containerId, startedAt, timeoutSeconds)
+}
+
+// How a stop that docker reported ended, read from the container's exit code.
+async function readStopOutcome(ref, startedAt, timeoutSeconds) {
+    const seconds = Math.round((Date.now() - startedAt) / 1000)
+    const exitCode = await new Promise((resolve) => {
+        execFile('docker', ['inspect', '--format', '{{.State.ExitCode}}', ref], (error, stdout) => {
+            const code = parseInt(String(stdout || '').trim(), 10)
+            resolve(error || !Number.isFinite(code) ? null : code)
+        })
+    })
+    const killed = exitCode === 137 || (exitCode === null && seconds >= timeoutSeconds)
+    return { stopped: true, seconds, killed, exitCode }
 }
 
 // Graceful stop by NAME with an explicit shutdown budget, for stateful
@@ -116,16 +137,8 @@ async function stopContainerByName(name, timeoutSeconds) {
             resolve(!error && stdout.trim() === name)
         })
     })
-    const seconds = Math.round((Date.now() - startedAt) / 1000)
-    if (!stopped) return { stopped: false, seconds, killed: false, exitCode: null }
-    const exitCode = await new Promise((resolve) => {
-        execFile('docker', ['inspect', '--format', '{{.State.ExitCode}}', name], (error, stdout) => {
-            const code = parseInt(String(stdout || '').trim(), 10)
-            resolve(error || !Number.isFinite(code) ? null : code)
-        })
-    })
-    const killed = exitCode === 137 || (exitCode === null && seconds >= timeoutSeconds)
-    return { stopped: true, seconds, killed, exitCode }
+    if (!stopped) return { stopped: false, seconds: Math.round((Date.now() - startedAt) / 1000), killed: false, exitCode: null }
+    return readStopOutcome(name, startedAt, timeoutSeconds)
 }
 
 async function startContainer(containerId) {

@@ -154,3 +154,39 @@ describe('DockerService', function () {
     })
 })
 
+describe('DockerService', function () {
+    describe('stopContainer() with a budget', function () {
+        const ID = 'xchain-node-bitcoin-mainnet-node'
+
+        it('runs docker stop -t <budget> <id> and resolves the outcome read after it', async function () {
+            const stubs = makeStubs()
+            const calls = stopThenInspect(stubs, { exitCode: '137' })
+            const ds = loadDockerService(stubs)
+            const outcome = await ds.stopContainer(ID, 120)
+            expect(calls[0]).to.deep.equal(['stop', '-t', '120', ID])
+            expect(calls[1].slice(0, 2)).to.deep.equal(['inspect', '--format'])
+            expect(outcome).to.include({ stopped: true, killed: true, exitCode: 137 })
+        })
+
+        it('rejects with docker\'s own error object, so a missing container stays distinguishable', async function () {
+            const stubs = makeStubs()
+            const original = new Error('Error response from daemon: No such container: ' + ID)
+            const calls = stopThenInspect(stubs, { stopErr: original })
+            const ds = loadDockerService(stubs)
+            let err = null
+            try { await ds.stopContainer(ID, 120) } catch (e) { err = e }
+            expect(err).to.equal(original)
+            expect(calls, 'a failed stop must not be inspected').to.have.length(1)
+        })
+
+        it('still rejects when docker exits 0 without echoing the id', async function () {
+            const stubs = makeStubs()
+            stopThenInspect(stubs, { stopOut: 'something-else\n' })
+            const ds = loadDockerService(stubs)
+            let err = null
+            try { await ds.stopContainer(ID, 120) } catch (e) { err = e }
+            expect(err).to.be.a('string').and.include(ID)
+        })
+    })
+})
+

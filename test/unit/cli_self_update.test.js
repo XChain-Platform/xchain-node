@@ -45,6 +45,7 @@ function setupSelfUpdateTest() {
 function teardownSelfUpdateTest() {
     delete process.env[TARGET_ENV]
     delete process.env[NO_SELF_UPDATE_ENV]
+    delete process.env.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS
 }
 
 describe('cli maybeSelfUpdateBeforeUpdate()', function () {
@@ -117,6 +118,16 @@ describe('cli maybeSelfUpdateBeforeUpdate()', function () {
         expect(deps.acquireCommandLock.calledOnce).to.equal(true)
         expect(selfUpdate.selfUpdateAndReexec.firstCall.args[0].deps.beforeSpawn).to.equal(release)
         expect(release.called, 'released after a no-move outcome too').to.equal(true)
+    })
+
+    it('takes the self-update lock with the same wait every mutator honours', async function () {
+        delete process.env.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS
+        await maybeSelfUpdateBeforeUpdate(['all'], deps)
+        expect(deps.acquireCommandLock.firstCall.args[0].waitMs).to.equal(0)
+        setupSelfUpdateTest()
+        process.env.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS = '4000'
+        await maybeSelfUpdateBeforeUpdate(['all'], deps)
+        expect(deps.acquireCommandLock.firstCall.args[0].waitMs).to.equal(4000)
     })
 
     it('lets a lookup failure propagate as the update failure', async function () {

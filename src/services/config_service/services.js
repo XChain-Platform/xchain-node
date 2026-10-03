@@ -201,6 +201,16 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
                 defaultValues[varName] = config.INDEXER_GENESIS_ENV[varName]
             }
         }
+        const originIndexerPassthroughVars = [
+            "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL",
+            "BTC_INDEXER_API_KEY", "LTC_INDEXER_API_KEY", "DOGE_INDEXER_API_KEY"
+        ]
+        for (const varName of originIndexerPassthroughVars) {
+            const value = readSecretHostEnv(varName)
+            if (value !== undefined && value !== "") {
+                defaultValues[varName] = value
+            }
+        }
         const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
         if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
                                                                       "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
@@ -208,7 +218,9 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
                                                                       "HUB_PRICE_SYNC_TIMEOUT_MS",
                                                                       "XCHAIN_COINPAY_EXPIRATION_S",
                                                                       "XC_MIRROR_ADMISSION_ACTIVATION",
-                                                                      "XC_ANCHOR_FOLD_REGTEST_ACTIVATION")
+                                                                      "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
+                                                                      "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
+                                                                      "XC_ANCHOR_SLASH_REGTEST_ACTIVATION")
         for (const varName of rollcallPassthroughVars) {
             if (config.INDEXER_ROLLCALL_ENV[varName] !== undefined && config.INDEXER_ROLLCALL_ENV[varName] !== "") {
                 defaultValues[varName] = config.INDEXER_ROLLCALL_ENV[varName]

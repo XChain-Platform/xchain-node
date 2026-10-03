@@ -41,6 +41,30 @@ on:
         description: 'Per-leg bound passed to rail_leg_drive.js --limit-minutes'
         type: string
         default: '200'
+      XC_ANCHOR_FOLD_REGTEST_ACTIVATION:
+        description: 'Optional common regtest height for the anchor fold rehearsal'
+        type: string
+        required: false
+      XC_ANCHOR_STAKE_REGTEST_ACTIVATION:
+        description: 'Optional common regtest height for the anchor stake rehearsal'
+        type: string
+        required: false
+      XC_ANCHOR_SLASH_REGTEST_ACTIVATION:
+        description: 'Optional common regtest height for the anchor slash rehearsal'
+        type: string
+        required: false
+      XC_AMOUNTS_PRICE_REGTEST_ACTIVATION:
+        description: 'Optional regtest height for the R2 amounts price arm'
+        type: string
+        required: false
+      XC_AMOUNTS_PRICE_REGTEST_TIME:
+        description: 'Optional Unix instant for the R2 amounts price arm'
+        type: string
+        required: false
+      XC_CONTRACTS_REGTEST_ACTIVATION:
+        description: 'Optional regtest height for the R2 contracts arm'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -104,6 +128,36 @@ jobs:
         with:
           node-version: '22.22.3'
 
+      - name: Resolve the anchor arm height
+        id: anchor-arms
+        env:
+          XC_ANCHOR_FOLD_REGTEST_ACTIVATION: ${{ inputs.XC_ANCHOR_FOLD_REGTEST_ACTIVATION }}
+          XC_ANCHOR_STAKE_REGTEST_ACTIVATION: ${{ inputs.XC_ANCHOR_STAKE_REGTEST_ACTIVATION }}
+          XC_ANCHOR_SLASH_REGTEST_ACTIVATION: ${{ inputs.XC_ANCHOR_SLASH_REGTEST_ACTIVATION }}
+        run: |
+          node scripts/rail_leg_env.js --resolve-anchor-arms "$RUNNER_TEMP/anchor-arms.env"
+          cat "$RUNNER_TEMP/anchor-arms.env" >> "$GITHUB_ENV"
+          if [ -s "$RUNNER_TEMP/anchor-arms.env" ]; then
+            . "$RUNNER_TEMP/anchor-arms.env"
+            echo "height=$XC_ANCHOR_FOLD_REGTEST_ACTIVATION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve the R2 arm values
+        env:
+          XC_AMOUNTS_PRICE_REGTEST_ACTIVATION: ${{ inputs.XC_AMOUNTS_PRICE_REGTEST_ACTIVATION }}
+          XC_AMOUNTS_PRICE_REGTEST_TIME: ${{ inputs.XC_AMOUNTS_PRICE_REGTEST_TIME }}
+          XC_CONTRACTS_REGTEST_ACTIVATION: ${{ inputs.XC_CONTRACTS_REGTEST_ACTIVATION }}
+        run: |
+          node scripts/rail_leg_env.js --resolve-r2-arms "$RUNNER_TEMP/r2-arms.env"
+          cat "$RUNNER_TEMP/r2-arms.env" >> "$GITHUB_ENV"
+
+      - name: Resolve the leg expect values
+        env:
+          LEG_EXPECT_JSON: ${{ toJSON(matrix.expect) }}
+        run: |
+          node scripts/rail_leg_env.js --resolve-leg-expect "$RUNNER_TEMP/leg-expect.env"
+          cat "$RUNNER_TEMP/leg-expect.env" >> "$GITHUB_ENV"
+
       - name: Start headless MariaDB
         run: |
           XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD="$(openssl rand -hex 24)"
@@ -136,6 +190,10 @@ jobs:
       # BTC_INDEXER_API_URL left every venue hub unable to read its capability set.
       - name: Initialize the validator identity
         run: |
+          anchor_arm_values="${XC_ANCHOR_FOLD_REGTEST_ACTIVATION:-}${XC_ANCHOR_STAKE_REGTEST_ACTIVATION:-}${XC_ANCHOR_SLASH_REGTEST_ACTIVATION:-}"
+          if [ -n "$anchor_arm_values" ]; then
+            export DOGE_ENCODER_URL=http://xchain-node-dogecoin-regtest-xchain-encoder:3003
+          fi
           node src/index.js validator init \
             --network regtest \
             --oracle-epoch-start "$(date -u +%s)000" \
@@ -157,6 +215,14 @@ jobs:
             echo "XCHAIN_CONFIRMATIONS_BTC=1"
             echo "XCHAIN_CONFIRMATIONS_LTC=1"
             echo "XCHAIN_CONFIRMATIONS_DOGE=1"
+            if [ -n "$anchor_arm_values" ]; then
+              echo "DOGE_ENCODER_URL=$DOGE_ENCODER_URL"
+              echo "HUB_SIGNER_MODULE=/XChainHub/operator-signer/signer.js"
+            fi
+            for name in XC_ANCHOR_FOLD_REGTEST_ACTIVATION XC_ANCHOR_STAKE_REGTEST_ACTIVATION XC_ANCHOR_SLASH_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_TIME XC_CONTRACTS_REGTEST_ACTIVATION; do
+              value="${!name:-}"
+              if [ -n "$value" ]; then echo "$name=$value"; fi
+            done
             # Mirror admission publishes decoder-tip observations only after a round window.
             # Short regtest windows keep the armed rail leg paced at its block cadence.
             if [ "$XC_MIRROR_ADMISSION_ACTIVATION" = armed ]; then
@@ -179,6 +245,10 @@ jobs:
               echo "INDEXER_PORT=$((base + 4))"
               echo "REGTEST_MINER_PORT=$((base + 5))"
               for line in "$@"; do echo "$line"; done
+              for name in XC_ANCHOR_FOLD_REGTEST_ACTIVATION XC_ANCHOR_STAKE_REGTEST_ACTIVATION XC_ANCHOR_SLASH_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_ACTIVATION XC_AMOUNTS_PRICE_REGTEST_TIME XC_CONTRACTS_REGTEST_ACTIVATION; do
+                value="${!name:-}"
+                if [ -n "$value" ]; then echo "$name=$value"; fi
+              done
             } > "$file"
           }
           mkdir -p config
@@ -203,6 +273,10 @@ jobs:
           mkdir -p "$XCHAIN_NODE_DATA_DIR"
           set -a; . "$RUNNER_TEMP/stack.env"; set +a
           node src/index.js install "$STACK_REF" all dogecoin regtest
+          # The standing hub pays for its anchors from the generated DOGE publisher, which
+          # nothing else funds; fund and confirm it before BTC checkpoints can call for an
+          # anchor. The script does nothing when no anchor arm input is set.
+          node scripts/rail_fund_publisher.js
           node src/index.js install "$STACK_REF" all bitcoin regtest
           case ",${STACKS:-btc,doge}," in
             *,ltc,*) node src/index.js install "$STACK_REF" all litecoin regtest ;;
@@ -244,10 +318,105 @@ jobs:
           node -e 'require(process.argv[1] + "/xchain-indexer/node_modules/xchain-vm"); console.log("xchain-indexer loads xchain-vm")' "$ROOT"
 
       - name: Write the host .env for the drive
+        env:
+          DRIVE: ${{ matrix.drive }}
+          LEG: ${{ matrix.leg }}
         run: |
-          node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" bitcoin
+          coin=bitcoin
+          coin_helper="$RAIL_ROOT/xchain-e2e-test/test/helpers/rail_leg_coins.js"
+          if [ -f "$coin_helper" ]; then
+            coin="$(node "$coin_helper" "$DRIVE" "$LEG")"
+          fi
+          node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env" "$coin"
+          if [ "$coin" != bitcoin ]; then
+            # Steps that still run as COIN=bitcoin on this leg (the federation seed) load
+            # .env.btc instead of the leg's coin .env (xchain-e2e-test test/helpers/rail/coin_env.js).
+            node scripts/rail_leg_env.js "$RAIL_ROOT/xchain-e2e-test/.env.btc" bitcoin
+          fi
+          for name in BTC_INDEXER_API_URL DOGE_INDEXER_API_URL DOGE_ENCODER_URL; do
+            grep -Eq "^${name}=http://127\\.0\\.0\\.1:[0-9]+$" "$RAIL_ROOT/xchain-e2e-test/.env"
+          done
           mkdir -p "$RAIL_ROOT/xchain-e2e-test/drill-keys"
           chmod 700 "$RAIL_ROOT/xchain-e2e-test/drill-keys"
+
+      - name: Clone forward DOGE follower
+        if: ${{ steps.anchor-arms.outputs.height != '' }}
+        env:
+          DOGE_SOURCE_CONTAINER: xchain-node-dogecoin-regtest-xchain-indexer
+          DOGE_FOLLOWER_CONTAINER: xchain-rail-doge-follower
+          DOGE_FOLLOWER_DB: XChain_DOGE_DrillB_Indexer
+          DOGE_FOLLOWER_NETWORK: xchain-node-dogecoin-regtest
+        run: |
+          set -euo pipefail
+          umask 077
+          WORK="$RUNNER_TEMP/doge-follower"
+          ENV_FILE="$WORK/follower.env"
+          PLAN_FILE="$WORK/plan.json"
+          mkdir -p "$WORK"
+          export DOGE_FOLLOWER_ENV_FILE="$ENV_FILE" DOGE_FOLLOWER_PLAN_FILE="$PLAN_FILE"
+          docker inspect "$DOGE_SOURCE_CONTAINER" --format '{{json .Config.Env}}' > "$WORK/source-env.json"
+          docker inspect "$DOGE_SOURCE_CONTAINER" --format '{{.Config.Image}}' > "$WORK/source-image.txt"
+          node - <<'JS'
+          const fs = require('fs')
+          const { followerEnvLines, followerCreateArgs } = require('./scripts/rail_follower_clone')
+          const sourceEnv = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/doge-follower/source-env.json', 'utf8'))
+          const sourceDb = sourceEnv.find((line) => line.startsWith('INDEXER_DB_NAME='))?.slice('INDEXER_DB_NAME='.length)
+          const image = fs.readFileSync(process.env.RUNNER_TEMP + '/doge-follower/source-image.txt', 'utf8').trim()
+          const envLines = followerEnvLines(sourceEnv, process.env.DOGE_FOLLOWER_DB)
+          fs.writeFileSync(process.env.DOGE_FOLLOWER_ENV_FILE, envLines.join('\n') + '\n', { mode: 0o600 })
+          fs.writeFileSync(process.env.DOGE_FOLLOWER_PLAN_FILE, JSON.stringify({
+            sourceDb,
+            createArgs: followerCreateArgs({
+              container: process.env.DOGE_FOLLOWER_CONTAINER,
+              network: process.env.DOGE_FOLLOWER_NETWORK,
+              envFile: process.env.DOGE_FOLLOWER_ENV_FILE,
+              image,
+            }),
+          }), { mode: 0o600 })
+          JS
+          docker rm -f "$DOGE_FOLLOWER_CONTAINER" >/dev/null 2>&1 || true
+          docker stop "$DOGE_SOURCE_CONTAINER" >/dev/null
+          trap 'docker start "$DOGE_SOURCE_CONTAINER" >/dev/null || true' EXIT
+          node - <<'JS'
+          const fs = require('fs')
+          const mariadb = require('mariadb')
+          const { cloneStatements } = require('./scripts/rail_follower_clone')
+          ;(async () => {
+            const plan = JSON.parse(fs.readFileSync(process.env.DOGE_FOLLOWER_PLAN_FILE, 'utf8'))
+            const connectionOptions = {
+              host: process.env.XCHAIN_NODE_EXTERNAL_DB_HOST,
+              port: Number(process.env.XCHAIN_NODE_EXTERNAL_DB_PORT),
+              user: process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER,
+            }
+            connectionOptions['password'] = process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD
+            const connection = await mariadb.createConnection(connectionOptions)
+            try {
+              const rows = await connection.query(
+                'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = ? ORDER BY TABLE_NAME',
+                [plan.sourceDb, 'BASE TABLE']
+              )
+              const statements = cloneStatements(plan.sourceDb, process.env.DOGE_FOLLOWER_DB,
+                rows.map((row) => row.TABLE_NAME))
+              for (const statement of statements) await connection.query(statement)
+            } finally {
+              await connection.end()
+            }
+          })().catch((error) => { console.error('DOGE follower clone failed: ' + error.message); process.exitCode = 1 })
+          JS
+          docker start "$DOGE_SOURCE_CONTAINER" >/dev/null
+          trap - EXIT
+          node - <<'JS'
+          const fs = require('fs')
+          const { spawnSync } = require('child_process')
+          const plan = JSON.parse(fs.readFileSync(process.env.DOGE_FOLLOWER_PLAN_FILE, 'utf8'))
+          const created = spawnSync('docker', plan.createArgs, { stdio: 'inherit' })
+          if (created.status !== 0) process.exit(created.status || 1)
+          JS
+          docker start "$DOGE_FOLLOWER_CONTAINER" >/dev/null
+          {
+            node -e 'const p=require(process.env.DOGE_FOLLOWER_PLAN_FILE); console.log("DOGE_FOLLOWER_SOURCE_DB="+p.sourceDb)'
+            echo "DOGE_FOLLOWER_DB=$DOGE_FOLLOWER_DB"
+          } >> "$GITHUB_ENV"
 
       # The self-hosted rails were seeded once with the four-source ROLLCALL
       # federation (test/tools/rollcallSeedFederation.test.js), whose keys the
@@ -336,6 +505,44 @@ jobs:
           echo "drive exit $rc"
           test -s "$J/case-journal.jsonl" && node scripts/rail_journal_triage.js "$J/case-journal.jsonl" 2>/dev/null | tail -5 || true
           exit "$rc"
+
+      - name: Compare DOGE follower state hashes
+        if: ${{ success() && steps.anchor-arms.outputs.height != '' }}
+        env:
+          DOGE_FOLLOWER_ARM_HEIGHT: ${{ steps.anchor-arms.outputs.height }}
+        run: |
+          set -euo pipefail
+          H="$DOGE_FOLLOWER_ARM_HEIGHT"
+          OUT="$JOURNAL_DIR/follower"
+          A="$OUT/standing.json"
+          B="$OUT/forward.json"
+          mkdir -p "$OUT"
+          ready=0
+          for attempt in $(seq 1 60); do
+            node scripts/rail_follower_rows.js \
+              --host "$XCHAIN_NODE_EXTERNAL_DB_HOST" \
+              --port "$XCHAIN_NODE_EXTERNAL_DB_PORT" \
+              --user "$XCHAIN_NODE_EXTERNAL_DB_ROOT_USER" \
+              --password-env XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD \
+              --database "$DOGE_FOLLOWER_SOURCE_DB" --arm-height "$H" --out "$A"
+            node scripts/rail_follower_rows.js \
+              --host "$XCHAIN_NODE_EXTERNAL_DB_HOST" \
+              --port "$XCHAIN_NODE_EXTERNAL_DB_PORT" \
+              --user "$XCHAIN_NODE_EXTERNAL_DB_ROOT_USER" \
+              --password-env XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD \
+              --database "$DOGE_FOLLOWER_DB" --arm-height "$H" --out "$B"
+            if node -e 'const fs=require("fs"); const h=Number(process.argv[1]); for (const f of process.argv.slice(2)) { const rows=JSON.parse(fs.readFileSync(f)); if (![h-1,h,h+5].every((n)=>rows.some((r)=>Number(r.block_index)===n))) process.exit(1) }' "$H" "$A" "$B"; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "DOGE followers did not both reach comparison height $((H + 5))" >&2
+            exit 1
+          fi
+          node scripts/rail_follower_compare.js --a "$A" --b "$B" --arm-height "$H" | tee "$OUT/compare.log"
+          node scripts/rail_follower_compare.js --a "$A" --b "$B" --arm-height "$H" --control | tee "$OUT/control.log"
 
       - name: Capture stack diagnostics
         if: always()
