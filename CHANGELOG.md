@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.3] - 2026-10-04
+
+### Fixed
+- A per-coin HUB_SEED_URLS now suppresses the default HUB_API_URL in generated indexer config.
+
 ## [0.22.2] - 2026-10-04
 
 ### Changed
