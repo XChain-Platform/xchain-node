@@ -18,8 +18,7 @@ const {
 } = require('../../src/config')
 const { resolveArgs } = require('../../src/services/config_service')
 
-// Mirrors the refusal pinned by test/unit/config_service.test/resolve_args.test.js:
-// an unrecognized token throws "Unrecognized argument '<token>'" and never resolves.
+// Matches the exact refusal pinned by test/unit/config_service.test/resolve_args.test.js.
 function expectRefusal(args, token, options) {
     let message = null
     try {
@@ -28,7 +27,10 @@ function expectRefusal(args, token, options) {
         message = err.message
     }
     expect(message, 'resolveArgs should refuse').to.be.a('string')
-    expect(message.startsWith(`Unrecognized argument '${token}'`)).to.equal(true)
+    expect(message).to.equal(`Unrecognized argument '${token}'. Valid services: database, node, ` +
+        'xchain-decoder, xchain-e2e-test, xchain-encoder, xchain-explorer, xchain-hub, xchain-indexer, ' +
+        'xchain-regtest-miner, xchain-sync, xchain-utxo-tracker. Valid coins: bitcoin, litecoin, dogecoin. ' +
+        'Networks: mainnet, testnet, regtest.')
 }
 
 describe('Fuzz: resolveArgs()', function () {
