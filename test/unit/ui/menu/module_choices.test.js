@@ -29,100 +29,117 @@ function installedModule(containerId, status) {
     }
 }
 
-describe('module menu choices', function () {
-    describe('expectedModules', function () {
-        it('excludes the E2E module on every network', function () {
-            for (const network of Object.values(Network)) {
-                expect(expectedModules(network)).to.not.include(XChainService.XCHAIN_E2E_TEST)
-            }
-        })
+function moduleKey(color, moduleName, status) {
+    return `\x1b[${color}m${moduleName} (${status})\x1b[37m`
+}
 
-        it('includes the regtest miner only on regtest', function () {
-            expect(expectedModules(Network.MAINNET)).to.not.include(XChainService.XCHAIN_REGTEST_MINER)
-            expect(expectedModules(Network.TESTNET)).to.not.include(XChainService.XCHAIN_REGTEST_MINER)
-            expect(expectedModules(Network.REGTEST)).to.include(XChainService.XCHAIN_REGTEST_MINER)
-        })
+function assertInstalledModules(result, installedModules) {
+    const expectedChoices = installedModules.map(({ color, moduleName, status }) => ({
+        name: moduleKey(color, moduleName, status),
+        value: moduleName
+    }))
 
-        it('ends with the node and database module names on every network', function () {
-            for (const network of Object.values(Network)) {
-                expect(expectedModules(network).slice(-2)).to.deep.equal([
-                    NODE_MODULE_NAME,
-                    DB_MODULE_NAME
-                ])
-            }
+    expect(result.moduleChoices.slice(0, installedModules.length)).to.deep.equal(expectedChoices)
+    for (const { color, moduleName, containerId, status } of installedModules) {
+        const key = moduleKey(color, moduleName, status)
+        expect(result.actionModules[key]).to.deep.equal({
+            value: moduleName,
+            container_id: containerId,
+            status
         })
+    }
+}
+
+function assertMissingModules(result, installed) {
+    const missing = expectedModules(Network.MAINNET)
+        .filter(moduleName => !(moduleName in installed))
+    const missingChoices = missing.map(moduleName => ({
+        name: moduleKey(34, moduleName, 'missing'),
+        value: moduleName
+    }))
+
+    expect(result.moduleChoices.slice(Object.keys(installed).length, -2)).to.deep.equal(missingChoices)
+    for (const moduleName of missing) {
+        const key = moduleKey(34, moduleName, 'missing')
+        expect(result.actionModules[key]).to.deep.equal({ value: moduleName, status: 'missing' })
+    }
+}
+
+describe('expectedModules', function () {
+    it('excludes the E2E module on every network', function () {
+        for (const network of Object.values(Network)) {
+            expect(expectedModules(network)).to.not.include(XChainService.XCHAIN_E2E_TEST)
+        }
     })
 
-    describe('buildModuleChoices', function () {
-        it('offers installation and return when the coin or network is absent', function () {
-            const fallbackChoices = [
-                { name: 'Install the node', value: 'Install the node' },
-                { name: 'Return', value: 'return' }
-            ]
-            const incompleteMaps = [{}, { bitcoin: {} }]
+    it('includes the regtest miner only on regtest', function () {
+        expect(expectedModules(Network.MAINNET)).to.not.include(XChainService.XCHAIN_REGTEST_MINER)
+        expect(expectedModules(Network.TESTNET)).to.not.include(XChainService.XCHAIN_REGTEST_MINER)
+        expect(expectedModules(Network.REGTEST)).to.include(XChainService.XCHAIN_REGTEST_MINER)
+    })
 
-            for (const modulesStatus of incompleteMaps) {
-                const result = buildModuleChoices(modulesStatus, 'bitcoin', Network.MAINNET)
-                expect(result.moduleChoices).to.deep.equal(fallbackChoices)
-                expect(result.actionModules).to.deep.equal({})
-            }
-        })
+    it('ends with the node and database module names on every network', function () {
+        for (const network of Object.values(Network)) {
+            expect(expectedModules(network).slice(-2)).to.deep.equal([
+                NODE_MODULE_NAME,
+                DB_MODULE_NAME
+            ])
+        }
+    })
+})
 
-        it('colours installed modules, maps their status, and lists every missing module', function () {
-            const installed = {
-                [XChainService.XCHAIN_ENCODER]: installedModule('encoder-id', 'exited'),
-                [XChainService.XCHAIN_DECODER]: installedModule('decoder-id', 'running')
-            }
-            const modulesStatus = { bitcoin: { [Network.MAINNET]: installed } }
+describe('buildModuleChoices fallback', function () {
+    it('offers installation and return when the coin or network is absent', function () {
+        const fallbackChoices = [
+            { name: 'Install the node', value: 'Install the node' },
+            { name: 'Return', value: 'return' }
+        ]
+
+        for (const modulesStatus of [{}, { bitcoin: {} }]) {
             const result = buildModuleChoices(modulesStatus, 'bitcoin', Network.MAINNET)
-            const redKey = `\x1b[31m${XChainService.XCHAIN_ENCODER} (exited)\x1b[37m`
-            const greenKey = `\x1b[32m${XChainService.XCHAIN_DECODER} (running)\x1b[37m`
-            const missing = expectedModules(Network.MAINNET)
-                .filter(moduleName => !(moduleName in installed))
+            expect(result.moduleChoices).to.deep.equal(fallbackChoices)
+            expect(result.actionModules).to.deep.equal({})
+        }
+    })
+})
 
-            expect(result.moduleChoices.slice(0, 2)).to.deep.equal([
-                { name: redKey, value: XChainService.XCHAIN_ENCODER },
-                { name: greenKey, value: XChainService.XCHAIN_DECODER }
-            ])
-            expect(result.actionModules[redKey]).to.deep.equal({
-                value: XChainService.XCHAIN_ENCODER,
-                container_id: 'encoder-id',
-                status: 'exited'
-            })
-            expect(result.actionModules[greenKey]).to.deep.equal({
-                value: XChainService.XCHAIN_DECODER,
-                container_id: 'decoder-id',
-                status: 'running'
-            })
-            expect(result.moduleChoices.slice(2, -2)).to.deep.equal(missing.map(moduleName => ({
-                name: `\x1b[34m${moduleName} (missing)\x1b[37m`,
-                value: moduleName
-            })))
-            for (const moduleName of missing) {
-                const key = `\x1b[34m${moduleName} (missing)\x1b[37m`
-                expect(result.actionModules[key]).to.deep.equal({ value: moduleName, status: 'missing' })
-            }
-            expect(result.moduleChoices.slice(-2)).to.deep.equal([
-                { name: 'Uninstall all the modules', value: 'Uninstall all the modules' },
-                { name: 'Return', value: 'return' }
-            ])
-        })
+describe('buildModuleChoices populated status', function () {
+    it('colours installed modules, maps their status, and lists every missing module', function () {
+        const installed = {
+            [XChainService.XCHAIN_ENCODER]: installedModule('encoder-id', 'exited'),
+            [XChainService.XCHAIN_DECODER]: installedModule('decoder-id', 'running')
+        }
+        const installedModules = [
+            { color: 31, moduleName: XChainService.XCHAIN_ENCODER, containerId: 'encoder-id', status: 'exited' },
+            { color: 32, moduleName: XChainService.XCHAIN_DECODER, containerId: 'decoder-id', status: 'running' }
+        ]
+        const modulesStatus = { bitcoin: { [Network.MAINNET]: installed } }
+        const result = buildModuleChoices(modulesStatus, 'bitcoin', Network.MAINNET)
 
-        it('places the E2E action immediately before uninstall and return on regtest', function () {
-            const modulesStatus = {
-                bitcoin: {
-                    [Network.REGTEST]: {
-                        [XChainService.XCHAIN_REGTEST_MINER]: installedModule('miner-id', 'running')
-                    }
+        assertInstalledModules(result, installedModules)
+        assertMissingModules(result, installed)
+        expect(result.moduleChoices.slice(-2)).to.deep.equal([
+            { name: 'Uninstall all the modules', value: 'Uninstall all the modules' },
+            { name: 'Return', value: 'return' }
+        ])
+    })
+})
+
+describe('buildModuleChoices on regtest', function () {
+    it('places the E2E action immediately before uninstall and return', function () {
+        const modulesStatus = {
+            bitcoin: {
+                [Network.REGTEST]: {
+                    [XChainService.XCHAIN_REGTEST_MINER]: installedModule('miner-id', 'running')
                 }
             }
-            const result = buildModuleChoices(modulesStatus, 'bitcoin', Network.REGTEST)
+        }
+        const result = buildModuleChoices(modulesStatus, 'bitcoin', Network.REGTEST)
 
-            expect(result.moduleChoices.slice(-3)).to.deep.equal([
-                { name: 'Perform an E2E test', value: 'e2etest' },
-                { name: 'Uninstall all the modules', value: 'Uninstall all the modules' },
-                { name: 'Return', value: 'return' }
-            ])
-        })
+        expect(result.moduleChoices.slice(-3)).to.deep.equal([
+            { name: 'Perform an E2E test', value: 'e2etest' },
+            { name: 'Uninstall all the modules', value: 'Uninstall all the modules' },
+            { name: 'Return', value: 'return' }
+        ])
     })
 })
