@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.3] - 2026-10-04
+
+### Fixed
+- A per-coin HUB_SEED_URLS now suppresses the default HUB_API_URL in generated indexer config.
+
+## [0.22.2] - 2026-10-04
+
+### Changed
+- Pinned xchain-hub v0.22.2 in the release manifest for the peer catch-up fallback.
+
+## [0.22.1] - 2026-10-04
+
+### Changed
+- Pinned xchain-hub v0.22.1 in the release manifest for the peer catch-up fix.
+
+## [0.22.0] - 2026-10-04
+
+### Added
+- Added a two-hub regtest venue for indexer failover drills.
+
+### Changed
+- Configured HUB_SEED_URLS and HUB_FEED_API_KEY for indexers, explorers, and managed hubs.
+- Limited feed credentials to failover clients and gated the failover venue on indexer readiness.
+
 ## [0.21.3] - 2026-10-03
 
 ### Added
