@@ -28,6 +28,7 @@ describe('validator stake send lock selection and release', function () {
     it('selects a supplied lock only for broadcasts', function () {
         const lock = { hold: sinon.stub(), release: sinon.stub() }
         expect(sendLockFor({ broadcast: true }, { sendLock: lock })).to.equal(lock)
+        expect(sendLockFor({ broadcast: 'yes' }, { sendLock: lock })).to.equal(lock)
         expect(sendLockFor()).to.equal(NO_LOCK)
         expect(sendLockFor({ broadcast: true })).to.equal(NO_LOCK)
         expect(sendLockFor({ broadcast: false }, { sendLock: lock })).to.equal(NO_LOCK)
