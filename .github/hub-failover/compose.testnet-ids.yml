@@ -1,0 +1,19 @@
+services:
+  hub-a:
+    environment:
+      P2P_VALIDATOR_ADDR: mverify5szar1XwwAjqAnPUHbA814kfHh4
+
+  hub-b:
+    environment:
+      P2P_VALIDATOR_ADDR: mverify7szar1XwwAjqAnPUHbA814kfHh4
+
+  hub-federation-init:
+    command:
+      - |
+        for hub in hub-a hub-b; do
+          for registration in \
+            '{"jsonrpc":"2.0","id":1,"method":"registervalidator","params":{"signing_pubkey":"03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8","addr":"mverify5szar1XwwAjqAnPUHbA814kfHh4"}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"registervalidator","params":{"signing_pubkey":"29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7","addr":"mverify7szar1XwwAjqAnPUHbA814kfHh4"}}'; do
+            wget -qO- --header="x-api-key: $${HUB_API_KEY}" --header="Content-Type: application/json" --post-data="$${registration}" "http://$${hub}:10000/" | grep -q '"status":"success"'
+          done
+        done
