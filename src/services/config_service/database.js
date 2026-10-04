@@ -120,7 +120,10 @@ function setIndexerHubPassword(defaultConfig, defaultValues, module) {
 }
 
 function mergeDefaults(defaultConfig, defaultValues) {
-    const hasHubSeedUrls = defaultConfig.HUB_SEED_URLS || defaultValues.HUB_SEED_URLS
+    const hubSeedUrls = "HUB_SEED_URLS" in defaultConfig
+        ? defaultConfig.HUB_SEED_URLS
+        : defaultValues.HUB_SEED_URLS
+    const hasHubSeedUrls = Boolean(hubSeedUrls)
     if (hasHubSeedUrls) delete defaultConfig.HUB_API_URL
     for (const key in defaultValues) {
         if (!(key in defaultConfig) && !(hasHubSeedUrls && key === "HUB_API_URL")) {
