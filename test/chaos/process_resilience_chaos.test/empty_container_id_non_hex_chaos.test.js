@@ -25,6 +25,11 @@ describe('Experiment: Empty container ID propagation', function () {
         it('rejects when docker run returns container ID with non-hex characters', async function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
+            const dockerArgs = require('../../../src/services/module_service/docker_args')
+            const configureDependencies = dockerArgs.configureDependencies
+            sinon.stub(dockerArgs, 'configureDependencies').callsFake((dependencies) => {
+                configureDependencies({ ...dependencies, getPublishedHostPorts: sinon.stub().resolves(new Map()) })
+            })
 
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let cb
@@ -40,7 +45,7 @@ describe('Experiment: Empty container ID propagation', function () {
             const ms = loadModuleService(stubs)
 
             try {
-                await ms.buildAndUp('xchain-vm', 'bitcoin', 'regtest')
+                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest')
                 expect.fail('should have rejected')
             } catch (err) {
                 const message = err instanceof Error ? err.message : err
