@@ -40,10 +40,11 @@ describe('Chaos: Process Resilience', function () {
             const ms = loadModuleService(stubs)
 
             try {
-                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest')
+                await ms.buildAndUp('xchain-vm', 'bitcoin', 'regtest')
                 expect.fail('should have rejected')
             } catch (err) {
-                expect(err).to.include('Invalid container ID')
+                const message = err instanceof Error ? err.message : err
+                expect(message).to.include('Invalid container ID')
             }
         })
     })
