@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-04
+
+### Changed
+- Pinned xchain-hub v0.22.1 in the release manifest for the peer catch-up fix.
+
 ## [0.22.0] - 2026-10-04
 
 ### Added
