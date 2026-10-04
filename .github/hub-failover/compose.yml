@@ -302,7 +302,7 @@ services:
       - "127.0.0.1:${BTC_INDEXER_HOST_PORT:-64205}:3004"
     healthcheck:
       <<: *service-healthcheck
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status 2>/dev/null | grep -Eq '\"bootstrapped\"[[:space:]]*:[[:space:]]*true'"]
     restart: unless-stopped
 
   btc-indexer-control:
@@ -332,7 +332,7 @@ services:
       - "127.0.0.1:${BTC_CONTROL_INDEXER_HOST_PORT:-64207}:3004"
     healthcheck:
       <<: *service-healthcheck
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status 2>/dev/null | grep -Eq '\"bootstrapped\"[[:space:]]*:[[:space:]]*true'"]
     restart: unless-stopped
 
   ltc-node:
@@ -478,7 +478,7 @@ services:
       - "127.0.0.1:${LTC_INDEXER_HOST_PORT:-64214}:3004"
     healthcheck:
       <<: *service-healthcheck
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status 2>/dev/null | grep -Eq '\"bootstrapped\"[[:space:]]*:[[:space:]]*true'"]
     restart: unless-stopped
 
   doge-node:
@@ -624,7 +624,7 @@ services:
       - "127.0.0.1:${DOGE_INDEXER_HOST_PORT:-64224}:3004"
     healthcheck:
       <<: *service-healthcheck
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3004/status 2>/dev/null | grep -Eq '\"bootstrapped\"[[:space:]]*:[[:space:]]*true'"]
     restart: unless-stopped
 
 volumes:

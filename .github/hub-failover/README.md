@@ -10,6 +10,8 @@ Start the venue from the `xchain-node` repository:
 docker compose -p hub-failover -f .github/hub-failover/compose.yml up -d --wait
 ```
 
+The indexer healthchecks require `/status` to report `bootstrapped: true`, so `--wait` returns only after all four indexers have migrated their databases and bootstrapped their mirrors.
+
 HF-15b drives these service names:
 
 | Role | Compose service | Default host port |
