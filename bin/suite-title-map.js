@@ -273,36 +273,23 @@ function isGrowth(difference) {
     return GROWTH_KINDS.has(difference.kind);
 }
 
-function pendingSplits(pin, fresh, renames, splits, only) {
+function applicableSplits(splitFile, pinFile) {
+    if (!splitFile) return {};
+    const record = JSON.parse(fs.readFileSync(splitFile, 'utf8'));
+    const splits = loadSplits(splitFile);
     if (validateSplits(splits).length) return splits;
-    const structured = renames && typeof renames.paths === 'object' && renames.paths !== null;
-    const paths = structured ? renames.paths : renames;
-    const pending = {};
-    const names = Object.keys(pin.scripts).filter((name) => !only || name === only);
-    for (const old of Object.keys(splits)) {
-        let seen = false;
-        let absorbed = true;
-        for (const name of names) {
-            const before = expand(pin, name);
-            const after = expand(fresh, name);
-            if (!before || !after) continue;
-            const pinned = new Set(Object.keys(before).map((file) => paths[file] || file));
-            if (!pinned.has(old)) continue;
-            seen = true;
-            const collected = splits[old].filter((part) => Object.hasOwn(after, part));
-            if (collected.some((part) => !pinned.has(part))) { absorbed = false; break; }
-        }
-        if (!seen || !absorbed) pending[old] = splits[old];
+    if (record.pin_before_sha256) {
+        const digest = crypto.createHash('sha256').update(fs.readFileSync(pinFile)).digest('hex');
+        if (record.pin_before_sha256 !== digest) return {};
     }
-    return pending;
+    return splits;
 }
 
 function compareAgainst(opts, map) {
     const pin = JSON.parse(fs.readFileSync(opts.compare, 'utf8'));
     const renames = opts.renameMap ? JSON.parse(fs.readFileSync(opts.renameMap, 'utf8')) : {};
-    const splits = opts.splitMap ? loadSplits(opts.splitMap) : {};
-    const pending = pendingSplits(pin, map, renames, splits, opts.script);
-    const differences = compareWithSplits({ pin, fresh: map, renames, splits: pending, only: opts.script, compare });
+    const splits = applicableSplits(opts.splitMap, opts.compare);
+    const differences = compareWithSplits({ pin, fresh: map, renames, splits, only: opts.script, compare });
     if (!differences.length) {
         console.log(`suite identity holds against ${path.relative(REPO_ROOT, opts.compare)}`
             + `${opts.renameMap ? ' through the declared rename map' : ''}`

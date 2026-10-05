@@ -50,9 +50,11 @@ function runCli(dir, name, files, extraArgs = []) {
     });
 }
 
-function writeSplit(dir, name, old, parts) {
+function writeSplit(dir, name, old, parts, pinBefore) {
     const split = path.join(dir, `${name}.json`);
-    fs.writeFileSync(split, JSON.stringify({ splits: { [old]: parts } }));
+    const record = { splits: { [old]: parts } };
+    if (pinBefore) record.pin_before_sha256 = pinBefore;
+    fs.writeFileSync(split, JSON.stringify(record));
     return split;
 }
 
@@ -116,6 +118,34 @@ describe('suite title comparison CLI keeps structural changes blocking', () => {
     });
 });
 
+describe('suite title comparison CLI grades split record applicability', () => {
+    let dir;
+    let current;
+
+    before(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'suite-title-splits-'));
+        current = expand(buildMap(SCRIPT), SCRIPT);
+    });
+
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    it('rejects an absorbed split record', () => {
+        const [old, part] = Object.keys(current);
+        const split = writeSplit(dir, 'absorbed-split', old, [old, part]);
+        const result = runCli(dir, 'absorbed-split-pin', current, ['--split-map', split]);
+        assert.strictEqual(result.status, 1, result.stderr);
+        assert.match(result.stdout, /split_part_collides/);
+    });
+
+    it('does not apply a split record tied to an earlier pin', () => {
+        const [old, part] = Object.keys(current);
+        const split = writeSplit(dir, 'earlier-split', old, [old, part], '0'.repeat(64));
+        const result = runCli(dir, 'retaken-pin', current, ['--split-map', split]);
+        assert.strictEqual(result.status, 0, result.stderr);
+        assert.match(result.stdout, /suite identity holds/);
+    });
+});
+
 describe('suite title comparison CLI exit status', () => {
     let dir;
     let current;
@@ -137,14 +167,6 @@ describe('suite title comparison CLI exit status', () => {
         assert.match(result.stdout, /additive growth only/);
         assert.match(result.stdout, /\[growth\].*file_added/);
         assert.match(result.stdout, /\[growth\].*title_added/);
-    });
-
-    it('accepts a split record already absorbed into the pin', () => {
-        const [old, part] = Object.keys(current);
-        const split = writeSplit(dir, 'absorbed-split', old, [old, part]);
-        const result = runCli(dir, 'absorbed-split-pin', current, ['--split-map', split]);
-        assert.strictEqual(result.status, 0, result.stderr);
-        assert.match(result.stdout, /suite identity holds/);
     });
 
     it('rejects dropped files and titles', () => {
