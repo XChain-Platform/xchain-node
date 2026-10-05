@@ -29,7 +29,8 @@ function configureDependencies(dependencies) {
     ({
         fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME,
         EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD,
-        getUtxoTrackerVolumeName, getPublishedHostPorts, config, validatorService,
+        getUtxoTrackerVolumeName = getUtxoTrackerVolumeName,
+        getPublishedHostPorts = getPublishedHostPorts, config, validatorService,
         logger
     } = dependencies)
 }
