@@ -35,6 +35,8 @@ function moduleRun(module) {
 }
 
 function expectContainerEnv(run, name, value) {
+    // Each name must immediately follow its own --env flag.
+    // The captured child environment carries its resolved value.
     expect(run.args.some((arg, index) => arg === '--env' && run.args[index + 1] === name)).to.be.true
     expect(run.args.some(arg => String(arg).startsWith(`${name}=`))).to.be.false
     expect(run.options.env).to.have.property(name)

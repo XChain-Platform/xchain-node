@@ -62,6 +62,7 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             // Update
             await cli.moduleOps.updateModules(serviceList)
 
+            // Replacement uses one budgeted stop for the old container and never docker kill.
             expect(env.capture.findCommands(/docker kill/)).to.have.lengthOf(0)
             const stopCmds = env.capture.findCommands(/docker stop -t \d+ /)
             expect(stopCmds).to.have.lengthOf(1)

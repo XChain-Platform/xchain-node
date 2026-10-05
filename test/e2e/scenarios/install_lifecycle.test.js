@@ -364,17 +364,18 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             cli = env.createCLI()
 
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
-
+            // Install returns the complete registration result.
             const installResult = await cli.moduleOps.installModules(serviceList, 'master')
             expect(installResult.installed).to.have.lengthOf(7)
             expect(installResult.skipped).to.deep.equal([])
 
             const modulesAfterInstall = await env.getAllModules()
             expect(modulesAfterInstall.length).to.be.greaterThanOrEqual(5)
-
+            // Stop keeps the registered container identities intact.
             const stopResult = await cli.moduleOps.stopModules(serviceList)
             expect(stopResult).to.be.true
 
+            // Start reuses the containers recorded before the stop.
             const startResult = await cli.moduleOps.startModules(serviceList)
             expect(startResult).to.be.true
 
@@ -390,6 +391,7 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
                 expect(afterRestart.container_id).to.equal(mod.container_id)
             }
 
+            // Uninstall reports both removals and intentional skips.
             const uninstallResult = await cli.moduleOps.uninstallModules(serviceList)
             expect(uninstallResult.uninstalled).to.have.lengthOf(5)
             expect(uninstallResult.skipped.map(s => `${s.module}:${s.reason}`)).to.deep.equal(['xchain-explorer:shared', 'node:not-installed'])
