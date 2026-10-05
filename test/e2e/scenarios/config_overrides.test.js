@@ -35,8 +35,7 @@ function moduleRun(module) {
 }
 
 function expectContainerEnv(run, name, value) {
-    expect(run.args).to.include('--env')
-    expect(run.args).to.include(name)
+    expect(run.args.some((arg, index) => arg === '--env' && run.args[index + 1] === name)).to.be.true
     expect(run.args.some(arg => String(arg).startsWith(`${name}=`))).to.be.false
     expect(run.options.env).to.have.property(name)
     if (value !== undefined) expect(run.options.env[name]).to.equal(String(value))
