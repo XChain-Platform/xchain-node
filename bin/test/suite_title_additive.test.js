@@ -50,6 +50,12 @@ function runCli(dir, name, files, extraArgs = []) {
     });
 }
 
+function writeSplit(dir, name, old, parts) {
+    const split = path.join(dir, `${name}.json`);
+    fs.writeFileSync(split, JSON.stringify({ splits: { [old]: parts } }));
+    return split;
+}
+
 describe('suite title comparison classifies additive and subtractive changes', () => {
     it('reports an added file', () => {
         const diffs = compare(mapOf({}), mapOf({ [FILE]: ['one'] }), {}, undefined);
@@ -98,6 +104,16 @@ describe('suite title comparison CLI keeps structural changes blocking', () => {
         assert.strictEqual(splitResult.status, 1, splitResult.stderr);
         assert.match(splitResult.stdout, /split_record/);
     });
+
+    it('rejects a pending split that collides with a pinned file', () => {
+        const pin = cloneFiles(current);
+        const [old, collision, newPart] = Object.keys(pin);
+        delete pin[newPart];
+        const split = writeSplit(dir, 'partial-split', old, [old, collision, newPart]);
+        const result = runCli(dir, 'partial-split-pin', pin, ['--split-map', split]);
+        assert.strictEqual(result.status, 1, result.stderr);
+        assert.match(result.stdout, /split_part_collides/);
+    });
 });
 
 describe('suite title comparison CLI exit status', () => {
@@ -121,6 +137,14 @@ describe('suite title comparison CLI exit status', () => {
         assert.match(result.stdout, /additive growth only/);
         assert.match(result.stdout, /\[growth\].*file_added/);
         assert.match(result.stdout, /\[growth\].*title_added/);
+    });
+
+    it('accepts a split record already absorbed into the pin', () => {
+        const [old, part] = Object.keys(current);
+        const split = writeSplit(dir, 'absorbed-split', old, [old, part]);
+        const result = runCli(dir, 'absorbed-split-pin', current, ['--split-map', split]);
+        assert.strictEqual(result.status, 0, result.stderr);
+        assert.match(result.stdout, /suite identity holds/);
     });
 
     it('rejects dropped files and titles', () => {
