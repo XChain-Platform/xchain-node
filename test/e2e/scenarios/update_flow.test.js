@@ -62,11 +62,9 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             // Update
             await cli.moduleOps.updateModules(serviceList)
 
-            // Old container is stopped with the per-module budget, never killed
-            // (pinned by test/integration/docker_commands.test/build_and_up_with_overwrite_container_id.test.js)
             expect(env.capture.findCommands(/docker kill/)).to.have.lengthOf(0)
             const stopCmds = env.capture.findCommands(/docker stop -t \d+ /)
-            expect(stopCmds.length).to.be.greaterThanOrEqual(1)
+            expect(stopCmds).to.have.lengthOf(1)
             const stopHasOldId = stopCmds.some(c => c.command.includes(oldContainerId))
             expect(stopHasOldId, 'stop references old container').to.be.true
 
