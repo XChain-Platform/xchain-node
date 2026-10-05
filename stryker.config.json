@@ -22,8 +22,8 @@
   ],
   "mochaOptions": {
     "spec": [
-      "test/unit/**/*.test.js",
-      "test/integration/**/*.test.js"
+      "test/integration/**/*.test.js",
+      "test/unit/**/*.test.js"
     ],
     "no-config": true,
     "no-opts": true
