@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.4] - 2026-10-05
+
+### Changed
+- Pinned the v0.22.4 hub, indexer, explorer, sync and sdk tags in the release manifest for the price landing and batch gap fixes.
+
 ## [0.22.3] - 2026-10-04
 
 ### Fixed
