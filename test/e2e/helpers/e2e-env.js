@@ -19,6 +19,7 @@ const { proxyquireDockerService } = require('../../helpers/docker_service_loader
 const TestEnv        = require('../../integration/helpers/test-env')
 const CommandCapture = require('../../integration/helpers/command-capture')
 const HttpCapture    = require('../../integration/helpers/http-capture')
+const { migrationsDirOf } = require('../../../src/utils/migration_files')
 
 const ROOT = path.join(__dirname, '..', '..', '..')
 
@@ -520,6 +521,29 @@ class E2EEnv extends TestEnv {
             }
         })
 
+        const RealSkewGuardService = require(path.join(ROOT, 'src/services/skew_guard_service'))
+        const SkewGuardService = Object.assign({}, RealSkewGuardService, {
+            assertHubNotBehind: (module, branch) => RealSkewGuardService.assertHubNotBehind(module, branch, {
+                cloneGit: ModuleService.cloneGit,
+                readPackageJson: name => JSON.parse(fs.readFileSync(
+                    path.join(ConfigService.getModuleTmpDir(name), 'package.json'),
+                    'utf8'
+                ))
+            })
+        })
+
+        const RealMigrationPreconditionService = require(path.join(ROOT, 'src/services/migration_precondition_service'))
+        const MigrationPreconditionService = Object.assign({}, RealMigrationPreconditionService, {
+            assertRequiredMigrationsApplied: (module, coin, network, branch) =>
+                RealMigrationPreconditionService.assertRequiredMigrationsApplied(module, coin, network, branch, {
+                    cloneGit: ModuleService.cloneGit,
+                    listDeployPreconditionMigrations: () =>
+                        RealMigrationPreconditionService.listDeployPreconditionMigrations(
+                            migrationsDirOf(ConfigService.getModuleTmpDir(module))
+                        )
+                })
+        })
+
         // moduleOperations: the main entry point.
         // Must also stub 'util' because resetModules uses promisify(execFile) at top level
         const moduleOps = proxyquire(path.join(ROOT, 'src/operations/module_operations'), {
@@ -531,6 +555,8 @@ class E2EEnv extends TestEnv {
             '../services/docker_service': DockerService,
             '../services/database_service': DatabaseService,
             '../services/module_service': ModuleService,
+            '../services/skew_guard_service': SkewGuardService,
+            '../services/migration_precondition_service': MigrationPreconditionService,
             '../services/status_service': StatusService
         })
 
