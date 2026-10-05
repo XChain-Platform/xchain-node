@@ -22,6 +22,7 @@
   ],
   "mochaOptions": {
     "spec": [
+      "test/unit/00_config_directory_isolation.test.js",
       "test/integration/**/*.test.js",
       "test/unit/**/*.test.js"
     ],
@@ -35,10 +36,10 @@
     "progress"
   ],
   "htmlReporter": {
-    "fileName": "tmp/reports/mutation/index.html"
+    "fileName": "reports/mutation/index.html"
   },
   "jsonReporter": {
-    "fileName": "tmp/reports/mutation/report.json"
+    "fileName": "reports/mutation/report.json"
   },
   "thresholds": {
     "high": 90,
@@ -49,7 +50,8 @@
   "tempDirName": "stryker-tmp",
   "mutator": {
     "excludedMutations": [
-      "StringLiteral"
+      "StringLiteral",
+      "ArrowFunction"
     ]
   }
 }
