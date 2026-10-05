@@ -31,6 +31,7 @@ const { db } = require('../../state')
 const bundledCryptoNodesDir = path.join(__dirname, '../../../crypto_nodes')
 const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('../config_service')
 const { statusChanged }                 = require('../status_service')
+const memoryLimitService                = require('../memory_limit_service')
 const config = require('../../config');
 // Destructured where they are used, so each call reads the export at that moment.
 const dockerService = require('../docker_service')
@@ -260,6 +261,9 @@ async function prepareExistingContainer(containerPrefix, coin, network, storage,
 }
 
 function createRunArgs(coin, network, containerPrefix, stopBudgetSeconds, volumeMounts) {
+    const { memoryArgsFor } = memoryLimitService
+    const memory = memoryArgsFor(NODE_MODULE_NAME, { coin, network })
+    if (memory.note) logger.info(memory.note)
     const runArgs = [
         'run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix,
         // Same shutdown budget for an operator's `docker stop`/`restart`
@@ -276,7 +280,8 @@ function createRunArgs(coin, network, containerPrefix, stopBudgetSeconds, volume
         // heavier P2P chatter. --tail reads stay inside one rotated file.
         '--log-opt', 'max-size=50m', '--log-opt', 'max-file=4',
         '--hostname', NODE_MODULE_NAME, '--network-alias', NODE_MODULE_NAME,
-        '--ulimit', 'nofile=2048:2048', '--network', getDockerNetwork(coin, network)
+        '--ulimit', 'nofile=2048:2048', ...memory.args,
+        '--network', getDockerNetwork(coin, network)
     ]
     for (const mount of volumeMounts) runArgs.push('-v', mount.spec)
     return runArgs

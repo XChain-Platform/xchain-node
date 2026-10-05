@@ -27,14 +27,10 @@ const {
 const { getRemoteModuleVersions } = require('../state')
 const { getCryptoNode } = require('./node_service/crypto_node_download.js')
 const {
-    buildCryptoNode: buildCryptoNodeContainer,
+    buildCryptoNode,
     stageBuildScaffold,
     resolveBlocksDir
 } = require('./node_service/crypto_node_build.js')
-const { execFile } = require('child_process')
-const { promisify } = require('util')
-const execFileAsync = promisify(execFile)
-const memoryLimitService = require('./memory_limit_service')
 const { statusChanged }                 = require('./status_service')
 const { checkRemoteNodeVersion }        = require('./version_service')
 const config = require('../config');
@@ -46,18 +42,6 @@ const versionService = require('./version_service')
 const peers = require('./peer_services').bindPeerServices(require)
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
-
-async function buildCryptoNode(coin, network) {
-    const { memoryArgsFor } = memoryLimitService
-    const memory = memoryArgsFor(NODE_MODULE_NAME, { coin, network })
-    if (memory.note) logger.info(memory.note)
-
-    const containerId = await buildCryptoNodeContainer(coin, network)
-    if (memory.args.length > 0) {
-        await execFileAsync('docker', ['update', ...memory.args, containerId])
-    }
-    return containerId
-}
 
 // Optional exact-version pin for a coin daemon, read from
 // XCHAIN_NODE_NODE_VERSION_<COIN> (e.g. XCHAIN_NODE_NODE_VERSION_LITECOIN=v0.21.4).

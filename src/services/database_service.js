@@ -70,7 +70,7 @@ const { resetDatabases, clearHubPriceIngestWatermark, configureDependencies: con
 const { purgeHubCrossChainRows, manualHubCrossChainPurgeStatements, configureDependencies: configureHubCrossChainPurge } = require('./database_service/hub_cross_chain_purge')
 const { buildDatabaseModule, ensureXchainNodeAccess, configureDependencies: configureDatabaseModule } = require('./database_service/database_module')
 
-const databaseServiceDependencies = { execFile, spawn, promisify, execFileAsync, mariadb, Password, Input, NumberPrompt, DB_MODULE_NAME, HUB_MODULE_NAME, XChainService, SEP, CoinTickerSymbol, EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER, DEPENDENCY_HEALTH_START_PERIOD, db, getDbRootPassword, setDbRootPassword, sleep, redactSecrets, assertSafeDbIdentifier, escapeSqlStringLiteral, dockerMariadbArgs, mariadbEnv, PING_SQL, schemaExistsSql, tableExistsSql, tablesExistSql, PRICE_FENCE_TABLE, FENCE_NETWORK_COLUMN, clearChainFenceSql, clearNetworkFenceSql, manualClearStatement, CROSS_CHAIN_MATCH_TABLE, CROSS_CHAIN_CALL_TABLE, CAPABILITY_SNAPSHOT_TABLE, purgeAllMatchesSql, purgeAllCallsSql, purgeChainMatchesSql, purgeChainCallsSql, purgeCapabilitySnapshotsSql, foreignNetworkMatchCountSql, manualPurgeStatements, manualSnapshotPurgeStatement, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort, getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName, assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError, statusChanged, config, statusService, peers, getLogger, logger, XCHAIN_NODE_DB, getOsUserDbName, generatePassword, hasCredentials, loadCredentials, saveCredentials, hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig, loadDbRootPassword, saveDbRootPassword }
+const databaseServiceDependencies = { execFile, spawn, promisify, execFileAsync, mariadb, Password, Input, NumberPrompt, DB_MODULE_NAME, HUB_MODULE_NAME, XChainService, SEP, CoinTickerSymbol, EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER, DEPENDENCY_HEALTH_START_PERIOD, db, getDbRootPassword, setDbRootPassword, sleep, redactSecrets, assertSafeDbIdentifier, escapeSqlStringLiteral, dockerMariadbArgs, mariadbEnv, PING_SQL, memoryLimitService, stopTimeoutArgs, schemaExistsSql, tableExistsSql, tablesExistSql, PRICE_FENCE_TABLE, FENCE_NETWORK_COLUMN, clearChainFenceSql, clearNetworkFenceSql, manualClearStatement, CROSS_CHAIN_MATCH_TABLE, CROSS_CHAIN_CALL_TABLE, CAPABILITY_SNAPSHOT_TABLE, purgeAllMatchesSql, purgeAllCallsSql, purgeChainMatchesSql, purgeChainCallsSql, purgeCapabilitySnapshotsSql, foreignNetworkMatchCountSql, manualPurgeStatements, manualSnapshotPurgeStatement, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort, getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName, assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError, statusChanged, config, statusService, peers, getLogger, logger, XCHAIN_NODE_DB, getOsUserDbName, generatePassword, hasCredentials, loadCredentials, saveCredentials, hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig, loadDbRootPassword, saveDbRootPassword }
 configureContainerAccess(databaseServiceDependencies)
 configureExternalDb(databaseServiceDependencies)
 configureMariadbExec(databaseServiceDependencies)
@@ -78,36 +78,7 @@ configureUserProvisioning(databaseServiceDependencies)
 configureDbParameters(databaseServiceDependencies)
 configureResetDatabases(databaseServiceDependencies)
 configureHubCrossChainPurge(databaseServiceDependencies)
-
-function databaseRunArgs(args) {
-    if (args[0] !== 'run') return args
-    const envIndex = args.indexOf('--env')
-    if (envIndex < 0 || args[envIndex + 1] !== 'MYSQL_ROOT_PASSWORD') return args
-
-    const memory = memoryLimitService.memoryArgsFor(DB_MODULE_NAME)
-    if (memory.note) logger.info(memory.note)
-    const imageIndex = envIndex + 2
-    return [
-        ...args.slice(0, imageIndex),
-        ...stopTimeoutArgs(DB_MODULE_NAME),
-        ...memory.args,
-        ...args.slice(imageIndex)
-    ]
-}
-
-function databaseModuleExecFile(...args) {
-    return execFile(...args)
-}
-
-function databaseModuleExecFileAsync(file, args, options) {
-    return execFileAsync(file, file === 'docker' ? databaseRunArgs(args) : args, options)
-}
-
-configureDatabaseModule({
-    ...databaseServiceDependencies,
-    execFile: databaseModuleExecFile,
-    execFileAsync: databaseModuleExecFileAsync
-})
+configureDatabaseModule(databaseServiceDependencies)
 
 // Open the shared MariaDB connection pool if it isn't already open.
 // The CLI precheck normally does this, but restore/maintenance routines can

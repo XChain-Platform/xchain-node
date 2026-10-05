@@ -29,6 +29,8 @@ let { PING_SQL } = require('../../db/connectivity')
 let { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, validatePort } = require('../config_service')
 let { getStatusFromContainer, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName } = require('../docker_service')
 let { statusChanged }           = require('../status_service')
+let memoryLimitService          = require('../memory_limit_service')
+let { stopTimeoutArgs }         = require('../stop_budget_service')
 let config = require('../../config');
 let peers = require('../peer_services').bindPeerServices((file) => require(path.join('..', file)))
 let { getLogger } = require('../../observability/logger');
@@ -45,7 +47,7 @@ let { askMariadbRootPassword, executeNativeMariaDbCommand, executeDockerMariaDbC
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
     if (dependencies.execFile === nativeExecFile) return
-    ;({ execFile, promisify, execFileAsync, mariadb, DB_MODULE_NAME, EXTERNAL_DB, DEPENDENCY_HEALTH_START_PERIOD, assertSafeDbIdentifier, escapeSqlStringLiteral, PING_SQL, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, validatePort, getStatusFromContainer, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName, statusChanged, config, peers, getLogger, logger, XCHAIN_NODE_DB, getOsUserDbName, generatePassword, hasCredentials, loadCredentials, saveCredentials } = dependencies)
+    ;({ execFile, promisify, execFileAsync, mariadb, DB_MODULE_NAME, EXTERNAL_DB, DEPENDENCY_HEALTH_START_PERIOD, assertSafeDbIdentifier, escapeSqlStringLiteral, PING_SQL, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, validatePort, getStatusFromContainer, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName, statusChanged, memoryLimitService, stopTimeoutArgs, config, peers, getLogger, logger, XCHAIN_NODE_DB, getOsUserDbName, generatePassword, hasCredentials, loadCredentials, saveCredentials } = dependencies)
 }
 
 // External (host-native) MariaDB mode: xchain-node doesn't own the DB
@@ -78,7 +80,14 @@ async function verifyExternalDatabase() {
 // it. An already-installed DB keeps 10m x 3 until an operator tears the
 // container down and reinstalls it inside a maintenance window.
 function createDatabaseRunArgs(containerPrefix, environmentVariables, coin, network) {
-    const runArgs = ['run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix, '--hostname', 'mariadb', '--log-opt', 'max-size=50m', '--log-opt', 'max-file=4']
+    const { memoryArgsFor } = memoryLimitService
+    const memory = memoryArgsFor(DB_MODULE_NAME)
+    if (memory.note) logger.info(memory.note)
+    const runArgs = [
+        'run', '-d', '--restart', 'unless-stopped', ...stopTimeoutArgs(DB_MODULE_NAME),
+        '--name', containerPrefix, '--hostname', 'mariadb',
+        '--log-opt', 'max-size=50m', '--log-opt', 'max-file=4', ...memory.args
+    ]
     // A visibility-only probe makes a stalled-but-alive mariadbd observable
     // to `docker ps` and to anything reading container health, while
     // --restart unless-stopped only ever fires on process EXIT. Deliberately
