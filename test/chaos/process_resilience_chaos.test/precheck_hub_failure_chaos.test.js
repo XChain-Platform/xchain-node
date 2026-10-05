@@ -39,7 +39,14 @@ describe('Experiment: Precheck failure cascade', function () {
                     checkDockerInstalledAndReachable: sinon.stub().resolves(true),
                     createDockerNetwork: sinon.stub().resolves(true)
                 },
-                './services/config_service': { getDockerNetwork: () => 'xchain-node' },
+                './services/config_service': { getDockerNetwork: () => 'xchain-node', applyHubApiKeyFromSidecar: sinon.stub() },
+                './services/database_service': {
+                    buildDatabaseModule: sinon.stub().resolves(),
+                    ensureXchainNodeAccess: sinon.stub().resolves({ user: 'u', password: 'p', database: 'd' }),
+                    getDatabaseHostPort: sinon.stub().resolves(3306),
+                    getExternalDbConfig: sinon.stub().resolves({ host: 'h', port: 1 })
+                },
+                './services/discovery_service': { scanAndRegisterModules: sinon.stub().resolves() },
                 './services/version_service': { checkAllRemoteVersions: sinon.stub() },
                 './services/status_service': { getStatus: sinon.stub().resolves({}) },
                 './services/hub_service': {

@@ -57,26 +57,68 @@ configureUpdateHubOrExplorer({
 // costs time on a real failure and absorbs the docker race that causes most
 // of them; the failures it collects are what updateHub reports at the end
 // instead of the discarded error that made a disconnected hub look installed.
-async function attachSharedContainer(moduleLabel, containerId, installedCoinsAndNetworks, failures) {
-    for (const nextCoin in installedCoinsAndNetworks) {
-        for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
-            try {
-                await addContainerToNetwork(containerId, getDockerNetwork(nextCoin, nextNetwork))
-            } catch (firstErr) {
-                logger.info("There was an error trying to connect " + moduleLabel + " to the " +
-                    nextCoin + "/" + nextNetwork + " network (" + redactSecrets(firstErr) + "). Trying again in 3 seconds...")
-                await sleep(3000)
+function isMissingContainerError(err) {
+    const text = String((err && err.stderr) || '') + ' ' + String((err && err.message) || err || '')
+    return /no such (object|container)/i.test(text)
+}
+
+async function attachToNetwork(moduleLabel, containerId, coin, network, failures) {
+    const dockerNetwork = getDockerNetwork(coin, network)
+    try {
+        await addContainerToNetwork(containerId, dockerNetwork)
+    } catch (firstErr) {
+        if (isMissingContainerError(firstErr)) throw firstErr
+        logger.info("There was an error trying to connect " + moduleLabel + " to the " +
+            coin + "/" + network + " network (" + redactSecrets(firstErr) + "). Trying again in 3 seconds...")
+        await sleep(3000)
+        try {
+            await addContainerToNetwork(containerId, dockerNetwork)
+        } catch (retryErr) {
+            if (isMissingContainerError(retryErr)) throw retryErr
+            failures.push({ label: moduleLabel + " -> " + coin + "/" + network, error: retryErr })
+        }
+    }
+}
+
+async function attachSharedContainer(moduleLabel, containerId, installedCoinsAndNetworks, failures, { hubContainerName } = {}) {
+    if (!hubContainerName) {
+        for (const nextCoin in installedCoinsAndNetworks) {
+            for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
                 try {
                     await addContainerToNetwork(containerId, getDockerNetwork(nextCoin, nextNetwork))
-                } catch (retryErr) {
-                    failures.push({
-                        label: moduleLabel + " -> " + nextCoin + "/" + nextNetwork,
-                        error: retryErr
-                    })
+                } catch (firstErr) {
+                    logger.info("There was an error trying to connect " + moduleLabel + " to the " +
+                        nextCoin + "/" + nextNetwork + " network (" + redactSecrets(firstErr) + "). Trying again in 3 seconds...")
+                    await sleep(3000)
+                    try {
+                        await addContainerToNetwork(containerId, getDockerNetwork(nextCoin, nextNetwork))
+                    } catch (retryErr) {
+                        failures.push({
+                            label: moduleLabel + " -> " + nextCoin + "/" + nextNetwork,
+                            error: retryErr
+                        })
+                    }
                 }
             }
         }
+        return
     }
+
+    let activeContainer = containerId
+    for (const nextCoin in installedCoinsAndNetworks) {
+        for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
+            try {
+                await attachToNetwork(moduleLabel, activeContainer, nextCoin, nextNetwork, failures)
+            } catch {
+                if (activeContainer === hubContainerName) return false
+                activeContainer = hubContainerName
+                try {
+                    await attachToNetwork(moduleLabel, activeContainer, nextCoin, nextNetwork, failures)
+                } catch { return false }
+            }
+        }
+    }
+    return true
 }
 
 // Does the hub answer right now? One request, no retries, no restart attempt.
@@ -104,8 +146,11 @@ async function updateHub({ skipConfigPush = false } = {}) {
     const failures = []
 
     if (hubContainerId) {
-        await attachSharedContainer("xchain-hub", hubContainerId, installedCoinsAndNetworks, failures)
-        if (!skipConfigPush) await updateHubOrExplorer(HUB_MODULE_NAME)
+        const hubIsPresent = await attachSharedContainer(
+            "xchain-hub", hubContainerId, installedCoinsAndNetworks, failures,
+            { hubContainerName: getDockerContainerImageName(HUB_MODULE_NAME, "", "") }
+        )
+        if (hubIsPresent && !skipConfigPush) await updateHubOrExplorer(HUB_MODULE_NAME)
     }
 
     // Connect xchain-sync container to all chain/network Docker networks (same pattern as hub)

@@ -274,18 +274,17 @@ moduleSuite('unit-suite venue independence', function () {
                 'child_process': { execFile: stubs.execFile },
                 './docker_service': { getPublishedHostPorts: stubs.getPublishedHostPorts }
             })
-            // The flip must not outlive that one load: a plain proxyquire with the same
-            // partial stub has to shadow the whole dependency, so the missing probe reads
-            // as undefined rather than falling back to the real (here guarded) export.
-            const ms = proxyquire('../../../src/services/module_service', {
-                'child_process': { execFile: stubs.execFile },
-                'fs': stubs.fs,
-                '../state': { db: stubs.db, getRemoteModuleVersions: () => ({}), getLastStatus: () => null },
-                './docker_service': { killContainer: stubs.killContainer }
+            // The flip must not outlive that one load: a plain proxyquire with a partial
+            // stub has to shadow the whole dependency, so the missing probe reads as
+            // undefined rather than falling back to the real (here guarded) export.
+            // Load docker_args directly because module_service deliberately supplies its
+            // own captured probe when an injected dependency is absent.
+            const dockerArgs = proxyquire('../../../src/services/module_service/docker_args', {
+                '../docker_service': { killContainer: stubs.killContainer }
             })
             let threw = null
             try {
-                await ms.assertNoHostPortConflicts(['-p', '3001:3001'], 'self')
+                await dockerArgs.assertNoHostPortConflicts(['-p', '3001:3001'], 'self')
             } catch (err) { threw = err }
             expect(threw).to.be.an.instanceOf(TypeError)
         })
