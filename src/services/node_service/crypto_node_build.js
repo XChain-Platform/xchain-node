@@ -31,7 +31,7 @@ const { db } = require('../../state')
 const bundledCryptoNodesDir = path.join(__dirname, '../../../crypto_nodes')
 const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('../config_service')
 const { statusChanged }                 = require('../status_service')
-const memoryLimitService                = require('../memory_limit_service')
+const { createNodeContainerRunArgs }    = require('./container_run_args')
 const config = require('../../config');
 // Destructured where they are used, so each call reads the export at that moment.
 const dockerService = require('../docker_service')
@@ -260,33 +260,6 @@ async function prepareExistingContainer(containerPrefix, coin, network, storage,
     return stopBudgetSeconds
 }
 
-function createRunArgs(coin, network, containerPrefix, stopBudgetSeconds, volumeMounts) {
-    const { memoryArgsFor } = memoryLimitService
-    const memory = memoryArgsFor(NODE_MODULE_NAME, { coin, network })
-    if (memory.note) logger.info(memory.note)
-    const runArgs = [
-        'run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix,
-        // Same shutdown budget for an operator's `docker stop`/`restart`
-        // and for dockerd's own shutdown: the default 10 s is far too
-        // short for a chain daemon to flush.
-        '--stop-timeout', String(stopBudgetSeconds),
-        // Cap json-file log growth so a long-running node cannot fill
-        // the host disk, at the same 50m x 4 = 200 MB the module
-        // containers carry (ModuleService.buildAndUp holds the sizing
-        // arithmetic). Chain nodes
-        // are the quietest containers measured on regtest (686 B/h BTC,
-        // 4.4 KB/h DOGE, 2.5 KB/h LTC on 2026-08-30), so this is far
-        // past the 48 h floor even allowing for a mainnet node's much
-        // heavier P2P chatter. --tail reads stay inside one rotated file.
-        '--log-opt', 'max-size=50m', '--log-opt', 'max-file=4',
-        '--hostname', NODE_MODULE_NAME, '--network-alias', NODE_MODULE_NAME,
-        '--ulimit', 'nofile=2048:2048', ...memory.args,
-        '--network', getDockerNetwork(coin, network)
-    ]
-    for (const mount of volumeMounts) runArgs.push('-v', mount.spec)
-    return runArgs
-}
-
 function addPortArgs(runArgs, defaultExposedPort, defaultNodePort, reject) {
     if (defaultExposedPort && defaultNodePort) {
         // NODE_EXPOSED_PORT/NODE_PORT come from the operator-supplied
@@ -390,7 +363,12 @@ async function buildCryptoNode(coin, network) {
             if (!storage) return
             const stopBudgetSeconds = await prepareExistingContainer(containerPrefix, coin, network, storage, reject)
             if (!stopBudgetSeconds) return
-            const runArgs = createRunArgs(coin, network, containerPrefix, stopBudgetSeconds, storage.volumeMounts)
+            const runArgs = createNodeContainerRunArgs({
+                coin, network, containerPrefix, stopBudgetSeconds,
+                volumeMounts: storage.volumeMounts,
+                getDockerNetwork,
+                logger
+            })
             if (!addPortArgs(runArgs, defaultExposedPort, defaultNodePort, reject)) return
             addDaemonArgs(runArgs, coin, storage.blocksDir, storage.useBlocksdirFlag, containerPrefix)
             runNodeContainer(runArgs, nodeDir, coin, network, resolve, reject)
