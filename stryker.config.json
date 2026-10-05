@@ -22,9 +22,8 @@
   ],
   "mochaOptions": {
     "spec": [
-      "test/unit/00_config_directory_isolation.test.js",
-      "test/integration/**/*.test.js",
-      "test/unit/**/*.test.js"
+      "test/unit/**/*.test.js",
+      "test/integration/**/*.test.js"
     ],
     "no-config": true,
     "no-opts": true
@@ -50,8 +49,7 @@
   "tempDirName": "stryker-tmp",
   "mutator": {
     "excludedMutations": [
-      "StringLiteral",
-      "ArrowFunction"
+      "StringLiteral"
     ]
   }
 }
