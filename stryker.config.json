@@ -6,10 +6,18 @@
     "src/services/config_service.js",
     "src/services/config_service/**",
     "src/services/module_service.js",
+    "src/services/module_service/**",
     "src/services/docker_service.js",
+    "src/services/docker_service/**",
     "src/services/database_service.js",
+    "src/services/database_service/**",
+    "!src/services/database_service/database_module.js",
     "src/services/bootstrap_service.js",
-    "src/services/status_service.js"
+    "src/services/bootstrap_service/**",
+    "src/services/status_service.js",
+    "src/services/status_service/**",
+    "!src/services/status_service/get_status.js",
+    "!src/services/status_service/status_reducers.js"
   ],
   "testRunner": "mocha",
   "testRunnerNodeArgs": [
@@ -17,8 +25,8 @@
   ],
   "mochaOptions": {
     "spec": [
-      "test/integration/**/*.test.js",
-      "test/unit/**/*.test.js"
+      "test/unit/**/*.test.js",
+      "test/integration/**/*.test.js"
     ],
     "no-config": true,
     "no-opts": true

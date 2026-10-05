@@ -39,7 +39,7 @@
     "test:regression:p0": "mocha 'test/regression/**/*.test.js' --grep '\\[regression:p0\\]' --timeout 10000 --recursive",
     "test:regression:p0p1": "mocha 'test/regression/**/*.test.js' --grep '\\[regression:p[01]\\]' --timeout 10000 --recursive",
     "test:all": "mocha 'test/smoke/**/*.test.js' 'test/unit/**/*.test.js' 'test/integration/**/*.test.js' 'test/e2e/**/*.test.js' 'test/fuzz/**/*.fuzz.js' 'test/chaos/**/*_chaos.test.js' 'test/regression/**/*.test.js' --timeout 30000 --recursive",
-    "test:mutation": "npx stryker run",
+    "test:mutation": "npx stryker run stryker.config.json",
     "test:mutation:config": "npx stryker run stryker.config.pilot.json",
     "benchmark": "node test/benchmarks/helpers/harness.js",
     "benchmark:quick": "node test/benchmarks/helpers/harness.js --quick"
