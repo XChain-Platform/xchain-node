@@ -80,15 +80,38 @@ async function attachToNetwork(moduleLabel, containerId, coin, network, failures
     }
 }
 
-async function attachSharedContainer(moduleLabel, containerId, installedCoinsAndNetworks, failures, containerName) {
+async function attachSharedContainer(moduleLabel, containerId, installedCoinsAndNetworks, failures, { hubContainerName } = {}) {
+    if (!hubContainerName) {
+        for (const nextCoin in installedCoinsAndNetworks) {
+            for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
+                try {
+                    await addContainerToNetwork(containerId, getDockerNetwork(nextCoin, nextNetwork))
+                } catch (firstErr) {
+                    logger.info("There was an error trying to connect " + moduleLabel + " to the " +
+                        nextCoin + "/" + nextNetwork + " network (" + redactSecrets(firstErr) + "). Trying again in 3 seconds...")
+                    await sleep(3000)
+                    try {
+                        await addContainerToNetwork(containerId, getDockerNetwork(nextCoin, nextNetwork))
+                    } catch (retryErr) {
+                        failures.push({
+                            label: moduleLabel + " -> " + nextCoin + "/" + nextNetwork,
+                            error: retryErr
+                        })
+                    }
+                }
+            }
+        }
+        return
+    }
+
     let activeContainer = containerId
     for (const nextCoin in installedCoinsAndNetworks) {
         for (const nextNetwork of installedCoinsAndNetworks[nextCoin]) {
             try {
                 await attachToNetwork(moduleLabel, activeContainer, nextCoin, nextNetwork, failures)
             } catch {
-                if (!containerName || activeContainer === containerName) return false
-                activeContainer = containerName
+                if (activeContainer === hubContainerName) return false
+                activeContainer = hubContainerName
                 try {
                     await attachToNetwork(moduleLabel, activeContainer, nextCoin, nextNetwork, failures)
                 } catch { return false }
@@ -125,7 +148,7 @@ async function updateHub({ skipConfigPush = false } = {}) {
     if (hubContainerId) {
         const hubIsPresent = await attachSharedContainer(
             "xchain-hub", hubContainerId, installedCoinsAndNetworks, failures,
-            getDockerContainerImageName(HUB_MODULE_NAME, "", "")
+            { hubContainerName: getDockerContainerImageName(HUB_MODULE_NAME, "", "") }
         )
         if (hubIsPresent && !skipConfigPush) await updateHubOrExplorer(HUB_MODULE_NAME)
     }
@@ -133,10 +156,7 @@ async function updateHub({ skipConfigPush = false } = {}) {
     // Connect xchain-sync container to all chain/network Docker networks (same pattern as hub)
     const syncContainerId = await db.getModuleContainer(SYNC_MODULE_NAME, "", "")
     if (syncContainerId) {
-        await attachSharedContainer(
-            "xchain-sync", syncContainerId, installedCoinsAndNetworks, failures,
-            getDockerContainerImageName(SYNC_MODULE_NAME, "", "")
-        )
+        await attachSharedContainer("xchain-sync", syncContainerId, installedCoinsAndNetworks, failures)
     }
 
     // Report unreachable networks instead of returning success: a topology
@@ -289,90 +309,4 @@ module.exports = {
     // Same: the opt-in must survive a shell that never exported the env, and that
     // is pinned against a stubbed container-env read rather than a live docker.
     isCheckpointSelfSyncEnabled
-}
-
-if (require.main === module && process.argv.includes('--unit-test')) {
-    const assert = require('node:assert/strict')
-    const test = require('node:test')
-    const proxyquire = require('proxyquire').noCallThru()
-
-    test('updateHub re-resolves a stale stored container id and exits successfully', async () => {
-        const connections = []
-        const configUpdates = []
-        const canonicalHubName = 'xchain-node-hub'
-        const staleHubId = 'stale-hub-id'
-        const dockerServiceStub = {
-            addContainerToNetwork: async (container, network) => {
-                connections.push({ container, network })
-                if (container === staleHubId) throw new Error('No such container: ' + staleHubId)
-                return true
-            }
-        }
-        const service = proxyquire(__filename, {
-            '../config': {
-                HUB_MODULE_NAME: 'xchain-hub',
-                EXPLORER_MODULE_NAME: 'xchain-explorer',
-                SYNC_MODULE_NAME: 'xchain-sync',
-                EXTERNAL_DB: false,
-                XChainService: {},
-                DEFAULT_MODULE_BRANCH: 'main'
-            },
-            '../state': {
-                db: {
-                    getModuleContainer: async (module) => module === 'xchain-hub' ? staleHubId : null
-                },
-                getLastStatus: () => ({}),
-                isStatusUpdated: () => false,
-                isVerbose: () => false
-            },
-            '../utils/helpers': {
-                sleep: async () => {},
-                redactSecrets: String
-            },
-            './config_service': {
-                getDefaultConfig: async () => ({}),
-                getDockerContainerImageName: (module) => module === 'xchain-hub' ? canonicalHubName : module,
-                getDockerNetwork: (coin, network) => `xchain-node-${coin}-${network}`
-            },
-            './status_service': {
-                getStatus: async () => true,
-                getInstalledCoinsAndNetworks: async () => ({ bitcoin: ['regtest'] })
-            },
-            './docker_service': dockerServiceStub,
-            './module_service': {
-                cloneGit: async () => true,
-                buildAndUp: async () => true
-            },
-            './database_service': {
-                addUserPasswordToDatabase: async () => true,
-                getExternalDbConfig: async () => ({})
-            },
-            './db_credential_drift': {
-                readContainerEnv: async () => ({}),
-                assertNoHubDbCredentialDrift: async () => true
-            },
-            './hub_connector.js': class {},
-            './explorer_connector.js': class {},
-            './release_manifest_service': {},
-            '../observability/logger': {
-                getLogger: () => ({ info: () => {} })
-            },
-            './hub_service/hub_module_config.js': {
-                buildHubModuleConfig: async () => ({}),
-                buildCheckpointConfig: async () => ({}),
-                isCheckpointSelfSyncEnabled: async () => false
-            },
-            './hub_service/update_hub_or_explorer.js': {
-                configureUpdateHubOrExplorer: () => {},
-                updateHubOrExplorer: async (module) => configUpdates.push(module)
-            }
-        })
-
-        await assert.doesNotReject(service.updateHub())
-        assert.deepStrictEqual(connections, [
-            { container: staleHubId, network: 'xchain-node-bitcoin-regtest' },
-            { container: canonicalHubName, network: 'xchain-node-bitcoin-regtest' }
-        ])
-        assert.deepStrictEqual(configUpdates, ['xchain-hub'])
-    })
 }
