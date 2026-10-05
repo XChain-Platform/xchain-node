@@ -133,4 +133,16 @@ describe('suite title comparison CLI exit status', () => {
         assert.match(result.stdout, /file_dropped/);
         assert.match(result.stdout, /title_dropped/);
     });
+
+    it('keeps drops blocking when the same run also has growth', () => {
+        const pin = cloneFiles(current);
+        const [addedFile, titleFile] = Object.keys(pin);
+        delete pin[addedFile];
+        pin[titleFile].push('suite title that was dropped');
+        const result = runCli(dir, 'mixed', pin);
+        assert.strictEqual(result.status, 1, result.stderr);
+        assert.match(result.stdout, /\[growth\].*file_added/);
+        assert.match(result.stdout, /title_dropped/);
+        assert.doesNotMatch(result.stdout, /additive growth only/);
+    });
 });
