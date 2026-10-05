@@ -367,7 +367,8 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
 
             // Install
             const installResult = await cli.moduleOps.installModules(serviceList, 'master')
-            expect(installResult).to.be.true
+            expect(installResult.installed).to.have.lengthOf(7)
+            expect(installResult.skipped).to.deep.equal([])
 
             const modulesAfterInstall = await env.getAllModules()
             expect(modulesAfterInstall.length).to.be.greaterThanOrEqual(5)
@@ -394,7 +395,11 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
 
             // Uninstall
             const uninstallResult = await cli.moduleOps.uninstallModules(serviceList)
-            expect(uninstallResult).to.be.true
+            expect(uninstallResult.uninstalled).to.have.lengthOf(5)
+            expect(uninstallResult.skipped).to.deep.equal([
+                { module: 'xchain-explorer', coin: '', network: '', reason: 'shared' },
+                { module: 'node', coin: 'bitcoin', network: 'regtest', reason: 'not-installed' }
+            ])
         })
     })
 })

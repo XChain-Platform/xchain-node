@@ -86,6 +86,9 @@ function makePreCheck(capture, overrides = {}) {
         },
         './services/explorer_service': overrides.ExplorerService || {
             updateExplorer: async () => true
+        },
+        './services/discovery_service': overrides.DiscoveryService || {
+            scanAndRegisterModules: async () => true
         }
     })
 

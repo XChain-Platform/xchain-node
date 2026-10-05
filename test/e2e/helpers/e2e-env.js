@@ -141,6 +141,7 @@ class E2EEnv extends TestEnv {
      */
     sealLazyRequireSeams(patchedConfigService) {
         const dbContainerId = 'd'.repeat(64)
+        this._store.setModuleContainer('database', '', '', dbContainerId)
         this._sealSeam('src/services/database_service', {
             getDatabaseContainerId: async () => dbContainerId
         })
@@ -445,7 +446,11 @@ class E2EEnv extends TestEnv {
         // generic command success.
         const dbSpawnStub = function (command, args, options) {
             const child = spawnStub(command, args, options)
-            child.stdin = { on: () => {}, end: () => {} }
+            const call = capture.history()[capture.history().length - 1]
+            child.stdin = {
+                on: () => {},
+                end: input => { call.stdin = String(input || '') }
+            }
             process.nextTick(() => {
                 child.stdout.emit('data', '0')
                 child.emit('close', 0)
