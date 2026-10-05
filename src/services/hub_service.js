@@ -290,3 +290,89 @@ module.exports = {
     // is pinned against a stubbed container-env read rather than a live docker.
     isCheckpointSelfSyncEnabled
 }
+
+if (require.main === module && process.argv.includes('--unit-test')) {
+    const assert = require('node:assert/strict')
+    const test = require('node:test')
+    const proxyquire = require('proxyquire').noCallThru()
+
+    test('updateHub re-resolves a stale stored container id and exits successfully', async () => {
+        const connections = []
+        const configUpdates = []
+        const canonicalHubName = 'xchain-node-hub'
+        const staleHubId = 'stale-hub-id'
+        const dockerServiceStub = {
+            addContainerToNetwork: async (container, network) => {
+                connections.push({ container, network })
+                if (container === staleHubId) throw new Error('No such container: ' + staleHubId)
+                return true
+            }
+        }
+        const service = proxyquire(__filename, {
+            '../config': {
+                HUB_MODULE_NAME: 'xchain-hub',
+                EXPLORER_MODULE_NAME: 'xchain-explorer',
+                SYNC_MODULE_NAME: 'xchain-sync',
+                EXTERNAL_DB: false,
+                XChainService: {},
+                DEFAULT_MODULE_BRANCH: 'main'
+            },
+            '../state': {
+                db: {
+                    getModuleContainer: async (module) => module === 'xchain-hub' ? staleHubId : null
+                },
+                getLastStatus: () => ({}),
+                isStatusUpdated: () => false,
+                isVerbose: () => false
+            },
+            '../utils/helpers': {
+                sleep: async () => {},
+                redactSecrets: String
+            },
+            './config_service': {
+                getDefaultConfig: async () => ({}),
+                getDockerContainerImageName: (module) => module === 'xchain-hub' ? canonicalHubName : module,
+                getDockerNetwork: (coin, network) => `xchain-node-${coin}-${network}`
+            },
+            './status_service': {
+                getStatus: async () => true,
+                getInstalledCoinsAndNetworks: async () => ({ bitcoin: ['regtest'] })
+            },
+            './docker_service': dockerServiceStub,
+            './module_service': {
+                cloneGit: async () => true,
+                buildAndUp: async () => true
+            },
+            './database_service': {
+                addUserPasswordToDatabase: async () => true,
+                getExternalDbConfig: async () => ({})
+            },
+            './db_credential_drift': {
+                readContainerEnv: async () => ({}),
+                assertNoHubDbCredentialDrift: async () => true
+            },
+            './hub_connector.js': class {},
+            './explorer_connector.js': class {},
+            './release_manifest_service': {},
+            '../observability/logger': {
+                getLogger: () => ({ info: () => {} })
+            },
+            './hub_service/hub_module_config.js': {
+                buildHubModuleConfig: async () => ({}),
+                buildCheckpointConfig: async () => ({}),
+                isCheckpointSelfSyncEnabled: async () => false
+            },
+            './hub_service/update_hub_or_explorer.js': {
+                configureUpdateHubOrExplorer: () => {},
+                updateHubOrExplorer: async (module) => configUpdates.push(module)
+            }
+        })
+
+        await assert.doesNotReject(service.updateHub())
+        assert.deepStrictEqual(connections, [
+            { container: staleHubId, network: 'xchain-node-bitcoin-regtest' },
+            { container: canonicalHubName, network: 'xchain-node-bitcoin-regtest' }
+        ])
+        assert.deepStrictEqual(configUpdates, ['xchain-hub'])
+    })
+}
