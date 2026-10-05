@@ -148,7 +148,8 @@ describe('Fuzz: Container ID Validation', function () {
                 await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
                 expect.fail('Should have rejected invalid container ID')
             } catch (err) {
-                expect(err.message, err.message).to.include('Invalid container ID')
+                expect(err).to.be.a('string')
+                expect(err).to.include('Invalid container ID')
             }
         })
     }
@@ -175,7 +176,8 @@ describe('Fuzz: Container ID Validation', function () {
             await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
             expect.fail('Should have rejected')
         } catch (err) {
-            expect(err.message, err.message).to.include('Invalid container ID')
+            expect(err).to.be.a('string')
+            expect(err).to.include('Invalid container ID')
         }
     })
 })
