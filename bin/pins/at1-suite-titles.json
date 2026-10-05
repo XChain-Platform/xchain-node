@@ -16,9 +16,6 @@
       "moduleOperations updateModules(): partial update continuation fails closed when the credential refusal belongs to the requested coin",
       "moduleOperations updateModules(): partial update continuation rethrows ordinary install failures without attempting later coins"
     ],
-    "06ac9b58d4a7dceb": [
-      "Chaos: Process Resilience Experiment 11: Async error propagation propagates rejection from removeContainer during overwrite"
-    ],
     "06cdae1616e269c6": [
       "coverage ratchet floors enforces every declared floor, at the declared value",
       "coverage ratchet floors fails the job on a shortfall rather than only reporting it",
@@ -594,6 +591,9 @@
       "DatabaseService addUserPasswordToDatabase(): EXTERNAL_DB path grants SLAVE MONITOR to an indexer account via native mariadb (EXTERNAL_DB)",
       "DatabaseService addUserPasswordToDatabase(): EXTERNAL_DB path skips creates when db and user already exist (EXTERNAL_DB)",
       "DatabaseService addUserPasswordToDatabase(): EXTERNAL_DB path throws when native mariadb command fails (EXTERNAL_DB)"
+    ],
+    "2d5951fd05d23617": [
+      "Chaos: Process Resilience Experiment 11: Async error propagation handles rejection from removeContainer during overwrite gracefully"
     ],
     "2dca3358a936b011": [
       "Bootstrap signing checkBootstrapSignature() policy fails closed BY DEFAULT when no public key is pinned",
@@ -2215,30 +2215,6 @@
       "Fuzz: Container ID Validation rejects invalid container ID: with shell injection",
       "Fuzz: Container ID Validation trims leading/trailing whitespace from container ID"
     ],
-    "835efb15177529f3": [
-      "HubService.buildCheckpointConfig hub endpoint defaults the endpoint to the hub container on the docker network",
-      "HubService.buildCheckpointConfig hub endpoint emits a hub_url alongside every self_sync it advertises",
-      "HubService.buildCheckpointConfig hub endpoint honours an operator HUB_API_URL from the host env",
-      "HubService.buildCheckpointConfig hub endpoint keeps the mirror schema and indexer credentials it already carried",
-      "HubService.isCheckpointSelfSyncEnabled is not opted in when neither the env nor the container says so",
-      "HubService.isCheckpointSelfSyncEnabled is not opted in when there is no explorer container to ask",
-      "HubService.isCheckpointSelfSyncEnabled is opted in when the host env carries the flag",
-      "HubService.isCheckpointSelfSyncEnabled reads the flag itself off the container when it is there",
-      "HubService.isCheckpointSelfSyncEnabled stays opted in when the env is gone but the explorer container remembers",
-      "HubService.isCheckpointSelfSyncEnabled treats an empty env value as unset rather than as an opt-in",
-      "HubService.isHubAnswering asks once, with no retry loop of its own",
-      "HubService.isHubAnswering is false when nothing answers",
-      "HubService.isHubAnswering is true when the hub answers a ping",
-      "HubService.updateHub network attachment rejects naming the unreachable network instead of reporting success",
-      "HubService.updateHub network attachment retries a failed attach once and succeeds on the second try",
-      "HubService.updateHub network attachment returns true when every shared-container attach succeeds",
-      "HubService.updateHub skipConfigPush attaches the shared containers but never reaches the config push",
-      "HubService.updateHub skipConfigPush defaults to pushing, so no existing caller changes behaviour",
-      "HubService.updateHub skipConfigPush pushes as it always has when not told to skip",
-      "HubService.updateHubOrExplorer config delivery exhausts ten attempts and reports the last hub error",
-      "HubService.updateHubOrExplorer config delivery retries a rejected hub update and succeeds on the next attempt",
-      "HubService.updateHubOrExplorer config delivery writes the explorer payload to config.json in its registered container"
-    ],
     "8403c6ea9dad5fe3": [
       "ValidatorStakeService validator set paging pages oldest first from page 1 and stops at the total",
       "ValidatorStakeService validator set paging refuses a response with no data array rather than reading it as empty",
@@ -3270,9 +3246,6 @@
       "GitHubDownloader downloadReleaseAsset() throws when tar fails with non-zero exit code",
       "GitHubDownloader downloadReleaseAsset() throws when unzip fails with non-zero exit code",
       "GitHubDownloader downloadReleaseAsset() warns on unrecognized file extension (no extraction)"
-    ],
-    "bd3429f1a8b7bb8b": [
-      "Chaos: Process Resilience Experiment 11: Async error propagation handles rejection from killContainer during overwrite gracefully"
     ],
     "bdea07439a6b5cec": [
       "HubConsensusEnvGuard assertNoHubConsensusEnvDrift() is a no-op (returns empty) on a fresh install with no running hub container",
@@ -4434,6 +4407,9 @@
       "Fuzz: resolveArgs() uses custom defaultBranch",
       "Fuzz: resolveArgs() uses defaultBranch when no unrecognized arg and expectBranch=true"
     ],
+    "f033f9a92030563f": [
+      "Chaos: Process Resilience Experiment 11: Async error propagation propagates rejection from stopContainerByName during overwrite"
+    ],
     "f0e58110dbd1940b": [
       "ReleaseManifestService the shipped manifest declares a platform version and a release date",
       "ReleaseManifestService the shipped manifest does not pin xchain-node itself",
@@ -4781,6 +4757,32 @@
     "fedac1cc56d1106d": [
       "Chaos: Download Resilience Experiment 8g: Archive extraction failure throws when tar exits with non-zero code"
     ],
+    "ff1fb64b6e8edf8f": [
+      "HubService.buildCheckpointConfig hub endpoint defaults the endpoint to the hub container on the docker network",
+      "HubService.buildCheckpointConfig hub endpoint emits a hub_url alongside every self_sync it advertises",
+      "HubService.buildCheckpointConfig hub endpoint honours an operator HUB_API_URL from the host env",
+      "HubService.buildCheckpointConfig hub endpoint keeps the mirror schema and indexer credentials it already carried",
+      "HubService.isCheckpointSelfSyncEnabled is not opted in when neither the env nor the container says so",
+      "HubService.isCheckpointSelfSyncEnabled is not opted in when there is no explorer container to ask",
+      "HubService.isCheckpointSelfSyncEnabled is opted in when the host env carries the flag",
+      "HubService.isCheckpointSelfSyncEnabled reads the flag itself off the container when it is there",
+      "HubService.isCheckpointSelfSyncEnabled stays opted in when the env is gone but the explorer container remembers",
+      "HubService.isCheckpointSelfSyncEnabled treats an empty env value as unset rather than as an opt-in",
+      "HubService.isHubAnswering asks once, with no retry loop of its own",
+      "HubService.isHubAnswering is false when nothing answers",
+      "HubService.isHubAnswering is true when the hub answers a ping",
+      "HubService.updateHub network attachment keeps missing xchain-sync containers on the existing retry and report path",
+      "HubService.updateHub network attachment rejects naming the unreachable network instead of reporting success",
+      "HubService.updateHub network attachment retries a failed attach once and succeeds on the second try",
+      "HubService.updateHub network attachment returns true when every shared-container attach succeeds",
+      "HubService.updateHub network attachment updateHub re-resolves a stale hub container id",
+      "HubService.updateHub skipConfigPush attaches the shared containers but never reaches the config push",
+      "HubService.updateHub skipConfigPush defaults to pushing, so no existing caller changes behaviour",
+      "HubService.updateHub skipConfigPush pushes as it always has when not told to skip",
+      "HubService.updateHubOrExplorer config delivery exhausts ten attempts and reports the last hub error",
+      "HubService.updateHubOrExplorer config delivery retries a rejected hub update and succeeds on the next attempt",
+      "HubService.updateHubOrExplorer config delivery writes the explorer payload to config.json in its registered container"
+    ],
     "ff91bbaf1f49c8c2": [
       "Integration: Database Service Chain checkIfDatabaseIsReady retries until database responds"
     ]
@@ -4788,7 +4790,7 @@
   "scripts": {
     "test": {
       "fileCount": 305,
-      "titleCount": 2915,
+      "titleCount": 2917,
       "files": {
         "test/unit/00_config_directory_isolation.test.js": "f13ced249dae415e",
         "test/unit/autoheal_service.test.js": "eae1a818e5f6a1fe",
@@ -4944,7 +4946,7 @@
         "test/unit/hub_connector_failures.test.js": "2c16774921b9b66c",
         "test/unit/hub_consensus_env_guard.test.js": "bdea07439a6b5cec",
         "test/unit/hub_install_pinning.test.js": "13499f2ff51c6f3c",
-        "test/unit/hub_service.test.js": "835efb15177529f3",
+        "test/unit/hub_service.test.js": "ff1fb64b6e8edf8f",
         "test/unit/hub_service_failover.test.js": "dfc874d437cc3eda",
         "test/unit/identify_deployed_ref.test.js": "9b210872d17a3ffa",
         "test/unit/install_target_service.test.js": "3b04cc05990c4f9a",
@@ -5099,7 +5101,7 @@
     },
     "test:all": {
       "fileCount": 415,
-      "titleCount": 3681,
+      "titleCount": 3683,
       "files": {
         "test/chaos/config_resilience_chaos.test.js": "e187ad3068ae0375",
         "test/chaos/config_resilience_chaos.test/argument_parsing_resilience_chaos.test.js": "24bd240f4198a15b",
@@ -5132,8 +5134,8 @@
         "test/chaos/git_clone_resilience_chaos.test.js": "cbdbc1d46a4e8f22",
         "test/chaos/network_resilience_chaos.test.js": "2828c04ca92985e6",
         "test/chaos/process_resilience_chaos.test.js": "4a50c1aca5c12ab0",
-        "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_kill_chaos.test.js": "bd3429f1a8b7bb8b",
-        "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_remove_chaos.test.js": "06ac9b58d4a7dceb",
+        "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_kill_chaos.test.js": "f033f9a92030563f",
+        "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_remove_chaos.test.js": "2d5951fd05d23617",
         "test/chaos/process_resilience_chaos.test/async_error_propagation_run_chaos.test.js": "841397b0f12a1dbd",
         "test/chaos/process_resilience_chaos.test/async_error_propagation_status_chaos.test.js": "9b06c8565cfe1f81",
         "test/chaos/process_resilience_chaos.test/empty_container_id_non_hex_chaos.test.js": "c30fc0c4dd2e1ee9",
@@ -5365,7 +5367,7 @@
         "test/unit/hub_connector_failures.test.js": "2c16774921b9b66c",
         "test/unit/hub_consensus_env_guard.test.js": "bdea07439a6b5cec",
         "test/unit/hub_install_pinning.test.js": "13499f2ff51c6f3c",
-        "test/unit/hub_service.test.js": "835efb15177529f3",
+        "test/unit/hub_service.test.js": "ff1fb64b6e8edf8f",
         "test/unit/hub_service_failover.test.js": "dfc874d437cc3eda",
         "test/unit/identify_deployed_ref.test.js": "9b210872d17a3ffa",
         "test/unit/install_target_service.test.js": "3b04cc05990c4f9a",
@@ -5566,8 +5568,8 @@
         "test/chaos/git_clone_resilience_chaos.test.js": "cbdbc1d46a4e8f22",
         "test/chaos/network_resilience_chaos.test.js": "2828c04ca92985e6",
         "test/chaos/process_resilience_chaos.test.js": "4a50c1aca5c12ab0",
-        "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_kill_chaos.test.js": "bd3429f1a8b7bb8b",
-        "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_remove_chaos.test.js": "06ac9b58d4a7dceb",
+        "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_kill_chaos.test.js": "f033f9a92030563f",
+        "test/chaos/process_resilience_chaos.test/async_error_propagation_overwrite_remove_chaos.test.js": "2d5951fd05d23617",
         "test/chaos/process_resilience_chaos.test/async_error_propagation_run_chaos.test.js": "841397b0f12a1dbd",
         "test/chaos/process_resilience_chaos.test/async_error_propagation_status_chaos.test.js": "9b06c8565cfe1f81",
         "test/chaos/process_resilience_chaos.test/empty_container_id_non_hex_chaos.test.js": "c30fc0c4dd2e1ee9",

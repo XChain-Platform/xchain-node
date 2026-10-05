@@ -118,7 +118,7 @@ describe('suite title comparison CLI keeps structural changes blocking', () => {
     });
 });
 
-describe('suite title comparison CLI grades split record applicability', () => {
+describe('suite title comparison CLI always grades split records', () => {
     let dir;
     let current;
 
@@ -137,12 +137,12 @@ describe('suite title comparison CLI grades split record applicability', () => {
         assert.match(result.stdout, /split_part_collides/);
     });
 
-    it('does not apply a split record tied to an earlier pin', () => {
+    it('rejects a stale-digest split record', () => {
         const [old, part] = Object.keys(current);
         const split = writeSplit(dir, 'earlier-split', old, [old, part], '0'.repeat(64));
         const result = runCli(dir, 'retaken-pin', current, ['--split-map', split]);
-        assert.strictEqual(result.status, 0, result.stderr);
-        assert.match(result.stdout, /suite identity holds/);
+        assert.strictEqual(result.status, 1, result.stderr);
+        assert.match(result.stdout, /split_part_collides/);
     });
 });
 

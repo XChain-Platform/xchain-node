@@ -66,7 +66,7 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
-const { loadSplits, validateSplits, compareWithSplits } = require('./suite_title_map/split_map.js');
+const { loadSplits, compareWithSplits } = require('./suite_title_map/split_map.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const MOCHA_BIN = path.join(REPO_ROOT, 'node_modules', '.bin', 'mocha');
@@ -273,22 +273,10 @@ function isGrowth(difference) {
     return GROWTH_KINDS.has(difference.kind);
 }
 
-function applicableSplits(splitFile, pinFile) {
-    if (!splitFile) return {};
-    const record = JSON.parse(fs.readFileSync(splitFile, 'utf8'));
-    const splits = loadSplits(splitFile);
-    if (validateSplits(splits).length) return splits;
-    if (record.pin_before_sha256) {
-        const digest = crypto.createHash('sha256').update(fs.readFileSync(pinFile)).digest('hex');
-        if (record.pin_before_sha256 !== digest) return {};
-    }
-    return splits;
-}
-
 function compareAgainst(opts, map) {
     const pin = JSON.parse(fs.readFileSync(opts.compare, 'utf8'));
     const renames = opts.renameMap ? JSON.parse(fs.readFileSync(opts.renameMap, 'utf8')) : {};
-    const splits = applicableSplits(opts.splitMap, opts.compare);
+    const splits = opts.splitMap ? loadSplits(opts.splitMap) : {};
     const differences = compareWithSplits({ pin, fresh: map, renames, splits, only: opts.script, compare });
     if (!differences.length) {
         console.log(`suite identity holds against ${path.relative(REPO_ROOT, opts.compare)}`
