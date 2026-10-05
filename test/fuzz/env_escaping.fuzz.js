@@ -79,6 +79,7 @@ function makeStubs(envVars) {
 function captureDockerRunArgs(stubs) {
     let runArgs = null
     let runCmd = null
+    let runEnv = null
     stubs.execFile.callsFake((cmd, args, opts, cb) => {
         if (typeof opts === 'function') { cb = opts; opts = {} }
         if (args && args.includes('build')) {
@@ -86,10 +87,19 @@ function captureDockerRunArgs(stubs) {
         } else if (args && args.includes('run')) {
             runArgs = args
             runCmd = cmd + ' ' + (args || []).join(' ')
+            runEnv = opts.env
             cb(null, 'a'.repeat(64) + '\n')
         }
     })
-    return { getCmd: () => runCmd, getArgs: () => runArgs }
+    return { getCmd: () => runCmd, getArgs: () => runArgs, getEnv: () => runEnv }
+}
+
+function expectDockerEnv(args, env, key, value) {
+    const index = args.indexOf(key)
+    expect(index).to.be.greaterThan(0)
+    expect(args[index - 1]).to.equal('--env')
+    expect(args.some(arg => String(arg).startsWith(key + '='))).to.be.false
+    expect(env[key]).to.equal(String(value))
 }
 
 // ---------------------------------------------------------------------------
@@ -98,13 +108,7 @@ function captureDockerRunArgs(stubs) {
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
 
-    // With execFile, env vars are passed as raw array elements; no shell escaping is needed.
-    // Each env var is passed as two separate args: '-e', 'KEY=value'
-    // The values are NOT shell-quoted or escaped.
-
-    // With execFile, env vars are passed as raw array elements; no shell escaping is needed.
-    // Each env var is passed as two separate args: '-e', 'KEY=value'
-    // The values are NOT shell-quoted or escaped.
+    // Docker receives bare env names on argv and raw values in the child env.
 
     // --- Values with shell metacharacters pass through raw ---
     const rawPassthroughInputs = [
@@ -119,87 +123,65 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
     ]
 
     for (const [desc, rawValue] of rawPassthroughInputs) {
-        it(`passes ${desc} as raw value in args array (no escaping needed)`, async function () {
+        it(`passes ${desc} as a raw child env value without exposing it on argv`, async function () {
             const stubs = makeStubs({ 'TEST_KEY': rawValue, 'ENCODER_PORT': 3003, 'ENCODER_API_PORT': 3003 })
-            const { getArgs } = captureDockerRunArgs(stubs)
+            const { getArgs, getEnv } = captureDockerRunArgs(stubs)
             const ms = loadModuleService(stubs)
             await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
             const args = getArgs()
             expect(args).to.exist
-
-            // Find the -e flag followed by the TEST_KEY=<value> arg
-            const eIndex = args.indexOf('-e')
-            let found = false
-            for (let i = 0; i < args.length; i++) {
-                if (args[i] === '-e' && args[i + 1] && args[i + 1].startsWith('TEST_KEY=')) {
-                    const val = args[i + 1].substring('TEST_KEY='.length)
-                    expect(val).to.equal(String(rawValue))
-                    found = true
-                    break
-                }
-            }
-            expect(found, 'TEST_KEY env var found in args').to.be.true
+            expectDockerEnv(args, getEnv(), 'TEST_KEY', rawValue)
         })
     }
 })
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
-    // --- Newline / carriage return values are passed as raw strings ---
-    // With execFile there is no shell to interpret them, so they are safe
-    it('newline characters are passed raw (safe with execFile)', async function () {
+    // --- Newline / carriage return values are passed as raw child env strings ---
+    it('newline characters are passed through the child env', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'safe_value\n-v /:/host:ro',
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        // The newline is safe with execFile; no flag injection possible.
-        // Verify the value is in the args array as a single element
-        const envArg = args.find(a => a.startsWith('EVIL_KEY='))
-        expect(envArg).to.exist
-        expect(envArg).to.equal('EVIL_KEY=safe_value\n-v /:/host:ro')
+        expectDockerEnv(args, getEnv(), 'EVIL_KEY', 'safe_value\n-v /:/host:ro')
     })
 
-    it('carriage return characters are passed raw (safe with execFile)', async function () {
+    it('carriage return characters are passed through the child env', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'safe_value\r-v /:/host:ro',
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        const envArg = args.find(a => a.startsWith('EVIL_KEY='))
-        expect(envArg).to.exist
-        expect(envArg).to.equal('EVIL_KEY=safe_value\r-v /:/host:ro')
+        expectDockerEnv(args, getEnv(), 'EVIL_KEY', 'safe_value\r-v /:/host:ro')
     })
 })
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
-    it('combined \\r\\n passed raw (safe with execFile)', async function () {
+    it('combined \\r\\n is passed through the child env', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'value\r\n--privileged',
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        const envArg = args.find(a => a.startsWith('EVIL_KEY='))
-        expect(envArg).to.exist
-        // The value is a single array element; no command injection possible
-        expect(envArg).to.equal('EVIL_KEY=value\r\n--privileged')
+        expectDockerEnv(args, getEnv(), 'EVIL_KEY', 'value\r\n--privileged')
     })
 
     // --- Null byte and binary data ---
@@ -225,15 +207,13 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        const envArg = args.find(a => a.startsWith('TEST='))
-        expect(envArg).to.exist
-        expect(envArg).to.include('A'.repeat(1000))
+        expectDockerEnv(args, getEnv(), 'TEST', 'A'.repeat(100000))
     })
 
     it('handles empty string env var value', async function () {
@@ -242,14 +222,13 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        const envArg = args.find(a => a === 'TEST=')
-        expect(envArg).to.exist
+        expectDockerEnv(args, getEnv(), 'TEST', '')
     })
 })
 
@@ -261,14 +240,13 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        const envArg = args.find(a => a === 'PORT=8332')
-        expect(envArg).to.exist
+        expectDockerEnv(args, getEnv(), 'PORT', 8332)
     })
 
     it('handles boolean env var value', async function () {
@@ -277,14 +255,13 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        const envArg = args.find(a => a === 'FLAG=false')
-        expect(envArg).to.exist
+        expectDockerEnv(args, getEnv(), 'FLAG', false)
     })
 })
 
@@ -295,14 +272,13 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        const envArg = args.find(a => a === 'NULLVAL=null')
-        expect(envArg).to.exist
+        expectDockerEnv(args, getEnv(), 'NULLVAL', null)
     })
 
     it('handles undefined env var value via String() coercion', async function () {
@@ -311,14 +287,13 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        const envArg = args.find(a => a === 'UNDEF=undefined')
-        expect(envArg).to.exist
+        expectDockerEnv(args, getEnv(), 'UNDEF', undefined)
     })
 })
 
@@ -338,22 +313,19 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
     })
 
     // --- Comprehensive: all dangerous chars in one value ---
-    it('passes all dangerous shell characters raw in a single value (safe with execFile)', async function () {
+    it('passes all dangerous shell characters through the child env', async function () {
         const combined = 'a"b\\c$d`e\nf\rg'
         const stubs = makeStubs({
             'COMBINED': combined,
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const { getArgs } = captureDockerRunArgs(stubs)
+        const { getArgs, getEnv } = captureDockerRunArgs(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const args = getArgs()
         expect(args).to.exist
 
-        // With execFile, the value is a single array element; no shell interpretation occurs
-        const envArg = args.find(a => a.startsWith('COMBINED='))
-        expect(envArg).to.exist
-        expect(envArg).to.equal('COMBINED=' + combined)
+        expectDockerEnv(args, getEnv(), 'COMBINED', combined)
     })
 })
