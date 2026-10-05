@@ -31,11 +31,15 @@ jobs:
       - name: Run Stryker
         run: npm run test:mutation
 
+      - name: Verify mutation reports
+        if: always()
+        run: test -s reports/mutation/report.json && test -s reports/mutation/index.html
+
       - name: Upload mutation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mutation-report
           path: reports/mutation/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
