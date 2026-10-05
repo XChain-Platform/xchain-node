@@ -31,6 +31,8 @@ const { sleep, redactSecrets }    = require('../utils/helpers')
 const { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../utils/sql_safety')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
 const { PING_SQL } = require('../db/connectivity')
+const memoryLimitService = require('./memory_limit_service')
+const { stopTimeoutArgs } = require('./stop_budget_service')
 const { schemaExistsSql, tableExistsSql, tablesExistSql } = require('../db/information_schema')
 const {
     PRICE_FENCE_TABLE, FENCE_NETWORK_COLUMN, clearChainFenceSql, clearNetworkFenceSql,
@@ -76,7 +78,36 @@ configureUserProvisioning(databaseServiceDependencies)
 configureDbParameters(databaseServiceDependencies)
 configureResetDatabases(databaseServiceDependencies)
 configureHubCrossChainPurge(databaseServiceDependencies)
-configureDatabaseModule(databaseServiceDependencies)
+
+function databaseRunArgs(args) {
+    if (args[0] !== 'run') return args
+    const envIndex = args.indexOf('--env')
+    if (envIndex < 0 || args[envIndex + 1] !== 'MYSQL_ROOT_PASSWORD') return args
+
+    const memory = memoryLimitService.memoryArgsFor(DB_MODULE_NAME)
+    if (memory.note) logger.info(memory.note)
+    const imageIndex = envIndex + 2
+    return [
+        ...args.slice(0, imageIndex),
+        ...stopTimeoutArgs(DB_MODULE_NAME),
+        ...memory.args,
+        ...args.slice(imageIndex)
+    ]
+}
+
+function databaseModuleExecFile(...args) {
+    return execFile(...args)
+}
+
+function databaseModuleExecFileAsync(file, args, options) {
+    return execFileAsync(file, file === 'docker' ? databaseRunArgs(args) : args, options)
+}
+
+configureDatabaseModule({
+    ...databaseServiceDependencies,
+    execFile: databaseModuleExecFile,
+    execFileAsync: databaseModuleExecFileAsync
+})
 
 // Open the shared MariaDB connection pool if it isn't already open.
 // The CLI precheck normally does this, but restore/maintenance routines can
