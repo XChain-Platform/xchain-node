@@ -14,6 +14,160 @@
  * XChain Node - CLI
  * Commander setup and command definitions
  ********************************************************************/
+const fs = require('fs')
+const path = require('path')
+const zlib = require('zlib')
+const { execFile, spawn } = require('child_process')
+const { promisify } = require('util')
+const { pipeline } = require('stream/promises')
+const config = require('../config')
+const bootstrap = require('../services/bootstrap_service')
+const { assertArchiveIdentity } = require('../services/bootstrap_service/restore_archive')
+const { getWorkDir } = require('../services/bootstrap_service/workspace')
+const database = require('../services/database_service')
+const { getDefaultConfig, getModuleDatabaseName } = require('../services/config_service')
+const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
+const { getLogger } = require('../observability/logger')
+
+const execFileAsync = promisify(execFile)
+const rehearsalDatabase = 'xchain_restore_rehearsal'
+const logger = getLogger()
+function mariaTool(context, tool, args, interactive = false) {
+    if (context.external) {
+        return {
+            file: tool,
+            args: ['-h', context.external.host, '-P', String(context.external.port),
+                '-u', context.external.root_user].concat(args),
+            env: mariadbEnv(context.external.root_password)
+        }
+    }
+    return {
+        file: 'docker',
+        args: dockerMariadbArgs(context.containerId,
+            [tool, '-u', 'root'].concat(args), { interactive }),
+        env: mariadbEnv(context.rootPassword)
+    }
+}
+async function runMariaTool(context, tool, args) {
+    const command = mariaTool(context, tool, args)
+    return execFileAsync(command.file, command.args, { env: command.env })
+}
+async function rehearsalContext(coin, network) {
+    if (config.EXTERNAL_DB) return { external: await database.getExternalDbConfig() }
+    const containerId = await database.getDatabaseContainerId()
+    if (!containerId) throw new Error('MariaDB container not found')
+    return { containerId, rootPassword: await database.askMariadbRootPassword(coin, network) }
+}
+async function rehearsalArchive(coin, network, fileName) {
+    const module = config.XChainService.XCHAIN_INDEXER
+    const files = await bootstrap.getBootstrapFilesList(coin, network, module)
+    const selected = fileName || files[0]
+    if (!selected) throw new Error(`No bootstrap archives found for ${coin}/${network} ${module}`)
+    if (!files.includes(selected)) throw new Error(`Bootstrap '${selected}' not found`)
+    const moduleConfig = await getDefaultConfig(module, coin, network)
+    const archivePath = path.join(moduleConfig.INDEXER_BOOTSTRAP_VOLUME, selected)
+    await bootstrap.checkBootstrapSignature(archivePath)
+    await assertArchiveIdentity(archivePath, { module, coin, network })
+    const workDir = getWorkDir(coin, network, `${module}-rehearsal`)
+    const innerArchive = await bootstrap.ensureVerifiedInnerArchive(
+        archivePath, workDir, 'dump.sql.gz', 'dump.sha256'
+    )
+    return { innerArchive, selected, workDir }
+}
+function showRowCount(stdout, table) {
+    const rows = String(stdout).split('\n')
+        .filter(line => line.startsWith('|'))
+        .map(line => line.split('|').slice(1, -1).map(value => value.trim()))
+    const rowColumn = rows[0] ? rows[0].indexOf('Rows') : -1
+    const count = rowColumn >= 0 && rows[1] ? Number(rows[1][rowColumn]) : NaN
+    if (!Number.isSafeInteger(count) || count < 0) {
+        throw new Error(`Could not read ${table} count from mariadb-show`)
+    }
+    return count
+}
+
+async function databaseCounts(context, databaseName) {
+    const count = async table => {
+        const { stdout } = await runMariaTool(context, 'mariadb-show', ['--count', databaseName, table])
+        return showRowCount(stdout, table)
+    }
+    return {
+        rows: await count('blocks'),
+        tokens: await count('tokens'),
+        issuances: await count('issues')
+    }
+}
+
+async function importRehearsal(context, innerArchive) {
+    const command = mariaTool(context, 'mariadb', [rehearsalDatabase], true)
+    const maria = spawn(command.file, command.args,
+        { stdio: ['pipe', 'inherit', 'inherit'], env: command.env })
+    const closed = new Promise((resolve, reject) => {
+        maria.once('error', reject)
+        maria.once('close', code => code === 0
+            ? resolve()
+            : reject(new Error(`MariaDB rehearsal restore exited with code ${code}`)))
+    })
+    await Promise.all([
+        pipeline(fs.createReadStream(innerArchive), zlib.createGunzip(), maria.stdin),
+        closed
+    ])
+}
+
+function countsMatch(source, restored) {
+    return source.rows === restored.rows && source.tokens === restored.tokens &&
+        source.issuances === restored.issuances
+}
+
+async function rehearseBootstrapRestore(coin, network, options) {
+    if (network !== 'mainnet') throw new Error('Bootstrap restore rehearsal requires mainnet')
+    const sourceName = getModuleDatabaseName(config.XChainService.XCHAIN_INDEXER, coin, network)
+    const archive = await rehearsalArchive(coin, network, options.file)
+    const context = await rehearsalContext(coin, network)
+    let created = false
+    try {
+        const source = await databaseCounts(context, sourceName)
+        await runMariaTool(context, 'mariadb-admin', ['create', rehearsalDatabase])
+        created = true
+        logger.info(`Restoring ${archive.selected} into ${rehearsalDatabase}...`)
+        await importRehearsal(context, archive.innerArchive)
+        const restored = await databaseCounts(context, rehearsalDatabase)
+        logger.info(`source: rows=${source.rows} tokens=${source.tokens} issuances=${source.issuances}`)
+        logger.info(`${rehearsalDatabase}: rows=${restored.rows} tokens=${restored.tokens} issuances=${restored.issuances}`)
+        return countsMatch(source, restored)
+    } finally {
+        fs.rmSync(archive.workDir, { recursive: true, force: true })
+        if (created) {
+            await runMariaTool(context, 'mariadb-admin', ['--force', 'drop', rehearsalDatabase])
+            logger.info(`Removed disposable database ${rehearsalDatabase}`)
+        }
+    }
+}
+
+function registerBootstrapRestoreRehearsal(program, deps) {
+    program.command('bootstrap-restore-rehearsal')
+        .description('Restore a mainnet indexer bootstrap into a disposable database and compare counts')
+        .argument('<chain>', '(bitcoin, litecoin, dogecoin)')
+        .argument('<network>', '(mainnet)')
+        .option('--file <name>', 'restore this exact local archive instead of the newest one')
+        .action(async (chain, network, options) => {
+            let release = null
+            let exitCode = 1
+            try {
+                const waitMs = parseInt(config.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS || '0', 10) || 0
+                release = deps.acquireCommandLock({ command: 'bootstrap-restore-rehearsal', waitMs })
+                const matches = await rehearseBootstrapRestore(chain, network, options)
+                if (!matches) logger.error('Bootstrap restore rehearsal count mismatch')
+                exitCode = matches ? 0 : 1
+            } catch (err) {
+                logger.error('Bootstrap restore rehearsal failed: ' +
+                    deps.redactSecrets(err && err.message ? err.message : err))
+            } finally {
+                if (release) release()
+            }
+            return process.exit(exitCode)
+        })
+}
 function registerInstall(program, deps) {
     const { filterCommandParameters, resolveArgs, installModules, syncSharedServicesAfterInstall, config } = deps
     program
@@ -239,6 +393,7 @@ function registerToolCommands(program, deps) {
     registerExec(program, deps)
     registerClearReorgHalt(program, deps)
     registerShell(program, deps)
+    registerBootstrapRestoreRehearsal(program, deps)
 }
 
-module.exports = { registerPrimaryCommands, registerToolCommands }
+module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch }
