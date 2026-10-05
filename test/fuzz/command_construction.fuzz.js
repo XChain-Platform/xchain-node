@@ -87,6 +87,7 @@ function captureDockerRunCmd(stubs) {
         } else if (args && args.includes('run')) {
             runCmd = fullCmd
             runArgs = args
+            stubs.dockerRunOptions = opts
             cb(null, 'a'.repeat(64) + '\n')
         } else if (args && args[0] === 'inspect') {
             // A create that asked for a memory limit reads it back off the new
@@ -143,10 +144,7 @@ describe('Fuzz: Docker Command Construction', function () {
 
 describe('Fuzz: Docker Command Construction', function () {
 
-    // env vars are passed as raw array elements; execFile needs no shell quoting.
-
-    // --- env vars are passed as raw array elements (no shell quoting with execFile) ---
-    it('every -e flag is followed by a raw KEY=value pair', async function () {
+    it('passes env names in argv and values through the child environment', async function () {
         const stubs = makeStubs({
             'KEY1': 'val1',
             'KEY2': 'val2',
@@ -158,10 +156,13 @@ describe('Fuzz: Docker Command Construction', function () {
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
         const cmd = getCmd()
-        // With execFile, env vars appear as "-e KEY1=val1" (no quotes around KEY=value)
-        expect(cmd).to.include('-e KEY1=val1')
-        expect(cmd).to.include('-e KEY2=val2')
-        expect(cmd).to.include('-e KEY3=val3')
+        expect(cmd).to.include('--env KEY1')
+        expect(cmd).to.include('--env KEY2')
+        expect(cmd).to.include('--env KEY3')
+        expect(cmd).to.not.include('KEY1=val1')
+        expect(cmd).to.not.include('KEY2=val2')
+        expect(cmd).to.not.include('KEY3=val3')
+        expect(stubs.dockerRunOptions.env).to.include({ KEY1: 'val1', KEY2: 'val2', KEY3: 'val3' })
     })
 
     // --- Malicious env var keys ---
