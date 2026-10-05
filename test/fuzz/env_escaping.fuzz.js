@@ -72,10 +72,7 @@ function makeStubs(envVars) {
     }
 }
 
-/**
- * Captures the args array from the `docker run` execFile call.
- * Returns a getter for the full reconstructed command string and the raw args.
- */
+/** Capture Docker run arguments, reconstructed command text, and child environment. */
 function captureDockerRunArgs(stubs) {
     let runArgs = null
     let runCmd = null
@@ -108,9 +105,12 @@ function expectDockerEnv(args, env, key, value) {
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
 
-    // Docker receives bare env names on argv and raw values in the child env.
+    // Pass only variable names to Docker so values never appear in process listings.
+    // Supply raw values through the child environment, where Docker reads bare names.
+    // Preserve string coercion because child process environments accept string values.
 
-    // --- Values with shell metacharacters pass through raw ---
+    // Exercise metacharacters that would be dangerous if a shell interpreted them.
+    // Keep every value byte-for-byte intact in the child environment.
     const rawPassthroughInputs = [
         ['double quote',           'val"injection'],
         ['backslash',              'val\\injection'],
@@ -136,7 +136,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
 })
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
-    // --- Newline / carriage return values are passed as raw child env strings ---
+    // Exercise line breaks that could form extra commands in a shell command string.
+    // Keep line breaks inside one child environment value and away from argv.
     it('newline characters are passed through the child env', async function () {
         const stubs = makeStubs({
             'EVIL_KEY': 'safe_value\n-v /:/host:ro',
@@ -184,7 +185,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         expectDockerEnv(args, getEnv(), 'EVIL_KEY', 'value\r\n--privileged')
     })
 
-    // --- Null byte and binary data ---
+    // Exercise a null byte that execFile itself may reject before spawning Docker.
+    // Require only a controlled outcome without shell parsing or argument splitting.
     it('handles null byte in env var value', async function () {
         const stubs = makeStubs({
             'TEST': 'safe\x00malicious',
@@ -200,7 +202,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
 })
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
-    // --- Extreme lengths ---
+    // Exercise extreme lengths without truncating the child environment value.
+    // Keep the large value off argv even when its size stresses process creation.
     it('handles extremely long env var value without crashing', async function () {
         const stubs = makeStubs({
             'TEST': 'A'.repeat(100000),
@@ -233,7 +236,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
 })
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
-    // --- Type coercion ---
+    // Exercise non-string configuration values accepted by the configuration layer.
+    // Match child process environment semantics by coercing each value with String.
     it('handles numeric env var value', async function () {
         const stubs = makeStubs({
             'PORT': 8332,
@@ -266,6 +270,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
 })
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
+    // Exercise nullish configuration values rather than omitting their keys.
+    // Preserve explicit entries by coercing null and undefined to their string forms.
     it('handles null env var value via String() coercion', async function () {
         const stubs = makeStubs({
             'NULLVAL': null,
@@ -298,7 +304,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
 })
 
 describe('Fuzz: Environment Variable Handling with execFile', function () {
-    // --- Unicode / special encoding ---
+    // Exercise Unicode and embedded control characters without changing their encoding.
+    // Require the execFile boundary to avoid interpreting those characters as syntax.
     it('handles unicode characters in env var value', async function () {
         const stubs = makeStubs({
             'TEST': '\u{1F4A9} bitcoin‏',
@@ -312,7 +319,8 @@ describe('Fuzz: Environment Variable Handling with execFile', function () {
         expect(args).to.exist
     })
 
-    // --- Comprehensive: all dangerous chars in one value ---
+    // Combine dangerous shell characters to catch accidental command-string reconstruction.
+    // Keep the combined value solely in the child environment and absent from argv.
     it('passes all dangerous shell characters through the child env', async function () {
         const combined = 'a"b\\c$d`e\nf\rg'
         const stubs = makeStubs({
