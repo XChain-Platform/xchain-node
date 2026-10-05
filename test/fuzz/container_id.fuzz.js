@@ -80,10 +80,9 @@ function setupExec(stubs, dockerRunOutput) {
     })
 }
 
-// Unit test "rejects when container ID returned is not a valid 64-char hex"
-// pins the same rejection text.
-function rejectionMessage(err) {
-    return err instanceof Error ? err.message : String(err)
+function expectContainerIdError(err) {
+    expect(err).to.be.instanceOf(Error)
+    expect(err.message).to.include('Invalid container ID')
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +153,7 @@ describe('Fuzz: Container ID Validation', function () {
                 await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
                 expect.fail('Should have rejected invalid container ID')
             } catch (err) {
-                expect(rejectionMessage(err)).to.include('Invalid container ID')
+                expectContainerIdError(err)
             }
         })
     }
@@ -181,7 +180,7 @@ describe('Fuzz: Container ID Validation', function () {
             await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
             expect.fail('Should have rejected')
         } catch (err) {
-            expect(rejectionMessage(err)).to.include('Invalid container ID')
+            expectContainerIdError(err)
         }
     })
 })
