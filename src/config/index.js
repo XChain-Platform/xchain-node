@@ -166,6 +166,21 @@ const containersFilesDir = path.join(tmpDir, "containers_files")
 // or the install --no-bootstrap flag (both read live from the env, not at load).
 const BOOTSTRAP_BASE_URL     = process.env.XCHAIN_NODE_BOOTSTRAP_BASE_URL || "https://sync.xchain.io/bootstraps"
 
+// The environment view the generated DOGE signer module carries. That module
+// runs inside the hub container, where this config does not exist, so the config
+// owns its source text: the generated file is written from this string and never
+// names the environment itself. The WIF is a non-enumerable getter so it is read
+// only when a signature is made and never appears in a dump of the view.
+const DOGE_SIGNER_ENV_SOURCE = [
+    "const signerEnv = {",
+    "    get network()   { return process.env.DOGE_NETWORK || ''; },",
+    "    get address()   { return process.env.DOGE_ADDRESS || ''; },",
+    "    get encoderUrl() { return process.env.DOGE_ENCODER_URL || ''; },",
+    "    get feePerKb()  { return process.env.DOGE_FEE_PER_KB ? Number(process.env.DOGE_FEE_PER_KB) : undefined; }",
+    "};",
+    "Object.defineProperty(signerEnv, 'wif', { enumerable: false, get() { return process.env.DOGE_WIF || ''; } });"
+].join('\n')
+
 module.exports = {
     // codemod:env-entries
     // HUB_PORT is the ONE environment name that collides with a constant of
@@ -297,5 +312,6 @@ module.exports = {
     bootstrapDir,
     configDir,
     containersFilesDir,
-    BOOTSTRAP_BASE_URL
+    BOOTSTRAP_BASE_URL,
+    DOGE_SIGNER_ENV_SOURCE
 }
