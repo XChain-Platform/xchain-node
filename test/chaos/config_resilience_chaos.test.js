@@ -21,7 +21,7 @@ function makeConfigService(fsStub, readlineOverride) {
     const constants = require('../../src/config/index')
     const stubs = {
         'fs': fsStub || require('fs'),
-        '../config/constants': {
+        '../config': {
             ...constants,
             configDir: '/test/config'
         },
