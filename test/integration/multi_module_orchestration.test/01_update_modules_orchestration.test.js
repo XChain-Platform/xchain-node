@@ -96,6 +96,9 @@ multiModuleSuite('updateModules orchestration', function (fixture) {
             },
             '../services/database_service': {
                 buildDatabaseModule: async () => true
+            },
+            '../services/migration_precondition_service': {
+                assertRequiredMigrationsApplied: async () => ({ checked: false, reason: 'stubbed' })
             }
         })
 
