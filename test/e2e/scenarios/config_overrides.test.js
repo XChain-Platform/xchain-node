@@ -145,6 +145,7 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const run = moduleRun('xchain-encoder')
+            // NODE_USER overridden
             expectContainerEnv(run, 'NODE_USER', 'customuser')
             expectContainerEnv(run, 'NODE_PASSWORD', 'custompass')
         })
@@ -160,6 +161,8 @@ describe('E2E: Configuration Overrides (Scenario 4.4)', function () {
             const run = moduleRun('xchain-encoder')
             const resolvedConfig = await cli.ConfigService.getDefaultConfig('xchain-encoder', 'bitcoin', 'regtest')
             expectContainerEnv(run, 'NODE_USER', 'customuser')
+            // NODE_PASSWORD uses default
+            // The current default is a generated credential rather than the legacy literal.
             expect(resolvedConfig.NODE_PASSWORD).to.match(/^[0-9a-f]{48}$/)
             expectContainerEnv(run, 'NODE_PASSWORD', resolvedConfig.NODE_PASSWORD)
         })
