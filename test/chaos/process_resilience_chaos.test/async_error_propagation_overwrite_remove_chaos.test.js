@@ -22,9 +22,10 @@ describe('Chaos: Process Resilience', function () {
 
 describe('Experiment 11: Async error propagation', function () {
 
-        it('propagates rejection from removeContainer during overwrite', async function () {
+        it('handles rejection from removeContainer during overwrite gracefully', async function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
+            const containerId = 'b'.repeat(64)
 
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let cb
@@ -32,20 +33,19 @@ describe('Experiment 11: Async error propagation', function () {
                 else cb = rest[1]
                 if (args[0] === 'build') {
                     cb(null)
+                } else if (args[0] === 'run') {
+                    cb(null, containerId + '\n')
                 }
             })
 
-            const ms = loadModuleService(stubs, {
-                killContainer: sinon.stub().resolves(true),
-                removeContainer: sinon.stub().rejects(new Error('container in use'))
-            })
+            const stopContainerByName = sinon.stub().resolves({ stopped: true, seconds: 1, killed: false })
+            const removeContainer = sinon.stub().rejects(new Error('container in use'))
+            const ms = loadModuleService(stubs, { stopContainerByName, removeContainer })
 
-            try {
-                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest', 'old-container-id')
-                expect.fail('should have rejected')
-            } catch (err) {
-                expect(err.message).to.equal('container in use')
-            }
+            const result = await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest', 'old-container-id')
+            expect(result).to.equal(containerId)
+            expect(stopContainerByName.calledOnceWith('old-container-id', 30)).to.be.true
+            expect(removeContainer.calledOnceWith('old-container-id')).to.be.true
         })
     })
 })

@@ -226,8 +226,8 @@ describe('Fuzz: Docker Command Construction', function () {
             const ms = loadModuleService(stubs)
             await ms.cloneGit('xchain-encoder', false, false, null)
             expect(cloneCmd).to.not.include('-b')
-            // Should be: git clone <url> <dest>
-            expect(cloneCmd).to.include('git clone git@')
+            // modulesUrls (src/config/index.js) is HTTPS by design
+            expect(cloneCmd).to.include('git clone ' + modulesUrls['xchain-encoder'])
         })
     })
 })

@@ -234,7 +234,6 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
         }
         if (config.HUB_SEED_URLS !== undefined && config.HUB_SEED_URLS !== "") {
             defaultValues.HUB_SEED_URLS = config.HUB_SEED_URLS
-            delete defaultValues.HUB_API_URL
         }
     }
 }
