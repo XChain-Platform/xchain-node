@@ -143,10 +143,8 @@ describe('Fuzz: Docker Command Construction', function () {
 
 describe('Fuzz: Docker Command Construction', function () {
 
-    // env vars are passed as raw array elements; execFile needs no shell quoting.
-
-    // --- env vars are passed as raw array elements (no shell quoting with execFile) ---
-    it('every -e flag is followed by a raw KEY=value pair', async function () {
+    // --- env names are bare on argv while values stay in the child env ---
+    it('every container env name is bare on argv and its value is in the child env', async function () {
         const stubs = makeStubs({
             'KEY1': 'val1',
             'KEY2': 'val2',
@@ -154,14 +152,17 @@ describe('Fuzz: Docker Command Construction', function () {
             'ENCODER_PORT': 3003,
             'ENCODER_API_PORT': 3003
         })
-        const getCmd = captureDockerRunCmd(stubs)
+        captureDockerRunCmd(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp(XChainService.XCHAIN_ENCODER, 'bitcoin', 'mainnet')
-        const cmd = getCmd()
-        // With execFile, env vars appear as "-e KEY1=val1" (no quotes around KEY=value)
-        expect(cmd).to.include('-e KEY1=val1')
-        expect(cmd).to.include('-e KEY2=val2')
-        expect(cmd).to.include('-e KEY3=val3')
+        const runCall = stubs.execFile.getCalls().find(call => call.args[1].includes('run'))
+        const args = runCall.args[1]
+        const env = runCall.args[2].env
+        for (const [key, value] of Object.entries({ KEY1: 'val1', KEY2: 'val2', KEY3: 'val3' })) {
+            expect(args[args.indexOf(key) - 1]).to.equal('--env')
+            expect(args).to.not.include(key + '=' + value)
+            expect(env[key]).to.equal(value)
+        }
     })
 
     // --- Malicious env var keys ---

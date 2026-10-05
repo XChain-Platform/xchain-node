@@ -69,12 +69,12 @@ describe('Fuzz: resolveArgs()', function () {
     })
 
     for (const arg of garbageArgs) {
-        it(`does not crash on garbage argument: ${JSON.stringify(arg)}`, function () {
+        it(`refuses unrecognized argument: ${JSON.stringify(arg)}`, function () {
             expectRefusal([arg], arg)
         })
     }
 
-    it('defaults to all/all/all when no recognized args', function () {
+    it('refuses the first unrecognized argument instead of defaulting to all/all/all', function () {
         expectRefusal(['unknown1', 'unknown2'], 'unknown1')
     })
 })
@@ -207,7 +207,7 @@ describe('Fuzz: resolveArgs()', function () {
 
 describe('Fuzz: resolveArgs()', function () {
     // --- Massive argument list ---
-    it('handles 100 garbage arguments without crashing', function () {
+    it('refuses the first of 100 garbage arguments', function () {
         const args = Array.from({ length: 100 }, (_, i) => 'garbage_' + i)
         expectRefusal(args, 'garbage_0')
     })
