@@ -26,11 +26,6 @@ describe('Chaos: Process Resilience', function () {
         it('rejects when docker run returns whitespace-only container ID', async function () {
             const stubs = makeStubs()
             sinon.stub(console, 'log')
-            const dockerArgs = require('../../../src/services/module_service/docker_args')
-            const configureDependencies = dockerArgs.configureDependencies
-            sinon.stub(dockerArgs, 'configureDependencies').callsFake((dependencies) => {
-                configureDependencies({ ...dependencies, getPublishedHostPorts: sinon.stub().resolves(new Map()) })
-            })
 
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let cb
