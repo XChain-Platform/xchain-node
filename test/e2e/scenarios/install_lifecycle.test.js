@@ -94,16 +94,15 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             expect(btcModules.length).to.be.greaterThanOrEqual(5)
         })
 
-        it('database container is stored with empty coin/network (shared service)', async function () {
+        it('database container is discoverable by its shared container name', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
 
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
-            const dbModule = await env.getModule('database', '', '')
-            expect(dbModule).to.not.be.null
-            expect(dbModule).to.have.lengthOf(64)
+            const dbContainerId = await cli.DatabaseService.getDatabaseContainerId()
+            expect(dbContainerId).to.equal('d'.repeat(64))
         })
     })
 })
@@ -282,8 +281,8 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             // Uninstall without includeShared
             await cli.moduleOps.uninstallModules(serviceList, false)
 
-            const dbEntry = await env.getModule('database', '', '')
-            expect(dbEntry).to.not.be.null
+            const dbContainerId = await cli.DatabaseService.getDatabaseContainerId()
+            expect(dbContainerId).to.equal('d'.repeat(64))
         })
     })
 })
@@ -307,10 +306,8 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             expect(decoderEntry).to.not.be.null
             expect(decoderEntry).to.have.lengthOf(64)
 
-            // Database should be installed (shared dependency)
-            // Database entry should still exist (shared service)
-            const dbEntry = await env.getModule('database', '', '')
-            expect(dbEntry).to.not.be.null
+            const dbContainerId = await cli.DatabaseService.getDatabaseContainerId()
+            expect(dbContainerId).to.equal('d'.repeat(64))
 
             // Encoder should NOT be installed
             // LevelDB entries for coin-specific modules should be removed
@@ -367,7 +364,8 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
 
             // Install
             const installResult = await cli.moduleOps.installModules(serviceList, 'master')
-            expect(installResult).to.be.true
+            expect(installResult.installed).to.have.lengthOf(7)
+            expect(installResult.skipped).to.deep.equal([])
 
             const modulesAfterInstall = await env.getAllModules()
             expect(modulesAfterInstall.length).to.be.greaterThanOrEqual(5)
@@ -394,7 +392,13 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
 
             // Uninstall
             const uninstallResult = await cli.moduleOps.uninstallModules(serviceList)
-            expect(uninstallResult).to.be.true
+            expect(uninstallResult.uninstalled).to.have.lengthOf(5)
+            // Unit pins: "skips shared modules by default" and
+            // "skips module when container ID is null".
+            expect(uninstallResult.skipped).to.deep.equal([
+                { module: 'xchain-explorer', coin: '', network: '', reason: 'shared' },
+                { module: 'node', coin: 'bitcoin', network: 'regtest', reason: 'not-installed' }
+            ])
         })
     })
 })

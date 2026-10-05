@@ -157,8 +157,8 @@ describe('E2E: Multi-Coin Installation (Scenario 4.2)', function () {
             await cli.moduleOps.uninstallModules(btcList)
 
             // Database should remain
-            const dbEntry = await env.getModule('database', '', '')
-            expect(dbEntry).to.not.be.null
+            const dbContainerId = await cli.DatabaseService.getDatabaseContainerId()
+            expect(dbContainerId).to.equal('d'.repeat(64))
         })
     })
 })

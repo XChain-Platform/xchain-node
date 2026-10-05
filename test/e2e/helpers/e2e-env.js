@@ -47,6 +47,7 @@ class E2EEnv extends TestEnv {
         // wired and the real implementations ran against the host instead.
         this.hostSeamCalls = []
         this._sealedSeams = []
+        this._originalDbPool = null
     }
 
     async setup() {
@@ -54,6 +55,16 @@ class E2EEnv extends TestEnv {
         this.capture = new CommandCapture()
         this.http = new HttpCapture()
         this.hostSeamCalls = []
+        const state = require(path.join(ROOT, 'src/state'))
+        this._originalDbPool = state.db.pool
+        state.db.assertReady = this._origDbMethods.assertReady
+        state.db.getModuleContainerStrict = this._origDbMethods.getModuleContainerStrict
+        state.db.pool = {
+            query: async (_sql, [module, coin, network]) => {
+                const containerId = await this._store.getModuleContainer(module, coin, network)
+                return containerId === null ? [] : [{ container_id: containerId }]
+            }
+        }
         this.sealBootstrapSeam()
         return this
     }
@@ -161,6 +172,8 @@ class E2EEnv extends TestEnv {
 
     async teardown() {
         this.restoreHostSeams()
+        require(path.join(ROOT, 'src/state')).db.pool = this._originalDbPool
+        this._originalDbPool = null
         return super.teardown()
     }
 
@@ -432,7 +445,11 @@ class E2EEnv extends TestEnv {
         // generic command success.
         const dbSpawnStub = function (command, args, options) {
             const child = spawnStub(command, args, options)
-            child.stdin = { on: () => {}, end: () => {} }
+            const call = capture.history()[capture.history().length - 1]
+            child.stdin = {
+                on: () => {},
+                end: input => { call.stdin = String(input || '') }
+            }
             process.nextTick(() => {
                 child.stdout.emit('data', '0')
                 child.emit('close', 0)
