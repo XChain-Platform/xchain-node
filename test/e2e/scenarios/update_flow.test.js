@@ -43,7 +43,7 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
     beforeEach(setupEnvironment)
     afterEach(teardownEnvironment)
 
-    // E2E-040: Update kills old container and creates new one
+    // E2E-040: Update stops old container and creates new one
     describe('E2E-040: Update replaces container', function () {
 
         it('stops old container, removes it, builds new image, and runs new container', async function () {
