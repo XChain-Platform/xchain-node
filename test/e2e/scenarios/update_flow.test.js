@@ -62,11 +62,13 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             // Update
             await cli.moduleOps.updateModules(serviceList)
 
-            const stopCmds = env.capture.findCommands(/docker stop/)
+            // Old container is stopped with the per-module budget, never killed
+            // (pinned by test/integration/docker_commands.test/build_and_up_with_overwrite_container_id.test.js)
+            expect(env.capture.findCommands(/docker kill/)).to.have.lengthOf(0)
+            const stopCmds = env.capture.findCommands(/docker stop -t \d+ /)
             expect(stopCmds.length).to.be.greaterThanOrEqual(1)
             const stopHasOldId = stopCmds.some(c => c.command.includes(oldContainerId))
             expect(stopHasOldId, 'stop references old container').to.be.true
-            expect(env.capture.findCommands(/docker kill/)).to.have.lengthOf(0)
 
             // Should have removed the old container
             const rmCmds = env.capture.findCommands(/docker rm/)
@@ -147,9 +149,8 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
 
-            const serviceList = {
-                bitcoin: { regtest: ['xchain-encoder', 'xchain-decoder'] }
-            }
+            require('../../../src/state').setRemoteModuleVersion('node-bitcoin', { tag_name: 'v28.1' })
+            const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 
             const oldEncoderId = await env.getModule('xchain-encoder', 'bitcoin', 'regtest')
