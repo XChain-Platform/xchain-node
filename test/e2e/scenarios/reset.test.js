@@ -50,7 +50,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
 
             env.capture.reset()
 
-            await cli.moduleOps.resetModules('xchain-decoder', 'bitcoin', 'regtest')
+            await cli.moduleOps.resetModules('xchain-decoder', 'bitcoin', 'regtest', true, true)
 
             // Should have called docker stop for the decoder
             const stopCmds = env.capture.findCommands(/docker stop/)
@@ -73,7 +73,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
 
             const idBefore = await env.getModule('xchain-decoder', 'bitcoin', 'regtest')
 
-            await cli.moduleOps.resetModules('xchain-decoder', 'bitcoin', 'regtest')
+            await cli.moduleOps.resetModules('xchain-decoder', 'bitcoin', 'regtest', true, true)
 
             const idAfter = await env.getModule('xchain-decoder', 'bitcoin', 'regtest')
             expect(idAfter).to.equal(idBefore)
@@ -98,12 +98,12 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
 
             env.capture.reset()
 
-            await cli.moduleOps.resetModules('xchain-decoder', 'bitcoin', 'regtest')
+            await cli.moduleOps.resetModules('xchain-decoder', 'bitcoin', 'regtest', true, true)
 
             // Should have executed a docker exec mariadb command with DROP DATABASE
             const execCmds = env.capture.findCommands(/docker exec/)
             const hasDropCreate = execCmds.some(c =>
-                c.command.includes('DROP DATABASE') && c.command.includes('CREATE DATABASE')
+                c.stdin && c.stdin.includes('DROP DATABASE') && c.stdin.includes('CREATE DATABASE')
             )
             expect(hasDropCreate, 'DROP and CREATE DATABASE executed').to.be.true
         })
@@ -133,7 +133,7 @@ describe('E2E: Reset Command (Scenario 4.8)', function () {
 
             env.capture.reset()
 
-            await cli.moduleOps.resetModules('all', 'bitcoin', 'regtest')
+            await cli.moduleOps.resetModules('all', 'bitcoin', 'regtest', true)
 
             const stopCmds = env.capture.findCommands(/docker stop/)
 
