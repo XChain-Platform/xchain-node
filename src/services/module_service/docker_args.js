@@ -20,6 +20,8 @@ let path = require('path')
 let { XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD } = require('../../config')
 let { getUtxoTrackerVolumeName } = require('../config_service')
 let { getPublishedHostPorts } = require('../docker_service')
+const requiredGetUtxoTrackerVolumeName = getUtxoTrackerVolumeName
+const requiredGetPublishedHostPorts = getPublishedHostPorts
 let config = require('../../config');
 let validatorService = require('../validator_service')
 const { getLogger } = require('../../observability/logger');
@@ -29,8 +31,8 @@ function configureDependencies(dependencies) {
     ({
         fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME,
         EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD,
-        getUtxoTrackerVolumeName = getUtxoTrackerVolumeName,
-        getPublishedHostPorts = getPublishedHostPorts, config, validatorService,
+        getUtxoTrackerVolumeName = requiredGetUtxoTrackerVolumeName,
+        getPublishedHostPorts = requiredGetPublishedHostPorts, config, validatorService,
         logger
     } = dependencies)
 }
