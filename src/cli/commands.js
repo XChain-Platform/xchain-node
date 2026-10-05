@@ -30,7 +30,7 @@ const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
 const { getLogger } = require('../observability/logger')
 
 const execFileAsync = promisify(execFile)
-const rehearsalDatabase = 'test01'
+const rehearsalDatabase = 'xchain_restore_rehearsal'
 const logger = getLogger()
 function mariaTool(context, tool, args, interactive = false) {
     if (context.external) {
@@ -146,7 +146,7 @@ async function rehearseBootstrapRestore(coin, network, options) {
 
 function registerBootstrapRestoreRehearsal(program, deps) {
     program.command('bootstrap-restore-rehearsal')
-        .description('Restore a mainnet indexer bootstrap into disposable database test01 and compare counts')
+        .description('Restore a mainnet indexer bootstrap into a disposable database and compare counts')
         .argument('<chain>', '(bitcoin, litecoin, dogecoin)')
         .argument('<network>', '(mainnet)')
         .option('--file <name>', 'restore this exact local archive instead of the newest one')
