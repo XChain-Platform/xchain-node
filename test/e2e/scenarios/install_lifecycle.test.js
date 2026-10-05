@@ -358,7 +358,6 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
     afterEach(teardownEnv)
     // E2E-006: Full lifecycle sequence (install → stop → start → uninstall)
     describe('E2E-006: Full lifecycle sequence', function () {
-
         it('install → stop → start → uninstall all succeed in sequence', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
@@ -369,23 +368,19 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             const installResult = await cli.moduleOps.installModules(serviceList, 'master')
             expect(installResult.installed).to.have.lengthOf(7)
             expect(installResult.skipped).to.deep.equal([])
-
             const modulesAfterInstall = await env.getAllModules()
             expect(modulesAfterInstall.length).to.be.greaterThanOrEqual(5)
             // Stop
             // Stop keeps the registered container identities intact.
             const stopResult = await cli.moduleOps.stopModules(serviceList)
             expect(stopResult).to.be.true
-
             // Start
             // Start reuses the containers recorded before the stop.
             const startResult = await cli.moduleOps.startModules(serviceList)
             expect(startResult).to.be.true
-
             // Container IDs unchanged after stop/start
             const modulesAfterRestart = await env.getAllModules()
             expect(modulesAfterRestart).to.have.lengthOf(modulesAfterInstall.length)
-
             for (const mod of modulesAfterInstall) {
                 const afterRestart = modulesAfterRestart.find(
                     m => m.module === mod.module && m.coin === mod.coin && m.network === mod.network
