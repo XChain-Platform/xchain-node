@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Pinned the v0.22.5 hub tag in the release manifest for the signer-set peer catch-up fix.
 
+### Security
+- Moved proxy-addr to 2.0.8 for the IPv4-mapped IPv6 trust subnet advisory GHSA-jqcg-44mw-7w3h.
+
 ## [0.22.4] - 2026-10-05
 
 ### Changed
