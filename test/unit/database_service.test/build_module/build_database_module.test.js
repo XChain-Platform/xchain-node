@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const { sinon, expect, VALID_CONTAINER_ID, fakeSpawn, mariadbAttempts, makeStubs, loadDatabaseService } = require('./helpers/harness')
+const { sinon, expect, VALID_CONTAINER_ID, fakeSpawn, mariadbAttempts, makeStubs, loadDatabaseService } = require('../helpers/harness')
 
 
 // Locate the `docker run -d ...` argv array among the execFileAsync calls.
@@ -236,7 +236,7 @@ describe('DatabaseService', function () {
             expect(String(runArgs[spIdx + 1]),
                 'the DB start period must stay DEPENDENCY_HEALTH_START_PERIOD: the hub and ' +
                 'explorer windows are derived from it and would silently go narrow'
-            ).to.equal(require('../../../src/config').DEPENDENCY_HEALTH_START_PERIOD)
+            ).to.equal(require('../../../../src/config').DEPENDENCY_HEALTH_START_PERIOD)
         })
 
 
