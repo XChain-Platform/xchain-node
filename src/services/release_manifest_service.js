@@ -171,12 +171,19 @@ async function fetchReleaseAsset(tag, assetName) {
     // storage REJECTS a request still carrying our Authorization header (the
     // same trap githubApiHeaders documents for coin-node downloads). So follow
     // the redirect by hand and drop the credentials on the second hop.
-    const first = await axios.get(asset.url, {
-        headers: { ...githubApiHeaders(), Accept: 'application/octet-stream' },
-        responseType: 'arraybuffer',
-        maxRedirects: 0,
-        validateStatus: status => (status >= 200 && status < 300) || [301, 302, 307, 308].includes(status)
-    })
+    let first
+    try {
+        first = await axios.get(asset.url, {
+            headers: { ...githubApiHeaders(), Accept: 'application/octet-stream' },
+            responseType: 'arraybuffer',
+            maxRedirects: 0,
+            validateStatus: status => (status >= 200 && status < 300) || [301, 302, 307, 308].includes(status)
+        })
+    } catch (error) {
+        // The asset endpoint is still api.github.com and spends the same quota,
+        // so a rate-limited 403 gets the reset time and GITHUB_TOKEN advice too.
+        throw githubRateLimitError(error) || error
+    }
 
     if (first.status >= 300) {
         const location = first.headers && first.headers.location
@@ -201,15 +208,15 @@ async function verifyManifestBytes(tag, bytes) {
 
 // The ONE latest-release semantic for the platform (spec section 5).
 //
-// Two paths existed and disagreed: VersionService hits `releases/latest`, which
-// the GitHub API defines as the newest NON-prerelease, non-draft release;
+// Two paths existed and disagreed: a VersionService helper hit `releases/latest`,
+// which the GitHub API defines as the newest NON-prerelease, non-draft release;
 // GitHubDownloader fetches the full list and sorts by published_at, which does
 // not exclude either. They are reconciled by ruling that train releases are
 // never flagged as GitHub pre-releases (D1/section 5), which makes
 // `releases/latest` well-defined, and by routing platform-version resolution
-// through this function only. GitHubDownloader keeps its own sort because it
-// resolves COIN daemon releases from third-party repos whose flagging this
-// project does not control.
+// through this function only; the VersionService helper had no caller and is
+// gone. GitHubDownloader keeps its own sort because it resolves COIN daemon
+// releases from third-party repos whose flagging this project does not control.
 async function resolveLatestReleaseTag() {
     const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/releases/latest`
     let result

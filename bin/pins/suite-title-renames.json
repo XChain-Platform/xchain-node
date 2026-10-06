@@ -191,6 +191,9 @@
     "test/unit/migration_precondition_service.test.js": {
       "MigrationPreconditionService migrationMode returns null when no mode is declared": "MigrationPreconditionService migrationMode defaults to manual when no recognized mode is declared"
     },
+    "test/unit/module_operations.test/14_reset_utxo_tracker_volume.test.js": {
+      "moduleOperations resetModules() the utxo-tracker volume wipe aborts and restores the stack when the wipe fails with nothing else touched": "moduleOperations resetModules() the utxo-tracker volume wipe leaves the stack down and reports a possibly partial wipe when the wipe fails with nothing else touched"
+    },
     "test/unit/module_service.test.js": {
       "ModuleService buildAndUp(): module-specific port/volume branches rejects when insertModuleContainer returns false": "ModuleService buildAndUp(): module-specific port/volume branches rejects when setModuleContainer returns false",
       "ModuleService uninstallModule(): removeModuleContainer returns false throws when removeModuleContainer returns false after successful container removal": "ModuleService uninstallModule(): deleteModuleContainer returns false throws when deleteModuleContainer returns false after successful container removal"

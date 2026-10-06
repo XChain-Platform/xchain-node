@@ -81,6 +81,24 @@ describe("NodeService: installNode()", function () {
             expect(err.message).to.match(/no valid version/)
         }
     })
+
+    // checkRemoteNodeVersion stores a null entry for a coin it has no release
+    // source for; the guard must cover the entry, not only its tag.
+    it('throws the no-valid-version error, not a TypeError, when the remote entry is null', async function () {
+        const stubs = makeNodeServiceStubs({
+            getLocalNodeVersion: sinon.stub().resolves(null),
+            getRemoteModuleVersions: () => ({ 'node-bitcoin': null })
+        })
+
+        const ns = loadNodeService(stubs)
+        try {
+            await ns.installNode('bitcoin', 'mainnet')
+            expect.fail('Should have thrown')
+        } catch (err) {
+            expect(err).to.not.be.instanceOf(TypeError)
+            expect(err.message).to.match(/no valid version/)
+        }
+    })
 })
 
 describe("NodeService: installNode()", function () {

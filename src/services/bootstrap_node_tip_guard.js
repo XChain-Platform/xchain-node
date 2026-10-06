@@ -203,7 +203,8 @@ async function probeServiceCapability(module, coin, network, { runner = defaultR
 }
 
 // The whole assessment for one restore, never throwing: reads the archive
-// height, asks the node, asks the service, compares, prints the verdict.
+// height, asks the node, asks the service, compares, prints the verdict
+// (all but a refusal, which the caller prints once the archive is verified).
 // Returns { verdict, refuse, detail, archiveHeight, nodeHeight, gap, ibd }.
 async function assessNodeTipForRestore({ coin, network, module, archivePath }, deps = {}) {
     if (guardSkipped()) {
@@ -251,7 +252,7 @@ async function assessNodeTipForRestore({ coin, network, module, archivePath }, d
             logger.info(`WARNING: ${result.detail}.`)
             break
         case VERDICT.BEHIND_REFUSE:
-            logger.info(`REFUSING the ${module} bootstrap restore: ${result.detail}.`)
+            // Printed by the caller after the signature check: the archive height is only a claim here.
             break
         default:
             logger.info(`Note: ${result.detail}.`)

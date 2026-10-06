@@ -97,7 +97,9 @@ describe('moduleOperations', function () {
     describe('resetModules()', function () {
         describe('the utxo-tracker volume wipe', function () {
 
-            it('aborts and restores the stack when the wipe fails with nothing else touched', async function () {
+            // A wipe that STARTED may have deleted part of the volume (find -delete keeps going past a
+            // per-entry error), so even with nothing else touched it must not restart the tracker over it.
+            it('leaves the stack down and reports a possibly partial wipe when the wipe fails with nothing else touched', async function () {
                 const stubs = makeStubs()
                 stubs.execFile.callsFake((cmd, args, cb) => {
                     if (args[0] === 'volume') return cb(null, '', '')
@@ -115,10 +117,13 @@ describe('moduleOperations', function () {
                 }
                 expect(result).to.be.false
                 expect(stubs.resetDatabases.called).to.be.false
+                expect(stubs.startContainer.called).to.be.false
                 const output = lines.join('\n')
                 expect(output).to.include(`clearing the Docker volume ${VOLUME} failed`)
                 expect(output).to.include('permission denied')
-                expect(output).to.include('No data was touched.')
+                expect(output).to.include('may be PARTLY cleared')
+                expect(output).to.include('The stopped services are left down: xchain-utxo-tracker')
+                expect(output).to.not.include('No data was touched.')
             })
         })
     })

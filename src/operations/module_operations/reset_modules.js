@@ -2,6 +2,7 @@
 
 let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings
 let RESETTABLE_SERVICES
+const { WIPE_IMAGE, ensureWipeImage, reportPartialWipe } = require('./reset_wipe_safety')
 
 function configure(dependencies) {
     ({ askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings } = dependencies)
@@ -187,6 +188,10 @@ async function checkResetDatabase(context) {
         }
     }
 
+    // The wipe image is checked here, ahead of the stop loop like the probes above, so its one untouched failure refuses while nothing is down.
+    const wipesData = (resetNode && (context.nodeDataPath || context.blocksHostPath || context.txindexHostPath)) || resetUtxoTracker
+    if (wipesData && !(await ensureWipeImage(execFileAsync, failureReason))) return false
+
     const modulesToStop = []
     if (resetNode)        modulesToStop.push(NODE_MODULE_NAME)
     if (resetUtxoTracker) modulesToStop.push(XChainService.XCHAIN_UTXO_TRACKER)
@@ -268,46 +273,39 @@ async function classifyResetVolume(context) {
 }
 
 async function wipeResetStores(context) {
-    const { abortBeforeAnyWipe, blocksHostPath, coin, network, nodeDataPath, resetDecoder, resetIndexer, resetNode, resetUtxoTracker, txindexHostPath, utxoVolumeName, utxoVolumePresent } = context
-    // Tracks whether anything irreversible has happened yet, so a later abort reports the stack's real state instead of promising an untouched one.
-    let nodeDataWiped = false
+    const { blocksHostPath, coin, network, nodeDataPath, resetDecoder, resetIndexer, resetNode, resetUtxoTracker, txindexHostPath, utxoVolumeName, utxoVolumePresent } = context
+    // The node paths already cleared, so a later abort reports the stack's real state instead of promising an untouched one.
+    const nodeCleared = []
+    // A failed node wipe may have deleted part of its target, so it is reported as possibly partial with services left down, never sent to abortBeforeAnyWipe (see reportPartialWipe).
+    const clearNodePath = async (target, label) => {
+        console.log(`Clearing ${label} at ${target}...`)
+        try {
+            await execFileAsync('docker', ['run', '--rm', '-v', `${target}:/data`, WIPE_IMAGE, 'sh', '-c', 'find /data -mindepth 1 -delete'])
+        } catch (err) {
+            return reportPartialWipe(context, { target: `${label} at ${target}`, err, failureReason, nodeCleared, trackerUntouched: Boolean(resetUtxoTracker && utxoVolumePresent) })
+        }
+        nodeCleared.push(target)
+        return true
+    }
 
     if (resetNode) {
         // No existsSync guard here any more: the path was resolved (and the reset refused, or the "not installed" skip announced) up top, so an unresolvable datadir can no longer read as a silent
         // no-op.
-        if (nodeDataPath) {
-            console.log(`Clearing node data at ${nodeDataPath}...`)
-            await execFileAsync('docker', ['run', '--rm', '-v', `${nodeDataPath}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
-            nodeDataWiped = true
-        }
+        if (nodeDataPath && !(await clearNodePath(nodeDataPath, 'node data'))) return false
         // Relocated blocks/txindex (XCHAIN_NODE_BLOCKS_DIR) live outside the datadir, so wipe them here too or the daemon restarts over stale chain data (uuid:90630038).
         for (const relocated of [blocksHostPath, txindexHostPath]) {
-            if (relocated && fs.existsSync(relocated)) {
-                console.log(`Clearing relocated node data at ${relocated}...`)
-                await execFileAsync('docker', ['run', '--rm', '-v', `${relocated}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
-                nodeDataWiped = true
-            }
+            if (relocated && fs.existsSync(relocated) && !(await clearNodePath(relocated, 'relocated node data'))) return false
         }
     }
 
     if (resetUtxoTracker && utxoVolumePresent) {
         try {
             console.log(`Clearing Docker volume ${utxoVolumeName}...`)
-            await execFileAsync('docker', ['run', '--rm', '-v', `${utxoVolumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
+            await execFileAsync('docker', ['run', '--rm', '-v', `${utxoVolumeName}:/data`, WIPE_IMAGE, 'sh', '-c', 'find /data -mindepth 1 -delete'])
         } catch (err) {
-            // The volume exists and the wipe failed, so the tracker still holds its old store. Falling through would drop the decoder/indexer databases around retained tracker data and still return
-            // true.
-            const reason = `clearing the Docker volume ${utxoVolumeName} failed (${failureReason(err)})`
-            if (nodeDataWiped) {
-                // Node data is already gone, so this reset is half done and cannot claim otherwise. Starting the services again would run a resynced chain under decoder and indexer stores that still
-                // describe the old one, so they stay down until the operator re-runs the same reset.
-                console.log(`Aborted: ${reason}.`)
-                console.log('  The node data for this stack WAS already cleared; the decoder/indexer')
-                console.log('  databases were NOT touched, and the stopped services are left down.')
-                console.log('  Fix the volume problem and re-run the same reset command.')
-                return false
-            }
-            return await abortBeforeAnyWipe(reason)
+            // The wipe STARTED, so the volume may be partly cleared whether or not node data went first. Falling through would drop the decoder/indexer databases around a damaged tracker store,
+            // and abortBeforeAnyWipe would restart the tracker over it while claiming nothing was touched, so it is reported as possibly partial with every stopped service left down.
+            return reportPartialWipe(context, { target: `the Docker volume ${utxoVolumeName}`, err, failureReason, nodeCleared })
         }
     }
 
