@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Pinned the v0.22.7 hub tag in the release manifest for the paged, backed-off peer catch-up fix.
 
+### Security
+- Raised the MCP SDK to 1.31.0 or later to clear advisory GHSA-6qxp-vccf-f47h.
+
 ## [0.22.6] - 2026-10-06
 
 ### Changed
