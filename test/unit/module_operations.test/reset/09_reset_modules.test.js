@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const { sinon, expect, makeStubs, loadOperations, registerLifecycleHooks, requireFromUnit } = require('./helpers/harness')
+const { sinon, expect, makeStubs, loadOperations, registerLifecycleHooks, requireFromUnit } = require('../helpers/harness')
 
 describe('moduleOperations', function () {
     let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
