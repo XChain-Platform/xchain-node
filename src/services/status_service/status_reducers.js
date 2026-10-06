@@ -137,9 +137,12 @@ function describeNodeUnreachableNote(coin, network, module, gap) {
 }
 
 // The REORG_HALT fields of a decoder health payload, or null for anything that
-// is not a payload. Strict `=== true` on the flag: an older image without the
+// is not a payload. Accepts the plain body or the JSON-RPC `result` envelope, as
+// the watchdog does. Strict `=== true` on the flag: an older image without the
 // field reads as not halted rather than as a halt.
-function reduceDecoderReorgHalt(payload) {
+function reduceDecoderReorgHalt(body) {
+    if (!body || typeof body !== 'object') return null
+    const payload = body.result !== undefined ? body.result : body
     if (!payload || typeof payload !== 'object') return null
     return {
         halted:         payload.reorg_halted === true,
