@@ -30,6 +30,18 @@ function logEntry(agoMs, exitCode) {
     }
 }
 
+// Health.Log entry helper keyed to an ABSOLUTE start time, for fixtures whose
+// probes sit around a pass timestamp other than NOW.
+function recordedProbe(atMs, exitCode) {
+    const start = new Date(atMs)
+    return {
+        Start: start.toISOString(),
+        End: new Date(atMs + 1000).toISOString(),
+        ExitCode: exitCode,
+        Output: exitCode === 0 ? 'ok' : 'wget: server returned error'
+    }
+}
+
 // docker-inspect shape for a container in a given health state. `runState` is
 // State.Status and defaults to 'running'; pass 'exited' to model what Docker
 // reports for a STOPPED container, whose Health.Status stays frozen at whatever
@@ -48,6 +60,23 @@ function unhealthyPastGrace() {
     return inspectStatus('unhealthy', [logEntry(11 * 60000, 0), logEntry(10 * 60000, 1), logEntry(5 * 60000, 1), logEntry(60000, 1)])
 }
 
+// What Docker ACTUALLY exposes for a long-wedged container: Health.Log is capped
+// at 5 entries and every descriptor probes at 15s, so a container wedged for an
+// hour still shows only the last ~60s, all failures, sliding forward with `at`.
+// The unhealthyPastGrace fixture above (entries 11 minutes apart) is a shape a
+// real 15s ring buffer can never produce, which is why it hid this bug.
+function unhealthyRingBuffer(at) {
+    return inspectStatus('unhealthy', [60000, 45000, 30000, 15000, 0].map(ms => {
+        const start = new Date(at - ms)
+        return {
+            Start: start.toISOString(),
+            End: new Date(start.getTime() + 1000).toISOString(),
+            ExitCode: 1,
+            Output: 'wget: server returned error'
+        }
+    }))
+}
+
 function makeStubs() {
     return {
         db: { getAllModuleContainers: sinon.stub().resolves([]), assertReady: sinon.stub() },
@@ -57,14 +86,14 @@ function makeStubs() {
 }
 
 function loadService(stubs) {
-    return proxyquire('../../../src/services/autoheal_service', {
+    return proxyquire('../../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             restartContainer: stubs.restartContainer
         },
         // Real descriptor table: asserts the actual opt-in flags too.
-        './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
+        './module_service': { SERVICE_HEALTHCHECK: require('../../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
 }
 
@@ -91,30 +120,40 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // A container a restart never fixes must not be restarted once per fixed
-    // cooldown forever: that is pure churn, and the file's own header states it
-    // must not be flapped indefinitely. Each restart that does not clear the
-    // wedge doubles the next wait.
-    it('doubles the cooldown for each restart that does not clear the wedge', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'bo1')])
+    // A recovery-then-relapse that falls entirely between two passes reseeds the
+    // episode onset, and the attempt count has to reset with it: a NEW episode that
+    // inherits the old one's doubled cooldown sits at the ceiling, six hours of
+    // suppression after the probes have proved the wedge cleared.
+    it('drops the earned backoff when retained probes show a recovery past the restart probation', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'rec1')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
 
         await service.runAutoheal({ now: NOW })                      // restart #1
-        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2, base cooldown
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2 -> next wait doubles
         expect(stubs.restartContainer.callCount).to.equal(2)
 
-        // 11 minutes after restart #2 clears the BASE cooldown but not the doubled
-        // one, so the old fixed-window behavior would have restarted here.
-        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
-        expect(stubs.restartContainer.callCount).to.equal(2)
-        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+        // A pass 7 minutes after restart #2, far outside the 150s probation, then a
+        // fresh failing run: the container recovered and relapsed between passes.
+        const t3 = NOW + 22 * 60000
+        stubs.getStatusFromContainer.resolves(inspectStatus('unhealthy', [
+            recordedProbe(NOW + 18 * 60000, 0),
+            recordedProbe(NOW + 21 * 60000, 1),
+            recordedProbe(t3 - 15000, 1),
+            recordedProbe(t3, 1)
+        ]))
+        const reseeded = await service.runAutoheal({ now: t3 })
+        expect(reseeded.skipped[0].reason).to.equal('inside grace window')
 
-        // 21 minutes after restart #2 clears the doubled window.
-        const resumed = await service.runAutoheal({ now: NOW + 32 * 60000 })
+        const cleared = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(cleared.restartCount, 'a proven recovery ends the episode the backoff belonged to')
+            .to.not.have.property('rec1')
+
+        // 14 minutes after restart #2: past the BASE cooldown, inside the doubled
+        // one. With the count dropped the new episode is restarted; had it survived,
+        // the 20-minute window would still be blocking.
+        stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW + 25 * 60000))
+        const resumed = await service.runAutoheal({ now: NOW + 25 * 60000 })
+        expect(resumed.restarted, 'the new episode must start at the base cooldown').to.have.length(1)
         expect(stubs.restartContainer.callCount).to.equal(3)
-        expect(resumed.restarted).to.have.length(1)
-
-        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
-        expect(state.restartCount.bo1).to.equal(3)
     })
 })
