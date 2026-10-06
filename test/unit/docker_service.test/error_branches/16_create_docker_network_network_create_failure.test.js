@@ -12,7 +12,7 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-const { proxyquireDockerService } = require('../../helpers/docker_service_loader')
+const { proxyquireDockerService } = require('../../../helpers/docker_service_loader')
 
 // Helpers
 function makeStubs() {
@@ -24,7 +24,7 @@ function makeStubs() {
 }
 
 function loadDockerService(stubs, fsStub) {
-    return proxyquireDockerService(require.resolve('../../../src/services/docker_service'), {
+    return proxyquireDockerService(require.resolve('../../../../src/services/docker_service'), {
         'child_process': {
             execFile: stubs.execFile,
             spawn: stubs.spawn,
@@ -50,21 +50,24 @@ function loadDockerService(stubs, fsStub) {
 describe('DockerService', function () {
 
 
-    // getDockerContainerFileCat: error branch
-    describe('getDockerContainerFileCat(): error branch', function () {
+    // createDockerNetwork: network create failure
+    describe('createDockerNetwork(): network create failure', function () {
 
-        it('rejects when docker exec cat fails', async function () {
+        it('rejects false when network create fails', async function () {
             const stubs = makeStubs()
+            let callNum = 0
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cb(new Error('cat failed'))
+                callNum++
+                if (callNum === 1) { cb(new Error('not found')) } // inspect fails
+                else { cb(new Error('create failed')) }            // create fails
             })
             const ds = loadDockerService(stubs)
             try {
-                await ds.getDockerContainerFileCat('abc123', '/app/file.txt')
+                await ds.createDockerNetwork('mynet')
                 expect.fail()
             } catch (err) {
-                expect(err).to.be.an.instanceOf(Error)
+                expect(err).to.equal(false)
             }
         })
     })
