@@ -242,14 +242,12 @@ async function prepareMariaRestore(coin, network, module, fileName) {
 
     // Stop the service that owns this DB so it isn't writing rows or holding
     // connections while we DROP and reimport (mirrors the utxo-tracker path,
-    // which stops the tracker before clearing its volume). Best-effort: a
-    // manual restore run before the service is installed has no container to
-    // stop. Open the DB pool first so getModuleContainer can resolve the row.
+    // which stops the tracker before clearing its volume). Only a confirmed
+    // zero-row registry answer means "not installed"; a failed lookup aborts
+    // the restore rather than wiping the DB under a running service. Open the
+    // DB pool first so the lookup can resolve the row.
     await ensureDatabasePool()
-    let serviceContainerId = null
-    try {
-        serviceContainerId = await db.getModuleContainer(module, coin, network)
-    } catch { /* service not installed yet, proceed without stopping */ }
+    const serviceContainerId = await db.getModuleContainerStrict(module, coin, network)
     if (serviceContainerId) {
         logger.info(`Stopping ${module} container...`)
         await stopModuleContainer(stopContainer, module, coin, network, serviceContainerId, undefined, getContainerStopSettings)
