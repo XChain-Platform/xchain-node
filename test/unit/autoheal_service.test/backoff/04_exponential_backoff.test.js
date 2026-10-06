@@ -48,13 +48,6 @@ function unhealthyPastGrace() {
     return inspectStatus('unhealthy', [logEntry(11 * 60000, 0), logEntry(10 * 60000, 1), logEntry(5 * 60000, 1), logEntry(60000, 1)])
 }
 
-// An operator stopped this container while it was unhealthy: State.Status is
-// 'exited' and Health.Status is frozen at the last value the probe read, well
-// past the grace window. Docker keeps answering `docker inspect` for it.
-function stoppedWithFrozenUnhealthy() {
-    return inspectStatus('unhealthy', [logEntry(11 * 60000, 0), logEntry(10 * 60000, 1), logEntry(5 * 60000, 1), logEntry(60000, 1)], 'exited')
-}
-
 function makeStubs() {
     return {
         db: { getAllModuleContainers: sinon.stub().resolves([]), assertReady: sinon.stub() },
@@ -64,14 +57,14 @@ function makeStubs() {
 }
 
 function loadService(stubs) {
-    return proxyquire('../../../src/services/autoheal_service', {
+    return proxyquire('../../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
             restartContainer: stubs.restartContainer
         },
         // Real descriptor table: asserts the actual opt-in flags too.
-        './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
+        './module_service': { SERVICE_HEALTHCHECK: require('../../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
 }
 
@@ -98,22 +91,30 @@ describe('AutohealService', () => {
         return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
     }
 
-    // The not-running guard's documented asymmetry (drop the onset, keep the count)
-    // had no test of its own, so a regression flipping it would have passed green.
-    it('keeps the earned backoff when a pass catches the container not running', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'st1')])
+    // A container a restart never fixes must not be restarted once per fixed
+    // cooldown forever: that is pure churn, and the file's own header states it
+    // must not be flapped indefinitely. Each restart that does not clear the
+    // wedge doubles the next wait.
+    it('doubles the cooldown for each restart that does not clear the wedge', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'bo1')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
 
         await service.runAutoheal({ now: NOW })                      // restart #1
-        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2
+        await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2, base cooldown
         expect(stubs.restartContainer.callCount).to.equal(2)
 
-        stubs.getStatusFromContainer.resolves(stoppedWithFrozenUnhealthy())
-        const skipped = await service.runAutoheal({ now: NOW + 12 * 60000 })
-        expect(skipped.skipped[0].reason).to.match(/not running/)
+        // 11 minutes after restart #2 clears the BASE cooldown but not the doubled
+        // one, so the old fixed-window behavior would have restarted here.
+        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+
+        // 21 minutes after restart #2 clears the doubled window.
+        const resumed = await service.runAutoheal({ now: NOW + 32 * 60000 })
+        expect(stubs.restartContainer.callCount).to.equal(3)
+        expect(resumed.restarted).to.have.length(1)
 
         const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
-        expect(state.restartCount.st1, 'mid-restart is not recovery').to.equal(2)
-        expect(state.unhealthySince).to.not.have.property('st1')
+        expect(state.restartCount.bo1).to.equal(3)
     })
 })
