@@ -200,8 +200,11 @@ describe('moduleOperations', function () {
             await ops.runE2ETest('bitcoin', 'mainnet', 'myTest', null)
             const installArgs = stubs.installModule.firstCall.args
             const dockerCmdArgs = installArgs[7]
-            expect(dockerCmdArgs).to.include('mocha')
-            expect(dockerCmdArgs.some(a => a.includes('myTest'))).to.be.true
+            expect(dockerCmdArgs.slice(0, 2)).to.deep.equal(['sh', '-c'])
+            expect(dockerCmdArgs[2]).to.include('exec npx mocha')
+            expect(dockerCmdArgs[2]).to.include('initial_check.test.js')
+            expect(dockerCmdArgs[2]).to.include('initialCheck.test.js')
+            expect(dockerCmdArgs.slice(3)).to.deep.equal(['sh', 'test/actions/myTest.test.js'])
         })
 
         it('includes --grep when grep is provided with testName', async function () {
@@ -210,8 +213,8 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             await ops.runE2ETest('bitcoin', 'mainnet', 'myTest', 'my grep pattern')
             const dockerCmdArgs = stubs.installModule.firstCall.args[7]
-            expect(dockerCmdArgs).to.include('--grep')
-            expect(dockerCmdArgs).to.include('my grep pattern')
+            expect(dockerCmdArgs.slice(-2)).to.deep.equal(['--grep', 'my grep pattern'])
+            expect(dockerCmdArgs[2]).to.not.include('my grep pattern')
         })
     })
 })
