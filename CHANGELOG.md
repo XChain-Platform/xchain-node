@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.6] - 2026-10-06
+
+### Changed
+- Pinned xchain-hub at v0.22.6 in the release manifest for the single-flight, read-bounded peer catch-up and price round catch-up fixes.
+- Moved the generated DOGE signer's environment reads into the node config with no change in behavior.
+
 ## [0.22.5] - 2026-10-06
 
 ### Changed

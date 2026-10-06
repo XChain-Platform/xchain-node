@@ -107,19 +107,15 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const { XChainSDK } = require('@dankest-llc/xchain-sdk');
 
-const NETWORK    = process.env.DOGE_NETWORK || '';
-const WIF        = process.env.DOGE_WIF || '';
-const ADDRESS    = process.env.DOGE_ADDRESS || '';
-const ENCODER    = process.env.DOGE_ENCODER_URL || '';
-const FEE_PER_KB = process.env.DOGE_FEE_PER_KB ? Number(process.env.DOGE_FEE_PER_KB) : undefined;
+${config.DOGE_SIGNER_ENV_SOURCE}
 
 // Fail at load time: the hub treats a configured-but-broken signer as fatal,
 // and a signer that cannot sign must not boot quietly.
-for (const [name, value] of [['DOGE_NETWORK', NETWORK], ['DOGE_WIF', WIF], ['DOGE_ADDRESS', ADDRESS], ['DOGE_ENCODER_URL', ENCODER]]) {
+for (const [name, value] of [['DOGE_NETWORK', signerEnv.network], ['DOGE_WIF', signerEnv.wif], ['DOGE_ADDRESS', signerEnv.address], ['DOGE_ENCODER_URL', signerEnv.encoderUrl]]) {
     if (!value) throw new Error('doge-signer: ' + name + ' is not set in ' + path.join(__dirname, '.env'));
 }
 
-const sdk = new XChainSDK({ network: NETWORK, encoderUrl: ENCODER });
+const sdk = new XChainSDK({ network: signerEnv.network, encoderUrl: signerEnv.encoderUrl });
 
 function requireEncoder() {
     return typeof sdk.requireEncoder === 'function' ? sdk.requireEncoder() : sdk['_requireEncoder']();
@@ -132,11 +128,11 @@ module.exports = {
     async broadcast(payload) {
         const encoder = requireEncoder();
 
-        const txParams = { data: payload, pubkey: ADDRESS, change: ADDRESS, encoding: 'P2SH' };
-        if (FEE_PER_KB !== undefined) txParams.feePerKb = FEE_PER_KB;
+        const txParams = { data: payload, pubkey: signerEnv.address, change: signerEnv.address, encoding: 'P2SH' };
+        if (signerEnv.feePerKb !== undefined) txParams.feePerKb = signerEnv.feePerKb;
 
         const encoded = await encoder.createTx(txParams);
-        const signed  = sdk.wallet.signPsbt(encoded.psbt, WIF);
+        const signed  = sdk.wallet.signPsbt(encoded.psbt, signerEnv.wif);
         await encoder.broadcastTx(signed.txHex);
         if (encoded.encoding !== 'P2SH' && encoded.encoding !== 'P2WSH')
             return { txid: signed.txid };
@@ -149,16 +145,16 @@ module.exports = {
         // operator reconciles the stranded funding transaction against.
         try {
             const spendParams = {
-                pubkey:   ADDRESS,
+                pubkey:   signerEnv.address,
                 p2shHash: signed.txid,
                 p2shHex:  signed.txHex,
                 data:     payload,
                 encoding: encoded.encoding,
-                change:   ADDRESS
+                change:   signerEnv.address
             };
-            if (FEE_PER_KB !== undefined) spendParams.feePerKb = FEE_PER_KB;
+            if (signerEnv.feePerKb !== undefined) spendParams.feePerKb = signerEnv.feePerKb;
             const spendResult = await encoder.spendP2sh(spendParams);
-            const spendSigned = sdk.wallet.signRevealPsbt(spendResult.psbt, WIF);
+            const spendSigned = sdk.wallet.signRevealPsbt(spendResult.psbt, signerEnv.wif);
             await encoder.broadcastTx(spendSigned.txHex);
 
             return { txid: spendSigned.txid, phase1_txid: signed.txid };
@@ -179,7 +175,7 @@ module.exports = {
     // phase-1 pipeline and balance plumbing use this; broadcast() above takes
     // precedence when both are exported.
     async walletSign(psbtHex) {
-        return sdk.wallet.signPsbt(psbtHex, WIF).txHex;
+        return sdk.wallet.signPsbt(psbtHex, signerEnv.wif).txHex;
     }
 };
 `
