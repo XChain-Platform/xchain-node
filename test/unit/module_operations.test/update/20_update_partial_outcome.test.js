@@ -11,7 +11,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const { sinon, expect, makeStubs, loadOperations, registerLifecycleHooks } = require('./helpers/harness')
+const { sinon, expect, makeStubs, loadOperations, registerLifecycleHooks } = require('../helpers/harness')
 
 describe('moduleOperations updateModules(): partial update continuation', function () {
     registerLifecycleHooks(() => {})

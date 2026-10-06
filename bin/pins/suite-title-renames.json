@@ -147,7 +147,19 @@
     "test/unit/secret-env.test.js": "test/unit/secret_env.test.js",
     "test/unit/security/configuration/dependency-advisories.test.js": "test/unit/security/configuration/dependency_advisories.test.js",
     "test/unit/statusReorgHalt.test.js": "test/unit/status_reorg_halt.test.js",
-    "test/unit/ui-menu.test.js": "test/unit/ui_menu.test.js"
+    "test/unit/ui-menu.test.js": "test/unit/ui_menu.test.js",
+    "test/unit/module_operations.test/09_reset_modules.test.js": "test/unit/module_operations.test/reset/09_reset_modules.test.js",
+    "test/unit/module_operations.test/10_reset_node_datadir_resolution.test.js": "test/unit/module_operations.test/reset/10_reset_node_datadir_resolution.test.js",
+    "test/unit/module_operations.test/11_reset_external_db_reachability.test.js": "test/unit/module_operations.test/reset/11_reset_external_db_reachability.test.js",
+    "test/unit/module_operations.test/12_reset_bootstrap_republish.test.js": "test/unit/module_operations.test/reset/12_reset_bootstrap_republish.test.js",
+    "test/unit/module_operations.test/13_reset_registry_read.test.js": "test/unit/module_operations.test/reset/13_reset_registry_read.test.js",
+    "test/unit/module_operations.test/14_reset_utxo_tracker_volume.test.js": "test/unit/module_operations.test/reset/14_reset_utxo_tracker_volume.test.js",
+    "test/unit/module_operations.test/15_reset_regtest_hub_purge.test.js": "test/unit/module_operations.test/reset/15_reset_regtest_hub_purge.test.js",
+    "test/unit/module_operations.test/16_reset_coupled_decoder_indexer.test.js": "test/unit/module_operations.test/reset/16_reset_coupled_decoder_indexer.test.js",
+    "test/unit/module_operations.test/05_update_modules_branch_handling.test.js": "test/unit/module_operations.test/update/05_update_modules_branch_handling.test.js",
+    "test/unit/module_operations.test/06_update_modules_no_ref_target_resolution.test.js": "test/unit/module_operations.test/update/06_update_modules_no_ref_target_resolution.test.js",
+    "test/unit/module_operations.test/07_update_modules_all_expansion.test.js": "test/unit/module_operations.test/update/07_update_modules_all_expansion.test.js",
+    "test/unit/module_operations.test/20_update_partial_outcome.test.js": "test/unit/module_operations.test/update/20_update_partial_outcome.test.js"
   },
   "titles": {
     "test/unit/docker_mariadb.test.js": {
