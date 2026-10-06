@@ -222,10 +222,11 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         archivePath = path.join(bootstrapDir, fileName)
         const tip = await assessNodeTipBeforeRestore(coin, network, XChainService.XCHAIN_UTXO_TRACKER, archivePath)
         if (tip.refuse) {
-            // Refused before any restore was attempted, and the archive is
-            // signature-verified first, so retiring it destroys no evidence;
-            // see retireBootstrapArchive for why it goes anyway.
+            // The refusal rests on the archive's own bootstrap.json: verify signature and identity before
+            // announcing it or retiring the archive (see retireBootstrapArchive for why a verified one goes).
+            // A tampered archive throws into the catch, which keeps it and records the integrity failure.
             await verifyRefusedArchive(archivePath, { module: XChainService.XCHAIN_UTXO_TRACKER, coin, network })
+            logger.info(`REFUSING the ${XChainService.XCHAIN_UTXO_TRACKER} bootstrap restore: ${tip.detail}.`)
             const bytes   = await statBootstrapArchiveBytes(archivePath)
             const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'node-behind', tip.detail, archive)
@@ -287,10 +288,11 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         archivePath = path.join(bootstrapDir, fileName)
         const tip = await assessNodeTipBeforeRestore(coin, network, module, archivePath)
         if (tip.refuse) {
-            // Refused before any restore was attempted, and the archive is
-            // signature-verified first, so retiring it destroys no evidence;
-            // see retireBootstrapArchive for why it goes anyway.
+            // The refusal rests on the archive's own bootstrap.json: verify signature and identity before
+            // announcing it or retiring the archive (see retireBootstrapArchive for why a verified one goes).
+            // A tampered archive throws into the catch, which keeps it and records the integrity failure.
             await verifyRefusedArchive(archivePath, { module, coin, network })
+            logger.info(`REFUSING the ${module} bootstrap restore: ${tip.detail}.`)
             const bytes   = await statBootstrapArchiveBytes(archivePath)
             const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
             recordBootstrapOutcome(module, 'node-behind', tip.detail, archive)

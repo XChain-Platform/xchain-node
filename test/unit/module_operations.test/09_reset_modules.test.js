@@ -125,7 +125,8 @@ describe('moduleOperations', function () {
             const result = await ops.resetModules('all', 'bitcoin', 'mainnet', true)
             expect(result).to.be.false
             expect(stubs.resetDatabases.called).to.be.false
-            expect(stubs.execFile.called).to.be.false          // no wipe ran
+            // No docker call ran past the pre-stop wipe-image check: no volume probe, no wipe.
+            expect(stubs.execFile.getCalls().filter(c => c.args[1][0] !== 'image')).to.have.length(0)
             expect(stubs.startContainer.calledOnce).to.be.true // node put back
         })
 
@@ -160,7 +161,7 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             const result = await ops.resetModules('xchain-utxo-tracker', 'bitcoin', 'mainnet', true)
             expect(result).to.be.false
-            expect(stubs.execFile.called).to.be.false
+            expect(stubs.execFile.getCalls().filter(c => c.args[1][0] !== 'image')).to.have.length(0)
         })
 
         it('clears the hub price ingest fence when the indexer DB is reset', async function () {
@@ -305,7 +306,7 @@ describe('moduleOperations', function () {
             const ops = loadOperations(stubs)
             const result = await ops.resetModules('node', 'bitcoin', 'mainnet', true)
             expect(result).to.be.false
-            expect(stubs.execFile.called).to.be.false
+            expect(stubs.execFile.getCalls().filter(c => c.args[1][0] !== 'image')).to.have.length(0)
         })
 
         // #3144: reset must fail loud on bad args rather than reporting success
