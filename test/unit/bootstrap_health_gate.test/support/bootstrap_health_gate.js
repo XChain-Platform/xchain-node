@@ -19,6 +19,12 @@ const DB_CONTAINER = 'd'.repeat(64)
 const DECODER_DB = 'xchain_ltc_mainnet_decoder'
 const INDEXER_DB = 'xchain_ltc_mainnet_indexer'
 
+function containerDb() {
+    const db = { getModuleContainer: sinon.stub().resolves(SVC_CONTAINER) }
+    db.getModuleContainerStrict = sinon.stub().callsFake((...args) => db.getModuleContainer(...args))
+    return db
+}
+
 // A container that is up, stable, and passing its healthcheck.
 function healthyInspect({ started = '2026-01-01T00:00:00.000Z' } = {}) {
     return `running|false|0|${started}|healthy\n`
@@ -63,7 +69,7 @@ function loadGate({ external = false, nativeResolves = null } = {}) {
     })
     return proxyquire('../../../../src/services/bootstrap_health_gate', {
         '../config': config,
-        '../state': { db: { getModuleContainer: sinon.stub().resolves(SVC_CONTAINER) } },
+        '../state': { db: containerDb() },
         './config_service': configService,
         './database_service': {
             getDatabaseContainerId:      sinon.stub().resolves(DB_CONTAINER),
@@ -140,6 +146,7 @@ function callGate(gate, { module = XChainService.XCHAIN_DECODER, runner, contain
     return gate.assertBootstrapSourceHealthy(COIN, NETWORK, module, {
         runner,
         getModuleContainer: sinon.stub().resolves(container),
+        getModuleContainerStrict: sinon.stub().resolves(container),
         now: now || Date.parse('2026-07-27T00:00:00.000Z'),
         since: since === undefined ? null : since
     })
@@ -179,6 +186,7 @@ module.exports = {
     SVC_CONTAINER,
     XChainService,
     callGate,
+    containerDb,
     expect,
     healthyInspect,
     installEnvironmentHooks,
