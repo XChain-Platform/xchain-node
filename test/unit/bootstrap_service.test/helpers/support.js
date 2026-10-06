@@ -113,6 +113,7 @@ function makeServiceStubs() {
         getModuleContainer:  sinon.stub().resolves(FAKE_CONTAINER_ID),
         isReady:             sinon.stub().returns(true)
     }
+    dbStub.getModuleContainerStrict = sinon.stub().callsFake((...args) => dbStub.getModuleContainer(...args))
 
     const axiosStub = sinon.stub()
 
