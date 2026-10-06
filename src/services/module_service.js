@@ -102,7 +102,11 @@ async function installNodeModule(coin, network, remoteUpdate) {
     if (localNodeVersion == null || remoteUpdate) {
         const remoteVersions = getRemoteModuleVersions()
         if (!(NODE_MODULE_NAME + SEP + coin in remoteVersions)) await checkRemoteNodeVersion(coin)
-        const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]["tag_name"]
+        const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]?.["tag_name"]
+        // Name the missing release rather than handing an undefined tag to the download.
+        if (remoteNodeVersion == null) {
+            throw new Error("There is no valid version to download for the " + coin + "/" + network + " node")
+        }
         await getCryptoNode(coin, network, remoteNodeVersion)
     }
     await buildCryptoNode(coin, network)

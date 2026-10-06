@@ -144,7 +144,8 @@ async function installNode(coin, network) {
             if (!(NODE_MODULE_NAME + SEP + coin in getRemoteModuleVersions())) {
                 await checkRemoteNodeVersion(coin)
             }
-            const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]["tag_name"]
+            // The entry itself can be null (a coin with no release source), so guard it too.
+            const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]?.["tag_name"]
             if (remoteNodeVersion != null) {
                 await getCryptoNode(coin, network, remoteNodeVersion)
             } else {

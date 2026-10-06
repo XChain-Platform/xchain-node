@@ -183,7 +183,8 @@ class GitHubDownloader {
   }
 
   // Returns the most recent release. With verifyHash=true (default), skips releases that have
-  // no entry in the hashes file, since an unverified release cannot be installed safely.
+  // no hash for THIS host's architecture, since the download verifies against that arch's hash
+  // and a release without one cannot be installed here.
   async getLatestCompatibleVersion(owner, repoName, verifyHash = true) {
     const releases = await this.getReleases(owner, repoName);
     const repoKey = `${owner}/${repoName}`;
@@ -192,13 +193,14 @@ class GitHubDownloader {
     releases.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
 
     if (verifyHash) {
-      // Gets the most recent version with an entry in the hashes file
+      // Gets the most recent version with a host-arch entry in the hashes file
+      const arch = getHostArch();
       for (const release of releases) {
-        if (this.hasHash(repoKey, release.tag_name)) {
+        if (this.hasHash(repoKey, release.tag_name, arch)) {
           return release;
         }
       }
-      throw new Error(`Couldn't find a version of ${repoKey} with an entry in the hashes file`);
+      throw new Error(`Couldn't find a version of ${repoKey} with an entry in the hashes file for ${arch}`);
     }
 
     // If verifyHash is false, then just return the first one (most recent)
@@ -230,8 +232,10 @@ class GitHubDownloader {
     // Gets the specific release info
     const release = await this.getReleaseByTag(owner, repoName, version);
 
-    if (verifyHash && !this.hasHash(repoKey, version)) {
-      throw new Error( `Required SHA-256 hash not found for ${repoKey}@${version}`);
+    // Refuse before downloading when this host's arch has no pinned hash: the
+    // post-download verification checks that arch only, so any-arch is not enough.
+    if (verifyHash && !this.hasHash(repoKey, version, getHostArch())) {
+      throw new Error( `Required SHA-256 hash not found for ${repoKey}@${version} on ${getHostArch()}`);
     }
 
     try {
