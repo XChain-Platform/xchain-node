@@ -125,3 +125,34 @@ serviceSuite('the provenance gate', () => {
         expect(stubs.axiosGet.thirdCall.args[1].headers).to.not.have.property('Accept')
     })
 })
+
+// The release-asset hop is an api.github.com call, so it maps a rate limit like
+// its siblings. These cases rely on the REAL githubRateLimitError: the service
+// requires it from ../utils/github_api, which load() above does not stub.
+serviceSuite('the provenance gate', () => {
+    function assetHopRejects(response) {
+        const err = new Error('Request failed with status code ' + response.status)
+        err.response = response
+        stubs.axiosGet.onCall(0).resolves({ data: { assets: [{ name: 'SHA256SUMS', url: 'https://api/asset/1' }] } })
+        stubs.axiosGet.onCall(1).rejects(err)
+        return err
+    }
+
+    it('fetchReleaseAsset reports a rate-limited asset hop with the reset time and GITHUB_TOKEN advice', async () => {
+        assetHopRejects({ status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1783529945' } })
+        await svc.fetchReleaseAsset('v0.9.0', 'SHA256SUMS').then(
+            () => { throw new Error('should have rejected') },
+            e => {
+                expect(e.message).to.match(/rate limit exhausted/)
+                expect(e.message).to.match(/GITHUB_TOKEN/)
+            })
+        expect(stubs.axiosGet.callCount).to.equal(2)
+    })
+
+    it('fetchReleaseAsset rethrows any other asset-hop failure unchanged', async () => {
+        const original = assetHopRejects({ status: 403, headers: { 'x-ratelimit-remaining': '42' } })
+        await svc.fetchReleaseAsset('v0.9.0', 'SHA256SUMS').then(
+            () => { throw new Error('should have rejected') },
+            e => expect(e).to.equal(original))
+    })
+})

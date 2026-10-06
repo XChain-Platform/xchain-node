@@ -214,3 +214,111 @@ describe('ui/menu mutating actions hold the command lock', function () {
         assert.deepStrictEqual(handlers.match(new RegExp('(?<![.\\w])(' + ops + ')\\(', 'g')), null);
     });
 });
+
+// The coin node's remote entry is the GitHub release object (tag_name, no
+// version field). Reading ["version"] off it hid the node's remote actions
+// for every coin, and Bitcoin's two-part tags (28.1) and Litecoin's four-part
+// ones (0.21.5.6) are not semver, so they compare by their numeric parts.
+function loadNodeMenu({ localNodeVersion = null, updateModules = async () => ({}) } = {}) {
+    const calls = { update: [], clone: [], install: [] };
+    const mod = proxyquire('../../src/ui/menu.js', {
+        '../services/version_service': {
+            getLocalNodeVersion: async () => {
+                if (localNodeVersion == null) throw 'No file';
+                return localNodeVersion;
+            },
+            getLocalModuleVersion: async () => '1.0.0',
+            getContainerNodeVersion: async () => '0',
+            getContainerModuleVersion: async () => '0',
+        },
+        '../operations/module_operations': {
+            installModules: async () => true, uninstallModules: async () => true,
+            restartModules: async () => true, logModules: async () => true, runE2ETest: async () => null,
+            updateModules: async (list) => { calls.update.push(list); return updateModules(list); },
+        },
+        '../services/module_service': {
+            cloneGit: async (...args) => { calls.clone.push(args); },
+            installModule: async (...args) => { calls.install.push(args); },
+        },
+        '../cli/dispatch': { scopedCommandLock: () => ({ hold() {}, release() {} }) },
+    });
+    return { mod, calls };
+}
+
+const NODE = 'node';
+const offered = (actions) => actions.map(a => a.name);
+
+describe('ui/menu coin node remote versions', function () {
+    it('reads the node remote version from the release tag_name', async function () {
+        const { mod } = loadNodeMenu({ localNodeVersion: 'v1.14.8' });
+        const versions = await mod.readModuleVersions(NODE, { 'node-dogecoin': { tag_name: 'v1.14.9', id: 1 } }, 'dogecoin', 'mainnet');
+        assert.deepStrictEqual(versions, { remoteVersion: 'v1.14.9', localVersion: 'v1.14.8' });
+    });
+
+    it('answers "0" for a node release that has not been looked up yet', async function () {
+        const { mod } = loadNodeMenu();
+        const versions = await mod.readModuleVersions(NODE, {}, 'bitcoin', 'mainnet');
+        assert.deepStrictEqual(versions, { remoteVersion: '0', localVersion: '0' });
+        const actions = offered(mod.installedModuleActions('running', NODE, versions.localVersion, versions.remoteVersion, '0'));
+        assert.ok(!actions.includes('Update local version') && !actions.includes('Reinstall from remote'), actions.join(', '));
+    });
+
+    it('offers an update for each coin whose installed node is behind the release', function () {
+        const { mod } = loadNodeMenu();
+        const cases = [['28.1\n', 'v31.1'], ['v1.14.8', 'v1.14.9'], ['v0.21.4', 'v0.21.5.6'], ['v0.21.5.5', 'v0.21.5.6']];
+        for (const [local, remote] of cases) {
+            const actions = offered(mod.installedModuleActions('running', NODE, local, remote, local));
+            assert.ok(actions.includes('Update local version'), `${local} -> ${remote}: ${actions.join(', ')}`);
+        }
+    });
+
+    it('offers a reinstall when the installed node matches the release', function () {
+        const { mod } = loadNodeMenu();
+        const actions = offered(mod.installedModuleActions('running', NODE, '28.1\n', 'v28.1', '28.1'));
+        assert.ok(actions.includes('Reinstall from remote'), actions.join(', '));
+        assert.ok(!actions.includes('Update local version'), actions.join(', '));
+    });
+
+    it('still compares a module as semver', function () {
+        const { mod } = loadNodeMenu();
+        const actions = offered(mod.installedModuleActions('running', 'xchain-encoder', '1.0.0', '1.1.0', '1.0.0'));
+        assert.ok(actions.includes('Update local version'), actions.join(', '));
+        const twoPart = offered(mod.installedModuleActions('running', 'xchain-encoder', '1.0', '1.1', '1.0'));
+        assert.ok(!twoPart.includes('Update local version'), twoPart.join(', '));
+    });
+});
+
+describe('ui/menu coin node remote actions run update, never a clone', function () {
+    const selected = { value: NODE, container_id: 'c'.repeat(64), status: 'running' };
+
+    for (const label of ['Update local version', 'Reinstall from remote']) {
+        it(`"${label}" on the node runs update node for that coin and network`, async function () {
+            const { mod, calls } = loadNodeMenu();
+            await mod.runInstalledModuleAction(label, selected, 'bitcoin', 'mainnet');
+            assert.deepStrictEqual(calls.update, [{ bitcoin: { mainnet: [NODE] } }]);
+            assert.deepStrictEqual(calls.clone, []);
+            assert.deepStrictEqual(calls.install, []);
+        });
+    }
+
+    it('reports a refused node update and stays in the menu', async function () {
+        const refusal = new Error('Refusing to update a node while XCHAIN_NODE_DATA_DIR is unset.');
+        const { mod } = loadNodeMenu({ updateModules: async () => { throw refusal; } });
+        const saved = console.log;
+        const lines = [];
+        console.log = (...a) => lines.push(a.join(' '));
+        try {
+            await mod.runInstalledModuleAction('Update local version', selected, 'bitcoin', 'mainnet');
+        } finally {
+            console.log = saved;
+        }
+        assert.ok(lines.some(l => l.includes('XCHAIN_NODE_DATA_DIR')), lines.join('\n'));
+    });
+
+    it('"Update local version" on a module still clones its source', async function () {
+        const { mod, calls } = loadNodeMenu();
+        await mod.runInstalledModuleAction('Update local version', { value: 'xchain-encoder' }, 'bitcoin', 'mainnet');
+        assert.deepStrictEqual(calls.clone, [['xchain-encoder', true, false]]);
+        assert.deepStrictEqual(calls.update, []);
+    });
+});

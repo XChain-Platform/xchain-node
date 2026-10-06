@@ -16,6 +16,28 @@
       "moduleOperations updateModules(): partial update continuation fails closed when the credential refusal belongs to the requested coin",
       "moduleOperations updateModules(): partial update continuation rethrows ordinary install failures without attempting later coins"
     ],
+    "0586050116b0dd94": [
+      "VersionService checkAllRemoteVersions() is a function that returns a promise",
+      "VersionService checkRemoteNodeVersion() calls gitHubDownloader for bitcoin with correct owner/repo",
+      "VersionService checkRemoteNodeVersion() calls gitHubDownloader for dogecoin with correct owner/repo",
+      "VersionService checkRemoteNodeVersion() calls gitHubDownloader for litecoin with correct owner/repo",
+      "VersionService checkRemoteNodeVersion() stores result in remoteModuleVersions with node-<coin> key",
+      "VersionService getContainerModuleVersion() prefers the exec read over the host copy",
+      "VersionService getContainerModuleVersion() reads package.json from container and returns version",
+      "VersionService getContainerModuleVersion() reads the version with docker exec even when docker cp is permanently broken",
+      "VersionService getContainerModuleVersion() throws on docker cp error",
+      "VersionService getContainerNodeVersion() reads version file from container via docker cp",
+      "VersionService getContainerNodeVersion() throws on docker cp error",
+      "VersionService getLocalModuleVersion() reads version from module package.json",
+      "VersionService getLocalModuleVersion() rejects when package.json does not exist",
+      "VersionService getLocalModuleVersion() rejects when package.json has no version field",
+      "VersionService getLocalModuleVersion() rejects when package.json is malformed",
+      "VersionService getLocalNodeVersion() reads version from correct file path",
+      "VersionService getLocalNodeVersion() rejects on read error",
+      "VersionService getLocalNodeVersion() rejects when version file does not exist",
+      "VersionService readContainerFile() falls back to docker cp when the container cannot be exec'd",
+      "VersionService readContainerFile() names BOTH failures when neither read works"
+    ],
     "06cdae1616e269c6": [
       "coverage ratchet floors enforces every declared floor, at the declared value",
       "coverage ratchet floors fails the job on a shortfall rather than only reporting it",
@@ -40,8 +62,8 @@
       "Security Bootstrap directory permissions uses chmod 755 instead of 777 for bootstrap directories"
     ],
     "08758d91b3b5705b": [
-      "E2E: Reset Command (Scenario 4.8) E2E-050: Reset lifecycle (stop \u2192 clear \u2192 restart) LevelDB entries preserved after reset",
-      "E2E: Reset Command (Scenario 4.8) E2E-050: Reset lifecycle (stop \u2192 clear \u2192 restart) stops and then restarts the specified module",
+      "E2E: Reset Command (Scenario 4.8) E2E-050: Reset lifecycle (stop → clear → restart) LevelDB entries preserved after reset",
+      "E2E: Reset Command (Scenario 4.8) E2E-050: Reset lifecycle (stop → clear → restart) stops and then restarts the specified module",
       "E2E: Reset Command (Scenario 4.8) E2E-051: Reset decoder resets database executes DROP DATABASE and CREATE DATABASE for decoder DB",
       "E2E: Reset Command (Scenario 4.8) E2E-052: Reset all stops multiple modules stops node, utxo-tracker, decoder, indexer, and regtest-miner"
     ],
@@ -123,6 +145,16 @@
     "0df0aabf6e94707f": [
       "Chaos: Download Resilience Experiment 8: GitHub API unreachable throws descriptive error on request timeout"
     ],
+    "0e15713d36178e5f": [
+      "ReleaseManifestService the provenance gate a refusal from the gate aborts the install",
+      "ReleaseManifestService the provenance gate fetchReleaseAsset downloads the asset bytes",
+      "ReleaseManifestService the provenance gate fetchReleaseAsset follows the storage redirect WITHOUT the credentials",
+      "ReleaseManifestService the provenance gate fetchReleaseAsset reports a rate-limited asset hop with the reset time and GITHUB_TOKEN advice",
+      "ReleaseManifestService the provenance gate fetchReleaseAsset rethrows any other asset-hop failure unchanged",
+      "ReleaseManifestService the provenance gate fetchReleaseAsset returns null when the release carries no such asset",
+      "ReleaseManifestService the provenance gate fetchReleaseAsset returns null when the release itself is absent",
+      "ReleaseManifestService the provenance gate verifies the fetched manifest BEFORE parsing it"
+    ],
     "10f7c66de1d99f6d": [
       "anchor arm passthrough hands the hub and a regtest indexer the same three values",
       "anchor arm passthrough never hands a shared-ledger indexer any of them"
@@ -199,7 +231,7 @@
       "utils/docker_mariadb mariadbEnv() returns process.env plus MYSQL_PWD"
     ],
     "13ff9670bc05bf2e": [
-      "S-SMOKE-007 \u2013 Docker Command Construction exports all expected Docker operation functions"
+      "S-SMOKE-007 – Docker Command Construction exports all expected Docker operation functions"
     ],
     "148e787f79bb3562": [
       "StatusService: getStatus() DB not ready returns empty object when db is not ready",
@@ -247,11 +279,11 @@
       "utils/helpers decompressTarGz() resolves true on success",
       "utils/helpers decompressTarGz() sets cwd to the parent directory of the file on extraction",
       "utils/helpers redactSecrets() accepts an Error and redacts secrets from its stack",
-      "utils/helpers redactSecrets() masks IDENTIFIED BY '\u2026' literals",
+      "utils/helpers redactSecrets() masks IDENTIFIED BY '…' literals",
       "utils/helpers redactSecrets() masks MYSQL_PWD / MYSQL_ROOT_PASSWORD env values",
       "utils/helpers redactSecrets() masks credentials embedded in a git/remote URL",
       "utils/helpers redactSecrets() masks the per-install service secrets in a failed docker-run argv",
-      "utils/helpers redactSecrets() masks the value inside PASSWORD('\u2026')",
+      "utils/helpers redactSecrets() masks the value inside PASSWORD('…')",
       "utils/helpers redactSecrets() returns clean strings unchanged and handles null",
       "utils/helpers sleep() resolves after the specified delay",
       "utils/helpers sleep() returns a promise that resolves",
@@ -611,7 +643,7 @@
       "Bootstrap signing rejects a malformed signature file",
       "Bootstrap signing rejects a signature from the wrong key",
       "Bootstrap signing rejects a tampered archive",
-      "Bootstrap signing sign \u2192 verify round-trip passes",
+      "Bootstrap signing sign → verify round-trip passes",
       "Bootstrap signing the repo-pinned default public key is the same key the repository ships, not some other file",
       "Bootstrap signing the repo-pinned default public key loads with no env override and parses as an ed25519 public key",
       "Bootstrap signing the repo-pinned default public key ships at src/config/bootstrap_signing_pubkey.pem",
@@ -903,7 +935,7 @@
       "Fuzz: Branch Name Validation rejects invalid branch name: \"branch^name\"",
       "Fuzz: Branch Name Validation rejects invalid branch name: \"branch{name}\"",
       "Fuzz: Branch Name Validation rejects invalid branch name: \"branch~name\"",
-      "Fuzz: Branch Name Validation rejects invalid branch name: \"br\u00e4nch\"",
+      "Fuzz: Branch Name Validation rejects invalid branch name: \"bränch\"",
       "Fuzz: Branch Name Validation rejects invalid branch name: \"master && echo pwned\"",
       "Fuzz: Branch Name Validation rejects invalid branch name: \"master | cat /etc/passwd\"",
       "Fuzz: Branch Name Validation rejects invalid branch name: \"master$(whoami)\"",
@@ -961,14 +993,14 @@
       "ModuleService buildAndUp() ROLLCALL wiring guard lets a one-shot execution container through: it never closes an epoch"
     ],
     "38eae73b5e2c3897": [
-      "S-SMOKE-003 \u2013 Global Options Registration registers --interactive option",
-      "S-SMOKE-003 \u2013 Global Options Registration registers --no-bootstrap option",
-      "S-SMOKE-003 \u2013 Global Options Registration registers --no-explorer option",
-      "S-SMOKE-003 \u2013 Global Options Registration registers --verbose option",
-      "S-SMOKE-003 \u2013 Global Options Registration registers --version option",
-      "S-SMOKE-003 \u2013 Global Options Registration registers -V as short flag for --version",
-      "S-SMOKE-003 \u2013 Global Options Registration registers -i as short flag for --interactive",
-      "S-SMOKE-003 \u2013 Global Options Registration registers -v as short flag for --verbose"
+      "S-SMOKE-003 – Global Options Registration registers --interactive option",
+      "S-SMOKE-003 – Global Options Registration registers --no-bootstrap option",
+      "S-SMOKE-003 – Global Options Registration registers --no-explorer option",
+      "S-SMOKE-003 – Global Options Registration registers --verbose option",
+      "S-SMOKE-003 – Global Options Registration registers --version option",
+      "S-SMOKE-003 – Global Options Registration registers -V as short flag for --version",
+      "S-SMOKE-003 – Global Options Registration registers -i as short flag for --interactive",
+      "S-SMOKE-003 – Global Options Registration registers -v as short flag for --verbose"
     ],
     "3916386139147a8b": [
       "BootstrapNodeTipGuard assessNodeTipForRestore() XCHAIN_NODE_SKIP_NODE_TIP_GUARD skips the comparison, loudly",
@@ -1131,14 +1163,6 @@
     "3fa86dc751918535": [
       "Integration: Docker Command Construction xchain-utxo-tracker Docker run command includes data volume, bootstrap volume, and ulimit"
     ],
-    "3fea112c1dd22f23": [
-      "ReleaseManifestService the provenance gate a refusal from the gate aborts the install",
-      "ReleaseManifestService the provenance gate fetchReleaseAsset downloads the asset bytes",
-      "ReleaseManifestService the provenance gate fetchReleaseAsset follows the storage redirect WITHOUT the credentials",
-      "ReleaseManifestService the provenance gate fetchReleaseAsset returns null when the release carries no such asset",
-      "ReleaseManifestService the provenance gate fetchReleaseAsset returns null when the release itself is absent",
-      "ReleaseManifestService the provenance gate verifies the fetched manifest BEFORE parsing it"
-    ],
     "3fec2f60b896a660": [
       "prototype method descriptors GitHubDownloader.calculateDirectoryHash is non-enumerable and callable",
       "prototype method descriptors GitHubDownloader.calculateFileHash is non-enumerable and callable",
@@ -1153,14 +1177,6 @@
       "prototype method descriptors MariaDbStore.getModuleContainerStrict is non-enumerable and callable",
       "prototype method descriptors MariaDbStore.getModuleCount is non-enumerable and callable",
       "prototype method descriptors MariaDbStore.setModuleContainer is non-enumerable and callable"
-    ],
-    "40d0e5ff515a5cf5": [
-      "NodeService: installNode() bootstraps utxo tracker when volume is fresh",
-      "NodeService: installNode() does NOT install regtest miner when network is mainnet",
-      "NodeService: installNode() fetches remote version and calls getCryptoNode when not installed (dogecoin)",
-      "NodeService: installNode() installs regtest miner when network is regtest",
-      "NodeService: installNode() succeeds when local node version already installed (skips getCryptoNode)",
-      "NodeService: installNode() throws when no valid remote version is available"
     ],
     "4168e4dba2ad4bbb": [
       "StopBudgetService gives an unstamped decoder its default budget, and leaves unlisted and unreadable ones on the current one",
@@ -1191,6 +1207,12 @@
       "StopBudgetService uses the lowered budget once the container was recreated under it, and a raised one at once",
       "StopBudgetService warns before the stop when the container carries a drain timer at or above its budget"
     ],
+    "41f655e5214c0500": [
+      "GitHubDownloader downloadRepoVersion(): host-arch hash gate refuses before any asset download when the host arch has no hash",
+      "GitHubDownloader getLatestCompatibleVersion(): host-arch hash gate skips a newer release with no hash for an aarch64 host",
+      "GitHubDownloader getLatestCompatibleVersion(): host-arch hash gate still picks the newest release on an x86_64 host",
+      "GitHubDownloader getLatestCompatibleVersion(): host-arch hash gate throws when no release has a hash for the host arch"
+    ],
     "41f7f97eefd13478": [
       "migrate CLI status contract guard does not execute a file-only CLI at the current path",
       "migrate CLI status contract guard does not execute a file-only CLI at the old path",
@@ -1204,6 +1226,13 @@
       "CLI: validatorSendLock takes it again after a release, for the send that follows an index wait",
       "CLI: validatorSendLock takes the lock once per hold, under the command's name, refusing a held one at once",
       "CLI: validatorSendLock waits as long as any mutator is told to wait for a held lock"
+    ],
+    "426085f91f8b7f22": [
+      "ui/menu/node_version_order NODE_VERSION_ORDER orders by numeric parts, not by string or by semver",
+      "ui/menu/node_version_order NODE_VERSION_ORDER treats a missing trailing part as zero and ignores the v",
+      "ui/menu/node_version_order nodeVersionParts() reads two-, three- and four-part daemon tags, with or without the v",
+      "ui/menu/node_version_order nodeVersionParts() rejects the menu sentinel \"0\" and anything that is not a dotted version",
+      "ui/menu/node_version_order remoteNodeVersion() reads the release tag, or \"0\" when no release was stored"
     ],
     "428aec81edc63b3f": [
       "Integration: Hub/Explorer Config Update updateHub network connectivity connects hub container to all installed coin/network Docker networks"
@@ -1248,29 +1277,6 @@
       "DockerService stringToDockerContainerFile() rejects on spawn error",
       "DockerService stringToDockerContainerFile() rejects when tee exits with non-zero code",
       "DockerService stringToDockerContainerFile() resolves true when tee exits with code 0"
-    ],
-    "45c76bf41f38007d": [
-      "ui/menu exports mainMenu as a function",
-      "ui/menu exports modulesSelectionInterface as a function",
-      "ui/menu exports restoreBootstrapInterface as a function",
-      "ui/menu exports startInterface as a function",
-      "ui/menu mutating actions hold the command lock holds the lock around the scan and releases it after",
-      "ui/menu mutating actions hold the command lock never calls a mutating operation bare from a handler",
-      "ui/menu mutating actions hold the command lock releases the lock when the action throws",
-      "ui/menu mutating actions hold the command lock skips the action and stays in the menu when another command holds the lock",
-      "ui/menu per-module action labels are all handled ACTION_INSTALL_LOCAL_IN_CONTAINER (\"Install Local Version in Container\") reaches a handler",
-      "ui/menu per-module action labels are all handled ACTION_REINSTALL_CONTAINER (\"Reinstall\") reaches a handler",
-      "ui/menu per-module action labels are all handled ACTION_REINSTALL_REMOTE (\"Reinstall from remote\") reaches a handler",
-      "ui/menu per-module action labels are all handled ACTION_UPDATE_CONTAINER (\"Update Container\") reaches a handler",
-      "ui/menu per-module action labels are all handled ACTION_UPDATE_LOCAL (\"Update local version\") reaches a handler",
-      "ui/menu per-module action labels are all handled every offered per-module action label has a handler branch",
-      "ui/menu requiring the module has no throwing side effects",
-      "ui/menu restoreBootstrapInterface non-interactive resolution falls back to the newest archive when there is no TTY to prompt on",
-      "ui/menu restoreBootstrapInterface non-interactive resolution rejects a --file that is not present instead of silently picking another",
-      "ui/menu restoreBootstrapInterface non-interactive resolution restores exactly the named archive on --file",
-      "ui/menu restoreBootstrapInterface non-interactive resolution restores the newest archive on --latest without prompting",
-      "ui/menu restoreBootstrapInterface non-interactive resolution says so plainly when there is nothing to restore",
-      "ui/menu restoreBootstrapInterface non-interactive resolution surfaces a failed restore as an error rather than a bare false"
     ],
     "462a874ef1e65e98": [
       "ModuleService buildAndUp() init and wget timeout passes init and a bounded wget command for a healthchecked module",
@@ -1500,14 +1506,14 @@
       "Chaos: Download Resilience Experiment 8c: SHA-256 hash mismatch throws with expected vs actual hash on mismatch"
     ],
     "568cce545e5bfbec": [
-      "S-SMOKE-009 \u2013 State Module Initialization exports all expected getter/setter functions",
-      "S-SMOKE-009 \u2013 State Module Initialization exports db instance",
-      "S-SMOKE-009 \u2013 State Module Initialization exports gitHubDownloader instance",
-      "S-SMOKE-009 \u2013 State Module Initialization getDbRootPassword returns null initially",
-      "S-SMOKE-009 \u2013 State Module Initialization getInstalledModules returns empty object initially",
-      "S-SMOKE-009 \u2013 State Module Initialization getRemoteModuleVersions returns empty object initially",
-      "S-SMOKE-009 \u2013 State Module Initialization isVerbose returns false initially",
-      "S-SMOKE-009 \u2013 State Module Initialization setVerbose and isVerbose work as getter/setter"
+      "S-SMOKE-009 – State Module Initialization exports all expected getter/setter functions",
+      "S-SMOKE-009 – State Module Initialization exports db instance",
+      "S-SMOKE-009 – State Module Initialization exports gitHubDownloader instance",
+      "S-SMOKE-009 – State Module Initialization getDbRootPassword returns null initially",
+      "S-SMOKE-009 – State Module Initialization getInstalledModules returns empty object initially",
+      "S-SMOKE-009 – State Module Initialization getRemoteModuleVersions returns empty object initially",
+      "S-SMOKE-009 – State Module Initialization isVerbose returns false initially",
+      "S-SMOKE-009 – State Module Initialization setVerbose and isVerbose work as getter/setter"
     ],
     "5756d1c8d96ada07": [
       "Integration: Multi-Module Orchestration uninstallModules orchestration calls uninstallModule for each service in the list",
@@ -1684,9 +1690,9 @@
       "E2E: Configuration Overrides (Scenario 4.4) E2E-022: Regtest-specific config values mainnet does NOT include REGTEST_MINER_URL",
       "E2E: Configuration Overrides (Scenario 4.4) E2E-022: Regtest-specific config values regtest includes REGTEST_MINER_URL",
       "E2E: Configuration Overrides (Scenario 4.4) E2E-023: Database naming follows convention DB user follows xchain_<module>_<coin>_<network> pattern",
-      "E2E: Configuration Overrides (Scenario 4.4) E2E-023: Database naming follows convention decoder bitcoin/mainnet \u2192 XChain_BTC_Mainnet_Decoder",
-      "E2E: Configuration Overrides (Scenario 4.4) E2E-023: Database naming follows convention decoder litecoin/regtest \u2192 XChain_LTC_Regtest_Decoder",
-      "E2E: Configuration Overrides (Scenario 4.4) E2E-023: Database naming follows convention indexer dogecoin/testnet \u2192 XChain_DOGE_Testnet_Indexer"
+      "E2E: Configuration Overrides (Scenario 4.4) E2E-023: Database naming follows convention decoder bitcoin/mainnet → XChain_BTC_Mainnet_Decoder",
+      "E2E: Configuration Overrides (Scenario 4.4) E2E-023: Database naming follows convention decoder litecoin/regtest → XChain_LTC_Regtest_Decoder",
+      "E2E: Configuration Overrides (Scenario 4.4) E2E-023: Database naming follows convention indexer dogecoin/testnet → XChain_DOGE_Testnet_Indexer"
     ],
     "616adeca1c559bb1": [
       "Integration: Database Service Chain addUserPasswordToDatabase creates database, user, and grants for decoder",
@@ -1795,7 +1801,7 @@
       "E2E: Install Lifecycle (Scenarios 4.1, 4.3) E2E-004: Uninstall all services shared services (database, hub, explorer) are preserved unless --include-shared",
       "E2E: Install Lifecycle (Scenarios 4.1, 4.3) E2E-005: Selective install (decoder only) docker build called only for decoder, not other services",
       "E2E: Install Lifecycle (Scenarios 4.1, 4.3) E2E-005: Selective install (decoder only) installs only decoder, database, hub, and explorer",
-      "E2E: Install Lifecycle (Scenarios 4.1, 4.3) E2E-006: Full lifecycle sequence install \u2192 stop \u2192 start \u2192 uninstall all succeed in sequence"
+      "E2E: Install Lifecycle (Scenarios 4.1, 4.3) E2E-006: Full lifecycle sequence install → stop → start → uninstall all succeed in sequence"
     ],
     "6befe4bcc41421e4": [
       "rail follower hash comparison CLI exits one when the control height is missing",
@@ -2354,60 +2360,60 @@
       "ValidatorService initValidator() writes key, settings, and capabilities files on first run"
     ],
     "90560b45328159e3": [
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-mainnet all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-mainnet contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-mainnet contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-mainnet contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-mainnet has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-mainnet is non-empty",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-regtest all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-regtest contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-regtest contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-regtest contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-regtest has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-regtest is non-empty",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-testnet all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-testnet contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-testnet contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-testnet contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-testnet has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity bitcoin-testnet is non-empty",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-mainnet all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-mainnet contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-mainnet contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-mainnet contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-mainnet has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-mainnet is non-empty",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-regtest all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-regtest contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-regtest contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-regtest contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-regtest has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-regtest is non-empty",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-testnet all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-testnet contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-testnet contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-testnet contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-testnet has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity dogecoin-testnet is non-empty",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-mainnet all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-mainnet contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-mainnet contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-mainnet contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-mainnet has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-mainnet is non-empty",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-regtest all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-regtest contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-regtest contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-regtest contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-regtest has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-regtest is non-empty",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-testnet all non-comment lines match KEY=VALUE format",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-testnet contains DUST_AMOUNT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-testnet contains NETWORK",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-testnet contains NODE_EXPOSED_PORT",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-testnet has no duplicate keys",
-      "S-SMOKE-005 \u2013 Config Template File Integrity litecoin-testnet is non-empty"
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-mainnet all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-mainnet contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-mainnet contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-mainnet contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-mainnet has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-mainnet is non-empty",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-regtest all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-regtest contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-regtest contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-regtest contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-regtest has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-regtest is non-empty",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-testnet all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-testnet contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-testnet contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-testnet contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-testnet has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity bitcoin-testnet is non-empty",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-mainnet all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-mainnet contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-mainnet contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-mainnet contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-mainnet has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-mainnet is non-empty",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-regtest all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-regtest contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-regtest contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-regtest contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-regtest has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-regtest is non-empty",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-testnet all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-testnet contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-testnet contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-testnet contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-testnet has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity dogecoin-testnet is non-empty",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-mainnet all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-mainnet contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-mainnet contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-mainnet contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-mainnet has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-mainnet is non-empty",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-regtest all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-regtest contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-regtest contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-regtest contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-regtest has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-regtest is non-empty",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-testnet all non-comment lines match KEY=VALUE format",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-testnet contains DUST_AMOUNT",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-testnet contains NETWORK",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-testnet contains NODE_EXPOSED_PORT",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-testnet has no duplicate keys",
+      "S-SMOKE-005 – Config Template File Integrity litecoin-testnet is non-empty"
     ],
     "910cade45cc50889": [
       "CredentialsService XCHAIN_NODE_DB equals \"xchain_node\""
@@ -2423,46 +2429,20 @@
       "rail-leg.yml drive environment service URLs writes host-reachable BTC and DOGE service URLs without changing generic bitcoin endpoints"
     ],
     "946b75a6f83d1f21": [
-      "S-SMOKE-001 \u2013 Module Import Chain requires ConfigService without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires DockerService without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires ExplorerConnector without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires GitHubDownloader without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires HubConnector without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires MariaDbStore without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires config/constants without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires moduleOperations without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires precheck without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires state module without throwing",
-      "S-SMOKE-001 \u2013 Module Import Chain requires utils/helpers without throwing"
+      "S-SMOKE-001 – Module Import Chain requires ConfigService without throwing",
+      "S-SMOKE-001 – Module Import Chain requires DockerService without throwing",
+      "S-SMOKE-001 – Module Import Chain requires ExplorerConnector without throwing",
+      "S-SMOKE-001 – Module Import Chain requires GitHubDownloader without throwing",
+      "S-SMOKE-001 – Module Import Chain requires HubConnector without throwing",
+      "S-SMOKE-001 – Module Import Chain requires MariaDbStore without throwing",
+      "S-SMOKE-001 – Module Import Chain requires config/constants without throwing",
+      "S-SMOKE-001 – Module Import Chain requires moduleOperations without throwing",
+      "S-SMOKE-001 – Module Import Chain requires precheck without throwing",
+      "S-SMOKE-001 – Module Import Chain requires state module without throwing",
+      "S-SMOKE-001 – Module Import Chain requires utils/helpers without throwing"
     ],
     "95e6da4b094313a0": [
       "Security helpers.js decompressTarGz safety uses execFile instead of exec"
-    ],
-    "9778dd0f1c360aef": [
-      "VersionService checkAllRemoteVersions() is a function that returns a promise",
-      "VersionService checkRemoteNodeVersion() calls gitHubDownloader for bitcoin with correct owner/repo",
-      "VersionService checkRemoteNodeVersion() calls gitHubDownloader for dogecoin with correct owner/repo",
-      "VersionService checkRemoteNodeVersion() calls gitHubDownloader for litecoin with correct owner/repo",
-      "VersionService checkRemoteNodeVersion() stores result in remoteModuleVersions with node-<coin> key",
-      "VersionService getContainerModuleVersion() prefers the exec read over the host copy",
-      "VersionService getContainerModuleVersion() reads package.json from container and returns version",
-      "VersionService getContainerModuleVersion() reads the version with docker exec even when docker cp is permanently broken",
-      "VersionService getContainerModuleVersion() throws on docker cp error",
-      "VersionService getContainerNodeVersion() reads version file from container via docker cp",
-      "VersionService getContainerNodeVersion() throws on docker cp error",
-      "VersionService getGithubProjectVersion() calls GitHub API with correct URL",
-      "VersionService getGithubProjectVersion() preserves tag_name without v prefix",
-      "VersionService getGithubProjectVersion() returns the release id",
-      "VersionService getGithubProjectVersion() strips leading v from tag_name",
-      "VersionService getLocalModuleVersion() reads version from module package.json",
-      "VersionService getLocalModuleVersion() rejects when package.json does not exist",
-      "VersionService getLocalModuleVersion() rejects when package.json has no version field",
-      "VersionService getLocalModuleVersion() rejects when package.json is malformed",
-      "VersionService getLocalNodeVersion() reads version from correct file path",
-      "VersionService getLocalNodeVersion() rejects on read error",
-      "VersionService getLocalNodeVersion() rejects when version file does not exist",
-      "VersionService readContainerFile() falls back to docker cp when the container cannot be exec'd",
-      "VersionService readContainerFile() names BOTH failures when neither read works"
     ],
     "97f5eba9d682a101": [
       "GitHubDownloader downloadReleaseAsset() downloads gz asset using axios stream + pipeline, extracts with tar",
@@ -2624,26 +2604,30 @@
     "9e93b855fedba971": [
       "ExplorerService: installExplorerModule() persistent attach failure exhausts the ping retries and throws instead of returning success"
     ],
+    "9edf66b2734f0658": [
+      "ModuleService installModule(): node: no remote release to download refuses by name, never with a TypeError, for a null entry",
+      "ModuleService installModule(): node: no remote release to download refuses by name, never with a TypeError, for an entry with no tag_name"
+    ],
     "9f5847124ddc28f6": [
-      "S-SMOKE-002 \u2013 Commander CLI Registration bootstrap has correct argument counts (4 required, 0 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration e2etest has correct argument counts (1 required, 1 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration each command has an action handler",
-      "S-SMOKE-002 \u2013 Commander CLI Registration exec has correct argument counts (4 required, 0 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration install has correct argument counts (0 required, 4 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration logs has correct argument counts (0 required, 3 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration monitor has correct argument counts (0 required, 3 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration ps has correct argument counts (0 required, 0 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration registers all expected commands",
-      "S-SMOKE-002 \u2013 Commander CLI Registration reset has correct argument counts (3 required, 0 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration restart has correct argument counts (1 required, 2 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration rollback has correct argument counts (4 required, 0 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration shell has correct argument counts (3 required, 0 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration start has correct argument counts (1 required, 2 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration stop has correct argument counts (1 required, 2 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration tail has correct argument counts (0 required, 3 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration tailmonitor has correct argument counts (0 required, 3 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration uninstall has correct argument counts (1 required, 2 optional)",
-      "S-SMOKE-002 \u2013 Commander CLI Registration update has correct argument counts (0 required, 4 optional)"
+      "S-SMOKE-002 – Commander CLI Registration bootstrap has correct argument counts (4 required, 0 optional)",
+      "S-SMOKE-002 – Commander CLI Registration e2etest has correct argument counts (1 required, 1 optional)",
+      "S-SMOKE-002 – Commander CLI Registration each command has an action handler",
+      "S-SMOKE-002 – Commander CLI Registration exec has correct argument counts (4 required, 0 optional)",
+      "S-SMOKE-002 – Commander CLI Registration install has correct argument counts (0 required, 4 optional)",
+      "S-SMOKE-002 – Commander CLI Registration logs has correct argument counts (0 required, 3 optional)",
+      "S-SMOKE-002 – Commander CLI Registration monitor has correct argument counts (0 required, 3 optional)",
+      "S-SMOKE-002 – Commander CLI Registration ps has correct argument counts (0 required, 0 optional)",
+      "S-SMOKE-002 – Commander CLI Registration registers all expected commands",
+      "S-SMOKE-002 – Commander CLI Registration reset has correct argument counts (3 required, 0 optional)",
+      "S-SMOKE-002 – Commander CLI Registration restart has correct argument counts (1 required, 2 optional)",
+      "S-SMOKE-002 – Commander CLI Registration rollback has correct argument counts (4 required, 0 optional)",
+      "S-SMOKE-002 – Commander CLI Registration shell has correct argument counts (3 required, 0 optional)",
+      "S-SMOKE-002 – Commander CLI Registration start has correct argument counts (1 required, 2 optional)",
+      "S-SMOKE-002 – Commander CLI Registration stop has correct argument counts (1 required, 2 optional)",
+      "S-SMOKE-002 – Commander CLI Registration tail has correct argument counts (0 required, 3 optional)",
+      "S-SMOKE-002 – Commander CLI Registration tailmonitor has correct argument counts (0 required, 3 optional)",
+      "S-SMOKE-002 – Commander CLI Registration uninstall has correct argument counts (1 required, 2 optional)",
+      "S-SMOKE-002 – Commander CLI Registration update has correct argument counts (0 required, 4 optional)"
     ],
     "9fbe6ba46e39d44d": [
       "AutohealService records a failed restart without aborting the pass and reports it",
@@ -2965,6 +2949,38 @@
     ],
     "b15f63c78bbeaa42": [
       "Integration: Database Service Chain buildDatabaseModule (already exists) reuses existing container and adds to network"
+    ],
+    "b160cd15b0db200d": [
+      "ui/menu coin node remote actions run update, never a clone \"Reinstall from remote\" on the node runs update node for that coin and network",
+      "ui/menu coin node remote actions run update, never a clone \"Update local version\" on a module still clones its source",
+      "ui/menu coin node remote actions run update, never a clone \"Update local version\" on the node runs update node for that coin and network",
+      "ui/menu coin node remote actions run update, never a clone reports a refused node update and stays in the menu",
+      "ui/menu coin node remote versions answers \"0\" for a node release that has not been looked up yet",
+      "ui/menu coin node remote versions offers a reinstall when the installed node matches the release",
+      "ui/menu coin node remote versions offers an update for each coin whose installed node is behind the release",
+      "ui/menu coin node remote versions reads the node remote version from the release tag_name",
+      "ui/menu coin node remote versions still compares a module as semver",
+      "ui/menu exports mainMenu as a function",
+      "ui/menu exports modulesSelectionInterface as a function",
+      "ui/menu exports restoreBootstrapInterface as a function",
+      "ui/menu exports startInterface as a function",
+      "ui/menu mutating actions hold the command lock holds the lock around the scan and releases it after",
+      "ui/menu mutating actions hold the command lock never calls a mutating operation bare from a handler",
+      "ui/menu mutating actions hold the command lock releases the lock when the action throws",
+      "ui/menu mutating actions hold the command lock skips the action and stays in the menu when another command holds the lock",
+      "ui/menu per-module action labels are all handled ACTION_INSTALL_LOCAL_IN_CONTAINER (\"Install Local Version in Container\") reaches a handler",
+      "ui/menu per-module action labels are all handled ACTION_REINSTALL_CONTAINER (\"Reinstall\") reaches a handler",
+      "ui/menu per-module action labels are all handled ACTION_REINSTALL_REMOTE (\"Reinstall from remote\") reaches a handler",
+      "ui/menu per-module action labels are all handled ACTION_UPDATE_CONTAINER (\"Update Container\") reaches a handler",
+      "ui/menu per-module action labels are all handled ACTION_UPDATE_LOCAL (\"Update local version\") reaches a handler",
+      "ui/menu per-module action labels are all handled every offered per-module action label has a handler branch",
+      "ui/menu requiring the module has no throwing side effects",
+      "ui/menu restoreBootstrapInterface non-interactive resolution falls back to the newest archive when there is no TTY to prompt on",
+      "ui/menu restoreBootstrapInterface non-interactive resolution rejects a --file that is not present instead of silently picking another",
+      "ui/menu restoreBootstrapInterface non-interactive resolution restores exactly the named archive on --file",
+      "ui/menu restoreBootstrapInterface non-interactive resolution restores the newest archive on --latest without prompting",
+      "ui/menu restoreBootstrapInterface non-interactive resolution says so plainly when there is nothing to restore",
+      "ui/menu restoreBootstrapInterface non-interactive resolution surfaces a failed restore as an error rather than a bare false"
     ],
     "b23bbb069f1bf215": [
       "release_assets names the release integrity assets",
@@ -3532,6 +3548,15 @@
       "DatabaseService executeNativeMariaDbCommand() returns tab-joined columns in batch mode for multi-column rows",
       "DatabaseService executeNativeMariaDbCommand() still returns empty for an option string carrying no batch flag"
     ],
+    "ce97a31910d4f041": [
+      "NodeService: installNode() bootstraps utxo tracker when volume is fresh",
+      "NodeService: installNode() does NOT install regtest miner when network is mainnet",
+      "NodeService: installNode() fetches remote version and calls getCryptoNode when not installed (dogecoin)",
+      "NodeService: installNode() installs regtest miner when network is regtest",
+      "NodeService: installNode() succeeds when local node version already installed (skips getCryptoNode)",
+      "NodeService: installNode() throws the no-valid-version error, not a TypeError, when the remote entry is null",
+      "NodeService: installNode() throws when no valid remote version is available"
+    ],
     "ced71ed191802081": [
       "AutohealService restarts a container wedged past the grace window even though Health.Log only spans ~60s"
     ],
@@ -3651,9 +3676,9 @@
       "GitHubDownloader hasHash() returns true when hash exists for repo/version"
     ],
     "d94222300a70d805": [
-      "S-SMOKE-006 \u2013 Config Composition getDefaultConfig returns populated config for bitcoin/mainnet",
-      "S-SMOKE-006 \u2013 Config Composition getDefaultConfig returns regtest-specific values for bitcoin/regtest",
-      "S-SMOKE-006 \u2013 Config Composition getDefaultConfig returns shared-service config when coin/network are omitted"
+      "S-SMOKE-006 – Config Composition getDefaultConfig returns populated config for bitcoin/mainnet",
+      "S-SMOKE-006 – Config Composition getDefaultConfig returns regtest-specific values for bitcoin/regtest",
+      "S-SMOKE-006 – Config Composition getDefaultConfig returns shared-service config when coin/network are omitted"
     ],
     "da1b432659303a4d": [
       "DbCredentialDrift findHubDbCredentialDrift does not flag an indexer whose hub connection uses its own account",
@@ -3691,9 +3716,9 @@
       "ValidatorService initValidator() hub API key tells the operator WHERE the credential lives"
     ],
     "dad38ac028223802": [
-      "S-SMOKE-010 \u2013 Crypto Node Dockerfile Existence bitcoin/Dockerfile exists and is non-empty",
-      "S-SMOKE-010 \u2013 Crypto Node Dockerfile Existence dogecoin/Dockerfile exists and is non-empty",
-      "S-SMOKE-010 \u2013 Crypto Node Dockerfile Existence litecoin/Dockerfile exists and is non-empty"
+      "S-SMOKE-010 – Crypto Node Dockerfile Existence bitcoin/Dockerfile exists and is non-empty",
+      "S-SMOKE-010 – Crypto Node Dockerfile Existence dogecoin/Dockerfile exists and is non-empty",
+      "S-SMOKE-010 – Crypto Node Dockerfile Existence litecoin/Dockerfile exists and is non-empty"
     ],
     "dad3a4c39a65e9b4": [
       "GitHubDownloader verifyFileHash() computes the SHA-256 of the file bytes",
@@ -3706,8 +3731,8 @@
       "ValidatorService isInitialized() returns false when neither file exists",
       "ValidatorService isInitialized() returns false when settings file is missing",
       "ValidatorService isInitialized() returns true when both settings and key files exist",
-      "ValidatorService pubkeyFromSeedHex() different seeds \u2192 different pubkeys",
-      "ValidatorService pubkeyFromSeedHex() is deterministic: same seed \u2192 same pubkey",
+      "ValidatorService pubkeyFromSeedHex() different seeds → different pubkeys",
+      "ValidatorService pubkeyFromSeedHex() is deterministic: same seed → same pubkey",
       "ValidatorService pubkeyFromSeedHex() returns a 64-char hex string"
     ],
     "dd3e260439472a75": [
@@ -4526,20 +4551,20 @@
       "preCheck(): remote version check degrades gracefully @regression a GitHub 403 rate-limit rejection does not abort preCheck",
       "preCheck(): remote version check degrades gracefully @regression a successful version check keeps checkVersions=true for getStatus",
       "preCheck(): remote version check degrades gracefully @regression checkVersions=false skips the remote version fetch entirely",
-      "preCheck(): xchain_node pool host/port resolution @regression EXTERNAL_DB \u2192 never falls back to the 127.0.0.1 load-time default",
-      "preCheck(): xchain_node pool host/port resolution @regression EXTERNAL_DB \u2192 opens the pool against the getExternalDbConfig() host/port",
+      "preCheck(): xchain_node pool host/port resolution @regression EXTERNAL_DB → never falls back to the 127.0.0.1 load-time default",
+      "preCheck(): xchain_node pool host/port resolution @regression EXTERNAL_DB → opens the pool against the getExternalDbConfig() host/port",
       "preCheck(): xchain_node pool host/port resolution @regression a failing external-DB resolution surfaces as the pool-open error",
-      "preCheck(): xchain_node pool host/port resolution @regression docker mode \u2192 127.0.0.1 with the live container port-forward"
+      "preCheck(): xchain_node pool host/port resolution @regression docker mode → 127.0.0.1 with the live container port-forward"
     ],
     "f689c0ae4d32f20c": [
       "Chaos: Process Resilience Experiment: Empty container ID propagation accepts valid 64-char hex container ID"
     ],
     "f799873bf537e087": [
-      "S-SMOKE-008 \u2013 Parameter Expansion adds explorer as shared service when using all",
-      "S-SMOKE-008 \u2013 Parameter Expansion expands all/bitcoin/mainnet to all non-regtest services",
-      "S-SMOKE-008 \u2013 Parameter Expansion expands all/bitcoin/regtest to include regtest-only modules",
-      "S-SMOKE-008 \u2013 Parameter Expansion expands single service across all coins and networks",
-      "S-SMOKE-008 \u2013 Parameter Expansion filters regtest-only modules from non-regtest networks"
+      "S-SMOKE-008 – Parameter Expansion adds explorer as shared service when using all",
+      "S-SMOKE-008 – Parameter Expansion expands all/bitcoin/mainnet to all non-regtest services",
+      "S-SMOKE-008 – Parameter Expansion expands all/bitcoin/regtest to include regtest-only modules",
+      "S-SMOKE-008 – Parameter Expansion expands single service across all coins and networks",
+      "S-SMOKE-008 – Parameter Expansion filters regtest-only modules from non-regtest networks"
     ],
     "f7a34d9505872f33": [
       "Security Shell injection prevention via execFile DockerService uses execFile (no shell) for all Docker commands",
@@ -4676,53 +4701,53 @@
       "ValidatorService container mount points mounts the container DIRECTORY that path sits in"
     ],
     "fd287b2db335a349": [
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Coin enum contains bitcoin",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Coin enum contains dogecoin",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Coin enum contains litecoin",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity CoinTickerSymbol maps bitcoin to BTC",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity CoinTickerSymbol maps dogecoin to DOGE",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity CoinTickerSymbol maps litecoin to LTC",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Directory path constants configDir is a non-empty string",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Directory path constants containersFilesDir is a non-empty string",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Directory path constants cryptoNodesDir is a non-empty string",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Directory path constants dataDir is a non-empty string",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Directory path constants moduleDir is a non-empty string",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Directory path constants srcDir is a non-empty string",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Directory path constants tmpDir is a non-empty string",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Network enum contains mainnet",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Network enum contains regtest",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity Network enum contains testnet",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity REGTEST_MODULES does not include non-regtest services",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity REGTEST_MODULES includes xchain-e2e-test",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity REGTEST_MODULES includes xchain-regtest-miner",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity String constants DB_SEP is defined",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity String constants HUB_PORT is a number",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity String constants NODE_PREFIX is defined",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity String constants SEP is defined",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity XChainService enum contains xchain-decoder",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity XChainService enum contains xchain-e2e-test",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity XChainService enum contains xchain-encoder",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity XChainService enum contains xchain-indexer",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity XChainService enum contains xchain-regtest-miner",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity XChainService enum contains xchain-utxo-tracker",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-decoder",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-e2e-test",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-encoder",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-explorer",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-hub",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-indexer",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-regtest-miner",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-sync",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity modulesUrls mapping has git URL for xchain-utxo-tracker",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-decoder",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-e2e-test",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-encoder",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-explorer",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-hub",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-indexer",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-regtest-miner",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-sync",
-      "S-SMOKE-004 \u2013 Constants and Enum Integrity projectFolders mapping has project folder for xchain-utxo-tracker"
+      "S-SMOKE-004 – Constants and Enum Integrity Coin enum contains bitcoin",
+      "S-SMOKE-004 – Constants and Enum Integrity Coin enum contains dogecoin",
+      "S-SMOKE-004 – Constants and Enum Integrity Coin enum contains litecoin",
+      "S-SMOKE-004 – Constants and Enum Integrity CoinTickerSymbol maps bitcoin to BTC",
+      "S-SMOKE-004 – Constants and Enum Integrity CoinTickerSymbol maps dogecoin to DOGE",
+      "S-SMOKE-004 – Constants and Enum Integrity CoinTickerSymbol maps litecoin to LTC",
+      "S-SMOKE-004 – Constants and Enum Integrity Directory path constants configDir is a non-empty string",
+      "S-SMOKE-004 – Constants and Enum Integrity Directory path constants containersFilesDir is a non-empty string",
+      "S-SMOKE-004 – Constants and Enum Integrity Directory path constants cryptoNodesDir is a non-empty string",
+      "S-SMOKE-004 – Constants and Enum Integrity Directory path constants dataDir is a non-empty string",
+      "S-SMOKE-004 – Constants and Enum Integrity Directory path constants moduleDir is a non-empty string",
+      "S-SMOKE-004 – Constants and Enum Integrity Directory path constants srcDir is a non-empty string",
+      "S-SMOKE-004 – Constants and Enum Integrity Directory path constants tmpDir is a non-empty string",
+      "S-SMOKE-004 – Constants and Enum Integrity Network enum contains mainnet",
+      "S-SMOKE-004 – Constants and Enum Integrity Network enum contains regtest",
+      "S-SMOKE-004 – Constants and Enum Integrity Network enum contains testnet",
+      "S-SMOKE-004 – Constants and Enum Integrity REGTEST_MODULES does not include non-regtest services",
+      "S-SMOKE-004 – Constants and Enum Integrity REGTEST_MODULES includes xchain-e2e-test",
+      "S-SMOKE-004 – Constants and Enum Integrity REGTEST_MODULES includes xchain-regtest-miner",
+      "S-SMOKE-004 – Constants and Enum Integrity String constants DB_SEP is defined",
+      "S-SMOKE-004 – Constants and Enum Integrity String constants HUB_PORT is a number",
+      "S-SMOKE-004 – Constants and Enum Integrity String constants NODE_PREFIX is defined",
+      "S-SMOKE-004 – Constants and Enum Integrity String constants SEP is defined",
+      "S-SMOKE-004 – Constants and Enum Integrity XChainService enum contains xchain-decoder",
+      "S-SMOKE-004 – Constants and Enum Integrity XChainService enum contains xchain-e2e-test",
+      "S-SMOKE-004 – Constants and Enum Integrity XChainService enum contains xchain-encoder",
+      "S-SMOKE-004 – Constants and Enum Integrity XChainService enum contains xchain-indexer",
+      "S-SMOKE-004 – Constants and Enum Integrity XChainService enum contains xchain-regtest-miner",
+      "S-SMOKE-004 – Constants and Enum Integrity XChainService enum contains xchain-utxo-tracker",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-decoder",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-e2e-test",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-encoder",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-explorer",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-hub",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-indexer",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-regtest-miner",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-sync",
+      "S-SMOKE-004 – Constants and Enum Integrity modulesUrls mapping has git URL for xchain-utxo-tracker",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-decoder",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-e2e-test",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-encoder",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-explorer",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-hub",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-indexer",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-regtest-miner",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-sync",
+      "S-SMOKE-004 – Constants and Enum Integrity projectFolders mapping has project folder for xchain-utxo-tracker"
     ],
     "fd296203c4043515": [
       "ValidatorService getValidatorEnv() omits ORACLE_EPOCH_START when null",
@@ -4789,8 +4814,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 305,
-      "titleCount": 2917,
+      "fileCount": 308,
+      "titleCount": 2936,
       "files": {
         "test/unit/00_config_directory_isolation.test.js": "f13ced249dae415e",
         "test/unit/autoheal_service.test.js": "eae1a818e5f6a1fe",
@@ -4940,6 +4965,7 @@
         "test/unit/github_downloader.test/10_load_hashes_file_invalid_hash_in_object_entry.test.js": "e6fde6f428c1cad7",
         "test/unit/github_downloader.test/11_download_release_asset_verify_hash_true.test.js": "1b74d54e11533ef4",
         "test/unit/github_downloader.test/12_verify_repository_hash.test.js": "d8afb9f19d929d01",
+        "test/unit/github_downloader.test/13_hash_gate_host_arch.test.js": "41f655e5214c0500",
         "test/unit/go_live_gate.test.js": "a67cabacd0112216",
         "test/unit/helpers.test.js": "152f5f77b38555af",
         "test/unit/hub_connector.test.js": "f99c9123540ed4aa",
@@ -4992,6 +5018,7 @@
         "test/unit/module_service.test/12_buildandup_shutdown_timeout_env.test.js": "e269ee035ad3b399",
         "test/unit/module_service.test/13_buildandup_buildkit_precedes_clone_and_db.test.js": "846dd1095f28252d",
         "test/unit/module_service.test/13_buildandup_init_and_wget_timeout.test.js": "462a874ef1e65e98",
+        "test/unit/module_service.test/15_installmodule_node_missing_remote_release.test.js": "9edf66b2734f0658",
         "test/unit/mutating_lock_wait.test.js": "37a925183bf82ad0",
         "test/unit/nightly_e2e_workflow.test/sharding.test.js": "54441a6949465539",
         "test/unit/nightly_e2e_workflow.test/two_stack_legs.test.js": "1fcd3f9e733e968a",
@@ -5000,7 +5027,7 @@
         "test/unit/node_service.test/blocks_dir_persistence.test.js": "73eac28b1927f020",
         "test/unit/node_service.test/broken_mirror.test.js": "c5bcb58acc73d969",
         "test/unit/node_service.test/build_crypto_node.test.js": "e9444247682f4e2d",
-        "test/unit/node_service.test/install_node.test.js": "40d0e5ff515a5cf5",
+        "test/unit/node_service.test/install_node.test.js": "ce97a31910d4f041",
         "test/unit/node_service.test/node_version_pin.test.js": "7a9a45411521e34f",
         "test/unit/node_service.test/placed_tarball.test.js": "29d03dcc1c784287",
         "test/unit/node_service.test/update_datadir_unset.test.js": "a543adaaff87951c",
@@ -5030,7 +5057,7 @@
         "test/unit/rebase_completeness_sweep.test.js": "f3c42962f4a597a9",
         "test/unit/release_manifest_service.test.js": "7cccd4dc81f793a1",
         "test/unit/release_manifest_service.test/resolve_install_target.test.js": "53a93d0ea7bffc56",
-        "test/unit/release_manifest_service.test/the_provenance_gate.test.js": "3fea112c1dd22f23",
+        "test/unit/release_manifest_service.test/the_provenance_gate.test.js": "0e15713d36178e5f",
         "test/unit/release_manifest_service.test/the_shipped_manifest.test.js": "f0e58110dbd1940b",
         "test/unit/release_signature_service.test.js": "0b0e062a08751d6c",
         "test/unit/rollcall_wiring.test/01_which_deploys_read_roll_calls.test.js": "dfb14232aba06767",
@@ -5062,7 +5089,8 @@
         "test/unit/telemetry_connector.test.js": "31b05a9177135645",
         "test/unit/telemetry_service.test.js": "9dc7ea4f45a7ab68",
         "test/unit/ui/menu/module_choices.test.js": "312597dee63fa214",
-        "test/unit/ui_menu.test.js": "45c76bf41f38007d",
+        "test/unit/ui/menu/node_version_order.test.js": "426085f91f8b7f22",
+        "test/unit/ui_menu.test.js": "b160cd15b0db200d",
         "test/unit/utils/indexer_migrate_cli.test.js": "c0a179d054a8c1ef",
         "test/unit/utils/migrate_cli_status_guard.test.js": "41f7f97eefd13478",
         "test/unit/utils/migration_files.test.js": "bbdb0aa3f3d1d42e",
@@ -5096,12 +5124,12 @@
         "test/unit/validator_stake_service.test/unstake_validator.test.js": "b81d9b9c07cd6df9",
         "test/unit/validator_stake_service.test/upstream_reads.test.js": "b7114a10b0030562",
         "test/unit/validator_stake_service.test/validator_set_paging.test.js": "8403c6ea9dad5fe3",
-        "test/unit/version_service.test.js": "9778dd0f1c360aef"
+        "test/unit/version_service.test.js": "0586050116b0dd94"
       }
     },
     "test:all": {
-      "fileCount": 415,
-      "titleCount": 3683,
+      "fileCount": 418,
+      "titleCount": 3702,
       "files": {
         "test/chaos/config_resilience_chaos.test.js": "e187ad3068ae0375",
         "test/chaos/config_resilience_chaos.test/argument_parsing_resilience_chaos.test.js": "24bd240f4198a15b",
@@ -5361,6 +5389,7 @@
         "test/unit/github_downloader.test/10_load_hashes_file_invalid_hash_in_object_entry.test.js": "e6fde6f428c1cad7",
         "test/unit/github_downloader.test/11_download_release_asset_verify_hash_true.test.js": "1b74d54e11533ef4",
         "test/unit/github_downloader.test/12_verify_repository_hash.test.js": "d8afb9f19d929d01",
+        "test/unit/github_downloader.test/13_hash_gate_host_arch.test.js": "41f655e5214c0500",
         "test/unit/go_live_gate.test.js": "a67cabacd0112216",
         "test/unit/helpers.test.js": "152f5f77b38555af",
         "test/unit/hub_connector.test.js": "f99c9123540ed4aa",
@@ -5413,6 +5442,7 @@
         "test/unit/module_service.test/12_buildandup_shutdown_timeout_env.test.js": "e269ee035ad3b399",
         "test/unit/module_service.test/13_buildandup_buildkit_precedes_clone_and_db.test.js": "846dd1095f28252d",
         "test/unit/module_service.test/13_buildandup_init_and_wget_timeout.test.js": "462a874ef1e65e98",
+        "test/unit/module_service.test/15_installmodule_node_missing_remote_release.test.js": "9edf66b2734f0658",
         "test/unit/mutating_lock_wait.test.js": "37a925183bf82ad0",
         "test/unit/nightly_e2e_workflow.test/sharding.test.js": "54441a6949465539",
         "test/unit/nightly_e2e_workflow.test/two_stack_legs.test.js": "1fcd3f9e733e968a",
@@ -5421,7 +5451,7 @@
         "test/unit/node_service.test/blocks_dir_persistence.test.js": "73eac28b1927f020",
         "test/unit/node_service.test/broken_mirror.test.js": "c5bcb58acc73d969",
         "test/unit/node_service.test/build_crypto_node.test.js": "e9444247682f4e2d",
-        "test/unit/node_service.test/install_node.test.js": "40d0e5ff515a5cf5",
+        "test/unit/node_service.test/install_node.test.js": "ce97a31910d4f041",
         "test/unit/node_service.test/node_version_pin.test.js": "7a9a45411521e34f",
         "test/unit/node_service.test/placed_tarball.test.js": "29d03dcc1c784287",
         "test/unit/node_service.test/update_datadir_unset.test.js": "a543adaaff87951c",
@@ -5451,7 +5481,7 @@
         "test/unit/rebase_completeness_sweep.test.js": "f3c42962f4a597a9",
         "test/unit/release_manifest_service.test.js": "7cccd4dc81f793a1",
         "test/unit/release_manifest_service.test/resolve_install_target.test.js": "53a93d0ea7bffc56",
-        "test/unit/release_manifest_service.test/the_provenance_gate.test.js": "3fea112c1dd22f23",
+        "test/unit/release_manifest_service.test/the_provenance_gate.test.js": "0e15713d36178e5f",
         "test/unit/release_manifest_service.test/the_shipped_manifest.test.js": "f0e58110dbd1940b",
         "test/unit/release_signature_service.test.js": "0b0e062a08751d6c",
         "test/unit/rollcall_wiring.test/01_which_deploys_read_roll_calls.test.js": "dfb14232aba06767",
@@ -5483,7 +5513,8 @@
         "test/unit/telemetry_connector.test.js": "31b05a9177135645",
         "test/unit/telemetry_service.test.js": "9dc7ea4f45a7ab68",
         "test/unit/ui/menu/module_choices.test.js": "312597dee63fa214",
-        "test/unit/ui_menu.test.js": "45c76bf41f38007d",
+        "test/unit/ui/menu/node_version_order.test.js": "426085f91f8b7f22",
+        "test/unit/ui_menu.test.js": "b160cd15b0db200d",
         "test/unit/utils/indexer_migrate_cli.test.js": "c0a179d054a8c1ef",
         "test/unit/utils/migrate_cli_status_guard.test.js": "41f7f97eefd13478",
         "test/unit/utils/migration_files.test.js": "bbdb0aa3f3d1d42e",
@@ -5517,7 +5548,7 @@
         "test/unit/validator_stake_service.test/unstake_validator.test.js": "b81d9b9c07cd6df9",
         "test/unit/validator_stake_service.test/upstream_reads.test.js": "b7114a10b0030562",
         "test/unit/validator_stake_service.test/validator_set_paging.test.js": "8403c6ea9dad5fe3",
-        "test/unit/version_service.test.js": "9778dd0f1c360aef"
+        "test/unit/version_service.test.js": "0586050116b0dd94"
       }
     },
     "test:boundary": {

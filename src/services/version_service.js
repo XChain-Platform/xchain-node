@@ -16,14 +16,12 @@
  ********************************************************************/
 
 const fs    = require('fs')
-const axios = require('axios')
 
 const {
     NODE_MODULE_NAME, EXPLORER_MODULE_NAME, SEP,
     XChainService, Coin, NODE_VERSION_FILE_NAME, projectFolders
 } = require('../config')
 const { gitHubDownloader, getRemoteModuleVersions, setRemoteModuleVersion } = require('../state')
-const { githubApiHeaders, githubRateLimitError }                             = require('../utils/github_api')
 const { getModuleDir, getModuleTmpDir, getCryptoNodeDir }                   = require('./config_service')
 const { getDockerContainerFileData, getDockerContainerFileCat }              = require('./docker_service')
 // Services on the far side of the require cycle, resolved when first used.
@@ -69,22 +67,6 @@ async function readContainerFile(containerId, filePath) {
             '; docker cp fallback also failed (' + (copyErr && copyErr.message ? copyErr.message : copyErr) + ')'
         )
     }
-}
-
-async function getGithubProjectVersion(owner, repoName) {
-    const url = "https://api.github.com/repos/" + owner + "/" + repoName + "/releases/latest"
-    let result
-    try {
-        result = await axios.get(url, { headers: githubApiHeaders() })
-    } catch (error) {
-        throw githubRateLimitError(error) || error
-    }
-    const json = result.data
-
-    let tagName = json["tag_name"]
-    if (tagName.charAt(0) === 'v') tagName = tagName.substring(1)
-
-    return { version: tagName, id: json["id"] }
 }
 
 async function checkRemoteNodeVersion(coin) {
@@ -207,7 +189,6 @@ async function getContainerModuleVersion(module, coin, network, containerId) {
 
 module.exports = {
     readContainerFile,
-    getGithubProjectVersion,
     checkRemoteNodeVersion,
     checkAllRemoteVersions,
     getLocalNodeVersion,

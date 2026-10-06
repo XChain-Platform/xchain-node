@@ -22,7 +22,6 @@ function makeStubs() {
             existsSync: sinon.stub().returns(true),
             readFile: sinon.stub()
         },
-        axiosGet: sinon.stub(),
         getDockerContainerFileData: sinon.stub(),
         // Defaults to failing so the pre-existing `docker cp` expectations below
         // still exercise the fallback path; tests of the preferred exec read
@@ -39,7 +38,6 @@ function makeStubs() {
 function loadVersionService(stubs) {
     return proxyquire('../../src/services/version_service', {
         'fs': stubs.fs,
-        'axios': { get: stubs.axiosGet },
         '../config/index': require('../../src/config'),
         '../state': {
             gitHubDownloader: stubs.gitHubDownloader,
@@ -57,46 +55,6 @@ function loadVersionService(stubs) {
         }
     })
 }
-
-describe('VersionService', function () {
-
-    describe('getGithubProjectVersion()', function () {
-
-        it('calls GitHub API with correct URL', async function () {
-            const stubs = makeStubs()
-            stubs.axiosGet.resolves({ data: { tag_name: 'v1.2.3', id: 42 } })
-            const vs = loadVersionService(stubs)
-            await vs.getGithubProjectVersion('owner', 'repo')
-            expect(stubs.axiosGet.firstCall.args[0]).to.equal(
-                'https://api.github.com/repos/owner/repo/releases/latest'
-            )
-        })
-
-        it('strips leading v from tag_name', async function () {
-            const stubs = makeStubs()
-            stubs.axiosGet.resolves({ data: { tag_name: 'v1.2.3', id: 42 } })
-            const vs = loadVersionService(stubs)
-            const result = await vs.getGithubProjectVersion('owner', 'repo')
-            expect(result.version).to.equal('1.2.3')
-        })
-
-        it('preserves tag_name without v prefix', async function () {
-            const stubs = makeStubs()
-            stubs.axiosGet.resolves({ data: { tag_name: '1.2.3', id: 42 } })
-            const vs = loadVersionService(stubs)
-            const result = await vs.getGithubProjectVersion('owner', 'repo')
-            expect(result.version).to.equal('1.2.3')
-        })
-
-        it('returns the release id', async function () {
-            const stubs = makeStubs()
-            stubs.axiosGet.resolves({ data: { tag_name: 'v1.0.0', id: 99 } })
-            const vs = loadVersionService(stubs)
-            const result = await vs.getGithubProjectVersion('owner', 'repo')
-            expect(result.id).to.equal(99)
-        })
-    })
-})
 
 describe('VersionService', function () {
 
