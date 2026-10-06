@@ -12,7 +12,7 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-const { proxyquireDockerService } = require('../../helpers/docker_service_loader')
+const { proxyquireDockerService } = require('../../../helpers/docker_service_loader')
 
 // Helpers
 function makeStubs() {
@@ -24,7 +24,7 @@ function makeStubs() {
 }
 
 function loadDockerService(stubs, fsStub) {
-    return proxyquireDockerService(require.resolve('../../../src/services/docker_service'), {
+    return proxyquireDockerService(require.resolve('../../../../src/services/docker_service'), {
         'child_process': {
             execFile: stubs.execFile,
             spawn: stubs.spawn,
@@ -50,26 +50,21 @@ function loadDockerService(stubs, fsStub) {
 describe('DockerService', function () {
 
 
-    // execContainer: error branch
-    describe('execContainer(): error branch', function () {
+    // getDockerContainerFileCat: error branch
+    describe('getDockerContainerFileCat(): error branch', function () {
 
-        it('rejects when docker exec fails', async function () {
+        it('rejects when docker exec cat fails', async function () {
             const stubs = makeStubs()
-            // The callback form of execFile hands stdout and stderr to the callback, never to the error.
-            const failure = Object.assign(new Error('exec failed'), { code: 4 })
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cb(failure, 'live marker line\n', 'REFUSED line\n')
+                cb(new Error('cat failed'))
             })
             const ds = loadDockerService(stubs)
             try {
-                await ds.execContainer('abc123', ['ls'])
+                await ds.getDockerContainerFileCat('abc123', '/app/file.txt')
                 expect.fail()
             } catch (err) {
-                expect(err).to.equal(failure)
-                expect(err.code).to.equal(4)
-                expect(err.stdout).to.equal('live marker line\n')
-                expect(err.stderr).to.equal('REFUSED line\n')
+                expect(err).to.be.an.instanceOf(Error)
             }
         })
     })

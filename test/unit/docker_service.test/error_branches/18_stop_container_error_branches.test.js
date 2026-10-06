@@ -12,7 +12,7 @@
 
 const sinon      = require('sinon')
 const { expect } = require('chai')
-const { proxyquireDockerService } = require('../../helpers/docker_service_loader')
+const { proxyquireDockerService } = require('../../../helpers/docker_service_loader')
 
 // Helpers
 function makeStubs() {
@@ -24,7 +24,7 @@ function makeStubs() {
 }
 
 function loadDockerService(stubs, fsStub) {
-    return proxyquireDockerService(require.resolve('../../../src/services/docker_service'), {
+    return proxyquireDockerService(require.resolve('../../../../src/services/docker_service'), {
         'child_process': {
             execFile: stubs.execFile,
             spawn: stubs.spawn,
@@ -50,18 +50,18 @@ function loadDockerService(stubs, fsStub) {
 describe('DockerService', function () {
 
 
-    // getDockerContainerFileData: error branch
-    describe('getDockerContainerFileData(): error branch', function () {
+    // stopContainer: error branches
+    describe('stopContainer(): error branches', function () {
 
-        it('rejects when docker cp fails', async function () {
+        it('rejects on exec error', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                cb(new Error('cp failed'))
+                cb(new Error('stop failed'))
             })
             const ds = loadDockerService(stubs)
             try {
-                await ds.getDockerContainerFileData('abc123', '/app/file.txt')
+                await ds.stopContainer('abc123')
                 expect.fail()
             } catch (err) {
                 expect(err).to.be.an.instanceOf(Error)
