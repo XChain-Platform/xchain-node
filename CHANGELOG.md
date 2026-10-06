@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.7] - 2026-10-06
+
+### Changed
+- Pinned the v0.22.7 hub tag in the release manifest for the paged, backed-off peer catch-up fix.
+
 ## [0.22.6] - 2026-10-06
 
 ### Changed
