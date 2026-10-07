@@ -115,7 +115,8 @@ function makeCoreDependencies(stubs) {
             getDockerContainerImageName: stubs.getDockerContainerImageName,
             getDockerNetwork:            stubs.getDockerNetwork,
             getDefaultConfig:            stubs.getDefaultConfig,
-            validatePort:                () => true,
+            // Default: every port passes. A test passes the real validator to reach the refusal.
+            validatePort:                stubs.validatePort || (() => true),
             // resolveBlocksDir sidecar persistence. Defaults: nothing
             // persisted, persistence is a no-op. Tests override to simulate a
             // config/node.local value.

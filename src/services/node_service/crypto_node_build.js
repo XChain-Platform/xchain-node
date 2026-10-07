@@ -260,28 +260,23 @@ async function prepareExistingContainer(containerPrefix, coin, network, storage,
     return stopBudgetSeconds
 }
 
-function addPortArgs(runArgs, defaultExposedPort, defaultNodePort, reject) {
+// Refuse a malformed operator-supplied NODE_EXPOSED_PORT/NODE_PORT before
+// anything touches the live node (it once ran after the stop and force-remove).
+function assertValidNodePorts(defaultExposedPort, defaultNodePort) {
+    if (!(defaultExposedPort && defaultNodePort)) return
+    if (!validatePort(defaultExposedPort)) {
+        throw new Error("Invalid port value in configuration: NODE_EXPOSED_PORT=" + defaultExposedPort)
+    }
+    if (!validatePort(defaultNodePort)) {
+        throw new Error("Invalid port value in configuration: NODE_PORT=" + defaultNodePort)
+    }
+}
+
+// Publish the node port; assertValidNodePorts already vetted both values.
+function addPortArgs(runArgs, defaultExposedPort, defaultNodePort) {
     if (defaultExposedPort && defaultNodePort) {
-        // NODE_EXPOSED_PORT/NODE_PORT come from the operator-supplied
-        // <coin>-<network> config. Validate before the docker run push so
-        // a malformed value fails loud here instead of surfacing as a
-        // cryptic docker argument-parse error (matches the DB_PORT guard
-        // in DatabaseService and the portArgs guard in ModuleService).
-        // This runs inside the async docker-build callback; a throw here
-        // escapes the Promise as an uncaught exception and hangs the
-        // build (same hazard as the mkdir guard above). Reject + return
-        // so the Promise settles instead.
-        if (!validatePort(defaultExposedPort)) {
-            reject(new Error("Invalid port value in configuration: NODE_EXPOSED_PORT=" + defaultExposedPort))
-            return false
-        }
-        if (!validatePort(defaultNodePort)) {
-            reject(new Error("Invalid port value in configuration: NODE_PORT=" + defaultNodePort))
-            return false
-        }
         runArgs.push('-p', `${defaultExposedPort}:${defaultNodePort}`)
     }
-    return true
 }
 
 function addDaemonArgs(runArgs, coin, blocksDir, useBlocksdirFlag, containerPrefix) {
@@ -336,6 +331,8 @@ async function buildCryptoNode(coin, network) {
     const defaultConfig = await getDefaultConfig(NODE_MODULE_NAME, coin, network)
     const defaultExposedPort = defaultConfig["NODE_EXPOSED_PORT"]
     const defaultNodePort = defaultConfig["NODE_PORT"]
+    // Async body, not the build callback: a throw here rejects cleanly.
+    assertValidNodePorts(defaultExposedPort, defaultNodePort)
     const containerPrefix = getDockerContainerImageName(NODE_MODULE_NAME, coin, network)
     const nodeDir = cryptoNodesDir + "/" + coin
     const confFileName = stageBuildScaffold(coin, network, nodeDir, defaultConfig)
@@ -369,7 +366,7 @@ async function buildCryptoNode(coin, network) {
                 getDockerNetwork,
                 logger
             })
-            if (!addPortArgs(runArgs, defaultExposedPort, defaultNodePort, reject)) return
+            addPortArgs(runArgs, defaultExposedPort, defaultNodePort)
             addDaemonArgs(runArgs, coin, storage.blocksDir, storage.useBlocksdirFlag, containerPrefix)
             runNodeContainer(runArgs, nodeDir, coin, network, resolve, reject)
         })
