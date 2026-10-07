@@ -174,9 +174,7 @@ moduleSuite('buildAndUp() healthcheck args', function () { describe('dependency-
             })
 
             it('does not enrol the encoder in autoheal, since a tracker halt 503s its probe', function () {
-                const ms = loadModuleService(makeStubs())
-                expect(ms.SERVICE_HEALTHCHECK['xchain-encoder']).to.be.an('object')
-                expect(ms.SERVICE_HEALTHCHECK['xchain-encoder'].autoheal).to.not.equal(true)
+                expect(loadModuleService(makeStubs()).SERVICE_HEALTHCHECK['xchain-encoder'].autoheal).to.not.equal(true)
             })
 
             it('grants the hub and the explorer at least the DB start period their probes SELECT 1 against', function () {

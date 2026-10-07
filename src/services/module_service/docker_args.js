@@ -147,9 +147,7 @@ const SERVICE_HEALTHCHECK = {
     // (xchain-encoder/src/api.js, getServeReadiness). Its window therefore has to
     // cover the TRACKER's startup, not the encoder's own fast boot: at the former
     // 30s a simultaneous cold start had the encoder's grace expiring while the
-    // tracker was still inside the 60s window it declares one line below. It does not
-    // opt into autoheal: a tracker halt 503s this probe and restarting the encoder
-    // cannot clear it.
+    // tracker was still inside the 60s window it declares one line below.
     [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
     [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
     [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
