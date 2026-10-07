@@ -16,17 +16,21 @@
 // wiring: a refusal reaches the caller with no docker call made, and a one-shot
 // execution container is exempt.
 
-const { sinon, expect, makeStubs, makeConfigServiceStub, loadModuleService, moduleSuite } = require('./support/helpers')
+const {
+    sinon, expect, makeStubs, makeConfigServiceStub, loadModuleService,
+    dockerEnvInspectOutput, moduleSuite
+} = require('./support/helpers')
 
 // A docker fake that records every call and answers the create path. The
 // indexer stages its bundled xchain-vm with cpSync, so the fixture fs gets one.
-function recordDocker(stubs) {
+function recordDocker(stubs, containerEnv = null) {
     const seen = []
     stubs.fs.cpSync = sinon.stub()
     stubs.execFile.callsFake((cmd, args, ...rest) => {
         const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
         seen.push({ cmd, args })
-        if (args[0] === 'build') cb(null)
+        if (args.includes('{{json .Config.Env}}')) cb(null, dockerEnvInspectOutput(containerEnv || {}))
+        else if (args[0] === 'build') cb(null)
         else if (args[0] === 'run') cb(null, 'f'.repeat(64) + '\n')
         else cb(null, '')
     })
@@ -71,6 +75,19 @@ moduleSuite('buildAndUp() ROLLCALL wiring guard', function () {
         const seen = recordDocker(stubs)
         const ms = loadModuleService(stubs)
         await ms.buildAndUp('xchain-indexer', 'bitcoin', 'mainnet')
+        expect(seen.some(c => c.args[0] === 'run')).to.equal(true)
+    })
+
+    it('checks the carried recreate env instead of refusing a shell-only DOGE read', async function () {
+        const stubs = makeStubs()
+        const seen = recordDocker(stubs, {
+            DOGE_INDEXER_API_URL: 'preserved-value'
+        })
+        const ms = loadWithoutDogeRead(stubs)
+        await ms.buildAndUp(
+            'xchain-indexer', 'bitcoin', 'mainnet', 'old-indexer-id', false, null,
+            { reuseImage: true }
+        )
         expect(seen.some(c => c.args[0] === 'run')).to.equal(true)
     })
 })

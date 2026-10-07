@@ -36,6 +36,7 @@ const execFileAsync = promisify(execFile)
 
 const { XChainService, HUB_MODULE_NAME, DB_CREDENTIAL_DRIFT_ENV } = require('../config')
 const { getDockerContainerImageName } = require('./config_service')
+const { readContainerEnv } = require('./module_service/carry_container_env')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -227,38 +228,6 @@ async function assertNoHubDbCredentialDrift(intended, deps = {}) {
     error.code = DRIFT_ERROR_CODE
     error.drift = drift
     throw error
-}
-
-/**
- * Read a running container's env as a plain object, or null when the container
- * does not exist. Tolerant by design: a missing container is not drift.
- *
- * @param {string} name
- * @param {{execFileAsync?: Function}} [deps]
- * @returns {Promise<Object<string,string>|null>}
- */
-async function readContainerEnv(name, deps = {}) {
-    const runDocker = deps.execFileAsync || execFileAsync
-    let stdout
-    try {
-        ({ stdout } = await runDocker('docker', ['inspect', '--type', 'container', '--format', '{{json .Config.Env}}', name]))
-    } catch {
-        return null
-    }
-    let parsed
-    try {
-        parsed = JSON.parse(String(stdout).trim())
-    } catch {
-        return null
-    }
-    if (!Array.isArray(parsed)) return null
-    const env = {}
-    for (const entry of parsed) {
-        const eqIndex = String(entry).indexOf('=')
-        if (eqIndex <= 0) continue
-        env[String(entry).substring(0, eqIndex)] = String(entry).substring(eqIndex + 1)
-    }
-    return env
 }
 
 /**
