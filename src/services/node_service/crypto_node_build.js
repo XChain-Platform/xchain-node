@@ -180,11 +180,15 @@ async function resolveStorageMounts(coin, network, reject) {
     // existing in-datadir txindex would be shadowed and rebuilt.
     const txindexHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
 
-    // The full bind-mount set of the NEW container, [{ spec, destination }],
+    // The full bind-mount set of the NEW container, [{ spec, source, destination }],
     // composed before the old container is touched so the drift guard
     // below can compare against it.
     const volumeMounts = [
-        { spec: `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`, destination: `/root/.${coin}` }
+        {
+            spec: `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`,
+            source: `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}`,
+            destination: `/root/.${coin}`
+        }
     ]
     if (blocksDir) {
         const blocksDest = useBlocksdirFlag
@@ -192,34 +196,44 @@ async function resolveStorageMounts(coin, network, reject) {
             // doged ignores -blocksdir: mount straight onto the blocks
             // dir it actually writes to, under the network subdir.
             : `/root/.${coin}${netSubdir}/blocks`
-        volumeMounts.push({ spec: `${blocksHostPath}:${blocksDest}`, destination: blocksDest })
+        volumeMounts.push({ spec: `${blocksHostPath}:${blocksDest}`, source: blocksHostPath, destination: blocksDest })
         // Relocate txindex for every coin (nested under the network subdir).
         const txindexDest = `/root/.${coin}${netSubdir}/indexes/txindex`
-        volumeMounts.push({ spec: `${txindexHostPath}:${txindexDest}`, destination: txindexDest })
+        volumeMounts.push({ spec: `${txindexHostPath}:${txindexDest}`, source: txindexHostPath, destination: txindexDest })
     }
     return { blocksDir, useBlocksdirFlag, blocksHostPath, txindexHostPath, volumeMounts }
 }
 
 async function prepareExistingContainer(containerPrefix, coin, network, storage, reject) {
     const { blocksDir, blocksHostPath, txindexHostPath, volumeMounts } = storage
-    // Mount-drift guard: if the container being replaced has bind mounts
-    // the new spec lacks, refuse BEFORE removing it. A real crash-loop
-    // came from exactly this: an env-less rebuild dropped the relocated
-    // blocks/txindex mounts, so the daemon restarted over an empty
-    // blocks store with a current chainstate.
+    // Mount-drift guard: refuse before replacing a container when its bind
+    // destinations disappear or begin pointing at different host sources.
     const { forceRemoveContainerByName, getContainerBindMounts, stopContainerByName } = dockerService
     let existingMounts = []
     try {
         existingMounts = await getContainerBindMounts(containerPrefix)
     } catch { /* no previous container or docker unreachable: nothing to preserve */ }
-    const newDestinations = new Set(volumeMounts.map(m => m.destination))
-    const droppedMounts = existingMounts.filter(m => !newDestinations.has(m.destination))
+    const newMountsByDestination = new Map(volumeMounts.map(m => [m.destination, m]))
+    const droppedMounts = existingMounts.filter(m => !newMountsByDestination.has(m.destination))
     if (droppedMounts.length > 0) {
         reject(`Refusing to replace container ${containerPrefix}: the new spec would drop bind mount(s) ` +
             droppedMounts.map(m => `${m.source} -> ${m.destination}`).join(', ') +
             `. This usually means XCHAIN_NODE_BLOCKS_DIR is missing from this environment ` +
             `(non-interactive shells do not source the profile). Set it, or persist it in ` +
             `config/node.local as XCHAIN_NODE_BLOCKS_DIR=<path>, then retry. The existing container was left untouched.`)
+        return null
+    }
+    const changedSources = existingMounts.filter(m => {
+        const replacement = newMountsByDestination.get(m.destination)
+        return replacement && replacement.source !== m.source
+    })
+    if (changedSources.length > 0) {
+        reject(`Refusing to replace container ${containerPrefix}: the new spec would change bind mount source(s) ` +
+            changedSources.map(m => {
+                const replacement = newMountsByDestination.get(m.destination)
+                return `${m.source} -> ${m.destination} to ${replacement.source} -> ${m.destination}`
+            }).join(', ') +
+            `. Verify the configured data and blocks directories, then retry. The existing container was left untouched.`)
         return null
     }
 
