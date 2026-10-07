@@ -75,6 +75,10 @@ function configureCapture(capture, options, dbContainerId) {
     capture.when(/docker network inspect/).returns({
         stdout: JSON.stringify([{ IPAM: { Config: [{ Gateway: options.gateway || '172.18.0.1' }] } }])
     })
+    // The credential-drift probe reads each decoder/indexer container's env;
+    // none runs in this fixture, so answer "no such container" (registered
+    // first because the --format route below also matches the probe's argv).
+    capture.when(/docker inspect .*\{\{json \.Config\.Env\}\}/).returns({ error: new Error('No such container') })
     // getDatabaseContainerId() runs `docker inspect --type container
     // --format {{.Id}}`, which prints the bare 64-hex container id (not
     // JSON) on success. This route has to be registered ahead of the
@@ -105,6 +109,12 @@ function proxyDatabaseService(capture, options) {
         },
         'util': { promisify: () => execFileAsyncStub },
         'enquirer': { Password: class { async run() { return 'testrootpw' } } },
+        // Route the real drift guard through the capture (unstubbed, it probed the
+        // venue's own docker daemon and refused on a CI venue's live bitcoin stack).
+        './db_credential_drift': proxyquire('../../../../src/services/db_credential_drift', {
+            'child_process': { execFile: capture.createExecFileStub() },
+            'util': { promisify: () => execFileAsyncStub }
+        }),
         './status_service': {
             statusChanged: async () => true,
             getStatus: async () => ({}),

@@ -261,6 +261,17 @@ function bridgeTablesSatisfiedSql(database) {
         tableShapeSql(database, table, 'InnoDB', COLLATION_UTF8_ALIASES)
     ].join(' AND ')).join(' AND ')
 }
+// The indexer's own baseline test: the file is CREATE TABLE IF NOT EXISTS only, so with both
+// tables present running it changes nothing and no shape check could be satisfied by applying it.
+function listShareTablesSatisfiedSql(database) {
+    return "(SELECT COUNT(1) FROM information_schema.tables WHERE table_schema = '" + database + "'" +
+        " AND table_name IN ('list_snapshots', 'list_share_mirrors')) = 2"
+}
+// Width alone, as the indexer baselines it: the file only widens oracle_prices.tick to 250.
+function oraclePricesTickWidthSatisfiedSql(database) {
+    return "EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = '" + database + "'" +
+        " AND table_name = 'oracle_prices' AND column_name = 'tick' AND character_maximum_length >= 250)"
+}
 function pubkeyWidthSatisfiedSql(database) { return columnSql(database, 'pubkeys', 'pubkey', 'varchar', { length: 130, ordinal: 2 }) }
 
 function validatorRewardsDeriveBlockIndexSatisfiedSql(database) {
@@ -373,7 +384,9 @@ function indexerSatisfiedMigrationsSql(database) {
         migrationFactSql('2026-09-02-issues-backfill-transfer-supply-id.sql', issueTransferSupplyBackfillSatisfiedSql(database)),
         migrationFactSql('2026-09-02-utf8mb4-raw-wire-fields-not-null.sql', rawWireFieldsSatisfiedSql(database)),
         migrationFactSql('2026-09-10-markets-native-coin-side.sql', marketsNativeCoinSideSatisfiedSql(database)),
-        migrationFactSql('2026-09-12-bridge-tables.sql', bridgeTablesSatisfiedSql(database))
+        migrationFactSql('2026-09-12-bridge-tables.sql', bridgeTablesSatisfiedSql(database)),
+        migrationFactSql('2026-09-22-oracle-prices-widen-tick.sql', oraclePricesTickWidthSatisfiedSql(database)),
+        migrationFactSql('2026-09-30-list-share-tables.sql', listShareTablesSatisfiedSql(database))
     ]
 }
 

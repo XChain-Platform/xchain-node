@@ -33,7 +33,7 @@ const {
 } = require('./node_service/crypto_node_build.js')
 const { statusChanged }                 = require('./status_service')
 const { checkRemoteNodeVersion }        = require('./version_service')
-const config = require('../config');
+const { resolveNodeVersionPin, assertNodeVersionPin } = require('./node_service/node_version_pin.js')
 // Destructured where they are used, so each call reads the export at that moment.
 const dockerService = require('./docker_service')
 const configService = require('./config_service')
@@ -42,28 +42,6 @@ const versionService = require('./version_service')
 const peers = require('./peer_services').bindPeerServices(require)
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
-
-// Optional exact-version pin for a coin daemon, read from
-// XCHAIN_NODE_NODE_VERSION_<COIN> (e.g. XCHAIN_NODE_NODE_VERSION_LITECOIN=v0.21.4).
-// Test harnesses (notably the multi-chain parity sweep) set this so the
-// installed daemon matches the DEPLOYED fleet image instead of drifting to the
-// latest upstream release. Returns null when no pin is set.
-function resolveNodeVersionPin(coin) {
-    const pin = config.NODE_VERSION_PIN_ENV['XCHAIN_NODE_NODE_VERSION_' + String(coin).toUpperCase()]
-    return pin && pin.trim() !== '' ? pin.trim() : null
-}
-
-// Enforce a version pin against an already-installed local daemon. A silent
-// mismatch would defeat the pin (installNode skips the download when a local
-// copy exists), so fail loudly with the remediation instead.
-function assertNodeVersionPin(coin, network, localNodeVersion, pin) {
-    if (pin && localNodeVersion != null && localNodeVersion !== pin) {
-        throw new Error(
-            `Installed ${coin} node is ${localNodeVersion} but ` +
-            `XCHAIN_NODE_NODE_VERSION_${String(coin).toUpperCase()} pins ${pin}. ` +
-            `Remove the ${coin}/${network} stack (or the cached crypto node) and reinstall.`)
-    }
-}
 
 async function installDependentServices(coin, network, cloneGit, buildAndUp) {
     logger.info("Downloading xchain-encoder...")

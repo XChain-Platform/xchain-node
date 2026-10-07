@@ -56,7 +56,7 @@ function makeExplorer(chain) {
         getValidators:  sinon.stub().resolves({ data: chain.existing ? [chain.existing] : [] }),
         getDelegations: sinon.stub().resolves({ total: 0, data: [] }),
         getStatus:      sinon.stub().resolves({ last_block: Object.fromEntries(
-            Object.values(COIN_NETWORKS).map(c => [c.stake, 200000])) })
+            Object.values(COIN_NETWORKS).map(c => [c.stakeCoin, 200000])) })
     }
 }
 

@@ -99,13 +99,13 @@ async function readTip(sdk, coins, fail) {
     let tip
     try {
         const status = await sdk.explorer.getStatus()
-        tip = Number(status && status.last_block && status.last_block[coins.stake])
+        tip = Number(status && status.last_block && status.last_block[coins.stakeCoin])
     } catch (e) {
         throw fail('could not read the chain tip (' + e.message + '), so this run cannot tell ' +
                    'whether the stake is active yet. Nothing was sent.')
     }
     if (!Number.isInteger(tip) || tip < 0) {
-        throw fail('the explorer reported no last block for ' + coins.stake + ', so this run cannot tell ' +
+        throw fail('the explorer reported no last block for ' + coins.stakeCoin + ', so this run cannot tell ' +
                    'whether the stake is active yet. Nothing was sent.')
     }
     return tip

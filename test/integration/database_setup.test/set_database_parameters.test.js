@@ -40,6 +40,9 @@ databaseSuite('setDatabaseParameters', function (fixture) {
 
         await DatabaseService.setDatabaseParameters()
 
+        // The drift guard ran inside the fixture, never against the host daemon.
+        expect(capture.findCommands(/\.Config\.Env/)).to.have.lengthOf(2)
+
         const createUserCmds = capture.findCommands(/CREATE USER/)
         const userNames = createUserCmds.map(c => c.command)
 

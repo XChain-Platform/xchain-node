@@ -86,45 +86,71 @@ function pendingManualMigrations(dir, applied) {
     }).map(([f]) => f)
 }
 
-/** Verify the running container's migrate CLI through its read-only status contract. */
-async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
+/**
+ * Read the running container's migrate CLI through its read-only status contract.
+ * `rows` is the file list THAT build carries, kept only when the response passed
+ * every check, because the refusal's remedy runs on that build and not on the
+ * source being deployed.
+ */
+async function readRunningBuildMigrationStatus(container, deps = {}) {
+    const refused = { supportsPerFile: false, rows: null }
     try {
         const cat = deps.getDockerContainerFileCat || require('../docker_service').getDockerContainerFileCat
         const found = await readMigrateCli(cat, container)
-        if (!found) return null
-        if (!/(['"])--status\1/.test(found.source)) return false
+        if (!found) return { supportsPerFile: null, rows: null }
+        if (!/(['"])--status\1/.test(found.source)) return refused
 
         const execContainer = deps.execContainer || require('../docker_service').execContainer
         let raw
         try {
             raw = await execContainer(container, ['node', found.cliPath, '--status', '--json'])
         } catch {
-            return false
+            return refused
         }
 
         let status
         try {
             status = JSON.parse(String(raw))
         } catch {
-            return false
+            return refused
         }
-        if (!status || Array.isArray(status) || typeof status !== 'object') return false
-        if (typeof status.database !== 'string' || status.database.length === 0) return false
-        if (!Array.isArray(status.migrations)) return false
+        if (!status || Array.isArray(status) || typeof status !== 'object') return refused
+        if (typeof status.database !== 'string' || status.database.length === 0) return refused
+        if (!Array.isArray(status.migrations)) return refused
         for (const row of status.migrations) {
-            if (!row || Array.isArray(row) || typeof row !== 'object') return false
-            if (typeof row.file !== 'string' || row.file.length === 0) return false
-            if (typeof row.applied !== 'boolean') return false
+            if (!row || Array.isArray(row) || typeof row !== 'object') return refused
+            if (typeof row.file !== 'string' || row.file.length === 0) return refused
+            if (typeof row.applied !== 'boolean') return refused
         }
 
         const counts = ['total', 'applied', 'pending']
-        if (!counts.every(k => Number.isInteger(status[k]) && status[k] >= 0)) return false
+        if (!counts.every(k => Number.isInteger(status[k]) && status[k] >= 0)) return refused
         const applied = status.migrations.filter(row => row.applied).length
-        return status.total === status.migrations.length &&
+        const consistent = status.total === status.migrations.length &&
             status.applied === applied && status.pending === status.total - applied
+        if (!consistent) return refused
+        return {
+            supportsPerFile: true,
+            rows: status.migrations.map(row => ({ file: row.file, applied: row.applied, mode: row.mode }))
+        }
     } catch {
-        return null
+        return { supportsPerFile: null, rows: null }
     }
+}
+
+/** Verify the running container's migrate CLI through its read-only status contract. */
+async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
+    return (await readRunningBuildMigrationStatus(container, deps)).supportsPerFile
+}
+
+/**
+ * The gated files an unscoped migrate run inside the running build would apply:
+ * its own pending rows (a row with no mode is the runners' manual default),
+ * minus any whose end state the database already embodies.
+ */
+function runningBuildPendingManual(rows, applied) {
+    return rows.filter(row => !row.applied && (row.mode == null || row.mode === 'manual') &&
+        !(applied && applied.has(row.file))).map(row => row.file)
 }
 
 /**
@@ -239,24 +265,44 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
     // REPLACED. Only name the scoped command when that build was confirmed to
     // honour --file; otherwise the command would quietly widen to every pending
     // manual migration, so state that instead of printing it.
+    // With the running build's own file list in hand, a file it does not carry
+    // (one first shipping in this release) can neither be named to --file there
+    // nor be applied by an unscoped run there.
+    const carriedSet  = Array.isArray(remedy.runningFiles) ? new Set(remedy.runningFiles) : null
+    const carried     = carriedSet ? missing.filter(f => carriedSet.has(f)) : missing
+    const notCarried  = carriedSet ? missing.filter(f => !carriedSet.has(f)) : []
+    const notCarriedNote = notCarried.length
+        ? '\n  The running build in ' + container + ' does not carry ' + notCarried.join(', ') +
+          ' (it first ships in the release being deployed), so no migrate run inside that container can apply ' +
+          (notCarried.length > 1 ? 'them' : 'it') + '. Apply the statements in ' +
+          (notCarried.length > 1 ? 'those files' : 'that file') + ' from the release being deployed by hand, ' +
+          'with the writer quiesced, then re-run the update; if this check still refuses because no ledger ' +
+          'row records the hand-applied file, set ' + SKIP_ENV + '=1 for that one deploy.'
+        : ''
+
     let instructions
     if (remedy.supportsPerFile === true) {
-        instructions = 'apply ' + (plural ? 'them' : 'it') +
-            ' deliberately, with the writer quiesced, then re-run the update:\n' +
-            missing.map(f => '    docker exec -i ' + container + ' node ' + migrateCliPathFor(container) + ' --file ' + f).join('\n')
+        instructions = (carried.length
+            ? 'apply ' + (carried.length > 1 ? 'them' : 'it') +
+              ' deliberately, with the writer quiesced, then re-run the update:\n' +
+              carried.map(f => '    docker exec -i ' + container + ' node ' + migrateCliPathFor(container) + ' --file ' + f).join('\n')
+            : 'none of ' + (plural ? 'them' : 'it') + ' can be applied by the migrate CLI inside ' + container + '.') +
+            notCarriedNote
     } else {
         const wouldApply = (remedy.pendingManual && remedy.pendingManual.length)
             ? remedy.pendingManual
-            : missing
+            : carried
+        const source = carriedSet ? '' : ' (listed from the source being deployed; that build may differ)'
         instructions = 'DO NOT run `node ' + migrateCliPathFor(container) + '` inside ' + container + '. ' +
             (remedy.supportsPerFile === false
                 ? 'That container did not return a valid --status --json response, so --file support is not verified'
                 : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +
             ' and apply EVERY pending manual migration on ' + dbName + ', which is ' +
-            wouldApply.length + ' file(s):\n' +
-            wouldApply.map(f => '    ' + f + (missing.includes(f) ? '  (the one you need)' : '')).join('\n') + '\n' +
+            wouldApply.length + ' file(s)' + source + ':\n' +
+            wouldApply.map(f => '    ' + f + (carried.includes(f) ? '  (the one you need)' : '')).join('\n') + '\n' +
             '  Apply ' + (plural ? 'the needed files' : 'the needed file') + ' with a build that supports ' +
-            '--file, or apply the statement by hand with the writer quiesced, then re-run the update.'
+            '--file, or apply the statement by hand with the writer quiesced, then re-run the update.' +
+            notCarriedNote
     }
 
     return 'update refused: the ' + module + ' source about to be deployed asserts migration' +
@@ -275,6 +321,8 @@ module.exports = {
     migrationMode,
     pendingManualMigrations,
     runningBuildSupportsPerFileMigrations,
+    readRunningBuildMigrationStatus,
+    runningBuildPendingManual,
     listDeployPreconditionMigrations,
     readAppliedMigrations,
     refusalMessage

@@ -55,14 +55,14 @@ async function provisionDatabaseAccount(nextCoin, nextNetwork, dbContainerId) {
                     indexer: driftCfg["INDEXER_DB_PASS"]
                 })
 
-                let containerId = await db.getModuleContainer(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork)
+                let containerId = await db.getModuleContainerStrict(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork)
                 if (containerId) {
                     const cfg = await getDefaultConfig(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork)
                     await addUserPasswordToDatabase(XChainService.XCHAIN_DECODER, nextCoin, nextNetwork, cfg["DECODER_DB_NAME"], cfg["DECODER_DB_USER"], cfg["DECODER_DB_PASS"])
                     accountsProvisioned++
                 }
 
-                containerId = await db.getModuleContainer(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork)
+                containerId = await db.getModuleContainerStrict(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork)
                 if (containerId) {
                     const cfg = await getDefaultConfig(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork)
                     await addUserPasswordToDatabase(XChainService.XCHAIN_INDEXER, nextCoin, nextNetwork, cfg["INDEXER_DB_NAME"], cfg["INDEXER_DB_USER"], cfg["INDEXER_DB_PASS"])

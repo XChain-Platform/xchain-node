@@ -136,8 +136,8 @@ function sumAmounts(rows) {
 // The explorer's indexed tip for the stake chain; throws when it is unreadable.
 async function readTip(sdk, coins) {
     const status = await sdk.explorer.getStatus()
-    const tip = Number(status && status.last_block && status.last_block[coins.stake])
-    if (!Number.isInteger(tip) || tip < 0) throw new Error('the explorer reported no last block for ' + coins.stake)
+    const tip = Number(status && status.last_block && status.last_block[coins.stakeCoin])
+    if (!Number.isInteger(tip) || tip < 0) throw new Error('the explorer reported no last block for ' + coins.stakeCoin)
     return tip
 }
 

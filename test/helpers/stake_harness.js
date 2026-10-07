@@ -42,9 +42,9 @@ function makeExplorer(chain) {
             ? sinon.stub().rejects(new Error(chain.delegationsThrow))
             : sinon.stub().resolves(chain.delegationsBody || {
                 total: (chain.delegations || []).length, data: chain.delegations || [] }),
-        // The explorer's indexed tip, under every stake chain.
+        // The explorer's indexed tip, keyed by route code (BTC/TBTC/RBTC) as the real /status is.
         getStatus: sinon.stub().resolves({ last_block: {
-            'bitcoin-mainnet': chain.tip ?? 200000, 'bitcoin-testnet': chain.tip ?? 200000, 'bitcoin-regtest': chain.tip ?? 200000 } })
+            BTC: chain.tip ?? 200000, TBTC: chain.tip ?? 200000, RBTC: chain.tip ?? 200000 } })
     }
 }
 

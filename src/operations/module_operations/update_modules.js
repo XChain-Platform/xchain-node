@@ -1,5 +1,7 @@
 'use strict'
 
+const { resolveNodeVersionPin, normalizeNodeVersion } = require('../../services/node_service/node_version_pin.js')
+
 let DB_MODULE_NAME, HUB_MODULE_NAME, NODE_MODULE_NAME, SEP, SYNC_MODULE_NAME, assertHubNotBehind, assertRequiredMigrationsApplied, config, db, getModuleBranch, installModule, installTargetService, releaseManifestService, stateModule, validatorService, versionService, withInstallTarget
 
 function configure(dependencies) {
@@ -249,13 +251,15 @@ async function coinNodeIsCurrent(coin, network) {
         const { checkRemoteNodeVersion } = versionService
         const running = getLastStatus()?.[coin]?.[network]?.[NODE_MODULE_NAME]?.["container_version"]
         if (!running) return false
+        // An env pin names the daemon the update would install, so it wins over the latest release.
+        const envPin = resolveNodeVersionPin(coin)
+        if (envPin) return normalizeNodeVersion(running) === normalizeNodeVersion(envPin)
         if (!(NODE_MODULE_NAME + SEP + coin in getRemoteModuleVersions())) {
             await checkRemoteNodeVersion(coin)
         }
         const pinned = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]?.["tag_name"]
         if (!pinned) return false
-        const strip = v => String(v).trim().replace(/^v/, '')
-        return strip(running) === strip(pinned)
+        return normalizeNodeVersion(running) === normalizeNodeVersion(pinned)
     } catch {
         return false
     }

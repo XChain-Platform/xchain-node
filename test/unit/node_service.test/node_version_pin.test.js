@@ -41,6 +41,12 @@ describe("NodeService: node version pin (XCHAIN_NODE_NODE_VERSION_<COIN>)", func
         expect(() => ns.assertNodeVersionPin('litecoin', 'regtest', 'v0.21.4', 'v0.21.4')).to.not.throw()
         expect(() => ns.assertNodeVersionPin('litecoin', 'regtest', null, 'v0.21.4')).to.not.throw()
     })
+
+    it('assertNodeVersionPin accepts the bare version file the bitcoin download writes', function () {
+        const ns = loadNodeService(makeNodeServiceStubs())
+        expect(() => ns.assertNodeVersionPin('bitcoin', 'mainnet', '28.1\n', 'v28.1')).to.not.throw()
+        expect(() => ns.assertNodeVersionPin('bitcoin', 'mainnet', '28.1', 'v27.0')).to.throw(/pins v27\.0/)
+    })
 })
 
 describe("NodeService: node version pin (XCHAIN_NODE_NODE_VERSION_<COIN>)", function () {
