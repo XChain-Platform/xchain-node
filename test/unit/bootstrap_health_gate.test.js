@@ -26,6 +26,12 @@ const {
     refusal,
     sinon
 } = require('./bootstrap_health_gate.test/support/bootstrap_health_gate')
+
+// Build a runner for a healthy indexer whose paired decoder database answers as `decoder` says.
+function pairedIndexerRunner(decoder) {
+    return makeRunner({ status: { status: 'healthy', lag: 0, decoderReorgHalted: false }, decoder })
+}
+
 describe('BootstrapHealthGate', function () {
 
     installEnvironmentHooks()
@@ -58,6 +64,8 @@ describe('BootstrapHealthGate', function () {
             expect(err.message).to.match(/full resync from a known-good snapshot/)
             // The message must name the artifact hazard, not just the symptom.
             expect(err.message).to.match(/publishing an unverified one is worse than publishing nothing/)
+            // The closing paragraph must not contradict the line's own clear-reorg-halt recovery.
+            expect(err.message).to.not.match(/durable halt marker that means a full resync/)
         })
 
         it('REFUSES a database carrying an uncleared xchain-sync divergence halt', async function () {
@@ -213,21 +221,19 @@ describe('BootstrapHealthGate', function () {
         // yes, and the gate's one image-independent backstop had no reach at all here.
         it('REFUSES an indexer whose PAIRED DECODER database carries a REORG_HALT row', async function () {
             const gate = loadGate()
-            const runner = makeRunner({
-                status:  { status: 'healthy', lag: 0, decoderReorgHalted: false },
-                decoder: { reorgHaltRows: '1' }
-            })
+            const runner = pairedIndexerRunner({ reorgHaltRows: '1' })
             const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
             expect(err.message).to.match(new RegExp(`paired decoder database ${DECODER_DB} carries a durable REORG_HALT`))
             expect(err.message).to.match(/frozen behind a decoder that aborted mid-rollback/)
+            // The paired-decoder line names the in-place clear first and the resync as the fallback.
+            const paired = err.reasons.find(r => /paired decoder database .* carries a durable REORG_HALT/.test(r))
+            expect(paired).to.match(/xchain-node clear-reorg-halt <chain> <network>/)
+            expect(paired).to.match(/full resync of the decoder and this indexer/)
         })
 
         it('REFUSES an indexer whose paired decoder database carries an uncleared sync halt', async function () {
             const gate = loadGate()
-            const runner = makeRunner({
-                status:  { status: 'healthy', lag: 0, decoderReorgHalted: false },
-                decoder: { syncHaltRows: '2' }
-            })
+            const runner = pairedIndexerRunner({ syncHaltRows: '2' })
             const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
             expect(err.message).to.match(/paired decoder database[\s\S]*uncleared[\s\S]*sync_halt/)
         })
@@ -245,10 +251,7 @@ describe('BootstrapHealthGate', function () {
         // must not arrive as "the decoder has no halt marker".
         it('REFUSES an indexer when the paired decoder database is absent', async function () {
             const gate = loadGate()
-            const runner = makeRunner({
-                status:  { status: 'healthy', lag: 0, decoderReorgHalted: false },
-                decoder: { tables: '0\t0' }
-            })
+            const runner = pairedIndexerRunner({ tables: '0\t0' })
             const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
             expect(err.message).to.match(/paired decoder database[\s\S]*could not be probed/)
             expect(err.message).to.match(/reports no events table/)
@@ -256,10 +259,7 @@ describe('BootstrapHealthGate', function () {
 
         it('REFUSES an indexer when the paired decoder probe throws', async function () {
             const gate = loadGate()
-            const runner = makeRunner({
-                status:  { status: 'healthy', lag: 0, decoderReorgHalted: false },
-                decoder: { throws: new Error('access denied') }
-            })
+            const runner = pairedIndexerRunner({ throws: new Error('access denied') })
             const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
             expect(err.message).to.match(/paired decoder database[\s\S]*could not be probed[\s\S]*access denied/)
         })

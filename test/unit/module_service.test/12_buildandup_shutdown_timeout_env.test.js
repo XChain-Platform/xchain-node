@@ -68,6 +68,11 @@ moduleSuite('buildAndUp() SHUTDOWN_TIMEOUT_MS', function () {
         expect(run.opts.env.SHUTDOWN_TIMEOUT_MS).to.equal('45000')
     })
 
+    it('replaces an explicit SHUTDOWN_TIMEOUT_MS the service would ignore with the derived drain', async function () {
+        const run = await createWithConfig('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: 'slow' })
+        expect(run.opts.env.SHUTDOWN_TIMEOUT_MS).to.equal('100000')
+    })
+
     it('gives a one-shot execution container no drain, as it gets no stop budget', async function () {
         const run = await createWithConfig('xchain-decoder', null, true)
         expect(run.args).to.not.include('--stop-timeout')

@@ -13,6 +13,7 @@
  ********************************************************************/
 
 const fs = require('fs')
+const path = require('path')
 
 const { EXTERNAL_DB } = require('../../config')
 const { tableCountSql, tableExistsSql } = require('../../db/information_schema')
@@ -66,6 +67,63 @@ function migrationMode(raw) {
     }
     const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im)
     return m ? m[1].toLowerCase() : 'manual'
+}
+
+const LEDGER_RENAMES_FILE = 'src/db/database/migration_registry.js'
+const LEDGER_RENAMES_OPEN = /^\s*const MIGRATION_LEDGER_RENAMES = \{\s*$/
+const LEDGER_RENAMES_PAIR = /^\s*'([A-Za-z0-9._-]+\.sql)'\s*:\s*'([A-Za-z0-9._-]+\.sql)'\s*,?\s*$/
+
+/**
+ * The ledger rename map (old filename -> new filename) the target tree's runner will
+ * apply at boot, read from that tree so a rename shipping in this release counts
+ * without an xchain-node release.
+ *
+ * All or nothing: every line inside the literal must be blank, a full-line comment,
+ * or one quoted 'old.sql': 'new.sql' pair, else the result is 'unparseable' with an
+ * empty map, so a misread can never re-key more than the runner itself would.
+ * A tree with no registry file (the decoder) is 'absent', also with an empty map.
+ *
+ * Twin of MIGRATION_LEDGER_RENAMES in xchain-indexer src/db/database/migration_registry.js,
+ * read as text for the reason given above; keep that literal a flat string-to-string object.
+ */
+function readLedgerRenames(root) {
+    const file = path.join(root, LEDGER_RENAMES_FILE)
+    const none = (state, reason) => ({ state, renames: {}, reason })
+    let lines
+    try {
+        lines = fs.readFileSync(file, 'utf8').split('\n')
+    } catch (err) {
+        if (err && err.code === 'ENOENT') return none('absent', file + ' does not exist')
+        return none('unparseable', 'could not read ' + file + ': ' + (err && err.message))
+    }
+    const opens = lines.map((line, i) => LEDGER_RENAMES_OPEN.test(line) ? i : -1).filter(i => i >= 0)
+    if (opens.length !== 1) return none('unparseable', 'expected one MIGRATION_LEDGER_RENAMES literal, found ' + opens.length)
+    const renames = {}
+    for (let i = opens[0] + 1; i < lines.length; i++) {
+        const trimmed = lines[i].trim()
+        if (trimmed === '};') return { state: 'parsed', renames, reason: null }
+        if (trimmed === '' || trimmed.startsWith('//')) continue
+        const m = lines[i].match(LEDGER_RENAMES_PAIR)
+        if (!m) return none('unparseable', 'line ' + (i + 1) + ' is not a quoted filename pair')
+        if (m[1] === m[2] || Object.prototype.hasOwnProperty.call(renames, m[1])) {
+            return none('unparseable', 'line ' + (i + 1) + ' repeats or self-maps ' + m[1])
+        }
+        renames[m[1]] = m[2]
+    }
+    return none('unparseable', 'MIGRATION_LEDGER_RENAMES literal is never closed')
+}
+
+/**
+ * A new applied set with each recorded old name re-keyed to its new name, in memory
+ * only, planned against the input set exactly as Database.planLedgerRenames does:
+ * a pair moves only when the old name is recorded and the new one is not.
+ * Twin of planLedgerRenames in xchain-indexer src/db/database/migration_registry.js; keep the rule in step.
+ */
+function rekeyApplied(applied, renames) {
+    const ops = Object.entries(renames || {}).filter(([from, to]) => applied.has(from) && !applied.has(to))
+    const out = new Set(applied)
+    for (const [from, to] of ops) { out.delete(from); out.add(to) }
+    return out
 }
 
 /**
@@ -325,5 +383,7 @@ module.exports = {
     runningBuildPendingManual,
     listDeployPreconditionMigrations,
     readAppliedMigrations,
+    readLedgerRenames,
+    rekeyApplied,
     refusalMessage
 }
