@@ -19,11 +19,13 @@
 let stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv
 let HUB_MODULE_NAME, getDockerContainerImageName
 let warnedHubConfigKeys = new Set()
+let hubDefaults = null
 
 function configure(dependencies) {
     ({ stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv,
         HUB_MODULE_NAME, getDockerContainerImageName } = dependencies)
     warnedHubConfigKeys = new Set()
+    hubDefaults = null
 }
 
 // A command composes the shared hub's config many times, so each deploy-time warning
@@ -63,9 +65,14 @@ function getCommandCoinsAndNetworks() {
 // runs on. Ambiguous (several networks, or none named) leaves it unset, because one
 // hub declaring the wrong network mis-gates the ingest rules it is being set for.
 async function resolveDeploymentHubNetwork() {
-    const registered = new Set((await getRegisteredCoinStacks()).map(r => r.network))
+    const registeredStacks = await getRegisteredCoinStacks()
+    const registered = new Set(registeredStacks.map(r => r.network))
     const networks = registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
-    if (networks.size === 1) return [...networks][0]
+    if (networks.size === 1) {
+        const network = [...networks][0]
+        await composeColocatedIndexerUrls(hubDefaults, network, registeredStacks)
+        return network
+    }
     if (networks.size > 1) {
         warnHubConfigOnce("HUB_NETWORK_AMBIGUOUS",
             "WARNING: HUB_NETWORK is not set and this deployment runs stacks on " +
@@ -81,6 +88,7 @@ async function resolveDeploymentHubNetwork() {
 // the composed URL names the container that install creates.
 async function hasBitcoinIndexer(network) {
     const registered = await getRegisteredCoinStacks()
+    await composeColocatedIndexerUrls(hubDefaults, network, registered)
     if (registered.some(r => r.coin === Coin.BITCOIN && r.network === network
         && r.module === XChainService.XCHAIN_INDEXER)) return true
     const command = getCommandCoinsAndNetworks()
@@ -90,9 +98,9 @@ async function hasBitcoinIndexer(network) {
 // The hub's configs-table fallback names a host alias the container cannot reach, so a
 // co-located LTC or DOGE indexer is addressed by container name. Host env still wins.
 const INDEXER_URL_VARS = { litecoin: "LTC_INDEXER_URL", dogecoin: "DOGE_INDEXER_URL" }
-async function composeColocatedIndexerUrls(defaultValues, network) {
-    if (!network) return
-    const registered = await getRegisteredCoinStacks()
+async function composeColocatedIndexerUrls(defaultValues, network, registeredStacks = null) {
+    if (!defaultValues || !network) return
+    const registered = registeredStacks || await getRegisteredCoinStacks()
     const command = getCommandCoinsAndNetworks()
     for (const [coin, name] of Object.entries(INDEXER_URL_VARS)) {
         const here = registered.some(r => r.coin === coin && r.network === network && r.module === XChainService.XCHAIN_INDEXER)
@@ -256,6 +264,7 @@ async function composeColocatedIndexerUrls(defaultValues, network) {
 // everything else resolves to a plain process.env read.
 function configureHubBeforeKey(defaultValues, module) {
     if (module === HUB_MODULE_NAME) {
+        hubDefaults = defaultValues
         defaultValues["TELEMETRY_ENABLED"]        = config.TELEMETRY_ENABLED
         defaultValues["TELEMETRY_RETENTION_DAYS"] = config.TELEMETRY_RETENTION_DAYS
         defaultValues["TELEMETRY_IP_SALT"]        = config.TELEMETRY_IP_SALT
