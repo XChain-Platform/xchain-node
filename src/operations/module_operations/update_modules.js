@@ -34,7 +34,7 @@ async function updateModules(servicesList, ref = null, opts = {}) {
     const { recordInstallTarget, resolveUpdateTarget } = installTargetService
 
     const list = opts.all ? includeSharedServicesForUpdate(servicesList) : servicesList
-    const runOpts = { skipCurrentNode: !!opts.all, quietNotInstalled: !!opts.all }
+    const runOpts = { skipCurrentNode: !!opts.all, quietNotInstalled: !!opts.all, continueOnRefusal: !!opts.all }
 
     assertNodeDataDirSetForUpdate(list)
 
@@ -166,10 +166,10 @@ async function recordCredentialPartialOutcome(outcome, err, module, coin, networ
     outcome.failed.push({ module, coin: driftScope.coin, network: driftScope.network, reason })
 }
 
-async function updateModulesOnBranch(servicesList, branch = null, { skipCurrentNode = false, quietNotInstalled = false } = {}) {
+async function updateModulesOnBranch(servicesList, branch = null, { skipCurrentNode = false, quietNotInstalled = false, continueOnRefusal = false } = {}) {
     const outcome = { updated: [], skipped: [], failed: [] }
     try {
-        await updateModulesInto(outcome, servicesList, branch, { skipCurrentNode, quietNotInstalled })
+        await updateModulesInto(outcome, servicesList, branch, { skipCurrentNode, quietNotInstalled, continueOnRefusal })
     } finally {
         // Under `all`, a service that is not installed is the ordinary case (a validator has a hub and nothing else), so the per-service warnings collapse into one line; the outcome still lists every one of them.
         const absent = outcome.skipped.filter(s => s.reason === 'not-installed')
@@ -180,7 +180,7 @@ async function updateModulesOnBranch(servicesList, branch = null, { skipCurrentN
     return outcome
 }
 
-async function updateModulesInto(outcome, servicesList, branch, { skipCurrentNode, quietNotInstalled }) {
+async function updateModulesInto(outcome, servicesList, branch, { skipCurrentNode, quietNotInstalled, continueOnRefusal }) {
     for (const nextCoin in servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
@@ -224,8 +224,7 @@ async function updateModulesInto(outcome, servicesList, branch, { skipCurrentNod
                         // remoteUpdate=true so installModule actually rebuilds the container. Without it, the `if (!containerNodeVersion || remoteUpdate)` guard short-circuits for any already-installed service and `update` becomes a silent no-op.  Version-skew guard: a hub-dependent service whose new source declares `xchainRequiresHub` in its package.json is REFUSED when the installed hub is behind that version, before anything is torn down. Under a pinned update the guard must read the PINNED source's package.json, not the branch tip: it clones into a tmp tree to find `xchainRequiresHub`, and reading that from a different ref than the one about to be installed is how a skew guard blesses a version it never saw.
                         const { resolveComponentRef } = releaseManifestService
                         const pin = resolveComponentRef(nextModule, moduleBranch)
-                        await assertHubNotBehind(nextModule, pin.ref)
-                        await assertRequiredMigrationsApplied(nextModule, nextCoin, nextNetwork, pin.ref)
+                        if (!await passesUpdateGuards(outcome, continueOnRefusal, nextModule, nextCoin, nextNetwork, pin.ref)) continue
                         // moduleBranch MUST be threaded through: installModule re-clones the module on the remoteUpdate path (cloneGit with this `branch`), so a null branch here re-clones the default branch and clobbers the branch the operator asked for (the cause of `update <svc> <chain> <net> <branch>` silently deploying master). installModule does the clone, so no separate cloneGit is needed here.
                         const rebuilt = await installModule(nextModule, nextCoin, nextNetwork, true, moduleContainerId, false, moduleBranch)
                         recordInstallOutcome(outcome, rebuilt, nextModule, nextCoin, nextNetwork)
@@ -237,6 +236,26 @@ async function updateModulesInto(outcome, servicesList, branch, { skipCurrentNod
         }
     }
     return outcome
+}
+
+/**
+ * Run the pre-update guards for one service. A refusal stops a targeted
+ * update. Under `all` it is recorded against that service and the run moves
+ * on, so one refused service (the hub first among them) does not leave every
+ * later service unmoved.
+ */
+async function passesUpdateGuards(outcome, continueOnRefusal, module, coin, network, ref) {
+    try {
+        await assertHubNotBehind(module, ref)
+        await assertRequiredMigrationsApplied(module, coin, network, ref)
+        return true
+    } catch (err) {
+        if (!continueOnRefusal) throw err
+        const reason = err && err.message ? err.message : String(err)
+        console.warn(`update: ${module} (${coin} ${network}) was refused and left unchanged: ${reason}`)
+        outcome.failed.push({ module, coin, network, reason })
+        return false
+    }
 }
 
 /**
