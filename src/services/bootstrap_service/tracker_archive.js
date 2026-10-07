@@ -38,7 +38,7 @@ const { redactSecrets } = require('../../utils/helpers')
 let { maybeSignBootstrap } = require('./archive_signing')
 let { startProgress, buildDateTimeString, getWorkDir, assertBootstrapCapacity, ensureDir, ensureDirWritable } = require('./workspace')
 const trackerHeight = require('./tracker_height')
-const { readTrackerCommittedHeight, readTrackerHeightAfterRestart, chooseArchiveHeight } = trackerHeight
+const { readTrackerCommittedHeight, readTrackerHeightAfterRestart, chooseArchiveHeight, refusePreStopOnlyHeight } = trackerHeight
 const { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 
@@ -217,8 +217,8 @@ async function prepareTrackerArchive(coin, network) {
     if (!context.containerId) throw new Error(`utxo-tracker container not found for ${coin}/${network}`)
 
     // A floor for the archive height, read while the tracker still runs: blocks it commits before the stop completes are in the archive
-    // but not in this reading, so the recorded height is taken again after the restart (chooseArchiveHeight). Best-effort: an archive
-    // without a height still restores, it just cannot be compared with the coin node at restore time (BootstrapNodeTipGuard).
+    // but not in this reading, so the recorded height is taken again after the restart, and a floor with no post-restart reading
+    // refuses the publish (chooseArchiveHeight). With neither reading the archive carries no height (BootstrapNodeTipGuard: unknown).
     context.preStopHeight = await readTrackerCommittedHeight(coin, network, context.containerId)
     context.postRestartHeight = null
 
@@ -317,6 +317,8 @@ async function restartTrackerAndReadHeight(context, endMaintenanceWindow) {
     context.containerRestored = true
     await endMaintenanceWindow()
     context.postRestartHeight = await readTrackerHeightAfterRestart(context.coin, context.network, context.containerId)
+    // Refuse here, before the compress on the snapshot path: a pre-stop reading alone may understate the archived data.
+    refusePreStopOnlyHeight(context)
 }
 
 async function compressTrackerArchive(context, snapshotTaken) {
