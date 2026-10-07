@@ -170,6 +170,12 @@
     "test/unit/module_operations.test/20_update_partial_outcome.test.js": "test/unit/module_operations.test/update/20_update_partial_outcome.test.js"
   },
   "titles": {
+    "test/unit/bootstrap_service.test/tracker_archive_height_after_restart.test.js": {
+      "BootstrapService tracker archive height helpers chooseArchiveHeight never records below either reading and keeps the floor when the post-read fails": "BootstrapService tracker archive height helpers chooseArchiveHeight never records below either reading and refuses when the post-read fails"
+    },
+    "test/unit/services/bootstrap_service/tracker_height.test.js": {
+      "tracker_height keeps the tracker height when the archive height is missing": "tracker_height refuses when only the tracker height before the stop was read"
+    },
     "test/unit/docker_mariadb.test.js": {
       "utils/dockerMariadb dockerMariadbArgs() builds a docker exec invocation forwarding MYSQL_PWD by name only": "utils/docker_mariadb dockerMariadbArgs() builds a docker exec invocation forwarding MYSQL_PWD by name only",
       "utils/dockerMariadb dockerMariadbArgs() inserts -i before the env forward when interactive": "utils/docker_mariadb dockerMariadbArgs() inserts -i before the env forward when interactive",

@@ -114,6 +114,38 @@ describe('BootstrapService', function () {
 describe('BootstrapService', function () {
     beforeEach(saveRequireSignedBootstrapSetting)
     afterEach(restoreRequireSignedBootstrapSetting)
+    describe('makeBootstrapUtxoTracker(): an unreadable post-restart height is never archived', function () {
+        // A pre-stop floor with no post-restart reading may understate the archived data, so the run refuses
+        // before the compress; the probe's 5 s retry delays run on fake timers.
+        it('refuses before the compress when the post-restart height cannot be read on the snapshot path', async function () {
+            const { stubs, probeLog } = trackerStubsWithProbe([100, new Error('connection refused')])
+            const spawnCalls = makeAutoSpawn(stubs)
+            const clock = sinon.useFakeTimers({ toFake: ['setTimeout'] })
+            try {
+                const bs = loadBootstrapService(stubs)
+                let err = null
+                const run = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER).then(() => null, e => { err = e })
+                for (let i = 0; i < 200 && err === null; i++) await clock.tickAsync(5000)
+                await run
+
+                expect(err, 'an unreadable post-restart height must fail the create').to.not.equal(null)
+                expect(err.message).to.match(/did not report its committed height after the restart/)
+                expect(err.message).to.include('pre-stop reading 100')
+                expect(probeLog.filter(p => p.restarted)).to.have.length(60)
+                expect(spawnCalls, 'no compress or wrap may run').to.have.length(0)
+                expect(stubs.archiveMeta.writeBootstrapMeta.called).to.equal(false)
+                expect(stubs.dockerService.startContainer.callCount).to.equal(1)
+                expect(stubs.encoderMaintenance.clearEncoderMaintenance.callCount).to.equal(1)
+            } finally {
+                clock.restore()
+            }
+        })
+    })
+})
+
+describe('BootstrapService', function () {
+    beforeEach(saveRequireSignedBootstrapSetting)
+    afterEach(restoreRequireSignedBootstrapSetting)
     describe('makeBootstrapUtxoTracker(): an unclean tracker stop is never archived', function () {
         it('stops the tracker with its 120 s service budget when the container carries no stamp', async function () {
             const { stubs } = trackerStubsWithProbe([100, 101])
@@ -157,10 +189,10 @@ describe('BootstrapService', function () {
     describe('tracker archive height helpers', function () {
         const trackerArchive = require('../../../src/services/bootstrap_service/tracker_archive')
 
-        it('chooseArchiveHeight never records below either reading and keeps the floor when the post-read fails', function () {
+        it('chooseArchiveHeight never records below either reading and refuses when the post-read fails', function () {
             loadBootstrapService(makeStubs())
             expect(trackerArchive.chooseArchiveHeight(null, null)).to.equal(null)
-            expect(trackerArchive.chooseArchiveHeight(100, null)).to.equal(100)
+            expect(() => trackerArchive.chooseArchiveHeight(100, null)).to.throw(/refusing to record the pre-stop height 100/)
             expect(trackerArchive.chooseArchiveHeight(null, 101)).to.equal(101)
             expect(trackerArchive.chooseArchiveHeight(100, 101)).to.equal(101)
             expect(trackerArchive.chooseArchiveHeight(100, 98)).to.equal(100)

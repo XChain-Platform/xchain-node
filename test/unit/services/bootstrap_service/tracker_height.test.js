@@ -51,8 +51,8 @@ describe('tracker_height', function () {
         })
     }
 
-    it('keeps the tracker height when the archive height is missing', function () {
-        expect(trackerHeight.chooseArchiveHeight(100, null)).to.equal(100)
+    it('refuses when only the tracker height before the stop was read', function () {
+        expect(() => trackerHeight.chooseArchiveHeight(100, null)).to.throw(/refusing to record the pre-stop height 100/)
     })
 
     it('uses the archive height when the tracker height is missing', function () {
