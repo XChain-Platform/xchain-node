@@ -90,12 +90,12 @@ async function containerExistsByName(name) {
     }
 }
 
-async function installNodeModule(coin, network, remoteUpdate) {
+async function installNodeModule(coin, network, remoteUpdate, overwriteContainerId = null) {
     const { getLocalNodeVersion, checkRemoteNodeVersion } = versionService
     const { getRemoteModuleVersions, getLastStatus } = stateModule
     const { buildCryptoNode, getCryptoNode } = nodeService
     const containerVersion = getLastStatus()?.[coin ?? ""]?.[network ?? ""]?.[NODE_MODULE_NAME]?.["container_version"] ?? null
-    if (containerVersion && !remoteUpdate) return false
+    if (containerVersion && !remoteUpdate && !overwriteContainerId) return false
     let localNodeVersion = null
     try {
         localNodeVersion = await getLocalNodeVersion(coin, network)
@@ -249,7 +249,7 @@ async function installServiceModule(context) {
 async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null, dockerCmdArgs = null) {
     if (coin === "") coin = null
     if (network === "") network = null
-    if (module === NODE_MODULE_NAME) return installNodeModule(coin, network, remoteUpdate)
+    if (module === NODE_MODULE_NAME) return installNodeModule(coin, network, remoteUpdate, overwriteContainerId)
     if (module === DB_MODULE_NAME) return installDatabaseModule(coin, network)
     if (module === EXPLORER_MODULE_NAME) return installExplorer(branch, remoteUpdate)
     return installServiceModule({ module, coin, network, remoteUpdate, overwriteContainerId, onlyExecution, branch, dockerCmdArgs })
