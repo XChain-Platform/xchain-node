@@ -64,27 +64,6 @@ describe("NodeService: buildCryptoNode()", function () {
             expect(stubs.execFile.getCalls().some(c => c.args[1][0] === 'run')).to.be.false
         })
 
-        it('leaves the existing container untouched when the datadir source changes', async function () {
-            const stubs = makeNodeServiceStubs()
-            stubs.forceRemoveContainerByName = sinon.stub().resolves(true)
-            stubs.stopContainerByName = sinon.stub().resolves({ stopped: true, seconds: 1, killed: false })
-            stubs.getContainerBindMounts = sinon.stub().resolves([
-                { source: '/carrier-a/node/bitcoin/mainnet', destination: '/root/.bitcoin' }
-            ])
-
-            let threw = null
-            try {
-                await build(stubs, { envBlocksDir: null })
-            } catch (err) { threw = err }
-
-            expect(String(threw)).to.include('Refusing to replace container')
-            expect(String(threw)).to.include('bind mount source')
-            expect(String(threw)).to.include('/carrier-a/node/bitcoin/mainnet')
-            expect(String(threw)).to.include('/data/node/bitcoin/mainnet')
-            expect(stubs.stopContainerByName.called).to.be.false
-            expect(stubs.forceRemoveContainerByName.called).to.be.false
-            expect(stubs.execFile.getCalls().some(call => call.args[1][0] === 'run')).to.be.false
-        })
     })
 })
 

@@ -204,15 +204,7 @@ async function resolveStorageMounts(coin, network, reject) {
     return { blocksDir, useBlocksdirFlag, blocksHostPath, txindexHostPath, volumeMounts }
 }
 
-async function prepareExistingContainer(containerPrefix, coin, network, storage, reject) {
-    const { blocksDir, blocksHostPath, txindexHostPath, volumeMounts } = storage
-    // Mount-drift guard: refuse before replacing a container when its bind
-    // destinations disappear or begin pointing at different host sources.
-    const { forceRemoveContainerByName, getContainerBindMounts, stopContainerByName } = dockerService
-    let existingMounts = []
-    try {
-        existingMounts = await getContainerBindMounts(containerPrefix)
-    } catch { /* no previous container or docker unreachable: nothing to preserve */ }
+function preserveExistingMounts(containerPrefix, existingMounts, volumeMounts, reject) {
     const newMountsByDestination = new Map(volumeMounts.map(m => [m.destination, m]))
     const droppedMounts = existingMounts.filter(m => !newMountsByDestination.has(m.destination))
     if (droppedMounts.length > 0) {
@@ -221,7 +213,7 @@ async function prepareExistingContainer(containerPrefix, coin, network, storage,
             `. This usually means XCHAIN_NODE_BLOCKS_DIR is missing from this environment ` +
             `(non-interactive shells do not source the profile). Set it, or persist it in ` +
             `config/node.local as XCHAIN_NODE_BLOCKS_DIR=<path>, then retry. The existing container was left untouched.`)
-        return null
+        return false
     }
     const changedSources = existingMounts.filter(m => {
         const replacement = newMountsByDestination.get(m.destination)
@@ -234,8 +226,21 @@ async function prepareExistingContainer(containerPrefix, coin, network, storage,
                 return `${m.source} -> ${m.destination} to ${replacement.source} -> ${m.destination}`
             }).join(', ') +
             `. Verify the configured data and blocks directories, then retry. The existing container was left untouched.`)
-        return null
+        return false
     }
+    return true
+}
+
+async function prepareExistingContainer(containerPrefix, coin, network, storage, reject) {
+    const { blocksDir, blocksHostPath, txindexHostPath, volumeMounts } = storage
+    // Mount-drift guard: refuse before replacing a container when its bind
+    // destinations disappear or begin pointing at different host sources.
+    const { forceRemoveContainerByName, getContainerBindMounts, stopContainerByName } = dockerService
+    let existingMounts = []
+    try {
+        existingMounts = await getContainerBindMounts(containerPrefix)
+    } catch { /* no previous container or docker unreachable: nothing to preserve */ }
+    if (!preserveExistingMounts(containerPrefix, existingMounts, volumeMounts, reject)) return null
 
     // Stop the running daemon cleanly BEFORE the force-remove below:
     // `docker rm -f` is SIGKILL, and a killed daemon restarts at its last
