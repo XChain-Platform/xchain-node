@@ -67,6 +67,8 @@ const {
     runningBuildPendingManual,
     listDeployPreconditionMigrations,
     readAppliedMigrations,
+    readLedgerRenames,
+    rekeyApplied,
     refusalMessage
 } = require('./migration_precondition_service/migration_scan')
 
@@ -107,6 +109,23 @@ function assertMigrationStateReadable(result, module, dbName, required) {
         `database is up and that this host can reach it, then re-run; set ${SKIP_ENV}=1 to override once ` +
         `you know the schema is current.`
     )
+}
+
+// Read the target tree's ledger rename map; an unparseable map re-keys nothing,
+// which is the guard's behaviour without one, so it can never loosen the check.
+function readTargetLedgerRenames(module, deps) {
+    const read = deps.readLedgerRenames || readLedgerRenames
+    let res
+    try {
+        res = read(getModuleTmpDir(module))
+    } catch (err) {
+        res = { state: 'unparseable', renames: {}, reason: (err && err.message) || String(err) }
+    }
+    if (res.state === 'unparseable') {
+        logger.warn(`Migration precondition guard: ${module}'s ledger rename map was not used (${res.reason}); ` +
+            'comparing raw ledger names.')
+    }
+    return res.state === 'parsed' ? res.renames : {}
 }
 
 // The refusal's remedy runs on the build being replaced, so that build's own file
@@ -181,12 +200,15 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
     if (result.state === 'empty-database') return emptyDatabaseResult(module, dbName, required)
     assertMigrationStateReadable(result, module, dbName, required)
 
-    const missing = required.filter(f => !result.applied.has(f))
+    // See the ledger the way the target's runner will after its boot re-key, so a
+    // renamed file recorded under its old name is not refused as missing.
+    const applied = rekeyApplied(result.applied, readTargetLedgerRenames(module, deps))
+    const missing = required.filter(f => !applied.has(f))
     if (missing.length) {
         // Only reached on the refusal path, so the probe costs a healthy deploy
         // nothing and cannot introduce a new way for one to fail: both the probe
         // and the pending-scan degrade to the cautious branch of the message.
-        const remedy = await readRefusalRemedy(module, coin, network, result.applied, deps)
+        const remedy = await readRefusalRemedy(module, coin, network, applied, deps)
         throw new Error(refusalMessage(module, coin, network, dbName, missing, remedy))
     }
 
