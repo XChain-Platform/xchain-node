@@ -110,38 +110,30 @@ async function composeColocatedIndexerUrls(defaultValues, network, registeredSta
     }
 }
 
-// Usage-telemetry env is only meaningful to the hub. TELEMETRY_IP_SALT and the
-// operators-endpoint admin key come from host env so the secrets stay out of source and
-// config files; without the salt ip_hash stays null, without the key the endpoint is 401.
+// Usage-telemetry env is only meaningful to the hub. The IP salt and operators-endpoint
+// admin key come from host env, keeping secrets out of config files; unset, ip_hash stays
+// null and the endpoint is 401.
 // BTC indexer JSON-RPC URL for the price oracle's block-height anchor, from host env
 // for a hub not co-located with one (the master hub box). Left empty, it is composed
 // from the co-located BTC indexer further down, else the hub uses its configs table.
-// State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a
-// shared service (no per coin/network config file), so like the telemetry
-// salt and BTC_INDEXER_API_URL above, the host env is the injection point.
+// State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a shared
+// service with no per coin/network config file, so host env is the injection point.
 // Per-coin <COIN>_INDEXER_URLs feed getblockhashes (checkpoint state reads);
 // DOGE_* configures the on-chain ANCHOR/price publisher signer pipeline;
 // XDEX_* are the shared single-validator/regtest seams. Only set values are
 // injected, so unset host env leaves the hub's own defaults untouched.
 // HUB_API_KEY gates the hub's consensus-affecting write methods. From host env (.env) so
 // it survives `update`; unset leaves the hub keyless.
-// ANCHOR_CHUNK_RETRY_MS must outlast the utxo-tracker's mempool poll
-// (60s on mainnet) or back-to-back same-wallet anchor broadcasts
-// exhaust their retries on a stale UTXO view (txn-mempool-conflict).
-// Anchor every Nth checkpoint_seq on-chain (off-multiples stay in the
-// free off-chain mirror); decouples DOGE spend from checkpoint cadence.
-// Per-coin confirmation depth the hub's cross-chain engines wait for
-// before proposing a source leg (coins/index.js resolveConfirmations).
-// A regtest venue pins these to 1 so a bridge lock finalizes on the
-// next block instead of six BTC blocks nothing is mining (the nightly
-// two-stack legs sat on "not proposing BTC:3 (below depth 6)" until
-// the 120 s credit wait gave up). Inert on mainnet and testnet: the
-// hub clamps a value below the per-coin default UP to that default
-// off regtest, so this can only raise the depth on a real network.
-// Reverse-proxy trust for the hub's express API (rate-limiter IP
-// keying). Default 'loopback' suits the Apache-on-same-host prod
-// topology; containerized hubs see the docker bridge as the peer,
-// so an operator fronting the container with a proxy sets this.
+// ANCHOR_CHUNK_RETRY_MS must outlast the utxo-tracker mempool poll (60s on mainnet) or
+// back-to-back same-wallet anchor broadcasts exhaust their retries on a stale UTXO view.
+// Anchor every Nth checkpoint_seq on-chain (off-multiples stay in the free off-chain
+// mirror); decouples DOGE spend from checkpoint cadence.
+// Per-coin confirmation depth the hub waits for before proposing a source leg
+// (coins/index.js resolveConfirmations). A regtest venue pins these to 1 so a bridge
+// lock finalizes on the next block; off regtest the hub clamps a lower value UP to the
+// per-coin default, so this can only raise the depth on a real network.
+// Reverse-proxy trust for the hub express API (rate-limiter IP keying). Default
+// loopback suits Apache on the same host; a proxy in front of the container sets this.
 // Deployment network for the hub's consensus gates (notably
 // STAKE_WEIGHTED_QUORUM, whose activation height is per-network).
 // REQUIRED by the hub in validator mode (it fails loud on a
@@ -278,8 +270,7 @@ function configureHubBeforeKey(defaultValues, module) {
             "CHECKPOINT_POLL_MS", "CHECKPOINT_ROUND_TIMEOUT_MS", "CHECKPOINT_CHAINS",
             "ANCHOR_ENABLED", "ANCHOR_INTERVAL_MS", "ANCHOR_MATCH_BATCH_SIZE",
             "ANCHOR_MAX_BATCH", "ANCHOR_CHUNK_MAX_BYTES", "ANCHOR_ROUND_TIMEOUT_MS",
-            "ANCHOR_CHUNK_RETRY_MS",
-            "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
+            "ANCHOR_CHUNK_RETRY_MS", "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
             "ANCHOR_CHECKPOINT_EVERY_N",
             "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
             "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
