@@ -19,13 +19,13 @@
 let stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv
 let HUB_MODULE_NAME, getDockerContainerImageName
 let warnedHubConfigKeys = new Set()
-let hubDefaults = null
+let hubDefaults = null, configuredHubNetwork = null
 
 function configure(dependencies) {
     ({ stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv,
         HUB_MODULE_NAME, getDockerContainerImageName } = dependencies)
     warnedHubConfigKeys = new Set()
-    hubDefaults = null
+    hubDefaults = configuredHubNetwork = null
 }
 
 // A command composes the shared hub's config many times, so each deploy-time warning
@@ -67,13 +67,15 @@ function getCommandCoinsAndNetworks() {
 async function resolveDeploymentHubNetwork() {
     const registeredStacks = await getRegisteredCoinStacks()
     const registered = new Set(registeredStacks.map(r => r.network))
-    const networks = registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
+    const networks = configuredHubNetwork ? new Set([configuredHubNetwork])
+        : registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
     if (networks.size === 1) {
         const network = [...networks][0]
         await composeColocatedIndexerUrls(hubDefaults, network, registeredStacks)
         return network
     }
     if (networks.size > 1) {
+        await composeColocatedIndexerUrls(hubDefaults, Network.MAINNET, registeredStacks)
         warnHubConfigOnce("HUB_NETWORK_AMBIGUOUS",
             "WARNING: HUB_NETWORK is not set and this deployment runs stacks on " +
             [...networks].sort().join(", ") + ", so the shared hub cannot derive one network. " +
@@ -95,8 +97,7 @@ async function hasBitcoinIndexer(network) {
     return command.coins.includes(Coin.BITCOIN) && command.networks.includes(network)
 }
 
-// The hub's configs-table fallback names a host alias the container cannot reach, so a
-// co-located LTC or DOGE indexer is addressed by container name. Host env still wins.
+// Co-located LTC and DOGE indexers use Docker DNS; host URLs remain for remote stacks.
 const INDEXER_URL_VARS = { litecoin: "LTC_INDEXER_URL", dogecoin: "DOGE_INDEXER_URL" }
 async function composeColocatedIndexerUrls(defaultValues, network, registeredStacks = null) {
     if (!defaultValues || !network) return
@@ -105,19 +106,15 @@ async function composeColocatedIndexerUrls(defaultValues, network, registeredSta
     for (const [coin, name] of Object.entries(INDEXER_URL_VARS)) {
         const here = registered.some(r => r.coin === coin && r.network === network && r.module === XChainService.XCHAIN_INDEXER)
             || (command.coins.includes(coin) && command.networks.includes(network))
-        if (here && !defaultValues[name]) defaultValues[name] =
-            "http://" + getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coin, network) + ":3004"
+        if (here) defaultValues[name] = "http://" +
+            getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coin, network) + ":3004"
     }
 }
 
-// Usage-telemetry env is only meaningful to the hub. The IP salt and operators-endpoint
-// admin key come from host env, keeping secrets out of config files; unset, ip_hash stays
-// null and the endpoint is 401.
-// BTC indexer JSON-RPC URL for the price oracle's block-height anchor, from host env
-// for a hub not co-located with one (the master hub box). Left empty, it is composed
-// from the co-located BTC indexer further down, else the hub uses its configs table.
-// State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a shared
-// service with no per coin/network config file, so host env is the injection point.
+// Hub telemetry secrets come from host env; unset, ip_hash stays null and admin is 401.
+// BTC indexer JSON-RPC URL comes from host env for a hub not co-located with one. Left
+// empty, it is composed from the co-located indexer, else the hub uses its configs table.
+// State-checkpoint and ANCHOR config also enters the shared hub through host env.
 // Per-coin <COIN>_INDEXER_URLs feed getblockhashes (checkpoint state reads);
 // DOGE_* configures the on-chain ANCHOR/price publisher signer pipeline;
 // XDEX_* are the shared single-validator/regtest seams. Only set values are
@@ -345,6 +342,8 @@ function configureHubAccess(defaultValues) {
             "updateconfig / registervalidator / reportreorg. Set HUB_API_KEY in the host env before " +
             "exposing this hub beyond a trusted network.")
     }
+    configuredHubNetwork = String(defaultValues["HUB_NETWORK"] || "").toLowerCase() || null
+    if (configuredHubNetwork) delete defaultValues["HUB_NETWORK"]
 }
 
 // Operator signer for the on-chain DOGE publishers: when the host sets
