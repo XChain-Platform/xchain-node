@@ -246,11 +246,9 @@ async function resolveLatestReleaseTag() {
  * @param {string}      [opts.defaultBranch]  branch to fall back to when no
  *                                            release can be resolved
  * @param {boolean}     [opts.fallbackToBranch]  false makes a no-ref call
- *                       THROW when no release can be resolved instead of
- *                       degrading to a branch. An install on a fresh box may
- *                       reasonably fall back to master; an UPDATE of a
- *                       release node must not, because that fallback would
- *                       move every pinned module onto a branch tip.
+ *                       THROW when no published release exists instead of
+ *                       degrading to a branch. A failed lookup always throws
+ *                       because it cannot establish that no release exists.
  * @returns {Promise<{kind:'release'|'branch', ref:string, tag:string|null,
  *                    manifest:object|null, resolvedFrom:string}>}
  */
@@ -275,15 +273,10 @@ async function resolveInstallTarget(ref, { defaultBranch = 'master', fallbackToB
     try {
         tag = await resolveLatestReleaseTag()
     } catch (err) {
-        if (!fallbackToBranch) {
-            throw new Error(
-                `Could not resolve the latest xchain-node release (${err.message}).`
-                + ' Nothing was changed. Retry, or name the release explicitly (e.g. `update all v0.15.2`).'
-            )
-        }
-        logger.warn(`Could not resolve the latest xchain-node release (${err.message}).`)
-        logger.warn(`Falling back to a tracking install of '${defaultBranch}' (UNRELEASED).`)
-        return { kind: 'branch', ref: defaultBranch, tag: null, manifest: null, resolvedFrom: 'fallback after lookup failure' }
+        throw new Error(
+            `Could not resolve the latest xchain-node release (${err.message}).`
+            + ' Nothing was changed. Retry, or name the release explicitly (e.g. `update all v0.15.2`).'
+        )
     }
 
     if (!tag) {
