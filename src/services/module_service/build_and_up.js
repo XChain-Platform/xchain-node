@@ -38,6 +38,7 @@ let { cloneGit, resolveBundledLibRef } = require('./clone_and_refs')
 let { assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs } = require('./docker_args')
 const { parsePortSpec } = require('./docker_args')
 let { attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings } = require('./container_networks')
+const { carryContainerEnv } = require('./carry_container_env')
 const { getLogger } = require('../../observability/logger');
 let logger = getLogger();
 
@@ -56,7 +57,6 @@ function configureDependencies(dependencies) {
         logDockerCreateWarnings, logger
     } = dependencies)
 }
-
 /**
  * Build the module image and (re)create its container from the current config.
  *
@@ -103,7 +103,6 @@ async function assertDeploymentReady(module, coin, network, environmentVariables
         const { assertNoHubConsensusEnvDrift } = hubConsensusEnvGuard
         await assertNoHubConsensusEnvDrift(environmentVariables)
     }
-
 }
 // Stage any bundled library modules into this service's build context.
     // The service's Dockerfile COPYs them in and npm resolves the
@@ -191,7 +190,6 @@ function validatePortArgs(portArgs) {
         }
     }
 }
-
 // With no build to make it, the tag has to already exist. Say so here rather
 // than letting `docker run` fall through to a registry pull for an image name
 // that was only ever local, which fails with an unrelated auth/not-found error.
@@ -377,11 +375,13 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
             await checkBuildKitAvailable()
         } catch (err) { throw "Error creating Docker image: " + err }
     }
-    const environmentVariables = await getDefaultConfig(module, coin, network)
+    let environmentVariables = await getDefaultConfig(module, coin, network)
     const dir = getModuleDir(module)
+    const containerPrefix = getDockerContainerImageName(module, coin, network)
+    environmentVariables = await carryContainerEnv(environmentVariables,
+        { reuseImage, overwriteContainerId, containerName: containerPrefix }, { execFileAsync })
     await assertDeploymentReady(module, coin, network, environmentVariables, dir, onlyExecution)
     await stageBundledLibraries(module, dir, reuseImage)
-    const containerPrefix = getDockerContainerImageName(module, coin, network)
     const dockerOptions = resolveDockerOptions(module, environmentVariables, coin, network)
     ;({ coin, network } = dockerOptions)
     const memoryOptions = await resolveMemoryOptions(module, coin, network, onlyExecution)
@@ -396,5 +396,4 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
         ...dockerOptions, ...memoryOptions, ...sourceMetadata, ...containerEnvironment
     })
 }
-
 module.exports = { configureDependencies, buildAndUp, validatePortArgs }
