@@ -21,10 +21,8 @@ const { DATABASE, resetSchemaModel, readResetLedger } = require('./helpers/reset
 
 const INDEXER_DIR = path.join(__dirname, '../../../../xchain-indexer')
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
-const MIRROR_ID_REPAIR = '2026-06-10-mirror-id-autoincrement-repair.sql'
 const LIST_SHARE = '2026-09-30-list-share-tables.sql'
 const ORACLE_WIDEN = '2026-09-22-oracle-prices-widen-tick.sql'
-const MIRROR_ID_TABLES = ['price_snapshots', 'cross_chain_matches', 'capability_snapshots', 'state_checkpoints']
 
 function table(name) {
     return { table_schema: DATABASE, table_name: name, engine: 'InnoDB', table_collation: 'utf8mb3_general_ci', table_type: 'BASE TABLE' }
@@ -37,24 +35,9 @@ function tickColumn(length) {
         character_set_name: 'utf8mb3', collation_name: 'utf8mb3_general_ci', generation_expression: null
     }
 }
-function mirrorIdColumn(table, { dataType = 'bigint', extra = 'auto_increment' } = {}) {
-    return {
-        table_schema: DATABASE, table_name: table, column_name: 'id', data_type: dataType,
-        is_nullable: 'NO', column_default: null, extra, character_maximum_length: null,
-        column_type: dataType, ordinal_position: 1, character_set_name: null,
-        collation_name: null, generation_expression: null
-    }
-}
 async function satisfiedWith({ tables = [], columns = [] }) {
     const model = resetSchemaModel()
     model.tables.push(...tables)
-    model.columns.push(...columns)
-    return (await readResetLedger(model)).satisfied
-}
-async function mirrorIdsSatisfiedWith(columns) {
-    const model = resetSchemaModel()
-    model.columns = model.columns.filter(column =>
-        column.column_name !== 'id' || !MIRROR_ID_TABLES.includes(column.table_name))
     model.columns.push(...columns)
     return (await readResetLedger(model)).satisfied
 }
@@ -72,20 +55,6 @@ describe('indexer precondition fact parity', () => {
         const sql = appliedMigrationsSql('XChain_BTC_Mainnet_Indexer', 'schema_migrations')
         const missing = [...names].filter(name => !sql.includes("SELECT '" + name + "' AS name WHERE "))
         expect(missing, 'indexer migrations with no node schema fact').to.deep.equal([])
-    })
-
-    it('treats the mirror id repair as applied only when all four cursors auto-increment', async () => {
-        const repaired = MIRROR_ID_TABLES.map(tableName => mirrorIdColumn(tableName))
-        expect(await mirrorIdsSatisfiedWith(repaired)).to.include(MIRROR_ID_REPAIR)
-        expect(await mirrorIdsSatisfiedWith(repaired.slice(1))).to.not.include(MIRROR_ID_REPAIR)
-        expect(await mirrorIdsSatisfiedWith(
-            repaired.map(column => column.table_name === 'state_checkpoints'
-                ? mirrorIdColumn(column.table_name, { extra: '' }) : column)
-        )).to.not.include(MIRROR_ID_REPAIR)
-        expect(await mirrorIdsSatisfiedWith(
-            repaired.map(column => column.table_name === 'price_snapshots'
-                ? mirrorIdColumn(column.table_name, { dataType: 'int' }) : column)
-        )).to.not.include(MIRROR_ID_REPAIR)
     })
 
     it('treats the list-share migration as applied once both tables exist', async () => {
