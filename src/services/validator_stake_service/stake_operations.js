@@ -16,6 +16,7 @@
 
 const { getLogger } = require('../../observability/logger')
 const { sendLockFor, releaseOnIndexWait, holdForSend } = require('./send_lock')
+const { sleepRefusal, sleepUnknownRefusal } = require('./address_sleep')
 
 function defaultLog() {
     const logger = getLogger()
@@ -83,7 +84,17 @@ function stakeBlockers(state, plan, coins, address) {
             'confirm the signing pubkey is not already staked. Nothing is sent until the set can be read; ' +
             'retry, or check the explorer.')
     }
+    // Refuse a sleeping stake address, or one whose sleep state is unreadable.
+    const slept = stakeSleepBlocker(state, address)
+    if (slept) blockers.push(slept)
     return blockers
+}
+
+// Why the stake address's sleep stops the MINTs and the STAKE, or null when it does not.
+function stakeSleepBlocker(state, address) {
+    const action = 'every MINT and the STAKE'
+    if (state.sleepUnknown) return sleepUnknownRefusal(state.sleepUnknown, address, action)
+    return sleepRefusal(state.sleep, address, action)
 }
 
 // Why a key held only by withdrawn stake cannot be staked yet, in the operator's terms.

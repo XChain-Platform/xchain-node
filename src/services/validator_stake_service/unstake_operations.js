@@ -19,6 +19,7 @@ const { getLogger } = require('../../observability/logger')
 const { readValidatorSet } = require('./validator_set_read')
 const { sumAmounts } = require('./free_key')
 const { sendLockFor, releaseOnIndexWait } = require('./send_lock')
+const { readAddressSleep, sleepRefusal, sleepUnknownRefusal } = require('./address_sleep')
 
 function defaultLog() {
     const logger = getLogger()
@@ -190,7 +191,21 @@ async function resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, 
     }
     // The indexer's UNSTAKE leaves a pending top-up undeactivated, so it would activate later and keep this key in N.
     if (pending.length) throw fail(pendingTopUpRefusal(pending, tip, STAKE_TICK))
+    await assertOwnerAwake(sdk, address, tip + 1, fail)
     return { active: withdrawnStake(admissible) }
+}
+
+// Refuse when the owning address is asleep at landBlock, or its sleep state cannot be read.
+async function assertOwnerAwake(sdk, address, landBlock, fail) {
+    const action = 'the UNSTAKE'
+    let sleep
+    try {
+        sleep = await readAddressSleep(sdk, address, landBlock)
+    } catch (e) {
+        throw fail(sleepUnknownRefusal(e.message, address, action) + ' Nothing was sent.')
+    }
+    const refusal = sleepRefusal(sleep, address, action)
+    if (refusal) throw fail(refusal + ' Nothing was sent.')
 }
 
 function createUnstakeValidator({
