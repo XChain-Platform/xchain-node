@@ -212,10 +212,10 @@ function registerUninstall(program, deps) {
     program
         .command('uninstall')
         .description('Uninstall XChain services')
-        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
+        .argument('<service>', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, xchain-hub, xchain-sync, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .option('--include-shared', 'Also uninstall shared services (database, xchain-hub, xchain-explorer, xchain-sync)')
+        .option('--include-shared', 'Also uninstall shared services (xchain-explorer, xchain-sync, xchain-hub) once no chain/network is still installed; the database is never removed and must be removed manually')
         .action(async (service, chain, network, options) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
             // A module that failed to uninstall must not be printed and forgotten,
@@ -223,7 +223,7 @@ function registerUninstall(program, deps) {
             // remaining modules are still attempted (uninstallModules finishes the
             // list first); only the exit status changes.
             try {
-                await uninstallModules(serviceList, options.includeShared)
+                await uninstallModules(serviceList, options.includeShared, { all: service === 'all' })
             } catch (err) {
                 console.error('uninstall failed: ' + redactSecrets(err && err.message ? err.message : err))
                 return process.exit(1)
