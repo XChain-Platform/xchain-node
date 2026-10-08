@@ -36,7 +36,7 @@ const execFileAsync = promisify(execFile)
 
 const { XChainService, HUB_MODULE_NAME, DB_CREDENTIAL_DRIFT_ENV } = require('../config')
 const { getDockerContainerImageName } = require('./config_service')
-const { readContainerEnv } = require('./module_service/carry_container_env')
+const { readContainerEnv: readContainerEnvFromDocker } = require('./module_service/carry_container_env')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -48,6 +48,13 @@ const DRIFT_OVERRIDE_ENV = 'XCHAIN_NODE_ALLOW_DB_CREDENTIAL_DRIFT'
 
 // Tags the refusal so callers can tell it apart from a docker/network failure.
 const DRIFT_ERROR_CODE = 'DB_CREDENTIAL_DRIFT'
+
+async function readContainerEnv(name, deps = {}) {
+    return readContainerEnvFromDocker(name, {
+        ...deps,
+        execFileAsync: deps.execFileAsync || execFileAsync
+    })
+}
 
 // Which container env key authenticates with which per-coin/network account.
 // The indexer appears twice on purpose: it opens its own DB with
