@@ -55,7 +55,8 @@ const RESET_BASELINED_ROWS = new Set([
 ])
 
 const SYNTHESIZED_ROWS = new Set(`
-    2026-05-30-balances-composite-index.sql 2026-06-03-unique-full-column-index-addresses.sql 2026-06-16-drop-orphaned-contract-balances.sql
+    2026-05-30-balances-composite-index.sql 2026-06-03-unique-full-column-index-addresses.sql 2026-06-10-mirror-id-autoincrement-repair.sql
+    2026-06-16-drop-orphaned-contract-balances.sql
     2026-07-10-contract-state-bin-key-index.sql 2026-07-15-markets-dedup-unique-pair.sql 2026-07-15-sweeps-drop-legacy-escrows-column.sql
     2026-07-16-mirror-twin-bigint-unsigned-align.sql 2026-07-16-reposition-state-key-bin.sql 2026-07-24-pubkeys-widen-uncompressed.sql
     2026-07-26-tokens-backfill-lock-mint-supply.sql 2026-07-29-state-checkpoints-uq-chain-seq.sql 2026-08-12-validator-rewards-derive-block-index.sql
@@ -197,6 +198,8 @@ function resetSchemaModel() {
         ['cross_chain_matches', 'a_action_index'], ['cross_chain_matches', 'b_action_index'],
         ['cross_chain_matches', 'effective_time'], ['capability_snapshots', 'snapshot_block']
     ]) columns.push(column(table, name, 'bigint', { unsigned: true }))
+    for (const table of ['price_snapshots', 'cross_chain_matches', 'capability_snapshots', 'state_checkpoints'])
+        columns.push(column(table, 'id', 'bigint', { unsigned: true, autoIncrement: true, ordinal: 1 }))
     for (const [table, name, dataType, length] of [
         ['contracts', 'code', 'mediumtext'], ['deploy_chunks', 'code_part', 'mediumtext'],
         ['deposits', 'amount', 'varchar', 250], ['withdrawals', 'amount', 'varchar', 250],

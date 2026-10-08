@@ -46,7 +46,7 @@ async function downgradeRefusal(result) {
 
 describe('from-genesis v0.20.0 migration ledger', () => {
     it('earns all 82 v0.19.0 rows from the reset schema and passes the real precondition scan', async () => {
-        expect(resetLedger()).to.have.length(68)
+        expect(resetLedger()).to.have.length(67)
 
         const { result, ledger, queries } = await readResetLedger(resetSchemaModel())
 
@@ -54,7 +54,7 @@ describe('from-genesis v0.20.0 migration ledger', () => {
         expect([...result.applied].filter(name => V0190_MIGRATIONS.includes(name)))
             .to.have.members(V0190_MIGRATIONS).and.have.length(82)
         expect([...result.applied]).to.have.length(83)
-        expect(ledger).to.have.length(68)
+        expect(ledger).to.have.length(67)
         expect(queries.some(sql => /^INSERT INTO /i.test(sql))).to.equal(false)
         expect(scanV0190Preconditions()).to.have.members([...PRECONDITION_MIGRATIONS])
         expect(await runDowngradeGuard(result)).to.deep.equal({
@@ -69,8 +69,8 @@ describe('from-genesis v0.20.0 migration ledger', () => {
         const { result, ledger, queries } = await readResetLedger(unsatisfiedSchemaModel())
 
         expect(result.state, result.reason).to.equal('ledger')
-        expect([...result.applied]).to.have.length(68)
-        expect(ledger).to.have.length(68)
+        expect([...result.applied]).to.have.length(67)
+        expect(ledger).to.have.length(67)
         expect(queries.some(sql => /^INSERT INTO /i.test(sql))).to.equal(false)
         const refusal = await downgradeRefusal(result)
         expect(refusal, 'the downgrade must stay refused').to.be.an('error')

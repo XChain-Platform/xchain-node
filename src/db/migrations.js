@@ -118,6 +118,11 @@ function stateKeyBinSatisfiedSql(database) {
         ['contract_index', 'state_key_bin', 'id'], 1)
     return column + ' AND ' + index
 }
+// Accept signed or unsigned cursor ids because the later width migration only changes signedness.
+function mirrorIdAutoIncrementSatisfiedSql(database) {
+    return `(SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = '${database}' AND column_name = 'id'` +
+        " AND data_type = 'bigint' AND extra = 'auto_increment' AND table_name IN ('price_snapshots', 'cross_chain_matches', 'capability_snapshots', 'state_checkpoints')) = 4"
+}
 function mirrorTwinWidthsSatisfiedSql(database) {
     return '(SELECT COUNT(1) FROM information_schema.columns' +
         " WHERE table_schema = '" + database + "'" +
@@ -354,6 +359,8 @@ function indexerSatisfiedMigrationsSql(database) {
             "' AND table_name = 'balances' AND index_name = 'address_id')"),
         migrationFactSql('2026-06-03-unique-full-column-index-addresses.sql',
             exactIndexSql(database, 'index_addresses', 'address', ['address'], 0)),
+        migrationFactSql('2026-06-10-mirror-id-autoincrement-repair.sql',
+            mirrorIdAutoIncrementSatisfiedSql(database)),
         migrationFactSql('2026-06-16-drop-orphaned-contract-balances.sql',
             "NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '" + database +
             "' AND table_name = 'contract_balances')"),
