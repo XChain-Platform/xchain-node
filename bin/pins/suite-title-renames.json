@@ -226,6 +226,9 @@
     },
     "test/unit/node_service.test.js": {
       "NodeService: buildCryptoNode() rejects when db.insertModuleContainer returns false": "NodeService: buildCryptoNode() rejects when db.setModuleContainer returns false"
+    },
+    "test/unit/release_manifest_service.test/resolve_install_target.test.js": {
+      "ReleaseManifestService resolveInstallTarget() falls back to the default branch when the lookup fails outright": "ReleaseManifestService resolveInstallTarget() fails closed on a thrown lookup error even when a branch fallback is allowed"
     }
   }
 }
