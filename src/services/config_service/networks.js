@@ -19,11 +19,13 @@
 let stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv
 let HUB_MODULE_NAME, getDockerContainerImageName
 let warnedHubConfigKeys = new Set()
+let hubDefaults = null, configuredHubNetwork = null
 
 function configure(dependencies) {
     ({ stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv,
         HUB_MODULE_NAME, getDockerContainerImageName } = dependencies)
     warnedHubConfigKeys = new Set()
+    hubDefaults = configuredHubNetwork = null
 }
 
 // A command composes the shared hub's config many times, so each deploy-time warning
@@ -63,9 +65,15 @@ function getCommandCoinsAndNetworks() {
 // runs on. Ambiguous (several networks, or none named) leaves it unset, because one
 // hub declaring the wrong network mis-gates the ingest rules it is being set for.
 async function resolveDeploymentHubNetwork() {
-    const registered = new Set((await getRegisteredCoinStacks()).map(r => r.network))
-    const networks = registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
-    if (networks.size === 1) return [...networks][0]
+    const registeredStacks = await getRegisteredCoinStacks()
+    const registered = new Set(registeredStacks.map(r => r.network))
+    const networks = configuredHubNetwork ? new Set([configuredHubNetwork])
+        : registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
+    if (networks.size === 1) {
+        const network = [...networks][0]
+        await composeColocatedIndexerUrls(hubDefaults, network, registeredStacks)
+        return network
+    }
     if (networks.size > 1) {
         warnHubConfigOnce("HUB_NETWORK_AMBIGUOUS",
             "WARNING: HUB_NETWORK is not set and this deployment runs stacks on " +
@@ -81,54 +89,47 @@ async function resolveDeploymentHubNetwork() {
 // the composed URL names the container that install creates.
 async function hasBitcoinIndexer(network) {
     const registered = await getRegisteredCoinStacks()
+    await composeColocatedIndexerUrls(hubDefaults, network, registered)
     if (registered.some(r => r.coin === Coin.BITCOIN && r.network === network
         && r.module === XChainService.XCHAIN_INDEXER)) return true
     const command = getCommandCoinsAndNetworks()
     return command.coins.includes(Coin.BITCOIN) && command.networks.includes(network)
 }
 
-// Usage-telemetry env is only meaningful to the hub (the telemetry collector).
-// TELEMETRY_IP_SALT is read from the host environment (e.g. xchain-node's .env) so
-// the IP-hash salt stays out of source and config files; without it the hub records
-// country/region but leaves ip_hash null. The hub is a shared service (no per
-// coin/network config file), so the host env is the injection point.
-// Gate for the per-install detail endpoint (GET /telemetry/operators). Like the
-// salt, sourced from host env so the secret stays out of source/config files;
-// unset leaves the endpoint fail-closed (401 for everyone).
-// BTC indexer JSON-RPC URL for the validator-mode price oracle's block-height
-// anchor (hub.getlatestblock). Sourced from host env so a hub NOT co-located with
-// a BTC indexer (e.g. the master hub box, where the BTC stack lives elsewhere) can
-// point at a reachable indexer. Empty default ⇒ the hub falls back to its configs
-// table, so co-located standalone/validator installs are unaffected. Left empty
-// here, it is composed from the co-located BTC indexer further down.
-// State-checkpoint engine + ANCHOR publisher (validator mode). The hub is a
-// shared service (no per coin/network config file), so like the telemetry
-// salt and BTC_INDEXER_API_URL above, the host env is the injection point.
+// Co-located LTC and DOGE indexers use Docker DNS; host URLs remain for remote stacks.
+const INDEXER_URL_VARS = { litecoin: "LTC_INDEXER_URL", dogecoin: "DOGE_INDEXER_URL" }
+async function composeColocatedIndexerUrls(defaultValues, network, registeredStacks = null) {
+    if (!defaultValues || !network) return
+    const registered = registeredStacks || await getRegisteredCoinStacks()
+    const command = getCommandCoinsAndNetworks()
+    for (const [coin, name] of Object.entries(INDEXER_URL_VARS)) {
+        const here = registered.some(r => r.coin === coin && r.network === network && r.module === XChainService.XCHAIN_INDEXER)
+            || (command.coins.includes(coin) && command.networks.includes(network))
+        if (here) defaultValues[name] = "http://" +
+            getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coin, network) + ":3004"
+    }
+}
+
+// Hub telemetry secrets come from host env; unset, ip_hash stays null and admin is 401.
+// BTC indexer JSON-RPC URL comes from host env for a hub not co-located with one. Left
+// empty, it is composed from the co-located indexer, else the hub uses its configs table.
+// State-checkpoint and ANCHOR config also enters the shared hub through host env.
 // Per-coin <COIN>_INDEXER_URLs feed getblockhashes (checkpoint state reads);
 // DOGE_* configures the on-chain ANCHOR/price publisher signer pipeline;
 // XDEX_* are the shared single-validator/regtest seams. Only set values are
 // injected, so unset host env leaves the hub's own defaults untouched.
-// HUB_API_KEY gates the hub's consensus-affecting write methods. Sourced from
-// host env (.env) so it persists across `update` (a hand-set container value is
-// dropped on rebuild). Set it on the publicly-fronted master hub so writes are
-// authenticated; unset leaves the hub keyless (the prior default).
-// ANCHOR_CHUNK_RETRY_MS must outlast the utxo-tracker's mempool poll
-// (60s on mainnet) or back-to-back same-wallet anchor broadcasts
-// exhaust their retries on a stale UTXO view (txn-mempool-conflict).
-// Anchor every Nth checkpoint_seq on-chain (off-multiples stay in the
-// free off-chain mirror); decouples DOGE spend from checkpoint cadence.
-// Per-coin confirmation depth the hub's cross-chain engines wait for
-// before proposing a source leg (coins/index.js resolveConfirmations).
-// A regtest venue pins these to 1 so a bridge lock finalizes on the
-// next block instead of six BTC blocks nothing is mining (the nightly
-// two-stack legs sat on "not proposing BTC:3 (below depth 6)" until
-// the 120 s credit wait gave up). Inert on mainnet and testnet: the
-// hub clamps a value below the per-coin default UP to that default
-// off regtest, so this can only raise the depth on a real network.
-// Reverse-proxy trust for the hub's express API (rate-limiter IP
-// keying). Default 'loopback' suits the Apache-on-same-host prod
-// topology; containerized hubs see the docker bridge as the peer,
-// so an operator fronting the container with a proxy sets this.
+// HUB_API_KEY gates the hub's consensus-affecting write methods. From host env (.env) so
+// it survives `update`; unset leaves the hub keyless.
+// ANCHOR_CHUNK_RETRY_MS must outlast the utxo-tracker mempool poll (60s on mainnet) or
+// back-to-back same-wallet anchor broadcasts exhaust their retries on a stale UTXO view.
+// Anchor every Nth checkpoint_seq on-chain (off-multiples stay in the free off-chain
+// mirror); decouples DOGE spend from checkpoint cadence.
+// Per-coin confirmation depth the hub waits for before proposing a source leg
+// (coins/index.js resolveConfirmations). A regtest venue pins these to 1 so a bridge
+// lock finalizes on the next block; off regtest the hub clamps a lower value UP to the
+// per-coin default, so this can only raise the depth on a real network.
+// Reverse-proxy trust for the hub express API (rate-limiter IP keying). Default
+// loopback suits Apache on the same host; a proxy in front of the container sets this.
 // Deployment network for the hub's consensus gates (notably
 // STAKE_WEIGHTED_QUORUM, whose activation height is per-network).
 // REQUIRED by the hub in validator mode (it fails loud on a
@@ -251,6 +252,7 @@ async function hasBitcoinIndexer(network) {
 // everything else resolves to a plain process.env read.
 function configureHubBeforeKey(defaultValues, module) {
     if (module === HUB_MODULE_NAME) {
+        hubDefaults = defaultValues
         defaultValues["TELEMETRY_ENABLED"]        = config.TELEMETRY_ENABLED
         defaultValues["TELEMETRY_RETENTION_DAYS"] = config.TELEMETRY_RETENTION_DAYS
         defaultValues["TELEMETRY_IP_SALT"]        = config.TELEMETRY_IP_SALT
@@ -264,8 +266,7 @@ function configureHubBeforeKey(defaultValues, module) {
             "CHECKPOINT_POLL_MS", "CHECKPOINT_ROUND_TIMEOUT_MS", "CHECKPOINT_CHAINS",
             "ANCHOR_ENABLED", "ANCHOR_INTERVAL_MS", "ANCHOR_MATCH_BATCH_SIZE",
             "ANCHOR_MAX_BATCH", "ANCHOR_CHUNK_MAX_BYTES", "ANCHOR_ROUND_TIMEOUT_MS",
-            "ANCHOR_CHUNK_RETRY_MS",
-            "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
+            "ANCHOR_CHUNK_RETRY_MS", "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
             "ANCHOR_CHECKPOINT_EVERY_N",
             "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
             "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
@@ -340,6 +341,8 @@ function configureHubAccess(defaultValues) {
             "updateconfig / registervalidator / reportreorg. Set HUB_API_KEY in the host env before " +
             "exposing this hub beyond a trusted network.")
     }
+    configuredHubNetwork = String(defaultValues["HUB_NETWORK"] || "").toLowerCase() || null
+    if (configuredHubNetwork) delete defaultValues["HUB_NETWORK"]
 }
 
 // Operator signer for the on-chain DOGE publishers: when the host sets
@@ -382,16 +385,13 @@ function configureHubValidator(defaultValues) {
 }
 
 module.exports = {
-    // A hub with no HUB_NETWORK resolves its network to '', which fails every
-    // network-keyed ingest gate closed, so a non-validator install can never
-    // validate an on-chain PRICE batch. Host env still wins; unresolved stays unset.
-    // Capability snapshots are read off a BTC indexer, and with none reachable the
-    // hub refuses every on-chain PRICE batch for insufficient signer stake. Compose
-    // the co-located one; say so when this deployment has none to compose.
+    // Host env wins for the hub network and the BTC indexer URL; an unresolved network stays
+    // unset, and a deployment with no BTC indexer to compose is warned about.
     configure,
     warnHubConfigOnce,
     resolveDeploymentHubNetwork,
     hasBitcoinIndexer,
+    composeColocatedIndexerUrls,
     configureHubBeforeKey,
     configureHubAccess,
     configureHubValidator
