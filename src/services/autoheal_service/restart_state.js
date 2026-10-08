@@ -31,7 +31,7 @@ const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000
 const DEFAULT_COOLDOWN_CEILING_MS = 6 * 60 * 60 * 1000
 // A passing probe landing inside this window after an autoheal restart is that
 // restart's own artifact, not evidence the wedge cleared. Every service opted
-// into autoheal in SERVICE_HEALTHCHECK (decoder, encoder, indexer) probes at a
+// into autoheal in SERVICE_HEALTHCHECK (decoder, indexer) probes at a
 // 15s interval with 3 retries behind a 60s start period, so Docker can
 // legitimately report `starting` or a first fresh pass for ~105s after a
 // restart; 150s leaves margin. An operator who widens a service's start period

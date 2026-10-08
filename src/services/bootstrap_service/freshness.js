@@ -23,10 +23,11 @@ let execFileAsync     = promisify(execFile)
 let { XChainService, EXTERNAL_DB } = require('../../config')
 const { tableExistsSql } = require('../../db/information_schema')
 const { rowCountSql } = require('../../db/blocks')
-let { getModuleDatabaseName, getUtxoTrackerVolumeName } = require('../config_service')
+let { getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = require('../config_service')
 let { getDatabaseContainerId, getDatabaseContainerPresence, getExternalDbConfig, executeNativeMariaDbCommand } = require('../database_service')
 let databaseService = require('../database_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
+const { configuredDatabaseName } = require('../../utils/module_database_name')
 const { redactSecrets } = require('../../utils/helpers')
 const { getLogger } = require('../../observability/logger')
 let logger = getLogger()
@@ -35,7 +36,7 @@ function configureDependencies(dependencies) {
     execFile = dependencies.childProcess.execFile
     execFileAsync = promisify(execFile)
     ;({ XChainService, EXTERNAL_DB } = dependencies.config)
-    ;({ getModuleDatabaseName, getUtxoTrackerVolumeName } = dependencies.configService)
+    ;({ getDefaultConfig, getModuleDatabaseName, getUtxoTrackerVolumeName } = dependencies.configService)
     databaseService = dependencies.databaseService
     ;({ getDatabaseContainerId, getDatabaseContainerPresence, getExternalDbConfig, executeNativeMariaDbCommand } = databaseService)
     logger = dependencies.logger
@@ -116,8 +117,21 @@ async function utxoTrackerVolumeFreshness(coin, network) {
 // not parse: a lookup error says nothing about how much data the database holds,
 // and reading it as EMPTY is what let a rolling-update blip authorise
 // DROP DATABASE over a populated store.
+// Name the database the service actually uses; null (read as UNKNOWN) when the
+// config cannot be read or names an unsafe database.
+async function freshnessDatabaseName(coin, network, module) {
+    const defaultName = getModuleDatabaseName(module, coin, network)
+    try {
+        return configuredDatabaseName(module, await getDefaultConfig(module, coin, network), defaultName)
+    } catch (err) {
+        reportUnknownFreshness(`the ${module} database`, err)
+        return null
+    }
+}
+
 async function mariaDbModuleFreshness(coin, network, module) {
-    const dbName = getModuleDatabaseName(module, coin, network)
+    const dbName = await freshnessDatabaseName(coin, network, module)
+    if (dbName === null) return FRESHNESS_UNKNOWN
     if (EXTERNAL_DB) return externalMariaFreshness(dbName)
     const local = await prepareLocalMariaFreshness(coin, network, dbName)
     if (Object.prototype.hasOwnProperty.call(local, 'freshness')) return local.freshness

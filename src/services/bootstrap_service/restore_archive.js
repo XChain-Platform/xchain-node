@@ -32,6 +32,7 @@ const { stopModuleContainer } = require('../stop_budget_service')
 let { getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = require('../database_service')
 let databaseService = require('../database_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
+const { configuredDatabaseName } = require('../../utils/module_database_name')
 let { checkBootstrapSignature, ensureVerifiedInnerArchive } = require('./archive_signing')
 const { BootstrapIntegrityError } = require('./archive_signing')
 let { readBootstrapArchiveMeta, compareArchiveIdentity } = require('../bootstrap_archive_meta')
@@ -212,7 +213,8 @@ async function prepareMariaRestore(coin, network, module, fileName) {
         ? defaultConfig["DECODER_BOOTSTRAP_VOLUME"]
         : defaultConfig["INDEXER_BOOTSTRAP_VOLUME"]
     const archivePath   = path.join(bootstrapDir, fileName)
-    const dbName        = getModuleDatabaseName(module, coin, network)
+    // Resolve before the service stop and the DROP, so an unsafe configured name touches nothing.
+    const dbName        = configuredDatabaseName(module, defaultConfig, getModuleDatabaseName(module, coin, network))
     const workDir       = getWorkDir(coin, network, `${module}-restore`)
 
     if (!fs.existsSync(archivePath)) throw new Error(`Bootstrap file not found: ${archivePath}`)

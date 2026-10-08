@@ -136,15 +136,17 @@ When xchain-node manages its own MariaDB container, these optional env vars over
 
 ## Autoheal (restart-on-unhealthy)
 
-Every persistent service container carries a Docker healthcheck, but Docker itself takes no action on the `unhealthy` state (`--restart unless-stopped` only fires when the process exits). An alive-but-stalled service would otherwise stay wedged until an operator notices it in `docker ps`. `xchain-node autoheal` closes that loop: it restarts containers that have been continuously unhealthy past a grace window, for services opted in via `autoheal: true` in the healthcheck table (currently the decoder, encoder, and indexer; the utxo-tracker is deliberately excluded because it halts on purpose rather than exiting, and a restart would just re-halt it).
+Every persistent service container carries a Docker healthcheck, but Docker itself takes no action on the `unhealthy` state (`--restart unless-stopped` only fires when the process exits). An alive-but-stalled service would otherwise stay wedged until an operator notices it in `docker ps`. `xchain-node autoheal` closes that loop: it restarts containers that have been continuously unhealthy past a grace window, for services opted in via `autoheal: true` in the healthcheck table (currently the decoder and indexer; the utxo-tracker is deliberately excluded because it halts on purpose rather than exiting, and a restart would just re-halt it; the encoder is deliberately excluded because its health probe reports utxo-tracker readiness (unreachable, halted, lagging or mempool not ready), which restarting the encoder cannot clear).
 
 The command is one-shot and never prompts or daemonizes. Unattended remediation requires wiring it to a cron entry or systemd timer, e.g. `*/5 * * * * xchain_node autoheal`. Detection-to-restart latency is the timer interval plus the health retry budget plus the grace window. Use `--dry-run` to see restart candidates without acting. Exit code is non-zero only when a restart was attempted and failed.
 
 | Variable | Default | What it controls |
 |---|---|---|
 | `XCHAIN_NODE_AUTOHEAL_GRACE_MS` | `120000` | How long a container must be continuously unhealthy before a restart is considered |
-| `XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS` | `600000` | Minimum time between two autoheal restarts of the same container (anti-flap) |
-| `XCHAIN_NODE_AUTOHEAL_STATE_DIR` | `~/.xchain-node` | Where the anti-flap state file (`autoheal-state.json`) lives |
+| `XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS` | `600000` | Base wait before autoheal restarts the same container again (anti-flap). The first retry waits this long; each further restart of a container that has not recovered doubles the wait, up to `XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS` (with defaults: 10m, 20m, 40m and so on, capped at 6h). The doubling resets once the container recovers |
+| `XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS` | `21600000` | Upper bound on the doubled cooldown. A container that never recovers settles at one restart per ceiling; there is no attempt cap, and every skipped pass logs an "investigate" line |
+| `XCHAIN_NODE_AUTOHEAL_PROBATION_MS` | `150000` | How long after an autoheal restart a passing health probe counts as that restart's own artifact rather than recovery, so it does not reset the backoff. If you widen a service's start period with `XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>`, widen this to match (start period plus interval times retries, plus margin) |
+| `XCHAIN_NODE_AUTOHEAL_STATE_DIR` | `~/.xchain-node` | Where the state file (`autoheal-state.json`) lives: last restart times, unhealthy onsets and the per-container restart count that drives the backoff. Falls back to `XCHAIN_NODE_LOCK_DIR` when that is set, otherwise `~/.xchain-node` |
 
 ## Telemetry
 

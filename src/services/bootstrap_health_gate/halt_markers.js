@@ -23,8 +23,9 @@
  ********************************************************************/
 
 const { XChainService, EXTERNAL_DB } = require('../../config')
-const { getModuleDatabaseName } = require('../config_service')
+const { getDefaultConfig, getModuleDatabaseName } = require('../config_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
+const { configuredDatabaseName } = require('../../utils/module_database_name')
 const {
     markerTablesSql, liveReorgHaltCountSql, liveSyncHaltCountSql,
     eventsWatermarkSql, syncHaltWatermarkSql, reorgHaltsSinceSql, syncHaltsSinceSql
@@ -71,6 +72,12 @@ function assertDbName(name) {
     if (!/^[A-Za-z0-9_]+$/.test(String(name)))
         throw new Error(`refusing to probe an unexpected database name: ${name}`)
     return String(name)
+}
+
+// Probe the database the service reads: the configured name, else the derived default
+// (one coin/network config file carries both the decoder and the indexer name).
+function markerDatabaseName(module, cfg, coin, network) {
+    return configuredDatabaseName(module, cfg, getModuleDatabaseName(module, coin, network))
 }
 
 // Run one SQL statement against the MariaDB holding coin/network's databases and
@@ -227,7 +234,8 @@ async function readRaisedInWindow(readCount, name, since, found, hasSyncHalt) {
 async function readHaltMarkers(coin, network, module, deps, since) {
     const run = sqlRunner(coin, network, deps)
     const readCount = countReader(run)
-    const dbName = assertDbName(getModuleDatabaseName(module, coin, network))
+    const cfg = await getDefaultConfig(module, coin, network)
+    const dbName = assertDbName(markerDatabaseName(module, cfg, coin, network))
 
     const markers = await probeDatabase(run, readCount, dbName, since && since.own)
 
@@ -243,7 +251,7 @@ async function readHaltMarkers(coin, network, module, deps, since) {
     // absent database, an absent events table and an unreadable count alike, and every
     // one of those means we could not tell.
     if (module === XChainService.XCHAIN_INDEXER) {
-        const decoderDbName = assertDbName(getModuleDatabaseName(XChainService.XCHAIN_DECODER, coin, network))
+        const decoderDbName = assertDbName(markerDatabaseName(XChainService.XCHAIN_DECODER, cfg, coin, network))
         let upstream
         try {
             upstream = await probeDatabase(run, readCount, decoderDbName, since && since.upstream)

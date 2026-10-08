@@ -33,6 +33,7 @@ let databaseService = require('../database_service')
 let { assertBootstrapSourceHealthy } = require('../bootstrap_health_gate')
 let { buildBootstrapMeta, writeBootstrapMeta } = require('../bootstrap_archive_meta')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
+const { configuredDatabaseName } = require('../../utils/module_database_name')
 const { redactSecrets } = require('../../utils/helpers')
 let { maybeSignBootstrap, computeSha256 } = require('./archive_signing')
 let { startProgress, buildDateTimeString, getWorkDir, ensureDir, ensureDirWritable } = require('./workspace')
@@ -78,7 +79,7 @@ async function prepareMariaArchive(coin, network, module) {
     const outputDir     = module === XChainService.XCHAIN_DECODER
         ? defaultConfig["DECODER_BOOTSTRAP_VOLUME"]
         : defaultConfig["INDEXER_BOOTSTRAP_VOLUME"]
-    const dbName        = getModuleDatabaseName(module, coin, network)
+    const dbName        = configuredDatabaseName(module, defaultConfig, getModuleDatabaseName(module, coin, network))
     const archiveName   = `${network}${SEP}${module}${SEP}${buildDateTimeString()}.tar.gz`
     const workDir       = getWorkDir(coin, network, module)
     const innerArchive  = path.join(workDir, 'dump.sql.gz')
