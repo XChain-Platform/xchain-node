@@ -269,7 +269,7 @@ describe('ValidatorStakeService', function () {
         it('calls explorer methods that the published SDK actually exposes', function () {
             const { XChainSDK } = require('@dankest-llc/xchain-sdk')
             const sdk = new XChainSDK({ network: 'bitcoin-testnet' })   // offline: no network I/O in the constructor
-            for (const m of ['getValidators', 'getAddress', 'getToken', 'getDelegations', 'getStatus'])
+            for (const m of ['getValidators', 'getAddress', 'getToken', 'getDelegations', 'getStatus', 'getSleeps'])
                 expect(sdk.explorer[m], 'sdk.explorer.' + m).to.be.a('function')
             for (const m of ['getBalances', 'session'])
                 expect(sdk[m], 'sdk.' + m).to.be.a('function')

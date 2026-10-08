@@ -43,7 +43,9 @@ function makeExplorer(chain) {
         getStatus: chain.statusThrow
             ? sinon.stub().rejects(new Error(chain.statusThrow))
             : sinon.stub().resolves({ last_block: Object.fromEntries(
-                Object.values(COIN_NETWORKS).map(c => [c.stakeCoin, chain.tip ?? TIP])) })
+                Object.values(COIN_NETWORKS).map(c => [c.stakeCoin, chain.tip ?? TIP])) }),
+        // No SLEEP rows, so the stake address reads as awake.
+        getSleeps: sinon.stub().resolves({ total: 0, data: [] })
     }
 }
 

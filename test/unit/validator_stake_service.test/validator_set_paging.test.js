@@ -57,7 +57,8 @@ function makeSdk(getValidators) {
             getToken:   sinon.stub().resolves({ mints: { max: 10000, address_max: 50000 } }),
             getValidators,
             getStatus:  sinon.stub().resolves({ last_block: Object.fromEntries(
-                Object.values(COIN_NETWORKS).map(c => [c.stakeCoin, TIP])) })
+                Object.values(COIN_NETWORKS).map(c => [c.stakeCoin, TIP])) }),
+            getSleeps:  sinon.stub().resolves({ total: 0, data: [] })
         },
         getBalances: async () => ({ data: [{ tick: 'XCHAIN', amount: '25000' }] }),
         session: () => ({

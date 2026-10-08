@@ -36,6 +36,7 @@ const {
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
 const { readKeyHolders } = require('./validator_stake_service/free_key')
+const { readSleepState } = require('./validator_stake_service/address_sleep')
 const { readTokenRow } = require('./validator_stake_service/token_balance_read')
 
 const STAKE_TICK = 'XCHAIN'
@@ -192,9 +193,11 @@ async function readChainState(sdk, address, pubkey, keyCtx) {
     // a truncated read throws into the same catch rather than reading as absent.
     // readKeyHolders also applies the reuse gate and reads the key's delegations.
     const holders = await readKeyHolders(sdk, pubkey, keyCtx)
+    // Read whether the stake address put itself to sleep: the indexer rejects its MINTs and STAKE then.
+    const sleepState = await readSleepState(sdk, address, keyCtx.coins)
 
     return { coinBal, coinPending, tokenBal, mintMax: num(mints && mints.max),
-        mintAddressMax: num(mints && mints.address_max), mintUnreadable, ...holders }
+        mintAddressMax: num(mints && mints.address_max), mintUnreadable, ...holders, ...sleepState }
 }
 
 // Plan the mints: how many transactions, at what amount each, to lift the

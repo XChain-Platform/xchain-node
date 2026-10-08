@@ -247,5 +247,6 @@ module.exports = {
     delegationRowsHoldingKey,
     sumAmounts,
     readDelegationsByPubkey,
-    readKeyHolders
+    readKeyHolders,
+    readTip
 }
