@@ -75,7 +75,6 @@ async function resolveDeploymentHubNetwork() {
         return network
     }
     if (networks.size > 1) {
-        await composeColocatedIndexerUrls(hubDefaults, Network.MAINNET, registeredStacks)
         warnHubConfigOnce("HUB_NETWORK_AMBIGUOUS",
             "WARNING: HUB_NETWORK is not set and this deployment runs stacks on " +
             [...networks].sort().join(", ") + ", so the shared hub cannot derive one network. " +

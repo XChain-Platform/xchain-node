@@ -57,4 +57,19 @@ describe('ConfigService colocated hub indexer URLs', function () {
         expect(config.LTC_INDEXER_URL).to.equal('http://127.0.1.1:3004')
         expect(config.DOGE_INDEXER_URL).to.equal('http://127.0.1.1:3004')
     })
+
+    it('preserves configured URLs when the deployment network is ambiguous', async function () {
+        delete process.env.HUB_NETWORK
+        sinon.stub(stateModule.db, 'getAllModuleContainers').resolves([
+            { coin: 'litecoin', network: 'mainnet', module: XChainService.XCHAIN_INDEXER },
+            { coin: 'dogecoin', network: 'mainnet', module: XChainService.XCHAIN_INDEXER },
+            { coin: 'litecoin', network: 'testnet', module: XChainService.XCHAIN_INDEXER }
+        ])
+
+        const config = await makeServiceWithConfig('').getDefaultConfig(HUB_MODULE_NAME, null, null)
+
+        expect(config).not.to.have.property('HUB_NETWORK')
+        expect(config.LTC_INDEXER_URL).to.equal('http://127.0.1.1:3004')
+        expect(config.DOGE_INDEXER_URL).to.equal('http://127.0.1.1:3004')
+    })
 })
