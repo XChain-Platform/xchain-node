@@ -91,71 +91,80 @@ async function dumpWithConfig(overrides) {
     return stubs
 }
 
+// Register the restore cases: each configured name is the one dropped and restored.
+function registerRestoreCases() {
+    it('restores into the configured decoder database, never the derived default', async function () {
+        const { stubs, error } = await restoreWithConfig(XChainService.XCHAIN_DECODER, { DECODER_DB_NAME: 'CustomDecoder' })
+        expect(error).to.equal(null)
+        const args = issuedArgs(stubs)
+        expect(args.some(a => a.includes('DROP DATABASE IF EXISTS CustomDecoder'))).to.equal(true)
+        expect(args).to.include('CustomDecoder')
+        expect(args.some(a => a.includes(DEFAULT_NAME))).to.equal(false)
+    })
+
+    it('restores into the configured indexer database', async function () {
+        const { stubs, error } = await restoreWithConfig(XChainService.XCHAIN_INDEXER,
+            { DECODER_DB_NAME: 'CustomDecoder', INDEXER_DB_NAME: 'CustomIndexer' })
+        expect(error).to.equal(null)
+        const args = issuedArgs(stubs)
+        expect(args.some(a => a.includes('DROP DATABASE IF EXISTS CustomIndexer'))).to.equal(true)
+        expect(args.some(a => a.includes('CustomDecoder') || a.includes(DEFAULT_NAME))).to.equal(false)
+    })
+
+    it('refuses an unsafe configured name before stopping the service or dropping anything', async function () {
+        const { stubs, error } = await restoreWithConfig(XChainService.XCHAIN_DECODER,
+            { DECODER_DB_NAME: 'Custom; DROP DATABASE mysql' })
+        expect(error && error.message).to.match(/Unsafe MariaDB database name/)
+        expect(stubs.dockerService.stopContainer.called).to.equal(false)
+        expect(issuedArgs(stubs).some(a => a.includes('DROP DATABASE'))).to.equal(false)
+    })
+}
+
+// Register the freshness and dump cases: both read the configured name or refuse it.
+function registerFreshnessAndDumpCases() {
+    it('samples freshness from the configured database', async function () {
+        const stubs = stubsWithConfig({ INDEXER_DB_NAME: 'CustomIndexer' })
+        stubs.execFile = sinon.stub().resolves({ stdout: '1\n' })
+        const bs = loadBootstrapService(stubs)
+        const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+        expect(result).to.equal('populated')
+        const args = issuedArgs(stubs)
+        expect(args.some(a => a.includes('CustomIndexer'))).to.equal(true)
+        expect(args.some(a => a.includes(DEFAULT_NAME))).to.equal(false)
+    })
+
+    it('samples freshness from the derived default when the configured name is blank', async function () {
+        const stubs = stubsWithConfig({ INDEXER_DB_NAME: '  ' })
+        stubs.execFile = sinon.stub().resolves({ stdout: '1\n' })
+        const bs = loadBootstrapService(stubs)
+        await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+        expect(issuedArgs(stubs).some(a => a.includes(DEFAULT_NAME))).to.equal(true)
+    })
+
+    it('reports freshness unknown, probing nothing, when the configured name is unsafe', async function () {
+        const stubs = stubsWithConfig({ DECODER_DB_NAME: 'Custom; DROP DATABASE mysql' })
+        stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
+        const bs = loadBootstrapService(stubs)
+        const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
+        expect(result).to.equal('unknown')
+        expect(stubs.execFile.called).to.equal(false)
+    })
+
+    it('dumps the configured database when publishing a bootstrap', async function () {
+        const stubs = await dumpWithConfig({ DECODER_DB_NAME: 'CustomDecoder' })
+        const [, dumpArgs] = stubs.spawn.firstCall.args
+        expect(dumpArgs).to.include('mariadb-dump')
+        expect(dumpArgs[dumpArgs.length - 1]).to.equal('CustomDecoder')
+        expect(issuedArgs(stubs).some(a => a.includes(DEFAULT_NAME))).to.equal(false)
+    })
+}
+
 describe('BootstrapService', function () {
     beforeEach(saveRequireSignedBootstrapSetting)
     afterEach(restoreRequireSignedBootstrapSetting)
 
     describe('operator-overridden database names', function () {
-        it('restores into the configured decoder database, never the derived default', async function () {
-            const { stubs, error } = await restoreWithConfig(XChainService.XCHAIN_DECODER, { DECODER_DB_NAME: 'CustomDecoder' })
-            expect(error).to.equal(null)
-            const args = issuedArgs(stubs)
-            expect(args.some(a => a.includes('DROP DATABASE IF EXISTS CustomDecoder'))).to.equal(true)
-            expect(args).to.include('CustomDecoder')
-            expect(args.some(a => a.includes(DEFAULT_NAME))).to.equal(false)
-        })
-
-        it('restores into the configured indexer database', async function () {
-            const { stubs, error } = await restoreWithConfig(XChainService.XCHAIN_INDEXER,
-                { DECODER_DB_NAME: 'CustomDecoder', INDEXER_DB_NAME: 'CustomIndexer' })
-            expect(error).to.equal(null)
-            const args = issuedArgs(stubs)
-            expect(args.some(a => a.includes('DROP DATABASE IF EXISTS CustomIndexer'))).to.equal(true)
-            expect(args.some(a => a.includes('CustomDecoder') || a.includes(DEFAULT_NAME))).to.equal(false)
-        })
-
-        it('refuses an unsafe configured name before stopping the service or dropping anything', async function () {
-            const { stubs, error } = await restoreWithConfig(XChainService.XCHAIN_DECODER,
-                { DECODER_DB_NAME: 'Custom; DROP DATABASE mysql' })
-            expect(error && error.message).to.match(/Unsafe MariaDB database name/)
-            expect(stubs.dockerService.stopContainer.called).to.equal(false)
-            expect(issuedArgs(stubs).some(a => a.includes('DROP DATABASE'))).to.equal(false)
-        })
-
-        it('samples freshness from the configured database', async function () {
-            const stubs = stubsWithConfig({ INDEXER_DB_NAME: 'CustomIndexer' })
-            stubs.execFile = sinon.stub().resolves({ stdout: '1\n' })
-            const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
-            expect(result).to.equal('populated')
-            const args = issuedArgs(stubs)
-            expect(args.some(a => a.includes('CustomIndexer'))).to.equal(true)
-            expect(args.some(a => a.includes(DEFAULT_NAME))).to.equal(false)
-        })
-
-        it('samples freshness from the derived default when the configured name is blank', async function () {
-            const stubs = stubsWithConfig({ INDEXER_DB_NAME: '  ' })
-            stubs.execFile = sinon.stub().resolves({ stdout: '1\n' })
-            const bs = loadBootstrapService(stubs)
-            await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
-            expect(issuedArgs(stubs).some(a => a.includes(DEFAULT_NAME))).to.equal(true)
-        })
-
-        it('reports freshness unknown, probing nothing, when the configured name is unsafe', async function () {
-            const stubs = stubsWithConfig({ DECODER_DB_NAME: 'Custom; DROP DATABASE mysql' })
-            stubs.execFile = sinon.stub().resolves({ stdout: '0\n' })
-            const bs = loadBootstrapService(stubs)
-            const result = await bs.mariaDbModuleFreshness(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-            expect(result).to.equal('unknown')
-            expect(stubs.execFile.called).to.equal(false)
-        })
-
-        it('dumps the configured database when publishing a bootstrap', async function () {
-            const stubs = await dumpWithConfig({ DECODER_DB_NAME: 'CustomDecoder' })
-            const [, dumpArgs] = stubs.spawn.firstCall.args
-            expect(dumpArgs).to.include('mariadb-dump')
-            expect(dumpArgs[dumpArgs.length - 1]).to.equal('CustomDecoder')
-            expect(issuedArgs(stubs).some(a => a.includes(DEFAULT_NAME))).to.equal(false)
-        })
+        registerRestoreCases()
+        registerFreshnessAndDumpCases()
     })
 })
