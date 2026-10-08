@@ -267,3 +267,63 @@ describe('moduleOperations', function () {
         })
     })
 })
+
+// filterCommandParameters leaves the hub and sync out of `all`, so a full
+// teardown with --include-shared adds them itself, hub last, and never asks
+// for the database, which uninstallModule refuses.
+function registerFullTeardownTests() {
+    const ALL_SHAPE = () => ({ '': { '': ['xchain-explorer'] }, bitcoin: { mainnet: ['xchain-encoder'] } })
+    const called = (stubs) => stubs.uninstallModule.getCalls().map(c => c.args[2])
+
+    it('removes the explorer, then sync, then the hub on an all teardown, and keeps the database', async function () {
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        const result = await ops.uninstallModules(ALL_SHAPE(), true, { all: true })
+        expect(called(stubs)).to.deep.equal(['xchain-encoder', 'xchain-explorer', 'xchain-sync', 'xchain-hub'])
+        const db = result.skipped.find(s => s.module === 'database')
+        expect(db, 'the database must be reported as kept').to.exist
+        expect(db.reason).to.contain('removed manually')
+    })
+
+    it('keeps the hub and sync on an all teardown while another chain is still installed', async function () {
+        const stubs = makeStubs()
+        stubs.db.getAllModuleContainers.resolves([
+            { module: 'xchain-indexer', coin: 'dogecoin', network: 'mainnet', container_id: 'c1' }
+        ])
+        const ops = loadOperations(stubs)
+        const result = await ops.uninstallModules(ALL_SHAPE(), true, { all: true })
+        expect(called(stubs)).to.deep.equal(['xchain-encoder'])
+        for (const m of ['xchain-hub', 'xchain-sync']) {
+            const kept = result.skipped.find(s => s.module === m)
+            expect(kept, `${m} must be reported as kept`).to.exist
+            expect(kept.reason).to.contain('dogecoin mainnet')
+        }
+    })
+
+    it('adds neither the hub nor sync without --include-shared or outside all', async function () {
+        for (const [includeShared, opts] of [[false, { all: true }], [true, {}]]) {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            await ops.uninstallModules(ALL_SHAPE(), includeShared, opts)
+            expect(called(stubs)).to.not.include('xchain-hub')
+            expect(called(stubs)).to.not.include('xchain-sync')
+        }
+    })
+
+    it('reaches the hub and sync from the real all expansion', async function () {
+        const { filterCommandParameters } = requireFromUnit('../../src/services/config_service/filters.js')
+        const stubs = makeStubs()
+        const ops = loadOperations(stubs)
+        await ops.uninstallModules(filterCommandParameters(null, 'all', 'bitcoin', 'mainnet'), true, { all: true })
+        expect(called(stubs).slice(-3)).to.deep.equal(['xchain-explorer', 'xchain-sync', 'xchain-hub'])
+        expect(called(stubs)).to.not.include('database')
+    })
+}
+
+describe('moduleOperations', function () {
+    registerLifecycleHooks(() => {})
+
+    describe('uninstallModules(): all with --include-shared', function () {
+        registerFullTeardownTests()
+    })
+})

@@ -53,7 +53,7 @@ for p in "$BTC_NODE_PORT" "$LTC_NODE_PORT" "$DOGE_NODE_PORT"; do
 done
 cd "${ATTEST_MIRROR_E2E_DIR:-$root/xchain-e2e-test}"
 printf "=== leg %s start %s node %s stack xca7%s venue-base %s file %s extra-env [%s]\n" "$tag" "$(date -u +%FT%TZ)" "$(node -v)" "$stack" "$venue_base" "$leg" "$*"
-env "$@" npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js "$leg" 2>&1 | node -e 'const rl=require("readline").createInterface({input:process.stdin});rl.on("line",l=>process.stdout.write(new Date().toISOString().slice(11,19)+" "+l+"\n"))'
+env "$@" npx mocha --timeout 0 --exit --require ./test/initial_check.test.js "$leg" 2>&1 | node -e 'const rl=require("readline").createInterface({input:process.stdin});rl.on("line",l=>process.stdout.write(new Date().toISOString().slice(11,19)+" "+l+"\n"))'
 rc=${PIPESTATUS[0]}
 printf "=== leg %s exit=%s end %s\n" "$tag" "$rc" "$(date -u +%FT%TZ)"
 exit "$rc"
