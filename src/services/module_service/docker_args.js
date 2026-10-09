@@ -20,6 +20,7 @@ let path = require('path')
 let { XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD } = require('../../config')
 let { getUtxoTrackerVolumeName } = require('../config_service')
 let { getPublishedHostPorts } = require('../docker_service')
+const { healthcheckCommand } = require('./healthcheck_command')
 const requiredGetUtxoTrackerVolumeName = getUtxoTrackerVolumeName
 const requiredGetPublishedHostPorts = getPublishedHostPorts
 let config = require('../../config');
@@ -265,7 +266,7 @@ function buildHealthcheckArgs(module, environmentVariables) {
         return []
     }
 
-    let cmd
+    let url, postData
     if (hc.probe === 'jsonrpc_ping' || hc.probe === 'jsonrpc_health') {
         // JSON-RPC POST; hub, explorer, and the regtest miner all speak this protocol.
         // `ping` is bare liveness (a SELECT 1, or "the port answers"); `health` is the
@@ -274,15 +275,15 @@ function buildHealthcheckArgs(module, environmentVariables) {
         // dead port. Pick per descriptor: a service whose ping already carries the
         // real verdict (explorer) stays on ping.
         const method = hc.probe === 'jsonrpc_health' ? 'health' : 'ping'
-        cmd = `wget -T ${parseInt(hc.timeout, 10)} -qO- --post-data='{"jsonrpc":"2.0","method":"${method}","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
+        url = `http://localhost:${port}/`
+        postData = `{"jsonrpc":"2.0","method":"${method}","id":1}`
     } else {
         // Default: plain HTTP GET on /status; descriptors override via `path`
         // where /status is too expensive to double as a liveness probe (sync).
-        cmd = `wget -T ${parseInt(hc.timeout, 10)} -qO- http://localhost:${port}${hc.path || '/status'} || exit 1`
+        url = `http://localhost:${port}${hc.path || '/status'}`
     }
-
     return [
-        '--health-cmd',      cmd,
+        '--health-cmd',      healthcheckCommand({ url, postData, timeoutSeconds: parseInt(hc.timeout, 10) }),
         '--health-interval', hc.interval,
         '--health-timeout',  hc.timeout,
         '--health-retries',  String(hc.retries),
