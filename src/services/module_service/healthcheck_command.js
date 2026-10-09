@@ -24,7 +24,7 @@ function healthcheckCommand({ url, postData, timeoutSeconds }) {
     const postOptions = postData === undefined
         ? ''
         : ` --post-data=${shellQuote(postData)} --header='Content-Type: application/json'`
-    const diagnostic = `const url=process.argv[1],body=process.argv[2],options={signal:AbortSignal.timeout(${timeoutSeconds * 1000})};if(body!==undefined){options.method="POST";options.headers={"Content-Type":"application/json"};options.body=body}fetch(url,options).then(async response=>{const text=(await response.text()).slice(0,1500);console.log("health probe failed: HTTP "+response.status+" "+text)}).catch(error=>console.log("health probe failed: "+error.message))`
+    const diagnostic = `const url=process.argv[1],body=process.argv[2],options={signal:AbortSignal.timeout(${timeoutSeconds * 1000})};if(body!==undefined){options.method="POST";options.headers={"Content-Type":"application/json"};options.body=body}fetch(url,options).then(async response=>{const text=(await response.text()).slice(0,1500);process.stdout.write("health probe failed: HTTP "+response.status+" "+text+"\\n")}).catch(error=>process.stdout.write("health probe failed: "+error.message+"\\n"))`
     const diagnosticArgs = ` ${shellQuote(url)}`
         + (postData === undefined ? '' : ` ${shellQuote(postData)}`)
     return `wget -T ${timeoutSeconds} -qO-${postOptions} ${url} || { node -e ${shellQuote(diagnostic)}${diagnosticArgs}; exit 1; }`
