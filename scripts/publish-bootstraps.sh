@@ -395,8 +395,18 @@ for c in "${SELECTED[@]}"; do
       log "  LOCKED: $c - another xchain-node command still held the command lock after ${LOCK_WAIT_MIN}m. Nothing published; the previous archive stays newest."
       SUMMARY+=("$c: LOCKED")
     elif grep -q 'Refusing to create a bootstrap' "$create_log"; then
-      log "  REFUSED: $c source is not known-good (reasons above). Nothing published; the previous archive stays newest."
-      SUMMARY+=("$c: SOURCE-UNHEALTHY")
+      refusal_reason="$(awk '
+        seen && sub(/^[[:space:]]*-[[:space:]]*/, "") {
+          reasons = reasons (reasons ? "; " : "") $0
+          next
+        }
+        seen && reasons { exit }
+        /Refusing to create a bootstrap/ { seen = 1 }
+        END { print reasons }
+      ' "$create_log")"
+      [ -n "$refusal_reason" ] || refusal_reason="reason unavailable; inspect create output above"
+      log "  REFUSED: $c source is not known-good ($refusal_reason). Nothing published; the previous archive stays newest."
+      SUMMARY+=("$c: SOURCE-UNHEALTHY ($refusal_reason)")
     else
       log "  create FAILED for $c"
       SUMMARY+=("$c: CREATE-FAIL")
