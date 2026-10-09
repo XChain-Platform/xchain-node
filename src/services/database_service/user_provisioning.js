@@ -171,14 +171,15 @@ async function grantDrillDatabaseAccess(run, module, network, mariadbUser) {
 // (db.js's _checkpointSource only honours a checkpoint entry whose
 // host/port/user/pass exactly match the indexer DB, so the mirror
 // writer has no separate credential to hold a separate grant).
-// Escaped underscores, so the pattern matches nothing but a
-// `_HubMirror` schema; gated to non-mainnet like DrillB, since
-// self-sync is currently an opt-in for deployments with no
-// externally-maintained hub schema colocated with the explorer.
-async function grantHubMirrorDatabaseAccess(run, module, network, mariadbUser) {
-    if (module === XChainService.XCHAIN_INDEXER && network && network !== "mainnet") {
+// Non-mainnet indexers retain the escaped wildcard used by self-sync
+// deployments. Mainnet indexers receive only their exact mirror schema.
+async function grantHubMirrorDatabaseAccess(run, module, network, databaseName, mariadbUser) {
+    if (module === XChainService.XCHAIN_INDEXER && network) {
+        const grantDatabase = network === "mainnet"
+            ? "`" + databaseName.replaceAll("_", "\\_") + "\\_HubMirror`"
+            : "`XChain\\_%\\_HubMirror`"
         await run(
-            "GRANT ALL PRIVILEGES ON `XChain\\_%\\_HubMirror`.* TO " + mariadbUser
+            "GRANT ALL PRIVILEGES ON " + grantDatabase + ".* TO " + mariadbUser
         )
         await run("FLUSH PRIVILEGES")
         logger.info(redactSecrets("Checkpoint hub-mirror database permissions granted to " + mariadbUser + "!"))
@@ -190,7 +191,7 @@ async function provisionDatabaseUser(run, module, network, databaseName, mariadb
     await grantHubTestDatabaseAccess(run, module, mariadbUser)
     await grantReplicationStatusAccess(run, module, mariadbUser)
     await grantDrillDatabaseAccess(run, module, network, mariadbUser)
-    await grantHubMirrorDatabaseAccess(run, module, network, mariadbUser)
+    await grantHubMirrorDatabaseAccess(run, module, network, databaseName, mariadbUser)
 }
 
 async function addUserPasswordToDatabase(module, coin, network, databaseName, user, userPassword, inDocker = true) {

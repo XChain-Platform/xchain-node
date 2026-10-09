@@ -129,6 +129,44 @@ describe('DatabaseService', function () {
             expect(executedCommands.find(c => c && c.includes('DrillB')), 'no wildcard grant on mainnet').to.not.exist;
         });
 
+        it('grants a MAINNET indexer only its own HubMirror database by exact name', async function () {
+            const stubs = makeStubs()
+            const executedCommands = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executedCommands.push(sql)
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' }
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' }
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs)
+            await ds.addUserPasswordToDatabase(
+                'xchain-indexer', 'bitcoin', 'mainnet',
+                'XChain_BTC_Mainnet_Indexer', 'xchain_indexer_bitcoin_mainnet', 'test-pass'
+            )
+            const grants = executedCommands.filter(c => c && c.includes('HubMirror'))
+            expect(grants).to.deep.equal([
+                "GRANT ALL PRIVILEGES ON `XChain\\_BTC\\_Mainnet\\_Indexer\\_HubMirror`.* TO 'xchain_indexer_bitcoin_mainnet'@'%';\n"
+            ])
+        })
+
+        it('keeps the HubMirror wildcard off a MAINNET indexer', async function () {
+            const stubs = makeStubs()
+            const executedCommands = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                executedCommands.push(sql)
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '0\n' }
+                if (sql.startsWith('SHOW GRANTS')) return { stdout: 'GRANT USAGE ON *.* TO user\n' }
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs)
+            await ds.addUserPasswordToDatabase(
+                'xchain-indexer', 'bitcoin', 'mainnet',
+                'XChain_BTC_Mainnet_Indexer', 'xchain_indexer_bitcoin_mainnet', 'test-pass'
+            )
+            const wildcardGrant = executedCommands.find(c => c && c.includes('XChain\\_%\\_HubMirror'))
+            expect(wildcardGrant).to.not.exist
+        })
+
         it('grants SLAVE MONITOR to indexer and decoder accounts, on MAINNET too', async function () {
             // Unlike the DrillB grant above, this one is NOT withheld from mainnet: a
             // silently stalled replica does the most damage there, and the privilege is a
