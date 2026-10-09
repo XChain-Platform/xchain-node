@@ -75,7 +75,9 @@ describe('attest-mirror wait-indexer-schema.js', function () {
         expect(await ready.schemaReady(config({ fetchImpl: invalidJson, connect }))).to.equal(false)
         expect(connections).to.equal(0)
     })
+})
 
+describe('attest-mirror wait-indexer-schema.js polling', function () {
     it('polls until schemaReady changes from false to true', async function () {
         let polls = 0
         let sleeps = 0
