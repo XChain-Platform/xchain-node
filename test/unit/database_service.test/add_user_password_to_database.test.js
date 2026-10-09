@@ -148,6 +148,12 @@ describe('DatabaseService', function () {
                 "GRANT ALL PRIVILEGES ON `XChain\\_BTC\\_Mainnet\\_Indexer\\_HubMirror`.* TO 'xchain_indexer_bitcoin_mainnet'@'%';\n"
             ])
         })
+        })
+})
+
+describe('DatabaseService', function () {
+
+        describe('addUserPasswordToDatabase()', function () {
 
         it('keeps the HubMirror wildcard off a MAINNET indexer', async function () {
             const stubs = makeStubs()

@@ -163,14 +163,8 @@ async function grantDrillDatabaseAccess(run, module, network, mariadbUser) {
     }
 }
 
-// The self-synced checkpoint mirror uses the same shape:
-// HubService.buildCheckpointConfig names the schema
-// `<INDEXER_DB_NAME>_HubMirror`, and the explorer's own
-// HubMirrorSyncManager/HubMirrorPool.ensureDatabase() runs `CREATE
-// DATABASE IF NOT EXISTS` on it under THIS SAME indexer account
-// (db.js's _checkpointSource only honours a checkpoint entry whose
-// host/port/user/pass exactly match the indexer DB, so the mirror
-// writer has no separate credential to hold a separate grant).
+// The checkpoint mirror writer shares the indexer account and creates
+// `<INDEXER_DB_NAME>_HubMirror` itself, so that account needs schema access.
 // Non-mainnet indexers retain the escaped wildcard used by self-sync
 // deployments. Mainnet indexers receive only their exact mirror schema.
 async function grantHubMirrorDatabaseAccess(run, module, network, databaseName, mariadbUser) {
