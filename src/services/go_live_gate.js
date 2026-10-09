@@ -35,10 +35,9 @@ const {
 // when a deploy asks, not values taken when this file loads.
 const config = require('../config')
 
-// An un-armed mainnet activation carries one of two sentinels: 9999999999 (the
-// year-2286 time sentinel) or 999999999 (the height sentinel). Shipping either
-// to a live mainnet silently leaves the gated behavior off for good. The gate
-// reads them only where an activation VALUE lives (an addChange() mainnet
+// An un-armed mainnet activation carries 9999999999 (the year-2286 time
+// sentinel), 999999999 (the height sentinel), or the UNARMED identifier. The
+// gate reads them only where an activation VALUE lives (an addChange() mainnet
 // argument, a `mainnet:` map entry, or a *MAINNET* constant), never as a bare
 // substring: 999999999 is also an ordinary "no upper bound" in query code.
 //
@@ -46,7 +45,7 @@ const config = require('../config')
 // placeholder for the un-decided flag days until the operator ruled it ARMED
 // on 2026-09-09 (CROSS_CHAIN_ROYALTY's mainnet instant); reading it
 // as un-armed was what made this gate refuse a correctly armed tree.
-const UNARMED_SENTINELS  = ['9999999999', '999999999']
+const UNARMED_SENTINELS  = ['9999999999', '999999999', 'UNARMED']
 const FLAG_DAY_PLACEHOLDER = UNARMED_SENTINELS[0]
 
 // Services whose mainnet deployment accepts writes or feeds consensus, and
@@ -86,10 +85,10 @@ function hasUnarmedMainnetActivation(source) {
     const isSentinel = (v) => UNARMED_SENTINELS.includes(String(v).trim())
 
     const constants = {}
-    for (const m of code.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(\d+)\b/g)) constants[m[1]] = m[2]
+    for (const m of code.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(\d+|UNARMED)\b/g)) constants[m[1]] = m[2]
     const resolves = (arg) => {
         const a = arg.trim()
-        if (/^\d+$/.test(a)) return isSentinel(a)
+        if (isSentinel(a)) return true
         return Object.prototype.hasOwnProperty.call(constants, a) && isSentinel(constants[a])
     }
 
@@ -97,7 +96,7 @@ function hasUnarmedMainnetActivation(source) {
         const args = m[1].split(',')
         if ((args[2] !== undefined && resolves(args[2])) || (args[5] !== undefined && resolves(args[5]))) return true
     }
-    for (const m of code.matchAll(/(?:\bmainnet\b|['"][A-Za-z]+:mainnet['"])\s*:\s*(\d+)\b/g)) {
+    for (const m of code.matchAll(/(?:\bmainnet\b|['"][A-Za-z]+:mainnet['"])\s*:\s*(\d+|UNARMED)\b/g)) {
         if (isSentinel(m[1])) return true
     }
     for (const [name, value] of Object.entries(constants)) {
