@@ -188,6 +188,17 @@ describe('GoLiveGate', () => {
             expect(findFlagDayPlaceholders(dir)).to.deep.equal([path.join('src', 'deep', 'activation.js')])
         })
 
+        const unarmedIdentifierCases = [
+            ['mainnet map entry', 'const A_ACTIVATION = { mainnet: UNARMED, testnet: 0 }'],
+            ['MAINNET constant', 'const A_MAINNET_HEIGHT = UNARMED']
+        ]
+        for (const [label, source] of unarmedIdentifierCases) {
+            it(`finds an UNARMED identifier in a ${label}`, () => {
+                const dir = makeModuleDir({ 'src/activation.js': source })
+                expect(findFlagDayPlaceholders(dir)).to.deep.equal([path.join('src', 'activation.js')])
+            })
+        }
+
         // The gate reads activation VALUES, not substrings: the sentinel is only
         // a violation where a mainnet instant or height actually lives.
         describe('hasUnarmedMainnetActivation', () => {
