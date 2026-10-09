@@ -201,6 +201,8 @@ describe('GoLiveGate', () => {
                 ['map mainnet UNARMED identifier',       'const A_ACTIVATION = { mainnet: UNARMED, testnet: 0 }',                    true],
                 ['MAINNET constant UNARMED identifier',  'const A_MAINNET_HEIGHT = UNARMED',                                        true],
                 ['1798761600 is an ARMED instant',       "this.addChange('CROSS_CHAIN_ROYALTY','0.2.0',1798761600,0,0,0,0,0);",  false],
+                ['bare UNARMED addChange argument',       "this.addChange('A','0.2.0',UNARMED,0,0,0,0,0);",                        false],
+                ['aliased UNARMED addChange argument',    "const A_TIME = UNARMED;\nthis.addChange('A','0.2.0',A_TIME,0,0,0,0,0);", false],
                 ['sentinel in the testnet position',     "this.addChange('A','0.2.0',0,9999999999,0,0,0,0);",                      false],
                 ['sentinel in a testnet map entry',      'const A = { mainnet: 0, testnet: 9999999999 }',                            false],
                 ['UNARMED in a testnet map entry',       'const A = { mainnet: 0, testnet: UNARMED }',                               false],
