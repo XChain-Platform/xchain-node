@@ -93,14 +93,16 @@ function createDatabaseRunArgs(containerPrefix, environmentVariables, coin, netw
     // leaving them judging a DB that is still starting.
     runArgs.push('--health-interval', '15s', '--health-timeout', '5s', '--health-retries', '5', '--health-start-period', DEPENDENCY_HEALTH_START_PERIOD)
     runArgs.push('--network', getDockerNetwork(coin, network))
-    const dbHostPort = environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
+    const dbHostPortOverride = config.hostEnv().XCHAIN_NODE_DB_HOST_PORT
+    const dbHostPort = dbHostPortOverride || environmentVariables["DB_PORT"] || XCHAIN_NODE_DB_DEFAULT_PORT
     // Every docker run port in this file is validated before reaching
     // execFile (see buildAndUp's portArgs loop). No shell-injection risk
     // applies either way (house execFile-
-    // array convention), but an out-of-contract DB_PORT should fail loud
+    // array convention), but an out-of-contract host port should fail loud
     // here instead of surfacing as a cryptic docker argument-parse error.
     if (!validatePort(dbHostPort)) {
-        throw new Error("Invalid port value in configuration: DB_PORT=" + dbHostPort)
+        const source = dbHostPortOverride ? 'XCHAIN_NODE_DB_HOST_PORT' : 'DB_PORT'
+        throw new Error("Invalid port value in configuration: " + source + "=" + dbHostPort)
     }
     runArgs.push('-p', `${XCHAIN_NODE_DB_HOST}:${dbHostPort}:3306`)
     // Optional: pin the MariaDB datadir to a host path (e.g. a fast NVMe
