@@ -103,6 +103,11 @@ describe('commandLock', () => {
         const holder = JSON.parse(fs.readFileSync(getLockFilePath(), 'utf8'))
         assert.strictEqual(holder.pid, process.pid + 1, 'successor lock must survive our release')
     })
+})
+
+describe('commandLock handoff', () => {
+    beforeEach(prepareCommandLock)
+    afterEach(cleanCommandLock)
 
     it('hands a live lock to a child without removing the lock path', () => {
         const release = acquireCommandLock({ command: 'update (self-update)' })
