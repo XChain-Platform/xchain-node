@@ -30,7 +30,7 @@ const fs    = require('fs')
 const path  = require('path')
 const axios = require('axios')
 
-const { githubApiHeaders, githubRateLimitError } = require('../utils/github_api')
+const { githubApiHeaders, githubRateLimitError, GITHUB_API_TIMEOUT_MS, GITHUB_DOWNLOAD_TIMEOUT_MS } = require('../utils/github_api')
 const { verifyManifestForTag } = require('./release_signature_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -113,7 +113,7 @@ async function fetchManifestAtTag(tag) {
     const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/contents/src/${MANIFEST_FILE}`
     let result
     try {
-        result = await axios.get(url, { headers: githubApiHeaders(), params: { ref: tag } })
+        result = await axios.get(url, { headers: githubApiHeaders(), params: { ref: tag }, timeout: GITHUB_API_TIMEOUT_MS })
     } catch (error) {
         const rateLimited = githubRateLimitError(error)
         if (rateLimited) throw rateLimited
@@ -155,7 +155,7 @@ async function fetchReleaseAsset(tag, assetName) {
     const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/releases/tags/${tag}`
     let release
     try {
-        release = await axios.get(url, { headers: githubApiHeaders() })
+        release = await axios.get(url, { headers: githubApiHeaders(), timeout: GITHUB_API_TIMEOUT_MS })
     } catch (error) {
         const rateLimited = githubRateLimitError(error)
         if (rateLimited) throw rateLimited
@@ -176,6 +176,7 @@ async function fetchReleaseAsset(tag, assetName) {
         first = await axios.get(asset.url, {
             headers: { ...githubApiHeaders(), Accept: 'application/octet-stream' },
             responseType: 'arraybuffer',
+            timeout: GITHUB_API_TIMEOUT_MS,
             maxRedirects: 0,
             validateStatus: status => (status >= 200 && status < 300) || [301, 302, 307, 308].includes(status)
         })
@@ -190,6 +191,7 @@ async function fetchReleaseAsset(tag, assetName) {
         if (!location) throw new Error(`Release asset ${assetName} redirected without a location header`)
         const followed = await axios.get(location, {
             responseType: 'arraybuffer',
+            timeout: GITHUB_DOWNLOAD_TIMEOUT_MS,
             headers: { 'User-Agent': 'GitHubDownloader' }
         })
         return Buffer.from(followed.data)
@@ -221,7 +223,7 @@ async function resolveLatestReleaseTag() {
     const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/releases/latest`
     let result
     try {
-        result = await axios.get(url, { headers: githubApiHeaders() })
+        result = await axios.get(url, { headers: githubApiHeaders(), timeout: GITHUB_API_TIMEOUT_MS })
     } catch (error) {
         const rateLimited = githubRateLimitError(error)
         if (rateLimited) throw rateLimited

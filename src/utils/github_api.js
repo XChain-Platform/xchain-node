@@ -23,6 +23,12 @@
 
 const config = require('../config');
 
+// Bound every GitHub request (axios defaults to none) so a stalled route rejects and advisory
+// callers degrade instead of hanging; it caps the wait for headers and each idle gap, not a body.
+const GITHUB_API_TIMEOUT_MS = 20000;
+// Release assets come from object storage behind a redirect; give them the bootstrap download's bound.
+const GITHUB_DOWNLOAD_TIMEOUT_MS = 60000;
+
 /**
  * Headers for an api.github.com call.
  *
@@ -57,4 +63,4 @@ function githubRateLimitError(error) {
     return new Error(`GitHub API rate limit exhausted for this IP (resets ${resetAt}); set GITHUB_TOKEN to raise the limit`);
 }
 
-module.exports = { githubApiHeaders, githubRateLimitError };
+module.exports = { githubApiHeaders, githubRateLimitError, GITHUB_API_TIMEOUT_MS, GITHUB_DOWNLOAD_TIMEOUT_MS };

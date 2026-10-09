@@ -192,17 +192,34 @@ async function restoreTrackerVolume({ containerId, innerArchive, volumeName, wor
     }
 }
 
+async function startMariaService(context, module) {
+    if (!context.serviceContainerId) return
+    logger.info(`Starting ${module} container...`)
+    await startContainer(context.serviceContainerId)
+}
+
 async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     const context = await prepareMariaRestore(coin, network, module, fileName)
     try {
-        return await restoreMariaDatabase(context)
-    } finally {
-        // Always restart the service so a failed restore doesn't leave it down.
-        if (context.serviceContainerId) {
-            logger.info(`Starting ${module} container...`)
-            await startContainer(context.serviceContainerId)
+        await restoreMariaDatabase(context)
+    } catch (err) {
+        // Restart after a failure only while the database is untouched. Past the
+        // DROP it is gone or partly imported, and the service would resume over
+        // it, so it stays stopped, as restoreTrackerVolume leaves the tracker.
+        if (err.postWipe) {
+            logger.info(
+                `[fatal] ${module} bootstrap restore failed AFTER database ${context.dbName} was dropped;\n` +
+                `it is only partly re-imported and the container has been left STOPPED rather than\n` +
+                `restarted over it. Re-run the restore with XCHAIN_NODE_FORCE_BOOTSTRAP=1, or drop the\n` +
+                `database and start the service to resync from block 0.`
+            )
+            throw err
         }
+        await startMariaService(context, module)
+        throw err
     }
+    await startMariaService(context, module)
+    return true
 }
 
 async function prepareMariaRestore(coin, network, module, fileName) {
@@ -258,7 +275,26 @@ async function prepareMariaRestore(coin, network, module, fileName) {
     return { dbContainerId, dbName, externalCfg, innerArchive, module, rootPassword, serviceContainerId, workDir }
 }
 
-async function restoreMariaDatabase({ dbContainerId, dbName, externalCfg, innerArchive, rootPassword, workDir }) {
+async function restoreMariaDatabase(context) {
+    let progress
+    try {
+        await recreateMariaDatabase(context)
+        progress = await importMariaDump(context)
+    } catch (err) {
+        // Everything above runs from the DROP on (a failed DROP call may still
+        // have dropped), so the database is no longer the one the service had.
+        err.postWipe = true
+        throw err
+    }
+    progress.stop(`${context.dbName} restored`)
+
+    fs.rmSync(context.workDir, { recursive: true })
+    logger.info('Bootstrap restore complete')
+
+    return true
+}
+
+async function recreateMariaDatabase({ dbContainerId, dbName, externalCfg, rootPassword }) {
     logger.info(`Recreating database ${dbName}...`)
     if (EXTERNAL_DB) {
         // Driver-based path: DROP and CREATE as separate statements (the
@@ -271,7 +307,11 @@ async function restoreMariaDatabase({ dbContainerId, dbName, externalCfg, innerA
             { env: mariadbEnv(rootPassword) }
         )
     }
+}
 
+// Streams the verified dump into the recreated database; returns the progress
+// bar for the caller to close once the import has exited clean.
+async function importMariaDump({ dbContainerId, dbName, externalCfg, innerArchive, rootPassword }) {
     const stats      = await fs.promises.stat(innerArchive)
     const totalBytes = stats.size
     const progress   = startProgress(`Restoring ${dbName}...`, totalBytes)
@@ -305,12 +345,7 @@ async function restoreMariaDatabase({ dbContainerId, dbName, externalCfg, innerA
             else reject(new Error(`mariadb restore exited with code ${code}`))
         })
     })
-    progress.stop(`${dbName} restored`)
-
-    fs.rmSync(workDir, { recursive: true })
-    logger.info('Bootstrap restore complete')
-
-    return true
+    return progress
 }
 
 module.exports = {

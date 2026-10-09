@@ -15,12 +15,12 @@
 const fs = require('fs')
 const path = require('path')
 
-const { EXTERNAL_DB } = require('../../config')
+const { EXTERNAL_DB, XChainService } = require('../../config')
 const { tableCountSql, tableExistsSql } = require('../../db/information_schema')
 const { appliedMigrationsSql } = require('../../db/migrations')
 const { migrationFiles } = require('../../utils/migration_files')
 const { getDockerContainerImageName } = require('../config_service')
-const { readMigrateCli, migrateCliPathFor } = require('../../utils/indexer_migrate_cli')
+const { readMigrateCli, migrateCliPathFor, migrateCliPathsFor, decoderStatusRows } = require('../../utils/indexer_migrate_cli')
 
 const SKIP_ENV     = 'XCHAIN_NODE_SKIP_MIGRATION_PRECONDITION'
 const LEDGER_TABLE = 'schema_migrations'
@@ -150,11 +150,11 @@ function pendingManualMigrations(dir, applied) {
  * every check, because the refusal's remedy runs on that build and not on the
  * source being deployed.
  */
-async function readRunningBuildMigrationStatus(container, deps = {}) {
+async function readRunningBuildMigrationStatus(container, deps = {}, module) {
     const refused = { supportsPerFile: false, rows: null }
     try {
         const cat = deps.getDockerContainerFileCat || require('../docker_service').getDockerContainerFileCat
-        const found = await readMigrateCli(cat, container)
+        const found = await readMigrateCli(cat, container, migrateCliPathsFor(module))
         if (!found) return { supportsPerFile: null, rows: null }
         if (!/(['"])--status\1/.test(found.source)) return refused
 
@@ -173,6 +173,11 @@ async function readRunningBuildMigrationStatus(container, deps = {}) {
             return refused
         }
         if (!status || Array.isArray(status) || typeof status !== 'object') return refused
+        // The decoder CLI lists names, not counted rows; its checks live beside its paths.
+        if (module === XChainService.XCHAIN_DECODER && Array.isArray(status.applied)) {
+            const rows = decoderStatusRows(status, found.source)
+            return rows ? { supportsPerFile: true, rows } : refused
+        }
         if (typeof status.database !== 'string' || status.database.length === 0) return refused
         if (!Array.isArray(status.migrations)) return refused
         for (const row of status.migrations) {
@@ -197,8 +202,8 @@ async function readRunningBuildMigrationStatus(container, deps = {}) {
 }
 
 /** Verify the running container's migrate CLI through its read-only status contract. */
-async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
-    return (await readRunningBuildMigrationStatus(container, deps)).supportsPerFile
+async function runningBuildSupportsPerFileMigrations(container, deps = {}, module) {
+    return (await readRunningBuildMigrationStatus(container, deps, module)).supportsPerFile
 }
 
 /**
@@ -316,6 +321,7 @@ async function readAppliedMigrations({ database, coin, network }, deps = {}) {
 
 function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
     const container = getDockerContainerImageName(module, coin, network)
+    const cliPath = migrateCliPathFor(container, migrateCliPathsFor(module))
     const files = missing.join(', ')
     const plural = missing.length > 1
 
@@ -343,7 +349,7 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
         instructions = (carried.length
             ? 'apply ' + (carried.length > 1 ? 'them' : 'it') +
               ' deliberately, with the writer quiesced, then re-run the update:\n' +
-              carried.map(f => '    docker exec -i ' + container + ' node ' + migrateCliPathFor(container) + ' --file ' + f).join('\n')
+              carried.map(f => '    docker exec -i ' + container + ' node ' + cliPath + ' --file ' + f).join('\n')
             : 'none of ' + (plural ? 'them' : 'it') + ' can be applied by the migrate CLI inside ' + container + '.') +
             notCarriedNote
     } else {
@@ -351,7 +357,7 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
             ? remedy.pendingManual
             : carried
         const source = carriedSet ? '' : ' (listed from the source being deployed; that build may differ)'
-        instructions = 'DO NOT run `node ' + migrateCliPathFor(container) + '` inside ' + container + '. ' +
+        instructions = 'DO NOT run `node ' + cliPath + '` inside ' + container + '. ' +
             (remedy.supportsPerFile === false
                 ? 'That container did not return a valid --status --json response, so --file support is not verified'
                 : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +

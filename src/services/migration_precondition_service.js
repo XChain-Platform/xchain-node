@@ -137,7 +137,7 @@ async function readRefusalRemedy(module, coin, network, applied, deps) {
         : readRunningBuildMigrationStatus)
     const listPending = deps.pendingManualMigrations || pendingManualMigrations
     try {
-        const status = await readStatus(container, deps)
+        const status = await readStatus(container, deps, module)
         const rows = status && Array.isArray(status.rows) ? status.rows : null
         return {
             supportsPerFile: status ? status.supportsPerFile : null,

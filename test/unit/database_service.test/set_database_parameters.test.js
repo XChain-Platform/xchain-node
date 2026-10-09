@@ -195,3 +195,32 @@ describe('DatabaseService', function () {
         })
         })
 })
+
+describe('DatabaseService', function () {
+
+        describe('setDatabaseParameters()', function () {
+
+        // The DrillB and HubMirror patterns span every chain, and their comments scope
+        // them to the indexer account. The decoder account the indexer reads is a
+        // different user, so it must not pick them up when the indexer is provisioned.
+        it('keeps the indexer-only pattern grants off the decoder account on a non-mainnet network', async function () {
+            const stubs = makeStubs()
+            stubs.getInstalledCoinsAndNetworks.resolves({ bitcoin: ['testnet'] })
+            const statements = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                statements.push(sql)
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '1\n' }
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs)
+            await ds.setDatabaseParameters()
+            const grants = statements.filter(s => /GRANT/.test(s))
+            const patternGrants = grants.filter(s => /DrillB|HubMirror/.test(s))
+            expect(patternGrants.some(s => /DrillB/.test(s) && /xchain_indexer_bitcoin_mainnet/.test(s))).to.be.true
+            expect(patternGrants.some(s => /HubMirror/.test(s) && /xchain_indexer_bitcoin_mainnet/.test(s))).to.be.true
+            expect(patternGrants.filter(s => /xchain_decoder_bitcoin_mainnet/.test(s))).to.deep.equal([])
+            expect(grants.some(s => /SLAVE MONITOR/.test(s) && /xchain_decoder_bitcoin_mainnet/.test(s))).to.be.true
+            expect(grants.some(s => /SLAVE MONITOR/.test(s) && /xchain_indexer_bitcoin_mainnet/.test(s))).to.be.true
+        })
+        })
+})

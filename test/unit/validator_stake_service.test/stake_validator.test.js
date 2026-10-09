@@ -27,6 +27,10 @@ describe('ValidatorStakeService', function () {
             expect(out).to.include('25000 XCHAIN is escrowed for as long as you stay staked')
             expect(out).to.include('cooldown of 1000 blocks (roughly 7 days)')
             expect(out).to.include('6 blocks it takes to leave the active set')
+            // The indexer starts both clocks at the UNSTAKE block, so the delay overlaps the cooldown.
+            expect(out).to.include('counted from the\n  block the UNSTAKE lands in')
+            expect(out).to.include('run inside the cooldown, not before it')
+            expect(out).to.not.include('on top of')
         })
 
         it('the post-broadcast summary takes the activation delay from the registry', async function () {

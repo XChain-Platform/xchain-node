@@ -51,11 +51,13 @@ function logStakeSteps(log, amount, pubkey, plan, timing, STAKE_TICK, paren) {
     // one that decides whether this XCHAIN is reachable next week.
     log('')
     log('  The ' + amount + ' ' + STAKE_TICK + ' is escrowed for as long as you stay staked. Standing down')
+    // Both exit clocks start at the UNSTAKE block, so the active-set delay runs inside the cooldown.
     log('  later frees it only after a cooldown of ' + timing.cooldownBlocks + ' blocks' +
-        paren(timing.cooldownFor) + ', on top of the')
-    log('  ' + timing.activationBlocks + ' blocks it takes to leave the active set. Do not stake ' +
-        STAKE_TICK + ' you may')
-    log('  need before then.')
+        paren(timing.cooldownFor) + ', counted from the')
+    log('  block the UNSTAKE lands in. The ' + timing.activationBlocks + ' blocks it takes to leave the active set')
+    log('  start at that same block and run inside the cooldown, not before it. Do not stake ' +
+        STAKE_TICK)
+    log('  you may need before then.')
     return steps
 }
 

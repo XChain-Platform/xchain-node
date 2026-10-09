@@ -104,7 +104,9 @@ function applyCoinDefaults(defaultValues, module, coin, network) {
         defaultValues['FEE_DESTINATION'] = feeDestination
         defaultValues[feeDestEnvName]    = feeDestination
     }
-    if (module === XChainService.XCHAIN_ENCODER || module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_UTXO_TRACKER) {
+    // The regtest miner reads its coin from this prefix (fee mode, dust floor), so a bare network would run every rail as bitcoin.
+    if (module === XChainService.XCHAIN_ENCODER || module === XChainService.XCHAIN_DECODER || module === XChainService.XCHAIN_UTXO_TRACKER ||
+        module === XChainService.XCHAIN_REGTEST_MINER) {
         defaultValues["NETWORK"] = coin + "-" + network
     }
     if (module === XChainService.XCHAIN_UTXO_TRACKER) {

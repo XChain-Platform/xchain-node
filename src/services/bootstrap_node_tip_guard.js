@@ -27,15 +27,20 @@
  * store and gives one of four verdicts:
  *
  *   ok             the node is at or past the archive; nothing to say
- *   behind-wait    the node is below the archive and the service waits out a
- *                  catching-up node: restore, and say what the wait means
- *   behind-refuse  the node is below the archive and the service does NOT
- *                  wait (an image older than that fix): refuse the
- *                  restore, the service syncs forward from its start height
- *                  as the node catches up, and the summary says how to take
- *                  the restore later
- *   unknown        the archive carries no height, or the node cannot be
- *                  asked: restore as before, one line says why
+ *   behind-wait    the node is below the archive, in initial block download,
+ *                  and the service waits that out: restore, and say what the
+ *                  wait means
+ *   behind-refuse  the node is below the archive and the service would read
+ *                  its lower tip as a reorg, either because its image does
+ *                  not wait (older than that fix) or because the node is not
+ *                  in initial block download (the decoder and tracker wait
+ *                  only then): refuse the restore, the service syncs forward
+ *                  from its start height as the node catches up, and the
+ *                  summary says how to take the restore later
+ *   unknown        the archive carries no height, its bootstrap.json claims
+ *                  another module, coin or network, or the node cannot be
+ *                  asked: restore as before (the restore's own signature and
+ *                  identity checks still decide), one line says why
  *
  * Whether the service waits is read from the service itself: an image with
  * the fix publishes `node_catching_up` on its status surface (null when not
@@ -54,6 +59,7 @@ const execFileAsync = promisify(execFile)
 
 const { XChainService, NODE_MODULE_NAME } = require('../config')
 const gate = require('./bootstrap_health_gate');
+const archiveMeta = require('./bootstrap_archive_meta');
 const config = require('../config');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -156,7 +162,17 @@ function evaluateNodeTipAgainstArchive({ archiveHeight, chainInfo, serviceWaits,
     const gap = archiveHeight - nodeHeight
     const ibd = chainInfo.initialblockdownload === true
     const position = `the coin node is at ${nodeHeight}${ibd ? ' (initial block download)' : ''}, ${gap} blocks below the archive's ${archiveHeight}`
-    if (serviceWaits) {
+    const later = `it now syncs forward from its start height as the node catches up. To take the restore later, wait for the node to pass ${archiveHeight} ` +
+                  `and re-run install with XCHAIN_NODE_FORCE_BOOTSTRAP=1, or pass --no-bootstrap to install to stop it trying`
+    if (!serviceWaits) {
+        return {
+            verdict: VERDICT.BEHIND_REFUSE, archiveHeight, nodeHeight, gap, ibd,
+            detail: `${position}, and this ${module} image does not wait out a catching-up node (it would read the node's lower tip as a reorg and halt); ${later}`
+        }
+    }
+    // The decoder and tracker wait only while the node reports initial block
+    // download; the indexer follows the decoder, so the node's flag is not its concern.
+    if (ibd || module === XChainService.XCHAIN_INDEXER) {
         return {
             verdict: VERDICT.BEHIND_WAIT, archiveHeight, nodeHeight, gap, ibd,
             detail: `${position}; the ${module} waits until the node passes ${archiveHeight} and then continues, which \`xchain-node ps\` shows as WAITING FOR NODE`
@@ -164,9 +180,7 @@ function evaluateNodeTipAgainstArchive({ archiveHeight, chainInfo, serviceWaits,
     }
     return {
         verdict: VERDICT.BEHIND_REFUSE, archiveHeight, nodeHeight, gap, ibd,
-        detail: `${position}, and this ${module} image does not wait out a catching-up node (it would read the node's lower tip as a reorg and halt); ` +
-                `it now syncs forward from its start height as the node catches up. To take the restore later, wait for the node to pass ${archiveHeight} ` +
-                `and re-run install with XCHAIN_NODE_FORCE_BOOTSTRAP=1, or pass --no-bootstrap to install to stop it trying`
+        detail: `${position}, and the node is not in initial block download, so the ${module} would read its lower tip as a rollback rather than wait; ${later}`
     }
 }
 
@@ -202,6 +216,43 @@ async function probeServiceCapability(module, coin, network, { runner = defaultR
     return null
 }
 
+// The archive's claimed end height, or a detail naming the target its claimed
+// identity contradicts. Both come from the unsigned bootstrap.json, so a
+// mismatch only ever stops the comparison; it never refuses or retires anything.
+async function readArchiveClaim(archivePath, target, deps) {
+    const meta = deps.readBootstrapArchiveMeta || archiveMeta.readBootstrapArchiveMeta
+    let parsed = null
+    try {
+        parsed = await meta(archivePath)
+    } catch { /* no metadata is "unknown", handled by the caller */ }
+    let mismatch = null
+    try {
+        const identity = (deps.compareArchiveIdentity || archiveMeta.compareArchiveIdentity)(parsed, target)
+        if (identity && identity.status === 'mismatch') {
+            const fields = identity.mismatches.map((m) => `${m.field} ${m.archive}`).join(', ')
+            mismatch = `the archive's bootstrap.json declares ${fields} (unverified), not this ${target.module} ${target.coin}/${target.network} restore, ` +
+                       `so its height is not compared with the coin node; the restore's signature and identity checks decide whether it is used`
+        }
+    } catch { /* an unreadable identity compares the height as before */ }
+    return { archiveHeight: parsed ? parsed.height : null, mismatch }
+}
+
+// Whether the service waits out this node. Asked only when the answer can
+// change the verdict: the indexer always passes, and a node out of initial
+// block download is refused whatever the image can do.
+async function readServiceWaits({ coin, network, module }, archiveHeight, chainInfo, deps) {
+    if (module === XChainService.XCHAIN_INDEXER || !Number.isInteger(archiveHeight) || !chainInfo) return true
+    if (chainInfo.blocks >= archiveHeight || chainInfo.initialblockdownload !== true) return true
+    const payload = await (deps.probeServiceCapability || probeServiceCapability)(module, coin, network, deps)
+    let version = null
+    if (!payload) {
+        try {
+            version = await (deps.getLocalModuleVersion || require('./version_service').getLocalModuleVersion)(module)
+        } catch { /* unknown version reads as "does not wait" */ }
+    }
+    return serviceWaitsOutCatchUp(module, { statusPayload: payload, version })
+}
+
 // The whole assessment for one restore, never throwing: reads the archive
 // height, asks the node, asks the service, compares, prints the verdict
 // (all but a refusal, which the caller prints once the archive is verified).
@@ -211,12 +262,11 @@ async function assessNodeTipForRestore({ coin, network, module, archivePath }, d
         logger.info('WARNING: XCHAIN_NODE_SKIP_NODE_TIP_GUARD is set: the archive height is NOT compared with the coin node tip.')
         return { verdict: VERDICT.SKIPPED, refuse: false, detail: 'node tip guard skipped by XCHAIN_NODE_SKIP_NODE_TIP_GUARD' }
     }
-    const meta = deps.readBootstrapArchiveMeta || require('./bootstrap_archive_meta').readBootstrapArchiveMeta
-    let archiveHeight = null
-    try {
-        const parsed = await meta(archivePath)
-        archiveHeight = parsed ? parsed.height : null
-    } catch { /* no metadata is "unknown", handled below */ }
+    const { archiveHeight, mismatch } = await readArchiveClaim(archivePath, { module, coin, network }, deps)
+    if (mismatch) {
+        logger.info(`Note: ${mismatch}.`)
+        return { verdict: VERDICT.UNKNOWN, refuse: false, detail: mismatch }
+    }
 
     let chainInfo = null
     let nodeProblem = null
@@ -228,18 +278,7 @@ async function assessNodeTipForRestore({ coin, network, module, archivePath }, d
         }
     }
 
-    let serviceWaits = true
-    if (Number.isInteger(archiveHeight) && chainInfo && chainInfo.blocks < archiveHeight && module !== XChainService.XCHAIN_INDEXER) {
-        const payload = await (deps.probeServiceCapability || probeServiceCapability)(module, coin, network, deps)
-        let version = null
-        if (!payload) {
-            try {
-                version = await (deps.getLocalModuleVersion || require('./version_service').getLocalModuleVersion)(module)
-            } catch { /* unknown version reads as "does not wait" */ }
-        }
-        serviceWaits = serviceWaitsOutCatchUp(module, { statusPayload: payload, version })
-    }
-
+    const serviceWaits = await readServiceWaits({ coin, network, module }, archiveHeight, chainInfo, deps)
     const result = evaluateNodeTipAgainstArchive({ archiveHeight, chainInfo, serviceWaits, module })
     if (result.verdict === VERDICT.UNKNOWN && nodeProblem) result.detail = `${result.detail} (${nodeProblem})`
     result.refuse = result.verdict === VERDICT.BEHIND_REFUSE

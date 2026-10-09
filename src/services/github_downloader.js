@@ -46,7 +46,7 @@ const { assertSafeArchiveMemberNames } = require('../utils/helpers');
 const util = require('util');
 const stream = require('stream');
 const config = require('../config');
-const { githubApiHeaders, githubRateLimitError } = require('../utils/github_api');
+const { githubApiHeaders, githubRateLimitError, GITHUB_API_TIMEOUT_MS, GITHUB_DOWNLOAD_TIMEOUT_MS } = require('../utils/github_api');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 const pipeline = util.promisify(stream.pipeline);
@@ -171,7 +171,7 @@ class GitHubDownloader {
     try {
       const response = await axios.get(
         `https://api.github.com/repos/${owner}/${repoName}/releases`,
-        { headers: githubApiHeaders() }
+        { headers: githubApiHeaders(), timeout: GITHUB_API_TIMEOUT_MS }
       );
       return response.data;
     } catch (error) {
@@ -265,7 +265,7 @@ class GitHubDownloader {
     try {
       const response = await axios.get(
         `https://api.github.com/repos/${owner}/${repoName}/releases/tags/${tag}`,
-        { headers: githubApiHeaders() }
+        { headers: githubApiHeaders(), timeout: GITHUB_API_TIMEOUT_MS }
       );
       return response.data;
     } catch (error) {
@@ -290,6 +290,7 @@ class GitHubDownloader {
         method: 'get',
         url: asset.browser_download_url,
         responseType: 'stream',
+        timeout: GITHUB_DOWNLOAD_TIMEOUT_MS,
         headers: {
           'Accept': 'application/octet-stream',
           'User-Agent': 'GitHubDownloader'
