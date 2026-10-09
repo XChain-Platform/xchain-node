@@ -165,8 +165,8 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
     }
 
     // Serialized like every mutator, so two concurrent updates cannot both
-    // move the checkout. The lock is handed back right before the re-exec, and the
-    // child waits a bounded time for a mutator that takes it in between (lockSettingsFor).
+    // move the checkout. The lock is transferred to the re-exec child without
+    // removing it, so no other mutator can enter between the two processes.
     const lock = deps.acquireCommandLock || acquireCommandLock
     const release = lock({ command: 'update (self-update)', waitMs: dispatchSettings(config).MUTATING_LOCK_WAIT_MS })
     let outcome
@@ -174,7 +174,7 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
         outcome = await selfUpdate.selfUpdateAndReexec({
             tag,
             childArgs: selfUpdate.explicitUpdateArgs(resolved, tag),
-            deps: { ...(deps.selfUpdateDeps || {}), beforeSpawn: release }
+            deps: { ...(deps.selfUpdateDeps || {}), commandLock: release }
         })
     } finally {
         release()

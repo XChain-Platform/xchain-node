@@ -111,12 +111,12 @@ describe('cli maybeSelfUpdateBeforeUpdate()', function () {
         expect(selfUpdate.selfUpdateAndReexec.called).to.equal(false)
     })
 
-    it('serializes on the command lock and hands it to the move as the pre-spawn release', async function () {
+    it('serializes on the command lock and gives the move its lock for child adoption', async function () {
         const release = sinon.stub()
         deps.acquireCommandLock.returns(release)
         await maybeSelfUpdateBeforeUpdate(['all'], deps)
         expect(deps.acquireCommandLock.calledOnce).to.equal(true)
-        expect(selfUpdate.selfUpdateAndReexec.firstCall.args[0].deps.beforeSpawn).to.equal(release)
+        expect(selfUpdate.selfUpdateAndReexec.firstCall.args[0].deps.commandLock).to.equal(release)
         expect(release.called, 'released after a no-move outcome too').to.equal(true)
     })
 

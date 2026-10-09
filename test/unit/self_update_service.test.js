@@ -50,7 +50,11 @@ function fakeExec(answers = {}) {
 
 function fakeChild(exitCode = 0) {
     const handlers = {}
-    const child = { on: (event, fn) => { handlers[event] = fn; if (event === 'exit') setImmediate(() => fn(exitCode)) } }
+    const child = {
+        pid: 4242,
+        kill: sinon.stub(),
+        on: (event, fn) => { handlers[event] = fn; if (event === 'exit') setImmediate(() => fn(exitCode)) }
+    }
     return child
 }
 
@@ -158,9 +162,10 @@ describe('SelfUpdateService', function () {
     afterEach(tearDownSelfUpdate)
 
     describe('selfUpdateAndReexec()', function () {
-        it('fetches, verifies the tag, checks it out, installs, hands back the lock and re-executes the explicit command', async function () {
-            const beforeSpawn = sinon.stub()
-            const d = deps({ beforeSpawn })
+        it('fetches, verifies, installs, spawns, adopts the lock and re-executes the explicit command', async function () {
+            const commandLock = sinon.stub()
+            const adopt = sinon.stub()
+            const d = deps({ commandLock, adoptCommandLock: adopt })
             await svc.selfUpdateAndReexec({ tag: 'v0.15.2', childArgs: ['update', 'all', 'all', 'all', 'v0.15.2'], deps: d })
 
             const calls = d.execFile.calls
@@ -170,8 +175,8 @@ describe('SelfUpdateService', function () {
             expect(calls[1].slice(3)).to.deep.equal(['checkout', '--detach', '--quiet', 'v0.15.2'])
             expect(calls[2][0]).to.equal('npm')
             expect(calls[2]).to.include('install')
-            expect(beforeSpawn.calledOnce).to.equal(true)
-            expect(beforeSpawn.calledBefore(d.spawn)).to.equal(true)
+            expect(adopt.calledOnceWith(commandLock, { pid: 4242, command: 'update' })).to.equal(true)
+            expect(adopt.calledAfter(d.spawn)).to.equal(true)
 
             const [bin, argv, opts] = d.spawn.firstCall.args
             expect(bin).to.equal(process.execPath)
@@ -179,6 +184,21 @@ describe('SelfUpdateService', function () {
             expect(opts.env[svc.TARGET_ENV]).to.equal('v0.15.2')
             expect(opts.stdio).to.equal('inherit')
             expect(d.exit.calledWith(0)).to.equal(true)
+        })
+
+        it('terminates the child when the lock cannot be adopted', async function () {
+            const child = fakeChild()
+            const adoptionError = new Error('ownership changed')
+            const d = deps({
+                commandLock: sinon.stub(),
+                adoptCommandLock: sinon.stub().throws(adoptionError),
+                spawn: sinon.stub().returns(child)
+            })
+            let err = null
+            try { await svc.selfUpdateAndReexec({ tag: 'v0.15.2', childArgs: ['update'], deps: d }) } catch (e) { err = e }
+            expect(err).to.equal(adoptionError)
+            expect(child.kill.calledOnceWith('SIGTERM')).to.equal(true)
+            expect(d.exit.called).to.equal(false)
         })
     })
 })
