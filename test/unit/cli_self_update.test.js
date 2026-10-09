@@ -111,7 +111,7 @@ describe('cli maybeSelfUpdateBeforeUpdate()', function () {
         expect(selfUpdate.selfUpdateAndReexec.called).to.equal(false)
     })
 
-    it('serializes on the command lock and gives the move its lock for child adoption', async function () {
+    it('serializes on the command lock and gives the move its parent lock to release', async function () {
         const release = sinon.stub()
         deps.acquireCommandLock.returns(release)
         await maybeSelfUpdateBeforeUpdate(['all'], deps)

@@ -165,8 +165,8 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
     }
 
     // Serialized like every mutator, so two concurrent updates cannot both
-    // move the checkout. The lock is transferred to the re-exec child without
-    // removing it, so no other mutator can enter between the two processes.
+    // move the checkout. The parent releases before spawning; the re-exec child
+    // takes the normal command lock and refuses if another mutator gets there first.
     const lock = deps.acquireCommandLock || acquireCommandLock
     const release = lock({ command: 'update (self-update)', waitMs: dispatchSettings(config).MUTATING_LOCK_WAIT_MS })
     let outcome

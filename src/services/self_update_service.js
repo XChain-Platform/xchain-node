@@ -145,21 +145,16 @@ async function installCarrierDependencies(deps) {
 }
 
 async function reexecUpdatedCommand(tag, childArgs, deps, logger) {
+    if (typeof deps.commandLock === 'function') {
+        const adopt = deps.adoptCommandLock || adoptCommandLock
+        adopt(deps.commandLock)
+    }
     const spawnImpl = deps.spawn || spawn
     const child = spawnImpl(process.execPath, [process.argv[1], ...childArgs], {
         cwd: process.cwd(),
         stdio: 'inherit',
         env: { ...(deps.env || childProcessEnv()), [TARGET_ENV]: tag }
     })
-    if (typeof deps.commandLock === 'function') {
-        const adopt = deps.adoptCommandLock || adoptCommandLock
-        try {
-            adopt(deps.commandLock, { pid: child.pid, command: childArgs[0] || 'update' })
-        } catch (err) {
-            try { child.kill('SIGTERM') } catch { /* already gone */ }
-            throw err
-        }
-    }
     const exitCode = await new Promise((resolve) => {
         child.on('exit', code => resolve(code == null ? 1 : code))
         child.on('error', err => {

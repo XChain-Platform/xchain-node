@@ -38,9 +38,9 @@
  * Each acquisition also stamps a random nonce into the payload. Release
  * removes the file only when both the pid and the nonce still match, so
  * neither a stale-lock takeover nor a recycled pid is clobbered on exit.
- * A self-update replaces its parent-owned payload atomically with a handoff
- * payload for the re-exec child. The child claims that payload in place, so
- * the lock path remains occupied throughout the process transition.
+ * A self-update releases its parent-owned lock before starting the re-exec
+ * child. The child then competes for the lock normally, so another mutator
+ * that acquires it first causes the child to refuse the update.
  *
  * Ops note: clearing a wedged lock by hand may mean deleting both
  * command.lock and command.lock.reclaim.
@@ -61,7 +61,6 @@ const RECLAIM_FILE_SUFFIX = '.reclaim'
 // live holder, or concedes one reclaim attempt to a contender.
 const MAX_ACQUIRE_ATTEMPTS = 8
 const RECLAIM_POLL_MS      = 5
-const lockOwners           = new WeakMap()
 
 function getLockFilePath() {
     // XCHAIN_NODE_LOCK_DIR is a test/ops override; default matches the
@@ -105,57 +104,11 @@ function sameFile(a, b) {
     return !!a && !!b && a.dev === b.dev && a.ino === b.ino
 }
 
-function releaseFor(lockFile, pid, nonce) {
-    const release = function release() { releaseCommandLock(lockFile, pid, nonce) }
-    lockOwners.set(release, { lockFile, pid, nonce })
-    return release
-}
-
-// Replace a live lock without leaving its pathname absent or exposing a
-// partially-written payload. The expected owner check prevents a stale handoff
-// request from replacing a lock that has since changed hands.
-function replaceOwnedLock(lockFile, expected, replacement) {
-    const tempFile = `${lockFile}.handoff-${process.pid}-${crypto.randomBytes(8).toString('hex')}`
-    try {
-        fs.writeFileSync(tempFile, JSON.stringify(replacement) + '\n', { flag: 'wx', mode: 0o600 })
-        const current = readLockHolder(lockFile)
-        if (!current || current.pid !== expected.pid || current.nonce !== expected.nonce) {
-            const err = new Error(`Cannot hand off the xchain-node command lock at ${lockFile}: ownership changed.`)
-            err.code = 'ELOCKCHANGED'
-            throw err
-        }
-        fs.renameSync(tempFile, lockFile)
-    } finally {
-        try { fs.unlinkSync(tempFile) } catch { /* renamed or already gone */ }
+function adoptCommandLock(release) {
+    if (typeof release !== 'function') {
+        throw new TypeError('adoptCommandLock requires a command lock release function')
     }
-}
-
-// Transfer an acquired lock to a spawned child without unlinking it. The child
-// recognizes the handoff record by its own pid and converts it to a normal lock
-// on its next acquireCommandLock call.
-function adoptCommandLock(release, { pid, command = 'update' } = {}) {
-    const owner = lockOwners.get(release)
-    if (!owner) throw new TypeError('adoptCommandLock requires a command lock release function')
-    if (!Number.isInteger(pid) || pid <= 0) throw new TypeError('adoptCommandLock requires a positive child pid')
-
-    replaceOwnedLock(owner.lockFile, owner, {
-        pid,
-        nonce: crypto.randomBytes(16).toString('hex'),
-        command,
-        startedAt: new Date().toISOString(),
-        handoff: true
-    })
-}
-
-function claimAdoptedLock(lockFile, holder, pid, command) {
-    const nonce = crypto.randomBytes(16).toString('hex')
-    replaceOwnedLock(lockFile, holder, {
-        pid,
-        nonce,
-        command,
-        startedAt: new Date().toISOString()
-    })
-    return releaseFor(lockFile, pid, nonce)
+    release()
 }
 
 // Break a reclaim marker left behind by a crash, and ONLY that: a marker whose
@@ -202,19 +155,16 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
 // Returns a release() on success; throws a tagged ELOCKHELD error when a LIVE
 // holder owns the lock (the caller may then choose to wait and retry); throws any
 // other error (fs failure, or lost post-stale race) as fatal.
-function tryAcquireOnce(lockFile, payload, pid, nonce, command) {
+function tryAcquireOnce(lockFile, payload, pid, nonce) {
     const reclaimFile = lockFile + RECLAIM_FILE_SUFFIX
     for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt++) {
         try {
             fs.writeFileSync(lockFile, payload, { flag: 'wx', mode: 0o600 })
-            return releaseFor(lockFile, pid, nonce)
+            return function release() { releaseCommandLock(lockFile, pid, nonce) }
         } catch (err) {
             if (err.code !== 'EEXIST') throw err
             const holder   = readLockHolder(lockFile)
             const observed = statLock(lockFile)
-            if (holder && holder.pid === pid && holder.handoff === true) {
-                return claimAdoptedLock(lockFile, holder, pid, command)
-            }
             if (holder && isPidAlive(holder.pid)) {
                 const what = holder.command ? ` (running "${holder.command}")` : ''
                 const held = new Error(
@@ -255,7 +205,7 @@ function acquireCommandLock({ pid = process.pid, command = '', waitMs = 0, pollM
     for (;;) {
         const payload = JSON.stringify({ pid, nonce, command, startedAt: new Date().toISOString() }) + '\n'
         try {
-            return tryAcquireOnce(lockFile, payload, pid, nonce, command)
+            return tryAcquireOnce(lockFile, payload, pid, nonce)
         } catch (err) {
             // Only a live-held lock is retryable; anything else is fatal.
             if (err.code === 'ELOCKHELD' && Date.now() < deadline) {

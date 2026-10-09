@@ -50,11 +50,7 @@ function fakeExec(answers = {}) {
 
 function fakeChild(exitCode = 0) {
     const handlers = {}
-    const child = {
-        pid: 4242,
-        kill: sinon.stub(),
-        on: (event, fn) => { handlers[event] = fn; if (event === 'exit') setImmediate(() => fn(exitCode)) }
-    }
+    const child = { on: (event, fn) => { handlers[event] = fn; if (event === 'exit') setImmediate(() => fn(exitCode)) } }
     return child
 }
 
@@ -162,7 +158,7 @@ describe('SelfUpdateService', function () {
     afterEach(tearDownSelfUpdate)
 
     describe('selfUpdateAndReexec()', function () {
-        it('fetches, verifies, installs, spawns, adopts the lock and re-executes the explicit command', async function () {
+        it('fetches, verifies, installs, releases the lock and re-executes the explicit command', async function () {
             const commandLock = sinon.stub()
             const adopt = sinon.stub()
             const d = deps({ commandLock, adoptCommandLock: adopt })
@@ -175,8 +171,8 @@ describe('SelfUpdateService', function () {
             expect(calls[1].slice(3)).to.deep.equal(['checkout', '--detach', '--quiet', 'v0.15.2'])
             expect(calls[2][0]).to.equal('npm')
             expect(calls[2]).to.include('install')
-            expect(adopt.calledOnceWith(commandLock, { pid: 4242, command: 'update' })).to.equal(true)
-            expect(adopt.calledAfter(d.spawn)).to.equal(true)
+            expect(adopt.calledOnceWithExactly(commandLock)).to.equal(true)
+            expect(adopt.calledBefore(d.spawn)).to.equal(true)
 
             const [bin, argv, opts] = d.spawn.firstCall.args
             expect(bin).to.equal(process.execPath)
@@ -186,18 +182,16 @@ describe('SelfUpdateService', function () {
             expect(d.exit.calledWith(0)).to.equal(true)
         })
 
-        it('terminates the child when the lock cannot be adopted', async function () {
-            const child = fakeChild()
+        it('does not spawn the child when the parent lock cannot be released', async function () {
             const adoptionError = new Error('ownership changed')
             const d = deps({
                 commandLock: sinon.stub(),
-                adoptCommandLock: sinon.stub().throws(adoptionError),
-                spawn: sinon.stub().returns(child)
+                adoptCommandLock: sinon.stub().throws(adoptionError)
             })
             let err = null
             try { await svc.selfUpdateAndReexec({ tag: 'v0.15.2', childArgs: ['update'], deps: d }) } catch (e) { err = e }
             expect(err).to.equal(adoptionError)
-            expect(child.kill.calledOnceWith('SIGTERM')).to.equal(true)
+            expect(d.spawn.called).to.equal(false)
             expect(d.exit.called).to.equal(false)
         })
     })

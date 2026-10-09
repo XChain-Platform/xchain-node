@@ -9,11 +9,11 @@ const { spawn } = require('child_process')
 const { acquireCommandLock, getLockFilePath } = require('../../src/utils/command_lock')
 const { selfUpdateAndReexec } = require('../../src/services/self_update_service')
 
-function contenderProgram(lockModule) {
+function reexecProgram(lockModule) {
     return `
         const { acquireCommandLock } = require(${JSON.stringify(lockModule)})
         try {
-            const release = acquireCommandLock({ command: 'reset' })
+            const release = acquireCommandLock({ command: 'update' })
             release()
             process.exit(22)
         } catch (err) {
@@ -22,21 +22,7 @@ function contenderProgram(lockModule) {
     `
 }
 
-function reexecProgram(lockModule, contender) {
-    return `
-        const { spawnSync } = require('child_process')
-        const { acquireCommandLock } = require(${JSON.stringify(lockModule)})
-        const release = acquireCommandLock({ command: 'update', waitMs: 5000, pollMs: 10 })
-        const result = spawnSync(process.execPath, ['-e', ${JSON.stringify(contender)}], {
-            env: process.env,
-            stdio: 'ignore'
-        })
-        release()
-        process.exit(result.status === 23 ? 0 : 25)
-    `
-}
-
-function handoffDeps(parentRelease, childProgram, recordExit) {
+function handoffDeps(parentRelease, childProgram, winGap, recordExit) {
     return {
         env: { ...process.env },
         logger: { log() {}, warn() {}, error() {} },
@@ -45,7 +31,10 @@ function handoffDeps(parentRelease, childProgram, recordExit) {
         execFile: async () => ({ stdout: '' }),
         verifyGitTagSignature: () => ({ fingerprint: 'F'.repeat(40) }),
         signatureCheckDisabled: () => false,
-        spawn: (bin, argv, opts) => spawn(process.execPath, ['-e', childProgram], opts),
+        spawn: (bin, argv, opts) => {
+            winGap()
+            return spawn(process.execPath, ['-e', childProgram], opts)
+        },
         exit: recordExit,
         commandLock: parentRelease
     }
@@ -66,24 +55,34 @@ describe('self-update command lock handoff', function () {
         fs.rmSync(lockDir, { recursive: true, force: true })
     })
 
-    it('keeps a competing mutator out while ownership moves to the re-exec child', async function () {
+    it('refuses the re-exec update when a mutator wins the unlocked gap', async function () {
         const lockModule = require.resolve('../../src/utils/command_lock')
-        const contender = contenderProgram(lockModule)
-        const childProgram = reexecProgram(lockModule, contender)
+        const childProgram = reexecProgram(lockModule)
 
         const parentRelease = acquireCommandLock({ command: 'update (self-update)' })
+        let contenderRelease = null
         let exitCode = null
         try {
             await selfUpdateAndReexec({
                 tag: 'v9.9.9',
                 childArgs: ['update'],
-                deps: handoffDeps(parentRelease, childProgram, code => { exitCode = code })
+                deps: handoffDeps(
+                    parentRelease,
+                    childProgram,
+                    () => { contenderRelease = acquireCommandLock({ command: 'reset' }) },
+                    code => { exitCode = code }
+                )
             })
+            assert.strictEqual(exitCode, 23, 'the re-exec child must refuse while reset owns the lock')
+            assert.strictEqual(JSON.parse(fs.readFileSync(getLockFilePath(), 'utf8')).command, 'reset')
+            parentRelease()
+            assert.strictEqual(fs.existsSync(getLockFilePath()), true, 'the old release must preserve the contender lock')
+            contenderRelease()
+            contenderRelease = null
+            assert.strictEqual(fs.existsSync(getLockFilePath()), false, 'the contender release removes its lock')
         } finally {
             parentRelease()
+            if (contenderRelease) contenderRelease()
         }
-
-        assert.strictEqual(exitCode, 0, 'the child must retain the lock against the contender')
-        assert.strictEqual(fs.existsSync(getLockFilePath()), false, 'the child release removes the adopted lock')
     })
 })

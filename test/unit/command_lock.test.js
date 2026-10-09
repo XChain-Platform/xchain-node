@@ -109,42 +109,23 @@ describe('commandLock handoff', () => {
     beforeEach(prepareCommandLock)
     afterEach(cleanCommandLock)
 
-    it('hands a live lock to a child without removing the lock path', () => {
+    it('releases the parent lock before the child acquires it normally', () => {
         const release = acquireCommandLock({ command: 'update (self-update)' })
         const lockFile = getLockFilePath()
-        const rename = fs.renameSync
-        let existedAtReplace = false
-        fs.renameSync = function (from, to) {
-            existedAtReplace = fs.existsSync(to)
-            return rename.call(fs, from, to)
-        }
-        try {
-            adoptCommandLock(release, { pid: process.pid, command: 'update' })
-        } finally {
-            fs.renameSync = rename
-        }
-        assert.strictEqual(existedAtReplace, true, 'the old lock must exist until its atomic replacement')
-        assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).handoff, true)
+        adoptCommandLock(release)
+        assert.strictEqual(fs.existsSync(lockFile), false)
 
         const childRelease = acquireCommandLock({ command: 'update' })
         const holder = JSON.parse(fs.readFileSync(lockFile, 'utf8'))
         assert.strictEqual(holder.pid, process.pid)
         assert.strictEqual(holder.command, 'update')
-        assert.strictEqual(holder.handoff, undefined)
         release()
-        assert.ok(fs.existsSync(lockFile), 'the parent release must not remove the adopted lock')
+        assert.ok(fs.existsSync(lockFile), 'the old release must not remove the child lock')
         childRelease()
     })
 
-    it('refuses to hand off through a release function that no longer owns the lock', () => {
-        const release = acquireCommandLock({ command: 'update (self-update)' })
-        fs.writeFileSync(getLockFilePath(), JSON.stringify({
-            pid: process.pid, nonce: 'replacement', command: 'update'
-        }) + '\n')
-        assert.throws(
-            () => adoptCommandLock(release, { pid: process.pid + 1, command: 'update' }),
-            err => err && err.code === 'ELOCKCHANGED'
-        )
+    it('requires a command lock release function', () => {
+        assert.throws(() => adoptCommandLock(null), TypeError)
     })
 })
 
