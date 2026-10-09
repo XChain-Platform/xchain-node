@@ -53,6 +53,8 @@
 #     deferred to a --with-trackers run by default (their create means
 #     downtime); --force-due-trackers overrides that, --no-forced-due disables
 #     the whole mechanism.
+#   - Skips the whole run (exit 0, SKIP line) while $ROLL_HOLD_FILE exists, so a
+#     scheduled run cannot take the xchain-node command lock during a roll.
 #   - flock guard so overlapping cron runs cannot collide.
 #
 # ┌─ DOWNTIME WARNING ──────────────────────────────────────────────────────┐
@@ -104,6 +106,7 @@ SYNC_HOST="${SYNC_HOST:-user@your-sync-host}"
 SYNC_DIR="${SYNC_DIR:-/misc/backups/bootstraps}"
 KEEP="${KEEP:-2}"                                       # archives to retain per combo (local + remote)
 LOCK_FILE="${LOCK_FILE:-/tmp/publish-bootstraps.lock}"
+ROLL_HOLD_FILE="${ROLL_HOLD_FILE:-$HOME/.xchain-roll-hold}"   # exists while a roll is in progress
 LOCK_WAIT_MIN="${LOCK_WAIT_MIN:-30}"                    # minutes to wait out a concurrent xchain-node command (0 = refuse at once)
 LOCK_POLL_SEC="${LOCK_POLL_SEC:-30}"                    # seconds between those attempts
 TRACKER_SVC="xchain-utxo-tracker"
@@ -130,7 +133,7 @@ while [ $# -gt 0 ]; do
     --force-due-trackers) FORCE_DUE_TRACKERS=1 ;;
     --dry-run)        DRY_RUN=1 ;;
     --keep)           KEEP="$2"; shift ;;
-    -h|--help)        sed -n '2,94p' "$0"; exit 0 ;;
+    -h|--help)        sed -n '2,96p' "$0"; exit 0 ;;
     -*)               echo "unknown flag: $1" >&2; exit 2 ;;
     *)                COMBOS+=("$1") ;;
   esac
@@ -203,6 +206,13 @@ else
 fi
 PRUNE_EOF
 )
+
+# A roll holds the xchain-node command lock for long stretches; a scheduled run
+# that started inside one would only burn its lock-wait budget and then fail.
+if [ -e "$ROLL_HOLD_FILE" ]; then
+  log "SKIP: roll in progress ($ROLL_HOLD_FILE exists); nothing created or published."
+  exit 0
+fi
 
 # ── Preconditions ─────────────────────────────────────────────────────────
 command -v "$XCHAIN_NODE_BIN" >/dev/null || die "xchain-node CLI not found ($XCHAIN_NODE_BIN)"
