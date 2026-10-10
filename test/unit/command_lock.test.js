@@ -8,7 +8,7 @@ const fs     = require('fs')
 const os     = require('os')
 const path   = require('path')
 
-const { acquireCommandLock, getLockFilePath, isPidAlive } = require('../../src/utils/command_lock')
+const { acquireCommandLock, adoptCommandLock, getLockFilePath, isPidAlive } = require('../../src/utils/command_lock')
 
 let tmpDir
 
@@ -102,6 +102,30 @@ describe('commandLock', () => {
         release()
         const holder = JSON.parse(fs.readFileSync(getLockFilePath(), 'utf8'))
         assert.strictEqual(holder.pid, process.pid + 1, 'successor lock must survive our release')
+    })
+})
+
+describe('commandLock handoff', () => {
+    beforeEach(prepareCommandLock)
+    afterEach(cleanCommandLock)
+
+    it('releases the parent lock before the child acquires it normally', () => {
+        const release = acquireCommandLock({ command: 'update (self-update)' })
+        const lockFile = getLockFilePath()
+        adoptCommandLock(release)
+        assert.strictEqual(fs.existsSync(lockFile), false)
+
+        const childRelease = acquireCommandLock({ command: 'update' })
+        const holder = JSON.parse(fs.readFileSync(lockFile, 'utf8'))
+        assert.strictEqual(holder.pid, process.pid)
+        assert.strictEqual(holder.command, 'update')
+        release()
+        assert.ok(fs.existsSync(lockFile), 'the old release must not remove the child lock')
+        childRelease()
+    })
+
+    it('requires a command lock release function', () => {
+        assert.throws(() => adoptCommandLock(null), TypeError)
     })
 })
 
