@@ -501,17 +501,6 @@
       "Integration: Multi-Module Orchestration updateModules orchestration clones git for non-node modules before installing",
       "Integration: Multi-Module Orchestration updateModules orchestration reads old container ID from LevelDB and passes it to installModule"
     ],
-    "257c55232f21a319": [
-      "DatabaseService addUserPasswordToDatabase() creates database and user via docker when db does not exist",
-      "DatabaseService addUserPasswordToDatabase() grants DrillB parity permissions to a NON-mainnet indexer",
-      "DatabaseService addUserPasswordToDatabase() grants MVH test permissions when module is xchain-hub",
-      "DatabaseService addUserPasswordToDatabase() grants SLAVE MONITOR to indexer and decoder accounts, on MAINNET too",
-      "DatabaseService addUserPasswordToDatabase() rotates the password via ALTER USER on the docker path when the user does not match",
-      "DatabaseService addUserPasswordToDatabase() skips create when database already exists (dbCount != 0)",
-      "DatabaseService addUserPasswordToDatabase() throws when docker exec fails",
-      "DatabaseService addUserPasswordToDatabase() withholds SLAVE MONITOR from the hub account",
-      "DatabaseService addUserPasswordToDatabase() withholds the DrillB grant from a MAINNET indexer"
-    ],
     "26f27dbd3b14ec37": [
       "ValidatorService VALIDATOR_DIR is configDir/validator"
     ],
@@ -3653,6 +3642,19 @@
       "GitHubDownloader verifyRepositoryHash() throws when hash does not match",
       "GitHubDownloader verifyRepositoryHash() throws when no hash registered for the repo/version/arch"
     ],
+    "d90f6b0a3738dda4": [
+      "DatabaseService addUserPasswordToDatabase() creates database and user via docker when db does not exist",
+      "DatabaseService addUserPasswordToDatabase() grants DrillB parity permissions to a NON-mainnet indexer",
+      "DatabaseService addUserPasswordToDatabase() grants MVH test permissions when module is xchain-hub",
+      "DatabaseService addUserPasswordToDatabase() grants SLAVE MONITOR to indexer and decoder accounts, on MAINNET too",
+      "DatabaseService addUserPasswordToDatabase() grants a MAINNET indexer only its own HubMirror database by exact name",
+      "DatabaseService addUserPasswordToDatabase() keeps the HubMirror wildcard off a MAINNET indexer",
+      "DatabaseService addUserPasswordToDatabase() rotates the password via ALTER USER on the docker path when the user does not match",
+      "DatabaseService addUserPasswordToDatabase() skips create when database already exists (dbCount != 0)",
+      "DatabaseService addUserPasswordToDatabase() throws when docker exec fails",
+      "DatabaseService addUserPasswordToDatabase() withholds SLAVE MONITOR from the hub account",
+      "DatabaseService addUserPasswordToDatabase() withholds the DrillB grant from a MAINNET indexer"
+    ],
     "d920ceea68258388": [
       "GitHubDownloader calculateDirectoryHash() computes SHA-256 hash from file contents",
       "GitHubDownloader constructor creates empty hashes file if it does not exist",
@@ -4884,7 +4886,7 @@
         "test/unit/crypto_node_build_scaffold.test.js": "12558605c0d0415c",
         "test/unit/crypto_node_conf_placeholders.test.js": "f23059ddff16822e",
         "test/unit/database_service.test.js": "7709742b49b662fb",
-        "test/unit/database_service.test/add_user_password_to_database.test.js": "257c55232f21a319",
+        "test/unit/database_service.test/add_user_password_to_database.test.js": "d90f6b0a3738dda4",
         "test/unit/database_service.test/ask_mariadb_root_password.test.js": "39d0192fdb2e885d",
         "test/unit/database_service.test/build_database_module.test.js": "7d9da93b27a0235d",
         "test/unit/database_service.test/check_if_database_is_ready.test.js": "f97bee5a65ae0f08",
@@ -5308,7 +5310,7 @@
         "test/unit/crypto_node_build_scaffold.test.js": "12558605c0d0415c",
         "test/unit/crypto_node_conf_placeholders.test.js": "f23059ddff16822e",
         "test/unit/database_service.test.js": "7709742b49b662fb",
-        "test/unit/database_service.test/add_user_password_to_database.test.js": "257c55232f21a319",
+        "test/unit/database_service.test/add_user_password_to_database.test.js": "d90f6b0a3738dda4",
         "test/unit/database_service.test/ask_mariadb_root_password.test.js": "39d0192fdb2e885d",
         "test/unit/database_service.test/build_database_module.test.js": "7d9da93b27a0235d",
         "test/unit/database_service.test/check_if_database_is_ready.test.js": "f97bee5a65ae0f08",
