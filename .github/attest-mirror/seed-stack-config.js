@@ -4,10 +4,14 @@ const port = Number(process.argv[2]);
 const pass = process.env.DB_PASSWORD;
 if (!port || !pass) process.exit(2);
 const ixHost = { BTC: 'indexer', LTC: 'ltc-indexer', DOGE: 'doge-indexer' };
+// The indexer entry's host and port are its API; db_host and db_port say where its
+// database lives. The explorer builds its pools from db_host/db_port and falls back to
+// host/port without them, so it would dial the indexer API as MariaDB and never serve.
 function services(code) {
     return {
         'xchain-decoder': { host: 'db', port: '3306', name: `XChain_${code}_Regtest_Decoder`, user: 'root', pass },
-        'xchain-indexer': { host: ixHost[code], port: '3004', name: `XChain_${code}_Regtest_Indexer`, user: 'root', pass }
+        'xchain-indexer': { host: ixHost[code], port: '3004', db_host: 'db', db_port: '3306',
+            name: `XChain_${code}_Regtest_Indexer`, user: 'root', pass }
     };
 }
 const config = {
