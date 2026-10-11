@@ -123,15 +123,14 @@ class E2EEnv extends TestEnv {
     }
 
     /**
-     * The two remaining call-time seams, sealed once createCLI() has built the
-     * patched ConfigService they have to answer from:
+     * The call-time seams sealed once createCLI() has built the patched
+     * ConfigService they have to answer from:
      *
-     *  - ConfigService.dbPasswordCanRotate runtime-requires DatabaseService,
-     *    whose getDatabaseContainerId runs `docker inspect` on the host. A box
-     *    with a resident xchain-node-database answers yes and the install mints
-     *    generated credentials; a box without one answers no and it uses the
-     *    static defaults. Answer from the harness's own docker routes instead,
-     *    which present a database container on every venue.
+     *  - DatabaseService.getDatabaseContainerId runs `docker inspect` on the
+     *    host. ConfigService.dbPasswordCanRotate answers without it, so an
+     *    install does not reach it; the seal is a guard so any caller
+     *    that does reach it gets the harness's database container and is
+     *    recorded in hostSeamCalls.
      *  - StatusService.probeServiceHealthPayload runtime-requires
      *    child_process AND the real ConfigService, then `docker exec`s wget
      *    into the container. Against the host that reads the resident stack's
