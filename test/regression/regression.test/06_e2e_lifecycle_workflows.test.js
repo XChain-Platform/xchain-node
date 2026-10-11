@@ -218,7 +218,9 @@ describe('Regression Suite', function () {
             const seams = env.hostSeamCallNames()
             expect(seams, 'utxo-tracker freshness').to.include('bootstrap_service.utxoTrackerVolumeFreshness')
             expect(seams, 'decoder/indexer freshness').to.include('bootstrap_service.mariaDbModuleFreshness')
-            expect(seams, 'db container probe').to.include('database_service.getDatabaseContainerId')
+            // Credential rotation is decided without probing the host's db
+            // container, so the install never reaches that seam.
+            expect(seams, 'no db container probe').to.not.include('database_service.getDatabaseContainerId')
             expect(seams, 'container health probe').to.include('bootstrap_health_gate.probeServiceStatus')
             expect(seams, 'config read').to.include('config_service.getDefaultConfig')
 
