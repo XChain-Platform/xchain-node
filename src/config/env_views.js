@@ -63,6 +63,9 @@ const LIST_VIEWS = {
         "XC_ANCHOR_STAKE_REGTEST_ACTIVATION", "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
         "XCHAIN_PRICE_INDEXER_DB_SECRET"
     ]],
+    // The host names the xchain-sync server container is handed (defaults.js
+    // configureSharedAfterHubKey), so a recreate keeps the operator's value.
+    SYNC_PASSTHROUGH_ENV: ['sync passthrough', ["INDEX_MAP_PARITY_CHECK"]],
     // The indexer's regtest genesis bootstrap (ConfigService genesisPassthroughVars).
     INDEXER_GENESIS_ENV: ['indexer genesis', [
         "XCHAIN_GENESIS_BLOCK", "XCHAIN_GENESIS_LEDGER_HASH", "XCHAIN_GENESIS_DUMP_HASH",
