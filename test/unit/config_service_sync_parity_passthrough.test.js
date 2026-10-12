@@ -18,7 +18,7 @@ function viewsFor(env) {
     return bindEnvViews({ read: (n) => env[n], copy: () => ({ ...env }) })
 }
 
-function sharedDefaultsWith(env) {
+function sharedDefaultsWith(env, module = 'sync') {
     const views = viewsFor(env)
     defaults.configure({
         config: { ...views }, Network: {}, Coin: {}, CoinTickerSymbol: {}, XChainService: {}, DB_SEP: "_",
@@ -28,6 +28,7 @@ function sharedDefaultsWith(env) {
     })
     const values = defaults.createSharedDefaults()
     defaults.configureSharedBeforeHubKey(values)
+    defaults.configureSharedAfterHubKey(values, module)
     return values
 }
 
@@ -42,6 +43,12 @@ describe('sync INDEX_MAP_PARITY_CHECK passthrough', () => {
 
     it('shared defaults carry the host value', () => {
         expect(sharedDefaultsWith({ INDEX_MAP_PARITY_CHECK: 'true' }).INDEX_MAP_PARITY_CHECK).to.equal('true')
+    })
+
+    it('other shared modules do not receive it', () => {
+        for (const m of ['hub', 'explorer', 'db']) {
+            expect(sharedDefaultsWith({ INDEX_MAP_PARITY_CHECK: 'true' }, m).INDEX_MAP_PARITY_CHECK).to.equal(undefined)
+        }
     })
 
     it('shared defaults omit it when unset or empty', () => {
