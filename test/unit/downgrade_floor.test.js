@@ -17,11 +17,11 @@ function loadManifestService(axiosGet = sinon.stub()) {
     })
 }
 
-describe('major-version downgrade floor', function () {
-    afterEach(function () {
-        sinon.restore()
-    })
+afterEach(function () {
+    sinon.restore()
+})
 
+describe('major-version downgrade floor: self-update', function () {
     it('refuses to move a 1.0.0 CLI to release v0.23.0 before touching git', async function () {
         const describeCarrier = sinon.stub().resolves({ isRepo: true, commit: 'a'.repeat(40), dirty: [] })
 
@@ -50,6 +50,9 @@ describe('major-version downgrade floor', function () {
         expect(() => selfUpdate.assertMajorDowngradeAllowed('1.9.0', 'v1.0.0')).not.to.throw()
     })
 
+})
+
+describe('major-version downgrade floor: manifest refusals', function () {
     it('refuses an explicit lower-major install before fetching its manifest', async function () {
         const axiosGet = sinon.stub()
         const service = loadManifestService(axiosGet)
@@ -83,6 +86,9 @@ describe('major-version downgrade floor', function () {
         expect(axiosGet.calledOnce).to.equal(true)
     })
 
+})
+
+describe('major-version downgrade floor: overrides', function () {
     it('allows the self-update override and announces it even when self-update is disabled', async function () {
         const logger = testLogger()
         const out = await selfUpdate.selfUpdateAndReexec({
