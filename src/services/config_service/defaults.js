@@ -188,6 +188,13 @@ function configureSharedBeforeHubKey(defaultValues) {
     if (config.ALLOW_NO_COLOCATED_HUB_DB !== undefined && config.ALLOW_NO_COLOCATED_HUB_DB !== "") {
         defaultValues.ALLOW_NO_COLOCATED_HUB_DB = config.ALLOW_NO_COLOCATED_HUB_DB
     }
+    // Host INDEX_MAP_PARITY_CHECK reaches the xchain-sync server container, so a
+    // recreate keeps it instead of reverting to the image default.
+    for (const k of ["INDEX_MAP_PARITY_CHECK"]) {
+        if (config.SYNC_PASSTHROUGH_ENV[k] !== undefined && config.SYNC_PASSTHROUGH_ENV[k] !== "") {
+            defaultValues[k] = config.SYNC_PASSTHROUGH_ENV[k]
+        }
+    }
     if (config.HUB_API_KEY !== undefined && config.HUB_API_KEY !== "") {
         defaultValues.HUB_API_KEY = config.HUB_API_KEY
     }
