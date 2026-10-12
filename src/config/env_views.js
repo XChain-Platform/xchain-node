@@ -64,7 +64,7 @@ const LIST_VIEWS = {
         "XCHAIN_PRICE_INDEXER_DB_SECRET"
     ]],
     // The host names the xchain-sync server container is handed (defaults.js
-    // configureSharedBeforeHubKey), so a recreate keeps the operator's value.
+    // configureSharedAfterHubKey), so a recreate keeps the operator's value.
     SYNC_PASSTHROUGH_ENV: ['sync passthrough', ["INDEX_MAP_PARITY_CHECK"]],
     // The indexer's regtest genesis bootstrap (ConfigService genesisPassthroughVars).
     INDEXER_GENESIS_ENV: ['indexer genesis', [

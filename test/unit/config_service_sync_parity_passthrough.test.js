@@ -12,24 +12,32 @@
 
 const { expect } = require('chai')
 const { bindEnvViews } = require('../../src/config/env_views')
-const defaults = require('../../src/services/config_service/defaults')
+const {
+    makeServiceWithConfig,
+    DB_MODULE_NAME,
+    HUB_MODULE_NAME,
+    EXPLORER_MODULE_NAME,
+    SYNC_MODULE_NAME
+} = require('./config_service.test/helpers.test')
 
 function viewsFor(env) {
     return bindEnvViews({ read: (n) => env[n], copy: () => ({ ...env }) })
 }
 
-function sharedDefaultsWith(env, module = 'sync') {
-    const views = viewsFor(env)
-    defaults.configure({
-        config: { ...views }, Network: {}, Coin: {}, CoinTickerSymbol: {}, XChainService: {}, DB_SEP: "_",
-        bootstrapDir: "/tmp", NODE_MODULE_NAME: "node", HUB_MODULE_NAME: "hub",
-        EXPLORER_MODULE_NAME: "explorer", SYNC_MODULE_NAME: "sync",
-        getDockerContainerImageName: (m) => m, getModuleDatabaseName: (m) => m
-    })
-    const values = defaults.createSharedDefaults()
-    defaults.configureSharedBeforeHubKey(values)
-    defaults.configureSharedAfterHubKey(values, module)
-    return values
+async function withParityValue(value, fn) {
+    const previous = process.env.INDEX_MAP_PARITY_CHECK
+    if (value === undefined) delete process.env.INDEX_MAP_PARITY_CHECK
+    else process.env.INDEX_MAP_PARITY_CHECK = value
+    try {
+        await fn()
+    } finally {
+        if (previous === undefined) delete process.env.INDEX_MAP_PARITY_CHECK
+        else process.env.INDEX_MAP_PARITY_CHECK = previous
+    }
+}
+
+async function containerConfig(module) {
+    return makeServiceWithConfig('').getDefaultConfig(module, null, null)
 }
 
 describe('sync INDEX_MAP_PARITY_CHECK passthrough', () => {
@@ -41,18 +49,28 @@ describe('sync INDEX_MAP_PARITY_CHECK passthrough', () => {
         expect(() => viewsFor({}).SYNC_PASSTHROUGH_ENV.NOT_DECLARED).to.throw(/not declared/)
     })
 
-    it('shared defaults carry the host value', () => {
-        expect(sharedDefaultsWith({ INDEX_MAP_PARITY_CHECK: 'true' }).INDEX_MAP_PARITY_CHECK).to.equal('true')
+    it('puts the host value in the sync container config', async () => {
+        await withParityValue('true', async () => {
+            const config = await containerConfig(SYNC_MODULE_NAME)
+            expect(config).to.have.property('INDEX_MAP_PARITY_CHECK', 'true')
+        })
     })
 
-    it('other shared modules do not receive it', () => {
-        for (const m of ['hub', 'explorer', 'db']) {
-            expect(sharedDefaultsWith({ INDEX_MAP_PARITY_CHECK: 'true' }, m).INDEX_MAP_PARITY_CHECK).to.equal(undefined)
+    it('does not put the host value in other shared container configs', async () => {
+        await withParityValue('true', async () => {
+            for (const module of [HUB_MODULE_NAME, EXPLORER_MODULE_NAME, DB_MODULE_NAME]) {
+                const config = await containerConfig(module)
+                expect(config).to.not.have.property('INDEX_MAP_PARITY_CHECK')
+            }
+        })
+    })
+
+    it('omits the value from the sync container config when unset or empty', async () => {
+        for (const value of [undefined, '']) {
+            await withParityValue(value, async () => {
+                const config = await containerConfig(SYNC_MODULE_NAME)
+                expect(config).to.not.have.property('INDEX_MAP_PARITY_CHECK')
+            })
         }
-    })
-
-    it('shared defaults omit it when unset or empty', () => {
-        expect(sharedDefaultsWith({}).INDEX_MAP_PARITY_CHECK).to.equal(undefined)
-        expect(sharedDefaultsWith({ INDEX_MAP_PARITY_CHECK: '' }).INDEX_MAP_PARITY_CHECK).to.equal(undefined)
     })
 })
