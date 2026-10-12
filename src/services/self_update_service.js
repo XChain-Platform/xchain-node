@@ -46,13 +46,14 @@ const { execFile, spawn } = require('child_process')
 const { promisify } = require('util')
 const execFileAsync = promisify(execFile)
 
-const { dataDir, SELF_UPDATE_ENV, childProcessEnv } = require('../config')
+const { dataDir, SELF_UPDATE_ENV, childProcessEnv, hostEnv } = require('../config')
 const { getLogger } = require('../observability/logger')
 const { adoptCommandLock } = require('../utils/command_lock')
 
 const CARRIER_ROOT      = path.join(__dirname, '../..')
 const TARGET_ENV        = 'XCHAIN_NODE_UPDATE_TARGET'
 const NO_SELF_UPDATE_ENV = 'XCHAIN_NODE_NO_SELF_UPDATE'
+const ALLOW_MAJOR_DOWNGRADE_ENV = 'XCHAIN_NODE_ALLOW_MAJOR_DOWNGRADE'
 const CHECK_CACHE_FILE  = 'release-check.json'
 const CHECK_TTL_MS      = 60 * 60 * 1000
 const CHECK_TIMEOUT_MS  = 5000
@@ -68,6 +69,31 @@ function defaultLogger() {
 
 function currentVersion() {
     return require('../../package.json').version
+}
+
+function versionMajor(version) {
+    const match = /^v?(\d+)(?:\.|$)/.exec(String(version || '').trim())
+    return match ? Number(match[1]) : null
+}
+
+function allowMajorDowngradeForRun({ env = hostEnv(), logger = defaultLogger() } = {}) {
+    const allowed = /^(1|true|yes)$/i.test(env[ALLOW_MAJOR_DOWNGRADE_ENV] || '')
+    if (allowed) {
+        logger.warn(`WARNING: ${ALLOW_MAJOR_DOWNGRADE_ENV}=1 is set; major-version downgrade protection is disabled for this run.`)
+    }
+    return allowed
+}
+
+function assertMajorDowngradeAllowed(installedVersion, targetVersion, allowed = false) {
+    const installedMajor = versionMajor(installedVersion)
+    const targetMajor = versionMajor(targetVersion)
+    if (allowed || installedMajor == null || targetMajor == null || targetMajor >= installedMajor) return
+
+    throw new Error(
+        `Refusing release ${targetVersion} because its major version ${targetMajor} is below the installed`
+        + ` xchain-node major version ${installedMajor} (v${versionOfTag(installedVersion)}). Set`
+        + ` ${ALLOW_MAJOR_DOWNGRADE_ENV}=1 to override this protection. Nothing was changed.`
+    )
 }
 
 function versionOfTag(tag) {
@@ -182,6 +208,9 @@ async function selfUpdateAndReexec({ tag, childArgs, deps = {} }) {
     const env     = deps.env || SELF_UPDATE_ENV
     const logger  = deps.logger || defaultLogger()
     const version = deps.currentVersion ? deps.currentVersion() : currentVersion()
+    const allowMajorDowngrade = allowMajorDowngradeForRun({ env: deps.env || hostEnv(), logger })
+
+    assertMajorDowngradeAllowed(version, tag, allowMajorDowngrade)
 
     if (env[TARGET_ENV]) return { moved: false, reason: 'already-reexecuted' }
     if (selfUpdateDisabled(env)) {
@@ -302,11 +331,15 @@ module.exports = {
     CARRIER_ROOT,
     TARGET_ENV,
     NO_SELF_UPDATE_ENV,
+    ALLOW_MAJOR_DOWNGRADE_ENV,
     CHECK_CACHE_FILE,
     CHECK_TTL_MS,
     currentVersion,
+    versionMajor,
     versionOfTag,
     compareVersions,
+    allowMajorDowngradeForRun,
+    assertMajorDowngradeAllowed,
     selfUpdateDisabled,
     describeCarrier,
     selfUpdateAndReexec,
