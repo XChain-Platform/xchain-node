@@ -273,7 +273,7 @@ describe('ValidatorStakeService', function () {
         it('calls explorer methods that the published SDK actually exposes', function () {
             const { XChainSDK } = require('@dankest-llc/xchain-sdk')
             const sdk = new XChainSDK({ network: 'bitcoin-testnet' })   // offline: no network I/O in the constructor
-            for (const m of ['getValidators', 'getAddress', 'getToken', 'getDelegations', 'getStatus', 'getSleeps'])
+            for (const m of ['getValidators', 'getAddress', 'getToken', 'getDelegations', 'getStatus', 'getSleeps', 'getMints'])
                 expect(sdk.explorer[m], 'sdk.explorer.' + m).to.be.a('function')
             for (const m of ['getBalances', 'session'])
                 expect(sdk[m], 'sdk.' + m).to.be.a('function')
@@ -310,6 +310,23 @@ describe('ValidatorStakeService', function () {
             expect(calls.stake).to.have.length(0)
             expect(result.staked).to.be.false
             expect(result.blockers).to.not.be.empty
+        })
+    })
+
+    // An address an earlier run spent from holds a fractional XCHAIN balance; the MINT that
+    // tops it up must carry the exact 8-place shortfall, never float noise the indexer refuses.
+    describe('stakeValidator() from a fractional XCHAIN balance', function () {
+
+        it('broadcasts the exact 8-place shortfall as the MINT amount', async function () {
+            const { calls, logged } = await run({ broadcast: true }, { xchain: 24999.99877, coin: '0.001' })
+            expect(calls.mint.map(c => c.params)).to.deep.equal([{ VERSION: 0, TICK: 'XCHAIN', AMOUNT: '0.00123' }])
+            expect(logged.join('\n')).to.include('Sending MINT 1/1 (0.00123 XCHAIN)')
+            expect(calls.stake).to.have.length(1)
+        })
+
+        it('prints a sub-micro shortfall as a plain decimal in the dry run', async function () {
+            const { logged } = await run({}, { xchain: 24999.9999999, coin: '0.001' })
+            expect(logged.join('\n')).to.include('MINT 1/1: 0.0000001 XCHAIN')
         })
     })
 })

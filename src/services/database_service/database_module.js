@@ -42,6 +42,7 @@ let {
 let { XCHAIN_NODE_DB_HOST, XCHAIN_NODE_DB_DEFAULT_PORT, getDatabaseContainerId, checkIfDatabaseModuleExists, checkIfDatabaseIsReady } = require('./container_access')
 let { getExternalDbConfig, pingMariaDb } = require('./external_db')
 let { askMariadbRootPassword, executeNativeMariaDbCommand, executeDockerMariaDbCommand } = require('./mariadb_exec')
+let { dbDatadirState, confirmPersistedDatadirRootPassword } = require('./persisted_datadir')
 
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
@@ -77,7 +78,8 @@ async function verifyExternalDatabase() {
 // (moduleOperations.js RECREATE/update paths) and from `recreate`
 // (RECREATE_UNSUPPORTED_MODULES), so no automated fleet path re-applies
 // it. An already-installed DB keeps 10m x 3 until an operator tears the
-// container down and reinstalls it inside a maintenance window.
+// container down and reinstalls it inside a maintenance window; a datadir
+// pinned with XCHAIN_NODE_DB_DATA_DIR keeps its data and root password then.
 function createDatabaseRunArgs(containerPrefix, environmentVariables, coin, network) {
     const runArgs = createDatabaseContainerRunArgs(containerPrefix, logger)
     // A visibility-only probe makes a stalled-but-alive mariadbd observable
@@ -191,7 +193,8 @@ async function prepareDatabaseContainer(containerPrefix, dbHostPort) {
             containerPrefix + "', which is not a confirmed absence. This install path force-removes that container " +
             "and would orphan the database volume holding every module's data. Run `docker inspect " + containerPrefix +
             "` and `docker ps -a` to see what is actually there, then re-run once docker answers cleanly. " +
-            "If the container is genuinely dead and you want it rebuilt from empty, remove it yourself first."
+            "If the container is genuinely dead and you want it rebuilt, remove it yourself first; a datadir pinned with " +
+            "XCHAIN_NODE_DB_DATA_DIR survives that removal, its data and root password included."
         )
     }
     try {
@@ -236,7 +239,12 @@ async function createDatabaseModule(coin, network) {
     const { runArgs, dbHostPort } = createDatabaseRunArgs(containerPrefix, environmentVariables, coin, network)
     addDatabaseTuningArgs(runArgs)
     await prepareDatabaseContainer(containerPrefix, dbHostPort)
-    return startDatabaseContainer(runArgs, mariadbRootPassword)
+    // Read before the start: a new container initialises an empty datadir, which then holds mysql/.
+    const persisted = dbDatadirState() === 'initialised'
+    const containerId = await startDatabaseContainer(runArgs, mariadbRootPassword)
+    // The image ignored MYSQL_ROOT_PASSWORD over a datadir that already held a database, so store one only once it authenticates.
+    if (persisted) await confirmPersistedDatadirRootPassword(containerId, mariadbRootPassword)
+    return containerId
 }
 
 // Existing-container branch. checkIfDatabaseModuleExists returns the id on

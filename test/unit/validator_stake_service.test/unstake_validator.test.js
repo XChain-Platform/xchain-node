@@ -323,6 +323,11 @@ describe('ValidatorStakeService', function () {
             expect(err.message).to.match(/could not read the chain tip/)
         })
 
+        it('refuses before sending when the explorer reports no usable last block', async function () {
+            const err = await runUnstake({ broadcast: true }, { existing: STAKED, tip: -1 }).then(() => null, e => e)
+            expect(err && err.message).to.match(/could not read the chain tip \(.*no last block.*Nothing was sent/)
+        })
+
         it('withdraws only the admissible rows and reports their sum', async function () {
             const second = { ...STAKED, action_index: '61', amount: '5000', activation_block: '150320' }
             const { result, unstakeCalls, logged } = await runUnstake({ broadcast: true },

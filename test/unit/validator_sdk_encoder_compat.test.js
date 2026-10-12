@@ -106,7 +106,10 @@ function stubEncoder() {
 function makeExplorer(chain) {
     return {
         getAddress: sinon.stub().resolves({ balances: { confirmed: chain.coin, pending: '0' } }),
-        getToken: sinon.stub().resolves({ mints: { max: 10000, address_max: 50000 } }),
+        // An open mint: caps set, no window, no lock, and no earlier MINT from the stake address.
+        getToken: sinon.stub().resolves({ mints: { max: 10000, address_max: 50000, start_block: 0, stop_block: 0 },
+            locks: { mint: false } }),
+        getMints: sinon.stub().resolves({ total: 0, data: [] }),
         getValidators: sinon.stub().resolves({ data: [] }),
         // No delegation holds the key; without an answer the stake command refuses to send.
         getDelegations: sinon.stub().resolves({ total: 0, data: [] }),

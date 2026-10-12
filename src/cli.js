@@ -67,11 +67,15 @@ const loadModule = require
 // problem with better context.
 function refForPreCheck(commandName, actionCommand) {
     if (commandName !== 'install' && commandName !== 'update') return null
+    let branch
     try {
-        return resolveArgs(actionCommand.args || [], { expectBranch: true, defaultBranch: null }).branch
+        branch = resolveArgs(actionCommand.args || [], { expectBranch: true, defaultBranch: null }).branch
     } catch {
         return null
     }
+    // Stage a no-ref update's hub at the tag self-update handed on, the one updateModules installs at.
+    if (!branch && commandName === 'update') return config.XCHAIN_NODE_UPDATE_TARGET || null
+    return branch
 }
 
 // The verbs that can put the hub container back: they rebuild it, recreate it

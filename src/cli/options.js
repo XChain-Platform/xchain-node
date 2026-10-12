@@ -47,7 +47,7 @@ function registerSync(program, deps) {
 }
 
 function registerStart(program, deps) {
-    const { filterCommandParameters, startModules } = deps
+    const { filterCommandParameters, startModules, redactSecrets } = deps
     program
         .command('start')
         .description('Start XChain service')
@@ -56,14 +56,20 @@ function registerStart(program, deps) {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await startModules(serviceList)
+            // Every selected module is still attempted; a failed one only changes the exit status.
+            try {
+                await startModules(serviceList)
+            } catch (err) {
+                console.error('start failed: ' + redactSecrets(err && err.message ? err.message : err))
+                return process.exit(1)
+            }
             return process.exit(0)
         })
 
 }
 
 function registerStop(program, deps) {
-    const { filterCommandParameters, stopModules } = deps
+    const { filterCommandParameters, stopModules, redactSecrets } = deps
     program
         .command('stop')
         .description('Stop XChain service')
@@ -72,14 +78,20 @@ function registerStop(program, deps) {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await stopModules(serviceList)
+            // Every selected module is still attempted; a failed one only changes the exit status.
+            try {
+                await stopModules(serviceList)
+            } catch (err) {
+                console.error('stop failed: ' + redactSecrets(err && err.message ? err.message : err))
+                return process.exit(1)
+            }
             return process.exit(0)
         })
 
 }
 
 function registerRestart(program, deps) {
-    const { filterCommandParameters, restartModules } = deps
+    const { filterCommandParameters, restartModules, redactSecrets } = deps
     program
         .command('restart')
         .description('Restart XChain service')
@@ -88,7 +100,13 @@ function registerRestart(program, deps) {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await restartModules(serviceList)
+            // Every selected module is still attempted; a failed one only changes the exit status.
+            try {
+                await restartModules(serviceList)
+            } catch (err) {
+                console.error('restart failed: ' + redactSecrets(err && err.message ? err.message : err))
+                return process.exit(1)
+            }
             return process.exit(0)
         })
 
