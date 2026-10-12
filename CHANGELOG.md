@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-11
+
+### Added
+- Added co-located indexer URLs to the hub config and honored per-coin hub seed and route settings.
+- Added an isolated bootstrap restore rehearsal and recovery of shared containers after a redeploy.
+- Recognized the UNARMED go-live sentinels in the release guards.
+
+### Changed
+- Applied container limits and resource overrides consistently at creation.
+- Made update all continue past a guard refusal and failed closed when the latest release lookup errors.
+
+### Fixed
+- Guarded coin node and datadir bind mount sources against drift.
+- Preserved the container environment on recreate and blocked stake teardown on a sleeping source address.
+- Dropped the encoder from autoheal because a restart cannot clear a tracker halt.
+
 ## [0.22.7] - 2026-10-06
 
 ### Changed
