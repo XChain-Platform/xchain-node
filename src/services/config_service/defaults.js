@@ -295,20 +295,23 @@ function configureManagedHubDiscovery(defaultValues, module) {
     }
 }
 
+// Host INDEX_MAP_PARITY_CHECK reaches the xchain-sync server container only,
+// so a recreate keeps it instead of reverting to the image default.
+function configureSyncPassthrough(defaultValues, module) {
+    if (module !== SYNC_MODULE_NAME) return
+    for (const k of ["INDEX_MAP_PARITY_CHECK"]) {
+        if (config.SYNC_PASSTHROUGH_ENV[k] !== undefined && config.SYNC_PASSTHROUGH_ENV[k] !== "") {
+            defaultValues[k] = config.SYNC_PASSTHROUGH_ENV[k]
+        }
+    }
+}
+
 function configureSharedAfterHubKey(defaultValues, module) {
     if (config.CORS_ORIGIN !== undefined && config.CORS_ORIGIN !== "") {
         defaultValues.CORS_ORIGIN = config.CORS_ORIGIN
     }
     configureExplorerHubFeed(defaultValues, module)
-    // Host INDEX_MAP_PARITY_CHECK reaches the xchain-sync server container only,
-    // so a recreate keeps it instead of reverting to the image default.
-    if (module === SYNC_MODULE_NAME) {
-        for (const k of ["INDEX_MAP_PARITY_CHECK"]) {
-            if (config.SYNC_PASSTHROUGH_ENV[k] !== undefined && config.SYNC_PASSTHROUGH_ENV[k] !== "") {
-                defaultValues[k] = config.SYNC_PASSTHROUGH_ENV[k]
-            }
-        }
-    }
+    configureSyncPassthrough(defaultValues, module)
     if (module === EXPLORER_MODULE_NAME) {
         if (config.EXPLORER_VM_QUERY_ENABLED !== undefined && config.EXPLORER_VM_QUERY_ENABLED !== "") {
             defaultValues.EXPLORER_VM_QUERY_ENABLED = config.EXPLORER_VM_QUERY_ENABLED
