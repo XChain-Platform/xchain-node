@@ -219,7 +219,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
 
             const moduleOps = proxyquire('../../src/operations/module_operations', {
                 '../services/docker_service': {
-                    stopContainerByName: async (id, seconds) => {
+                    stopContainer: async (id, seconds) => {
                         capture._history.push({ command: 'docker stop -t ' + seconds + ' ' + id, type: 'exec', options: {} })
                         return { stopped: true, seconds: 1, killed: false, exitCode: 0 }
                     },
@@ -263,7 +263,7 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
 
             const moduleOps = proxyquire('../../src/operations/module_operations', {
                 '../services/docker_service': {
-                    stopContainerByName: async (id, seconds) => {
+                    stopContainer: async (id, seconds) => {
                         capture._history.push({ command: 'docker stop -t ' + seconds + ' ' + id, type: 'exec', options: {} })
                         return { stopped: true, seconds: 1, killed: false, exitCode: 0 }
                     },

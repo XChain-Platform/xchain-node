@@ -202,13 +202,17 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
 
     // See the ledger the way the target's runner will after its boot re-key, so a
     // renamed file recorded under its old name is not refused as missing.
-    const applied = rekeyApplied(result.applied, readTargetLedgerRenames(module, deps))
+    const renames = readTargetLedgerRenames(module, deps)
+    const applied = rekeyApplied(result.applied, renames)
     const missing = required.filter(f => !applied.has(f))
     if (missing.length) {
+        // The blast radius subtracts only recorded names: the runner still executes a file the schema matches.
+        const recorded = result.ledger ? rekeyApplied(result.ledger, renames) : applied
         // Only reached on the refusal path, so the probe costs a healthy deploy
         // nothing and cannot introduce a new way for one to fail: both the probe
         // and the pending-scan degrade to the cautious branch of the message.
-        const remedy = await readRefusalRemedy(module, coin, network, applied, deps)
+        const remedy = await readRefusalRemedy(module, coin, network, recorded, deps)
+        remedy.schemaMatched = new Set([...applied].filter(f => !recorded.has(f)))
         throw new Error(refusalMessage(module, coin, network, dbName, missing, remedy))
     }
 

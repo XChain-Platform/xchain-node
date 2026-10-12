@@ -47,6 +47,16 @@ function logIfNotSilent(silent, message) {
     if (!silent) logger.info(message)
 }
 
+// Read a container's name the way docker reports it: first entry of an array, leading slash dropped.
+function containerName(container) {
+    return String((Array.isArray(container.Names) ? container.Names[0] : container.Names) || '').replace(/^\//, '')
+}
+
+// True when the container carries a CLI-assigned name rather than matching only by its image tag.
+function matchesByName(container) {
+    return containerName(container).startsWith(NODE_PREFIX + SEP)
+}
+
 // Resolve a docker container to its registry identity { module, coin, network }
 // (coin/network are '' for shared modules), or null for non-xchain containers.
 //
@@ -60,7 +70,7 @@ function logIfNotSilent(silent, message) {
 // xchain-indexer incident, 2026-06-11). The image name remains a fallback for
 // containers that were renamed externally.
 function classifyContainer(container) {
-    const name  = String((Array.isArray(container.Names) ? container.Names[0] : container.Names) || '').replace(/^\//, '')
+    const name  = containerName(container)
     const image = String(container.Image || '')
     const identity = name.startsWith(NODE_PREFIX + SEP) ? name : image
     if (!identity.startsWith(NODE_PREFIX + SEP)) return null
@@ -115,14 +125,11 @@ function moduleKey(module, coin, network) {
 async function registerContainers(containers, silent, seen) {
     let added       = 0
     let reconciled  = 0
-    // Sort containers so RUNNING ones come first. When multiple containers
-    // share the same expected key (e.g. an old exited container and a fresh
-    // running one), the running ID wins on the upsert.
-    containers.sort((a, b) => {
-        const ar = (a.State || '').toLowerCase() === 'running' ? 0 : 1
-        const br = (b.State || '').toLowerCase() === 'running' ? 0 : 1
-        return ar - br
-    })
+    // Rank name matches first, then RUNNING (stable, so docker's newest-first breaks ties):
+    // a container started by hand from a module image under another name matches only by
+    // image and must never take the key from the container holding the CLI-assigned name.
+    const rank = (c) => (matchesByName(c) ? 0 : 2) + ((c.State || '').toLowerCase() === 'running' ? 0 : 1)
+    containers.sort((a, b) => rank(a) - rank(b))
 
     for (const nextContainer of containers) {
         const identity = classifyContainer(nextContainer)
@@ -130,11 +137,9 @@ async function registerContainers(containers, silent, seen) {
         const { module, coin, network } = identity
         const label = (coin || network) ? (coin + SEP + network + SEP + module) : module
 
-        // First-seen wins the upsert. Because the list is sorted RUNNING-first,
-        // the running container reconciles the row first; any later duplicate
-        // (e.g. a stopped container that classifies to the same key via the
-        // image fallback) is skipped so it cannot overwrite the live ID with a
-        // dead one. The key still records into `seen` for the orphan purge.
+        // First-seen wins the upsert, so the ranking above decides which ID holds the row;
+        // a later duplicate is skipped so it cannot overwrite it. The key still records
+        // into `seen` for the orphan purge.
         const key = moduleKey(module, coin, network)
         if (seen.has(key)) continue
         seen.add(key)

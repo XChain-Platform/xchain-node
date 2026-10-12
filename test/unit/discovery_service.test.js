@@ -268,3 +268,51 @@ describe('DiscoveryService.scanAndRegisterModules fail-closed registry', functio
         expect(err.message).to.match(/Couldn't reconcile database/)
     })
 })
+
+// A container started by hand from a module image under another name matches
+// its key only through the image fallback, so it must never take the row from
+// the container that holds the CLI-assigned name.
+describe('DiscoveryService.scanAndRegisterModules name-over-image ranking', function () {
+
+    afterEach(() => sinon.restore())
+
+    const IMAGE = 'xchain-node-bitcoin-mainnet-xchain-indexer'
+    const debug = { Names: 'some-debug-name', Image: IMAGE, ID: 'debugdebugdebugdebug', State: 'running' }
+    const real  = { Names: IMAGE, Image: IMAGE, ID: 'realrealrealrealreal', State: 'running' }
+
+    it('gives the row to the named container when a newer image-only container also runs', async function () {
+        const { svc, db } = loadService({ containers: [debug, real] })
+        await svc.scanAndRegisterModules({ silent: true })
+        sinon.assert.calledWith(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'realrealrealrealreal')
+        sinon.assert.neverCalledWith(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'debugdebugdebugdebug')
+    })
+
+    it('leaves a row already holding the named container alone', async function () {
+        const { svc, db } = loadService({
+            containers: [debug, real],
+            db: {
+                getModuleContainer:     sinon.stub().resolves('realrealrealrealreal'),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-indexer', coin: 'bitcoin', network: 'mainnet', container_id: 'realrealrealrealreal' },
+                ]),
+            },
+        })
+        const changed = await svc.scanAndRegisterModules({ silent: true })
+        expect(changed).to.equal(0)
+        sinon.assert.notCalled(db.setModuleContainer)
+    })
+
+    it('keeps the row on a stopped named container over a running image-only one', async function () {
+        const { svc, db } = loadService({ containers: [debug, { ...real, State: 'exited' }] })
+        await svc.scanAndRegisterModules({ silent: true })
+        sinon.assert.calledOnceWithExactly(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'realrealrealrealreal')
+    })
+
+    it('still prefers a running image-only container over a stopped one when neither is named', async function () {
+        const stale = { Names: 'renamed-old', Image: IMAGE, ID: 'staleSTALEstaleSTALE', State: 'exited' }
+        const live  = { Names: 'renamed-new', Image: IMAGE, ID: 'liveLIVEliveLIVElive', State: 'running' }
+        const { svc, db } = loadService({ containers: [stale, live] })
+        await svc.scanAndRegisterModules({ silent: true })
+        sinon.assert.calledOnceWithExactly(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'liveLIVEliveLIVElive')
+    })
+})

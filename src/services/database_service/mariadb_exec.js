@@ -30,6 +30,7 @@ let logger = getLogger()
 let { loadDbRootPassword, saveDbRootPassword } = require('../credentials_service')
 let { checkIfDatabaseModuleExists, getDatabaseContainerPresence } = require('./container_access')
 let { getExternalDbConfig } = require('./external_db')
+let { dbDatadirState, rootPasswordForPersistedDatadir } = require('./persisted_datadir')
 
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
@@ -275,7 +276,10 @@ async function askMariadbRootPassword(coin, network) {
     }
 
     const dbContainerId = await checkIfDatabaseModuleExists(coin, network)
-    if (!dbContainerId) await requireConfirmedDbAbsence()
+    if (!dbContainerId) {
+        await requireConfirmedDbAbsence()
+        if (dbDatadirState() === 'initialised') return rootPasswordForPersistedDatadir()
+    }
     const configured = await rootPasswordFromConfig(dbContainerId)
     if (configured) return configured
     const fromContainer = await rootPasswordFromContainer(dbContainerId)

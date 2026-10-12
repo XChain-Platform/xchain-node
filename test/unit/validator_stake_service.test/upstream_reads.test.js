@@ -38,7 +38,9 @@ function fakeSdk(addressBody, tokenBody) {
     }
 }
 
-const TOKEN = { info: { tick: 'XCHAIN' }, mints: { max: '10000', address_max: '50000' } }
+// The full mints and locks groups the explorer serves for a token with an open mint.
+const TOKEN = { info: { tick: 'XCHAIN' }, mints: { max: '10000', address_max: '50000', start_block: 0, stop_block: 0 },
+    locks: { mint: false } }
 
 describe('validator stake upstream reads', function () {
 

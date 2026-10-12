@@ -68,8 +68,9 @@ function evaluateContainerState(raw, { now = Date.now() } = {}) {
 //   decoder  health: status, lag_blocks/blockLag, reorg_halted, reorg_halt_checked_at,
 //                    reorg_halt_parked
 //   indexer  health: status, lag, decoderReorgHalted, stallClass, train_activation.status
-//   tracker  health: lag, synced, halted
-//   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'unhealthy')
+//   tracker  health: status, lag, halted, halt_reason, block_fetch_desync,
+//                    node_height_stale (synced is sent but not read here)
+//   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'stalled'|'unhealthy')
 function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}) {
     const reasons = []
     if (!payload || typeof payload !== 'object')
