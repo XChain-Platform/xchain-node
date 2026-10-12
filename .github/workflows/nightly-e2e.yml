@@ -163,7 +163,7 @@ permissions:
 #
 # A shard is a fresh stack, so every suite already had to be runnable alone
 # (the `suite` input has always relied on that); sharding adds no new ordering
-# assumption. Five shards bring the bitcoin weights to ~42 minutes of action
+# assumption. Six shards bring the bitcoin weights to ~34 minutes of action
 # per shard, about an hour per job with setup and boot.
 jobs:
   plan:
@@ -176,10 +176,10 @@ jobs:
     env:
       STACK_REF: ${{ github.event.inputs.ref || 'develop' }}
       SUITE: ${{ github.event.inputs.suite || '' }}
-      # Sized off run 35605562229: ~204 minutes of bitcoin action weight over 5
-      # shards is ~42 each. Raise it here if the suite grows; nothing else
-      # hardcodes the count. Three coins at 5 shards is 15 concurrent runners.
-      E2E_SHARDS: '5'
+      # Sized off run 35605562229: ~204 minutes of bitcoin action weight over 6
+      # shards is ~34 each. Raise it here if the suite grows; nothing else
+      # hardcodes the count. Three coins at 6 shards is 18 concurrent runners.
+      E2E_SHARDS: '6'
     steps:
       # The plan and merge scripts come from THIS workflow's commit, not from
       # the ref under test, so an older ref (a published vX.Y.Z) that predates
@@ -235,9 +235,9 @@ jobs:
         coin: ${{ fromJSON(needs.plan.outputs.coins) }}
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     # 360 was the unsharded ceiling, set because a whole coin pass had no
-    # measured duration to size against. A shard does: ~42 minutes of action
+    # measured duration to size against. A shard does: ~34 minutes of action
     # plus ~15 of setup and boot on bitcoin, somewhat more on the two-stack
-    # legs. 240 is four times that, so a slow leg is never truncated, while a
+    # legs. 240 is about five times that, so a slow leg is never truncated, while a
     # WEDGED shard (a hung container, a stalled indexer poll) reports in four
     # hours instead of six.
     timeout-minutes: 240

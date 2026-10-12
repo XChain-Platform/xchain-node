@@ -202,6 +202,11 @@ services:
       INDEXER_COIN: BTC
       INDEXER_NETWORK: regtest
       INDEXER_API_PORT: 3004
+      # Every host-side caller (the venue's five hubs, its indexers and the suite)
+      # reaches this indexer through the published port from one source address, so
+      # the per-IP default of 600 a minute is spent in about 40 s and the hubs' tip
+      # reads are refused for the rest of each window. The same applies to LTC and DOGE.
+      INDEXER_RATE_LIMIT_RPM: 99999
       INDEXER_DB_HOST: db
       INDEXER_DB_PORT: 3306
       INDEXER_DB_NAME: XChain_BTC_Regtest_Indexer
@@ -409,6 +414,7 @@ services:
       INDEXER_COIN: LTC
       INDEXER_NETWORK: regtest
       INDEXER_API_PORT: 3004
+      INDEXER_RATE_LIMIT_RPM: 99999
       INDEXER_DB_HOST: db
       INDEXER_DB_PORT: 3306
       INDEXER_DB_NAME: XChain_LTC_Regtest_Indexer
@@ -592,6 +598,7 @@ services:
       INDEXER_COIN: DOGE
       INDEXER_NETWORK: regtest
       INDEXER_API_PORT: 3004
+      INDEXER_RATE_LIMIT_RPM: 99999
       INDEXER_DB_HOST: db
       INDEXER_DB_PORT: 3306
       INDEXER_DB_NAME: XChain_DOGE_Regtest_Indexer

@@ -13,6 +13,7 @@
 const sinon      = require('sinon')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
+const repoRefs   = require('../../../src/operations/module_operations/repo_refs')
 
 const PIN_SHA   = 'a'.repeat(40)
 const OTHER_SHA = 'b'.repeat(40)
@@ -104,14 +105,23 @@ serviceSuite('resolveInstallTarget()', () => {
 })
 
 serviceSuite('resolveInstallTarget()', () => {
-    it('falls back to the default branch when the lookup fails outright', async () => {
-        // Offline / rate-limited operators must still be able to install.
-        sinon.stub(console, 'warn')
+    it('fails closed on a thrown lookup error even when a branch fallback is allowed', async () => {
+        const recordInstallTarget = sinon.stub()
+        const run = sinon.stub()
+        repoRefs.configure({
+            DEFAULT_MODULE_BRANCH: 'master',
+            installTargetService: { recordInstallTarget },
+            releaseManifestService: svc
+        })
         stubs.axiosGet.rejects(new Error('getaddrinfo ENOTFOUND'))
-        const t = await svc.resolveInstallTarget(null, { defaultBranch: 'master' })
-        expect(t.kind).to.equal('branch')
-        expect(t.ref).to.equal('master')
-        expect(t.resolvedFrom).to.equal('fallback after lookup failure')
+        await repoRefs.withInstallTarget(null, run).then(
+            () => { throw new Error('should have rejected') },
+            e => {
+                expect(e.message).to.match(/Could not resolve the latest xchain-node release/)
+                expect(e.message).to.match(/Nothing was changed/)
+            })
+        expect(recordInstallTarget.called).to.equal(false)
+        expect(run.called).to.equal(false)
     })
 
     // An UPDATE of a release node must never degrade to a branch: that

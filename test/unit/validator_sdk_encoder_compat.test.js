@@ -109,7 +109,10 @@ function makeExplorer(chain) {
         getToken: sinon.stub().resolves({ mints: { max: 10000, address_max: 50000 } }),
         getValidators: sinon.stub().resolves({ data: [] }),
         // No delegation holds the key; without an answer the stake command refuses to send.
-        getDelegations: sinon.stub().resolves({ total: 0, data: [] })
+        getDelegations: sinon.stub().resolves({ total: 0, data: [] }),
+        // The tip and an empty sleep list, so the stake address reads as awake rather than unknown.
+        getStatus: sinon.stub().resolves({ last_block: { BTC: 200000, TBTC: 200000, RBTC: 200000 } }),
+        getSleeps: sinon.stub().resolves({ total: 0, data: [] })
     }
 }
 

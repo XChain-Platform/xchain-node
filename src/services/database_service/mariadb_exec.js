@@ -28,7 +28,7 @@ let config = require('../../config')
 let { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 let { loadDbRootPassword, saveDbRootPassword } = require('../credentials_service')
-let { checkIfDatabaseModuleExists } = require('./container_access')
+let { checkIfDatabaseModuleExists, getDatabaseContainerPresence } = require('./container_access')
 let { getExternalDbConfig } = require('./external_db')
 
 const nativeExecFile = execFile
@@ -126,7 +126,7 @@ async function rootPasswordFromConfig(dbContainerId) {
     if (config.XCHAIN_NODE_DB_ROOT_PASSWORD) {
         const envPassword = config.XCHAIN_NODE_DB_ROOT_PASSWORD
         if (!dbContainerId) {
-            // No running container to verify against yet (fresh install): the
+            // Docker has confirmed no container exists (fresh install): the
             // env override becomes the password the container is created with,
             // so there is nothing to ping. Accept as-is, same as before.
             setDbRootPassword(envPassword)
@@ -248,6 +248,20 @@ async function promptForRootPassword(dbContainerId) {
     }
 }
 
+// A null container id means "no container" OR "the inspect failed". Only docker SAYING the
+// container is gone makes this a fresh install; anything else would save an unverified root
+// password over the stored copy a live container still depends on, so it refuses instead.
+async function requireConfirmedDbAbsence() {
+    let presence
+    try { presence = await getDatabaseContainerPresence() } catch { presence = 'unknown' }
+    if (presence === 'gone') return
+    throw new Error(
+        `Docker reported '${presence}' for the MariaDB container: neither a container whose root ` +
+        'password can be verified nor a confirmed absence, so no root password was set or saved. ' +
+        'Check `docker ps -a` / `docker inspect` and re-run once docker answers cleanly.'
+    )
+}
+
 async function askMariadbRootPassword(coin, network) {
     const cached = getDbRootPassword()
     if (cached) return cached
@@ -261,6 +275,7 @@ async function askMariadbRootPassword(coin, network) {
     }
 
     const dbContainerId = await checkIfDatabaseModuleExists(coin, network)
+    if (!dbContainerId) await requireConfirmedDbAbsence()
     const configured = await rootPasswordFromConfig(dbContainerId)
     if (configured) return configured
     const fromContainer = await rootPasswordFromContainer(dbContainerId)

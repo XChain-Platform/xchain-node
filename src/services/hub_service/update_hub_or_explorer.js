@@ -67,8 +67,18 @@ function createModuleConnector(module, defaultConfig, dependencies) {
     return new ExplorerConnector("127.0.0.1", defaultConfig["EXPLORER_PORT"])
 }
 
+// Name the manual GRANT a mainnet mirror needs: provisioning grants the
+// HubMirror schema only off mainnet, so the explorer's CREATE DATABASE fails.
+function warnMainnetMirrorGrant(coin, checkpointConfig, logger) {
+    const escapedSchema = String(checkpointConfig.name).replace(/_/g, "\\_")
+    logger.warn("WARNING: checkpoint self-sync is on for " + coin + " mainnet, but provisioning does not grant a mainnet " +
+        "indexer account the mirror schema " + checkpointConfig.name + ". Unless it was granted by hand, the explorer cannot " +
+        "create it and serves a frozen checkpoint mirror for this coin. Grant it as the MariaDB root user: " +
+        "GRANT ALL PRIVILEGES ON `" + escapedSchema + "`.* TO '" + checkpointConfig.user + "'@'%'; then restart the explorer.")
+}
+
 async function buildConfigPayload(module, lastStatus, context, dependencies) {
-    const { EXTERNAL_DB, XChainService, getDefaultConfig, buildHubModuleConfig, buildCheckpointConfig } = dependencies
+    const { EXTERNAL_DB, XChainService, getDefaultConfig, buildHubModuleConfig, buildCheckpointConfig, logger } = dependencies
     const { externalDbCfg, checkpointSelfSync } = context
     let jsonConfig = {}
 
@@ -108,6 +118,7 @@ async function buildConfigPayload(module, lastStatus, context, dependencies) {
             // life: see isCheckpointSelfSyncEnabled). See buildCheckpointConfig above.
             if (checkpointSelfSync && XChainService.XCHAIN_INDEXER in lastStatus[nextCoin][nextNetwork]) {
                 const checkpointConfig = buildCheckpointConfig(defaultConfigCoinNetwork)
+                if (nextNetwork === "mainnet") warnMainnetMirrorGrant(nextCoin, checkpointConfig, logger)
                 if (module === "xchain-explorer") {
                     nextConfigObject.checkpoint = checkpointConfig
                 } else {

@@ -113,7 +113,7 @@ function makeIndexerSdk({ sets = {}, throwsOn, errorOn, truncatedOn, noMethod, l
     const explorer = {
         getStatus: statusThrows
             ? sinon.stub().rejects(new Error(statusThrows))
-            : sinon.stub().resolves({ last_block: { 'bitcoin-testnet': lastBlock } })
+            : sinon.stub().resolves({ last_block: { TBTC: lastBlock } })
     }
     if (!noMethod) {
         explorer.getCapabilityValidators = sinon.stub().callsFake(async ({ capability, block_index }) => {

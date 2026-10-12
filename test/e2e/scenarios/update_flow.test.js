@@ -16,19 +16,26 @@ const E2EEnv = require('../helpers/e2e-env')
 const TestEnv = require('../../integration/helpers/test-env')
 const { filterCommandParameters } = require('../../../src/services/config_service')
 
-let env, cli
+let env, cli, previousNodeDataDir
 
 async function setupEnvironment() {
     env = new E2EEnv()
     await env.setup()
     env.setupDefaultRoutes()
+    previousNodeDataDir = process.env.XCHAIN_NODE_DATA_DIR
+    process.env.XCHAIN_NODE_DATA_DIR = env.dataDir
 
     const state = require('../../../src/state')
     state.setDbRootPassword('testrootpw')
 }
 
 async function teardownEnvironment() {
-    await env.teardown()
+    try {
+        await env.teardown()
+    } finally {
+        if (previousNodeDataDir === undefined) delete process.env.XCHAIN_NODE_DATA_DIR
+        else process.env.XCHAIN_NODE_DATA_DIR = previousNodeDataDir
+    }
 }
 
 describe('E2E: Update Flow (Scenario 4.6)', function () {
@@ -37,9 +44,10 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
     afterEach(teardownEnvironment)
 
     // E2E-040: Update kills old container and creates new one
+    // The current replacement contract uses a budgeted stop rather than kill.
     describe('E2E-040: Update replaces container', function () {
 
-        it('kills old container, removes it, builds new image, and runs new container', async function () {
+        it('stops old container, removes it, builds new image, and runs new container', async function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
 
@@ -56,10 +64,12 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             await cli.moduleOps.updateModules(serviceList)
 
             // Should have killed the old container
-            const killCmds = env.capture.findCommands(/docker kill/)
-            expect(killCmds.length).to.be.greaterThanOrEqual(1)
-            const killHasOldId = killCmds.some(c => c.command.includes(oldContainerId))
-            expect(killHasOldId, 'kill references old container').to.be.true
+            // Replacement uses one budgeted stop for the old container and never docker kill.
+            expect(env.capture.findCommands(/docker kill/)).to.have.lengthOf(0)
+            const stopCmds = env.capture.findCommands(/docker stop -t \d+ /)
+            expect(stopCmds).to.have.lengthOf(1)
+            const stopHasOldId = stopCmds.some(c => c.command.includes(oldContainerId))
+            expect(stopHasOldId, 'stop references old container').to.be.true
 
             // Should have removed the old container
             const rmCmds = env.capture.findCommands(/docker rm/)
@@ -140,6 +150,7 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             env.setupFullStack('bitcoin', 'regtest')
             cli = env.createCLI()
 
+            require('../../../src/state').setRemoteModuleVersion('node-bitcoin', { tag_name: 'v28.1' })
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
             await cli.moduleOps.installModules(serviceList, 'master')
 

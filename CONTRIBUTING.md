@@ -118,6 +118,7 @@ CI is the unit gate. Before opening a PR:
 2. Update `CHANGELOG.md` with a terse entry for your change.
 3. Make sure `git status` is clean apart from intended changes (no `node_modules/`, no editor leftovers, no generated `.env` files).
 4. Open the PR with a clear title and a description of what changed and why.
+5. The CLA Assistant bot records your signature on your first PR; one signature covers every XChain Platform repository. Its `license/cla` check must pass before the PR can merge.
 
 For non-security bugs, open an issue at <https://github.com/XChain-Platform/xchain-node/issues/new>. For security bugs, see [`SECURITY.md`](./SECURITY.md).
 

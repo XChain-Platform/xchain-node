@@ -63,5 +63,23 @@ describe('DbCredentialDrift', () => {
             const execFileAsync = sinon.stub().resolves({ stdout: 'not json' })
             expect(await readContainerEnv('dec', { execFileAsync })).to.equal(null)
         })
+
+        // With no executor passed, the shared parser must still run docker through
+        // this module's own child_process, so a stub there reaches every read.
+        it('defaults to this module\'s executor when no deps executor is given', async () => {
+            const execFile = sinon.stub().callsFake((cmd, args, cb) => {
+                cb(null, JSON.stringify(['A=1', 'DECODER_DB_PASS=p']) + '\n')
+            })
+            const { readContainerEnv } = proxyquire('../../../src/services/db_credential_drift', {
+                'child_process': { execFile },
+                '../config': configStub({
+                    XChainService: { XCHAIN_DECODER: DECODER, XCHAIN_INDEXER: INDEXER },
+                    HUB_MODULE_NAME: HUB
+                }),
+                './config_service': { getDockerContainerImageName: () => 'unused' }
+            })
+            expect(await readContainerEnv('dec')).to.deep.equal({ A: '1', DECODER_DB_PASS: 'p' })
+            expect(execFile.calledOnce).to.equal(true)
+        })
     })
 })

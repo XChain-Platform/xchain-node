@@ -152,14 +152,14 @@ async function readAnsweredCapabilitySets(pubkey, network, capabilities, deps = 
     if (block === undefined || block === null) {
         try {
             const status = await sdk.explorer.getStatus()
-            block = Number(status && status.last_block && status.last_block[coins.stake])
+            block = Number(status && status.last_block && status.last_block[coins.stakeCoin])
         } catch (e) {
             return { unavailable: true, error: e.message }
         }
     }
     block = Number(block)
     if (!Number.isInteger(block) || block < 0)
-        return { unavailable: true, reason: 'the indexer reported no last block for ' + coins.stake }
+        return { unavailable: true, reason: 'the indexer reported no last block for ' + coins.stakeCoin }
 
     const sets = {}
     for (const capability of capabilities) {

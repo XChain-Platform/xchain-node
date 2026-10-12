@@ -258,11 +258,10 @@ describe('StopBudgetService', function () {
         expect(overLine(), 'a 30 s default-budget service').to.match(/xchain-explorer.*30 s stop budget/)
     })
 
-    it('stays quiet for an explicit value under the budget or one the service would ignore', function () {
+    it('stays quiet for an explicit value under the budget', function () {
         sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: '119000' }, {})
         sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: '45000' }, DECODER_300)
         sbs.shutdownTimeoutEnv('xchain-explorer', { SHUTDOWN_TIMEOUT_MS: '8000' }, {})
-        sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: 'slow' }, {})
         expect(warnStub.called).to.be.false
     })
 
@@ -323,5 +322,49 @@ describe('StopBudgetService', function () {
         } finally {
             read.restore()
         }
+    })
+})
+
+// A SHUTDOWN_TIMEOUT_MS the service would ignore leaves its own default timer, which only fits the default budget.
+describe('StopBudgetService', function () {
+    beforeEach(prepareConsoleStubs)
+    afterEach(restoreConsoleStubs)
+
+    const DECODER_60 = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_DECODER: '60' }
+    const TRACKER_60 = { XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_XCHAIN_UTXO_TRACKER: '60' }
+    const ignoredLine = () => warnStub.args.map(a => String(a[0])).find(l => /the service ignores/.test(l))
+    const cleanStop = () => sinon.stub().resolves({ stopped: true, seconds: 5, killed: false, exitCode: 0 })
+
+    it('forwards the derived drain timer in place of an explicit value the service would ignore, and says so', function () {
+        for (const bad of ['slow', '0', '-5']) {
+            warnStub.resetHistory()
+            expect(sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: bad }, DECODER_60), bad)
+                .to.deep.equal({ SHUTDOWN_TIMEOUT_MS: '40000' })
+            expect(ignoredLine(), bad).to.include('xchain-decoder').and.to.include('SHUTDOWN_TIMEOUT_MS=' + bad)
+            expect(ignoredLine(), bad).to.include('forwarding 40000')
+        }
+        expect(sbs.shutdownTimeoutEnv('xchain-utxo-tracker', { SHUTDOWN_TIMEOUT_MS: 'slow' }, TRACKER_60))
+            .to.deep.equal({ SHUTDOWN_TIMEOUT_MS: '40000' })
+        expect(sbs.shutdownTimeoutEnv('xchain-decoder', { SHUTDOWN_TIMEOUT_MS: 'slow' }, {}), 'default budget')
+            .to.deep.equal({ SHUTDOWN_TIMEOUT_MS: '100000' })
+    })
+
+    it('keeps a default-budget unlisted service on its own default, still naming the ignored value', function () {
+        expect(sbs.shutdownTimeoutEnv('xchain-explorer', { SHUTDOWN_TIMEOUT_MS: 'slow' }, {})).to.deep.equal({})
+        expect(ignoredLine()).to.include('xchain-explorer').and.to.include('keeps its own default')
+    })
+
+    it('warns before the stop when a container on a lowered budget carries a value the service ignores', async function () {
+        const read = sinon.stub().resolves({ stopTimeout: 60, shutdownTimeoutMs: 'slow' })
+        await sbs.stopModuleContainer(cleanStop(), 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', DECODER_60, read)
+        const line = warnStub.args.map(a => String(a[0])).find(l => /was created/.test(l))
+        expect(line).to.match(/xchain-decoder \(bitcoin mainnet\) was created with SHUTDOWN_TIMEOUT_MS=slow, which the service ignores/)
+        expect(line).to.match(/xchain-node recreate/)
+    })
+
+    it('stays quiet before the stop for an ignored value at the default budget, where the service default fits', async function () {
+        const read = sinon.stub().resolves({ stopTimeout: 120, shutdownTimeoutMs: 'slow' })
+        await sbs.stopModuleContainer(cleanStop(), 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', {}, read)
+        expect(warnStub.called).to.be.false
     })
 })

@@ -20,6 +20,9 @@ let path = require('path')
 let { XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD } = require('../../config')
 let { getUtxoTrackerVolumeName } = require('../config_service')
 let { getPublishedHostPorts } = require('../docker_service')
+const { healthcheckCommand } = require('./healthcheck_command')
+const requiredGetUtxoTrackerVolumeName = getUtxoTrackerVolumeName
+const requiredGetPublishedHostPorts = getPublishedHostPorts
 let config = require('../../config');
 let validatorService = require('../validator_service')
 const { getLogger } = require('../../observability/logger');
@@ -29,7 +32,8 @@ function configureDependencies(dependencies) {
     ({
         fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME,
         EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD,
-        getUtxoTrackerVolumeName, getPublishedHostPorts, config, validatorService,
+        getUtxoTrackerVolumeName = requiredGetUtxoTrackerVolumeName,
+        getPublishedHostPorts = requiredGetPublishedHostPorts, config, validatorService,
         logger
     } = dependencies)
 }
@@ -144,9 +148,10 @@ const SERVICE_HEALTHCHECK = {
     // (xchain-encoder/src/api.js, getServeReadiness). Its window therefore has to
     // cover the TRACKER's startup, not the encoder's own fast boot: at the former
     // 30s a simultaneous cold start had the encoder's grace expiring while the
-    // tracker was still inside the 60s window it declares one line below, and this
-    // is the one autoheal: true service whose probe judges another container.
-    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD, autoheal: true },
+    // tracker was still inside the 60s window it declares one line below.
+    // Deliberately no autoheal: that same probe 503s on tracker state, a
+    // deliberate tracker halt included, which restarting the encoder cannot clear.
+    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
     [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
     [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
     // The miner's API is JSON-RPC only (no GET /status route); an http_get probe 500s
@@ -261,7 +266,7 @@ function buildHealthcheckArgs(module, environmentVariables) {
         return []
     }
 
-    let cmd
+    let url, postData
     if (hc.probe === 'jsonrpc_ping' || hc.probe === 'jsonrpc_health') {
         // JSON-RPC POST; hub, explorer, and the regtest miner all speak this protocol.
         // `ping` is bare liveness (a SELECT 1, or "the port answers"); `health` is the
@@ -270,15 +275,15 @@ function buildHealthcheckArgs(module, environmentVariables) {
         // dead port. Pick per descriptor: a service whose ping already carries the
         // real verdict (explorer) stays on ping.
         const method = hc.probe === 'jsonrpc_health' ? 'health' : 'ping'
-        cmd = `wget -T ${parseInt(hc.timeout, 10)} -qO- --post-data='{"jsonrpc":"2.0","method":"${method}","id":1}' --header='Content-Type: application/json' http://localhost:${port}/ || exit 1`
+        url = `http://localhost:${port}/`
+        postData = `{"jsonrpc":"2.0","method":"${method}","id":1}`
     } else {
         // Default: plain HTTP GET on /status; descriptors override via `path`
         // where /status is too expensive to double as a liveness probe (sync).
-        cmd = `wget -T ${parseInt(hc.timeout, 10)} -qO- http://localhost:${port}${hc.path || '/status'} || exit 1`
+        url = `http://localhost:${port}${hc.path || '/status'}`
     }
-
     return [
-        '--health-cmd',      cmd,
+        '--health-cmd',      healthcheckCommand({ url, postData, timeoutSeconds: parseInt(hc.timeout, 10) }),
         '--health-interval', hc.interval,
         '--health-timeout',  hc.timeout,
         '--health-retries',  String(hc.retries),

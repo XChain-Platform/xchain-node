@@ -91,11 +91,12 @@ function reportBootstrapOutcomes() {
     }
     if (wipedDown.length > 0) {
         logger.info(
-            '\nThose services had their data directory wiped by a restore that then failed, so\n' +
-            'their containers were deliberately left STOPPED rather than restarted over an\n' +
-            'incomplete store that would report itself caught up. Re-run install with\n' +
-            'XCHAIN_NODE_FORCE_BOOTSTRAP=1 to take the restore again, or clear the volume and\n' +
-            'start the service to resync from block 0.\n'
+            '\nThose services had their data (the tracker\'s LevelDB volume, or the decoder\'s or\n' +
+            'indexer\'s MariaDB database) wiped by a restore that then failed, so their containers\n' +
+            'were deliberately left STOPPED rather than restarted over an incomplete store that\n' +
+            'would resume as if it were whole. Re-run install with XCHAIN_NODE_FORCE_BOOTSTRAP=1\n' +
+            'to take the restore again, or clear the volume or drop the database and start the\n' +
+            'service to resync from block 0.\n'
         )
     }
     if (failed.length > 0) {
@@ -222,10 +223,11 @@ async function ensureBootstrapUtxoTracker(coin, network) {
         archivePath = path.join(bootstrapDir, fileName)
         const tip = await assessNodeTipBeforeRestore(coin, network, XChainService.XCHAIN_UTXO_TRACKER, archivePath)
         if (tip.refuse) {
-            // Refused before any restore was attempted, and the archive is
-            // signature-verified first, so retiring it destroys no evidence;
-            // see retireBootstrapArchive for why it goes anyway.
+            // The refusal rests on the archive's own bootstrap.json: verify signature and identity before
+            // announcing it or retiring the archive (see retireBootstrapArchive for why a verified one goes).
+            // A tampered archive throws into the catch, which keeps it and records the integrity failure.
             await verifyRefusedArchive(archivePath, { module: XChainService.XCHAIN_UTXO_TRACKER, coin, network })
+            logger.info(`REFUSING the ${XChainService.XCHAIN_UTXO_TRACKER} bootstrap restore: ${tip.detail}.`)
             const bytes   = await statBootstrapArchiveBytes(archivePath)
             const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'node-behind', tip.detail, archive)
@@ -287,10 +289,11 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         archivePath = path.join(bootstrapDir, fileName)
         const tip = await assessNodeTipBeforeRestore(coin, network, module, archivePath)
         if (tip.refuse) {
-            // Refused before any restore was attempted, and the archive is
-            // signature-verified first, so retiring it destroys no evidence;
-            // see retireBootstrapArchive for why it goes anyway.
+            // The refusal rests on the archive's own bootstrap.json: verify signature and identity before
+            // announcing it or retiring the archive (see retireBootstrapArchive for why a verified one goes).
+            // A tampered archive throws into the catch, which keeps it and records the integrity failure.
             await verifyRefusedArchive(archivePath, { module, coin, network })
+            logger.info(`REFUSING the ${module} bootstrap restore: ${tip.detail}.`)
             const bytes   = await statBootstrapArchiveBytes(archivePath)
             const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
             recordBootstrapOutcome(module, 'node-behind', tip.detail, archive)
@@ -305,6 +308,16 @@ async function ensureBootstrapMariaDb(coin, network, module) {
     } catch (err) {
         const reason  = redactSecrets(err.message)
         const archive = archivePath ? reportKeptBootstrapArchive(archivePath, await statBootstrapArchiveBytes(archivePath)) : null
+        // Past the DROP the database is partly imported and the container stays
+        // stopped, so "will sync from scratch" would describe a state not on disk.
+        if (err.postWipe) {
+            logger.info(
+                `WARNING: bootstrap auto-restore failed (${reason}) AFTER the ${module} database was dropped: ` +
+                `the database is incomplete and its container was left stopped, not syncing.`
+            )
+            recordBootstrapOutcome(module, 'wiped-left-down', reason, archive)
+            return false
+        }
         logger.info(`WARNING: bootstrap auto-restore failed (${reason}): the service will sync from scratch`)
         recordBootstrapOutcome(module, 'failed', reason, archive)
         return false

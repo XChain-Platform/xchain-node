@@ -83,7 +83,7 @@ describe('DatabaseService', function () {
 
         it('throws when the registry lists a coin but holds no decoder/indexer container', async function () {
             const stubs = makeStubs()
-            stubs.db.getModuleContainer.resolves(null)
+            stubs.db.getModuleContainerStrict.resolves(null)
             const ds = loadDatabaseService(stubs)
             try {
                 await ds.setDatabaseParameters()
@@ -157,6 +157,70 @@ describe('DatabaseService', function () {
             } finally {
                 log.restore()
             }
+        })
+        })
+})
+
+describe('DatabaseService', function () {
+
+        describe('setDatabaseParameters()', function () {
+
+        // A registry read that errors is not "no indexer installed": the decoder's
+        // account alone keeps the count above zero, so a swallowed indexer read
+        // would report success over an indexer MariaDB never got a password for.
+        it('fails when the indexer registry read errors after the decoder was provisioned', async function () {
+            const stubs = makeStubs()
+            stubs.db.getModuleContainerStrict.callsFake(async (module) => {
+                if (module === 'xchain-indexer') throw new Error('ER_LOCK_WAIT_TIMEOUT')
+                return 'db-container-id'
+            })
+            const statements = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                statements.push(sql)
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '1\n' }
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs)
+            let caught = null
+            try {
+                await ds.setDatabaseParameters()
+            } catch (err) {
+                caught = err
+            }
+            expect(caught, 'a failed indexer lookup must not read as success').to.be.an('error')
+            expect(caught.message).to.equal('ER_LOCK_WAIT_TIMEOUT')
+            expect(statements.some(s => /xchain_decoder_bitcoin_mainnet/.test(s))).to.be.true
+            expect(statements.some(s => /xchain_indexer_bitcoin_mainnet/.test(s))).to.be.false
+            expect(stubs.db.getModuleContainer.called).to.be.false
+        })
+        })
+})
+
+describe('DatabaseService', function () {
+
+        describe('setDatabaseParameters()', function () {
+
+        // The DrillB and HubMirror patterns span every chain, and their comments scope
+        // them to the indexer account. The decoder account the indexer reads is a
+        // different user, so it must not pick them up when the indexer is provisioned.
+        it('keeps the indexer-only pattern grants off the decoder account on a non-mainnet network', async function () {
+            const stubs = makeStubs()
+            stubs.getInstalledCoinsAndNetworks.resolves({ bitcoin: ['testnet'] })
+            const statements = []
+            stubs.spawn.callsFake(fakeSpawn((sql) => {
+                statements.push(sql)
+                if (sql.startsWith('SELECT COUNT')) return { stdout: '1\n' }
+                return { stdout: '' }
+            }))
+            const ds = loadDatabaseService(stubs)
+            await ds.setDatabaseParameters()
+            const grants = statements.filter(s => /GRANT/.test(s))
+            const patternGrants = grants.filter(s => /DrillB|HubMirror/.test(s))
+            expect(patternGrants.some(s => /DrillB/.test(s) && /xchain_indexer_bitcoin_mainnet/.test(s))).to.be.true
+            expect(patternGrants.some(s => /HubMirror/.test(s) && /xchain_indexer_bitcoin_mainnet/.test(s))).to.be.true
+            expect(patternGrants.filter(s => /xchain_decoder_bitcoin_mainnet/.test(s))).to.deep.equal([])
+            expect(grants.some(s => /SLAVE MONITOR/.test(s) && /xchain_decoder_bitcoin_mainnet/.test(s))).to.be.true
+            expect(grants.some(s => /SLAVE MONITOR/.test(s) && /xchain_indexer_bitcoin_mainnet/.test(s))).to.be.true
         })
         })
 })

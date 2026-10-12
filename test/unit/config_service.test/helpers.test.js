@@ -44,7 +44,10 @@ const NO_VALIDATOR = {
 function makeConfigService(fsStub) {
     return proxyquire('../../../src/services/config_service', {
         'fs': fsStub || require('fs'),
-        './validator_service': NO_VALIDATOR
+        './validator_service': NO_VALIDATOR,
+        './database_service': {
+            getDatabaseContainerId: async () => null
+        }
     })
 }
 

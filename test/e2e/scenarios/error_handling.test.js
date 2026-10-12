@@ -99,6 +99,32 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
     this.timeout(30000)
     beforeEach(setupEnv)
     afterEach(teardownEnv)
+
+    describe('E2E-066: Module registry read failure', function () {
+        it('propagates a query error through the production strict read', async function () {
+            env.setupDefaultRoutes()
+            cli = env.createCLI()
+
+            const state = require('../../../src/state')
+            const MariaDbStore = require('../../../src/db')
+            expect(state.db.getModuleContainerStrict).to.equal(MariaDbStore.prototype.getModuleContainerStrict)
+            sinon.stub(state.db.pool, 'query').rejects(new Error('modules table unavailable'))
+
+            const serviceList = filterCommandParameters(null, 'xchain-encoder', 'bitcoin', 'mainnet')
+            const err = await cli.moduleOps.uninstallModules(serviceList).then(() => null, caught => caught)
+
+            expect(err).to.be.an('error')
+            expect(err.message).to.include('modules table unavailable')
+            expect(err.failures[0]).to.include({ module: 'xchain-encoder' })
+            expect(env.capture.findCommands(/docker stop|docker rm/)).to.have.lengthOf(0)
+        })
+    })
+})
+
+describe('E2E: Error Handling (Scenario 4.10)', function () {
+    this.timeout(30000)
+    beforeEach(setupEnv)
+    afterEach(teardownEnv)
     // E2E-061: Docker build failure
     describe('E2E-061: Docker run failure leaves no LevelDB entry', function () {
 

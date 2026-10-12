@@ -57,6 +57,26 @@ for _ in $(seq 1 180); do
         set +a
         node "$root/seed-stack-config.js" "$HUB_HOST_PORT"
         node "$root/wait-indexer-schema.js"
+        # The explorer answers ping 503 until its next hub config poll picks up the coins
+        # seeded above, which can trail a warm boot by a minute. A suite that pings it
+        # first fails its initial check, so the stack is ready only once it answers.
+        explorer_ping='{"jsonrpc":"2.0","method":"ping","id":1}'
+        explorer_ok=0
+        for _ in $(seq 1 120); do
+            if curl -fsS -o /dev/null -H 'content-type: application/json' --data "$explorer_ping" \
+                "http://127.0.0.1:$EXPLORER_HTTP_HOST_PORT/" 2>/dev/null; then
+                explorer_ok=1
+                break
+            fi
+            sleep 2
+        done
+        if [ "$explorer_ok" != 1 ]; then
+            date -u
+            printf "explorer=%s\n" "$(health explorer)"
+            printf "explorer ping timeout for xca7%s\n" "$stack"
+            exit 1
+        fi
+        printf "explorer ready\n"
         date -u
         exit 0
     fi

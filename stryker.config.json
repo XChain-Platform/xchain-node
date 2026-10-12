@@ -6,10 +6,15 @@
     "src/services/config_service.js",
     "src/services/config_service/**",
     "src/services/module_service.js",
+    "src/services/module_service/**",
     "src/services/docker_service.js",
+    "src/services/docker_service/**",
     "src/services/database_service.js",
+    "src/services/database_service/**",
     "src/services/bootstrap_service.js",
-    "src/services/status_service.js"
+    "src/services/bootstrap_service/**",
+    "src/services/status_service.js",
+    "src/services/status_service/**"
   ],
   "testRunner": "mocha",
   "testRunnerNodeArgs": [

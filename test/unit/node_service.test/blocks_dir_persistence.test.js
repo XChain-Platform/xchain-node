@@ -63,6 +63,7 @@ describe("NodeService: buildCryptoNode()", function () {
             expect(stubs.forceRemoveContainerByName.called).to.be.false
             expect(stubs.execFile.getCalls().some(c => c.args[1][0] === 'run')).to.be.false
         })
+
     })
 })
 

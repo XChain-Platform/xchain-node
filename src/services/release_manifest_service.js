@@ -30,7 +30,7 @@ const fs    = require('fs')
 const path  = require('path')
 const axios = require('axios')
 
-const { githubApiHeaders, githubRateLimitError } = require('../utils/github_api')
+const { githubApiHeaders, githubRateLimitError, GITHUB_API_TIMEOUT_MS, GITHUB_DOWNLOAD_TIMEOUT_MS } = require('../utils/github_api')
 const { verifyManifestForTag } = require('./release_signature_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -113,7 +113,7 @@ async function fetchManifestAtTag(tag) {
     const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/contents/src/${MANIFEST_FILE}`
     let result
     try {
-        result = await axios.get(url, { headers: githubApiHeaders(), params: { ref: tag } })
+        result = await axios.get(url, { headers: githubApiHeaders(), params: { ref: tag }, timeout: GITHUB_API_TIMEOUT_MS })
     } catch (error) {
         const rateLimited = githubRateLimitError(error)
         if (rateLimited) throw rateLimited
@@ -155,7 +155,7 @@ async function fetchReleaseAsset(tag, assetName) {
     const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/releases/tags/${tag}`
     let release
     try {
-        release = await axios.get(url, { headers: githubApiHeaders() })
+        release = await axios.get(url, { headers: githubApiHeaders(), timeout: GITHUB_API_TIMEOUT_MS })
     } catch (error) {
         const rateLimited = githubRateLimitError(error)
         if (rateLimited) throw rateLimited
@@ -171,18 +171,27 @@ async function fetchReleaseAsset(tag, assetName) {
     // storage REJECTS a request still carrying our Authorization header (the
     // same trap githubApiHeaders documents for coin-node downloads). So follow
     // the redirect by hand and drop the credentials on the second hop.
-    const first = await axios.get(asset.url, {
-        headers: { ...githubApiHeaders(), Accept: 'application/octet-stream' },
-        responseType: 'arraybuffer',
-        maxRedirects: 0,
-        validateStatus: status => (status >= 200 && status < 300) || [301, 302, 307, 308].includes(status)
-    })
+    let first
+    try {
+        first = await axios.get(asset.url, {
+            headers: { ...githubApiHeaders(), Accept: 'application/octet-stream' },
+            responseType: 'arraybuffer',
+            timeout: GITHUB_API_TIMEOUT_MS,
+            maxRedirects: 0,
+            validateStatus: status => (status >= 200 && status < 300) || [301, 302, 307, 308].includes(status)
+        })
+    } catch (error) {
+        // The asset endpoint is still api.github.com and spends the same quota,
+        // so a rate-limited 403 gets the reset time and GITHUB_TOKEN advice too.
+        throw githubRateLimitError(error) || error
+    }
 
     if (first.status >= 300) {
         const location = first.headers && first.headers.location
         if (!location) throw new Error(`Release asset ${assetName} redirected without a location header`)
         const followed = await axios.get(location, {
             responseType: 'arraybuffer',
+            timeout: GITHUB_DOWNLOAD_TIMEOUT_MS,
             headers: { 'User-Agent': 'GitHubDownloader' }
         })
         return Buffer.from(followed.data)
@@ -201,20 +210,20 @@ async function verifyManifestBytes(tag, bytes) {
 
 // The ONE latest-release semantic for the platform (spec section 5).
 //
-// Two paths existed and disagreed: VersionService hits `releases/latest`, which
-// the GitHub API defines as the newest NON-prerelease, non-draft release;
+// Two paths existed and disagreed: a VersionService helper hit `releases/latest`,
+// which the GitHub API defines as the newest NON-prerelease, non-draft release;
 // GitHubDownloader fetches the full list and sorts by published_at, which does
 // not exclude either. They are reconciled by ruling that train releases are
 // never flagged as GitHub pre-releases (D1/section 5), which makes
 // `releases/latest` well-defined, and by routing platform-version resolution
-// through this function only. GitHubDownloader keeps its own sort because it
-// resolves COIN daemon releases from third-party repos whose flagging this
-// project does not control.
+// through this function only; the VersionService helper had no caller and is
+// gone. GitHubDownloader keeps its own sort because it resolves COIN daemon
+// releases from third-party repos whose flagging this project does not control.
 async function resolveLatestReleaseTag() {
     const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/releases/latest`
     let result
     try {
-        result = await axios.get(url, { headers: githubApiHeaders() })
+        result = await axios.get(url, { headers: githubApiHeaders(), timeout: GITHUB_API_TIMEOUT_MS })
     } catch (error) {
         const rateLimited = githubRateLimitError(error)
         if (rateLimited) throw rateLimited
@@ -239,11 +248,9 @@ async function resolveLatestReleaseTag() {
  * @param {string}      [opts.defaultBranch]  branch to fall back to when no
  *                                            release can be resolved
  * @param {boolean}     [opts.fallbackToBranch]  false makes a no-ref call
- *                       THROW when no release can be resolved instead of
- *                       degrading to a branch. An install on a fresh box may
- *                       reasonably fall back to master; an UPDATE of a
- *                       release node must not, because that fallback would
- *                       move every pinned module onto a branch tip.
+ *                       THROW when no published release exists instead of
+ *                       degrading to a branch. A failed lookup always throws
+ *                       because it cannot establish that no release exists.
  * @returns {Promise<{kind:'release'|'branch', ref:string, tag:string|null,
  *                    manifest:object|null, resolvedFrom:string}>}
  */
@@ -268,15 +275,10 @@ async function resolveInstallTarget(ref, { defaultBranch = 'master', fallbackToB
     try {
         tag = await resolveLatestReleaseTag()
     } catch (err) {
-        if (!fallbackToBranch) {
-            throw new Error(
-                `Could not resolve the latest xchain-node release (${err.message}).`
-                + ' Nothing was changed. Retry, or name the release explicitly (e.g. `update all v0.15.2`).'
-            )
-        }
-        logger.warn(`Could not resolve the latest xchain-node release (${err.message}).`)
-        logger.warn(`Falling back to a tracking install of '${defaultBranch}' (UNRELEASED).`)
-        return { kind: 'branch', ref: defaultBranch, tag: null, manifest: null, resolvedFrom: 'fallback after lookup failure' }
+        throw new Error(
+            `Could not resolve the latest xchain-node release (${err.message}).`
+            + ' Nothing was changed. Retry, or name the release explicitly (e.g. `update all v0.15.2`).'
+        )
     }
 
     if (!tag) {

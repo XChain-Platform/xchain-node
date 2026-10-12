@@ -13,12 +13,42 @@
 // Pins the one `-p` grammar the port validator and the host-port conflict
 // check share: split on the last colon, host port is the field before it.
 
-const { expect, proxyquire, moduleSuite } = require('./support/helpers')
+const { sinon, expect, proxyquire, moduleSuite } = require('./support/helpers')
 const { validatePort } = require('../../../src/services/config_service/validation')
 const { parsePortSpec } = require('../../../src/services/module_service/docker_args')
 // Load a fresh copy so a sibling suite's configureDependencies cannot swap validatePort.
 const { validatePortArgs } = proxyquire('../../../src/services/module_service/build_and_up', {
     '../config_service': { validatePort }
+})
+
+moduleSuite('configureDependencies()', function () {
+    it('configureDependencies keeps its own getPublishedHostPorts and getUtxoTrackerVolumeName when the injected value is absent', async function () {
+        const ownGetUtxoTrackerVolumeName = sinon.stub().returns('own-tracker-volume')
+        const ownGetPublishedHostPorts = sinon.stub().resolves(new Map())
+        const dockerArgs = proxyquire('../../../src/services/module_service/docker_args', {
+            '../config_service': { getUtxoTrackerVolumeName: ownGetUtxoTrackerVolumeName },
+            '../docker_service': { getPublishedHostPorts: ownGetPublishedHostPorts }
+        })
+
+        dockerArgs.configureDependencies({
+            SERVICE_REGISTRY: {
+                tracker: {
+                    docker: {
+                        volumes: [{ hostFn: 'utxoTrackerVolume', container: '/data' }]
+                    }
+                }
+            },
+            getUtxoTrackerVolumeName: undefined,
+            getPublishedHostPorts: undefined
+        })
+
+        const built = dockerArgs.buildModuleDockerArgs('tracker', {}, 'bitcoin', 'mainnet')
+        expect(built.volumeArgs).to.deep.equal(['-v', 'own-tracker-volume:/data'])
+        expect(ownGetUtxoTrackerVolumeName.calledOnceWithExactly('bitcoin', 'mainnet')).to.equal(true)
+
+        await dockerArgs.assertNoHostPortConflicts(['-p', '8080:80'], 'self')
+        expect(ownGetPublishedHostPorts.calledOnceWithExactly()).to.equal(true)
+    })
 })
 
 moduleSuite('parsePortSpec()', function () {

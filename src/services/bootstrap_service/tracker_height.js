@@ -39,8 +39,9 @@ function configureDependencies(dependencies) {
     logger = dependencies.logger
 }
 
-// How long a just-restarted tracker gets to answer its status surface before the pre-stop floor is used instead.
-const POST_RESTART_PROBE_ATTEMPTS = 12
+// How long a just-restarted tracker gets to answer its status surface (5 min) before the publish refuses.
+// The tracker is serving again by then, so the wait costs publish wall-clock time only.
+const POST_RESTART_PROBE_ATTEMPTS = 60
 const POST_RESTART_PROBE_DELAY_MS = 5000
 
 // The tracker's committed height from its status surface, or null. Asked
@@ -79,24 +80,32 @@ async function readTrackerHeightAfterRestart(coin, network, containerId, { attem
 }
 
 // Pick the height the archive records: never below the data it holds, since the restore guard treats nodeHeight >= archiveHeight as safe.
-// max() keeps a rollback during the restart from lowering it. With no post-restart reading, the pre-stop floor is kept (a height off by
-// the stop window still guards more than none, which the guard reads as "unknown" and restores unchecked).
+// max() keeps a rollback during the restart from lowering it. A pre-stop reading alone can miss blocks committed while the tracker
+// stopped, so that case throws rather than sign an understated height; with no reading at all the archive honestly carries none.
 function chooseArchiveHeight(preStopHeight, postRestartHeight) {
     const pre  = Number.isInteger(preStopHeight) ? preStopHeight : null
     const post = Number.isInteger(postRestartHeight) ? postRestartHeight : null
-    const chosen = post === null ? pre : pre === null ? post : Math.max(pre, post)
     if (post === null && pre !== null) {
-        logger.info(`WARNING: could not read the tracker height after the restart; the archive records the pre-stop height ${pre}, ` +
-            'which may understate the archived data by the blocks committed while the tracker was stopping.')
-    } else {
-        logger.info(`Archive height: ${chosen === null ? 'unknown' : chosen} (pre-stop ${pre === null ? 'unknown' : pre}, after restart ${post === null ? 'unknown' : post}).`)
+        throw new Error(`the tracker height could not be read after the restart; refusing to record the pre-stop height ${pre}, ` +
+            'which may understate the archived data by the blocks committed while the tracker was stopping')
     }
+    const chosen = post === null ? pre : pre === null ? post : Math.max(pre, post)
+    logger.info(`Archive height: ${chosen === null ? 'unknown' : chosen} (pre-stop ${pre === null ? 'unknown' : pre}, after restart ${post === null ? 'unknown' : post}).`)
     return chosen
+}
+
+// Throw when only the pre-stop reading exists, naming the run, so the publish stops before any compress or signing.
+function refusePreStopOnlyHeight({ coin, network, preStopHeight, postRestartHeight }) {
+    if (!Number.isInteger(preStopHeight) || Number.isInteger(postRestartHeight)) return
+    throw new Error(`utxo-tracker ${coin}/${network} did not report its committed height after the restart; ` +
+        `refusing to sign an archive whose recorded height could understate its data (pre-stop reading ${preStopHeight}). ` +
+        'No archive was built or signed; the previously published archive stays in place, so rerun the publish.')
 }
 
 module.exports = {
     configureDependencies,
     readTrackerCommittedHeight,
     readTrackerHeightAfterRestart,
-    chooseArchiveHeight
+    chooseArchiveHeight,
+    refusePreStopOnlyHeight
 }

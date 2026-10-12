@@ -121,6 +121,60 @@ describe("NodeService: buildCryptoNode()", function () {
         // The guard runs before the build, so `docker build` must NOT fire.
         expect(built).to.be.false
     })
+
+    // A config typo must cost no running node: refuse before stop, force-remove or build.
+    for (const [key, ports] of [
+        ['NODE_EXPOSED_PORT', { NODE_EXPOSED_PORT: '3000/tcp', NODE_PORT: 8332 }],
+        ['NODE_EXPOSED_PORT', { NODE_EXPOSED_PORT: '99999', NODE_PORT: 8332 }],
+        ['NODE_PORT', { NODE_EXPOSED_PORT: 8333, NODE_PORT: 'abc' }]
+    ]) {
+        it(`refuses ${key}=${ports[key]} before touching the live container`, async function () {
+            const stopContainerByName = sinon.stub().resolves({ stopped: true, seconds: 1, killed: false })
+            const forceRemoveContainerByName = sinon.stub().resolves(true)
+            const stubs = makeNodeServiceStubs({
+                validatePort: require('../../../src/services/config_service/validation').validatePort,
+                getDefaultConfig: sinon.stub().resolves({ ...ports, NODE_USER: 'u', NODE_PASSWORD: 'p' }),
+                stopContainerByName,
+                forceRemoveContainerByName
+            })
+            stubs.execFile.callsFake((cmd, args, opts, cb) => {
+                if (args[0] === 'build') return cb(null)
+                if (args[0] === 'run')   return cb(null, 'f'.repeat(64) + '\n')
+            })
+
+            const ns = loadNodeService(stubs)
+            let threw = null
+            try {
+                await ns.buildCryptoNode('bitcoin', 'mainnet')
+            } catch (err) { threw = err }
+            expect(threw).to.be.an.instanceOf(Error)
+            expect(threw.message).to.include('Invalid port value in configuration: ' + key)
+            expect(stopContainerByName.called).to.be.false
+            expect(forceRemoveContainerByName.called).to.be.false
+            const dockerVerbs = stubs.execFile.getCalls().map(c => c.args[1][0])
+            expect(dockerVerbs).to.not.include('build')
+            expect(dockerVerbs).to.not.include('run')
+        })
+    }
+})
+
+describe("NodeService: buildCryptoNode()", function () {
+
+    it('still publishes valid ports under the real validator', async function () {
+        const stubs = makeNodeServiceStubs({
+            validatePort: require('../../../src/services/config_service/validation').validatePort
+        })
+        stubs.execFile.callsFake((cmd, args, opts, cb) => {
+            if (args[0] === 'build') return cb(null)
+            if (args[0] === 'run')   return cb(null, 'f'.repeat(64) + '\n')
+        })
+
+        const ns = loadNodeService(stubs)
+        await ns.buildCryptoNode('bitcoin', 'mainnet')
+        const runCall = stubs.execFile.getCalls().find(c => c.args[1][0] === 'run')
+        const argv = runCall.args[1]
+        expect(argv[argv.indexOf('-p') + 1]).to.equal('8333:8332')
+    })
 })
 
 describe("NodeService: buildCryptoNode()", function () {

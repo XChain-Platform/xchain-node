@@ -130,9 +130,12 @@ describe('BootstrapService', function () {
                 expect.fail()
             } catch (err) {
                 expect(err.message).to.include('mariadb restore exited with code 2')
+                // The database was already dropped and is only partly imported, so
+                // the error is tagged and the service is NOT restarted over it.
+                expect(err.postWipe).to.be.true
             }
-            // service container should still be restarted
-            expect(stubs.dockerService.startContainer.calledWith('svc-container-id')).to.be.true
+            expect(stubs.dockerService.stopContainer.called).to.be.true
+            expect(stubs.dockerService.startContainer.called).to.be.false
         })
     })
 })

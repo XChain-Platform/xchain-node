@@ -36,6 +36,7 @@ const {
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
 const { readKeyHolders } = require('./validator_stake_service/free_key')
+const { readSleepState } = require('./validator_stake_service/address_sleep')
 const { readTokenRow } = require('./validator_stake_service/token_balance_read')
 
 const STAKE_TICK = 'XCHAIN'
@@ -192,9 +193,11 @@ async function readChainState(sdk, address, pubkey, keyCtx) {
     // a truncated read throws into the same catch rather than reading as absent.
     // readKeyHolders also applies the reuse gate and reads the key's delegations.
     const holders = await readKeyHolders(sdk, pubkey, keyCtx)
+    // Read whether the stake address put itself to sleep: the indexer rejects its MINTs and STAKE then.
+    const sleepState = await readSleepState(sdk, address, keyCtx.coins)
 
     return { coinBal, coinPending, tokenBal, mintMax: num(mints && mints.max),
-        mintAddressMax: num(mints && mints.address_max), mintUnreadable, ...holders }
+        mintAddressMax: num(mints && mints.address_max), mintUnreadable, ...holders, ...sleepState }
 }
 
 // Plan the mints: how many transactions, at what amount each, to lift the
@@ -315,6 +318,12 @@ function openValidatorSession(opts, deps) {
     if (!network || !COIN_NETWORKS[network]) throw fail('validator network unknown; re-run `validator init --network testnet|mainnet`.')
     const coins  = COIN_NETWORKS[network]
     const pubkey = String(settings.pubkey || '').toLowerCase()
+    // Refuse a pubkey the indexer's SIGNING_PUBKEY rule refuses (64 hex, Ed25519), before the WIF
+    // prompt or any read: it matches no rows, so it reads as free and --broadcast would pay every MINT.
+    if (!/^[0-9a-f]{64}$/.test(pubkey)) {
+        throw fail('the signing pubkey in validator.json is not 64 hex characters (an Ed25519 key), so the ' +
+                   'indexer would refuse the STAKE after the MINT fees were spent. Restore validator.json. Nothing was sent.')
+    }
 
     const wallets = deps.wallets !== undefined ? deps.wallets : readWallets()
     const wif     = deps.wif || resolveStakeWif(wallets)

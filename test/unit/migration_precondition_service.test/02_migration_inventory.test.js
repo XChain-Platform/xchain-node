@@ -75,7 +75,11 @@ function registerRealIndexerInventory({ fs, expect, listDeployPreconditionMigrat
             + ' but has no migrations directory at ' + INDEXER_MIGRATIONS).to.equal(true)
         const required = listDeployPreconditionMigrations(INDEXER_MIGRATIONS)
         expect(required).to.include('2026-09-12-bridge-tables.sql')
-        expect(required).to.not.include('2026-09-12-token-bridge-fields.sql')
+        // Prove the auto migration is present, so its absence from the list is not vacuous.
+        const autoFields = '2026-10-08-token-bridge-fields.sql'
+        expect(fs.readdirSync(INDEXER_MIGRATIONS), autoFields + ' missing from ' + INDEXER_MIGRATIONS)
+            .to.include(autoFields)
+        expect(required).to.not.include(autoFields)
     })
 }
 

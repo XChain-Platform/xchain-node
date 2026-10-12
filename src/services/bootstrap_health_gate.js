@@ -98,8 +98,10 @@ class BootstrapSourceUnhealthyError extends Error {
             `Refusing to create a bootstrap from ${label}: the source is not known-good.\n` +
             reasons.map(r => `  - ${r}`).join('\n') + '\n' +
             'A bootstrap archive becomes the newest (and therefore default) recovery source for the whole ' +
-            'fleet, so publishing an unverified one is worse than publishing nothing. Fix the service (for a ' +
-            'durable halt marker that means a full resync from a known-good snapshot), then re-run. To snapshot ' +
+            'fleet, so publishing an unverified one is worse than publishing nothing. Fix the service, then ' +
+            're-run: a durable halt marker takes the recovery its line above names (a decoder REORG_HALT ' +
+            'also clears in place with `xchain-node clear-reorg-halt` once verified; any other marker means ' +
+            'a full resync from a known-good snapshot). To snapshot ' +
             'a known-bad database deliberately, set XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE=1.'
         )
         this.name = 'BootstrapSourceUnhealthyError'
@@ -308,8 +310,11 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
             reasons.push(`the paired decoder database ${markers.upstream.dbName} carries a durable REORG_HALT ` +
                 "marker (events.code='REORG_HALT'), so this indexer is frozen behind a decoder that aborted " +
                 'mid-rollback. Its own health surface reports lag 0 only because that lag is measured against ' +
-                'the frozen decoder height. Recovery is a full resync of the decoder and this indexer from a ' +
-                'known-good snapshot.')
+                'the frozen decoder height. Recovery happens on the decoder: once its rolled-back range is ' +
+                're-parsed and its database is verified intact, `xchain-node clear-reorg-halt <chain> ' +
+                '<network> --reason "..."` clears the halt in place, and this publish can be re-run when the ' +
+                'indexer reports healthy again; otherwise, a full resync of the decoder and this indexer from ' +
+                'a known-good snapshot.')
         if (markers.upstream && markers.upstream.syncHalt > 0)
             reasons.push(`the paired decoder database ${markers.upstream.dbName} carries an uncleared ` +
                 'xchain-sync divergence halt (sync_halt with cleared_at IS NULL), so the rows this indexer ' +

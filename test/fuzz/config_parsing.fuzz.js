@@ -33,6 +33,7 @@ function streamFromString(str) {
 function makeServiceWithConfig(configContent) {
     const fsStub = {
         createReadStream: sinon.stub().callsFake(() => streamFromString(configContent)),
+        readFileSync: sinon.stub().callsFake(() => configContent),
         existsSync: sinon.stub().returns(true),
         appendFileSync: sinon.stub(),
         writeFileSync: sinon.stub(),

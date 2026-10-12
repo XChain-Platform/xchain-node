@@ -227,6 +227,10 @@ function runArgsOf(seen) {
     return run ? run.args : null
 }
 
+function dockerEnvInspectOutput(env) {
+    return JSON.stringify(Object.entries(env).map(([key, value]) => `${key}=${value}`)) + '\n'
+}
+
 // What the readback reports, in bytes. 'requested' echoes the cap the create
 // actually asked for, which the service derives from the RAM of whatever host
 // runs the suite and so cannot be written as a literal here.
@@ -332,5 +336,5 @@ module.exports = {
     sinon, configStub, expect, proxyquire, modulesUrls, XChainService,
     DEFAULT_NODE_PREFIX, DEPENDENCY_HEALTH_START_PERIOD, makeStubs, makeConfigServiceStub,
     loadModuleService, stubDockerCreate, runArgsOf, inspectMemoryBytes,
-    captureConsole, proxyquireCallThru, moduleSuite
+    dockerEnvInspectOutput, captureConsole, proxyquireCallThru, moduleSuite
 }

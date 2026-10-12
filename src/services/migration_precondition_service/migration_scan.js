@@ -13,13 +13,14 @@
  ********************************************************************/
 
 const fs = require('fs')
+const path = require('path')
 
-const { EXTERNAL_DB } = require('../../config')
+const { EXTERNAL_DB, XChainService } = require('../../config')
 const { tableCountSql, tableExistsSql } = require('../../db/information_schema')
 const { appliedMigrationsSql } = require('../../db/migrations')
 const { migrationFiles } = require('../../utils/migration_files')
 const { getDockerContainerImageName } = require('../config_service')
-const { readMigrateCli, migrateCliPathFor } = require('../../utils/indexer_migrate_cli')
+const { readMigrateCli, migrateCliPathFor, migrateCliPathsFor, decoderStatusRows } = require('../../utils/indexer_migrate_cli')
 
 const SKIP_ENV     = 'XCHAIN_NODE_SKIP_MIGRATION_PRECONDITION'
 const LEDGER_TABLE = 'schema_migrations'
@@ -68,6 +69,63 @@ function migrationMode(raw) {
     return m ? m[1].toLowerCase() : 'manual'
 }
 
+const LEDGER_RENAMES_FILE = 'src/db/database/migration_registry.js'
+const LEDGER_RENAMES_OPEN = /^\s*const MIGRATION_LEDGER_RENAMES = \{\s*$/
+const LEDGER_RENAMES_PAIR = /^\s*'([A-Za-z0-9._-]+\.sql)'\s*:\s*'([A-Za-z0-9._-]+\.sql)'\s*,?\s*$/
+
+/**
+ * The ledger rename map (old filename -> new filename) the target tree's runner will
+ * apply at boot, read from that tree so a rename shipping in this release counts
+ * without an xchain-node release.
+ *
+ * All or nothing: every line inside the literal must be blank, a full-line comment,
+ * or one quoted 'old.sql': 'new.sql' pair, else the result is 'unparseable' with an
+ * empty map, so a misread can never re-key more than the runner itself would.
+ * A tree with no registry file (the decoder) is 'absent', also with an empty map.
+ *
+ * Twin of MIGRATION_LEDGER_RENAMES in xchain-indexer src/db/database/migration_registry.js,
+ * read as text for the reason given above; keep that literal a flat string-to-string object.
+ */
+function readLedgerRenames(root) {
+    const file = path.join(root, LEDGER_RENAMES_FILE)
+    const none = (state, reason) => ({ state, renames: {}, reason })
+    let lines
+    try {
+        lines = fs.readFileSync(file, 'utf8').split('\n')
+    } catch (err) {
+        if (err && err.code === 'ENOENT') return none('absent', file + ' does not exist')
+        return none('unparseable', 'could not read ' + file + ': ' + (err && err.message))
+    }
+    const opens = lines.map((line, i) => LEDGER_RENAMES_OPEN.test(line) ? i : -1).filter(i => i >= 0)
+    if (opens.length !== 1) return none('unparseable', 'expected one MIGRATION_LEDGER_RENAMES literal, found ' + opens.length)
+    const renames = {}
+    for (let i = opens[0] + 1; i < lines.length; i++) {
+        const trimmed = lines[i].trim()
+        if (trimmed === '};') return { state: 'parsed', renames, reason: null }
+        if (trimmed === '' || trimmed.startsWith('//')) continue
+        const m = lines[i].match(LEDGER_RENAMES_PAIR)
+        if (!m) return none('unparseable', 'line ' + (i + 1) + ' is not a quoted filename pair')
+        if (m[1] === m[2] || Object.prototype.hasOwnProperty.call(renames, m[1])) {
+            return none('unparseable', 'line ' + (i + 1) + ' repeats or self-maps ' + m[1])
+        }
+        renames[m[1]] = m[2]
+    }
+    return none('unparseable', 'MIGRATION_LEDGER_RENAMES literal is never closed')
+}
+
+/**
+ * A new applied set with each recorded old name re-keyed to its new name, in memory
+ * only, planned against the input set exactly as Database.planLedgerRenames does:
+ * a pair moves only when the old name is recorded and the new one is not.
+ * Twin of planLedgerRenames in xchain-indexer src/db/database/migration_registry.js; keep the rule in step.
+ */
+function rekeyApplied(applied, renames) {
+    const ops = Object.entries(renames || {}).filter(([from, to]) => applied.has(from) && !applied.has(to))
+    const out = new Set(applied)
+    for (const [from, to] of ops) { out.delete(from); out.add(to) }
+    return out
+}
+
 /**
  * Every gated (not mode=auto) migration in `dir` that the ledger has not recorded,
  * sorted. This is the blast radius of an UNSCOPED migrate run against that
@@ -86,45 +144,76 @@ function pendingManualMigrations(dir, applied) {
     }).map(([f]) => f)
 }
 
-/** Verify the running container's migrate CLI through its read-only status contract. */
-async function runningBuildSupportsPerFileMigrations(container, deps = {}) {
+/**
+ * Read the running container's migrate CLI through its read-only status contract.
+ * `rows` is the file list THAT build carries, kept only when the response passed
+ * every check, because the refusal's remedy runs on that build and not on the
+ * source being deployed.
+ */
+async function readRunningBuildMigrationStatus(container, deps = {}, module) {
+    const refused = { supportsPerFile: false, rows: null }
     try {
         const cat = deps.getDockerContainerFileCat || require('../docker_service').getDockerContainerFileCat
-        const found = await readMigrateCli(cat, container)
-        if (!found) return null
-        if (!/(['"])--status\1/.test(found.source)) return false
+        const found = await readMigrateCli(cat, container, migrateCliPathsFor(module))
+        if (!found) return { supportsPerFile: null, rows: null }
+        if (!/(['"])--status\1/.test(found.source)) return refused
 
         const execContainer = deps.execContainer || require('../docker_service').execContainer
         let raw
         try {
             raw = await execContainer(container, ['node', found.cliPath, '--status', '--json'])
         } catch {
-            return false
+            return refused
         }
 
         let status
         try {
             status = JSON.parse(String(raw))
         } catch {
-            return false
+            return refused
         }
-        if (!status || Array.isArray(status) || typeof status !== 'object') return false
-        if (typeof status.database !== 'string' || status.database.length === 0) return false
-        if (!Array.isArray(status.migrations)) return false
+        if (!status || Array.isArray(status) || typeof status !== 'object') return refused
+        // The decoder CLI lists names, not counted rows; its checks live beside its paths.
+        if (module === XChainService.XCHAIN_DECODER && Array.isArray(status.applied)) {
+            const rows = decoderStatusRows(status, found.source)
+            return rows ? { supportsPerFile: true, rows } : refused
+        }
+        if (typeof status.database !== 'string' || status.database.length === 0) return refused
+        if (!Array.isArray(status.migrations)) return refused
         for (const row of status.migrations) {
-            if (!row || Array.isArray(row) || typeof row !== 'object') return false
-            if (typeof row.file !== 'string' || row.file.length === 0) return false
-            if (typeof row.applied !== 'boolean') return false
+            if (!row || Array.isArray(row) || typeof row !== 'object') return refused
+            if (typeof row.file !== 'string' || row.file.length === 0) return refused
+            if (typeof row.applied !== 'boolean') return refused
         }
 
         const counts = ['total', 'applied', 'pending']
-        if (!counts.every(k => Number.isInteger(status[k]) && status[k] >= 0)) return false
+        if (!counts.every(k => Number.isInteger(status[k]) && status[k] >= 0)) return refused
         const applied = status.migrations.filter(row => row.applied).length
-        return status.total === status.migrations.length &&
+        const consistent = status.total === status.migrations.length &&
             status.applied === applied && status.pending === status.total - applied
+        if (!consistent) return refused
+        return {
+            supportsPerFile: true,
+            rows: status.migrations.map(row => ({ file: row.file, applied: row.applied, mode: row.mode }))
+        }
     } catch {
-        return null
+        return { supportsPerFile: null, rows: null }
     }
+}
+
+/** Verify the running container's migrate CLI through its read-only status contract. */
+async function runningBuildSupportsPerFileMigrations(container, deps = {}, module) {
+    return (await readRunningBuildMigrationStatus(container, deps, module)).supportsPerFile
+}
+
+/**
+ * The gated files an unscoped migrate run inside the running build would apply:
+ * its own pending rows (a row with no mode is the runners' manual default),
+ * minus any whose end state the database already embodies.
+ */
+function runningBuildPendingManual(rows, applied) {
+    return rows.filter(row => !row.applied && (row.mode == null || row.mode === 'manual') &&
+        !(applied && applied.has(row.file))).map(row => row.file)
 }
 
 /**
@@ -232,6 +321,7 @@ async function readAppliedMigrations({ database, coin, network }, deps = {}) {
 
 function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
     const container = getDockerContainerImageName(module, coin, network)
+    const cliPath = migrateCliPathFor(container, migrateCliPathsFor(module))
     const files = missing.join(', ')
     const plural = missing.length > 1
 
@@ -239,24 +329,44 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
     // REPLACED. Only name the scoped command when that build was confirmed to
     // honour --file; otherwise the command would quietly widen to every pending
     // manual migration, so state that instead of printing it.
+    // With the running build's own file list in hand, a file it does not carry
+    // (one first shipping in this release) can neither be named to --file there
+    // nor be applied by an unscoped run there.
+    const carriedSet  = Array.isArray(remedy.runningFiles) ? new Set(remedy.runningFiles) : null
+    const carried     = carriedSet ? missing.filter(f => carriedSet.has(f)) : missing
+    const notCarried  = carriedSet ? missing.filter(f => !carriedSet.has(f)) : []
+    const notCarriedNote = notCarried.length
+        ? '\n  The running build in ' + container + ' does not carry ' + notCarried.join(', ') +
+          ' (it first ships in the release being deployed), so no migrate run inside that container can apply ' +
+          (notCarried.length > 1 ? 'them' : 'it') + '. Apply the statements in ' +
+          (notCarried.length > 1 ? 'those files' : 'that file') + ' from the release being deployed by hand, ' +
+          'with the writer quiesced, then re-run the update; if this check still refuses because no ledger ' +
+          'row records the hand-applied file, set ' + SKIP_ENV + '=1 for that one deploy.'
+        : ''
+
     let instructions
     if (remedy.supportsPerFile === true) {
-        instructions = 'apply ' + (plural ? 'them' : 'it') +
-            ' deliberately, with the writer quiesced, then re-run the update:\n' +
-            missing.map(f => '    docker exec -i ' + container + ' node ' + migrateCliPathFor(container) + ' --file ' + f).join('\n')
+        instructions = (carried.length
+            ? 'apply ' + (carried.length > 1 ? 'them' : 'it') +
+              ' deliberately, with the writer quiesced, then re-run the update:\n' +
+              carried.map(f => '    docker exec -i ' + container + ' node ' + cliPath + ' --file ' + f).join('\n')
+            : 'none of ' + (plural ? 'them' : 'it') + ' can be applied by the migrate CLI inside ' + container + '.') +
+            notCarriedNote
     } else {
         const wouldApply = (remedy.pendingManual && remedy.pendingManual.length)
             ? remedy.pendingManual
-            : missing
-        instructions = 'DO NOT run `node ' + migrateCliPathFor(container) + '` inside ' + container + '. ' +
+            : carried
+        const source = carriedSet ? '' : ' (listed from the source being deployed; that build may differ)'
+        instructions = 'DO NOT run `node ' + cliPath + '` inside ' + container + '. ' +
             (remedy.supportsPerFile === false
                 ? 'That container did not return a valid --status --json response, so --file support is not verified'
                 : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +
             ' and apply EVERY pending manual migration on ' + dbName + ', which is ' +
-            wouldApply.length + ' file(s):\n' +
-            wouldApply.map(f => '    ' + f + (missing.includes(f) ? '  (the one you need)' : '')).join('\n') + '\n' +
+            wouldApply.length + ' file(s)' + source + ':\n' +
+            wouldApply.map(f => '    ' + f + (carried.includes(f) ? '  (the one you need)' : '')).join('\n') + '\n' +
             '  Apply ' + (plural ? 'the needed files' : 'the needed file') + ' with a build that supports ' +
-            '--file, or apply the statement by hand with the writer quiesced, then re-run the update.'
+            '--file, or apply the statement by hand with the writer quiesced, then re-run the update.' +
+            notCarriedNote
     }
 
     return 'update refused: the ' + module + ' source about to be deployed asserts migration' +
@@ -275,7 +385,11 @@ module.exports = {
     migrationMode,
     pendingManualMigrations,
     runningBuildSupportsPerFileMigrations,
+    readRunningBuildMigrationStatus,
+    runningBuildPendingManual,
     listDeployPreconditionMigrations,
     readAppliedMigrations,
+    readLedgerRenames,
+    rekeyApplied,
     refusalMessage
 }

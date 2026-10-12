@@ -50,6 +50,7 @@ const nodeService            = require('./node_service')
 const databaseService        = require('./database_service')
 const dbCredentialDrift      = require('./db_credential_drift')
 const bootstrapService       = require('./bootstrap_service')
+const nodeVersionPin         = require('./node_service/node_version_pin.js')
 const peers                  = require('./peer_services').bindPeerServices(require)
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -89,21 +90,35 @@ async function containerExistsByName(name) {
     }
 }
 
-async function installNodeModule(coin, network, remoteUpdate) {
+async function installNodeModule(coin, network, remoteUpdate, overwriteContainerId = null) {
     const { getLocalNodeVersion, checkRemoteNodeVersion } = versionService
     const { getRemoteModuleVersions, getLastStatus } = stateModule
     const { buildCryptoNode, getCryptoNode } = nodeService
     const containerVersion = getLastStatus()?.[coin ?? ""]?.[network ?? ""]?.[NODE_MODULE_NAME]?.["container_version"] ?? null
-    if (containerVersion && !remoteUpdate) return false
+    if (containerVersion && !remoteUpdate && !overwriteContainerId) return false
     let localNodeVersion = null
     try {
         localNodeVersion = await getLocalNodeVersion(coin, network)
     } catch { /* not installed yet */ }
+    // The daemon pin binds the CLI install and update too, not only the menu's installNode.
+    const { resolveNodeVersionPin, assertNodeVersionPin } = nodeVersionPin
+    const versionPin = resolveNodeVersionPin(coin)
+    // Only a reused cached daemon can defeat the pin; an update replaces it with the pinned download.
+    if (!remoteUpdate) assertNodeVersionPin(coin, network, localNodeVersion, versionPin)
     if (localNodeVersion == null || remoteUpdate) {
-        const remoteVersions = getRemoteModuleVersions()
-        if (!(NODE_MODULE_NAME + SEP + coin in remoteVersions)) await checkRemoteNodeVersion(coin)
-        const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]["tag_name"]
-        await getCryptoNode(coin, network, remoteNodeVersion)
+        if (versionPin) {
+            logger.info("Node version pinned via env: installing " + coin + " " + versionPin)
+            await getCryptoNode(coin, network, versionPin)
+        } else {
+            const remoteVersions = getRemoteModuleVersions()
+            if (!(NODE_MODULE_NAME + SEP + coin in remoteVersions)) await checkRemoteNodeVersion(coin)
+            const remoteNodeVersion = getRemoteModuleVersions()[NODE_MODULE_NAME + SEP + coin]?.["tag_name"]
+            // Name the missing release rather than handing an undefined tag to the download.
+            if (remoteNodeVersion == null) {
+                throw new Error("There is no valid version to download for the " + coin + "/" + network + " node")
+            }
+            await getCryptoNode(coin, network, remoteNodeVersion)
+        }
     }
     await buildCryptoNode(coin, network)
     await statusChanged()
@@ -234,7 +249,7 @@ async function installServiceModule(context) {
 async function installModule(module, coin, network, remoteUpdate = false, overwriteContainerId = null, onlyExecution = false, branch = null, dockerCmdArgs = null) {
     if (coin === "") coin = null
     if (network === "") network = null
-    if (module === NODE_MODULE_NAME) return installNodeModule(coin, network, remoteUpdate)
+    if (module === NODE_MODULE_NAME) return installNodeModule(coin, network, remoteUpdate, overwriteContainerId)
     if (module === DB_MODULE_NAME) return installDatabaseModule(coin, network)
     if (module === EXPLORER_MODULE_NAME) return installExplorer(branch, remoteUpdate)
     return installServiceModule({ module, coin, network, remoteUpdate, overwriteContainerId, onlyExecution, branch, dockerCmdArgs })

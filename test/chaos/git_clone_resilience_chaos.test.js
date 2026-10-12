@@ -30,6 +30,12 @@ function makeStubs() {
     }
 }
 
+// The clone is one git call among several the service makes, so tests pick it
+// out by its arguments instead of counting every execFile call.
+function cloneCalls(stubs) {
+    return stubs.execFile.getCalls().filter(c => c.args[0] === 'git' && Array.isArray(c.args[1]) && c.args[1][0] === 'clone')
+}
+
 function loadModuleService(stubs, configOverrides = {}) {
     return proxyquire('../../src/services/module_service', {
         'child_process': { execFile: stubs.execFile },
@@ -215,8 +221,9 @@ describe('Chaos: Git Clone Resilience', function () {
             const ms = loadModuleService(stubs)
 
             await ms.cloneGit('xchain-encoder', false, false, 'feature/my-branch')
-            expect(stubs.execFile.calledOnce).to.be.true
-            expect(stubs.execFile.firstCall.args[1]).to.include('feature/my-branch')
+            const clones = cloneCalls(stubs)
+            expect(clones).to.have.length(1)
+            expect(clones[0].args[1]).to.include.members(['-b', 'feature/my-branch'])
         })
     })
 })
@@ -250,7 +257,7 @@ describe('Chaos: Git Clone Resilience', function () {
             })
 
             await ms.cloneGit('xchain-encoder', true, false)
-            expect(stubs.execFile.calledOnce).to.be.true
+            expect(cloneCalls(stubs)).to.have.length(1)
             // The replacement is a swap of the staged clone, not a delete-then-clone:
             // the old directory only goes away after git has succeeded.
             expect(stubs.fs.renameSync.callCount).to.equal(2)

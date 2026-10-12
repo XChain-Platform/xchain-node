@@ -16,13 +16,17 @@ describe('mergeDefaults hub seed selection', function () {
         else process.env.HUB_SEED_URLS = savedHubSeedUrls
     })
 
-    it('omits the default hub API URL when the per-coin config has seed URLs', async function () {
-        const config = await makeServiceWithConfig('HUB_SEED_URLS=default\n')
-            .getDefaultConfig('xchain-indexer', 'dogecoin', 'mainnet')
+    for (const coin of ['litecoin', 'dogecoin']) {
+        for (const network of ['regtest', 'mainnet']) {
+            it(`omits the default hub API URL for seeded ${coin} ${network}`, async function () {
+                const config = await makeServiceWithConfig('HUB_SEED_URLS=default\n')
+                    .getDefaultConfig('xchain-indexer', coin, network)
 
-        expect(config.HUB_SEED_URLS).to.equal('default')
-        expect(config).not.to.have.property('HUB_API_URL')
-    })
+                expect(config.HUB_SEED_URLS).to.equal('default')
+                expect(config).not.to.have.property('HUB_API_URL')
+            })
+        }
+    }
 
     it('omits the hub API URL when host defaults have seed URLs', async function () {
         process.env.HUB_SEED_URLS = 'default'
@@ -37,6 +41,15 @@ describe('mergeDefaults hub seed selection', function () {
         const config = await makeServiceWithConfig('')
             .getDefaultConfig('xchain-indexer', 'dogecoin', 'mainnet')
 
+        expect(config.HUB_API_URL).to.equal(hubApiUrl)
+    })
+
+    it('keeps the default hub API URL when per-coin config disables host seed URLs', async function () {
+        process.env.HUB_SEED_URLS = 'default'
+        const config = await makeServiceWithConfig('HUB_SEED_URLS=\n')
+            .getDefaultConfig('xchain-indexer', 'dogecoin', 'mainnet')
+
+        expect(config.HUB_SEED_URLS).to.equal('')
         expect(config.HUB_API_URL).to.equal(hubApiUrl)
     })
 

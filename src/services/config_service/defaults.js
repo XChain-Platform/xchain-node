@@ -16,12 +16,12 @@
 
 'use strict'
 
-let config, Network, Coin, CoinTickerSymbol, XChainService, DB_SEP, SEP, bootstrapDir
+let config, Network, Coin, CoinTickerSymbol, XChainService, DB_SEP, bootstrapDir
 let NODE_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME
 let getDockerContainerImageName, getModuleDatabaseName
 
 function configure(dependencies) {
-    ({ config, Network, Coin, CoinTickerSymbol, XChainService, DB_SEP, SEP, bootstrapDir,
+    ({ config, Network, Coin, CoinTickerSymbol, XChainService, DB_SEP, bootstrapDir,
         NODE_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
         getDockerContainerImageName, getModuleDatabaseName } = dependencies)
 }
@@ -79,7 +79,6 @@ function createCoinDefaults(module, coin, network) {
         "DECODER_DB_HOST":   "mariadb",
         "DECODER_DB_PORT":   3306,
         "DECODER_DB_USER":   "xchain" + DB_SEP + "decoder" + DB_SEP + coin + DB_SEP + network,
-        "DECODER_DB_PASS":   "xchain" + SEP + "password",
         "DECODER_URL":       getDockerContainerImageName(XChainService.XCHAIN_DECODER, coin, network),
         "DECODER_API_PORT":  3002,
         "DECODER_PORT":      3002,
@@ -97,7 +96,6 @@ function createCoinDefaults(module, coin, network) {
         "INDEXER_DB_PORT":   3306,
         "INDEXER_DB_NAME":   getModuleDatabaseName(XChainService.XCHAIN_INDEXER, coin, network),
         "INDEXER_DB_USER":   "xchain" + DB_SEP + "indexer" + DB_SEP + coin + DB_SEP + network,
-        "INDEXER_DB_PASS":   "xchain" + SEP + "password",
         "DATABASE_URL":      "mariadb",
         "DATABASE_PORT":     3306,
         "HUB_HOST":          "0.0.0.0",
@@ -108,7 +106,7 @@ function createCoinDefaults(module, coin, network) {
         "HUB_DB_HOST":       "mariadb",
         "HUB_DB_PORT":       3306,
         "HUB_DB_USER":       "xchain" + DB_SEP + "hub",
-        "HUB_DB_PASS":       "xchain" + SEP + "password",
+        "HUB_DB_PASS":       undefined,
         "EXPLORER_URL":      getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""),
         "EXPLORER_API_PORT": 8080,
         "EXPLORER_PORT":     8080
@@ -125,7 +123,7 @@ function createSharedDefaults() {
         "HUB_DB_PORT":           3306,
         "HUB_DB_NAME":           "XChain" + DB_SEP + "Hub",
         "HUB_DB_USER":           "xchain" + DB_SEP + "hub",
-        "HUB_DB_PASS":           "xchain" + SEP + "password",
+        "HUB_DB_PASS":           undefined,
         "EXPLORER_HOST":         "127.0.0.1",
         "EXPLORER_PORT":         18080,
         "EXPLORER_API_HOST":     getDockerContainerImageName(EXPLORER_MODULE_NAME, "", ""),

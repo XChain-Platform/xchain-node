@@ -19,6 +19,7 @@ const { proxyquireDockerService } = require('../../helpers/docker_service_loader
 const TestEnv        = require('../../integration/helpers/test-env')
 const CommandCapture = require('../../integration/helpers/command-capture')
 const HttpCapture    = require('../../integration/helpers/http-capture')
+const { migrationsDirOf } = require('../../../src/utils/migration_files')
 
 const ROOT = path.join(__dirname, '..', '..', '..')
 
@@ -47,6 +48,7 @@ class E2EEnv extends TestEnv {
         // wired and the real implementations ran against the host instead.
         this.hostSeamCalls = []
         this._sealedSeams = []
+        this._originalDbPool = null
     }
 
     async setup() {
@@ -54,6 +56,16 @@ class E2EEnv extends TestEnv {
         this.capture = new CommandCapture()
         this.http = new HttpCapture()
         this.hostSeamCalls = []
+        const state = require(path.join(ROOT, 'src/state'))
+        this._originalDbPool = state.db.pool
+        state.db.assertReady = this._origDbMethods.assertReady
+        state.db.getModuleContainerStrict = this._origDbMethods.getModuleContainerStrict
+        state.db.pool = {
+            query: async (_sql, [module, coin, network]) => {
+                const containerId = await this._store.getModuleContainer(module, coin, network)
+                return containerId === null ? [] : [{ container_id: containerId }]
+            }
+        }
         this.sealBootstrapSeam()
         return this
     }
@@ -111,15 +123,14 @@ class E2EEnv extends TestEnv {
     }
 
     /**
-     * The two remaining call-time seams, sealed once createCLI() has built the
-     * patched ConfigService they have to answer from:
+     * The call-time seams sealed once createCLI() has built the patched
+     * ConfigService they have to answer from:
      *
-     *  - ConfigService.dbPasswordCanRotate runtime-requires DatabaseService,
-     *    whose getDatabaseContainerId runs `docker inspect` on the host. A box
-     *    with a resident xchain-node-database answers yes and the install mints
-     *    generated credentials; a box without one answers no and it uses the
-     *    static defaults. Answer from the harness's own docker routes instead,
-     *    which present a database container on every venue.
+     *  - DatabaseService.getDatabaseContainerId runs `docker inspect` on the
+     *    host. ConfigService.dbPasswordCanRotate answers without it, so an
+     *    install does not reach it; the seal is a guard so any caller
+     *    that does reach it gets the harness's database container and is
+     *    recorded in hostSeamCalls.
      *  - StatusService.probeServiceHealthPayload runtime-requires
      *    child_process AND the real ConfigService, then `docker exec`s wget
      *    into the container. Against the host that reads the resident stack's
@@ -130,6 +141,7 @@ class E2EEnv extends TestEnv {
      */
     sealLazyRequireSeams(patchedConfigService) {
         const dbContainerId = 'd'.repeat(64)
+        this._store.setModuleContainer('database', '', '', dbContainerId)
         this._sealSeam('src/services/database_service', {
             getDatabaseContainerId: async () => dbContainerId
         })
@@ -161,6 +173,8 @@ class E2EEnv extends TestEnv {
 
     async teardown() {
         this.restoreHostSeams()
+        require(path.join(ROOT, 'src/state')).db.pool = this._originalDbPool
+        this._originalDbPool = null
         return super.teardown()
     }
 
@@ -432,7 +446,11 @@ class E2EEnv extends TestEnv {
         // generic command success.
         const dbSpawnStub = function (command, args, options) {
             const child = spawnStub(command, args, options)
-            child.stdin = { on: () => {}, end: () => {} }
+            const call = capture.history()[capture.history().length - 1]
+            child.stdin = {
+                on: () => {},
+                end: input => { call.stdin = String(input || '') }
+            }
             process.nextTick(() => {
                 child.stdout.emit('data', '0')
                 child.emit('close', 0)
@@ -502,6 +520,29 @@ class E2EEnv extends TestEnv {
             }
         })
 
+        const RealSkewGuardService = require(path.join(ROOT, 'src/services/skew_guard_service'))
+        const SkewGuardService = Object.assign({}, RealSkewGuardService, {
+            assertHubNotBehind: (module, branch) => RealSkewGuardService.assertHubNotBehind(module, branch, {
+                cloneGit: ModuleService.cloneGit,
+                readPackageJson: name => JSON.parse(fs.readFileSync(
+                    path.join(ConfigService.getModuleTmpDir(name), 'package.json'),
+                    'utf8'
+                ))
+            })
+        })
+
+        const RealMigrationPreconditionService = require(path.join(ROOT, 'src/services/migration_precondition_service'))
+        const MigrationPreconditionService = Object.assign({}, RealMigrationPreconditionService, {
+            assertRequiredMigrationsApplied: (module, coin, network, branch) =>
+                RealMigrationPreconditionService.assertRequiredMigrationsApplied(module, coin, network, branch, {
+                    cloneGit: ModuleService.cloneGit,
+                    listDeployPreconditionMigrations: () =>
+                        RealMigrationPreconditionService.listDeployPreconditionMigrations(
+                            migrationsDirOf(ConfigService.getModuleTmpDir(module))
+                        )
+                })
+        })
+
         // moduleOperations: the main entry point.
         // Must also stub 'util' because resetModules uses promisify(execFile) at top level
         const moduleOps = proxyquire(path.join(ROOT, 'src/operations/module_operations'), {
@@ -513,6 +554,8 @@ class E2EEnv extends TestEnv {
             '../services/docker_service': DockerService,
             '../services/database_service': DatabaseService,
             '../services/module_service': ModuleService,
+            '../services/skew_guard_service': SkewGuardService,
+            '../services/migration_precondition_service': MigrationPreconditionService,
             '../services/status_service': StatusService
         })
 

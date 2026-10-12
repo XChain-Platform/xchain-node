@@ -71,6 +71,9 @@ function loadModuleService(stubs, opts = {}) {
         },
         './docker_service': {
             killContainer: opts.killContainer || sinon.stub().resolves(true),
+            stopContainerByName: opts.stopContainerByName || sinon.stub().resolves({
+                stopped: true, seconds: 1, killed: false
+            }),
             removeContainer: opts.removeContainer || sinon.stub().resolves(true),
             getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } })
         },

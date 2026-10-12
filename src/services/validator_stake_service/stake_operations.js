@@ -16,6 +16,7 @@
 
 const { getLogger } = require('../../observability/logger')
 const { sendLockFor, releaseOnIndexWait, holdForSend } = require('./send_lock')
+const { sleepRefusal, sleepUnknownRefusal } = require('./address_sleep')
 
 function defaultLog() {
     const logger = getLogger()
@@ -50,11 +51,13 @@ function logStakeSteps(log, amount, pubkey, plan, timing, STAKE_TICK, paren) {
     // one that decides whether this XCHAIN is reachable next week.
     log('')
     log('  The ' + amount + ' ' + STAKE_TICK + ' is escrowed for as long as you stay staked. Standing down')
+    // Both exit clocks start at the UNSTAKE block, so the active-set delay runs inside the cooldown.
     log('  later frees it only after a cooldown of ' + timing.cooldownBlocks + ' blocks' +
-        paren(timing.cooldownFor) + ', on top of the')
-    log('  ' + timing.activationBlocks + ' blocks it takes to leave the active set. Do not stake ' +
-        STAKE_TICK + ' you may')
-    log('  need before then.')
+        paren(timing.cooldownFor) + ', counted from the')
+    log('  block the UNSTAKE lands in. The ' + timing.activationBlocks + ' blocks it takes to leave the active set')
+    log('  start at that same block and run inside the cooldown, not before it. Do not stake ' +
+        STAKE_TICK)
+    log('  you may need before then.')
     return steps
 }
 
@@ -83,7 +86,17 @@ function stakeBlockers(state, plan, coins, address) {
             'confirm the signing pubkey is not already staked. Nothing is sent until the set can be read; ' +
             'retry, or check the explorer.')
     }
+    // Refuse a sleeping stake address, or one whose sleep state is unreadable.
+    const slept = stakeSleepBlocker(state, address)
+    if (slept) blockers.push(slept)
     return blockers
+}
+
+// Why the stake address's sleep stops the MINTs and the STAKE, or null when it does not.
+function stakeSleepBlocker(state, address) {
+    const action = 'every MINT and the STAKE'
+    if (state.sleepUnknown) return sleepUnknownRefusal(state.sleepUnknown, address, action)
+    return sleepRefusal(state.sleep, address, action)
 }
 
 // Why a key held only by withdrawn stake cannot be staked yet, in the operator's terms.

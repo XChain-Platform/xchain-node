@@ -20,10 +20,12 @@ function makeConfigService(fsStub, readlineOverride) {
     const constants = require('../../../src/config/index')
     const stubs = {
         'fs': fsStub || require('fs'),
-        '../config/constants': {
+        '../config': {
             ...constants,
-            configDir: '/test/config'
+            configDir: '/test/config',
+            EXTERNAL_DB: false
         },
+        './database_service': { getDatabaseContainerId: async () => null },
         '../utils/helpers': { stringToCoin: (s) => s }
     }
     if (readlineOverride) {

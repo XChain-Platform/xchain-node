@@ -32,7 +32,7 @@ function fakeSdk(addressBody, tokenBody) {
             getToken:      async () => tokenBody,
             getValidators: async () => ({ data: [] }),
             getDelegations: async () => ({ total: 0, data: [] }),
-            getStatus:     async () => ({ last_block: { 'bitcoin-testnet': 200000 } })
+            getStatus:     async () => ({ last_block: { TBTC: 200000 } })
         },
         getBalances: async () => ({ data: [{ tick: 'XCHAIN', amount: '0' }] })
     }

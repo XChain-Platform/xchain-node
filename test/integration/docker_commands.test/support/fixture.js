@@ -103,6 +103,10 @@ function makeBuildAndUp(env, capture) {
         },
         './database_service': {
             setDatabaseParameters: async () => true
+        },
+        './hub_consensus_env_guard': {
+            assertNoHubConsensusEnvDrift: async () => [],
+            isHubConsensusEnvDriftError: () => false
         }
     })
 

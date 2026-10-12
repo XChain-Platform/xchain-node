@@ -31,6 +31,7 @@ const { db } = require('../../state')
 const bundledCryptoNodesDir = path.join(__dirname, '../../../crypto_nodes')
 const { getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('../config_service')
 const { statusChanged }                 = require('../status_service')
+const { createNodeContainerRunArgs }    = require('./container_run_args')
 const config = require('../../config');
 // Destructured where they are used, so each call reads the export at that moment.
 const dockerService = require('../docker_service')
@@ -179,11 +180,15 @@ async function resolveStorageMounts(coin, network, reject) {
     // existing in-datadir txindex would be shadowed and rebuilt.
     const txindexHostPath  = blocksDir ? `${blocksDir}/${coin}/${network}-txindex` : null
 
-    // The full bind-mount set of the NEW container, [{ spec, destination }],
+    // The full bind-mount set of the NEW container, [{ spec, source, destination }],
     // composed before the old container is touched so the drift guard
     // below can compare against it.
     const volumeMounts = [
-        { spec: `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`, destination: `/root/.${coin}` }
+        {
+            spec: `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}:/root/.${coin}`,
+            source: `${dataDir}/${NODE_MODULE_NAME}/${coin}/${network}`,
+            destination: `/root/.${coin}`
+        }
     ]
     if (blocksDir) {
         const blocksDest = useBlocksdirFlag
@@ -191,36 +196,51 @@ async function resolveStorageMounts(coin, network, reject) {
             // doged ignores -blocksdir: mount straight onto the blocks
             // dir it actually writes to, under the network subdir.
             : `/root/.${coin}${netSubdir}/blocks`
-        volumeMounts.push({ spec: `${blocksHostPath}:${blocksDest}`, destination: blocksDest })
+        volumeMounts.push({ spec: `${blocksHostPath}:${blocksDest}`, source: blocksHostPath, destination: blocksDest })
         // Relocate txindex for every coin (nested under the network subdir).
         const txindexDest = `/root/.${coin}${netSubdir}/indexes/txindex`
-        volumeMounts.push({ spec: `${txindexHostPath}:${txindexDest}`, destination: txindexDest })
+        volumeMounts.push({ spec: `${txindexHostPath}:${txindexDest}`, source: txindexHostPath, destination: txindexDest })
     }
     return { blocksDir, useBlocksdirFlag, blocksHostPath, txindexHostPath, volumeMounts }
 }
 
-async function prepareExistingContainer(containerPrefix, coin, network, storage, reject) {
-    const { blocksDir, blocksHostPath, txindexHostPath, volumeMounts } = storage
-    // Mount-drift guard: if the container being replaced has bind mounts
-    // the new spec lacks, refuse BEFORE removing it. A real crash-loop
-    // came from exactly this: an env-less rebuild dropped the relocated
-    // blocks/txindex mounts, so the daemon restarted over an empty
-    // blocks store with a current chainstate.
-    const { forceRemoveContainerByName, getContainerBindMounts, stopContainerByName } = dockerService
-    let existingMounts = []
-    try {
-        existingMounts = await getContainerBindMounts(containerPrefix)
-    } catch { /* no previous container or docker unreachable: nothing to preserve */ }
-    const newDestinations = new Set(volumeMounts.map(m => m.destination))
-    const droppedMounts = existingMounts.filter(m => !newDestinations.has(m.destination))
+function preserveExistingMounts(containerPrefix, existingMounts, volumeMounts, reject) {
+    const newMountsByDestination = new Map(volumeMounts.map(m => [m.destination, m]))
+    const droppedMounts = existingMounts.filter(m => !newMountsByDestination.has(m.destination))
     if (droppedMounts.length > 0) {
         reject(`Refusing to replace container ${containerPrefix}: the new spec would drop bind mount(s) ` +
             droppedMounts.map(m => `${m.source} -> ${m.destination}`).join(', ') +
             `. This usually means XCHAIN_NODE_BLOCKS_DIR is missing from this environment ` +
             `(non-interactive shells do not source the profile). Set it, or persist it in ` +
             `config/node.local as XCHAIN_NODE_BLOCKS_DIR=<path>, then retry. The existing container was left untouched.`)
-        return null
+        return false
     }
+    const changedSources = existingMounts.filter(m => {
+        const replacement = newMountsByDestination.get(m.destination)
+        return replacement && replacement.source !== m.source
+    })
+    if (changedSources.length > 0) {
+        reject(`Refusing to replace container ${containerPrefix}: the new spec would change bind mount source(s) ` +
+            changedSources.map(m => {
+                const replacement = newMountsByDestination.get(m.destination)
+                return `${m.source} -> ${m.destination} to ${replacement.source} -> ${m.destination}`
+            }).join(', ') +
+            `. Verify the configured data and blocks directories, then retry. The existing container was left untouched.`)
+        return false
+    }
+    return true
+}
+
+async function prepareExistingContainer(containerPrefix, coin, network, storage, reject) {
+    const { blocksDir, blocksHostPath, txindexHostPath, volumeMounts } = storage
+    // Mount-drift guard: refuse before replacing a container when its bind
+    // destinations disappear or begin pointing at different host sources.
+    const { forceRemoveContainerByName, getContainerBindMounts, stopContainerByName } = dockerService
+    let existingMounts = []
+    try {
+        existingMounts = await getContainerBindMounts(containerPrefix)
+    } catch { /* no previous container or docker unreachable: nothing to preserve */ }
+    if (!preserveExistingMounts(containerPrefix, existingMounts, volumeMounts, reject)) return null
 
     // Stop the running daemon cleanly BEFORE the force-remove below:
     // `docker rm -f` is SIGKILL, and a killed daemon restarts at its last
@@ -259,51 +279,23 @@ async function prepareExistingContainer(containerPrefix, coin, network, storage,
     return stopBudgetSeconds
 }
 
-function createRunArgs(coin, network, containerPrefix, stopBudgetSeconds, volumeMounts) {
-    const runArgs = [
-        'run', '-d', '--restart', 'unless-stopped', '--name', containerPrefix,
-        // Same shutdown budget for an operator's `docker stop`/`restart`
-        // and for dockerd's own shutdown: the default 10 s is far too
-        // short for a chain daemon to flush.
-        '--stop-timeout', String(stopBudgetSeconds),
-        // Cap json-file log growth so a long-running node cannot fill
-        // the host disk, at the same 50m x 4 = 200 MB the module
-        // containers carry (ModuleService.buildAndUp holds the sizing
-        // arithmetic). Chain nodes
-        // are the quietest containers measured on regtest (686 B/h BTC,
-        // 4.4 KB/h DOGE, 2.5 KB/h LTC on 2026-08-30), so this is far
-        // past the 48 h floor even allowing for a mainnet node's much
-        // heavier P2P chatter. --tail reads stay inside one rotated file.
-        '--log-opt', 'max-size=50m', '--log-opt', 'max-file=4',
-        '--hostname', NODE_MODULE_NAME, '--network-alias', NODE_MODULE_NAME,
-        '--ulimit', 'nofile=2048:2048', '--network', getDockerNetwork(coin, network)
-    ]
-    for (const mount of volumeMounts) runArgs.push('-v', mount.spec)
-    return runArgs
+// Refuse a malformed operator-supplied NODE_EXPOSED_PORT/NODE_PORT before
+// anything touches the live node (it once ran after the stop and force-remove).
+function assertValidNodePorts(defaultExposedPort, defaultNodePort) {
+    if (!(defaultExposedPort && defaultNodePort)) return
+    if (!validatePort(defaultExposedPort)) {
+        throw new Error("Invalid port value in configuration: NODE_EXPOSED_PORT=" + defaultExposedPort)
+    }
+    if (!validatePort(defaultNodePort)) {
+        throw new Error("Invalid port value in configuration: NODE_PORT=" + defaultNodePort)
+    }
 }
 
-function addPortArgs(runArgs, defaultExposedPort, defaultNodePort, reject) {
+// Publish the node port; assertValidNodePorts already vetted both values.
+function addPortArgs(runArgs, defaultExposedPort, defaultNodePort) {
     if (defaultExposedPort && defaultNodePort) {
-        // NODE_EXPOSED_PORT/NODE_PORT come from the operator-supplied
-        // <coin>-<network> config. Validate before the docker run push so
-        // a malformed value fails loud here instead of surfacing as a
-        // cryptic docker argument-parse error (matches the DB_PORT guard
-        // in DatabaseService and the portArgs guard in ModuleService).
-        // This runs inside the async docker-build callback; a throw here
-        // escapes the Promise as an uncaught exception and hangs the
-        // build (same hazard as the mkdir guard above). Reject + return
-        // so the Promise settles instead.
-        if (!validatePort(defaultExposedPort)) {
-            reject(new Error("Invalid port value in configuration: NODE_EXPOSED_PORT=" + defaultExposedPort))
-            return false
-        }
-        if (!validatePort(defaultNodePort)) {
-            reject(new Error("Invalid port value in configuration: NODE_PORT=" + defaultNodePort))
-            return false
-        }
         runArgs.push('-p', `${defaultExposedPort}:${defaultNodePort}`)
     }
-    return true
 }
 
 function addDaemonArgs(runArgs, coin, blocksDir, useBlocksdirFlag, containerPrefix) {
@@ -358,6 +350,8 @@ async function buildCryptoNode(coin, network) {
     const defaultConfig = await getDefaultConfig(NODE_MODULE_NAME, coin, network)
     const defaultExposedPort = defaultConfig["NODE_EXPOSED_PORT"]
     const defaultNodePort = defaultConfig["NODE_PORT"]
+    // Async body, not the build callback: a throw here rejects cleanly.
+    assertValidNodePorts(defaultExposedPort, defaultNodePort)
     const containerPrefix = getDockerContainerImageName(NODE_MODULE_NAME, coin, network)
     const nodeDir = cryptoNodesDir + "/" + coin
     const confFileName = stageBuildScaffold(coin, network, nodeDir, defaultConfig)
@@ -385,8 +379,13 @@ async function buildCryptoNode(coin, network) {
             if (!storage) return
             const stopBudgetSeconds = await prepareExistingContainer(containerPrefix, coin, network, storage, reject)
             if (!stopBudgetSeconds) return
-            const runArgs = createRunArgs(coin, network, containerPrefix, stopBudgetSeconds, storage.volumeMounts)
-            if (!addPortArgs(runArgs, defaultExposedPort, defaultNodePort, reject)) return
+            const runArgs = createNodeContainerRunArgs({
+                coin, network, containerPrefix, stopBudgetSeconds,
+                volumeMounts: storage.volumeMounts,
+                getDockerNetwork,
+                logger
+            })
+            addPortArgs(runArgs, defaultExposedPort, defaultNodePort)
             addDaemonArgs(runArgs, coin, storage.blocksDir, storage.useBlocksdirFlag, containerPrefix)
             runNodeContainer(runArgs, nodeDir, coin, network, resolve, reject)
         })

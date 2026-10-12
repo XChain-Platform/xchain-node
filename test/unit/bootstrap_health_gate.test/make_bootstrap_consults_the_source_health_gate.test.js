@@ -11,6 +11,7 @@ const {
     NETWORK,
     SVC_CONTAINER,
     XChainService,
+    containerDb,
     expect,
     proxyquire,
     sinon
@@ -18,7 +19,7 @@ const {
 
 function loadServiceWithGate(gateStub) {
     return proxyquire('../../../../src/services/bootstrap_service', {
-        '../state': { db: { getModuleContainer: sinon.stub().resolves(SVC_CONTAINER) } },
+        '../state': { db: containerDb() },
         './config_service': {
             getDefaultConfig: sinon.stub().resolves({}),
             getModuleDatabaseName: sinon.stub().returns('db'),
@@ -53,7 +54,7 @@ describe('makeBootstrap() consults the source health gate', function () {
         const gateStub = sinon.stub().rejects(new Error('Refusing to create a bootstrap'))
         const stopContainer = sinon.stub().resolves()
         const svc = proxyquire('../../../../src/services/bootstrap_service', {
-            '../state': { db: { getModuleContainer: sinon.stub().resolves(SVC_CONTAINER) } },
+            '../state': { db: containerDb() },
             './config_service': {
                 getDefaultConfig: sinon.stub().resolves({ UTXO_TRACKER_BOOTSTRAP_VOLUME: '/tmp/x' }),
                 getModuleDatabaseName: sinon.stub().returns('db'),

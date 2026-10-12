@@ -15,7 +15,7 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const { hubConfigSuite } = require('./support/fixture')
 
-async function pushWithContainerEnv(fixture, containerEnv) {
+async function pushWithContainerEnv(fixture, containerEnv, networks = { bitcoin: 'regtest', litecoin: 'regtest' }) {
     const { env, httpCapture, TestEnv } = fixture()
     const state = require('../../../src/state')
 
@@ -24,16 +24,16 @@ async function pushWithContainerEnv(fixture, containerEnv) {
     const ltcId = TestEnv.fakeContainerId('l')
 
     await env.insertModule('xchain-hub', '', '', hubId)
-    await env.insertModule('xchain-indexer', 'bitcoin',  'regtest', btcId)
-    await env.insertModule('xchain-indexer', 'litecoin', 'regtest', ltcId)
+    await env.insertModule('xchain-indexer', 'bitcoin',  networks.bitcoin, btcId)
+    await env.insertModule('xchain-indexer', 'litecoin', networks.litecoin, ltcId)
 
-    env.writeConfigFile('bitcoin-regtest', '')
-    env.writeConfigFile('litecoin-regtest', '')
+    env.writeConfigFile('bitcoin-' + networks.bitcoin, '')
+    env.writeConfigFile('litecoin-' + networks.litecoin, '')
 
     state.setStatusUpdated(true)
     state.setLastStatus({
-        'bitcoin':  { 'regtest': { 'xchain-indexer': { container_id: btcId, status: { State: { Status: 'running' } } } } },
-        'litecoin': { 'regtest': { 'xchain-indexer': { container_id: ltcId, status: { State: { Status: 'running' } } } } }
+        'bitcoin':  { [networks.bitcoin]:  { 'xchain-indexer': { container_id: btcId, status: { State: { Status: 'running' } } } } },
+        'litecoin': { [networks.litecoin]: { 'xchain-indexer': { container_id: ltcId, status: { State: { Status: 'running' } } } } }
     })
 
     httpCapture.when('127.0.0.1:10000').returns({ data: { result: true } })
@@ -113,5 +113,38 @@ checkpointSuite(function (fixture) {
 
         expect(config['bitcoin']['regtest'].checkpoint).to.be.undefined
         expect(config['litecoin']['regtest'].checkpoint).to.be.undefined
+    })
+})
+
+// Provisioning grants the HubMirror schema to indexer accounts only off mainnet,
+// so a mainnet block is still emitted (the explorer requires one per serving coin)
+// but the push names the exact manual GRANT the explorer's CREATE DATABASE needs.
+checkpointSuite(function (fixture) {
+
+    it('warns with the exact mirror GRANT for a mainnet coin and still emits its block', async function () {
+        const warnings = []
+        const originalWarn = console.warn
+        console.warn = (...args) => { warnings.push(args.join(' ')) }
+        let config
+        try {
+            config = await pushWithContainerEnv(fixture, { HUB_API_URL: 'http://xchain-node-xchain-hub:10000' },
+                { bitcoin: 'mainnet', litecoin: 'regtest' })
+        } finally {
+            console.warn = originalWarn
+        }
+
+        const mainnetBlock = config['bitcoin']['mainnet'].checkpoint
+        expect(mainnetBlock, 'mainnet checkpoint block').to.exist
+        expect(mainnetBlock.self_sync).to.be.true
+        expect(config['litecoin']['regtest'].checkpoint, 'regtest checkpoint block').to.exist
+
+        const grantWarnings = warnings.filter(line => line.includes('GRANT ALL PRIVILEGES ON'))
+        expect(grantWarnings, 'one warning per mainnet coin').to.have.length(1)
+        const escapedSchema = mainnetBlock.name.replace(/_/g, '\\_')
+        expect(grantWarnings[0]).to.include('`' + escapedSchema + '`.*')
+        expect(grantWarnings[0]).to.include("'" + mainnetBlock.user + "'@'%'")
+        expect(grantWarnings[0]).to.include('bitcoin mainnet')
+        expect(grantWarnings[0]).to.not.include('%_HubMirror')
+        expect(grantWarnings[0]).to.not.include(mainnetBlock.pass)
     })
 })

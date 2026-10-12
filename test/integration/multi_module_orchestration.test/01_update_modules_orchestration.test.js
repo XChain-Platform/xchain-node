@@ -15,6 +15,11 @@ const proxyquire = require('proxyquire').noCallThru()
 
 const { multiModuleSuite } = require('./support/fixture')
 
+const installTargetServiceStub = {
+    recordInstallTarget: () => true,
+    resolveUpdateTarget: async () => ({ kind: 'branch', ref: 'master', inferred: false })
+}
+
 // updateModules
 multiModuleSuite('updateModules orchestration', function (fixture) {
 
@@ -47,7 +52,8 @@ multiModuleSuite('updateModules orchestration', function (fixture) {
             },
             '../services/database_service': {
                 buildDatabaseModule: async () => true
-            }
+            },
+            '../services/install_target_service': installTargetServiceStub
         })
 
         const serviceList = { 'bitcoin': { 'mainnet': ['xchain-encoder'] } }
@@ -96,6 +102,10 @@ multiModuleSuite('updateModules orchestration', function (fixture) {
             },
             '../services/database_service': {
                 buildDatabaseModule: async () => true
+            },
+            '../services/install_target_service': installTargetServiceStub,
+            '../services/migration_precondition_service': {
+                assertRequiredMigrationsApplied: async () => ({ checked: false, reason: 'stubbed' })
             }
         })
 

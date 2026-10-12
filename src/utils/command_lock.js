@@ -38,6 +38,9 @@
  * Each acquisition also stamps a random nonce into the payload. Release
  * removes the file only when both the pid and the nonce still match, so
  * neither a stale-lock takeover nor a recycled pid is clobbered on exit.
+ * A self-update releases its parent-owned lock before starting the re-exec
+ * child. The child then competes for the lock normally, so another mutator
+ * that acquires it first causes the child to refuse the update.
  *
  * Ops note: clearing a wedged lock by hand may mean deleting both
  * command.lock and command.lock.reclaim.
@@ -99,6 +102,13 @@ function statLock(lockFile) {
 
 function sameFile(a, b) {
     return !!a && !!b && a.dev === b.dev && a.ino === b.ino
+}
+
+function adoptCommandLock(release) {
+    if (typeof release !== 'function') {
+        throw new TypeError('adoptCommandLock requires a command lock release function')
+    }
+    release()
 }
 
 // Break a reclaim marker left behind by a crash, and ONLY that: a marker whose
@@ -226,4 +236,4 @@ function releaseCommandLock(lockFile, pid, nonce) {
     try { fs.unlinkSync(lockFile) } catch { /* already gone */ }
 }
 
-module.exports = { acquireCommandLock, getLockFilePath, isPidAlive }
+module.exports = { acquireCommandLock, adoptCommandLock, getLockFilePath, isPidAlive }

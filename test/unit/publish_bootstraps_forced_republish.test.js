@@ -45,6 +45,7 @@ function createWorkDir() {
     workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-publish-'))
     binDir  = path.join(workDir, 'bin')
     fs.mkdirSync(binDir)
+    fs.writeFileSync(path.join(binDir, 'flock'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 })
 }
 
 function removeWorkDir() {
@@ -56,18 +57,23 @@ function removeWorkDir() {
      * planner uses and nothing else. --dry-run exits before any create, so the
      * plan is the whole observable behaviour.
      */
-function fakeNode({ combos = [], due = [] } = {}) {
+function fakeNode({ combos = [], due = [], createRefusalReason = null } = {}) {
     // Each line is emitted by its own printf so no escape sequence in the
     // fixture is ever interpreted by the shell; the hostile-input case below
     // depends on the fake echoing its combos back verbatim.
     const emit = list => list.length === 0
         ? 'true'
         : list.map(c => `printf '%s\\n' ${JSON.stringify(c)}`).join('; ')
+    const create = createRefusalReason === null
+        ? 'echo "unexpected: $*" >&2; exit 3'
+        : `printf '%s\\n' 'Refusing to create a bootstrap: the source is not known-good.' ` +
+          `${JSON.stringify(`  - ${createRefusalReason}`)} >&2; exit 1`
     const script = [
         '#!/usr/bin/env bash',
         'case "$1" in',
         `  bootstrap-combos)         ${emit(combos)} ;;`,
         `  bootstrap-republish-due)  ${emit(due)} ;;`,
+        `  bootstrap)                [ "$2" = create ] && { ${create}; } ;;`,
         '  *) echo "unexpected: $*" >&2; exit 3 ;;',
         'esac',
         'exit 0',
@@ -183,6 +189,18 @@ describe('publish-bootstraps.sh: forced republish after a reindex', function () 
         const out = runPlan(['--all', '--dry-run', '--allow-unsigned', '--force-due-trackers'])
         expect(out).to.include('FORCED (reindexed since last publish; overrides the tracker opt-in, DOWNTIME)')
         expect(planLine(out)).to.include('xchain-utxo-tracker:bitcoin:testnet')
+    })
+
+    it('carries the reason through a refused forced tracker republish', function () {
+        fakeNode({
+            combos: ['xchain-decoder:bitcoin:testnet'],
+            due: ['xchain-utxo-tracker:dogecoin:testnet'],
+            createRefusalReason: 'service status probe could not reach the tracker API'
+        })
+
+        expect(() => runPlan([
+            '--all', '--allow-unsigned', '--no-publish', '--force-due-trackers'
+        ])).to.throw(/xchain-utxo-tracker:dogecoin:testnet: SOURCE-UNHEALTHY \(service status probe could not reach the tracker API\)/)
     })
 
     it('--no-forced-due falls back to the schedule alone', function () {

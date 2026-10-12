@@ -25,9 +25,22 @@ function streamFromString(str) {
     return s
 }
 
+// Fresh-credential generation reads, rewrites and chmods the sidecar, so every
+// stub handed to proxyquire carries inert versions of those calls unless a test
+// supplies its own.
+function withInertFsWrites(fsStub) {
+    return {
+        readFileSync: sinon.stub().returns(''),
+        writeFileSync: sinon.stub(),
+        appendFileSync: sinon.stub(),
+        chmodSync: sinon.stub(),
+        ...fsStub
+    }
+}
+
 function makeConfigService(fsStub) {
     return proxyquire('../../src/services/config_service', {
-        'fs': fsStub || require('fs')
+        'fs': fsStub ? withInertFsWrites(fsStub) : require('fs')
     })
 }
 

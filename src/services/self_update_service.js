@@ -48,6 +48,7 @@ const execFileAsync = promisify(execFile)
 
 const { dataDir, SELF_UPDATE_ENV, childProcessEnv } = require('../config')
 const { getLogger } = require('../observability/logger')
+const { adoptCommandLock } = require('../utils/command_lock')
 
 const CARRIER_ROOT      = path.join(__dirname, '../..')
 const TARGET_ENV        = 'XCHAIN_NODE_UPDATE_TARGET'
@@ -143,6 +144,28 @@ async function installCarrierDependencies(deps) {
     })
 }
 
+async function reexecUpdatedCommand(tag, childArgs, deps, logger) {
+    if (typeof deps.commandLock === 'function') {
+        const adopt = deps.adoptCommandLock || adoptCommandLock
+        adopt(deps.commandLock)
+    }
+    const spawnImpl = deps.spawn || spawn
+    const child = spawnImpl(process.execPath, [process.argv[1], ...childArgs], {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        env: { ...(deps.env || childProcessEnv()), [TARGET_ENV]: tag }
+    })
+    const exitCode = await new Promise((resolve) => {
+        child.on('exit', code => resolve(code == null ? 1 : code))
+        child.on('error', err => {
+            logger.error(`Could not re-run xchain-node at ${tag}: ${err.message}`)
+            resolve(1)
+        })
+    })
+    if (deps.exit) return deps.exit(exitCode)
+    return process.exit(exitCode)
+}
+
 /**
  * Move the carrier checkout to `tag` and re-execute the command there.
  *
@@ -193,26 +216,7 @@ async function selfUpdateAndReexec({ tag, childArgs, deps = {} }) {
         )
     }
     logger.log(`xchain-node CLI is now ${tag}; continuing the update with it.`)
-
-    // The caller's chance to hand back a lock the child is about to take.
-    if (typeof deps.beforeSpawn === 'function') {
-        try { deps.beforeSpawn() } catch { /* the child reports a held lock itself */ }
-    }
-    const spawnImpl = deps.spawn || spawn
-    const child = spawnImpl(process.execPath, [process.argv[1], ...childArgs], {
-        cwd: process.cwd(),
-        stdio: 'inherit',
-        env: { ...(deps.env || childProcessEnv()), [TARGET_ENV]: tag }
-    })
-    const exitCode = await new Promise((resolve) => {
-        child.on('exit', code => resolve(code == null ? 1 : code))
-        child.on('error', err => {
-            logger.error(`Could not re-run xchain-node at ${tag}: ${err.message}`)
-            resolve(1)
-        })
-    })
-    if (deps.exit) return deps.exit(exitCode)
-    return process.exit(exitCode)
+    return reexecUpdatedCommand(tag, childArgs, deps, logger)
 }
 
 /**

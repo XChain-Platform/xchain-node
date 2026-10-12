@@ -72,6 +72,13 @@ moduleSuite('buildAndUp()', function () {
             expect(buildArgs).to.include('xchain-node-bitcoin-mainnet-xchain-encoder')
         })
 
+        it('does not inspect or inherit a previous container on the normal build path', async function () {
+            const stubs = makeStubs(), seen = stubDockerCreate(stubs)
+            const ms = loadModuleService(stubs)
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(seen.some(call => call.args.includes('{{json .Config.Env}}'))).to.equal(false)
+        })
+
         })
 
 moduleSuite('buildAndUp()', function () {it('passes environment variables via the child env (bare --env NAME), not as argv values', async function () {

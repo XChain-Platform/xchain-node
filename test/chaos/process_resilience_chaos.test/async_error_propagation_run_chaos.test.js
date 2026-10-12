@@ -42,7 +42,8 @@ describe('Experiment 11: Async error propagation', function () {
                 await ms.buildAndUp('xchain-encoder', 'bitcoin', 'regtest')
                 expect.fail('should have rejected')
             } catch (err) {
-                expect(err).to.include('Error creating the container')
+                const message = err instanceof Error ? err.message : err
+                expect(message).to.include('Error creating the container')
             }
         })
     })

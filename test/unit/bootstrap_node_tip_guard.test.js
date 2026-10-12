@@ -170,7 +170,9 @@ describe('BootstrapNodeTipGuard', function () {
             })
             expect(r.verdict).to.equal('behind-refuse')
             expect(r.refuse).to.equal(true)
-            expect(logs.join('\n')).to.match(/^REFUSING the xchain-utxo-tracker bootstrap restore/m)
+            // The caller prints the refusal once the archive is verified; the height here is unverified.
+            expect(r.detail).to.match(/964970/)
+            expect(logs.join('\n')).to.not.match(/^REFUSING the/m)
         })
 
         it('falls back to the module version when the service cannot be probed', async function () {

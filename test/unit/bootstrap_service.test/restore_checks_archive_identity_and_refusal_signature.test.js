@@ -258,3 +258,54 @@ describe('BootstrapService', function () {
         })
     })
 })
+
+describe('BootstrapService', function () {
+    afterEach(restoreRequireSignedBootstrapSetting)
+    describe('the node tip guard refusal is announced only after the archive is verified', function () {
+
+        // Refuse on the node tip, run the ensure path, and capture what it printed while it ran.
+        async function refusedRunOutput(ensure) {
+            const stubs = makeStubs()
+            const finishDownload = stubDownloadedArchive(stubs)
+            stubs.nodeTipGuard.assessNodeTipForRestore.resolves({ verdict: 'behind-refuse', refuse: true, detail: 'the coin node is 5 blocks below the archive' })
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+            const lines = []
+            const log = sinon.stub(console, 'log').callsFake((...a) => lines.push(a.join(' ')))
+            let result
+            try {
+                const promise = ensure(bs)
+                setImmediate(finishDownload)
+                result = await promise
+            } finally { log.restore() }
+            return { result, output: lines.join('\n') }
+        }
+
+        it('prints no REFUSING line for an unsigned archive on either restore path', async function () {
+            savedRequireSigned = process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP
+            delete process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP
+            for (const ensure of [bs => bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER), bs => bs.ensureBootstrapUtxoTracker(COIN, NETWORK)]) {
+                const { result, output } = await refusedRunOutput(ensure)
+                expect(result).to.equal(false)
+                expect(output).to.not.match(/REFUSING the/)
+                expect(output).to.match(/bootstrap auto-restore failed/)
+            }
+        })
+
+        it('prints the REFUSING line once the archive verifies, before it is retired, on either restore path', async function () {
+            allowUnsignedBootstrap()
+            const cases = [
+                [XChainService.XCHAIN_DECODER, bs => bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)],
+                [XChainService.XCHAIN_UTXO_TRACKER, bs => bs.ensureBootstrapUtxoTracker(COIN, NETWORK)]
+            ]
+            for (const [module, ensure] of cases) {
+                const { result, output } = await refusedRunOutput(ensure)
+                expect(result).to.equal(false)
+                const refused = output.indexOf(`REFUSING the ${module} bootstrap restore: the coin node is 5 blocks below the archive.`)
+                expect(refused, output).to.be.at.least(0)
+                const removed = output.indexOf('Bootstrap archive removed')
+                expect(removed, output).to.be.above(refused)
+            }
+        })
+    })
+})

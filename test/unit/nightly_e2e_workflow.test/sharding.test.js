@@ -122,6 +122,12 @@ function registerWorkflowChecks() {
             expect(doc.jobs['e2e-shard'].strategy.matrix).to.have.keys('coin', 'shard')
         })
 
+        it('plans six shards per coin, for 18 concurrent runners across the full matrix', function () {
+            const shardsPerCoin = Number(doc.jobs.plan.env.E2E_SHARDS)
+            expect(shardsPerCoin).to.equal(6)
+            expect(shardsPerCoin * 3).to.equal(18)
+        })
+
         it('runs the aggregate after the shards even when one failed, and fails it per coin', function () {
             expect(doc.jobs.e2e.needs).to.include('e2e-shard')
             expect(doc.jobs.e2e.if).to.match(/!cancelled\(\)/)

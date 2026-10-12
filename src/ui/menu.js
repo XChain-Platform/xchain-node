@@ -35,6 +35,7 @@ const {
 const { scanAndRegisterModules } = require('../services/discovery_service')
 const { restoreBootstrapInterface } = require('./menu/restore_bootstrap_prompt.js')
 const { buildModuleChoices }         = require('./menu/module_choices.js')
+const { NODE_VERSION_ORDER, remoteNodeVersion } = require('./menu/node_version_order.js')
 const config                         = require('../config')
 const { acquireCommandLock }         = require('../utils/command_lock')
 const { scopedCommandLock }          = require('../cli/dispatch')
@@ -77,8 +78,9 @@ const ACTION_INSTALL_LOCAL_IN_CONTAINER = "Install Local Version in Container"
 async function readModuleVersions(selectedValue, remoteModuleVersions, coin, network) {
     let remoteVersion = "0"
     try {
+        // The node's entry is the GitHub release object itself, so its version is the tag
         remoteVersion = selectedValue === NODE_MODULE_NAME
-            ? await remoteModuleVersions[selectedValue + SEP + coin]["version"]
+            ? remoteNodeVersion(remoteModuleVersions[selectedValue + SEP + coin])
             : await remoteModuleVersions[selectedValue]
     } catch { /* not available */ }
 
@@ -91,25 +93,34 @@ async function readModuleVersions(selectedValue, remoteModuleVersions, coin, net
     return { remoteVersion, localVersion }
 }
 
+// Module versions come from package.json and compare as semver.
+const SEMVER_ORDER = {
+    valid: version => semver.valid(version) !== null,
+    gt: (a, b) => semver.gt(a, b),
+    eq: (a, b) => semver.eq(a, b)
+}
+
 // Lists an installed module's actions from its status and version comparisons.
 function installedModuleActions(selectedStatus, selectedValue, localVersion, remoteVersion, containerVersion) {
     const moduleActions = [{ name: "Tail logs", value: "tail" }]
+    // Coin node versions are daemon tags, not semver (see node_version_order.js)
+    const order = selectedValue === NODE_MODULE_NAME ? NODE_VERSION_ORDER : SEMVER_ORDER
 
     if (selectedStatus === "exited") moduleActions.push({ name: "Restart", value: "restart" })
 
     // enquirer's Select resolves to a choice's NAME, so the handler below must
     // branch on these exact strings, or picking one runs nothing and drops back
     // to the module list. Shared constants keep both sides renamed together.
-    if (semver.valid(localVersion)) {
-        if (semver.valid(remoteVersion)) {
-            if (semver.gt(remoteVersion, localVersion)) {
+    if (order.valid(localVersion)) {
+        if (order.valid(remoteVersion)) {
+            if (order.gt(remoteVersion, localVersion)) {
                 moduleActions.push({ name: ACTION_UPDATE_LOCAL, value: "update local version" })
-            } else if (semver.eq(remoteVersion, localVersion)) {
+            } else if (order.eq(remoteVersion, localVersion)) {
                 moduleActions.push({ name: ACTION_REINSTALL_REMOTE, value: "reinstall from remote" })
             }
         }
-        if (semver.valid(containerVersion)) {
-            if (semver.gt(localVersion, containerVersion)) {
+        if (order.valid(containerVersion)) {
+            if (order.gt(localVersion, containerVersion)) {
                 moduleActions.push({ name: ACTION_UPDATE_CONTAINER, value: "update container" })
             } else {
                 moduleActions.push({ name: ACTION_REINSTALL_CONTAINER, value: "reinstall container" })
@@ -117,7 +128,7 @@ function installedModuleActions(selectedStatus, selectedValue, localVersion, rem
         } else {
             moduleActions.push({ name: ACTION_INSTALL_LOCAL_IN_CONTAINER, value: "install local version in container" })
         }
-    } else if (semver.valid(remoteVersion)) {
+    } else if (order.valid(remoteVersion)) {
         moduleActions.push({ name: ACTION_UPDATE_LOCAL, value: "update local version" })
     }
 
@@ -158,6 +169,15 @@ async function runInstalledModuleAction(actionAnswer, selected, coin, network) {
     } else if (actionAnswer === "Restart") {
         try {
             await locked.restartModules({ [coin]: { [network]: [selectedValue] } })
+        } catch (err) {
+            console.log(redactSecrets(err))
+        }
+    } else if (selectedValue === NODE_MODULE_NAME
+            && (actionAnswer === ACTION_UPDATE_LOCAL || actionAnswer === ACTION_REINSTALL_REMOTE)) {
+        // A coin node has no source checkout to clone (cloneGit refuses "node"), so
+        // both remote actions run `update node`, which keeps its data-dir guard.
+        try {
+            await locked.updateModules({ [coin]: { [network]: [selectedValue] } })
         } catch (err) {
             console.log(redactSecrets(err))
         }
@@ -349,6 +369,10 @@ module.exports = {
     modulesSelectionInterface,
     restoreBootstrapInterface,
     startInterface,
+    // Exported so tests can drive the version reads, the offered actions and their handlers.
+    readModuleVersions,
+    installedModuleActions,
+    runInstalledModuleAction,
     // Exported so a test can assert every offered label has a handler branch.
     MODULE_ACTION_LABELS: {
         ACTION_UPDATE_LOCAL,

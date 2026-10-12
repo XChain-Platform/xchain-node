@@ -12,41 +12,42 @@
  *
  **********************************************************************
  * HubService.updateHub: shared-container network attachment.
- *
- * updateHub() used to catch every addContainerToNetwork failure, discard the
- * error and still return true, so a topology change published module config
- * while the shared hub/sync container was never joined to the new coin
- * network, leaving those endpoints unreachable until an unrelated later
- * mutation happened to retry. These cases pin the replacement contract:
- * one retry, then report the networks that stayed unreachable.
- *
- * The hub and sync loops share attachSharedContainer, so exercising the sync
- * loop (hub registry row absent) covers both without dragging the heavy
- * updateHubOrExplorer config push into a unit test.
  ********************************************************************/
 
 const sinon      = require('sinon')
+const assert     = require('node:assert/strict')
 const { expect } = require('chai')
 const proxyquire = require('proxyquire')
 
 const { HUB_MODULE_NAME, SYNC_MODULE_NAME } = require('../../src/config')
 const { updateHubOrExplorer } = require('../../src/services/hub_service/update_hub_or_explorer')
 
-function loadHubService({ addContainerToNetwork } = {}) {
+function loadHubService({
+    addContainerToNetwork,
+    hubContainerId = null,
+    syncContainerId = 'sync1234sync1234',
+    installedCoinsAndNetworks = { bitcoin: ['mainnet'] },
+    updateConfig = sinon.stub().resolves(true)
+} = {}) {
     const getModuleContainer = sinon.stub()
-    getModuleContainer.withArgs(HUB_MODULE_NAME,  '', '').resolves(null)
-    getModuleContainer.withArgs(SYNC_MODULE_NAME, '', '').resolves('sync1234sync1234')
+    getModuleContainer.withArgs(HUB_MODULE_NAME,  '', '').resolves(hubContainerId)
+    getModuleContainer.withArgs(SYNC_MODULE_NAME, '', '').resolves(syncContainerId)
 
     const attach = addContainerToNetwork || sinon.stub().resolves(true)
 
     const svc = proxyquire('../../src/services/hub_service', {
         '../state':          { db: { getModuleContainer } },
-        './status_service':   { getInstalledCoinsAndNetworks: async () => ({ bitcoin: ['mainnet'] }) },
+        './status_service':   { getInstalledCoinsAndNetworks: async () => installedCoinsAndNetworks },
+        './config_service':   { getDockerContainerImageName: () => 'xchain-node-hub' },
         './docker_service':   { addContainerToNetwork: attach },
         '../utils/helpers':  { sleep: async () => {} },
+        './hub_service/update_hub_or_explorer.js': {
+            configureUpdateHubOrExplorer: sinon.stub(),
+            updateHubOrExplorer: updateConfig
+        }
     })
 
-    return { svc, attach }
+    return { svc, attach, updateConfig }
 }
 
 function configDeliveryDependencies({ updateConfig = sinon.stub().resolves(true), lastStatus = {} } = {}) {
@@ -76,6 +77,25 @@ function configDeliveryDependencies({ updateConfig = sinon.stub().resolves(true)
 
 describe('HubService.updateHub network attachment', function () {
 
+    it('updateHub re-resolves a stale hub container id', async function () {
+        const staleHubId = 'stale-hub-id'
+        const attach = sinon.stub()
+        attach.onFirstCall().rejects(new Error('No such container: ' + staleHubId))
+        attach.onSecondCall().resolves(true)
+        const { svc, updateConfig } = loadHubService({
+            addContainerToNetwork: attach,
+            hubContainerId: staleHubId,
+            syncContainerId: null,
+            installedCoinsAndNetworks: { bitcoin: ['regtest'] }
+        })
+
+        expect(await svc.updateHub()).to.be.true
+        sinon.assert.calledTwice(attach)
+        expect(attach.firstCall.calledWithExactly(staleHubId, 'xchain-node-bitcoin-regtest')).to.be.true
+        expect(attach.secondCall.calledWithExactly('xchain-node-hub', 'xchain-node-bitcoin-regtest')).to.be.true
+        sinon.assert.calledOnceWithExactly(updateConfig, HUB_MODULE_NAME)
+    })
+
     it('returns true when every shared-container attach succeeds', async function () {
         const { svc, attach } = loadHubService()
         expect(await svc.updateHub()).to.be.true
@@ -94,15 +114,16 @@ describe('HubService.updateHub network attachment', function () {
     it('rejects naming the unreachable network instead of reporting success', async function () {
         const attach = sinon.stub().rejects(new Error('network xchain-node-bitcoin-mainnet not found'))
         const { svc } = loadHubService({ addContainerToNetwork: attach })
-        let threw = null
-        try {
-            await svc.updateHub()
-        } catch (err) {
-            threw = err
-        }
-        expect(threw).to.be.an('error')
-        expect(threw.message).to.match(/xchain-sync -> bitcoin\/mainnet/)
+        await assert.rejects(svc.updateHub(), /xchain-sync -> bitcoin\/mainnet/)
         expect(attach.callCount).to.equal(2)
+    })
+
+    it('keeps missing xchain-sync containers on the existing retry and report path', async function () {
+        const attach = sinon.stub().rejects(new Error('No such container: sync1234sync1234'))
+        const { svc } = loadHubService({ addContainerToNetwork: attach })
+        await assert.rejects(svc.updateHub(), /xchain-sync -> bitcoin\/mainnet/)
+        expect(attach.callCount).to.equal(2)
+        sinon.assert.alwaysCalledWithExactly(attach, 'sync1234sync1234', 'xchain-node-bitcoin-mainnet')
     })
 })
 

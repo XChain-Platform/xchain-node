@@ -45,9 +45,10 @@ async function runE2ETest(coin, network, testName = null, grep = null, script = 
         // precedence over testName; the e2e-test image carries these scripts.
         dockerCmdArgs = ['npm', 'run', script]
     } else if (testName) {
-        dockerCmdArgs = ['npx', 'mocha', '--timeout', '0', '--exit',
-            '--require', './test/initialCheck.test.js',
-            `test/actions/${testName}.test.js`]
+        // The suite renamed its preflight file; a release ref still carries the old name.
+        const shellCmd = 'f=./test/initial_check.test.js; [ -f "$f" ] || f=./test/initialCheck.test.js; ' +
+            'exec npx mocha --timeout 0 --exit --require "$f" "$@"'
+        dockerCmdArgs = ['sh', '-c', shellCmd, 'sh', `test/actions/${testName}.test.js`]
         if (grep) dockerCmdArgs.push('--grep', grep)
     }
     const containerId = await installModule(XChainService.XCHAIN_E2E_TEST, coin, network, true, null, true, ref, dockerCmdArgs)

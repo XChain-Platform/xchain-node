@@ -23,13 +23,14 @@ let { DB_MODULE_NAME } = require('../../config')
 let { sleep } = require('../../utils/helpers')
 let { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 let { PING_SQL } = require('../../db/connectivity')
-let { getDockerContainerImageName } = require('../config_service')
+let { getDockerContainerImageName, validatePort } = require('../config_service')
 let { getStatusFromContainer, probeContainerPresenceByName } = require('../docker_service')
+let config = require('../../config')
 
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
     if (dependencies.execFile === nativeExecFile) return
-    ;({ execFile, execFileAsync, DB_MODULE_NAME, sleep, dockerMariadbArgs, mariadbEnv, PING_SQL, getDockerContainerImageName, getStatusFromContainer, probeContainerPresenceByName } = dependencies)
+    ;({ execFile, execFileAsync, DB_MODULE_NAME, sleep, dockerMariadbArgs, mariadbEnv, PING_SQL, getDockerContainerImageName, validatePort, getStatusFromContainer, probeContainerPresenceByName, config } = dependencies)
 }
 
 
@@ -58,6 +59,10 @@ async function getDatabaseContainerPresence() {
 }
 
 async function getDatabaseHostPort() {
+    const configuredPort = config.hostEnv().XCHAIN_NODE_DB_HOST_PORT
+    if (configuredPort && !validatePort(configuredPort)) {
+        throw new Error("Invalid port value in configuration: XCHAIN_NODE_DB_HOST_PORT=" + configuredPort)
+    }
     try {
         const containerName = getDockerContainerImageName(DB_MODULE_NAME, "", "")
         const { stdout } = await execFileAsync('docker', ['port', containerName, '3306/tcp'])
@@ -66,9 +71,9 @@ async function getDatabaseHostPort() {
             const match = line.match(/:(\d+)$/)
             if (match) return parseInt(match[1], 10)
         }
-        return XCHAIN_NODE_DB_DEFAULT_PORT
+        return configuredPort ? parseInt(configuredPort, 10) : XCHAIN_NODE_DB_DEFAULT_PORT
     } catch {
-        return XCHAIN_NODE_DB_DEFAULT_PORT
+        return configuredPort ? parseInt(configuredPort, 10) : XCHAIN_NODE_DB_DEFAULT_PORT
     }
 }
 async function checkIfDatabaseModuleExists(coin, network) {

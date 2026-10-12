@@ -15,15 +15,28 @@ const { expect } = require('chai')
 const proxyquire = require('proxyquire').noCallThru()
 const { Readable } = require('stream')
 
+// getDefaultConfig rewrites the sidecar with generated database passwords;
+// these experiments parse the main config, so the sidecar calls are no-ops.
+function withSidecarCalls(fsStub) {
+    return {
+        readFileSync: sinon.stub().returns(''),
+        writeFileSync: sinon.stub(),
+        chmodSync: sinon.stub(),
+        ...fsStub
+    }
+}
+
 // Helpers
 function makeConfigService(fsStub, readlineOverride) {
     const constants = require('../../../src/config/index')
     const stubs = {
-        'fs': fsStub || require('fs'),
-        '../config/constants': {
+        'fs': fsStub ? withSidecarCalls(fsStub) : require('fs'),
+        '../config': {
             ...constants,
-            configDir: '/test/config'
+            configDir: '/test/config',
+            EXTERNAL_DB: false
         },
+        './database_service': { getDatabaseContainerId: async () => null },
         '../utils/helpers': { stringToCoin: (s) => s }
     }
     if (readlineOverride) {

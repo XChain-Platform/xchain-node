@@ -33,6 +33,10 @@ const NO_VALIDATOR = {
     validatorModeReport:  () => ({ mode: "standalone", dir: "/tmp/test-xchain-config/validator", missing: [] })
 }
 
+const NO_DATABASE = {
+    getDatabaseContainerId: async () => null
+}
+
 // The hub API-key sidecar is a real file on an operator box. Read, it would key the hub
 // and skip the keyless declaration one case below asserts, so this describes a host that
 // has never run `validator init`.
@@ -43,6 +47,7 @@ const FS_WITHOUT_SIDECAR = Object.assign({}, realFs, {
 function makeConfigService() {
     return proxyquire('../../src/services/config_service', {
         'fs': FS_WITHOUT_SIDECAR,
+        './database_service': NO_DATABASE,
         './validator_service': NO_VALIDATOR
     })
 }

@@ -98,32 +98,49 @@ function shutdownTimeoutMsForBudget(module, seconds) {
     return Math.max(budgetMs - STOP_DRAIN_MARGIN_MS, Math.floor(budgetMs / 2))
 }
 
-// A SHUTDOWN_TIMEOUT_MS the service would honour (parsed as the services parse
-// it) that is at or above the stop budget, so docker's kill always lands first.
-// Null when the value is under the budget or one the service would ignore.
-function overBudgetShutdownMs(value, budgetSeconds) {
-    if (value === undefined || value === null) return null
+// Whether a service honours this SHUTDOWN_TIMEOUT_MS. The services parse it with
+// parseInt and fall back to their own default unless it is a positive number.
+function serviceHonoursShutdownMs(value) {
+    if (value === undefined || value === null) return false
     const ms = parseInt(value, 10)
-    return Number.isFinite(ms) && ms > 0 && ms >= budgetSeconds * 1000 ? ms : null
+    return Number.isFinite(ms) && ms > 0
 }
 
-// The container env entry that carries the derived drain budget. An explicit
-// SHUTDOWN_TIMEOUT_MS in the module config wins and nothing is added, and so
-// does a null module (a one-shot run has no stop budget to derive from).
-// Warn when that explicit value is not under the budget (docker kills first).
+// A SHUTDOWN_TIMEOUT_MS the service would honour that is at or above the stop
+// budget, so docker's kill always lands first. Null when the value is under the
+// budget or one the service would ignore.
+function overBudgetShutdownMs(value, budgetSeconds) {
+    if (!serviceHonoursShutdownMs(value)) return null
+    const ms = parseInt(value, 10)
+    return ms >= budgetSeconds * 1000 ? ms : null
+}
+
+// The container env entry that carries the derived drain budget. A valid explicit
+// SHUTDOWN_TIMEOUT_MS wins and nothing is added, as for a null module (a one-shot run
+// has no budget). An ignored one counts as unset, since the service's own default only
+// fits the default budget. Warn on an explicit value docker could kill first or ignored.
 function shutdownTimeoutEnv(module, moduleConfig, env = MODULE_STOP_TIMEOUT_ENV) {
     if (!module) return {}
     const configured = moduleConfig ? moduleConfig.SHUTDOWN_TIMEOUT_MS : undefined
-    if (configured !== undefined && configured !== null && String(configured).trim() !== '') {
-        if (module !== 'node') {
-            const budget = moduleStopTimeoutSeconds(module, env)
-            const over = overBudgetShutdownMs(configured, budget)
-            if (over !== null) logger.warn(overBudgetShutdownLine(module, '', over, budget, 'the module config sets'))
-        }
+    const explicit = configured !== undefined && configured !== null && String(configured).trim() !== ''
+    if (module === 'node') return {}
+    const budget = moduleStopTimeoutSeconds(module, env)
+    if (explicit && serviceHonoursShutdownMs(configured)) {
+        const over = overBudgetShutdownMs(configured, budget)
+        if (over !== null) logger.warn(overBudgetShutdownLine(module, '', over, budget, 'the module config sets'))
         return {}
     }
-    const derived = moduleShutdownTimeoutMs(module, env)
+    const derived = shutdownTimeoutMsForBudget(module, budget)
+    if (explicit) logger.warn(ignoredShutdownLine(module, configured, derived, budget))
     return derived === null ? {} : { SHUTDOWN_TIMEOUT_MS: String(derived) }
+}
+
+// The operator line for an explicit SHUTDOWN_TIMEOUT_MS the service would ignore.
+function ignoredShutdownLine(module, raw, derived, budgetSeconds) {
+    const instead = derived === null ? 'the service keeps its own default'
+        : `the node is forwarding ${derived}, derived from the ${budgetSeconds} s stop budget, in its place`
+    return `WARNING: ${module}: the module config sets SHUTDOWN_TIMEOUT_MS=${raw}, which the service ignores ` +
+        `because it is not a positive number of milliseconds, so ${instead}. Correct or remove it in the module config.`
 }
 
 // The operator line for a drain timer at or above its stop budget.
@@ -141,18 +158,23 @@ function overBudgetShutdownLine(module, where, ms, budgetSeconds, source) {
 // read, or neither side involves a forwarded drain.
 function describeStopBudgetDrift(module, coin, network, settings, budgetSeconds) {
     if (!settings || module === 'node') return null
+    // A carried value the service ignores leaves its own default timer, the same as none at all
+    const carried = serviceHonoursShutdownMs(settings.shutdownTimeoutMs) ? settings.shutdownTimeoutMs : null
     const forwards = shutdownTimeoutMsForBudget(module, budgetSeconds) !== null
-    if (!forwards && settings.shutdownTimeoutMs === null) return null
+    if (!forwards && carried === null) return null
     const where = coin && network ? ` (${coin} ${network})` : ''
     let created
     if (settings.stopTimeout !== budgetSeconds) {
         created = Number.isInteger(settings.stopTimeout)
             ? `under a ${settings.stopTimeout} s stop budget` : 'without a stop budget'
-    } else if (settings.shutdownTimeoutMs === null && !isDefaultStopBudget(module, budgetSeconds)) {
-        created = 'before the node forwarded SHUTDOWN_TIMEOUT_MS'
+    } else if (carried === null && !isDefaultStopBudget(module, budgetSeconds)) {
+        const raw = settings.shutdownTimeoutMs
+        created = raw === null || raw === undefined || String(raw).trim() === ''
+            ? 'before the node forwarded SHUTDOWN_TIMEOUT_MS'
+            : `with SHUTDOWN_TIMEOUT_MS=${raw}, which the service ignores,`
     } else {
         // Flag a drain timer docker's kill would beat, before the stop rather than after it
-        const over = overBudgetShutdownMs(settings.shutdownTimeoutMs, budgetSeconds)
+        const over = overBudgetShutdownMs(carried, budgetSeconds)
         return over === null ? null : overBudgetShutdownLine(module, where, over, budgetSeconds, 'the container carries')
     }
     return `WARNING: ${module}${where} was created ${created}, so its own drain timer does not follow ` +
@@ -185,14 +207,14 @@ function describeModuleStopOutcome(module, coin, network, outcome, budgetSeconds
         return `WARNING: ${module}${where} did not exit within the ${budgetSeconds} s budget and was killed. ` +
             `Raise ${moduleStopTimeoutEnvName(module)} if this service needs longer to finish its block; the node ` +
             'derives the service\'s own SHUTDOWN_TIMEOUT_MS from it when the container is next recreated, unless ' +
-            'the module config sets one.'
+            'the module config sets a valid one.'
     }
     if (stoppedUnclean(outcome)) {
         return `WARNING: ${module}${where} exited with code ${outcome.exitCode} after ${outcome.seconds} s, inside the ` +
             `${budgetSeconds} s budget, so its shutdown drain did not complete: it overran the service's own ` +
             'hard-exit timer (SHUTDOWN_TIMEOUT_MS where the service reads one) or failed. Check the service log. ' +
             `Raising ${moduleStopTimeoutEnvName(module)} gives that drain more time only once the container is ` +
-            'recreated, and not while the module config sets SHUTDOWN_TIMEOUT_MS.'
+            'recreated, and not while the module config sets a valid SHUTDOWN_TIMEOUT_MS.'
     }
     return `Stopped ${module}${where} cleanly in ${outcome.seconds} s (budget ${budgetSeconds} s).`
 }

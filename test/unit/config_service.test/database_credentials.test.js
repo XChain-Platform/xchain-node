@@ -22,15 +22,15 @@ const {
 } = require('./helpers.test')
 
 function databaseCredentials1() {
-    it('does NOT auto-generate DB passwords where rotation cannot apply them (native/no-container -> static default)', async function () {
-        // The 2026-06-26 indexer outage: a generated sidecar password the native-DB
-        // rotation could never apply, desyncing config from the live account.
+    it('generates and persists DB passwords without a DB container', async function () {
         const { cs, files } = makeMemoryConfigService()
         const config = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
-        expect(config['DECODER_DB_PASS']).to.equal('xchain' + SEP + 'password')
-        expect(config['INDEXER_DB_PASS']).to.equal('xchain' + SEP + 'password')
-        expect(files[coinSidecar] || '').to.not.include('DECODER_DB_SECRET=')
-        expect(files[coinSidecar] || '').to.not.include('INDEXER_DB_SECRET=')
+        expect(config['DECODER_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
+        expect(config['INDEXER_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
+        expect(config['HUB_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
+        expect(files[coinSidecar]).to.include('DECODER_DB_SECRET=' + config['DECODER_DB_PASS'])
+        expect(files[coinSidecar]).to.include('INDEXER_DB_SECRET=' + config['INDEXER_DB_PASS'])
+        expect(files[hubSidecar]).to.include('HUB_DB_SECRET=' + config['HUB_DB_PASS'])
     })
 
     it('generates per-install DB passwords when a DB container exists (rotation can apply them) and persists them', async function () {
@@ -91,13 +91,13 @@ function databaseCredentials2() {
         expect(files[coinSidecar] || '').to.include('NODE_USER=' + gluedUser)  // relocated to the sidecar
     })
 
-    it('HUB_DB_PASS falls back to the shared static default when rotation cannot apply it', async function () {
+    it('HUB_DB_PASS is generated, shared, and persisted without a DB container', async function () {
         const { cs, files } = makeMemoryConfigService()
         const coinCfg = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
         const hubCfg  = await cs.getDefaultConfig(HUB_MODULE_NAME, '', '')
-        expect(coinCfg['HUB_DB_PASS']).to.equal('xchain' + SEP + 'password')
+        expect(coinCfg['HUB_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
         expect(hubCfg['HUB_DB_PASS']).to.equal(coinCfg['HUB_DB_PASS'])
-        expect(files[hubSidecar]).to.equal(undefined)
+        expect(files[hubSidecar]).to.include('HUB_DB_SECRET=' + coinCfg['HUB_DB_PASS'])
     })
 
     it('HUB_DB_PASS is generated, shared, and persisted when rotation can apply it', async function () {
@@ -110,17 +110,12 @@ function databaseCredentials2() {
         expect(files[hubSidecar]).to.include('HUB_DB_SECRET=')
     })
 
-    // #2246: on the non-rotatable path INDEXER_DB_PASS is not yet in
-    // defaultConfig when the indexer's HUB_DB_PASS bind runs, so the old
-    // unconditional copy planted HUB_DB_PASS=undefined - the key then
-    // "existed", the shared/static fallbacks skipped it, and the container
-    // got HUB_DB_PASS="undefined" against an account whose password fell
-    // through to the static default (HubDbSync ER_ACCESS_DENIED lockout).
-    it('indexer HUB_DB_PASS matches the indexer account static default when rotation cannot apply (never undefined)', async function () {
-        const { cs } = makeMemoryConfigService()
+    it('indexer HUB_DB_PASS matches its generated and persisted INDEXER_DB_PASS without a DB container', async function () {
+        const { cs, files } = makeMemoryConfigService()
         const config = await cs.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
-        expect(config['HUB_DB_PASS']).to.equal('xchain' + SEP + 'password')
+        expect(config['INDEXER_DB_PASS']).to.match(/^[0-9a-f]{48}$/)
         expect(config['HUB_DB_PASS']).to.equal(config['INDEXER_DB_PASS'])
+        expect(files[coinSidecar]).to.include('INDEXER_DB_SECRET=' + config['INDEXER_DB_PASS'])
     })
 
     it('indexer HUB_DB_PASS matches the generated per-install INDEXER_DB_PASS when rotation can apply', async function () {

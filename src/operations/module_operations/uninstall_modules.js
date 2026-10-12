@@ -24,6 +24,12 @@ function configure(dependencies) {
  * per-coin pass (so a genuine full teardown still reaches them, the remaining set
  * being empty by then) and skips with a reason naming what is still installed.
  *
+ * filterCommandParameters leaves the hub and sync out of `all` (the same
+ * expansion serves install/start/stop), so an `all` teardown with
+ * `--include-shared` adds them here, as update does, removing the hub last.
+ * The database is never removed by this command: it is reported as kept.
+ *
+ * @param {object} [opts] `opts.all` marks a run that expanded from `all`
  * @returns {Promise<{uninstalled: Array, skipped: Array}>} on full success
  * @throws {Error} listing every module that failed, after all were attempted
  */
@@ -53,7 +59,48 @@ function createUninstallOne(outcome, failures) {
     }
 }
 
-async function uninstallModules(servicesList, includeShared = false) {
+// Rebuild the shared bucket as explorer (and anything else asked), then sync, then hub.
+function includeSharedServicesForUninstall(servicesList) {
+    const shared  = (servicesList[""] && servicesList[""][""]) || []
+    const ordered = [...shared.filter(m => m !== HUB_MODULE_NAME && m !== SYNC_MODULE_NAME), SYNC_MODULE_NAME, HUB_MODULE_NAME]
+    return { ...servicesList, "": { "": ordered } }
+}
+
+// Remove the deferred shared services unless a coin/network is still being served.
+async function runSharedPass(deferredShared, outcome, uninstallOne) {
+    let remaining = []
+    try {
+        remaining = (await db.getAllModuleContainers(null, null)).filter(r => r.coin)
+    } catch (err) {
+        // The registry is the only thing that can answer "is anything still being served". Unreadable, we refuse rather than guess: leaving a shared service up costs an operator one more command, tearing it down under a live coin costs every other coin its explorer/hub.
+        const why = (err && err.message) ? err.message : String(err)
+        for (const s of deferredShared)
+            outcome.skipped.push({ ...s, reason: `shared, module registry unreadable (${why})` })
+        return null
+    }
+    const stillServed = [...new Set(remaining.map(r => `${r.coin} ${r.network}`))].sort()
+    for (const s of deferredShared) {
+        if (stillServed.length > 0) {
+            const reason = `shared, still serving ${stillServed.join(', ')}`
+            console.warn(`uninstall: keeping ${s.module}; it is ${reason}.`)
+            outcome.skipped.push({ ...s, reason })
+            continue
+        }
+        await uninstallOne(s.module, s.coin, s.network)
+    }
+    return stillServed
+}
+
+// Report the database as kept on a full teardown, since uninstallModule refuses it.
+function noteDatabaseKept(outcome, stillServed) {
+    outcome.skipped.push({ module: DB_MODULE_NAME, coin: '', network: '', reason: 'shared, database must be removed manually' })
+    if (stillServed && stillServed.length === 0)
+        console.warn(`uninstall: ${DB_MODULE_NAME} is not removed by this command; remove it manually.`)
+}
+
+async function uninstallModules(servicesList, includeShared = false, opts = {}) {
+    const fullTeardown = includeShared && !!opts.all
+    if (fullTeardown) servicesList = includeSharedServicesForUninstall(servicesList)
     const sharedModules = [DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME]
     const outcome = { uninstalled: [], skipped: [] }
     const failures = []
@@ -77,28 +124,8 @@ async function uninstallModules(servicesList, includeShared = false) {
     }
 
     // Shared pass. `remaining` is read AFTER the per-coin pass above, so a full teardown finds it empty and still removes them. A coin/network module is any registry row carrying a coin; shared services are registered under ''/''.
-    if (deferredShared.length > 0) {
-        let remaining = []
-        try {
-            remaining = (await db.getAllModuleContainers(null, null)).filter(r => r.coin)
-        } catch (err) {
-            // The registry is the only thing that can answer "is anything still being served". Unreadable, we refuse rather than guess: leaving a shared service up costs an operator one more command, tearing it down under a live coin costs every other coin its explorer/hub.
-            const why = (err && err.message) ? err.message : String(err)
-            for (const s of deferredShared)
-                outcome.skipped.push({ ...s, reason: `shared, module registry unreadable (${why})` })
-            deferredShared.length = 0
-        }
-        const stillServed = [...new Set(remaining.map(r => `${r.coin} ${r.network}`))].sort()
-        for (const s of deferredShared) {
-            if (stillServed.length > 0) {
-                const reason = `shared, still serving ${stillServed.join(', ')}`
-                console.warn(`uninstall: keeping ${s.module}; it is ${reason}.`)
-                outcome.skipped.push({ ...s, reason })
-                continue
-            }
-            await uninstallOne(s.module, s.coin, s.network)
-        }
-    }
+    const stillServed = deferredShared.length > 0 ? await runSharedPass(deferredShared, outcome, uninstallOne) : null
+    if (fullTeardown) noteDatabaseKept(outcome, stillServed)
 
     if (failures.length > 0) {
         const detail = failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; ')
