@@ -226,7 +226,6 @@ const HUB_ADMISSION_TIMING_VARS = new Set([
 // collectively blows 100/min and gets 429'd, so the heartbeat gate then stays
 // closed and the chain stalls. Raise for prod fleets. Passed through so the
 // host env survives a hub container regenerate.
-//
 // The hub exempts loopback and private-range callers from
 // that cap by default, which covers the case above: the indexers reach the hub
 // container over the bridge network this compose file creates, so a managed
