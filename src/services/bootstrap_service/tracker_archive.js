@@ -38,7 +38,7 @@ const { redactSecrets } = require('../../utils/helpers')
 let { maybeSignBootstrap } = require('./archive_signing')
 let { startProgress, buildDateTimeString, getWorkDir, assertBootstrapCapacity, ensureDir, ensureDirWritable } = require('./workspace')
 const trackerHeight = require('./tracker_height')
-const { readTrackerCommittedHeight, readTrackerHeightAfterRestart, chooseArchiveHeight, refusePreStopOnlyHeight } = trackerHeight
+const { readTrackerCommittedHeight, readTrackerHeightAfterRestart, readFrozenStoreHeight, chooseArchiveHeight, refusePreStopOnlyHeight } = trackerHeight
 const { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 
@@ -190,9 +190,11 @@ async function makeBootstrapUtxoTracker(coin, network) {
             `(exit code ${stop.exitCode}, ${stop.budget} s budget); no archive was built or signed`)
         const snapshotTaken = await takeTrackerSnapshot(context, endMaintenanceWindow)
         await compressTrackerArchive(context, snapshotTaken)
+        // The archived store's own height, read before the fallback restart (snapshot path: the snapshot is still pinned until the finally).
+        context.frozenHeight = await readFrozenStoreHeight(context.volumeName, snapshotTaken ? `/data/${TRACKER_SNAPSHOT_DIR}` : '/data')
         // Fallback path: the store is archived, so bring the tracker back before the wrap and sign, and read its height there.
         if (!snapshotTaken) await restartTrackerAndReadHeight(context, endMaintenanceWindow)
-        context.archiveHeight = chooseArchiveHeight(context.preStopHeight, context.postRestartHeight)
+        context.archiveHeight = chooseArchiveHeight(context.preStopHeight, context.postRestartHeight, context.frozenHeight)
         await finalizeTrackerArchive(coin, network, context)
     } finally {
         await cleanupTrackerArchive(context.volumeName, context.containerId, context.containerRestored, endMaintenanceWindow)
@@ -221,6 +223,7 @@ async function prepareTrackerArchive(coin, network) {
     // refuses the publish (chooseArchiveHeight). With neither reading the archive carries no height (BootstrapNodeTipGuard: unknown).
     context.preStopHeight = await readTrackerCommittedHeight(coin, network, context.containerId)
     context.postRestartHeight = null
+    context.frozenHeight = null
 
     // Staging and output dirs are prepared before the stop for the same reason as the capacity check: a read-only mount or a missing parent should not be
     // discovered with the tracker already dark.
@@ -396,5 +399,6 @@ module.exports = {
     readTrackerCommittedHeight,
     // Exported for tests
     chooseArchiveHeight,
+    readFrozenStoreHeight,
     readTrackerHeightAfterRestart
 }
