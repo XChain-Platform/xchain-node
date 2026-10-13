@@ -74,3 +74,27 @@ describe('sync INDEX_MAP_PARITY_CHECK passthrough', () => {
         }
     })
 })
+
+describe('hub publish switches passthrough', () => {
+    const NAMES = ['ORACLE_PUBLISH_ENABLED', 'ATTEST_BATCH_PUBLISH_ENABLED']
+
+    it('the view answers the host values', () => {
+        const views = viewsFor({ ORACLE_PUBLISH_ENABLED: 'false', ATTEST_BATCH_PUBLISH_ENABLED: 'true' })
+        expect(views.HUB_PASSTHROUGH_ENV.ORACLE_PUBLISH_ENABLED).to.equal('false')
+        expect(views.HUB_PASSTHROUGH_ENV.ATTEST_BATCH_PUBLISH_ENABLED).to.equal('true')
+    })
+
+    it('puts both host values in the hub env', async () => {
+        const previous = {}
+        for (const n of NAMES) { previous[n] = process.env[n]; process.env[n] = 'false' }
+        try {
+            const config = await containerConfig(HUB_MODULE_NAME)
+            for (const n of NAMES) expect(config).to.have.property(n, 'false')
+        } finally {
+            for (const n of NAMES) {
+                if (previous[n] === undefined) delete process.env[n]
+                else process.env[n] = previous[n]
+            }
+        }
+    })
+})
