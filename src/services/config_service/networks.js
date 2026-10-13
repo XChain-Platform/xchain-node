@@ -247,6 +247,7 @@ async function composeColocatedIndexerUrls(defaultValues, network, registeredSta
 // mirror-admission gate module gates it for real.
 // XC_ANCHOR_FOLD_REGTEST_ACTIVATION rides beside it: the hub and the regtest indexer arm the fold together,
 // and the stake and slash arms ride the same way.
+// XC_OFFER_LIST_REGTEST_ACTIVATION arms the offer-list gate on the hub; the hub's own gate module gates it for real.
 // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
 // accepted from the host env under their redaction-safe `*_SECRET` spelling;
 // everything else resolves to a plain process.env read.
@@ -295,7 +296,8 @@ function configureHubBeforeKey(defaultValues, module) {
             "XC_MIRROR_ADMISSION_ACTIVATION",
             "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
             "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
-            "XC_ANCHOR_SLASH_REGTEST_ACTIVATION"
+            "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
+            "XC_OFFER_LIST_REGTEST_ACTIVATION"
         ]
         const hubAdmissionTimingVars = new Set([
             "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS"
