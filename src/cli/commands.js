@@ -86,7 +86,6 @@ function showRowCount(stdout, table) {
     }
     return count
 }
-
 async function databaseCounts(context, databaseName) {
     const count = async table => {
         const { stdout } = await runMariaTool(context, 'mariadb-show', ['--count', databaseName, table])
@@ -98,7 +97,6 @@ async function databaseCounts(context, databaseName) {
         issuances: await count('issues')
     }
 }
-
 async function importRehearsal(context, innerArchive) {
     const command = mariaTool(context, 'mariadb', [rehearsalDatabase], true)
     const maria = spawn(command.file, command.args,
@@ -114,20 +112,15 @@ async function importRehearsal(context, innerArchive) {
         closed
     ])
 }
-
 function countsMatch(source, restored) {
     return source.rows === restored.rows && source.tokens === restored.tokens &&
         source.issuances === restored.issuances
 }
-
-// The rehearsal compares against the database the indexer actually reads, which an
-// operator may have renamed through INDEXER_DB_NAME.
 async function rehearsalSourceDatabaseName(coin, network) {
     const module = config.XChainService.XCHAIN_INDEXER
     const moduleConfig = await getDefaultConfig(module, coin, network)
     return configuredDatabaseName(module, moduleConfig, getModuleDatabaseName(module, coin, network))
 }
-
 async function rehearseBootstrapRestore(coin, network, options) {
     if (network !== 'mainnet') throw new Error('Bootstrap restore rehearsal requires mainnet')
     const sourceName = await rehearsalSourceDatabaseName(coin, network)
@@ -152,7 +145,6 @@ async function rehearseBootstrapRestore(coin, network, options) {
         }
     }
 }
-
 function registerBootstrapRestoreRehearsal(program, deps) {
     program.command('bootstrap-restore-rehearsal')
         .description('Restore a mainnet indexer bootstrap into a disposable database and compare counts')
