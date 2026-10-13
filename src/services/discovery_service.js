@@ -52,30 +52,16 @@ function containerName(container) {
     return String((Array.isArray(container.Names) ? container.Names[0] : container.Names) || '').replace(/^\//, '')
 }
 
-// True when the container carries a CLI-assigned name rather than matching only by its image tag.
-function matchesByName(container) {
-    return containerName(container).startsWith(NODE_PREFIX + SEP)
-}
-
 // Resolve a docker container to its registry identity { module, coin, network }
-// (coin/network are '' for shared modules), or null for non-xchain containers.
-//
-// Identity comes from the CONTAINER NAME, the stable key the CLI itself
-// assigns at creation (and what the file header above promises). The image
-// tag is NOT reliable: rebuilding a module's image while the old container is
-// still running steals the tag, docker then reports that container's image as
-// a bare ID, and an image-keyed scan goes blind to a live, healthy container.
-// Worse, the orphan purge below then DELETES its registry row, after which
-// update/start/stop silently no-op for it (a litecoin-mainnet
-// xchain-indexer incident, 2026-06-11). The image name remains a fallback for
-// containers that were renamed externally.
+// (coin/network are '' for shared modules), or null for any other container.
+// Identity is the container NAME the CLI assigns; the image tag can be stolen by a rebuild.
 function classifyContainer(container) {
-    const name  = containerName(container)
-    const image = String(container.Image || '')
-    const identity = name.startsWith(NODE_PREFIX + SEP) ? name : image
-    if (!identity.startsWith(NODE_PREFIX + SEP)) return null
+    const name = containerName(container)
+    // Refuse every name outside this install's scheme, whatever image it runs:
+    // another stack on the host may run the same module images under its own names.
+    if (!name.startsWith(NODE_PREFIX + SEP)) return null
 
-    const rest = identity.substr(NODE_PREFIX.length + SEP.length)
+    const rest = name.substr(NODE_PREFIX.length + SEP.length)
     if (SHARED_MODULES.includes(rest)) return { module: rest, coin: "", network: "" }
 
     const parts = rest.split(SEP)
@@ -125,10 +111,8 @@ function moduleKey(module, coin, network) {
 async function registerContainers(containers, silent, seen) {
     let added       = 0
     let reconciled  = 0
-    // Rank name matches first, then RUNNING (stable, so docker's newest-first breaks ties):
-    // a container started by hand from a module image under another name matches only by
-    // image and must never take the key from the container holding the CLI-assigned name.
-    const rank = (c) => (matchesByName(c) ? 0 : 2) + ((c.State || '').toLowerCase() === 'running' ? 0 : 1)
+    // Rank RUNNING first (stable, so docker's newest-first breaks ties) before first-seen wins.
+    const rank = (c) => ((c.State || '').toLowerCase() === 'running' ? 0 : 1)
     containers.sort((a, b) => rank(a) - rank(b))
 
     for (const nextContainer of containers) {

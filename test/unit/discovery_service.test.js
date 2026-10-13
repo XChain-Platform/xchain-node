@@ -19,7 +19,7 @@
  * image as a bare ID, so the scan went blind to a live container, and the
  * orphan purge then DELETED its registry row. From then on update/start/stop
  * silently no-op'd for that module while `sync` reported "already in sync".
- * Identity now comes from the CONTAINER NAME (image as fallback).
+ * Identity now comes from the CONTAINER NAME only; the image never decides it.
  ********************************************************************/
 
 const sinon      = require('sinon')
@@ -57,11 +57,24 @@ describe('DiscoveryService.classifyContainer', function () {
         })).to.deep.equal({ module: 'xchain-indexer', coin: 'litecoin', network: 'mainnet' })
     })
 
-    it('falls back to the image name when the container was renamed externally', function () {
+    it('never classifies a container outside the naming scheme by its module image', function () {
+        // Another stack on the same host (here a compose project) runs the same
+        // module images; claiming its containers would point every command at them.
+        for (const [name, image] of [
+            ['other-stack-hub-1',       'xchain-node-xchain-hub'],
+            ['other-stack-db-1',        'xchain-node-database'],
+            ['other-stack-doge-miner-1', 'xchain-node-dogecoin-regtest-xchain-regtest-miner'],
+            ['my-custom-name',          'xchain-node-bitcoin-regtest-xchain-decoder'],
+        ]) {
+            expect(svc.classifyContainer({ Names: name, Image: image }), name).to.equal(null)
+        }
+        // This install's own names still classify whatever image they run.
+        expect(svc.classifyContainer({ Names: 'xchain-node-xchain-hub', Image: 'xchain-node-xchain-hub' }))
+            .to.deep.equal({ module: 'xchain-hub', coin: '', network: '' })
         expect(svc.classifyContainer({
-            Names: 'my-custom-name',
-            Image: 'xchain-node-bitcoin-regtest-xchain-decoder',
-        })).to.deep.equal({ module: 'xchain-decoder', coin: 'bitcoin', network: 'regtest' })
+            Names: 'xchain-node-bitcoin-regtest-xchain-utxo-tracker',
+            Image: 'xchain-node-bitcoin-regtest-xchain-utxo-tracker',
+        })).to.deep.equal({ module: 'xchain-utxo-tracker', coin: 'bitcoin', network: 'regtest' })
     })
 
     it('classifies shared modules (no coin/network)', function () {
@@ -269,9 +282,8 @@ describe('DiscoveryService.scanAndRegisterModules fail-closed registry', functio
     })
 })
 
-// A container started by hand from a module image under another name matches
-// its key only through the image fallback, so it must never take the row from
-// the container that holds the CLI-assigned name.
+// A container started by hand from a module image under another name is not a
+// module, so it must never take the row from the container holding the CLI name.
 describe('DiscoveryService.scanAndRegisterModules name-over-image ranking', function () {
 
     afterEach(() => sinon.restore())
@@ -308,11 +320,11 @@ describe('DiscoveryService.scanAndRegisterModules name-over-image ranking', func
         sinon.assert.calledOnceWithExactly(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'realrealrealrealreal')
     })
 
-    it('still prefers a running image-only container over a stopped one when neither is named', async function () {
+    it('registers nothing when only containers outside the naming scheme run module images', async function () {
         const stale = { Names: 'renamed-old', Image: IMAGE, ID: 'staleSTALEstaleSTALE', State: 'exited' }
-        const live  = { Names: 'renamed-new', Image: IMAGE, ID: 'liveLIVEliveLIVElive', State: 'running' }
+        const live  = { Names: 'other-stack-indexer-1', Image: IMAGE, ID: 'liveLIVEliveLIVElive', State: 'running' }
         const { svc, db } = loadService({ containers: [stale, live] })
         await svc.scanAndRegisterModules({ silent: true })
-        sinon.assert.calledOnceWithExactly(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'liveLIVEliveLIVElive')
+        sinon.assert.notCalled(db.setModuleContainer)
     })
 })
