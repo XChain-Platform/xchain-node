@@ -54,7 +54,8 @@
 
 const { XChainService } = require('../config')
 const { migrationsDirOf } = require('../utils/migration_files')
-const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName } = require('./config_service')
+const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName, getDefaultConfig } = require('./config_service')
+const { configuredDatabaseName } = require('../utils/module_database_name')
 const config = require('../config');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -194,7 +195,19 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
     }
     if (!required.length) return { checked: false, reason: 'no-preconditions' }
 
-    const dbName = getModuleDatabaseName(module, coin, network)
+    // The database the service actually reads is the operator-configured name when
+    // set, not the derived default; checking the default would bless or refuse a
+    // database the service never touches. An unreadable config falls back to the
+    // default name with a warning, which is the guard's behaviour without the override.
+    const defaultName = getModuleDatabaseName(module, coin, network)
+    let dbName = defaultName
+    try {
+        const readConfig = deps.getDefaultConfig || getDefaultConfig
+        dbName = configuredDatabaseName(module, await readConfig(module, coin, network), defaultName)
+    } catch (err) {
+        logger.warn(`Migration precondition guard: could not read ${module}'s configured database name ` +
+            `(${err && err.message ? err.message : err}); using the default ${defaultName}.`)
+    }
     const result = await readApplied({ database: dbName, coin, network })
 
     if (result.state === 'empty-database') return emptyDatabaseResult(module, dbName, required)
