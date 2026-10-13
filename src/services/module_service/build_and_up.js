@@ -44,62 +44,28 @@ let logger = getLogger();
 
 function configureDependencies(dependencies) {
     ;({
-        execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db,
-        getModuleDir, checkIfModuleExists, getDockerContainerImageName,
-        getDockerNetwork, getDefaultConfig, validatePort, stopContainerByName,
-        removeContainer, forceRemoveContainerByName, checkBuildKitAvailable,
-        stopModuleContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters,
-        redactSecrets, config, goLiveGate, memoryLimitService,
-        hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk,
-        cloneGit, resolveBundledLibRef, assertNoHostPortConflicts,
-        resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs,
-        attachCrossChainNetworks, verifyContainerMemoryLimit,
+        execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir,
+        checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort,
+        stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable,
+        stopModuleContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config,
+        goLiveGate, memoryLimitService, hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk,
+        cloneGit, resolveBundledLibRef, assertNoHostPortConflicts, resolveObservabilityEnv,
+        buildHealthcheckArgs, buildModuleDockerArgs, attachCrossChainNetworks, verifyContainerMemoryLimit,
         logDockerCreateWarnings, logger
     } = dependencies)
 }
-/**
- * Build the module image and (re)create its container from the current config.
- *
- * `options.reuseImage` keeps the image that is already tagged for this container and
- * skips both the bundled-library re-clone and `docker build`. A container freezes its
- * env at `docker run`, so the ONLY way to correct a credential it carries is to
- * recreate it; without this flag that correction also drags in whatever GitHub HEAD
- * holds today, turning a credential repair into an unreviewed version bump.
- *
- * @param {string} module
- * @param {string|null} coin
- * @param {string|null} network
- * @param {string|null} [overwriteContainerId]
- * @param {boolean} [onlyExecution]
- * @param {string[]|null} [dockerCmdArgs]
- * @param {{reuseImage?: boolean}} [options]
- * @returns {Promise<string>} the new container id
- */
-// Decoder and indexer database names carry no NODE_PREFIX. On the shared
-// compose MariaDB each stack owns its own server, so that is harmless; on an
-// external (host-native) MariaDB every stack lands in ONE server, and a
-// non-default-prefix stack still carrying the unprefixed default name would
-// read and write the default stack's data. Refuse before anything is torn down.
-const DB_NAME_KEY_BY_MODULE = { 'xchain-decoder': 'DECODER_DB_NAME', 'xchain-indexer': 'INDEXER_DB_NAME' }
-
-function legacyDefaultDbName(module, coin, network) {
-    const { DB_SEP, CoinTickerSymbol } = config
-    const moduleName = module.slice('xchain-'.length)
-    return 'XChain' + DB_SEP + CoinTickerSymbol[coin] + DB_SEP
-        + network.charAt(0).toUpperCase() + network.slice(1) + DB_SEP
-        + moduleName.charAt(0).toUpperCase() + moduleName.slice(1)
-}
-
+// Decoder/indexer DB names carry no NODE_PREFIX. On an external MariaDB a non-default-prefix
+// stack still on the unprefixed default name would share the default stack's data; refuse early.
 function assertNoLegacyDbNameCollision(module, coin, network, environmentVariables) {
-    const key = DB_NAME_KEY_BY_MODULE[module]
-    if (!key || !config.EXTERNAL_DB) return
-    if (config.NODE_PREFIX === config.DEFAULT_NODE_PREFIX) return
+    const key = { 'xchain-decoder': 'DECODER_DB_NAME', 'xchain-indexer': 'INDEXER_DB_NAME' }[module]
+    if (!key || !config.EXTERNAL_DB || config.NODE_PREFIX === config.DEFAULT_NODE_PREFIX) return
     if (!coin || !network || config.CoinTickerSymbol[coin] === undefined) return
-    const dbName = environmentVariables[key]
-    if (dbName !== legacyDefaultDbName(module, coin, network)) return
-    throw new Error(`${key}=${dbName} is the unprefixed default database name, but NODE_PREFIX is ` +
-        `"${config.NODE_PREFIX}" and the database is external, so this stack would share ${dbName} ` +
-        `with the default "${config.DEFAULT_NODE_PREFIX}" stack. Set ${key} to a name unique to this stack.`)
+    const cap = (str) => str.charAt(0).toUpperCase() + str.slice(1)
+    const legacy = ['XChain', config.CoinTickerSymbol[coin], cap(network), cap(module.slice(7))].join(config.DB_SEP)
+    if (environmentVariables[key] !== legacy) return
+    throw new Error(`${key}=${legacy} is the unprefixed default database name, but NODE_PREFIX is "${config.NODE_PREFIX}" ` +
+        `and the database is external, so this stack would share it with the default "${config.DEFAULT_NODE_PREFIX}" stack. ` +
+        `Set ${key} to a name unique to this stack.`)
 }
 
 async function assertDeploymentReady(module, coin, network, environmentVariables, dir, onlyExecution) {
@@ -168,11 +134,7 @@ async function stageBundledLibraries(module, dir, reuseImage) {
         fs.cpSync(libSrc, libDest, {
             recursive: true,
             force: true,
-            filter: (src) => {
-                const base = path.basename(src)
-                return base !== "node_modules" && base !== ".git" &&
-                       base !== "test" && base !== "bench" && base !== "reports"
-            }
+            filter: (src) => !["node_modules", ".git", "test", "bench", "reports"].includes(path.basename(src))
         })
     }
 }
@@ -200,10 +162,7 @@ async function resolveMemoryOptions(module, coin, network, onlyExecution) {
     const trackerCount = await countInstalledTrackers(db, { coin, network })
     const memory = memoryArgsFor(module, { trackerCount, coin, network })
     if (memory.note) logger.info(memory.note)
-    return {
-        memoryArgs: memory.args,
-        memoryLimitMb: memory.args.length > 0 ? memory.mb : null
-    }
+    return { memoryArgs: memory.args, memoryLimitMb: memory.args.length > 0 ? memory.mb : null }
 }
 // Validate all port values, parsed with the conflict check's grammar; refuse a
 // host-interface (IP-scoped) spec, which no configured module port may carry.
@@ -226,10 +185,8 @@ async function assertReusableImage(reuseImage, containerPrefix, module, coin, ne
     try {
         await execFileAsync('docker', ['image', 'inspect', '--format', '{{.Id}}', containerPrefix])
     } catch {
-        throw new Error(
-            "No local image tagged " + containerPrefix + " to reuse; run `update " + module +
-            (coin && network ? " " + coin + " " + network : "") + "` to build one."
-        )
+        throw new Error("No local image tagged " + containerPrefix + " to reuse; run `update " + module +
+            (coin && network ? " " + coin + " " + network : "") + "` to build one.")
     }
 }
 
@@ -395,13 +352,29 @@ function buildOrCreateContainer(context, resolve, reject) {
 function launchContainer(context) {
     return new Promise((resolve, reject) => buildOrCreateContainer(context, resolve, reject))
 }
+/**
+ * Build the module image and (re)create its container from the current config.
+ *
+ * `options.reuseImage` keeps the image that is already tagged for this container and
+ * skips both the bundled-library re-clone and `docker build`. A container freezes its
+ * env at `docker run`, so the ONLY way to correct a credential it carries is to
+ * recreate it; without this flag that correction also drags in whatever GitHub HEAD
+ * holds today, turning a credential repair into an unreviewed version bump.
+ *
+ * @param {string} module
+ * @param {string|null} coin
+ * @param {string|null} network
+ * @param {string|null} [overwriteContainerId]
+ * @param {boolean} [onlyExecution]
+ * @param {string[]|null} [dockerCmdArgs]
+ * @param {{reuseImage?: boolean}} [options]
+ * @returns {Promise<string>} the new container id
+ */
 async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null, options = {}) {
     if (!checkIfModuleExists(module)) throw "module not found"
     const reuseImage = options.reuseImage === true
     if (!reuseImage && typeof checkBuildKitAvailable === 'function') {
-        try {
-            await checkBuildKitAvailable()
-        } catch (err) { throw "Error creating Docker image: " + err }
+        await checkBuildKitAvailable().catch((err) => { throw "Error creating Docker image: " + err })
     }
     let environmentVariables = await getDefaultConfig(module, coin, network)
     const dir = getModuleDir(module)
