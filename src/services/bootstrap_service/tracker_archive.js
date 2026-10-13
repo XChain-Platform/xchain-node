@@ -293,18 +293,13 @@ async function takeTrackerSnapshot(context, endMaintenanceWindow) {
         snapshotTaken = await snapshotTrackerVolume(context.volumeName)
     } catch (err) {
         logger.info(`Volume snapshot unavailable (${err.message}); compressing with the tracker stopped.`)
-        // A half-written snapshot must not be swept into the fallback
-        // archive, and a volume we cannot clean is not one we can publish
-        // from: let this throw into the outer finally, which restarts the
-        // container.
+        // A half-written snapshot must not be swept into the fallback archive, and a volume we cannot clean is not one we can publish
+        // from: let this throw into the outer finally, which restarts the container.
         await removeTrackerSnapshot(context.volumeName)
     }
 
-    // The whole point of the snapshot: the outage ends HERE, seconds after
-    // the stop, instead of after the multi-hour compress below. Without it
-    // the monthly cron took each mainnet encoder's tracker dark for the
-    // full run (2026-08-01: 3h36m BTC, 1h04m LTC, 42m DOGE), which the
-    // encoder correctly published as tracker_reachable:false.
+    // The whole point of the snapshot: the outage ends HERE, seconds after the stop, instead of after the multi-hour compress below.
+    // Without it the monthly cron took each mainnet encoder's tracker dark for the full run (2026-08-01: 3h36m BTC, 1h04m LTC, 42m DOGE).
     if (snapshotTaken) {
         logger.info(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container (compressing from the snapshot)...`)
         await restartTrackerAndReadHeight(context, endMaintenanceWindow)

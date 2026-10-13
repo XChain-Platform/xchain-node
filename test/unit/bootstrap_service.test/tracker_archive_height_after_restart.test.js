@@ -99,7 +99,13 @@ describe('BootstrapService', function () {
             expect(probeLog.map(p => p.restarted)).to.deep.equal([false, true])
             expect(recordedHeight(stubs)).to.equal(104)
         })
+    })
+})
 
+describe('BootstrapService', function () {
+    beforeEach(saveRequireSignedBootstrapSetting)
+    afterEach(restoreRequireSignedBootstrapSetting)
+    describe('makeBootstrapUtxoTracker(): archive height comes from the archived store', function () {
         it('records the frozen store height, read after the compress and before the fallback restart', async function () {
             const { stubs, probeLog } = trackerStubsWithProbe([100, 104], { snapshotFails: true })
             const base = stubs.execFile

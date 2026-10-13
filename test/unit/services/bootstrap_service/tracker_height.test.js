@@ -63,6 +63,15 @@ describe('tracker_height', function () {
         expect(trackerHeight.chooseArchiveHeight(null, null)).to.equal(null)
     })
 
+})
+
+describe('tracker_height frozen store', function () {
+    let fakes
+
+    beforeEach(function () {
+        fakes = configureTrackerHeight(sinon.stub())
+    })
+
     it('readFrozenStoreHeight reads the height of the archived directory', async function () {
         fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '4242\n', stderr: '' }))
 
@@ -86,6 +95,17 @@ describe('tracker_height', function () {
         expect(trackerHeight.chooseArchiveHeight(100, 105, 99)).to.equal(99)
         expect(() => trackerHeight.refusePreStopOnlyHeight({ coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: 99 })).to.not.throw()
         expect(() => trackerHeight.refusePreStopOnlyHeight({ coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: null })).to.throw()
+    })
+
+})
+
+describe('tracker_height live readings', function () {
+    let probeServiceStatus
+    let fakes
+
+    beforeEach(function () {
+        probeServiceStatus = sinon.stub()
+        fakes = configureTrackerHeight(probeServiceStatus)
     })
 
     it('reads the committed height through configured fakes', async function () {
