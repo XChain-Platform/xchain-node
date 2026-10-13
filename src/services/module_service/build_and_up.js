@@ -75,7 +75,35 @@ function configureDependencies(dependencies) {
  * @param {{reuseImage?: boolean}} [options]
  * @returns {Promise<string>} the new container id
  */
+// Decoder and indexer database names carry no NODE_PREFIX. On the shared
+// compose MariaDB each stack owns its own server, so that is harmless; on an
+// external (host-native) MariaDB every stack lands in ONE server, and a
+// non-default-prefix stack still carrying the unprefixed default name would
+// read and write the default stack's data. Refuse before anything is torn down.
+const DB_NAME_KEY_BY_MODULE = { 'xchain-decoder': 'DECODER_DB_NAME', 'xchain-indexer': 'INDEXER_DB_NAME' }
+
+function legacyDefaultDbName(module, coin, network) {
+    const { DB_SEP, CoinTickerSymbol } = config
+    const moduleName = module.slice('xchain-'.length)
+    return 'XChain' + DB_SEP + CoinTickerSymbol[coin] + DB_SEP
+        + network.charAt(0).toUpperCase() + network.slice(1) + DB_SEP
+        + moduleName.charAt(0).toUpperCase() + moduleName.slice(1)
+}
+
+function assertNoLegacyDbNameCollision(module, coin, network, environmentVariables) {
+    const key = DB_NAME_KEY_BY_MODULE[module]
+    if (!key || !config.EXTERNAL_DB) return
+    if (config.NODE_PREFIX === config.DEFAULT_NODE_PREFIX) return
+    if (!coin || !network || config.CoinTickerSymbol[coin] === undefined) return
+    const dbName = environmentVariables[key]
+    if (dbName !== legacyDefaultDbName(module, coin, network)) return
+    throw new Error(`${key}=${dbName} is the unprefixed default database name, but NODE_PREFIX is ` +
+        `"${config.NODE_PREFIX}" and the database is external, so this stack would share ${dbName} ` +
+        `with the default "${config.DEFAULT_NODE_PREFIX}" stack. Set ${key} to a name unique to this stack.`)
+}
+
 async function assertDeploymentReady(module, coin, network, environmentVariables, dir, onlyExecution) {
+    assertNoLegacyDbNameCollision(module, coin, network, environmentVariables)
     // Go-live pre-flight: warns pre-launch, refuses a mainnet write-surface
     // deploy with un-armed settings once XCHAIN_NODE_GO_LIVE=1.
     const { assertGoLiveReady } = goLiveGate
