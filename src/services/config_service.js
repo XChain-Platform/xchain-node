@@ -203,8 +203,7 @@ const { resolveArgs } = argumentsService
 
 async function getDefaultConfig(module, coin, network) {
     let defaultValues; if (coin && network) {
-        defaultValues = defaults.createCoinDefaults(module, coin, network)
-        applyPrefixedModuleDbUsers(defaultValues, coin, network); coins.applyCoinDefaults(defaultValues, module, coin, network)
+        defaultValues = defaults.createCoinDefaults(module, coin, network); applyPrefixedModuleDbUsers(defaultValues, coin, network); coins.applyCoinDefaults(defaultValues, module, coin, network)
         services.configureE2e(defaultValues, module, coin)
         if (module === XChainService.XCHAIN_E2E_TEST) await applyHubApiKeyFromSidecar(defaultValues)
         services.configureIndexerBeforeHubKey(defaultValues, module, network)
