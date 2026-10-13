@@ -26,6 +26,7 @@ const { assertArchiveIdentity } = require('../services/bootstrap_service/restore
 const { getWorkDir } = require('../services/bootstrap_service/workspace')
 const database = require('../services/database_service')
 const { getDefaultConfig, getModuleDatabaseName } = require('../services/config_service')
+const { configuredDatabaseName } = require('../utils/module_database_name')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
 const { getLogger } = require('../observability/logger')
 
@@ -119,9 +120,17 @@ function countsMatch(source, restored) {
         source.issuances === restored.issuances
 }
 
+// The rehearsal compares against the database the indexer actually reads, which an
+// operator may have renamed through INDEXER_DB_NAME.
+async function rehearsalSourceDatabaseName(coin, network) {
+    const module = config.XChainService.XCHAIN_INDEXER
+    const moduleConfig = await getDefaultConfig(module, coin, network)
+    return configuredDatabaseName(module, moduleConfig, getModuleDatabaseName(module, coin, network))
+}
+
 async function rehearseBootstrapRestore(coin, network, options) {
     if (network !== 'mainnet') throw new Error('Bootstrap restore rehearsal requires mainnet')
-    const sourceName = getModuleDatabaseName(config.XChainService.XCHAIN_INDEXER, coin, network)
+    const sourceName = await rehearsalSourceDatabaseName(coin, network)
     const archive = await rehearsalArchive(coin, network, options.file)
     const context = await rehearsalContext(coin, network)
     let created = false
@@ -396,4 +405,4 @@ function registerToolCommands(program, deps) {
     registerBootstrapRestoreRehearsal(program, deps)
 }
 
-module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch }
+module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch, rehearsalSourceDatabaseName }
