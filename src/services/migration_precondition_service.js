@@ -153,6 +153,22 @@ async function readRefusalRemedy(module, coin, network, applied, deps) {
 }
 
 /**
+ * The database the service reads: the operator-configured name when set, else the
+ * derived default. An unreadable config falls back to the default with a warning.
+ */
+async function resolveCheckedDatabaseName(module, coin, network, deps) {
+    const defaultName = getModuleDatabaseName(module, coin, network)
+    try {
+        const readConfig = deps.getDefaultConfig || getDefaultConfig
+        return configuredDatabaseName(module, await readConfig(module, coin, network), defaultName)
+    } catch (err) {
+        logger.warn(`Migration precondition guard: could not read ${module}'s configured database name ` +
+            `(${err && err.message ? err.message : err}); using the default ${defaultName}.`)
+        return defaultName
+    }
+}
+
+/**
  * Refuses (throws) when the source tree about to be deployed declares a migration
  * as a startup precondition that the target database has not applied.
  *
@@ -195,19 +211,7 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
     }
     if (!required.length) return { checked: false, reason: 'no-preconditions' }
 
-    // The database the service actually reads is the operator-configured name when
-    // set, not the derived default; checking the default would bless or refuse a
-    // database the service never touches. An unreadable config falls back to the
-    // default name with a warning, which is the guard's behaviour without the override.
-    const defaultName = getModuleDatabaseName(module, coin, network)
-    let dbName = defaultName
-    try {
-        const readConfig = deps.getDefaultConfig || getDefaultConfig
-        dbName = configuredDatabaseName(module, await readConfig(module, coin, network), defaultName)
-    } catch (err) {
-        logger.warn(`Migration precondition guard: could not read ${module}'s configured database name ` +
-            `(${err && err.message ? err.message : err}); using the default ${defaultName}.`)
-    }
+    const dbName = await resolveCheckedDatabaseName(module, coin, network, deps)
     const result = await readApplied({ database: dbName, coin, network })
 
     if (result.state === 'empty-database') return emptyDatabaseResult(module, dbName, required)
