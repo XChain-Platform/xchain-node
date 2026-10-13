@@ -35,4 +35,12 @@ function configuredDatabaseName(module, cfg, defaultName) {
     return assertSafeDbIdentifier(name, 'database name')
 }
 
-module.exports = { DATABASE_NAME_KEY, configuredDatabaseName }
+// Scopes a derived database or DB user name to its NODE_PREFIX stack: '' for the default
+// prefix, else '<prefix>' plus sep with characters outside [A-Za-z0-9] folded to '_'
+// (a SQL identifier cannot carry hyphens or dots).
+function nodePrefixSegment(nodePrefix, defaultPrefix, sep = '_') {
+    if (nodePrefix === defaultPrefix) return ''
+    return String(nodePrefix).replace(/[^A-Za-z0-9]/g, '_') + sep
+}
+
+module.exports = { DATABASE_NAME_KEY, configuredDatabaseName, nodePrefixSegment }
