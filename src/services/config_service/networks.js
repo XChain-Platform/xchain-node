@@ -110,6 +110,50 @@ async function composeColocatedIndexerUrls(defaultValues, network, registeredSta
     }
 }
 
+const HUB_PASSTHROUGH_VARS = [
+    "HUB_API_KEY",
+    "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL",
+    "BTC_INDEXER_API_KEY", "LTC_INDEXER_API_KEY", "DOGE_INDEXER_API_KEY",
+    "CHECKPOINT_ENABLED", "CHECKPOINT_INTERVAL_BLOCKS", "CHECKPOINT_CONFIRMATIONS",
+    "CHECKPOINT_POLL_MS", "CHECKPOINT_ROUND_TIMEOUT_MS", "CHECKPOINT_CHAINS",
+    "ANCHOR_ENABLED", "ANCHOR_INTERVAL_MS", "ANCHOR_MATCH_BATCH_SIZE",
+    "ANCHOR_MAX_BATCH", "ANCHOR_CHUNK_MAX_BYTES", "ANCHOR_ROUND_TIMEOUT_MS",
+    "ANCHOR_CHUNK_RETRY_MS", "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
+    "ANCHOR_CHECKPOINT_EVERY_N",
+    "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
+    "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
+    "XDEX_SEED_LOCAL_VALIDATOR", "XDEX_SNAPSHOT_BLOCK",
+    "XCHAIN_CONFIRMATIONS_BTC", "XCHAIN_CONFIRMATIONS_LTC", "XCHAIN_CONFIRMATIONS_DOGE",
+    "HUB_TRUST_PROXY",
+    "HUB_NETWORK",
+    "ORACLE_MIN_SUBMISSIONS",
+    "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
+    "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS",
+    "ORACLE_BATCH_WINDOW_ROUNDS", "ORACLE_BATCH_GRACE_MS",
+    "ORACLE_BATCH_SIGN_TIMEOUT_MS", "ORACLE_BATCH_BUFFER_MAX_ROUNDS",
+    "ORACLE_BATCH_LANDING_RESERVE_MS",
+    "ATTEST_RESPONSE_FORWARD_S_OVERRIDE",
+    "ATTEST_BATCH_WINDOW_S_OVERRIDE",
+    "HUB_RATE_LIMIT_RPM", "HUB_RATE_LIMIT_EXEMPT_LOCAL",
+    "XCHAIN_PRICE_INDEXER_DB_HOST", "XCHAIN_PRICE_INDEXER_DB_PORT",
+    "XCHAIN_PRICE_INDEXER_DB_NAME", "XCHAIN_PRICE_INDEXER_DB_USER",
+    "XCHAIN_PRICE_INDEXER_DB_PASS", "XCHAIN_PRICE_INDEXER_DB_COIN",
+    "XCHAIN_PRICE_WINDOW_BLOCKS", "XCHAIN_PRICE_CONFIRMATION_BUFFER",
+    "XCHAIN_PRICE_BOOTSTRAP_SATS",
+    "XCHAIN_PRICE_MIN_BTC_VOLUME",
+    "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED",
+    "XC_ROLLCALL_REGTEST_ACTIVATION",
+    "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
+    "XC_MIRROR_ADMISSION_ACTIVATION",
+    "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
+    "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
+    "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
+    "XC_OFFER_LIST_REGTEST_ACTIVATION"
+]
+const HUB_ADMISSION_TIMING_VARS = new Set([
+    "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS"
+])
+
 // Hub telemetry secrets come from host env; unset, ip_hash stays null and admin is 401.
 // BTC indexer JSON-RPC URL comes from host env for a hub not co-located with one. Left
 // empty, it is composed from the co-located indexer, else the hub uses its configs table.
@@ -182,7 +226,6 @@ async function composeColocatedIndexerUrls(defaultValues, network, registeredSta
 // collectively blows 100/min and gets 429'd, so the heartbeat gate then stays
 // closed and the chain stalls. Raise for prod fleets. Passed through so the
 // host env survives a hub container regenerate.
-//
 // The hub exempts loopback and private-range callers from
 // that cap by default, which covers the case above: the indexers reach the hub
 // container over the bridge network this compose file creates, so a managed
@@ -247,6 +290,7 @@ async function composeColocatedIndexerUrls(defaultValues, network, registeredSta
 // mirror-admission gate module gates it for real.
 // XC_ANCHOR_FOLD_REGTEST_ACTIVATION rides beside it: the hub and the regtest indexer arm the fold together,
 // and the stake and slash arms ride the same way.
+// XC_OFFER_LIST_REGTEST_ACTIVATION arms the offer-list gate on the hub; the hub's own gate module gates it for real.
 // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
 // accepted from the host env under their redaction-safe `*_SECRET` spelling;
 // everything else resolves to a plain process.env read.
@@ -258,50 +302,8 @@ function configureHubBeforeKey(defaultValues, module) {
         defaultValues["TELEMETRY_IP_SALT"]        = config.TELEMETRY_IP_SALT
         defaultValues["TELEMETRY_ADMIN_KEY"]      = config.TELEMETRY_ADMIN_KEY
         defaultValues["BTC_INDEXER_API_URL"]      = config.BTC_INDEXER_API_URL
-        const hubPassthroughVars = [
-            "HUB_API_KEY",
-            "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL",
-            "BTC_INDEXER_API_KEY", "LTC_INDEXER_API_KEY", "DOGE_INDEXER_API_KEY",
-            "CHECKPOINT_ENABLED", "CHECKPOINT_INTERVAL_BLOCKS", "CHECKPOINT_CONFIRMATIONS",
-            "CHECKPOINT_POLL_MS", "CHECKPOINT_ROUND_TIMEOUT_MS", "CHECKPOINT_CHAINS",
-            "ANCHOR_ENABLED", "ANCHOR_INTERVAL_MS", "ANCHOR_MATCH_BATCH_SIZE",
-            "ANCHOR_MAX_BATCH", "ANCHOR_CHUNK_MAX_BYTES", "ANCHOR_ROUND_TIMEOUT_MS",
-            "ANCHOR_CHUNK_RETRY_MS", "ANCHOR_ELECTION_TOLERANCE_BLOCKS", "ANCHOR_REWARD_PER_PUBLISH",
-            "ANCHOR_CHECKPOINT_EVERY_N",
-            "DOGE_ENCODER_URL", "DOGE_ENCODER_API_KEY", "DOGE_ADDRESS",
-            "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD",
-            "XDEX_SEED_LOCAL_VALIDATOR", "XDEX_SNAPSHOT_BLOCK",
-            "XCHAIN_CONFIRMATIONS_BTC", "XCHAIN_CONFIRMATIONS_LTC", "XCHAIN_CONFIRMATIONS_DOGE",
-            "HUB_TRUST_PROXY",
-            "HUB_NETWORK",
-            "ORACLE_MIN_SUBMISSIONS",
-            "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
-            "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS",
-            "ORACLE_BATCH_WINDOW_ROUNDS", "ORACLE_BATCH_GRACE_MS",
-            "ORACLE_BATCH_SIGN_TIMEOUT_MS", "ORACLE_BATCH_BUFFER_MAX_ROUNDS",
-            "ORACLE_BATCH_LANDING_RESERVE_MS",
-            "ATTEST_RESPONSE_FORWARD_S_OVERRIDE",
-            "ATTEST_BATCH_WINDOW_S_OVERRIDE",
-            "HUB_RATE_LIMIT_RPM", "HUB_RATE_LIMIT_EXEMPT_LOCAL",
-            "XCHAIN_PRICE_INDEXER_DB_HOST", "XCHAIN_PRICE_INDEXER_DB_PORT",
-            "XCHAIN_PRICE_INDEXER_DB_NAME", "XCHAIN_PRICE_INDEXER_DB_USER",
-            "XCHAIN_PRICE_INDEXER_DB_PASS", "XCHAIN_PRICE_INDEXER_DB_COIN",
-            "XCHAIN_PRICE_WINDOW_BLOCKS", "XCHAIN_PRICE_CONFIRMATION_BUFFER",
-            "XCHAIN_PRICE_BOOTSTRAP_SATS",
-            "XCHAIN_PRICE_MIN_BTC_VOLUME",
-            "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED",
-            "XC_ROLLCALL_REGTEST_ACTIVATION",
-            "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
-            "XC_MIRROR_ADMISSION_ACTIVATION",
-            "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
-            "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
-            "XC_ANCHOR_SLASH_REGTEST_ACTIVATION"
-        ]
-        const hubAdmissionTimingVars = new Set([
-            "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS"
-        ])
-        for (const varName of hubPassthroughVars) {
-            const value = hubAdmissionTimingVars.has(varName)
+        for (const varName of HUB_PASSTHROUGH_VARS) {
+            const value = HUB_ADMISSION_TIMING_VARS.has(varName)
                 ? config.childProcessEnv()[varName]
                 : readSecretHostEnv(varName)
             if (value !== undefined && value !== "") {
