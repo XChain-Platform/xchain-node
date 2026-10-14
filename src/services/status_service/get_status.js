@@ -30,7 +30,7 @@ let { getLogger } = require('../../observability/logger');
 let logger = getLogger();
 let { checkRemoteNodeVersionAdvisory, loadInstalledModules } = require('./installed_modules')
 let {
-    isContainerGoneError, probeServiceHealthPayload,
+    isContainerGoneError, probeServiceHealthPayload, probeReadinessPayload, reduceNotReady, describeNotReadyNote,
     reduceNodeCatchingUp, describeNodeCatchingUpNote,
     reduceNodeUnreachable, describeNodeUnreachableNote,
     reduceDecoderReorgHalt, describeReorgHaltNote,
@@ -39,7 +39,7 @@ let {
 } = require('./status_reducers')
 
 function configureDependencies(dependencies) {
-    ;({ NODE_MODULE_NAME, SEP, XChainService, db, getInstalledModules, resetInstalledModules, getRemoteModuleVersions, isStatusUpdated, setStatusUpdated, getLastStatus, setLastStatus, getLastPrintedStatus, setLastPrintedStatus, getStatusFromContainer, getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion, peers, getLogger, logger, checkRemoteNodeVersionAdvisory, loadInstalledModules, isContainerGoneError, probeServiceHealthPayload, reduceNodeCatchingUp, describeNodeCatchingUpNote, reduceNodeUnreachable, describeNodeUnreachableNote, reduceDecoderReorgHalt, describeReorgHaltNote, reduceIndexerStall, describeIndexerStallNote, reduceTrackerHalt, describeTrackerHaltNote } = dependencies)
+    ;({ NODE_MODULE_NAME, SEP, XChainService, db, getInstalledModules, resetInstalledModules, getRemoteModuleVersions, isStatusUpdated, setStatusUpdated, getLastStatus, setLastStatus, getLastPrintedStatus, setLastPrintedStatus, getStatusFromContainer, getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion, peers, getLogger, logger, checkRemoteNodeVersionAdvisory, loadInstalledModules, isContainerGoneError, probeServiceHealthPayload, probeReadinessPayload, reduceNotReady, describeNotReadyNote, reduceNodeCatchingUp, describeNodeCatchingUpNote, reduceNodeUnreachable, describeNodeUnreachableNote, reduceDecoderReorgHalt, describeReorgHaltNote, reduceIndexerStall, describeIndexerStallNote, reduceTrackerHalt, describeTrackerHaltNote } = dependencies)
 }
 
 async function recordVersions(moduleStatus, nextModule, nextCoin, nextCoinNetwork, containerId, remoteModuleVersions) {
@@ -176,6 +176,23 @@ async function annotatePublishedHealth(nextModule, containerId, nextCoin, nextCo
             display.isChurning = true
             moduleStatus[key] = finding
             notes.push(describe(nextCoin, nextCoinNetwork, finding))
+        }
+    }
+    // The readiness verdict rides on the indexer's /status and the decoder's /live, which the
+    // JSON-RPC health read above does not carry. Advisory, like the rest: an unreadable route or
+    // an older image without the fields leaves the row as it was. Distinct word, same amber.
+    if (nextModule === XChainService.XCHAIN_INDEXER || nextModule === XChainService.XCHAIN_DECODER) {
+        let readiness = null
+        try {
+            readiness = typeof (payload && payload.ready) === 'boolean'
+                ? payload : await probeReadinessPayload(nextModule, containerId, nextCoin, nextCoinNetwork)
+        } catch { /* advisory: an unreadable route is not a finding */ }
+        const notReady = reduceNotReady(readiness)
+        if (notReady) {
+            display.state += " NOT READY"
+            display.isChurning = true
+            moduleStatus["not_ready"] = notReady
+            notes.push(describeNotReadyNote(nextCoin, nextCoinNetwork, nextModule, notReady))
         }
     }
     const wait = reduceNodeCatchingUp(payload)

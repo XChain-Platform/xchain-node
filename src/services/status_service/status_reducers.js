@@ -57,6 +57,23 @@ async function probeServiceHealthPayload(module, containerId, coin, network) {
     return probeServiceStatus(containerId, port, runner)
 }
 
+// Which route carries each module's readiness verdict. The JSON-RPC health method the
+// probe above reads first does not carry it.
+const READINESS_ROUTE = { 'xchain-indexer': '/status', 'xchain-decoder': '/live' }
+
+// The readiness fields of an indexer's /status or a decoder's /live, or null when the
+// route is unreadable or the image predates the verdict (an older image reads as ready).
+async function probeReadinessPayload(module, containerId, coin, network) {
+    const route = READINESS_ROUTE[module]
+    const { probeReadinessSurface, MODULE_API_PORT_KEY } = peers.bootstrapHealthGate
+    if (!route || typeof probeReadinessSurface !== 'function') return null
+    const config = await configService.getDefaultConfig(module, coin, network)
+    const port = config && config[MODULE_API_PORT_KEY[module]]
+    if (!port) return null
+    const runner = (cmd, args) => nodeUtil.promisify(childProcess.execFile)(cmd, args, { timeout: 15000 })
+    return probeReadinessSurface(containerId, port, route, runner)
+}
+
 async function probeDecoderReorgHalt(containerId, coin, network) {
     return reduceDecoderReorgHalt(await probeServiceHealthPayload(XChainService.XCHAIN_DECODER, containerId, coin, network))
 }
@@ -189,6 +206,30 @@ function reduceIndexerStall(payload) {
     }
 }
 
+// The readiness verdict a service publishes: the indexer's `ready` / `notReadyReasons`
+// (/status) and `barrierCeilingExceeded`, the decoder's `ready` / `not_ready_reasons`
+// (/live). Strict on shape: only `ready === false` or `barrierCeilingExceeded === true`
+// is a finding, so an older image that lacks the fields reads as ready, as today. A hub
+// barrier held past its ceiling is NOT READY even though reduceIndexerStall calls a
+// barrier_defer healthy: the block is not advancing and the hub is why.
+function reduceNotReady(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    const ceiling = payload.barrierCeilingExceeded === true
+    if (payload.ready !== false && !ceiling) return null
+    const listed = [payload.notReadyReasons, payload.not_ready_reasons].find(Array.isArray) || []
+    const reasons = listed.filter(r => typeof r === 'string' && r.trim()).map(r => r.trim())
+    if (ceiling && !reasons.includes('barrier_ceiling_exceeded')) reasons.push('barrier_ceiling_exceeded')
+    return { notReady: true, reasons }
+}
+
+// The line `ps` prints under the table for a service that is up but not ready.
+function describeNotReadyNote(coin, network, module, finding) {
+    return coin + "/" + network + " " + module + " is NOT READY"
+        + (finding.reasons.length ? " (" + finding.reasons.join(", ") + ")" : "")
+        + ": the process is alive and its healthcheck passes, but it is not serving the chain right now."
+        + " A restart does not clear this; `xchain-node logs " + module + " " + coin + " " + network + "` names the cause."
+}
+
 // The indexer stamps its last commit in epoch milliseconds; the note wants an
 // instant an operator can read. A string is passed through, anything else is null.
 function describeCommitInstant(value) {
@@ -256,6 +297,9 @@ function describeTrackerHaltNote(coin, network, halt) {
 module.exports = {
     isContainerGoneError,
     probeServiceHealthPayload,
+    probeReadinessPayload,
+    reduceNotReady,
+    describeNotReadyNote,
     probeDecoderReorgHalt,
     reduceNodeCatchingUp,
     describeNodeCatchingUpNote,

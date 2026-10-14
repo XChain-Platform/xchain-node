@@ -43,7 +43,7 @@ const {
     configureDependencies: configureInstalledModules
 } = require('./status_service/installed_modules.js')
 const {
-    isContainerGoneError, probeServiceHealthPayload,
+    isContainerGoneError, probeServiceHealthPayload, probeReadinessPayload, reduceNotReady, describeNotReadyNote,
     reduceNodeCatchingUp, describeNodeCatchingUpNote,
     reduceNodeUnreachable, describeNodeUnreachableNote, describeDuration,
     reduceDecoderReorgHalt, describeReorgHaltNote,
@@ -62,7 +62,8 @@ configureGetStatus({
     getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion,
     getContainerModuleVersion, peers, getLogger, logger,
     checkRemoteNodeVersionAdvisory, loadInstalledModules, isContainerGoneError,
-    probeServiceHealthPayload, reduceNodeCatchingUp, describeNodeCatchingUpNote,
+    probeServiceHealthPayload, probeReadinessPayload, reduceNotReady, describeNotReadyNote,
+    reduceNodeCatchingUp, describeNodeCatchingUpNote,
     reduceNodeUnreachable, describeNodeUnreachableNote, reduceDecoderReorgHalt,
     describeReorgHaltNote, reduceIndexerStall, describeIndexerStallNote,
     reduceTrackerHalt, describeTrackerHaltNote
@@ -119,5 +120,7 @@ module.exports = {
     reduceIndexerStall,
     describeIndexerStallNote,
     reduceTrackerHalt,
-    describeTrackerHaltNote
+    describeTrackerHaltNote,
+    reduceNotReady,
+    describeNotReadyNote
 }

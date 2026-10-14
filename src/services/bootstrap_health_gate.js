@@ -159,6 +159,19 @@ async function probeServiceStatus(containerId, port, runner) {
     throw lastErr || new Error('no status probe succeeded')
 }
 
+// One GET on a service's own readiness surface (the indexer's /status, the decoder's /live),
+// parsed, or null when the route cannot be read. A non-2xx answer (wget exits non-zero and
+// prints no body) reads as null on purpose: the container healthcheck already shows that fault.
+async function probeReadinessSurface(containerId, port, route, runner) {
+    try {
+        const { stdout } = await runner('docker', ['exec', containerId, 'wget', '-qO-', `http://localhost:${port}${route}`])
+        const parsed = JSON.parse(String(stdout || '').trim())
+        return (parsed && typeof parsed === 'object') ? parsed : null
+    } catch (_) {
+        return null
+    }
+}
+
 // Refuse unless `module` on coin/network is a known-good bootstrap source.
 // Resolves silently when the source passes; throws BootstrapSourceUnhealthyError
 // (with every reason, not just the first) when it does not.
@@ -356,5 +369,6 @@ module.exports = {
     // StatusService reads a decoder's health surface through the same probe so
     // `xchain-node ps` can show a latent REORG_HALT.
     probeServiceStatus,
+    probeReadinessSurface,
     MODULE_API_PORT_KEY
 }
