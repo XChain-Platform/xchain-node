@@ -189,13 +189,15 @@ function describeReorgHaltNote(coin, network, reorgHalt) {
 // its grace window, which a BTC mainnet indexer's price mirror defers on
 // almost every poll while the counter keeps advancing. A host fault (a
 // missing DOGE read, a VM executor down) shows at once, and so does any stall
-// the indexer graded wedged, or one an older image left ungraded.
+// the indexer graded wedged, or one an older image left ungraded. A bridge
+// proof wait shows too: it never wedges, so nothing else would surface it.
 function reduceIndexerStall(payload) {
     if (!payload || typeof payload !== 'object') return null
     const reason = typeof payload.stallReason === 'string' && payload.stallReason.trim() ? payload.stallReason.trim() : null
     const stallClass = typeof payload.stallClass === 'string' ? payload.stallClass : null
+    // The price-landing wait is that same in-grace barrier defer, judged on its own longer window.
     const healthyDefer = stallClass === 'future_block_wait'
-        || (stallClass === 'barrier_defer' && /_barrier$/.test(reason || ''))
+        || ((stallClass === 'barrier_defer' || stallClass === 'price_landing_wait') && /_barrier$/.test(reason || ''))
     return {
         stalled:     reason !== null && !healthyDefer,
         reason,
@@ -239,8 +241,9 @@ function describeCommitInstant(value) {
 }
 
 // What to do about each stall an indexer names, keyed by its reason word. A
-// reason with no entry gets the barrier line, since every hub-mirror barrier
-// is named `<something>_barrier` and they all clear the same way.
+// reason with no entry gets the hub-mirror line only when its word ends in
+// `_barrier` (the indexer's name for a hub-mirror barrier), else the log line.
+// The bridge proof wait ends in `_barrier` but no hub resync shortens it, so it has its own entry.
 const INDEXER_STALL_HINTS = {
     rollcall_proof_unavailable: (coin, network) =>
         "it cannot prove on Dogecoin who signed the roll call, so it defers the epoch close rather than read silence as absence."
@@ -255,15 +258,33 @@ const INDEXER_STALL_HINTS = {
     train_activation_halt: (coin, network) =>
         "the signed release manifest names a rule set this build does not implement; `xchain-node update xchain-indexer " + coin + " " + network + "`.",
     reorg_rollback: () =>
-        "a reorg rollback is in progress; it resumes on its own once the rolled-back range is re-parsed."
+        "a reorg rollback is in progress; it resumes on its own once the rolled-back range is re-parsed.",
+    bridge_proof_barrier: (coin, network) =>
+        "it is waiting for a bridge escrow proof and defers the block rather than mint unproven. This is not a hub-mirror fault,"
+        + " and neither a hub resync nor a restart shortens it: it clears once this node holds a quorum-established checkpoint"
+        + " at or after the transfer's snapshot block, or an origin-chain indexer endpoint is configured and serves the proof."
+        + " Look for BRIDGE ESCROW PROOF UNAVAILABLE in `xchain-node logs xchain-indexer " + coin + " " + network + "`.",
+    list_share_halt: (coin, network) =>
+        "it refuses to commit the block because a list version is missing or altered, and committing would fork it from its peers;"
+        + " this is not a hub-mirror wait. `xchain-node logs xchain-indexer " + coin + " " + network + "` shows the LIST SHARE HALT line and its reason.",
+    parse_exception: (coin, network) =>
+        "the same exception hit the same block twice, so the block is not committing;"
+        + " `xchain-node logs xchain-indexer " + coin + " " + network + "` shows the repeated parse error."
+}
+
+// Hub-mirror line for an unlisted `_barrier` word, neutral log line for any other unlisted
+// reason. Tests the word, not the reason, so exception prose ending in `_barrier` never matches.
+function fallbackIndexerStallHint(stall) {
+    if (/_barrier$/.test(stall.word || '')) return (c, n) =>
+        "a hub-mirror barrier (" + stall.reason + ") has held the head block past the grace window; check that the hub is answering"
+        + " and its mirror stream is advancing, then `xchain-node logs xchain-indexer " + c + " " + n + "`."
+    return (c, n) => "`ps` has no specific remedy for this stall; `xchain-node logs xchain-indexer " + c + " " + n + "` names the fault."
 }
 
 // The line `ps` prints under the table for a stalled indexer: the reason, how
 // long no block has committed, and the remedy for that reason.
 function describeIndexerStallNote(coin, network, stall) {
-    const hint = INDEXER_STALL_HINTS[stall.word] || ((c, n) =>
-        "a hub-mirror barrier (" + stall.reason + ") has held the head block past the grace window; check that the hub is answering"
-        + " and its mirror stream is advancing, then `xchain-node logs xchain-indexer " + c + " " + n + "`.")
+    const hint = INDEXER_STALL_HINTS[stall.word] || fallbackIndexerStallHint(stall)
     return coin + "/" + network + " xchain-indexer is STALLED (" + stall.reason + ")"
         + (stall.since ? ", no block committed since " + stall.since : "")
         + ": " + hint(coin, network)

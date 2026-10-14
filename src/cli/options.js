@@ -119,12 +119,12 @@ function registerAutoheal(program, deps) {
         .description('Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe')
         .option('--dry-run', 'report restart candidates without acting')
         .action(async (options) => {
-            const { runAutoheal } = loadModule('./services/autoheal_service')
+            const { runAutoheal, autohealExitCode } = loadModule('./services/autoheal_service')
             const result = await runAutoheal({ dryRun: options.dryRun ?? false })
-            // Exit non-zero ONLY when a restart was attempted and failed, so a
-            // timer unit can alert on real remediation failures without paging
-            // on "nothing to do" passes.
-            return process.exit(result.failed.length > 0 ? 1 : 0)
+            // Exit 1 when a restart was attempted and failed, 2 when a container
+            // outlived two restarts this episode (the escalation), and 0 otherwise,
+            // so a timer unit alerts on both without paging on "nothing to do" passes.
+            return process.exit(autohealExitCode(result))
         })
 
 }

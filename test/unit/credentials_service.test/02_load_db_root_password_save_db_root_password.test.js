@@ -12,7 +12,7 @@
 
 const {
     sinon, expect, CREDS_FILE,
-    loadCredentialsService, makeFs
+    loadCredentialsService, makeFs, expectAtomicSave
 } = require('./support/helpers')
 
 // loadDbRootPassword / saveDbRootPassword
@@ -67,9 +67,7 @@ describe('CredentialsService', function () {
             const cs = loadCredentialsService(fs)
             cs.saveDbRootPassword('new-root-pw')
 
-            expect(fs.writeFileSync.calledOnce).to.be.true
-            const [filePath, content, opts] = fs.writeFileSync.firstCall.args
-            expect(filePath).to.equal(CREDS_FILE)
+            const { content, opts } = expectAtomicSave(fs)
             const written = JSON.parse(content)
             expect(written.dbRootPassword).to.equal('new-root-pw')
             expect(written.user).to.equal('u')

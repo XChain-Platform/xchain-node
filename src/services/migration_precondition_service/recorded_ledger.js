@@ -15,9 +15,13 @@
  *
  * An indexer database can embody a manual migration's end state with no
  * ledger row for it. The guard counts that as applied when deciding what is
- * missing, but the indexer runner reads only the ledger, so an unscoped
- * migrate run still executes such a file. The refusal's list of what that
- * run would apply is therefore built from the names the ledger records.
+ * missing, but the indexer runner decides from the ledger, so an unscoped
+ * migrate run still executes such a file. The exception is a file listed in
+ * that runner's MIGRATION_PRECONDITIONS: when its predicate finds the end
+ * state already live, the runner records it as applied without running a
+ * statement, while an older build lacking that entry still executes it. The
+ * refusal's list of what that run would apply is therefore built from the
+ * names the ledger records, and can overcount by such a baselined file.
  ********************************************************************/
 
 const { recordedMigrationsSql } = require('../../db/migration_ledger')

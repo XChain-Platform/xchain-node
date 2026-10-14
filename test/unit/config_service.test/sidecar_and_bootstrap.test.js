@@ -180,6 +180,33 @@ function feeDestinationInjection() {
 
 }
 
+// Testnet is a multi-operator federation whose consensus pin hashes only the
+// static bundle, so the generic host var must not reach either consumer there.
+function feeDestinationTestnet() {
+    const TESTNET_ENV = 'XCHAIN_FEE_DESTINATION_BTC_TESTNET'
+    let saved
+    beforeEach(function () {
+        saved = { perCoin: process.env[TESTNET_ENV], generic: process.env.FEE_DESTINATION }
+        delete process.env[TESTNET_ENV]
+        process.env.FEE_DESTINATION = 'mGenericTestnetAddr555'
+    })
+    afterEach(function () {
+        if (saved.perCoin === undefined) delete process.env[TESTNET_ENV]; else process.env[TESTNET_ENV] = saved.perCoin
+        if (saved.generic === undefined) delete process.env.FEE_DESTINATION; else process.env.FEE_DESTINATION = saved.generic
+    })
+
+    it('ignores the generic FEE_DESTINATION host env on testnet and injects the registry pin', async function () {
+        const { getCoinConfigByFullName } = require('../../../src/coins')
+        const pinned = getCoinConfigByFullName('bitcoin', 'testnet').addresses.FEE_DESTINATION
+        expect(pinned).to.be.a('string').and.not.equal('mGenericTestnetAddr555')
+        for (const module of ['xchain-decoder', 'xchain-indexer']) {
+            const config = await makeServiceWithConfig('').getDefaultConfig(module, 'bitcoin', 'testnet')
+            expect(config['FEE_DESTINATION'], module).to.equal(pinned)
+            expect(config[TESTNET_ENV], module).to.equal(pinned)
+        }
+    })
+}
+
 function genesisBootstrapPassthrough() {
     const GENESIS_VARS = [
         'XCHAIN_GENESIS_BLOCK', 'XCHAIN_GENESIS_LEDGER_HASH', 'XCHAIN_GENESIS_DUMP_HASH',
@@ -251,6 +278,14 @@ describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('with coin and network (coin-specific config)', function () {
             describe('native-coin fee destination injection', feeDestinationInjection)
+        })
+    })
+})
+
+describe('ConfigService', function () {
+    describe('getDefaultConfig()', function () {
+        describe('with coin and network (coin-specific config)', function () {
+            describe('native-coin fee destination injection', feeDestinationTestnet)
         })
     })
 })

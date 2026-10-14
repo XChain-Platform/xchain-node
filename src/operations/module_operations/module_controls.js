@@ -1,9 +1,9 @@
 'use strict'
 
-let XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, restartContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings, isNoSuchContainerError
+let XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainer, stopModuleContainer, restartModuleContainer, getContainerStopSettings, isNoSuchContainerError
 
 function configure(dependencies) {
-    ({ XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, restartContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings, isNoSuchContainerError } = dependencies)
+    ({ XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainer, stopModuleContainer, restartModuleContainer, getContainerStopSettings, isNoSuchContainerError } = dependencies)
 }
 
 async function logModules(servicesList, follow = true) {
@@ -112,8 +112,11 @@ async function controlModules(verb, servicesList, act) {
 }
 
 async function restartModules(servicesList) {
-    return controlModules('restart', servicesList, async (target, containerId) => {
-        await restartContainer(containerId)
+    return controlModules('restart', servicesList, async ({ module, coin, network }, containerId) => {
+        // With the same stop budget as `stop`, so a restart cannot SIGKILL a service mid-block either.
+        // A container docker says is gone stays a failure here: restart promises a running service.
+        await restartModuleContainer(stopContainer, startContainer, module, coin, network, containerId,
+            undefined, getContainerStopSettings)
         try {
             await statusChanged()
         } catch (err) {
@@ -303,15 +306,17 @@ async function bounceResetModules(context) {
                 continue
             }
             if (!containerId) continue /* not installed, skip */
-            // restartContainer = docker stop + docker start; sufficient to re-enter Node's bootstrap with the freshly-created DB ready.
+            // A budgeted stop then a start, enough to re-enter Node's bootstrap with the freshly-created DB ready.
             // A failed restart can leave the wiped service stopped, so it gets the start pass's one retry and is then reported, never swallowed.
+            const bounce = () => restartModuleContainer(stopContainer, startContainer, module, coin, network, containerId,
+                undefined, getContainerStopSettings)
             try {
-                await restartContainer(containerId)
+                await bounce()
             } catch (firstErr) {
                 console.warn(`Failed to restart ${module} (${firstErr && firstErr.message}); retrying in 3s...`)
                 await sleep(3000)
                 try {
-                    await restartContainer(containerId)
+                    await bounce()
                 } catch (retryErr) {
                     startFailures.push({ module, error: `post-reset restart failed (${(retryErr && retryErr.message) || String(retryErr)})` })
                 }

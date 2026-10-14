@@ -236,7 +236,8 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
     const applied = rekeyApplied(result.applied, renames)
     const missing = required.filter(f => !applied.has(f))
     if (missing.length) {
-        // The blast radius subtracts only recorded names: the runner still executes a file the schema matches.
+        // The blast radius subtracts only recorded names: the runner still executes a file the schema matches,
+        // unless its MIGRATION_PRECONDITIONS entry baselines it (see recorded_ledger.js), so the list can overcount.
         const recorded = result.ledger ? rekeyApplied(result.ledger, renames) : applied
         // Only reached on the refusal path, so the probe costs a healthy deploy
         // nothing and cannot introduce a new way for one to fail: both the probe

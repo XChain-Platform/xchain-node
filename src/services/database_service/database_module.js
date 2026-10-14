@@ -30,6 +30,7 @@ let { getDefaultConfig, getDockerContainerImageName, getDockerNetwork, validateP
 let { getStatusFromContainer, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName } = require('../docker_service')
 let { statusChanged }           = require('../status_service')
 const { createDatabaseContainerRunArgs } = require('./container_run_args')
+const { notRunningHint } = require('./not_running_hint')
 let config = require('../../config');
 let peers = require('../peer_services').bindPeerServices((file) => require(path.join('..', file)))
 let { getLogger } = require('../../observability/logger');
@@ -270,7 +271,7 @@ async function reuseDatabaseModule(existingId, coin, network) {
     } catch { /* inspect failed: fall through and let the existing path surface it */ }
     if (dbState && dbState !== 'running') {
         const name = getDockerContainerImageName(DB_MODULE_NAME, coin, network)
-        throw new Error("MariaDB container " + name + " exists but is " + dbState + "; run: docker start " + name)
+        throw new Error("MariaDB container " + name + " exists but is " + dbState + "; " + notRunningHint(dbState, name))
     }
     try {
         if (coin && network) {

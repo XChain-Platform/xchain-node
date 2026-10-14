@@ -39,8 +39,11 @@
  * removes the file only when both the pid and the nonce still match, so
  * neither a stale-lock takeover nor a recycled pid is clobbered on exit.
  * A self-update releases its parent-owned lock before starting the re-exec
- * child. The child then competes for the lock normally, so another mutator
- * that acquires it first causes the child to refuse the update.
+ * child. The update run that re-takes it waits at least
+ * SELF_UPDATE_HANDOFF_WAIT_MS (cli/dispatch.js, 30s, even when
+ * XCHAIN_NODE_MUTATING_LOCK_WAIT_MS is lower or 0), so a mutator that
+ * slipped into the gap delays the update; it refuses only if that mutator
+ * still holds the lock when the wait runs out.
  *
  * Ops note: clearing a wedged lock by hand may mean deleting both
  * command.lock and command.lock.reclaim.

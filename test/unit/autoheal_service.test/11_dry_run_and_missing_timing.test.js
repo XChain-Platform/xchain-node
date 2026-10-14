@@ -52,7 +52,8 @@ function makeStubs() {
     return {
         db: { getAllModuleContainers: sinon.stub().resolves([]), assertReady: sinon.stub() },
         getStatusFromContainer: sinon.stub(),
-        restartContainer: sinon.stub().resolves(true)
+        stopContainer: sinon.stub().resolves({ stopped: true, seconds: 1, killed: false, exitCode: 0 }),
+        startContainer: sinon.stub().resolves(true)
     }
 }
 
@@ -61,7 +62,9 @@ function loadService(stubs) {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
-            restartContainer: stubs.restartContainer
+            stopContainer: stubs.stopContainer,
+            startContainer: stubs.startContainer,
+            getContainerStopSettings: sinon.stub().resolves(null)
         },
         // Real descriptor table: asserts the actual opt-in flags too.
         './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
@@ -98,7 +101,7 @@ describe('AutohealService', () => {
         const dry = await service.runAutoheal({ dryRun: true, now: NOW })
         expect(dry.candidates).to.have.length(1)
         expect(dry.restarted).to.have.length(0)
-        expect(stubs.restartContainer.called).to.equal(false)
+        expect(stubs.stopContainer.called).to.equal(false)
 
         // A real pass right after must still restart (dry run wrote no state).
         const real = await service.runAutoheal({ now: NOW })
@@ -111,7 +114,7 @@ describe('AutohealService', () => {
 
         const result = await service.runAutoheal({ now: NOW })
 
-        expect(stubs.restartContainer.called).to.equal(false)
+        expect(stubs.stopContainer.called).to.equal(false)
         expect(result.skipped[0].reason).to.match(/no failing probe log/)
     })
 })

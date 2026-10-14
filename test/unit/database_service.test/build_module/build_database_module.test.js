@@ -351,3 +351,46 @@ describe('DatabaseService', function () {
         })
         })
 })
+
+// The not-running guard's hint must work for the state Docker actually reports:
+// `docker start` does nothing for a crash-loop and Docker refuses it for a paused container.
+async function notRunningError(state) {
+    const stubs = makeStubs({
+        getStatusFromContainer: sinon.stub().resolves({ State: { Status: state } })
+    })
+    let threw = null
+    try {
+        await loadDatabaseService(stubs).buildDatabaseModule('bitcoin', 'mainnet')
+    } catch (err) { threw = err }
+    expect(threw, state).to.be.an.instanceOf(Error)
+    // No network mutation and no recreate attempt, whatever the state.
+    expect(stubs.addContainerToNetwork.called, state).to.be.false
+    return threw.message
+}
+
+describe('DatabaseService', function () {
+    describe('buildDatabaseModule()', function () {
+        it('points a crash-looping DB container at its logs, not docker start', async function () {
+            const message = await notRunningError('restarting')
+            expect(message).to.match(/exists but is restarting/)
+            expect(message).to.match(/docker logs/)
+            expect(message).to.not.match(/docker start/)
+        })
+
+        it('tells the operator to unpause a paused DB container', async function () {
+            const message = await notRunningError('paused')
+            expect(message).to.match(/docker unpause/)
+            expect(message).to.not.match(/docker start/)
+        })
+
+        it('gives a dead DB container a non-destructive inspect hint', async function () {
+            const message = await notRunningError('dead')
+            expect(message).to.match(/docker inspect/)
+            expect(message).to.not.match(/docker start|docker rm/)
+        })
+
+        it('keeps the docker start hint for a created DB container', async function () {
+            expect(await notRunningError('created')).to.match(/run: docker start /)
+        })
+    })
+})

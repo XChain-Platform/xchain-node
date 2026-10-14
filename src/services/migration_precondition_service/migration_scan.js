@@ -210,8 +210,8 @@ async function runningBuildSupportsPerFileMigrations(container, deps = {}, modul
 /**
  * The gated files an unscoped migrate run inside the running build would apply:
  * its own pending rows (a row with no mode is the runners' manual default),
- * minus any the ledger records (re-keyed for renames). A file whose end state
- * the schema already matches still runs when no ledger row records it.
+ * minus any the ledger records (re-keyed for renames). A schema-matched file with no
+ * ledger row still runs, unless its MIGRATION_PRECONDITIONS entry baselines it (recorded_ledger.js).
  */
 function runningBuildPendingManual(rows, applied) {
     return rows.filter(row => !row.applied && (row.mode == null || row.mode === 'manual') &&
@@ -316,7 +316,7 @@ async function readAppliedMigrations({ database, coin, network }, deps = {}) {
 
         const out = String(await runner(appliedMigrationsSql(database, LEDGER_TABLE)))
         const applied = new Set(out.split('\n').map(s => s.trim()).filter(Boolean))
-        // Keep the recorded names apart: the runner executes every pending file the ledger lacks, schema match or not.
+        // Keep the recorded names apart: the runner executes every pending file the ledger lacks unless MIGRATION_PRECONDITIONS baselines it.
         return { state: 'ledger', applied, ledger: await readRecordedNames(runner, database, LEDGER_TABLE, applied) }
     } catch (err) {
         return { state: 'unreadable', reason: (err && err.message) ? err.message : String(err) }

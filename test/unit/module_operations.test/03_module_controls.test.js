@@ -172,7 +172,11 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.restartModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(stubs.restartContainer.calledWith('container-id-123')).to.be.true
+            // A budgeted stop then a start, never docker's bare restart and its ten second default.
+            expect(stubs.stopContainer.firstCall.args).to.deep.equal(['container-id-123', 30])
+            expect(stubs.startContainer.calledOnceWith('container-id-123')).to.be.true
+            expect(stubs.stopContainer.calledBefore(stubs.startContainer)).to.be.true
+            expect(stubs.restartContainer.called).to.be.false
             expect(stubs.statusChanged.calledOnce).to.be.true
         })
     })

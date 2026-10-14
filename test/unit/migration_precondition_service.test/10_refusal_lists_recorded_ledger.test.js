@@ -7,8 +7,9 @@
 
 // An indexer database can embody a manual migration's end state with no ledger
 // row for it. That counts as applied when deciding what is missing, but the
-// indexer runner reads only the ledger, so an unscoped migrate run still executes
-// the file: the refusal's "would apply" list has to name it.
+// indexer runner decides from the ledger, so an unscoped migrate run still executes
+// the file (unless its MIGRATION_PRECONDITIONS entry baselines it, which this
+// fixture's file has none of): the refusal's "would apply" list has to name it.
 
 const sinon = require('sinon')
 const { expect } = require('chai')

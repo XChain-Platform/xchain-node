@@ -12,7 +12,7 @@
 
 const {
     sinon, expect, CREDS_DIR, CREDS_FILE,
-    loadCredentialsService, makeFs
+    loadCredentialsService, makeFs, expectAtomicSave
 } = require('./support/helpers')
 
 // saveCredentials
@@ -47,9 +47,7 @@ describe('CredentialsService', function () {
             const cs = loadCredentialsService(fs)
             const creds = { user: 'u', password: 'test-pass', database: 'xchain_node' }
             cs.saveCredentials(creds)
-            expect(fs.writeFileSync.calledOnce).to.be.true
-            const [filePath, content, opts] = fs.writeFileSync.firstCall.args
-            expect(filePath).to.equal(CREDS_FILE)
+            const { content, opts } = expectAtomicSave(fs)
             expect(JSON.parse(content)).to.deep.equal(creds)
             expect(opts.mode).to.equal(0o600)
         })
@@ -93,9 +91,7 @@ describe('CredentialsService', function () {
             const cs = loadCredentialsService(fs)
             cs.saveCredentials({ user: 'u', password: 'test-pass', database: 'xchain_node' })
 
-            expect(fs.writeFileSync.calledOnce).to.be.true
-            const [filePath, content, opts] = fs.writeFileSync.firstCall.args
-            expect(filePath).to.equal(CREDS_FILE)
+            const { content, opts } = expectAtomicSave(fs)
             const written = JSON.parse(content)
             expect(written.externalDb).to.deep.equal({ host: 'db.example.com', port: 3306, root_user: 'root', root_password: 'r' })
             expect(written.user).to.equal('u')

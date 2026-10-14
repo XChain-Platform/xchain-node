@@ -44,8 +44,11 @@
  * watchdog on node containers, and a cap that stops retrying can leave a
  * RECOVERABLE service down through an outage that would have self-cleared.
  * Backing off ends the churn; giving up would trade it for an outage.
- * Every skipped pass still logs an "investigate" line, which is the
- * escalation path for a wedge that has stopped being transient.
+ * The escalation path instead: once a container has been restarted twice
+ * in one episode without recovering, every pass that sees it logs an
+ * "investigate" line at warn (stderr) and the command exits 2, so a
+ * systemd OnFailure= hook or cron mail can act on a wedge that has stopped
+ * being transient. A failed restart logs at error and exits 1.
  *
  * Detection-to-restart latency is the timer interval plus the health
  * retry budget plus the grace window; this is deliberate, restarts
@@ -57,7 +60,8 @@
  ********************************************************************/
 
 const { db } = require('../state')
-const { getStatusFromContainer, restartContainer } = require('./docker_service')
+const { getStatusFromContainer, stopContainer, startContainer, getContainerStopSettings } = require('./docker_service')
+const { restartModuleContainer } = require('./stop_budget_service')
 const { SERVICE_HEALTHCHECK } = require('./module_service')
 const {
     DEFAULT_GRACE_MS,
@@ -112,8 +116,8 @@ async function inspectCandidate(candidate, result) {
 // at its last value the moment a container stops (the probe goroutine
 // runs only while the container is up), so a container that happened to
 // be unhealthy when an operator stopped it keeps reporting `unhealthy`
-// while State.Status is `exited` - and `docker restart` on a stopped
-// container STARTS it, silently undoing the stop. Frozen health from a
+// while State.Status is `exited` - and a restart (stop, then start) of a
+// stopped container STARTS it, silently undoing the stop. Frozen health from a
 // container that is no longer probing is not evidence of a wedge. This
 // costs no healing either: autoheal exists for the ALIVE-but-stalled
 // case (see the file header), because `--restart unless-stopped` already
@@ -152,7 +156,7 @@ function skipNonUnhealthy(candidate, health, state) {
     // that DID recover starts its next episode at the base cooldown. Backing
     // off is a response to a wedge restarts are not clearing; a recovery is
     // the evidence they cleared it, and `!== 'unhealthy'` is not that
-    // evidence: `docker restart` puts the container into `starting` for the
+    // evidence: a restart puts the container into `starting` for the
     // descriptor's start period plus its retry budget (60s + 3x15s for the
     // decoder/indexer, and an operator can widen it to minutes via
     // XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>), so a pass landing in that
@@ -240,11 +244,19 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
     // instead of one per cooldown forever.
     const attempts = state.restartCount[containerId] || 0
     const effectiveCooldownMs = restartBackoffMs(attempts, timing.cooldownMs, timing.ceilingMs)
+    // Two restarts that did not clear the wedge is where the backoff starts doubling, and where it stops being transient.
+    const escalated = attempts >= 2
+    // Escalate on the restart path too: a timer slower than the doubled cooldown never lands in the cooldown branch.
+    if (escalated) result.escalated.push({ module, coin, network, containerId, attempts })
     const lastRestart = state.restarts[containerId]
     if (typeof lastRestart === 'number' && now - lastRestart < effectiveCooldownMs) {
         result.skipped.push({ module, coin, network, containerId, reason: 'inside restart cooldown' })
-        logger.info(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
+        const log = escalated ? logger.warn : logger.info
+        log(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
         return
+    }
+    if (escalated) {
+        logger.warn(`autoheal: ${label} is still unhealthy after ${attempts} restart(s) this episode, a restart is not clearing this wedge; investigate`)
     }
 
     result.candidates.push({ module, coin, network, containerId })
@@ -254,14 +266,16 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
     }
 
     try {
-        await restartContainer(containerId)
+        // With the stop budget `stop` uses, so the restart gives a block-bound drain its time
+        await restartModuleContainer(stopContainer, startContainer, module, coin, network, containerId,
+            undefined, getContainerStopSettings)
         state.restarts[containerId] = now
         state.restartCount[containerId] = attempts + 1
         result.restarted.push({ module, coin, network, containerId })
         logger.info(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
     } catch (err) {
         result.failed.push({ module, coin, network, containerId, reason: String(err) })
-        logger.info(`autoheal: FAILED to restart ${label}: ${err}`)
+        logger.error(`autoheal: FAILED to restart ${label}: ${err}`)
     }
 }
 
@@ -283,13 +297,13 @@ function persistState(stateFile, state, modules) {
 
 // One autoheal pass over the module registry. Never throws for a single bad
 // container (a vanished container id must not abort the whole sweep).
-// Returns { candidates, restarted, failed, skipped } where each array holds
-// { module, coin, network, containerId, reason? }.
+// Returns { candidates, restarted, failed, skipped, escalated } where each array holds
+// { module, coin, network, containerId, reason? }; escalated entries carry attempts instead.
 async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
     const timing = autohealTiming()
     const stateFile = getStateFilePath()
     const state = readState(stateFile)
-    const result = { candidates: [], restarted: [], failed: [], skipped: [] }
+    const result = { candidates: [], restarted: [], failed: [], skipped: [], escalated: [] }
     // Set whenever an episode-onset or attempt-count entry is recorded or cleared,
     // so the pass persists it even when nothing was restarted. Without this the
     // onset never survives to the next pass and the grace window can never be
@@ -331,8 +345,16 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
     return result
 }
 
+// The CLI exit code for one pass: 1 when a restart failed, 2 when a wedge outlived two restarts, else 0.
+function autohealExitCode(result) {
+    if (result.failed.length > 0) return 1
+    if (result.escalated && result.escalated.length > 0) return 2
+    return 0
+}
+
 module.exports = {
     runAutoheal,
+    autohealExitCode,
     getUnhealthySinceMs,
     getLastHealthyProbeMs,
     isRecoveryEstablished,

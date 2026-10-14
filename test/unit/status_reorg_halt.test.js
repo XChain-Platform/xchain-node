@@ -60,6 +60,13 @@ describe('ps: indexer STALL surface', function () {
         expect(reduceIndexerStall({ stallReason: 'price_sync_barrier', stallClass: 'wedged' }).stalled).to.equal(true)
     })
 
+    it('does not show a price-landing wait inside its own grace window, and shows it once wedged', function () {
+        expect(reduceIndexerStall({ stallReason: 'price_landing_barrier', stallClass: 'price_landing_wait' }).stalled).to.equal(false)
+        expect(reduceIndexerStall({ stallReason: 'price_landing_barrier', stallClass: 'wedged' }).stalled).to.equal(true)
+        expect(reduceIndexerStall({ stallReason: 'vm_executor_unavailable', stallClass: 'price_landing_wait' }).stalled).to.equal(true)
+        expect(reduceIndexerStall({ stallReason: 'price_landing_barrier', stallClass: 'some_future_class' }).stalled).to.equal(true)
+    })
+
     it('reads an older image that names a reason but grades nothing as stalled, and no reason as advancing', function () {
         expect(reduceIndexerStall({ stallReason: 'oracle_sync_barrier' }).stalled).to.equal(true)
         expect(reduceIndexerStall({ status: 'healthy', stallReason: null }).stalled).to.equal(false)
@@ -84,6 +91,50 @@ describe('ps: indexer STALL surface', function () {
         expect(barrier).to.match(/xchain-node logs xchain-indexer litecoin mainnet/)
         const decoder = describeIndexerStallNote('bitcoin', 'mainnet', { reason: 'decoder_reorg_halt: decoder wrote a REORG_HALT marker', word: 'decoder_reorg_halt', since: null })
         expect(decoder).to.match(/see the decoder's line/)
+    })
+})
+
+// Only a hub-mirror barrier gets the hub-mirror line. A consensus halt, a
+// repeated parse error and a bridge proof wait each name their own remedy, and
+// an unknown reason that is not a barrier gets the neutral log line.
+describe('ps: indexer STALL surface', function () {
+
+    const note = (reason, stallClass) => describeIndexerStallNote('bitcoin', 'mainnet',
+        reduceIndexerStall({ stallReason: reason, stallClass }))
+
+    it('keeps a bridge proof wait STALLED, since it never wedges and nothing else shows it', function () {
+        const r = reduceIndexerStall({ stallReason: 'bridge_proof_barrier', stallClass: 'bridge_proof_wait' })
+        expect(r).to.include({ stalled: true, word: 'bridge_proof_barrier', stall_class: 'bridge_proof_wait' })
+    })
+
+    it('a bridge proof wait names the checkpoint and origin proof, not the hub mirror', function () {
+        const n = note('bridge_proof_barrier', 'bridge_proof_wait')
+        expect(n).to.match(/^bitcoin\/mainnet xchain-indexer is STALLED \(bridge_proof_barrier\): /)
+        expect(n).to.not.match(/hub-mirror barrier|grace window/)
+        expect(n).to.match(/escrow proof/).and.to.match(/checkpoint/).and.to.match(/origin-chain indexer/)
+        expect(n).to.match(/xchain-node logs xchain-indexer bitcoin mainnet/)
+    })
+
+    it('a list share halt and a repeated parse error point at the indexer log, not the hub', function () {
+        const halt = note('list_share_halt', 'wedged')
+        expect(halt).to.not.match(/hub-mirror barrier/)
+        expect(halt).to.match(/would fork/).and.to.match(/xchain-node logs xchain-indexer bitcoin mainnet/)
+        const parse = note('parse_exception: TypeError: boom', 'wedged')
+        expect(parse).to.not.match(/hub-mirror barrier/)
+        expect(parse).to.match(/same exception hit the same block twice/).and.to.match(/xchain-node logs xchain-indexer bitcoin mainnet/)
+    })
+
+    it('an unknown reason gets the hub-mirror line only when its word ends in _barrier', function () {
+        expect(note('foo_sync_barrier', 'wedged')).to.match(/: a hub-mirror barrier \(foo_sync_barrier\)/)
+        const other = note('some_new_halt', 'wedged')
+        expect(other).to.not.match(/hub-mirror barrier/)
+        expect(other).to.match(/no specific remedy for this stall; `xchain-node logs xchain-indexer bitcoin mainnet` names the fault/)
+    })
+
+    it('reads the word, not the reason prose, so an exception ending in _barrier is not a barrier', function () {
+        const n = describeIndexerStallNote('bitcoin', 'mainnet',
+            { reason: 'odd_thing: lookup failed near price_sync_barrier', word: 'odd_thing', since: null })
+        expect(n).to.not.match(/hub-mirror barrier/)
     })
 })
 
