@@ -16,6 +16,7 @@
 
 'use strict'
 
+const crypto = require('crypto')
 const { XChainService } = require('../config/module_names')
 const { assertSafeDbIdentifier } = require('./sql_safety')
 
@@ -58,7 +59,7 @@ function scopedNodePrefixSegment(nodePrefix, defaultPrefix, sep = '_') {
     const raw = String(nodePrefix)
     const readable = nodePrefixSegment(raw, defaultPrefix, sep)
     if (readable.slice(0, -sep.length) === raw && readable.length <= SCOPE_SEGMENT_MAX) return readable
-    const digest = require('crypto').createHash('sha256').update(raw).digest('hex').substring(0, 8)
+    const digest = crypto.createHash('sha256').update(raw).digest('hex').substring(0, 8)
     const head = readable.substring(0, SCOPE_SEGMENT_MAX - sep.length * 2 - digest.length)
     return head + sep + digest + sep
 }
