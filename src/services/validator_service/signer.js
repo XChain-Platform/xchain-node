@@ -121,6 +121,15 @@ function requireEncoder() {
     return typeof sdk.requireEncoder === 'function' ? sdk.requireEncoder() : sdk['_requireEncoder']();
 }
 
+// Set the hub's classification fields on a failure and return it. The SAME object
+// is mutated where there is one, because the hub classifier reads err.response and
+// err.message off the original and a fresh wrapper would drop both. A thrown
+// non-object gets a carrier instead.
+function tagFailure(err, prefix, fields) {
+    const tagged = (err && typeof err === 'object') ? err : new Error(prefix + String(err));
+    return Object.assign(tagged, fields);
+}
+
 module.exports = {
     // Full publish pipeline for a raw wire payload string -> { txid }. The
     // returned txid is the phase-2 (reveal) txid when two-phase encoding is
@@ -131,44 +140,54 @@ module.exports = {
         const txParams = { data: payload, pubkey: signerEnv.address, change: signerEnv.address, encoding: 'P2SH' };
         if (signerEnv.feePerKb !== undefined) txParams.feePerKb = signerEnv.feePerKb;
 
-        const encoded = await encoder.createTx(txParams);
-        const signed  = sdk.wallet.signPsbt(encoded.psbt, signerEnv.wif);
-        await encoder.broadcastTx(signed.txHex);
-        if (encoded.encoding !== 'P2SH' && encoded.encoding !== 'P2WSH')
-            return { txid: signed.txid };
+        // Both transactions are built and signed before either is broadcast. The
+        // signed phase 1 already has its final txid, so the reveal is built from it
+        // here, and a reveal the encoder refuses or this key cannot sign stops the
+        // publish while nothing is on chain. neverSent tells the hub this round
+        // spent nothing and may be rebuilt.
+        let signed, spendSigned = null, twoPhase;
+        try {
+            const encoded = await encoder.createTx(txParams);
+            signed   = sdk.wallet.signPsbt(encoded.psbt, signerEnv.wif);
+            twoPhase = encoded.encoding === 'P2SH' || encoded.encoding === 'P2WSH';
+            if (twoPhase) {
+                const spendParams = {
+                    pubkey:   signerEnv.address,
+                    p2shHash: signed.txid,
+                    p2shHex:  signed.txHex,
+                    data:     payload,
+                    encoding: encoded.encoding,
+                    change:   signerEnv.address
+                };
+                if (signerEnv.feePerKb !== undefined) spendParams.feePerKb = signerEnv.feePerKb;
+                const spendResult = await encoder.spendP2sh(spendParams);
+                spendSigned = sdk.wallet.signRevealPsbt(spendResult.psbt, signerEnv.wif);
+            }
+        } catch (err) {
+            throw tagFailure(err, 'doge-signer: publish failed before any broadcast: ', { neverSent: true });
+        }
 
-        // Phase 1 has funded the P2SH outputs on chain, so every failure below is a
-        // POST-SPEND failure and has to say so on the way out. The hub reads a
+        await encoder.broadcastTx(signed.txHex);
+        if (!twoPhase) return { txid: signed.txid };
+
+        // Phase 1 has funded the P2SH outputs on chain, so a reveal broadcast failure
+        // is a POST-SPEND failure and has to say so on the way out. The hub reads a
         // definitive encoder rejection as safe to retry, and a retry re-enters this
         // function, runs createTx over fresh UTXOs and funds the same payload a second
         // time. fundsCommitted makes the hub fail closed instead; phase1Txid is what an
-        // operator reconciles the stranded funding transaction against.
+        // operator reconciles the funding transaction against, and revealTxHex is the
+        // signed reveal that spends it, ready to rebroadcast as it stands.
         try {
-            const spendParams = {
-                pubkey:   signerEnv.address,
-                p2shHash: signed.txid,
-                p2shHex:  signed.txHex,
-                data:     payload,
-                encoding: encoded.encoding,
-                change:   signerEnv.address
-            };
-            if (signerEnv.feePerKb !== undefined) spendParams.feePerKb = signerEnv.feePerKb;
-            const spendResult = await encoder.spendP2sh(spendParams);
-            const spendSigned = sdk.wallet.signRevealPsbt(spendResult.psbt, signerEnv.wif);
             await encoder.broadcastTx(spendSigned.txHex);
-
-            return { txid: spendSigned.txid, phase1_txid: signed.txid };
         } catch (err) {
-            // Mutate and rethrow the SAME object where there is one: the classifier
-            // reads err.response and err.message off the original, and a fresh wrapper
-            // would drop both. A thrown non-object gets a carrier instead.
-            const tagged = (err && typeof err === 'object')
-                ? err
-                : new Error('doge-signer: phase 2 failed after funding: ' + String(err));
-            tagged.fundsCommitted = true;
-            tagged.phase1Txid     = signed.txid;
-            throw tagged;
+            throw tagFailure(err, 'doge-signer: reveal broadcast failed after funding: ', {
+                fundsCommitted: true,
+                phase1Txid:     signed.txid,
+                revealTxid:     spendSigned.txid,
+                revealTxHex:    spendSigned.txHex
+            });
         }
+        return { txid: spendSigned.txid, phase1_txid: signed.txid };
     },
 
     // Sign an encoder-built PSBT -> signed raw tx hex. The hub's built-in
