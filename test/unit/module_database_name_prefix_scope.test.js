@@ -20,6 +20,28 @@ const SRC = path.resolve(__dirname, '../../src') + path.sep
 // later suites keep their default-prefix singletons.
 function isSrc(id) { return id.startsWith(SRC) }
 
+const { scopedNodePrefixSegment, DB_NAME_MAX, HUB_MIRROR_SUFFIX, unscopedDefaultDatabaseName } = require('../../src/utils/module_database_name')
+const seg = scopedNodePrefixSegment('stack-b.test', 'xchain-node', '_')
+const scopedDecoder = 'XChain_' + seg + 'BTC_Mainnet_Decoder'
+const scopedDecoderUser = 'xchain_' + seg + 'decoder_bitcoin_mainnet'
+const scopedIndexerUser = 'xchain_' + seg + 'indexer_bitcoin_mainnet'
+
+describe('prefix segment budget', function () {
+    it('is empty for the default prefix', function () {
+        expect(scopedNodePrefixSegment('xchain-node', 'xchain-node')).to.equal('')
+    })
+    it('keeps prefixes that fold to the same text distinct', function () {
+        expect(scopedNodePrefixSegment('a-b', 'x')).to.not.equal(scopedNodePrefixSegment('a_b', 'x'))
+        expect(scopedNodePrefixSegment('stack-b.test', 'x')).to.not.equal(scopedNodePrefixSegment('stack_b_test', 'x'))
+    })
+    it('keeps the longest indexer name plus _HubMirror within 64 characters', function () {
+        const long = 'a-very-long-node-prefix-that-overflows-every-budget'
+        const name = unscopedDefaultDatabaseName('xchain-indexer', 'DOGE', 'testnet').replace('XChain_', 'XChain_' + scopedNodePrefixSegment(long, 'x'))
+        expect(name.length + HUB_MIRROR_SUFFIX.length).to.be.at.most(DB_NAME_MAX)
+        expect(scopedNodePrefixSegment(long, 'x')).to.not.equal(scopedNodePrefixSegment(long + '2', 'x'))
+    })
+})
+
 describe('module database names under a non-default NODE_PREFIX', function () {
     let savedCache, savedPrefix, prefixed
 
@@ -44,15 +66,23 @@ describe('module database names under a non-default NODE_PREFIX', function () {
 
     it('carries the sanitized prefix in the derived database name', function () {
         expect(prefixed.getModuleDatabaseName('xchain-decoder', 'bitcoin', 'mainnet'))
-            .to.equal('XChain_stack_b_test_BTC_Mainnet_Decoder')
+            .to.equal(scopedDecoder)
     })
 
     it('carries the prefix in the module DB user names', async function () {
         const decoder = await prefixed.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
         const indexer = await prefixed.getDefaultConfig('xchain-indexer', 'bitcoin', 'mainnet')
-        expect(decoder.DECODER_DB_USER).to.equal('xchain_stack_b_test_decoder_bitcoin_mainnet')
-        expect(indexer.INDEXER_DB_USER).to.equal('xchain_stack_b_test_indexer_bitcoin_mainnet')
-        expect(decoder.DECODER_DB_NAME).to.equal('XChain_stack_b_test_BTC_Mainnet_Decoder')
+        expect(decoder.DECODER_DB_USER).to.equal(scopedDecoderUser)
+        expect(indexer.INDEXER_DB_USER).to.equal(scopedIndexerUser)
+        expect(decoder.DECODER_DB_NAME).to.equal(scopedDecoder)
+    })
+
+    it('lets a configured name win over the scoped default in reset targets', async function () {
+        const { configuredDatabaseName } = require('../../src/utils/module_database_name')
+        const cs = prefixed
+        const def = cs.getModuleDatabaseName('xchain-decoder', 'bitcoin', 'mainnet')
+        expect(configuredDatabaseName('xchain-decoder', { DECODER_DB_NAME: 'Custom_Dec' }, def)).to.equal('Custom_Dec')
+        expect(configuredDatabaseName('xchain-decoder', {}, def)).to.equal(def)
     })
 
     it('restores the default-prefix modules after the suite', function () {

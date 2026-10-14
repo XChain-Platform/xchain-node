@@ -55,7 +55,8 @@
 const { XChainService } = require('../config')
 const { migrationsDirOf } = require('../utils/migration_files')
 const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName, getDefaultConfig } = require('./config_service')
-const { configuredDatabaseName } = require('../utils/module_database_name')
+const { configuredDatabaseName, unscopedDefaultDatabaseName } = require('../utils/module_database_name')
+const appConfig = require('../config')
 const config = require('../config');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -152,6 +153,16 @@ async function readRefusalRemedy(module, coin, network, applied, deps) {
     }
 }
 
+// A non-default NODE_PREFIX stack still on the unprefixed default name shares that
+// database with the default stack; deploys refuse it, this surfaces it before then.
+function warnUnscopedDefaultName(module, coin, network, name) {
+    const { NODE_PREFIX, DEFAULT_NODE_PREFIX, CoinTickerSymbol, DB_SEP } = appConfig
+    if (NODE_PREFIX === DEFAULT_NODE_PREFIX || !CoinTickerSymbol || CoinTickerSymbol[coin] === undefined) return
+    if (name !== unscopedDefaultDatabaseName(module, CoinTickerSymbol[coin], network, DB_SEP)) return
+    logger.warn(`Migration precondition guard: ${module} uses the unprefixed default database ${name} ` +
+        `under NODE_PREFIX "${NODE_PREFIX}"; it is shared with the default "${DEFAULT_NODE_PREFIX}" stack.`)
+}
+
 /**
  * The database the service reads: the operator-configured name when set, else the
  * derived default. An unreadable config falls back to the default with a warning.
@@ -160,7 +171,9 @@ async function resolveCheckedDatabaseName(module, coin, network, deps) {
     const defaultName = getModuleDatabaseName(module, coin, network)
     try {
         const readConfig = deps.getDefaultConfig || getDefaultConfig
-        return configuredDatabaseName(module, await readConfig(module, coin, network), defaultName)
+        const name = configuredDatabaseName(module, await readConfig(module, coin, network), defaultName)
+        warnUnscopedDefaultName(module, coin, network, name)
+        return name
     } catch (err) {
         logger.warn(`Migration precondition guard: could not read ${module}'s configured database name ` +
             `(${err && err.message ? err.message : err}); using the default ${defaultName}.`)

@@ -23,6 +23,7 @@ let { assertSafeDbIdentifier, escapeSqlStringLiteral } = require('../../utils/sq
 let { tableExistsSql } = require('../../db/information_schema')
 let { PRICE_FENCE_TABLE, FENCE_NETWORK_COLUMN, clearChainFenceSql, clearNetworkFenceSql, manualClearStatement } = require('../../db/price_fence')
 let { getDefaultConfig, getModuleDatabaseName } = require('../config_service')
+const { DATABASE_NAME_KEY, configuredDatabaseName } = require('../../utils/module_database_name')
 let { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 let { getDatabaseContainerId } = require('./container_access')
@@ -54,20 +55,10 @@ function configureDependencies(dependencies) {
     // throw with the first module's database already dropped. This also covers
     // an operator-supplied name, which is the only untrusted one.
 async function resolveResetTargets(coin, network, modules) {
-    const configuredDbNameKey = {
-        [XChainService.XCHAIN_DECODER]: "DECODER_DB_NAME",
-        [XChainService.XCHAIN_INDEXER]: "INDEXER_DB_NAME"
-    }
     const resetTargets = []
     for (const module of modules) {
-        let dbName = getModuleDatabaseName(module, coin, network)
-        const configKey = configuredDbNameKey[module]
-        if (configKey) {
-            const cfg = await getDefaultConfig(module, coin, network)
-            const configured = cfg ? cfg[configKey] : undefined
-            if (typeof configured === "string" && configured.trim() !== "") dbName = configured.trim()
-        }
-        resetTargets.push(assertSafeDbIdentifier(dbName, 'database name'))
+        const cfg = DATABASE_NAME_KEY[module] ? await getDefaultConfig(module, coin, network) : undefined
+        resetTargets.push(configuredDatabaseName(module, cfg, getModuleDatabaseName(module, coin, network)))
     }
     return resetTargets
 }

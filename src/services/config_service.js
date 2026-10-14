@@ -27,7 +27,7 @@ const {
     moduleDir, tmpDir, cryptoNodesDir, bootstrapDir, configDir, EXTERNAL_DB
 } = require('../config')
 const { stringToCoin } = require('../utils/helpers')
-const { nodePrefixSegment } = require('../utils/module_database_name')
+const { scopedNodePrefixSegment } = require('../utils/module_database_name')
 const { preferredSecretEnvName, foldSecretEnvAliases, readSecretHostEnv, deprecatedSecretEnvNames } = require('../config/secret_env')
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config')
@@ -149,7 +149,7 @@ function getModuleDatabaseName(module, coin, network) {
     }
     const moduleName = module.slice("xchain-".length)
     return "XChain" + DB_SEP
-        + nodePrefixSegment(NODE_PREFIX, DEFAULT_NODE_PREFIX, DB_SEP)
+        + scopedNodePrefixSegment(NODE_PREFIX, DEFAULT_NODE_PREFIX, DB_SEP)
         + CoinTickerSymbol[coin] + DB_SEP
         + network.charAt(0).toUpperCase() + network.slice(1) + DB_SEP
         + moduleName.charAt(0).toUpperCase() + moduleName.slice(1)
@@ -158,7 +158,7 @@ function getModuleDatabaseName(module, coin, network) {
 // Module DB account names carry the NODE_PREFIX like the database names, so two
 // stacks sharing one MariaDB never contend for one account. Default prefix: unchanged.
 function applyPrefixedModuleDbUsers(defaultValues, coin, network) {
-    const segment = nodePrefixSegment(NODE_PREFIX, DEFAULT_NODE_PREFIX, DB_SEP)
+    const segment = scopedNodePrefixSegment(NODE_PREFIX, DEFAULT_NODE_PREFIX, DB_SEP)
     if (segment === '') return
     for (const [key, name] of [["DECODER_DB_USER", "decoder"], ["INDEXER_DB_USER", "indexer"]]) {
         defaultValues[key] = "xchain" + DB_SEP + segment + name + DB_SEP + coin + DB_SEP + network
