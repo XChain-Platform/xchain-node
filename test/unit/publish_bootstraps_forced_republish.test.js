@@ -49,6 +49,11 @@ function createWorkDir() {
 }
 
 function removeWorkDir() {
+    // Any gpg the script under test runs under this work dir may have started an
+    // agent bound to it; stop it before the directory goes.
+    try {
+        execFileSync('gpgconf', ['--homedir', workDir, '--kill', 'gpg-agent'], { stdio: 'ignore' })
+    } catch { /* gpgconf missing or no agent running */ }
     fs.rmSync(workDir, { recursive: true, force: true })
 }
 

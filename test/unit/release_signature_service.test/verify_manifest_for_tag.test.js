@@ -60,7 +60,14 @@ function makeKeyring(name) {
                 '--local-user', fingerprint, '--armor', '--detach-sign', '--output', '-', dataPath
             ])
         },
-        cleanup() { fs.rmSync(home, { recursive: true, force: true }) }
+        cleanup() {
+            // gpg spawns a gpg-agent bound to this homedir; kill it first or it
+            // outlives the run and leaks a socket and a process per keyring.
+            try {
+                execFileSync('gpgconf', ['--homedir', home, '--kill', 'gpg-agent'], { stdio: 'ignore' })
+            } catch { /* gpgconf missing or no agent running */ }
+            fs.rmSync(home, { recursive: true, force: true })
+        }
     }
 }
 
