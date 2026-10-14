@@ -43,7 +43,10 @@ describe('prefix segment budget', function () {
 })
 
 describe('module database names under a non-default NODE_PREFIX', function () {
-    let savedCache, savedPrefix, prefixed
+    const EXTERNAL_ENV = { XCHAIN_NODE_EXTERNAL_DB: '1', XCHAIN_NODE_EXTERNAL_DB_HOST: '127.0.0.1',
+        XCHAIN_NODE_EXTERNAL_DB_PORT: '3306', XCHAIN_NODE_EXTERNAL_DB_ROOT_USER: 'root',
+        XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: 'unit-test-only' }
+    let savedCache, savedPrefix, savedExternal, prefixed
 
     before(function () {
         savedPrefix = process.env.NODE_PREFIX
@@ -51,13 +54,20 @@ describe('module database names under a non-default NODE_PREFIX', function () {
         for (const id of Object.keys(require.cache)) {
             if (isSrc(id)) { savedCache[id] = require.cache[id]; delete require.cache[id] }
         }
+        savedExternal = {}
+        for (const k of Object.keys(EXTERNAL_ENV)) savedExternal[k] = process.env[k]
         process.env.NODE_PREFIX = 'stack-b.test'
+        Object.assign(process.env, EXTERNAL_ENV)
         prefixed = require('../../src/services/config_service')
     })
 
     after(function () {
         if (savedPrefix === undefined) delete process.env.NODE_PREFIX
         else process.env.NODE_PREFIX = savedPrefix
+        for (const [k, v] of Object.entries(savedExternal)) {
+            if (v === undefined) delete process.env[k]
+            else process.env[k] = v
+        }
         for (const id of Object.keys(require.cache)) {
             if (isSrc(id)) delete require.cache[id]
         }
@@ -85,6 +95,80 @@ describe('module database names under a non-default NODE_PREFIX', function () {
         expect(configuredDatabaseName('xchain-decoder', {}, def)).to.equal(def)
     })
 
+    it('resolves reset targets through the configured name, not the raw derived name', async function () {
+        const { resolveResetTargets } = require('../../src/services/database_service/reset_databases')
+        const targets = await resolveResetTargets('bitcoin', 'mainnet', ['xchain-decoder', 'xchain-indexer'])
+        expect(targets).to.deep.equal([scopedDecoder, 'XChain_' + seg + 'BTC_Mainnet_Indexer'])
+        expect(targets[0]).to.not.equal('XChain_BTC_Mainnet_Decoder')
+    })
+
+    describe('legacy-collision refusal in buildAndUp', function () {
+        const legacy = { 'xchain-decoder': ['DECODER_DB_NAME', 'XChain_BTC_Mainnet_Decoder'],
+            'xchain-indexer': ['INDEXER_DB_NAME', 'XChain_BTC_Mainnet_Indexer'] }
+        const reached = new Error('past the refusal')
+
+        function wire(envFor) {
+            const { configureDependencies, buildAndUp } = require('../../src/services/module_service/build_and_up')
+            configureDependencies({
+                checkIfModuleExists: () => true, checkBuildKitAvailable: async () => {},
+                getDefaultConfig: async (m) => envFor(m), getModuleDir: () => '/nonexistent',
+                getDockerContainerImageName: (m) => m, config: require('../../src/config'),
+                execFileAsync: async () => ({ stdout: '' }),
+                // First step after the refusal in assertDeploymentReady; proves ordering.
+                goLiveGate: { assertGoLiveReady: () => { throw reached } }
+            })
+            return buildAndUp
+        }
+
+        for (const module of Object.keys(legacy)) {
+            it('refuses the unprefixed default name for ' + module + ' before any other deploy step', async function () {
+                const [key, name] = legacy[module]
+                const buildAndUp = wire(() => ({ [key]: name }))
+                let err
+                try { await buildAndUp(module, 'bitcoin', 'mainnet') } catch (e) { err = e }
+                expect(err).to.be.instanceOf(Error)
+                expect(err).to.not.equal(reached)
+                expect(err.message).to.include(key + '=' + name)
+            })
+            it('lets the scoped name for ' + module + ' through to the next deploy step', async function () {
+                const [key] = legacy[module]
+                const cfg = (await prefixed.getDefaultConfig(module, 'bitcoin', 'mainnet'))
+                const buildAndUp = wire(() => ({ [key]: cfg[key] }))
+                let err
+                try { await buildAndUp(module, 'bitcoin', 'mainnet') } catch (e) { err = e }
+                expect(err).to.equal(reached)
+            })
+        }
+
+        it('does not refuse other modules', async function () {
+            const buildAndUp = wire(() => ({}))
+            let err
+            try { await buildAndUp('xchain-encoder', 'bitcoin', 'mainnet') } catch (e) { err = e }
+            expect(err).to.equal(reached)
+        })
+    })
+
+    describe('precheck for default names under a non-default prefix', function () {
+        it('warns when the configured name is the unprefixed default', async function () {
+            const { getLogger } = require('../../src/observability/logger')
+            const logger = getLogger()
+            const original = logger.warn
+            const warnings = []
+            logger.warn = (m) => { warnings.push(String(m)) }
+            try {
+                const { resolveCheckedDatabaseName } = require('../../src/services/migration_precondition_service')
+                const name = await resolveCheckedDatabaseName('xchain-decoder', 'bitcoin', 'mainnet',
+                    { getDefaultConfig: async () => ({ DECODER_DB_NAME: 'XChain_BTC_Mainnet_Decoder' }) })
+                expect(name).to.equal('XChain_BTC_Mainnet_Decoder')
+                expect(warnings.some(w => w.includes('unprefixed default database'))).to.equal(true)
+                warnings.length = 0
+                await resolveCheckedDatabaseName('xchain-decoder', 'bitcoin', 'mainnet',
+                    { getDefaultConfig: async () => ({ DECODER_DB_NAME: scopedDecoder }) })
+                expect(warnings.some(w => w.includes('unprefixed default database'))).to.equal(false)
+            } finally { logger.warn = original }
+        })
+    })
+
     it('restores the default-prefix modules after the suite', function () {
         // Runs while the prefixed load is still cached; the real check is that after()
         // reinstates the snapshot, asserted by the sibling describe below.
@@ -98,5 +182,30 @@ describe('module database names after the prefix suite', function () {
         expect(cs.getModuleDatabaseName('xchain-decoder', 'bitcoin', 'mainnet')).to.equal('XChain_BTC_Mainnet_Decoder')
         const cfg = await cs.getDefaultConfig('xchain-decoder', 'bitcoin', 'mainnet')
         expect(cfg.DECODER_DB_USER).to.equal('xchain_decoder_bitcoin_mainnet')
+    })
+})
+
+describe('raw getModuleDatabaseName callers', function () {
+    const fs = require('fs')
+    const files = []
+    ;(function walk(dir) {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, e.name)
+            if (e.isDirectory()) walk(full)
+            else if (e.name.endsWith('.js')) files.push(full)
+        }
+    })(SRC)
+    const allowed = new Set(['services/config_service.js', 'services/config_service/defaults.js'])
+
+    it('resolve the name through configuredDatabaseName wherever they call it', function () {
+        const offenders = []
+        for (const file of files) {
+            const rel = path.relative(SRC, file)
+            if (allowed.has(rel)) continue
+            const text = fs.readFileSync(file, 'utf8')
+            const calls = text.split('\n').filter(l => /getModuleDatabaseName\(/.test(l) && !/^\s*(\/\/|\*)/.test(l))
+            if (calls.length > 0 && !/configuredDatabaseName\(/.test(text)) offenders.push(rel)
+        }
+        expect(offenders).to.deep.equal([])
     })
 })

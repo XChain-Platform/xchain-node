@@ -273,4 +273,4 @@ function warnPriceFenceNotCleared(ticker, fenceNetwork, reason) {
         + ticker + " in place.")
 }
 
-module.exports = { resetDatabases, clearHubPriceIngestWatermark, configureDependencies }
+module.exports = { resetDatabases, clearHubPriceIngestWatermark, configureDependencies, resolveResetTargets }

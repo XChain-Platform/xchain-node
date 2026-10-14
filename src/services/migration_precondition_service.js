@@ -262,5 +262,6 @@ module.exports = {
     // database returning `unreadable` rather than throwing past the guard, and
     // that is a property of the real driver call, not of a stub.
     readAppliedMigrations,
-    assertRequiredMigrationsApplied
+    assertRequiredMigrationsApplied,
+    resolveCheckedDatabaseName
 }
