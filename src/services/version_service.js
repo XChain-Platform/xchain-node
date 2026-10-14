@@ -82,6 +82,12 @@ async function checkRemoteNodeVersion(coin) {
         case Coin.LITECOIN:
             githubProjectVersion = await gitHubDownloader.getLatestCompatibleVersion("litecoin-project", "litecoin", true)
             break
+        // Kaspa is not the bitcoind family: the repository and asset names differ.
+        // Only one platform hash has been computed for that repository so far (see ASSET-HASHES.md),
+        //    so linux-amd64 is pending and the download side fails closed rather than skipping.
+        case Coin.KASPA:
+            githubProjectVersion = await gitHubDownloader.getLatestCompatibleVersion("kaspanet", "rusty-kaspa", true)
+            break
     }
 
     setRemoteModuleVersion(NODE_MODULE_NAME + SEP + coin, githubProjectVersion)

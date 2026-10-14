@@ -8,6 +8,11 @@ const path = require('path')
 
 const cryptoNodesDir = path.join(__dirname, '../../crypto_nodes')
 
+// Kaspa family: kaspad's local RPC has no rpcuser/rpcpassword (neither appears in args.rs),
+// so its conf cannot carry placeholders. This test exists to forbid leaked credentials, and for
+// Kaspa it asserts the opposite: no credential line may appear anywhere in the file.
+const CREDENTIAL_FREE_COINS = ['kaspa']
+
 function listConfFiles() {
     const files = []
     for (const coin of fs.readdirSync(cryptoNodesDir)) {
@@ -34,6 +39,12 @@ describe('bundled crypto-node conf files', function () {
             const content = fs.readFileSync(file, 'utf8')
             const userLine = content.match(/^rpcuser=(.*)$/m)
             const passLine = content.match(/^rpcpassword=(.*)$/m)
+            // credential-free family (kaspad's local RPC takes no user/password): the assertion is reversed - no credential line may appear
+            if (CREDENTIAL_FREE_COINS.some((coin) => file.includes(path.sep + coin + path.sep))) {
+                assert.strictEqual(userLine, null, `${file}: no rpcuser line may appear for this family`)
+                assert.strictEqual(passLine, null, `${file}: no rpcpassword line may appear for this family`)
+                continue
+            }
             assert.ok(userLine, `${file}: missing rpcuser line (substitution anchor)`)
             assert.ok(passLine, `${file}: missing rpcpassword line (substitution anchor)`)
             assert.strictEqual(userLine[1], '__XCHAIN_NODE_RPC_USER__',
