@@ -125,12 +125,12 @@ On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 wi
 
 ### Bundled MariaDB tuning
 
-When xchain-node manages its own MariaDB container, these optional env vars override server defaults. They are applied as `mysqld` startup args at install time, so they **persist across a container recreate** (a `conf.d` file edited inside a running container does not). Each is unset by default so image defaults remain unchanged. Set them before `xchain-node install`.
+When xchain-node manages its own MariaDB container, these optional env vars override server defaults. They are applied as `mysqld` startup args at install time, so they **persist across a container recreate** (a `conf.d` file edited inside a running container does not). Each is unset by default so image defaults remain unchanged, except `XCHAIN_NODE_DB_BUFFER_POOL_SIZE`, which defaults to `1G` (a value that is not digits with an optional `K`, `M` or `G` suffix logs a warning and falls back to `1G`), and `XCHAIN_NODE_DB_MAX_CONNECTIONS`, which defaults to `1000`. Set them before `xchain-node install`.
 
 | Variable | mysqld setting | When to set |
 |---|---|---|
 | `XCHAIN_NODE_DB_DATA_DIR` | datadir bind-mount (`-v <dir>:/var/lib/mysql`) | Pin the datadir to a fast NVMe mount instead of the Docker data-root |
-| `XCHAIN_NODE_DB_BUFFER_POOL_SIZE` | `innodb-buffer-pool-size` (e.g. `16G`) | Large/multi-DB hosts where the stock 128 MB thrashes on multi-GB datasets |
+| `XCHAIN_NODE_DB_BUFFER_POOL_SIZE` | `innodb-buffer-pool-size` (e.g. `16G`) | Hosts that need more (or less) than the 1G default; the stock 128 MB thrashes on multi-GB datasets |
 | `XCHAIN_NODE_DB_MAX_CONNECTIONS` | `max-connections` (e.g. `300`) | Many connection pools against one DB (replicas, shared services) |
 | `XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT` | `innodb-flush-log-at-trx-commit` (e.g. `2`) | Replica/cache DBs where a 1-second crash window is acceptable for speed |
 

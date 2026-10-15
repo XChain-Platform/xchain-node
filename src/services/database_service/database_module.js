@@ -31,6 +31,7 @@ let { getStatusFromContainer, addContainerToNetwork, forceRemoveContainerByName,
 let { statusChanged }           = require('../status_service')
 const { createDatabaseContainerRunArgs } = require('./container_run_args')
 const { notRunningHint } = require('./not_running_hint')
+const { resolveBufferPoolSize } = require('./buffer_pool_size')
 let config = require('../../config');
 let peers = require('../peer_services').bindPeerServices((file) => require(path.join('..', file)))
 let { getLogger } = require('../../observability/logger');
@@ -132,7 +133,7 @@ function createDatabaseRunArgs(containerPrefix, environmentVariables, coin, netw
 // straight to mysqld, so they persist across a container *recreate*,
 // unlike a conf.d file written into a running container (its /etc isn't
 // a mounted volume, so a recreate drops it). Each is unset by default,
-// leaving image defaults unchanged. Size them to the host: a busy
+// leaving image defaults unchanged, except the buffer pool and max-connections below. Size them to the host: a busy
 // multi-replica box (e.g. a shared services host serving xchain-sync
 // replicas across 18 DBs) wants a large buffer pool + a higher connection ceiling and
 // can relax durable-log flushing; a laptop or single-chain node should
@@ -140,14 +141,16 @@ function createDatabaseRunArgs(containerPrefix, environmentVariables, coin, netw
 // as the container command, not as `docker run` options.
 function addDatabaseTuningArgs(runArgs) {
     const dbTuningArgs = {
-        XCHAIN_NODE_DB_BUFFER_POOL_SIZE:        'innodb-buffer-pool-size',        // e.g. 16G
-        XCHAIN_NODE_DB_MAX_CONNECTIONS:         'max-connections',               // e.g. 300
+        XCHAIN_NODE_DB_MAX_CONNECTIONS:        'max-connections',               // e.g. 300
         XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT: 'innodb-flush-log-at-trx-commit' // e.g. 2 (faster, less durable)
     }
     for (const [envVar, mysqldFlag] of Object.entries(dbTuningArgs)) {
         const value = config.DB_TUNING_ENV[envVar]
         if (value) runArgs.push(`--${mysqldFlag}=${value}`)
     }
+    // The buffer pool is the other exception: it defaults to 1G (see buffer_pool_size.js)
+    // and a malformed XCHAIN_NODE_DB_BUFFER_POOL_SIZE falls back to that with a warning.
+    runArgs.push(`--innodb-buffer-pool-size=${resolveBufferPoolSize(config.DB_TUNING_ENV.XCHAIN_NODE_DB_BUFFER_POOL_SIZE, (msg) => logger.warn(msg))}`)
     // max_connections is the exception to "unset = image default": the image's 151
     // saturates on a shared multi-chain container (three chains' services plus one
     // e2e run sit just under it, and any extra consumer tips it over with misleading

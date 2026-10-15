@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Started the bundled MariaDB with a 1G InnoDB buffer pool by default, settable with `XCHAIN_NODE_DB_BUFFER_POOL_SIZE`.
+
 ## [0.23.0] - 2026-10-11
 
 ### Added

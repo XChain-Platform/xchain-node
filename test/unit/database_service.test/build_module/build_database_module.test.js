@@ -337,7 +337,7 @@ describe('DatabaseService', function () {
 
                 const runArgs = findDockerRunArgs(stubs.execFileAsync)
                 expect(runArgs, 'docker run call not found').to.not.be.null
-                expect(runArgs.some(a => a.startsWith('--innodb-buffer-pool-size'))).to.be.false
+                expect(runArgs).to.include('--innodb-buffer-pool-size=1G')
                 // max-connections is deliberately NOT omitted when unset: it falls back to
                 // the 1000 default (see the saturation-guard test above).
                 expect(runArgs).to.include('--max-connections=1000')
