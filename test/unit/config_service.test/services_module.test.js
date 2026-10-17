@@ -38,7 +38,7 @@ function configure(configOverrides = {}, secretValues = {}, validatorSettings = 
     })
 }
 
-describe('config_service/services', function () {
+function e2eServiceTests() {
     it('configures the e2e container with public validator identity and hub access', function () {
         configure({ HUB_API_KEY: 'hub-key' }, {}, { pubkey: '02abcdef' })
         const defaults = {}
@@ -57,7 +57,9 @@ describe('config_service/services', function () {
         services.configureE2e(defaults, 'xchain-indexer', 'bitcoin')
         expect(defaults).to.deep.equal({ KEEP: 'value' })
     })
+}
 
+function indexerInputTests() {
     it('passes genesis, origin-indexer, hub, and regtest-only settings to an indexer', function () {
         configure({
             INDEXER_GENESIS_ENV: { XCHAIN_GENESIS_BLOCK: '101', GENESIS_DUMP_PATH: '' },
@@ -99,7 +101,9 @@ describe('config_service/services', function () {
         expect(defaults.DOGE_INDEXER_API_URL).to.equal('http://doge:3004')
         expect(defaults).not.to.have.property('XC_ROLLCALL_REGTEST_ACTIVATION')
     })
+}
 
+function indexerOutputTests() {
     it('configures indexer database mirroring and defaults every regtest grace to zero', function () {
         configure({ HUB_SYNC_GRACE_ENV: { HUB_SYNC_PRICE_GRACE_S: '7' } })
         const defaults = {
@@ -128,4 +132,10 @@ describe('config_service/services', function () {
         expect(defaults).not.to.have.property('INDEXER_ALLOW_UNAUTHENTICATED')
         expect(defaults).not.to.have.property('HUB_SYNC_PRICE_GRACE_S')
     })
+}
+
+describe('config_service/services', function () {
+    e2eServiceTests()
+    indexerInputTests()
+    indexerOutputTests()
 })

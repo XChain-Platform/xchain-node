@@ -32,31 +32,7 @@ function foldSecretEnvAliases(config) {
     return config
 }
 
-describe('config_service/sidecars', function () {
-    beforeEach(function () {
-        fs.mkdirSync(scratchRoot, { recursive: true })
-        configDir = fs.mkdtempSync(path.join(scratchRoot, 'case-'))
-        sidecars.configure({
-            crypto,
-            fs,
-            path,
-            readline,
-            configDir,
-            preferredSecretEnvName,
-            foldSecretEnvAliases,
-            deprecatedSecretEnvNames: () => [],
-            logger: { warn() {} }
-        })
-    })
-
-    afterEach(function () {
-        fs.rmSync(configDir, { recursive: true, force: true })
-    })
-
-    after(function () {
-        fs.rmSync(scratchRoot, { recursive: true, force: true })
-    })
-
+function persistenceTests() {
     it('creates and appends sidecar credentials with mode 0600 and valid line boundaries', function () {
         const file = path.join(configDir, 'bitcoin-mainnet.local')
         sidecars.persistSidecarCreds(file, { NODE_USER: 'alice' })
@@ -80,7 +56,9 @@ describe('config_service/sidecars', function () {
         fs.writeFileSync(file, 'HUB_API_KEY=legacy\nHUB_API_SECRET=preferred\n')
         expect(await sidecars.readSidecarValue(file, 'HUB_API_KEY')).to.equal('preferred')
     })
+}
 
+function hubKeyTests() {
     it('generates a hub API key once and then reuses it', async function () {
         const first = await sidecars.ensureHubApiKey()
         const contents = fs.readFileSync(first.path, 'utf8')
@@ -100,7 +78,9 @@ describe('config_service/sidecars', function () {
         expect(empty.HUB_API_KEY).to.equal('sidecar-key')
         expect(explicit.HUB_API_KEY).to.equal('host-key')
     })
+}
 
+function parsingAndGenerationTests() {
     it('rejects coin names that escape the config directory', function () {
         expect(() => sidecars.coinConfigPaths('../outside', '')).to.throw('Config path traversal detected')
     })
@@ -126,4 +106,34 @@ describe('config_service/sidecars', function () {
         expect(defaults.NODE_PASSWORD).to.match(/^[0-9a-f]{48}$/)
         expect(fs.readFileSync(file, 'utf8')).to.equal('NODE_SECRET=' + defaults.NODE_PASSWORD + '\n')
     })
+}
+
+describe('config_service/sidecars', function () {
+    beforeEach(function () {
+        fs.mkdirSync(scratchRoot, { recursive: true })
+        configDir = fs.mkdtempSync(path.join(scratchRoot, 'case-'))
+        sidecars.configure({
+            crypto,
+            fs,
+            path,
+            readline,
+            configDir,
+            preferredSecretEnvName,
+            foldSecretEnvAliases,
+            deprecatedSecretEnvNames: () => [],
+            logger: { warn() {} }
+        })
+    })
+
+    afterEach(function () {
+        fs.rmSync(configDir, { recursive: true, force: true })
+    })
+
+    after(function () {
+        fs.rmSync(scratchRoot, { recursive: true, force: true })
+    })
+
+    persistenceTests()
+    hubKeyTests()
+    parsingAndGenerationTests()
 })

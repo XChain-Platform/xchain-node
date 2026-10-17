@@ -51,7 +51,7 @@ function configure(overrides = {}) {
     return { db, logger, config }
 }
 
-describe('config_service/networks', function () {
+function networkResolutionTests() {
     it('composes co-located LTC and DOGE indexer URLs without replacing unrelated defaults', async function () {
         configure()
         const defaults = { KEEP: 'value' }
@@ -95,7 +95,9 @@ describe('config_service/networks', function () {
         expect(await networks.hasBitcoinIndexer('regtest')).to.equal(true)
         expect(await networks.hasBitcoinIndexer('mainnet')).to.equal(false)
     })
+}
 
+function hubConfigurationTests() {
     it('declares a keyless non-mainnet hub and consumes HUB_NETWORK after access checks', function () {
         const { logger } = configure()
         const defaults = { HUB_NETWORK: 'REGTEST' }
@@ -134,4 +136,9 @@ describe('config_service/networks', function () {
         })
         expect(logger.info.calledWithMatch('VALIDATOR mode')).to.equal(true)
     })
+}
+
+describe('config_service/networks', function () {
+    networkResolutionTests()
+    hubConfigurationTests()
 })
