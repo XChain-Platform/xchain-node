@@ -128,9 +128,21 @@ function sumAmounts(rows) {
         if (u === null) return null
         total += u
     }
+    return fromUnits(total)
+}
+
+// A non-negative amount, a number or a plain decimal string, as 1e-8 units; null when it is neither.
+// A number is read at 8 places, so a float that stands for an 8-place decimal comes back as that decimal.
+function amountUnits(amount) {
+    if (typeof amount === 'number') return Number.isFinite(amount) && amount >= 0 ? toUnits(amount.toFixed(UNIT_DIGITS)) : null
+    return toUnits(amount)
+}
+
+// Non-negative 1e-8 units as a plain decimal string, trailing zeros trimmed.
+function fromUnits(units) {
     const scale = 10n ** BigInt(UNIT_DIGITS)
-    const frac = (total % scale).toString().padStart(UNIT_DIGITS, '0').replace(/0+$/, '')
-    return (total / scale).toString() + (frac ? '.' + frac : '')
+    const frac = (units % scale).toString().padStart(UNIT_DIGITS, '0').replace(/0+$/, '')
+    return (units / scale).toString() + (frac ? '.' + frac : '')
 }
 
 // The explorer's indexed tip for the stake chain; throws when it is unreadable.
@@ -245,6 +257,9 @@ module.exports = {
     stakeKeyReuseHeight,
     stakeRowsHoldingKey,
     delegationRowsHoldingKey,
+    isUndeactivated,
+    amountUnits,
+    fromUnits,
     sumAmounts,
     readDelegationsByPubkey,
     readKeyHolders,

@@ -67,11 +67,15 @@ const loadModule = require
 // problem with better context.
 function refForPreCheck(commandName, actionCommand) {
     if (commandName !== 'install' && commandName !== 'update') return null
+    let branch
     try {
-        return resolveArgs(actionCommand.args || [], { expectBranch: true, defaultBranch: null }).branch
+        branch = resolveArgs(actionCommand.args || [], { expectBranch: true, defaultBranch: null }).branch
     } catch {
         return null
     }
+    // Stage a no-ref update's hub at the tag self-update handed on, the one updateModules installs at.
+    if (!branch && commandName === 'update') return config.XCHAIN_NODE_UPDATE_TARGET || null
+    return branch
 }
 
 // The verbs that can put the hub container back: they rebuild it, recreate it
@@ -165,8 +169,8 @@ async function maybeSelfUpdateBeforeUpdate(args, deps = {}) {
     }
 
     // Serialized like every mutator, so two concurrent updates cannot both
-    // move the checkout. The parent releases before spawning; the re-exec child
-    // takes the normal command lock and refuses if another mutator gets there first.
+    // move the checkout. The parent releases before spawning; the update run that re-takes
+    // the lock waits at least SELF_UPDATE_HANDOFF_WAIT_MS, refusing only if it is still held then.
     const lock = deps.acquireCommandLock || acquireCommandLock
     const release = lock({ command: 'update (self-update)', waitMs: dispatchSettings(config).MUTATING_LOCK_WAIT_MS })
     let outcome

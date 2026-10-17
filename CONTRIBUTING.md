@@ -112,6 +112,8 @@ Match the existing log style: a concise subject line, then a short body explaini
 
 ## Pull requests
 
+Fork the repository, branch off `develop`, and open your pull request against `develop`. Keep history linear (rebase, don't merge). `master` is what production runs and only ever receives release merges from `develop`; a pull request into `master` from a fork or any other branch fails the `base-branch guard` check and cannot be merged.
+
 CI is the unit gate. Before opening a PR:
 
 1. Run the no-external-services tiers (`npm run ci`, `npm run test:security`) and confirm they pass.

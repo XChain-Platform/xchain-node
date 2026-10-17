@@ -14,8 +14,9 @@
  *
  * XChain Node - Bootstrap source health gate halt marker probe
  *
- * Reads the durable halt markers (a decoder REORG_HALT row, an uncleared
- * sync_halt row) and the dump-window watermarks straight out of the database
+ * Reads the durable halt markers (a live decoder REORG_HALT row, one no newer
+ * REORG_HALT_CLEARED row supersedes, and an uncleared sync_halt row) and the
+ * dump-window watermarks straight out of the database
  * about to be dumped, and for an indexer source out of its paired decoder
  * database as well. Every unreadable answer throws, and the gate turns a throw
  * into a refusal.

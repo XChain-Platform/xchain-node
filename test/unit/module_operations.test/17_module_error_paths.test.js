@@ -105,10 +105,13 @@ describe('moduleOperations', function () {
 
         it('continues after restartContainer error', async function () {
             const stubs = makeStubs()
-            stubs.restartContainer.rejects(new Error('restart failed'))
+            stubs.stopContainer.onFirstCall().rejects(new Error('restart failed'))
             const ops = loadOperations(stubs)
-            const result = await ops.restartModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } })
-            expect(result).to.be.true
+            const err = await ops.restartModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } }).then(() => null, e => e)
+            expect(stubs.stopContainer.callCount, 'the second module is still attempted').to.equal(2)
+            expect(stubs.startContainer.callCount, 'a failed stop is never followed by a start').to.equal(1)
+            expect(err, 'a failed restart must not resolve').to.be.an('error')
+            expect(err.message).to.match(/restart failed for 1 module: xchain-encoder \(bitcoin mainnet\): restart failed/)
         })
     })
 })
@@ -128,7 +131,7 @@ describe('moduleOperations', function () {
 
         it('skips when container ID is not found', async function () {
             const stubs = makeStubs()
-            stubs.db.getModuleContainer.resolves(null)
+            stubs.db.getModuleContainerStrict.resolves(null)
             const ops = loadOperations(stubs)
             const result = await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
             expect(result).to.be.true
@@ -137,10 +140,12 @@ describe('moduleOperations', function () {
 
         it('continues after stopContainer error', async function () {
             const stubs = makeStubs()
-            stubs.stopContainer.rejects(new Error('stop failed'))
+            stubs.stopContainer.onFirstCall().rejects(new Error('stop failed'))
             const ops = loadOperations(stubs)
-            const result = await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            const err = await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } }).then(() => null, e => e)
+            expect(stubs.stopContainer.callCount, 'the second module is still attempted').to.equal(2)
+            expect(err, 'a failed stop must not resolve').to.be.an('error')
+            expect(err.message).to.match(/stop failed for 1 module: xchain-encoder \(bitcoin mainnet\): stop failed/)
         })
     })
 })
@@ -156,10 +161,12 @@ describe('moduleOperations', function () {
 
         it('continues after startContainer error', async function () {
             const stubs = makeStubs()
-            stubs.startContainer.rejects(new Error('start failed'))
+            stubs.startContainer.onFirstCall().rejects(new Error('start failed'))
             const ops = loadOperations(stubs)
-            const result = await ops.startModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            const err = await ops.startModules({ bitcoin: { mainnet: ['xchain-encoder', 'xchain-decoder'] } }).then(() => null, e => e)
+            expect(stubs.startContainer.callCount, 'the second module is still attempted').to.equal(2)
+            expect(err, 'a failed start must not resolve').to.be.an('error')
+            expect(err.message).to.match(/start failed for 1 module: xchain-encoder \(bitcoin mainnet\): start failed/)
         })
     })
 })
@@ -223,21 +230,28 @@ describe('moduleOperations', function () {
             it('reports a bounce restart that fails twice instead of returning success', async function () {
                 const stubs = makeStubs()
                 stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
-                stubs.restartContainer.rejects(new Error('docker restart: container failed to start'))
-                const outcome = await runBounceReset(stubs)
+                let startsBefore = 0
+                const outcome = await runBounceReset(stubs, { duringSettle: () => {
+                    startsBefore = stubs.startContainer.callCount
+                    stubs.startContainer.rejects(new Error('docker start: container failed to start'))
+                } })
                 expect(outcome.error, 'reset must not resolve with a bounced service down').to.be.an('error')
                 expect(outcome.error.message).to.match(/failed to restart/)
-                expect(outcome.error.message).to.match(/post-reset restart failed \(docker restart: container failed to start\)/)
+                expect(outcome.error.message).to.match(/post-reset restart failed \(xchain-\w+ was stopped but failed to start again \(docker start: container failed to start\)\)/)
                 // One try plus one retry per bounced module (decoder and indexer).
-                expect(stubs.restartContainer.callCount).to.equal(4)
+                expect(stubs.startContainer.callCount - startsBefore).to.equal(4)
             })
 
             it('recovers silently when the retry succeeds', async function () {
                 const stubs = makeStubs()
                 stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
-                stubs.restartContainer.onCall(0).rejects(new Error('transient'))
-                stubs.restartContainer.resolves(true)
-                const outcome = await runBounceReset(stubs)
+                let stopsBefore = 0
+                const outcome = await runBounceReset(stubs, { duringSettle: () => {
+                    stopsBefore = stubs.stopContainer.callCount
+                    stubs.stopContainer.onCall(stopsBefore).rejects(new Error('transient'))
+                } })
+                // The first bounce stop failed and was retried once; the second module bounced first time.
+                expect(stubs.stopContainer.callCount - stopsBefore).to.equal(3)
                 expect(outcome.error).to.equal(undefined)
                 expect(outcome.value).to.equal(true)
             })
@@ -246,16 +260,66 @@ describe('moduleOperations', function () {
                 const stubs = makeStubs()
                 stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
                 let bouncing = false
+                let stopsBefore = 0
                 stubs.db.getModuleContainerStrict.callsFake(async () => {
                     if (bouncing) throw new Error('ER_LOCK_WAIT_TIMEOUT')
                     return 'container-id-123'
                 })
-                const outcome = await runBounceReset(stubs, { duringSettle: () => { bouncing = true } })
+                const outcome = await runBounceReset(stubs, { duringSettle: () => {
+                    bouncing = true
+                    stopsBefore = stubs.stopContainer.callCount
+                } })
                 expect(stubs.startContainer.called, 'the start pass must finish before the flip').to.equal(true)
                 expect(outcome.error).to.be.an('error')
                 expect(outcome.error.message).to.match(/registry lookup failed before the post-reset bounce/)
-                expect(stubs.restartContainer.called).to.equal(false)
+                expect(stubs.stopContainer.callCount, 'no bounce stop after a failed registry read').to.equal(stopsBefore)
             })
+        })
+    })
+})
+
+// start, stop and restart attempt every selected module and then fail together,
+// so a runbook can trust the exit status the CLI derives from the rejection.
+describe('moduleOperations', function () {
+    registerLifecycleHooks(() => {})
+
+    describe('start/stop/restart: failures are reported, not swallowed', function () {
+
+        it('stop treats a container docker says is gone as stopped, not as a failure', async function () {
+            const stubs = makeStubs()
+            const gone = new Error('Error response from daemon: No such container: container-id-123')
+            stubs.stopContainer.rejects(gone)
+            const result = await loadOperations(stubs).stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
+            expect(result).to.be.true
+        })
+
+        it('stop fails on a bare-string rejection, which is a failed stop rather than a miss', async function () {
+            const stubs = makeStubs()
+            stubs.stopContainer.callsFake(() => Promise.reject('There was an error trying to stop the docker container (container-id-123)'))
+            const err = await loadOperations(stubs).stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } }).then(() => null, e => e)
+            expect(err).to.be.an('error')
+            expect(err.failures).to.have.lengthOf(1)
+            expect(err.failures[0].reason).to.match(/error trying to stop the docker container/)
+        })
+
+        it('fails on a registry read that errored instead of skipping the module as not installed', async function () {
+            for (const op of ['startModules', 'stopModules', 'restartModules']) {
+                const stubs = makeStubs()
+                stubs.db.getModuleContainerStrict.rejects(new Error('pool closed'))
+                const err = await loadOperations(stubs)[op]({ bitcoin: { mainnet: ['xchain-encoder'] } }).then(() => null, e => e)
+                expect(err, op).to.be.an('error')
+                expect(err.message, op).to.match(/registry lookup failed \(pool closed\)/)
+                expect(stubs.db.getModuleContainer.called, op).to.be.false
+            }
+        })
+
+        it('restart fails when the hub and explorer config refresh after it fails', async function () {
+            const stubs = makeStubs()
+            stubs.statusChanged.rejects(new Error('hub unreachable'))
+            const err = await loadOperations(stubs).restartModules({ bitcoin: { mainnet: ['xchain-encoder'] } }).then(() => null, e => e)
+            expect(stubs.stopContainer.calledOnce).to.be.true
+            expect(stubs.startContainer.calledOnce).to.be.true
+            expect(err.message).to.match(/restarted, but the hub and explorer config refresh failed \(hub unreachable\)/)
         })
     })
 })

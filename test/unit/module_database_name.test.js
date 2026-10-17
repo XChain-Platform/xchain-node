@@ -12,7 +12,7 @@
 
 const { expect } = require('chai')
 const { XChainService } = require('../../src/config')
-const { configuredDatabaseName } = require('../../src/utils/module_database_name')
+const { configuredDatabaseName, nodePrefixSegment } = require('../../src/utils/module_database_name')
 
 const DEFAULT_DECODER = 'XChain_BTC_Mainnet_Decoder'
 const DEFAULT_INDEXER = 'XChain_BTC_Mainnet_Indexer'
@@ -43,5 +43,15 @@ describe('configuredDatabaseName()', function () {
         const cfg = { INDEXER_DB_NAME: 'Custom; DROP DATABASE mysql' }
         expect(() => configuredDatabaseName(XChainService.XCHAIN_INDEXER, cfg, DEFAULT_INDEXER))
             .to.throw(/Unsafe MariaDB database name/)
+    })
+})
+
+describe('nodePrefixSegment()', function () {
+    it('is empty for the default prefix', function () {
+        expect(nodePrefixSegment('xchain-node', 'xchain-node')).to.equal('')
+    })
+
+    it('folds non-alphanumerics to underscores and appends the separator', function () {
+        expect(nodePrefixSegment('my-stack.1', 'xchain-node')).to.equal('my_stack_1_')
     })
 })

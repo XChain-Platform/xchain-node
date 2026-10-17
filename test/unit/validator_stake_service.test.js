@@ -13,6 +13,7 @@
 const { expect } = require('chai')
 
 const { planMints, stakeTiming } = require('../../src/services/validator_stake_service')
+const { mintClosedReason } = require('../../src/services/validator_stake_service/mint_rules')
 // The authoritative source for both stake clocks. Read here too, so a test that
 // asserts the CLI's numbers cannot itself become the place they are frozen.
 const { getCoinConfig } = require('../../src/coins')
@@ -48,7 +49,58 @@ describe('ValidatorStakeService', function () {
         })
 
         it('flags a token with no open mint', function () {
-            expect(planMints('testnet', 0, 25000, 0, 0).reason).to.match(/no open mint/)
+            const mintClosed = mintClosedReason({ locked: true }, 200001, 'XCHAIN')
+            const p = planMints('testnet', 0, 25000, 10000, 50000, null, { mintClosed })
+            expect(p.mints).to.deep.equal([])
+            expect(p.reason).to.match(/no open mint/)
+        })
+
+        it('reads MAX_MINT 0 as no per-transaction cap and plans one MINT of the shortfall', function () {
+            expect(planMints('testnet', 0, 25000, 0, 0)).to.deep.equal({ short: 25000, mints: [25000], reason: null })
+            expect(planMints('testnet', 0, 25000, 0, 50000).mints).to.deep.equal([25000])
+        })
+
+        it('counts what the address already minted against the per-address cap', function () {
+            expect(planMints('testnet', 0, 25000, 10000, 50000, null, { mintedSoFar: 30000 }).reason)
+                .to.match(/plus the 30000 this address already minted exceeds the per-address mint cap/)
+            expect(planMints('testnet', 0, 25000, 10000, 50000, null, { mintedSoFar: 25000 }).reason).to.equal(null)
+        })
+
+        it('refuses when what the address already minted could not be read', function () {
+            const p = planMints('testnet', 0, 25000, 10000, 50000, null, { mintedUnknown: 'could not read what X has already minted' })
+            expect(p.mints).to.deep.equal([])
+            expect(p.reason).to.match(/could not read what X has already minted/)
+        })
+    })
+})
+
+// A fractional XCHAIN balance is the normal state after an earlier run spent from the address,
+// and the indexer refuses a MINT AMOUNT past 8 decimal places as malformed.
+describe('ValidatorStakeService exact mint amounts', function () {
+    describe('planMints() from a fractional balance', function () {
+        const EIGHT_PLACES = /^\d+(\.\d{1,8})?$/
+
+        it('plans the exact 8-place shortfall, not float noise', function () {
+            const p = planMints('testnet', 24999.99877, 25000, 10000, 50000)
+            expect(p).to.deep.equal({ short: 0.00123, mints: [0.00123], reason: null })
+            for (const m of p.mints) expect(m.toFixed(8).replace(/\.?0+$/, '')).to.match(EIGHT_PLACES)
+            expect(String(p.mints[0])).to.equal('0.00123')
+        })
+
+        it('splits a fractional shortfall into cap-sized mints that sum to it exactly', function () {
+            const p = planMints('testnet', 12000.5, 25000, 10000, 50000)
+            expect(p.mints).to.deep.equal([10000, 2999.5])
+            expect(p.short).to.equal(12999.5)
+            const p2 = planMints('testnet', 0.1 + 0.2, 25000, 10000, 50000)
+            expect(p2.mints).to.deep.equal([10000, 10000, 4999.7])
+        })
+
+        it('names the exact shortfall on mainnet', function () {
+            expect(planMints('mainnet', 24999.99877, 25000, 10000, 50000).reason).to.match(/acquire 0\.00123 more/)
+        })
+
+        it('needs no mint when the balance rounds to the stake at 8 places', function () {
+            expect(planMints('testnet', 24999.999999999, 25000, 10000, 50000)).to.deep.equal({ short: 0, mints: [], reason: null })
         })
     })
 })

@@ -30,8 +30,9 @@
  * The gate refuses to create a bootstrap from a source that is:
  *   - missing, not running, restarting, or crash-looping
  *   - reporting an unhealthy/halted status on its own health surface
- *   - carrying a durable halt marker in its database: a decoder REORG_HALT row
- *     (events.code = 'REORG_HALT') or an uncleared xchain-sync divergence halt
+ *   - carrying a durable halt marker in its database: a live decoder REORG_HALT
+ *     row (events.code = 'REORG_HALT' with no newer REORG_HALT_CLEARED row
+ *     superseding it) or an uncleared xchain-sync divergence halt
  *     (sync_halt with cleared_at IS NULL). For an indexer source both its own
  *     database and the PAIRED DECODER's are read: REORG_HALT is written only in the
  *     decoder's (an indexer's own events table carries REORG and TRAIN_ACTIVATION_HALT
@@ -156,6 +157,19 @@ async function probeServiceStatus(containerId, port, runner) {
         return (parsed && parsed.result !== undefined) ? parsed.result : parsed
     }
     throw lastErr || new Error('no status probe succeeded')
+}
+
+// One GET on a service's own readiness surface (the indexer's /status, the decoder's /live),
+// parsed, or null when the route cannot be read. A non-2xx answer (wget exits non-zero and
+// prints no body) reads as null on purpose: the container healthcheck already shows that fault.
+async function probeReadinessSurface(containerId, port, route, runner) {
+    try {
+        const { stdout } = await runner('docker', ['exec', containerId, 'wget', '-qO-', `http://localhost:${port}${route}`])
+        const parsed = JSON.parse(String(stdout || '').trim())
+        return (parsed && typeof parsed === 'object') ? parsed : null
+    } catch (_) {
+        return null
+    }
 }
 
 // Refuse unless `module` on coin/network is a known-good bootstrap source.
@@ -355,5 +369,6 @@ module.exports = {
     // StatusService reads a decoder's health surface through the same probe so
     // `xchain-node ps` can show a latent REORG_HALT.
     probeServiceStatus,
+    probeReadinessSurface,
     MODULE_API_PORT_KEY
 }

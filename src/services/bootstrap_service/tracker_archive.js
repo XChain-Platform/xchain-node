@@ -38,7 +38,7 @@ const { redactSecrets } = require('../../utils/helpers')
 let { maybeSignBootstrap } = require('./archive_signing')
 let { startProgress, buildDateTimeString, getWorkDir, assertBootstrapCapacity, ensureDir, ensureDirWritable } = require('./workspace')
 const trackerHeight = require('./tracker_height')
-const { readTrackerCommittedHeight, readTrackerHeightAfterRestart, chooseArchiveHeight, refusePreStopOnlyHeight } = trackerHeight
+const { readTrackerCommittedHeight, readTrackerHeightAfterRestart, readFrozenStoreHeight, chooseArchiveHeight, refusePreStopOnlyHeight } = trackerHeight
 const { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 
@@ -190,9 +190,11 @@ async function makeBootstrapUtxoTracker(coin, network) {
             `(exit code ${stop.exitCode}, ${stop.budget} s budget); no archive was built or signed`)
         const snapshotTaken = await takeTrackerSnapshot(context, endMaintenanceWindow)
         await compressTrackerArchive(context, snapshotTaken)
+        // The archived store's own height, read before the fallback restart (snapshot path: the snapshot is still pinned until the finally).
+        context.frozenHeight = await readFrozenStoreHeight(context.volumeName, snapshotTaken ? `/data/${TRACKER_SNAPSHOT_DIR}` : '/data')
         // Fallback path: the store is archived, so bring the tracker back before the wrap and sign, and read its height there.
         if (!snapshotTaken) await restartTrackerAndReadHeight(context, endMaintenanceWindow)
-        context.archiveHeight = chooseArchiveHeight(context.preStopHeight, context.postRestartHeight)
+        context.archiveHeight = chooseArchiveHeight(context.preStopHeight, context.postRestartHeight, context.frozenHeight)
         await finalizeTrackerArchive(coin, network, context)
     } finally {
         await cleanupTrackerArchive(context.volumeName, context.containerId, context.containerRestored, endMaintenanceWindow)
@@ -221,6 +223,7 @@ async function prepareTrackerArchive(coin, network) {
     // refuses the publish (chooseArchiveHeight). With neither reading the archive carries no height (BootstrapNodeTipGuard: unknown).
     context.preStopHeight = await readTrackerCommittedHeight(coin, network, context.containerId)
     context.postRestartHeight = null
+    context.frozenHeight = null
 
     // Staging and output dirs are prepared before the stop for the same reason as the capacity check: a read-only mount or a missing parent should not be
     // discovered with the tracker already dark.
@@ -290,18 +293,13 @@ async function takeTrackerSnapshot(context, endMaintenanceWindow) {
         snapshotTaken = await snapshotTrackerVolume(context.volumeName)
     } catch (err) {
         logger.info(`Volume snapshot unavailable (${err.message}); compressing with the tracker stopped.`)
-        // A half-written snapshot must not be swept into the fallback
-        // archive, and a volume we cannot clean is not one we can publish
-        // from: let this throw into the outer finally, which restarts the
-        // container.
+        // A half-written snapshot must not be swept into the fallback archive, and a volume we cannot clean is not one we can publish
+        // from: let this throw into the outer finally, which restarts the container.
         await removeTrackerSnapshot(context.volumeName)
     }
 
-    // The whole point of the snapshot: the outage ends HERE, seconds after
-    // the stop, instead of after the multi-hour compress below. Without it
-    // the monthly cron took each mainnet encoder's tracker dark for the
-    // full run (2026-08-01: 3h36m BTC, 1h04m LTC, 42m DOGE), which the
-    // encoder correctly published as tracker_reachable:false.
+    // The whole point of the snapshot: the outage ends HERE, seconds after the stop, instead of after the multi-hour compress below.
+    // Without it the monthly cron took each mainnet encoder's tracker dark for the full run (2026-08-01: 3h36m BTC, 1h04m LTC, 42m DOGE).
     if (snapshotTaken) {
         logger.info(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container (compressing from the snapshot)...`)
         await restartTrackerAndReadHeight(context, endMaintenanceWindow)
@@ -396,5 +394,6 @@ module.exports = {
     readTrackerCommittedHeight,
     // Exported for tests
     chooseArchiveHeight,
+    readFrozenStoreHeight,
     readTrackerHeightAfterRestart
 }

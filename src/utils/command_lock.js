@@ -39,8 +39,11 @@
  * removes the file only when both the pid and the nonce still match, so
  * neither a stale-lock takeover nor a recycled pid is clobbered on exit.
  * A self-update releases its parent-owned lock before starting the re-exec
- * child. The child then competes for the lock normally, so another mutator
- * that acquires it first causes the child to refuse the update.
+ * child. The update run that re-takes it waits at least
+ * SELF_UPDATE_HANDOFF_WAIT_MS (cli/dispatch.js, 30s, even when
+ * XCHAIN_NODE_MUTATING_LOCK_WAIT_MS is lower or 0), so a mutator that
+ * slipped into the gap delays the update; it refuses only if that mutator
+ * still holds the lock when the wait runs out.
  *
  * Ops note: clearing a wedged lock by hand may mean deleting both
  * command.lock and command.lock.reclaim.
@@ -61,6 +64,7 @@ const RECLAIM_FILE_SUFFIX = '.reclaim'
 // live holder, or concedes one reclaim attempt to a contender.
 const MAX_ACQUIRE_ATTEMPTS = 8
 const RECLAIM_POLL_MS      = 5
+const UNREADABLE_LOCK_HOLDER = Object.freeze({ unreadable: true })
 
 function getLockFilePath() {
     // XCHAIN_NODE_LOCK_DIR is a test/ops override; default matches the
@@ -116,7 +120,7 @@ function adoptCommandLock(release) {
 // section, and removing it would restore the very race the marker prevents.
 function breakAbandonedReclaimMarker(reclaimFile) {
     const owner = readLockHolder(reclaimFile)
-    if (owner && isPidAlive(owner.pid)) return
+    if (isLockHolderActive(owner)) return
     try { fs.unlinkSync(reclaimFile) } catch { /* already gone */ }
 }
 
@@ -141,7 +145,7 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
         const current = statLock(lockFile)
         if (!current) return
         const holder = readLockHolder(lockFile)
-        if (holder && isPidAlive(holder.pid)) return
+        if (isLockHolderActive(holder)) return
         if (!sameFile(observed, current)) return
         try { fs.unlinkSync(lockFile) } catch (unlinkErr) {
             if (unlinkErr.code !== 'ENOENT') throw unlinkErr
@@ -152,9 +156,8 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
 }
 
 // One acquire pass with serialized stale-lock removal and bounded retries.
-// Returns a release() on success; throws a tagged ELOCKHELD error when a LIVE
-// holder owns the lock (the caller may then choose to wait and retry); throws any
-// other error (fs failure, or lost post-stale race) as fatal.
+// A live or unreadable holder throws ELOCKHELD, which callers can retry;
+// filesystem failures and lost races stay fatal.
 function tryAcquireOnce(lockFile, payload, pid, nonce) {
     const reclaimFile = lockFile + RECLAIM_FILE_SUFFIX
     for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt++) {
@@ -165,7 +168,16 @@ function tryAcquireOnce(lockFile, payload, pid, nonce) {
             if (err.code !== 'EEXIST') throw err
             const holder   = readLockHolder(lockFile)
             const observed = statLock(lockFile)
-            if (holder && isPidAlive(holder.pid)) {
+            if (isLockHolderActive(holder)) {
+                if (holder === UNREADABLE_LOCK_HOLDER) {
+                    const held = new Error(
+                        `Another xchain-node instance holds the command lock ` +
+                        `(${lockFile} cannot be read). Wait for it to finish, ` +
+                        `or inspect the lock file permissions before removing it.`
+                    )
+                    held.code = 'ELOCKHELD'
+                    throw held
+                }
                 const what = holder.command ? ` (running "${holder.command}")` : ''
                 const held = new Error(
                     `Another xchain-node instance${what} holds the command lock ` +
@@ -175,7 +187,7 @@ function tryAcquireOnce(lockFile, payload, pid, nonce) {
                 held.code = 'ELOCKHELD'
                 throw held
             }
-            // Holder pid is dead (or the file is unreadable garbage): the lock is
+            // Holder pid is dead (or the file is unparseable garbage): the lock is
             // stale, likely from a crashed/killed run. The file may also have gone
             // between the read and the stat, in which case the retry just creates it.
             if (observed) reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce)
@@ -221,9 +233,14 @@ function readLockHolder(lockFile) {
     try {
         const parsed = JSON.parse(fs.readFileSync(lockFile, 'utf8'))
         return (parsed && Number.isInteger(parsed.pid)) ? parsed : null
-    } catch {
+    } catch (err) {
+        if (err.code === 'EACCES' || err.code === 'EPERM') return UNREADABLE_LOCK_HOLDER
         return null
     }
+}
+
+function isLockHolderActive(holder) {
+    return holder === UNREADABLE_LOCK_HOLDER || !!holder && isPidAlive(holder.pid)
 }
 
 function releaseCommandLock(lockFile, pid, nonce) {

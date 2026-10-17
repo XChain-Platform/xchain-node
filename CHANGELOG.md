@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-17
+
+### Added
+- Scoped module database and user names to a non-default node prefix and proved the scope end to end.
+- Showed NOT READY in the process list from the indexer and decoder readiness verdicts.
+
+### Changed
+- Defaulted the bundled MariaDB buffer pool to 1G and kept it overridable.
+- Refused cross-major release downgrades and decoder or indexer setups that would share the default external database name.
+
+### Fixed
+- Built and signed the DOGE signer's reveal before broadcasting its commit, and kept the signed reveal when only its broadcast fails.
+- Classified containers by name only and preserved unreadable command locks.
+
+### Security
+- Replaced vulnerable Bitcoin signing dependencies and bumped js-yaml and brace-expansion.
+
+### Changed
+- Started the bundled MariaDB with a 1G InnoDB buffer pool by default, settable with `XCHAIN_NODE_DB_BUFFER_POOL_SIZE`.
+
 ## [0.23.0] - 2026-10-11
 
 ### Added

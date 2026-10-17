@@ -103,13 +103,13 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.startModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(stubs.db.getModuleContainer.calledOnce).to.be.true
+            expect(stubs.db.getModuleContainerStrict.calledOnce).to.be.true
             expect(stubs.startContainer.calledWith('container-id-123')).to.be.true
         })
 
         it('skips module when container ID is not found', async function () {
             const stubs = makeStubs()
-            stubs.db.getModuleContainer.resolves(null)
+            stubs.db.getModuleContainerStrict.resolves(null)
             const ops = loadOperations(stubs)
             const result = await ops.startModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
             expect(result).to.be.true
@@ -135,8 +135,8 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(stubs.stopContainerByName.calledWith('container-id-123', 30)).to.be.true
-            expect(stubs.stopContainer.called).to.be.false
+            expect(stubs.stopContainer.calledOnceWithExactly('container-id-123', 30)).to.be.true
+            expect(stubs.stopContainerByName.called).to.be.false
         })
 
         it('reads the container before the stop so a drain that predates the budget is named', async function () {
@@ -146,7 +146,7 @@ describe('moduleOperations', function () {
             try {
                 await loadOperations(stubs).stopModules({ bitcoin: { mainnet: ['xchain-decoder'] } })
                 expect(stubs.getContainerStopSettings.calledOnceWith('container-id-123')).to.be.true
-                expect(stubs.getContainerStopSettings.calledBefore(stubs.stopContainerByName)).to.be.true
+                expect(stubs.getContainerStopSettings.calledBefore(stubs.stopContainer)).to.be.true
                 expect(warn.args.some(a => /xchain-decoder \(bitcoin mainnet\) was created under a 300 s stop budget/.test(String(a[0])))).to.be.true
             } finally {
                 warn.restore()
@@ -172,7 +172,11 @@ describe('moduleOperations', function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
             await ops.restartModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(stubs.restartContainer.calledWith('container-id-123')).to.be.true
+            // A budgeted stop then a start, never docker's bare restart and its ten second default.
+            expect(stubs.stopContainer.firstCall.args).to.deep.equal(['container-id-123', 30])
+            expect(stubs.startContainer.calledOnceWith('container-id-123')).to.be.true
+            expect(stubs.stopContainer.calledBefore(stubs.startContainer)).to.be.true
+            expect(stubs.restartContainer.called).to.be.false
             expect(stubs.statusChanged.calledOnce).to.be.true
         })
     })

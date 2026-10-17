@@ -52,7 +52,10 @@ function otherCommandGetsLock(command = 'update') {
 function makeExplorer(chain) {
     return {
         getAddress:     sinon.stub().resolves({ balances: { confirmed: '0.001', pending: '0' } }),
-        getToken:       sinon.stub().resolves({ mints: { max: 10000, address_max: 50000 } }),
+        // An open mint: caps set, no window, no lock, and no earlier MINT from the stake address.
+        getToken:       sinon.stub().resolves({ mints: { max: 10000, address_max: 50000, start_block: 0, stop_block: 0 },
+            locks: { mint: false } }),
+        getMints:       sinon.stub().resolves({ total: 0, data: [] }),
         getValidators:  sinon.stub().resolves({ data: chain.existing ? [chain.existing] : [] }),
         getDelegations: sinon.stub().resolves({ total: 0, data: [] }),
         getStatus:      sinon.stub().resolves({ last_block: Object.fromEntries(

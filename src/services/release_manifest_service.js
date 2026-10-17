@@ -29,9 +29,12 @@
 const fs    = require('fs')
 const path  = require('path')
 const axios = require('axios')
+const { version: installedNodeVersion } = require('../../package.json')
 
 const { githubApiHeaders, githubRateLimitError, GITHUB_API_TIMEOUT_MS, GITHUB_DOWNLOAD_TIMEOUT_MS } = require('../utils/github_api')
 const { verifyManifestForTag } = require('./release_signature_service')
+const { allowMajorDowngradeForRun, assertMajorDowngradeAllowed } = require('./self_update_service')
+const { hostEnv } = require('../config')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -254,9 +257,15 @@ async function resolveLatestReleaseTag() {
  * @returns {Promise<{kind:'release'|'branch', ref:string, tag:string|null,
  *                    manifest:object|null, resolvedFrom:string}>}
  */
-async function resolveInstallTarget(ref, { defaultBranch = 'master', fallbackToBranch = true } = {}) {
+async function resolveInstallTarget(ref, {
+    defaultBranch = 'master', fallbackToBranch = true, env = hostEnv(),
+    logger: resolutionLogger = logger, installedVersion = installedNodeVersion
+} = {}) {
+    const allowMajorDowngrade = allowMajorDowngradeForRun({ env, logger: resolutionLogger })
+
     if (isReleaseRef(ref)) {
         const tag = ref.trim()
+        assertMajorDowngradeAllowed(installedVersion, tag, allowMajorDowngrade)
         return {
             kind: 'release',
             ref: tag,
@@ -289,6 +298,8 @@ async function resolveInstallTarget(ref, { defaultBranch = 'master', fallbackToB
         logger.info(`No published xchain-node release yet; installing '${defaultBranch}' (UNRELEASED).`)
         return { kind: 'branch', ref: defaultBranch, tag: null, manifest: null, resolvedFrom: 'no published release' }
     }
+
+    assertMajorDowngradeAllowed(installedVersion, tag, allowMajorDowngrade)
 
     return {
         kind: 'release',

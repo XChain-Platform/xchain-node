@@ -19,7 +19,7 @@
  * image as a bare ID, so the scan went blind to a live container, and the
  * orphan purge then DELETED its registry row. From then on update/start/stop
  * silently no-op'd for that module while `sync` reported "already in sync".
- * Identity now comes from the CONTAINER NAME (image as fallback).
+ * Identity now comes from the CONTAINER NAME only; the image never decides it.
  ********************************************************************/
 
 const sinon      = require('sinon')
@@ -57,11 +57,24 @@ describe('DiscoveryService.classifyContainer', function () {
         })).to.deep.equal({ module: 'xchain-indexer', coin: 'litecoin', network: 'mainnet' })
     })
 
-    it('falls back to the image name when the container was renamed externally', function () {
+    it('never classifies a container outside the naming scheme by its module image', function () {
+        // Another stack on the same host (here a compose project) runs the same
+        // module images; claiming its containers would point every command at them.
+        for (const [name, image] of [
+            ['other-stack-hub-1',       'xchain-node-xchain-hub'],
+            ['other-stack-db-1',        'xchain-node-database'],
+            ['other-stack-doge-miner-1', 'xchain-node-dogecoin-regtest-xchain-regtest-miner'],
+            ['my-custom-name',          'xchain-node-bitcoin-regtest-xchain-decoder'],
+        ]) {
+            expect(svc.classifyContainer({ Names: name, Image: image }), name).to.equal(null)
+        }
+        // This install's own names still classify whatever image they run.
+        expect(svc.classifyContainer({ Names: 'xchain-node-xchain-hub', Image: 'xchain-node-xchain-hub' }))
+            .to.deep.equal({ module: 'xchain-hub', coin: '', network: '' })
         expect(svc.classifyContainer({
-            Names: 'my-custom-name',
-            Image: 'xchain-node-bitcoin-regtest-xchain-decoder',
-        })).to.deep.equal({ module: 'xchain-decoder', coin: 'bitcoin', network: 'regtest' })
+            Names: 'xchain-node-bitcoin-regtest-xchain-utxo-tracker',
+            Image: 'xchain-node-bitcoin-regtest-xchain-utxo-tracker',
+        })).to.deep.equal({ module: 'xchain-utxo-tracker', coin: 'bitcoin', network: 'regtest' })
     })
 
     it('classifies shared modules (no coin/network)', function () {
@@ -266,5 +279,52 @@ describe('DiscoveryService.scanAndRegisterModules fail-closed registry', functio
         try { await svc.scanAndRegisterModules({ silent: true }) } catch (e) { err = e }
         expect(err).to.not.equal(null)
         expect(err.message).to.match(/Couldn't reconcile database/)
+    })
+})
+
+// A container started by hand from a module image under another name is not a
+// module, so it must never take the row from the container holding the CLI name.
+describe('DiscoveryService.scanAndRegisterModules name-over-image ranking', function () {
+
+    afterEach(() => sinon.restore())
+
+    const IMAGE = 'xchain-node-bitcoin-mainnet-xchain-indexer'
+    const debug = { Names: 'some-debug-name', Image: IMAGE, ID: 'debugdebugdebugdebug', State: 'running' }
+    const real  = { Names: IMAGE, Image: IMAGE, ID: 'realrealrealrealreal', State: 'running' }
+
+    it('gives the row to the named container when a newer image-only container also runs', async function () {
+        const { svc, db } = loadService({ containers: [debug, real] })
+        await svc.scanAndRegisterModules({ silent: true })
+        sinon.assert.calledWith(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'realrealrealrealreal')
+        sinon.assert.neverCalledWith(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'debugdebugdebugdebug')
+    })
+
+    it('leaves a row already holding the named container alone', async function () {
+        const { svc, db } = loadService({
+            containers: [debug, real],
+            db: {
+                getModuleContainer:     sinon.stub().resolves('realrealrealrealreal'),
+                getAllModuleContainers: sinon.stub().resolves([
+                    { module: 'xchain-indexer', coin: 'bitcoin', network: 'mainnet', container_id: 'realrealrealrealreal' },
+                ]),
+            },
+        })
+        const changed = await svc.scanAndRegisterModules({ silent: true })
+        expect(changed).to.equal(0)
+        sinon.assert.notCalled(db.setModuleContainer)
+    })
+
+    it('keeps the row on a stopped named container over a running image-only one', async function () {
+        const { svc, db } = loadService({ containers: [debug, { ...real, State: 'exited' }] })
+        await svc.scanAndRegisterModules({ silent: true })
+        sinon.assert.calledOnceWithExactly(db.setModuleContainer, 'xchain-indexer', 'bitcoin', 'mainnet', 'realrealrealrealreal')
+    })
+
+    it('registers nothing when only containers outside the naming scheme run module images', async function () {
+        const stale = { Names: 'renamed-old', Image: IMAGE, ID: 'staleSTALEstaleSTALE', State: 'exited' }
+        const live  = { Names: 'other-stack-indexer-1', Image: IMAGE, ID: 'liveLIVEliveLIVElive', State: 'running' }
+        const { svc, db } = loadService({ containers: [stale, live] })
+        await svc.scanAndRegisterModules({ silent: true })
+        sinon.assert.notCalled(db.setModuleContainer)
     })
 })

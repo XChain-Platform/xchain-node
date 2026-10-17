@@ -111,7 +111,7 @@ membership on the explorer, is `xchain-documentation/operations/run-a-validator.
 
 ## Host environment variables
 
-Five env vars override where xchain-node stores its filesystem state. Set them in the shell or systemd unit before running `xchain-node install`. Each falls back to a path inside this repo if unset, so existing installs are unaffected.
+Six env vars override where xchain-node stores its filesystem state. Set them in the shell or systemd unit before running `xchain-node install`. The data, temporary, modules, crypto-node, and config directories fall back to paths inside this repo if unset, so existing installs are unaffected. The command lock defaults to `~/.xchain-node/command.lock`.
 
 | Variable | What goes here |
 |---|---|
@@ -120,17 +120,18 @@ Five env vars override where xchain-node stores its filesystem state. Set them i
 | `XCHAIN_NODE_MODULES_DIR` | Git clones of sibling xchain-* repos |
 | `XCHAIN_NODE_CRYPTO_NODES_DIR` | Downloaded coin-node binaries |
 | `XCHAIN_NODE_CONFIG_DIR` | Generated per-service `.env` files |
+| `XCHAIN_NODE_LOCK_DIR` | Directory for the cross-process command lock (`command.lock` and its reclaim marker) |
 
 On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/configuration.md).
 
 ### Bundled MariaDB tuning
 
-When xchain-node manages its own MariaDB container, these optional env vars override server defaults. They are applied as `mysqld` startup args at install time, so they **persist across a container recreate** (a `conf.d` file edited inside a running container does not). Each is unset by default so image defaults remain unchanged. Set them before `xchain-node install`.
+When xchain-node manages its own MariaDB container, these optional env vars override server defaults. They are applied as `mysqld` startup args at install time, so they **persist across a container recreate** (a `conf.d` file edited inside a running container does not). Each is unset by default so image defaults remain unchanged, except `XCHAIN_NODE_DB_BUFFER_POOL_SIZE`, which defaults to `1G` (a value that is not digits with an optional `K`, `M` or `G` suffix logs a warning and falls back to `1G`), and `XCHAIN_NODE_DB_MAX_CONNECTIONS`, which defaults to `1000`. Set them before `xchain-node install`.
 
 | Variable | mysqld setting | When to set |
 |---|---|---|
 | `XCHAIN_NODE_DB_DATA_DIR` | datadir bind-mount (`-v <dir>:/var/lib/mysql`) | Pin the datadir to a fast NVMe mount instead of the Docker data-root |
-| `XCHAIN_NODE_DB_BUFFER_POOL_SIZE` | `innodb-buffer-pool-size` (e.g. `16G`) | Large/multi-DB hosts where the stock 128 MB thrashes on multi-GB datasets |
+| `XCHAIN_NODE_DB_BUFFER_POOL_SIZE` | `innodb-buffer-pool-size` (e.g. `16G`) | Hosts that need more (or less) than the 1G default; the stock 128 MB thrashes on multi-GB datasets |
 | `XCHAIN_NODE_DB_MAX_CONNECTIONS` | `max-connections` (e.g. `300`) | Many connection pools against one DB (replicas, shared services) |
 | `XCHAIN_NODE_DB_FLUSH_LOG_AT_TRX_COMMIT` | `innodb-flush-log-at-trx-commit` (e.g. `2`) | Replica/cache DBs where a 1-second crash window is acceptable for speed |
 
@@ -138,13 +139,13 @@ When xchain-node manages its own MariaDB container, these optional env vars over
 
 Every persistent service container carries a Docker healthcheck, but Docker itself takes no action on the `unhealthy` state (`--restart unless-stopped` only fires when the process exits). An alive-but-stalled service would otherwise stay wedged until an operator notices it in `docker ps`. `xchain-node autoheal` closes that loop: it restarts containers that have been continuously unhealthy past a grace window, for services opted in via `autoheal: true` in the healthcheck table (currently the decoder and indexer; the utxo-tracker is deliberately excluded because it halts on purpose rather than exiting, and a restart would just re-halt it; the encoder is deliberately excluded because its health probe reports utxo-tracker readiness (unreachable, halted, lagging or mempool not ready), which restarting the encoder cannot clear).
 
-The command is one-shot and never prompts or daemonizes. Unattended remediation requires wiring it to a cron entry or systemd timer, e.g. `*/5 * * * * xchain_node autoheal`. Detection-to-restart latency is the timer interval plus the health retry budget plus the grace window. Use `--dry-run` to see restart candidates without acting. Exit code is non-zero only when a restart was attempted and failed.
+The command is one-shot and never prompts or daemonizes. Unattended remediation requires wiring it to a cron entry or systemd timer, e.g. `*/5 * * * * xchain_node autoheal`. Detection-to-restart latency is the timer interval plus the health retry budget plus the grace window. Use `--dry-run` to see restart candidates without acting. Exit codes: `1` when a restart was attempted and failed, `2` when a container has been restarted twice this episode without recovering (a wedge restarts are not clearing; investigate), and `0` otherwise. The escalation also logs a warning on stderr, so a systemd `OnFailure=` hook trips on it and cron mails it even when stdout is discarded. It repeats on every pass until the container recovers.
 
 | Variable | Default | What it controls |
 |---|---|---|
 | `XCHAIN_NODE_AUTOHEAL_GRACE_MS` | `120000` | How long a container must be continuously unhealthy before a restart is considered |
 | `XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS` | `600000` | Base wait before autoheal restarts the same container again (anti-flap). The first retry waits this long; each further restart of a container that has not recovered doubles the wait, up to `XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS` (with defaults: 10m, 20m, 40m and so on, capped at 6h). The doubling resets once the container recovers |
-| `XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS` | `21600000` | Upper bound on the doubled cooldown. A container that never recovers settles at one restart per ceiling; there is no attempt cap, and every skipped pass logs an "investigate" line |
+| `XCHAIN_NODE_AUTOHEAL_COOLDOWN_CEILING_MS` | `21600000` | Upper bound on the doubled cooldown. A container that never recovers settles at one restart per ceiling; there is no attempt cap, and from the second unrecovered restart on every pass logs an "investigate" warning and exits `2` |
 | `XCHAIN_NODE_AUTOHEAL_PROBATION_MS` | `150000` | How long after an autoheal restart a passing health probe counts as that restart's own artifact rather than recovery, so it does not reset the backoff. If you widen a service's start period with `XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>`, widen this to match (start period plus interval times retries, plus margin) |
 | `XCHAIN_NODE_AUTOHEAL_STATE_DIR` | `~/.xchain-node` | Where the state file (`autoheal-state.json`) lives: last restart times, unhealthy onsets and the per-container restart count that drives the backoff. Falls back to `XCHAIN_NODE_LOCK_DIR` when that is set, otherwise `~/.xchain-node` |
 

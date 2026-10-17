@@ -1,9 +1,9 @@
 'use strict'
 
-let XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, restartContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainerByName, stopModuleContainer, getContainerStopSettings
+let XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainer, stopModuleContainer, restartModuleContainer, getContainerStopSettings, isNoSuchContainerError
 
 function configure(dependencies) {
-    ({ XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, restartContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainerByName, stopModuleContainer, getContainerStopSettings } = dependencies)
+    ({ XChainService, failureReason, sleep, db, execContainer, getDockerContainerImageName, logContainer, shellContainer, startContainer, startDockerMonitor, statusChanged, stopContainer, stopModuleContainer, restartModuleContainer, getContainerStopSettings, isNoSuchContainerError } = dependencies)
 }
 
 async function logModules(servicesList, follow = true) {
@@ -71,60 +71,77 @@ async function monitorModules(servicesList, follow = true) {
     return true
 }
 
-async function restartModules(servicesList) {
-    for (const nextCoin in servicesList) {
-        for (const nextNetwork in servicesList[nextCoin]) {
-            for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
+// Read a registry row strictly: a failed read is recorded as a failure, never taken for "not installed".
+async function readRegisteredContainer(target, failures) {
+    try {
+        return await db.getModuleContainerStrict(target.module, target.coin, target.network)
+    } catch (err) {
+        const reason = `registry lookup failed (${failureReason(err)})`
+        console.error(`${target.module} (${target.coin} ${target.network}): ${reason}`)
+        failures.push({ ...target, reason })
+        return null
+    }
+}
+
+// Run one docker action on every selected module that is installed, attempting all of them, and
+// throw one error naming each module that failed so the command can exit non-zero.
+async function controlModules(verb, servicesList, act) {
+    const failures = []
+    for (const coin in servicesList) {
+        for (const network in servicesList[coin]) {
+            for (const module of servicesList[coin][network]) {
+                const target = { module, coin, network }
+                const containerId = await readRegisteredContainer(target, failures)
                 if (!containerId) continue
                 try {
-                    await restartContainer(containerId)
-                    await statusChanged()
+                    await act(target, containerId)
                 } catch (err) {
-                    console.log(err)
+                    console.error(`${verb}: ${module} (${coin} ${network}) FAILED: ${failureReason(err)}`)
+                    failures.push({ ...target, reason: failureReason(err) })
                 }
             }
         }
     }
+    if (failures.length > 0) {
+        const detail = failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; ')
+        const err = new Error(`${verb} failed for ${failures.length} module${failures.length === 1 ? '' : 's'}: ${detail}`)
+        err.failures = failures
+        throw err
+    }
     return true
+}
+
+async function restartModules(servicesList) {
+    return controlModules('restart', servicesList, async ({ module, coin, network }, containerId) => {
+        // With the same stop budget as `stop`, so a restart cannot SIGKILL a service mid-block either.
+        // A container docker says is gone stays a failure here: restart promises a running service.
+        await restartModuleContainer(stopContainer, startContainer, module, coin, network, containerId,
+            undefined, getContainerStopSettings)
+        try {
+            await statusChanged()
+        } catch (err) {
+            throw new Error(`restarted, but the hub and explorer config refresh failed (${failureReason(err)})`)
+        }
+    })
 }
 
 async function stopModules(servicesList) {
-    for (const nextCoin in servicesList) {
-        for (const nextNetwork in servicesList[nextCoin]) {
-            for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                if (!containerId) continue
-                try {
-                    // With the service's budget, not docker's ten seconds: a bare
-                    // `docker stop` on a container created before the budget was
-                    // stamped on it is a coin flip for a service mid-block.
-                    await stopModuleContainer(stopContainerByName, nextModule, nextCoin, nextNetwork, containerId,
-                        undefined, getContainerStopSettings)
-                } catch (err) {
-                    console.log(err)
-                }
-            }
+    return controlModules('stop', servicesList, async ({ module, coin, network }, containerId) => {
+        try {
+            // With the service's budget, not docker's ten seconds: a bare `docker stop` on a container
+            // created before the budget was stamped on it is a coin flip for a service mid-block.
+            await stopModuleContainer(stopContainer, module, coin, network, containerId,
+                undefined, getContainerStopSettings)
+        } catch (err) {
+            // Skip a container docker says is gone: it is not running, which is what stop promises.
+            if (!isNoSuchContainerError(err)) throw err
+            console.log(`${module} (${coin} ${network}): the registered container no longer exists; nothing to stop`)
         }
-    }
-    return true
+    })
 }
 
 async function startModules(servicesList) {
-    for (const nextCoin in servicesList) {
-        for (const nextNetwork in servicesList[nextCoin]) {
-            for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                if (!containerId) continue
-                try {
-                    await startContainer(containerId)
-                } catch (err) {
-                    console.log(err)
-                }
-            }
-        }
-    }
-    return true
+    return controlModules('start', servicesList, (target, containerId) => startContainer(containerId))
 }
 
 // The decoder's clear tool, relative to the decoder container's working directory.
@@ -289,15 +306,17 @@ async function bounceResetModules(context) {
                 continue
             }
             if (!containerId) continue /* not installed, skip */
-            // restartContainer = docker stop + docker start; sufficient to re-enter Node's bootstrap with the freshly-created DB ready.
+            // A budgeted stop then a start, enough to re-enter Node's bootstrap with the freshly-created DB ready.
             // A failed restart can leave the wiped service stopped, so it gets the start pass's one retry and is then reported, never swallowed.
+            const bounce = () => restartModuleContainer(stopContainer, startContainer, module, coin, network, containerId,
+                undefined, getContainerStopSettings)
             try {
-                await restartContainer(containerId)
+                await bounce()
             } catch (firstErr) {
                 console.warn(`Failed to restart ${module} (${firstErr && firstErr.message}); retrying in 3s...`)
                 await sleep(3000)
                 try {
-                    await restartContainer(containerId)
+                    await bounce()
                 } catch (retryErr) {
                     startFailures.push({ module, error: `post-reset restart failed (${(retryErr && retryErr.message) || String(retryErr)})` })
                 }

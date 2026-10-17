@@ -47,25 +47,21 @@ function logIfNotSilent(silent, message) {
     if (!silent) logger.info(message)
 }
 
-// Resolve a docker container to its registry identity { module, coin, network }
-// (coin/network are '' for shared modules), or null for non-xchain containers.
-//
-// Identity comes from the CONTAINER NAME, the stable key the CLI itself
-// assigns at creation (and what the file header above promises). The image
-// tag is NOT reliable: rebuilding a module's image while the old container is
-// still running steals the tag, docker then reports that container's image as
-// a bare ID, and an image-keyed scan goes blind to a live, healthy container.
-// Worse, the orphan purge below then DELETES its registry row, after which
-// update/start/stop silently no-op for it (a litecoin-mainnet
-// xchain-indexer incident, 2026-06-11). The image name remains a fallback for
-// containers that were renamed externally.
-function classifyContainer(container) {
-    const name  = String((Array.isArray(container.Names) ? container.Names[0] : container.Names) || '').replace(/^\//, '')
-    const image = String(container.Image || '')
-    const identity = name.startsWith(NODE_PREFIX + SEP) ? name : image
-    if (!identity.startsWith(NODE_PREFIX + SEP)) return null
+// Read a container's name the way docker reports it: first entry of an array, leading slash dropped.
+function containerName(container) {
+    return String((Array.isArray(container.Names) ? container.Names[0] : container.Names) || '').replace(/^\//, '')
+}
 
-    const rest = identity.substr(NODE_PREFIX.length + SEP.length)
+// Resolve a docker container to its registry identity { module, coin, network }
+// (coin/network are '' for shared modules), or null for any other container.
+// Identity is the container NAME the CLI assigns; the image tag can be stolen by a rebuild.
+function classifyContainer(container) {
+    const name = containerName(container)
+    // Refuse every name outside this install's scheme, whatever image it runs:
+    // another stack on the host may run the same module images under its own names.
+    if (!name.startsWith(NODE_PREFIX + SEP)) return null
+
+    const rest = name.substr(NODE_PREFIX.length + SEP.length)
     if (SHARED_MODULES.includes(rest)) return { module: rest, coin: "", network: "" }
 
     const parts = rest.split(SEP)
@@ -115,14 +111,9 @@ function moduleKey(module, coin, network) {
 async function registerContainers(containers, silent, seen) {
     let added       = 0
     let reconciled  = 0
-    // Sort containers so RUNNING ones come first. When multiple containers
-    // share the same expected key (e.g. an old exited container and a fresh
-    // running one), the running ID wins on the upsert.
-    containers.sort((a, b) => {
-        const ar = (a.State || '').toLowerCase() === 'running' ? 0 : 1
-        const br = (b.State || '').toLowerCase() === 'running' ? 0 : 1
-        return ar - br
-    })
+    // Rank RUNNING first (stable, so docker's newest-first breaks ties) before first-seen wins.
+    const rank = (c) => ((c.State || '').toLowerCase() === 'running' ? 0 : 1)
+    containers.sort((a, b) => rank(a) - rank(b))
 
     for (const nextContainer of containers) {
         const identity = classifyContainer(nextContainer)
@@ -130,11 +121,9 @@ async function registerContainers(containers, silent, seen) {
         const { module, coin, network } = identity
         const label = (coin || network) ? (coin + SEP + network + SEP + module) : module
 
-        // First-seen wins the upsert. Because the list is sorted RUNNING-first,
-        // the running container reconciles the row first; any later duplicate
-        // (e.g. a stopped container that classifies to the same key via the
-        // image fallback) is skipped so it cannot overwrite the live ID with a
-        // dead one. The key still records into `seen` for the orphan purge.
+        // First-seen wins the upsert, so the ranking above decides which ID holds the row;
+        // a later duplicate is skipped so it cannot overwrite it. The key still records
+        // into `seen` for the orphan purge.
         const key = moduleKey(module, coin, network)
         if (seen.has(key)) continue
         seen.add(key)
