@@ -95,6 +95,20 @@ describe('commandLock', () => {
         release()
     })
 
+    it('release does not clobber a successor lock owned by another pid', () => {
+        const release = acquireCommandLock({ command: 'install' })
+        // Simulate a stale-lock takeover: another process replaced the file.
+        fs.writeFileSync(getLockFilePath(), JSON.stringify({ pid: process.pid + 1, command: 'update' }))
+        release()
+        const holder = JSON.parse(fs.readFileSync(getLockFilePath(), 'utf8'))
+        assert.strictEqual(holder.pid, process.pid + 1, 'successor lock must survive our release')
+    })
+})
+
+describe('commandLock unreadable files', () => {
+    beforeEach(prepareCommandLock)
+    afterEach(cleanCommandLock)
+
     it('treats an EACCES lock read as held and preserves the lock', () => {
         const lockFile = getLockFilePath()
         fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }))
@@ -117,15 +131,6 @@ describe('commandLock', () => {
             fs.readFileSync = realReadFile
         }
         assert.strictEqual(fs.statSync(lockFile).ino, before)
-    })
-
-    it('release does not clobber a successor lock owned by another pid', () => {
-        const release = acquireCommandLock({ command: 'install' })
-        // Simulate a stale-lock takeover: another process replaced the file.
-        fs.writeFileSync(getLockFilePath(), JSON.stringify({ pid: process.pid + 1, command: 'update' }))
-        release()
-        const holder = JSON.parse(fs.readFileSync(getLockFilePath(), 'utf8'))
-        assert.strictEqual(holder.pid, process.pid + 1, 'successor lock must survive our release')
     })
 })
 
