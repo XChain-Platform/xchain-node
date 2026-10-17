@@ -46,124 +46,27 @@ const database = require('./config_service/database')
 const networks = require('./config_service/networks')
 const filters = require('./config_service/filters')
 const argumentsService = require('./config_service/arguments')
+const paths = require('./config_service/paths')
+const naming = require('./config_service/naming')
 const { validatePort } = require('./config_service/validation')
 
-function getModuleDir(module) {
-    return moduleDir + "/" + module
-}
+paths.configure({ fs, moduleDir, tmpDir, cryptoNodesDir, Coin, stringToCoin })
+naming.configure({
+    NODE_PREFIX, DEFAULT_NODE_PREFIX, SEP, DB_SEP,
+    DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
+    CoinTickerSymbol, Network, XChainService, scopedNodePrefixSegment
+})
 
-function getModuleTmpDir(module) {
-    return tmpDir + "/" + module
-}
-
-function getCryptoNodeDir(coin) {
-    if (!(coin in Coin)) {
-        coin = stringToCoin(coin)
-    }
-    return cryptoNodesDir + "/" + Coin[coin]
-}
-
-function removeModuleDir(module) {
-    fs.rmSync(getModuleDir(module), { recursive: true })
-}
-
-function removeModuleTmpDir(module) {
-    const dir = getModuleTmpDir(module)
-    if (fs.existsSync(dir)) {
-        fs.rmSync(dir, { recursive: true })
-    }
-}
-
-function createModuleTmpDir(module) {
-    const dir = getModuleTmpDir(module)
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir)
-    }
-}
-
-function moduleDirExists(module) {
-    return fs.existsSync(getModuleDir(module))
-}
-
-function checkIfModuleExists(module) {
-    const dir = getModuleDir(module)
-    return fs.existsSync(dir)
-        && fs.existsSync(dir + "/Dockerfile")
-        && fs.existsSync(dir + "/src")
-        && fs.existsSync(dir + "/package.json")
-}
-
-function checkIfCryptoNodeSourceExists(coin) {
-    const dir = getCryptoNodeDir(coin)
-    return fs.existsSync(dir)
-        && fs.existsSync(dir + "/Dockerfile")
-        && fs.existsSync(dir + "/src")
-}
-
-function getDockerContainerImageNamePrefix(module, coin, network) {
-    if (module === DB_MODULE_NAME || module === HUB_MODULE_NAME || module === EXPLORER_MODULE_NAME || module === SYNC_MODULE_NAME) {
-        return NODE_PREFIX
-    }
-    return NODE_PREFIX + SEP + coin + SEP + network
-}
-
-function getDockerContainerImageName(module, coin, network) {
-    return getDockerContainerImageNamePrefix(module, coin, network) + SEP + module
-}
-
-// Single source of truth for the UTXO tracker's Docker volume name. Two
-// NODE_PREFIX stacks of the same coin+network must not share one volume, so
-// non-default prefixes get a prefixed volume name; the default prefix keeps
-// the legacy unprefixed name (renaming it would orphan every existing
-// deployment's tracker data, forcing a fleet-wide resync). Previously this
-// rule lived only in ModuleService.buildAndUp; moduleOperations.resetModules
-// and all three BootstrapService sites re-derived the unprefixed name
-// independently, so a non-default NODE_PREFIX made reset/bootstrap/restore
-// silently operate on the wrong stack's volume (uuid:7523dd94, uuid:a61fc673).
-function getUtxoTrackerVolumeName(coin, network) {
-    const prefix = NODE_PREFIX === DEFAULT_NODE_PREFIX ? '' : `${NODE_PREFIX}${SEP}`
-    return `${prefix}${XChainService.XCHAIN_UTXO_TRACKER}${SEP}${coin}-${network}-data`
-}
-
-function getDockerNetwork(coin, network) {
-    return NODE_PREFIX
-        + (coin   !== "" ? SEP + coin    : "")
-        + (network !== "" ? SEP + network : "")
-}
-
-function getModuleDatabaseName(module, coin, network) {
-    // Defense in depth: an unknown coin (e.g. 'all' or a typo passed straight
-    // from a raw CLI arg) yields CoinTickerSymbol[coin] === undefined, which
-    // would otherwise produce a junk `XChain_undefined_*` name that reaches
-    // CREATE DATABASE on the live MariaDB while the command still exits 0.
-    // Fail loud so an unresolved coin never materializes a database.
-    if (coin !== "" && CoinTickerSymbol[coin] === undefined) {
-        throw new Error("Unknown coin '" + coin + "'; cannot derive a database name")
-    }
-    // Mirror the coin guard above: a typo'd network (e.g. from a raw CLI arg
-    // on the reset/bootstrap paths, which bypass filterCommandParameters)
-    // would otherwise derive a well-formed-but-bogus name that still reaches
-    // CREATE DATABASE while the command exits 0.
-    if (network !== "" && !Object.values(Network).includes(network)) {
-        throw new Error("Unknown network '" + network + "'; cannot derive a database name")
-    }
-    const moduleName = module.slice("xchain-".length)
-    return "XChain" + DB_SEP
-        + scopedNodePrefixSegment(NODE_PREFIX, DEFAULT_NODE_PREFIX, DB_SEP)
-        + CoinTickerSymbol[coin] + DB_SEP
-        + network.charAt(0).toUpperCase() + network.slice(1) + DB_SEP
-        + moduleName.charAt(0).toUpperCase() + moduleName.slice(1)
-}
-
-// Module DB account names carry the NODE_PREFIX like the database names, so two
-// stacks sharing one MariaDB never contend for one account. Default prefix: unchanged.
-function applyPrefixedModuleDbUsers(defaultValues, coin, network) {
-    const segment = scopedNodePrefixSegment(NODE_PREFIX, DEFAULT_NODE_PREFIX, DB_SEP)
-    if (segment === '') return
-    for (const [key, name] of [["DECODER_DB_USER", "decoder"], ["INDEXER_DB_USER", "indexer"]]) {
-        defaultValues[key] = "xchain" + DB_SEP + segment + name + DB_SEP + coin + DB_SEP + network
-    }
-}
+const {
+    getModuleDir, getModuleTmpDir, getCryptoNodeDir, removeModuleDir,
+    removeModuleTmpDir, createModuleTmpDir, moduleDirExists,
+    checkIfModuleExists, checkIfCryptoNodeSourceExists
+} = paths
+const {
+    getDockerContainerImageNamePrefix, getDockerContainerImageName,
+    getUtxoTrackerVolumeName, getDockerNetwork, getModuleDatabaseName,
+    applyPrefixedModuleDbUsers
+} = naming
 
 sidecars.configure({
     crypto, fs, path, readline, configDir, preferredSecretEnvName,
