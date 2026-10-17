@@ -156,9 +156,8 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
 }
 
 // One acquire pass with serialized stale-lock removal and bounded retries.
-// Returns a release() on success; throws a tagged ELOCKHELD error when a live
-// holder owns the lock or permissions hide its identity (the caller may then
-// choose to wait and retry); throws any other error as fatal.
+// A live or unreadable holder throws ELOCKHELD, which callers can retry;
+// filesystem failures and lost races stay fatal.
 function tryAcquireOnce(lockFile, payload, pid, nonce) {
     const reclaimFile = lockFile + RECLAIM_FILE_SUFFIX
     for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt++) {
