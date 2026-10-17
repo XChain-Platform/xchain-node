@@ -58,12 +58,7 @@ function configure(config = {}) {
     })
 }
 
-describe('config_service/defaults', function () {
-    after(function () {
-        delete require.cache[require.resolve('../../../src/services/config_service')]
-        require('../../../src/services/config_service')
-    })
-
+describe('config_service/defaults constructors', function () {
     it('creates coin defaults with service addresses, ports, and database identities', function () {
         configure()
 
@@ -102,7 +97,9 @@ describe('config_service/defaults', function () {
             SYNC_API_PORT: 3006
         })
     })
+})
 
+describe('config_service/defaults shared overrides', function () {
     it('applies non-empty shared host overrides before hub-key resolution', function () {
         configure({
             HUB_PORT_OVERRIDE: '11000',
@@ -138,4 +135,9 @@ describe('config_service/defaults', function () {
         expect(syncDefaults).to.deep.equal({ CORS_ORIGIN: 'https://wallet.test', INDEX_MAP_PARITY_CHECK: 'strict' })
         expect(hubDefaults).to.deep.equal({ CORS_ORIGIN: 'https://wallet.test', HUB_PUBLIC_API_URL: 'https://hub.test' })
     })
+})
+
+after(function () {
+    delete require.cache[require.resolve('../../../src/services/config_service')]
+    require('../../../src/services/config_service')
 })

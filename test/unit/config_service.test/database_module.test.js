@@ -29,12 +29,7 @@ function configure({ persistedHubPass, generated = 'a'.repeat(48) } = {}) {
     return { crypto, sidecars }
 }
 
-describe('config_service/database', function () {
-    after(function () {
-        delete require.cache[require.resolve('../../../src/services/config_service')]
-        require('../../../src/services/config_service')
-    })
-
+describe('config_service/database credential generation', function () {
     it('reuses a persisted hub password without generating a replacement', async function () {
         const { crypto, sidecars } = configure({ persistedHubPass: 'persisted-pass' })
 
@@ -63,7 +58,9 @@ describe('config_service/database', function () {
             '/config/bitcoin-mainnet.local', { INDEXER_DB_PASS: 'a'.repeat(48) }
         )).to.equal(true)
     })
+})
 
+describe('config_service/database config shaping', function () {
     it('uses the indexer password for hub access and fails if it is absent', function () {
         configure()
         const config = { INDEXER_DB_PASS: 'indexer-pass' }
@@ -94,4 +91,9 @@ describe('config_service/database', function () {
 
         expect(config).to.deep.equal({ DECODER_DB_HOST: '172.18.0.1', DATABASE_PORT: 3307, OTHER: 'keep' })
     })
+})
+
+after(function () {
+    delete require.cache[require.resolve('../../../src/services/config_service')]
+    require('../../../src/services/config_service')
 })

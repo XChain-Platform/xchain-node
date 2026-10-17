@@ -40,12 +40,7 @@ function configure(config = {}) {
     })
 }
 
-describe('config_service/coins', function () {
-    after(function () {
-        delete require.cache[require.resolve('../../../src/services/config_service')]
-        require('../../../src/services/config_service')
-    })
-
+describe('config_service/coins fee defaults', function () {
     it('adds regtest miner, rate-limit, CORS, and canonical fee defaults', function () {
         configure()
         const defaults = {}
@@ -95,7 +90,9 @@ describe('config_service/coins', function () {
         expect(defaults.FEE_DESTINATION).to.equal('registry-fee-address')
         expect(defaults.XCHAIN_FEE_DESTINATION_BTC_MAINNET).to.equal('registry-fee-address')
     })
+})
 
+describe('config_service/coins module tuning', function () {
     it('passes non-empty LevelDB tuning only to the UTXO tracker', function () {
         configure({ LEVELDB_CACHE_BYTES: '1024', LEVELDB_WRITE_BUFFER_BYTES: '' })
         const tracker = {}
@@ -108,4 +105,9 @@ describe('config_service/coins', function () {
         expect(tracker).not.to.have.property('LEVELDB_WRITE_BUFFER_BYTES')
         expect(encoder).not.to.have.property('LEVELDB_CACHE_BYTES')
     })
+})
+
+after(function () {
+    delete require.cache[require.resolve('../../../src/services/config_service')]
+    require('../../../src/services/config_service')
 })
