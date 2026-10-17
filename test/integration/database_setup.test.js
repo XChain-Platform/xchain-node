@@ -26,8 +26,8 @@ databaseSuite('buildDatabaseModule (first install)', function (fixture) {
 
         // Pin tracks src/services/database_service.js's actual `docker pull`/
         // `docker tag` target; the image tag itself is not a secret.
-        capture.assertCalled(/docker pull mariadb:10.11/)
-        capture.assertCalled(/docker tag mariadb:10.11 xchain-node-database/)
+        capture.assertCalled(/docker pull mariadb:11.8/)
+        capture.assertCalled(/docker tag mariadb:11.8 xchain-node-database/)
 
         const runCmds = capture.findCommands(/docker run/)
         expect(runCmds).to.have.length(1)
