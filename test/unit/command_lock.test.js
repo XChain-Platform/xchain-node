@@ -95,6 +95,30 @@ describe('commandLock', () => {
         release()
     })
 
+    it('treats an EACCES lock read as held and preserves the lock', () => {
+        const lockFile = getLockFilePath()
+        fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }))
+        const before = fs.statSync(lockFile).ino
+        const realReadFile = fs.readFileSync
+        fs.readFileSync = function (file, ...args) {
+            if (file === lockFile) {
+                const err = new Error('permission denied')
+                err.code = 'EACCES'
+                throw err
+            }
+            return realReadFile.call(fs, file, ...args)
+        }
+        try {
+            assert.throws(
+                () => acquireCommandLock({ command: 'reset' }),
+                err => err.code === 'ELOCKHELD' && /cannot be read/.test(err.message)
+            )
+        } finally {
+            fs.readFileSync = realReadFile
+        }
+        assert.strictEqual(fs.statSync(lockFile).ino, before)
+    })
+
     it('release does not clobber a successor lock owned by another pid', () => {
         const release = acquireCommandLock({ command: 'install' })
         // Simulate a stale-lock takeover: another process replaced the file.
@@ -256,6 +280,29 @@ describe('commandLock', () => {
             assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).pid, process.pid)
             assert.ok(!fs.existsSync(lockFile + '.reclaim'))
             release()
+        })
+
+        it('treats an EPERM reclaim marker read as held and preserves the marker', () => {
+            const lockFile = getLockFilePath()
+            const reclaimFile = lockFile + '.reclaim'
+            fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
+            fs.writeFileSync(reclaimFile, JSON.stringify({ pid: findDeadPid(), nonce: 'unknown' }) + '\n')
+            const realReadFile = fs.readFileSync
+            fs.readFileSync = function (file, ...args) {
+                if (file === reclaimFile) {
+                    const err = new Error('operation not permitted')
+                    err.code = 'EPERM'
+                    throw err
+                }
+                return realReadFile.call(fs, file, ...args)
+            }
+            try {
+                assert.throws(() => acquireCommandLock({ command: 'update' }), /lost the race/)
+            } finally {
+                fs.readFileSync = realReadFile
+            }
+            assert.ok(fs.existsSync(lockFile))
+            assert.ok(fs.existsSync(reclaimFile))
         })
 
         it('release keeps a successor lock that reuses our pid under a different nonce', () => {
