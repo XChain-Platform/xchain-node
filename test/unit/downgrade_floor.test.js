@@ -126,16 +126,19 @@ describe('major-version downgrade floor: overrides', function () {
     })
 
     it('allows a lower-major release target when the manifest override is set', async function () {
+        // The bundled manifest's own release resolves without a network read, so
+        // the target follows that manifest across release bumps.
+        const bundledTag = `v${require('../../src/release-manifest.json').platform_version}`
         const service = loadManifestService()
         const logger = testLogger()
-        const target = await service.resolveInstallTarget('v0.23.0', {
+        const target = await service.resolveInstallTarget(bundledTag, {
             env: { XCHAIN_NODE_ALLOW_MAJOR_DOWNGRADE: 'true' },
             logger,
             installedVersion: '1.0.0'
         })
 
         expect(target.kind).to.equal('release')
-        expect(target.tag).to.equal('v0.23.0')
+        expect(target.tag).to.equal(bundledTag)
         expect(logger.warn.calledOnce).to.equal(true)
     })
 })
