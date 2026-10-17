@@ -159,7 +159,7 @@ jobs:
           node src/index.js install "$STACK_REF" all dogecoin regtest
           # The standing stacks stay up: legs read the standing
           # explorer (18080) and the standing LTC/DOGE indexers (at0-anti-wedge reads 3224).
-          docker pull -q mariadb:10.11 && docker tag mariadb:10.11 xchain-node-database
+          docker pull -q mariadb:11.8 && docker tag mariadb:11.8 xchain-node-database
           docker images --format '{{.Repository}}' | grep '^xchain-node-' | sort
           docker ps --format '{{.Names}} {{.Status}}'
 
