@@ -772,12 +772,6 @@
       "validator stake free-key rules resolves the reuse gate COIN:network first, then the bare network",
       "validator stake free-key rules sums amounts exactly in 1e-8 units and refuses to guess on a malformed one"
     ],
-    "332b1a20f0f85580": [
-      "ValidatorService coin wallets the emitted signer marks post-funding failures does not tag a successful two-phase publish",
-      "ValidatorService coin wallets the emitted signer marks post-funding failures is valid JavaScript once the template literal is expanded",
-      "ValidatorService coin wallets the emitted signer marks post-funding failures leaves a pre-funding failure untagged, so the round stays retryable",
-      "ValidatorService coin wallets the emitted signer marks post-funding failures tags a definitive phase-2 rejection with fundsCommitted and the phase-1 txid"
-    ],
     "332bea463a49f99c": [
       "Regression Suite [regression:p0] Security R-SEC-001: branch name with shell metacharacters rejected",
       "Regression Suite [regression:p0] Security R-SEC-002: branch name with backticks and $() rejected",
@@ -1489,6 +1483,18 @@
       "makeBootstrap() consults the source health gate aborts the create when the gate refuses",
       "makeBootstrap() consults the source health gate gates the utxo-tracker BEFORE stopping its container, so a refusal costs no downtime",
       "makeBootstrap() consults the source health gate still rejects an unsupported module before consulting the gate"
+    ],
+    "55d86c81bb4903d3": [
+      "ValidatorService coin wallets the emitted signer builds and signs the reveal before the commit broadcast broadcasts nothing when the encoder refuses the reveal",
+      "ValidatorService coin wallets the emitted signer builds and signs the reveal before the commit broadcast broadcasts nothing when the reveal cannot be signed",
+      "ValidatorService coin wallets the emitted signer builds and signs the reveal before the commit broadcast builds no reveal for a single-transaction encoding",
+      "ValidatorService coin wallets the emitted signer builds and signs the reveal before the commit broadcast builds the reveal from the signed commit, then broadcasts the commit and the reveal",
+      "ValidatorService coin wallets the emitted signer builds and signs the reveal before the commit broadcast hands back the signed reveal when its broadcast fails after the commit",
+      "ValidatorService coin wallets the emitted signer builds and signs the reveal before the commit broadcast leaves a commit broadcast failure untagged for the hub to classify",
+      "ValidatorService coin wallets the emitted signer marks post-funding failures does not tag a successful two-phase publish",
+      "ValidatorService coin wallets the emitted signer marks post-funding failures is valid JavaScript once the template literal is expanded",
+      "ValidatorService coin wallets the emitted signer marks post-funding failures marks a pre-funding failure neverSent and not fundsCommitted, so the round stays retryable",
+      "ValidatorService coin wallets the emitted signer marks post-funding failures tags a definitive phase-2 rejection with fundsCommitted, the phase-1 txid and the signed reveal"
     ],
     "56897dc4174a8788": [
       "Chaos: Download Resilience Experiment 8c: SHA-256 hash mismatch succeeds when hash matches exactly",
@@ -5112,7 +5118,7 @@
         "test/unit/validator_service.test/11_validator_dir.test.js": "26f27dbd3b14ec37",
         "test/unit/validator_service.test/12_coin_wallets.test.js": "6d7114a33630b804",
         "test/unit/validator_service.test/13_coin_wallet_options_and_mounts.test.js": "3670f7eb60a0bd6e",
-        "test/unit/validator_service.test/14_emitted_signer_post_funding_failures.test.js": "332b1a20f0f85580",
+        "test/unit/validator_service.test/14_emitted_signer_post_funding_failures.test.js": "55d86c81bb4903d3",
         "test/unit/validator_service.test/15_hub_env_wiring.test.js": "1dc33a33679f1947",
         "test/unit/validator_service.test/16_rollcall_status_reporting.test.js": "cb99d238d302d2c2",
         "test/unit/validator_service.test/17_capability_drift_probe.test.js": "1ee619322512f5f5",
@@ -5536,7 +5542,7 @@
         "test/unit/validator_service.test/11_validator_dir.test.js": "26f27dbd3b14ec37",
         "test/unit/validator_service.test/12_coin_wallets.test.js": "6d7114a33630b804",
         "test/unit/validator_service.test/13_coin_wallet_options_and_mounts.test.js": "3670f7eb60a0bd6e",
-        "test/unit/validator_service.test/14_emitted_signer_post_funding_failures.test.js": "332b1a20f0f85580",
+        "test/unit/validator_service.test/14_emitted_signer_post_funding_failures.test.js": "55d86c81bb4903d3",
         "test/unit/validator_service.test/15_hub_env_wiring.test.js": "1dc33a33679f1947",
         "test/unit/validator_service.test/16_rollcall_status_reporting.test.js": "cb99d238d302d2c2",
         "test/unit/validator_service.test/17_capability_drift_probe.test.js": "1ee619322512f5f5",

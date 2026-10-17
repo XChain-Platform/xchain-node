@@ -1,6 +1,6 @@
 {
   "name": "xchain-node",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "private": true,
   "description": "xchain-node allows users to install, configure and run XChain platform nodes.",
   "license": "AGPL-3.0-or-later",
@@ -17,7 +17,7 @@
     "dotenv": "^16.4.5",
     "enquirer": "^2.4.1",
     "follow-redirects": "^1.16.0",
-    "mariadb": "3.5.3",
+    "mariadb": "3.5.4",
     "semver": "^7.6.3"
   },
   "scripts": {
@@ -67,7 +67,11 @@
     "form-data": "^4.0.6",
     "ip-address": "^10.3.1",
     "decimal.js": "10.4.3",
-    "@modelcontextprotocol/sdk": "^1.31.0"
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "bitcoinjs-message": {
+      ".": "npm:@oipwg/bitcoinjs-message@2.2.0-beta.0",
+      "secp256k1": "npm:@exodus/secp256k1@5.0.0-exodus.4.patch.2"
+    }
   },
   "bin": {
     "xchain-node": "./src/index.js"

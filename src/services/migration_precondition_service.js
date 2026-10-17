@@ -54,7 +54,9 @@
 
 const { XChainService } = require('../config')
 const { migrationsDirOf } = require('../utils/migration_files')
-const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName } = require('./config_service')
+const { getModuleTmpDir, getModuleDatabaseName, getDockerContainerImageName, getDefaultConfig } = require('./config_service')
+const { configuredDatabaseName, unscopedDefaultDatabaseName } = require('../utils/module_database_name')
+const appConfig = require('../config')
 const config = require('../config');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -151,6 +153,34 @@ async function readRefusalRemedy(module, coin, network, applied, deps) {
     }
 }
 
+// A non-default NODE_PREFIX stack still on the unprefixed default name shares that
+// database with the default stack; deploys refuse it, this surfaces it before then.
+function warnUnscopedDefaultName(module, coin, network, name) {
+    const { NODE_PREFIX, DEFAULT_NODE_PREFIX, CoinTickerSymbol, DB_SEP } = appConfig
+    if (NODE_PREFIX === DEFAULT_NODE_PREFIX || !CoinTickerSymbol || CoinTickerSymbol[coin] === undefined) return
+    if (name !== unscopedDefaultDatabaseName(module, CoinTickerSymbol[coin], network, DB_SEP)) return
+    logger.warn(`Migration precondition guard: ${module} uses the unprefixed default database ${name} ` +
+        `under NODE_PREFIX "${NODE_PREFIX}"; it is shared with the default "${DEFAULT_NODE_PREFIX}" stack.`)
+}
+
+/**
+ * The database the service reads: the operator-configured name when set, else the
+ * derived default. An unreadable config falls back to the default with a warning.
+ */
+async function resolveCheckedDatabaseName(module, coin, network, deps) {
+    const defaultName = getModuleDatabaseName(module, coin, network)
+    try {
+        const readConfig = deps.getDefaultConfig || getDefaultConfig
+        const name = configuredDatabaseName(module, await readConfig(module, coin, network), defaultName)
+        warnUnscopedDefaultName(module, coin, network, name)
+        return name
+    } catch (err) {
+        logger.warn(`Migration precondition guard: could not read ${module}'s configured database name ` +
+            `(${err && err.message ? err.message : err}); using the default ${defaultName}.`)
+        return defaultName
+    }
+}
+
 /**
  * Refuses (throws) when the source tree about to be deployed declares a migration
  * as a startup precondition that the target database has not applied.
@@ -194,7 +224,7 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
     }
     if (!required.length) return { checked: false, reason: 'no-preconditions' }
 
-    const dbName = getModuleDatabaseName(module, coin, network)
+    const dbName = await resolveCheckedDatabaseName(module, coin, network, deps)
     const result = await readApplied({ database: dbName, coin, network })
 
     if (result.state === 'empty-database') return emptyDatabaseResult(module, dbName, required)
@@ -202,13 +232,18 @@ async function assertRequiredMigrationsApplied(module, coin, network, branch = n
 
     // See the ledger the way the target's runner will after its boot re-key, so a
     // renamed file recorded under its old name is not refused as missing.
-    const applied = rekeyApplied(result.applied, readTargetLedgerRenames(module, deps))
+    const renames = readTargetLedgerRenames(module, deps)
+    const applied = rekeyApplied(result.applied, renames)
     const missing = required.filter(f => !applied.has(f))
     if (missing.length) {
+        // The blast radius subtracts only recorded names: the runner still executes a file the schema matches,
+        // unless its MIGRATION_PRECONDITIONS entry baselines it (see recorded_ledger.js), so the list can overcount.
+        const recorded = result.ledger ? rekeyApplied(result.ledger, renames) : applied
         // Only reached on the refusal path, so the probe costs a healthy deploy
         // nothing and cannot introduce a new way for one to fail: both the probe
         // and the pending-scan degrade to the cautious branch of the message.
-        const remedy = await readRefusalRemedy(module, coin, network, applied, deps)
+        const remedy = await readRefusalRemedy(module, coin, network, recorded, deps)
+        remedy.schemaMatched = new Set([...applied].filter(f => !recorded.has(f)))
         throw new Error(refusalMessage(module, coin, network, dbName, missing, remedy))
     }
 
@@ -228,5 +263,6 @@ module.exports = {
     // database returning `unreadable` rather than throwing past the guard, and
     // that is a property of the real driver call, not of a stub.
     readAppliedMigrations,
-    assertRequiredMigrationsApplied
+    assertRequiredMigrationsApplied,
+    resolveCheckedDatabaseName
 }

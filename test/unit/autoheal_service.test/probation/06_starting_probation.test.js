@@ -52,7 +52,8 @@ function makeStubs() {
     return {
         db: { getAllModuleContainers: sinon.stub().resolves([]), assertReady: sinon.stub() },
         getStatusFromContainer: sinon.stub(),
-        restartContainer: sinon.stub().resolves(true)
+        stopContainer: sinon.stub().resolves({ stopped: true, seconds: 1, killed: false, exitCode: 0 }),
+        startContainer: sinon.stub().resolves(true)
     }
 }
 
@@ -61,7 +62,9 @@ function loadService(stubs) {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
-            restartContainer: stubs.restartContainer
+            stopContainer: stubs.stopContainer,
+            startContainer: stubs.startContainer,
+            getContainerStopSettings: sinon.stub().resolves(null)
         },
         // Real descriptor table: asserts the actual opt-in flags too.
         './module_service': { SERVICE_HEALTHCHECK: require('../../../../src/services/module_service').SERVICE_HEALTHCHECK }
@@ -102,7 +105,7 @@ describe('AutohealService', () => {
 
         await service.runAutoheal({ now: NOW })                      // restart #1
         await service.runAutoheal({ now: NOW + 11 * 60000 })         // restart #2 -> next wait doubles
-        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(stubs.startContainer.callCount).to.equal(2)
 
         // A minute after restart #2: Docker still reports `starting`.
         stubs.getStatusFromContainer.resolves(inspectStatus('starting', [logEntry(15000, 1)]))
@@ -116,7 +119,7 @@ describe('AutohealService', () => {
         // still open, so nothing restarts; with the counter wiped it would have.
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
         const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
-        expect(stubs.restartContainer.callCount).to.equal(2)
+        expect(stubs.startContainer.callCount).to.equal(2)
         expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
     })
 })

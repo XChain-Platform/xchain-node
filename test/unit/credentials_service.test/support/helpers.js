@@ -38,8 +38,33 @@ function makeFs(overrides = {}) {
         writeFileSync: sinon.stub(),
         mkdirSync:     sinon.stub(),
         chmodSync:     sinon.stub(),
+        // The atomic save: temp file, flush, rename over the original
+        renameSync:    sinon.stub(),
+        unlinkSync:    sinon.stub(),
+        openSync:      sinon.stub().returns(42),
+        fsyncSync:     sinon.stub(),
+        closeSync:     sinon.stub(),
         ...overrides
     }
+}
+
+// An fs error carrying its code, the way node's fs raises one
+function fsError(code) {
+    return Object.assign(new Error(code), { code })
+}
+
+// Assert a save went through a flushed 0600 temp file renamed over credentials.json, and return what it wrote
+function expectAtomicSave(fs) {
+    expect(fs.writeFileSync.calledOnce).to.be.true
+    const [tmpPath, content, opts] = fs.writeFileSync.firstCall.args
+    expect(path.dirname(tmpPath)).to.equal(CREDS_DIR)
+    expect(tmpPath).to.match(/\.tmp$/)
+    expect(opts).to.include({ mode: 0o600, flag: 'wx' })
+    expect(fs.fsyncSync.calledOnce).to.be.true
+    const renameOver = fs.renameSync.getCalls().find(c => c.args[0] === tmpPath && c.args[1] === CREDS_FILE)
+    expect(renameOver, 'the temp file is renamed over credentials.json').to.exist
+    expect(renameOver.calledAfter(fs.fsyncSync.firstCall)).to.be.true
+    return { content, opts }
 }
 
 module.exports = {
@@ -49,5 +74,7 @@ module.exports = {
     CREDS_DIR,
     CREDS_FILE,
     loadCredentialsService,
-    makeFs
+    makeFs,
+    fsError,
+    expectAtomicSave
 }

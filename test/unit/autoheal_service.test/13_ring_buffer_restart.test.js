@@ -53,7 +53,8 @@ function makeStubs() {
     return {
         db: { getAllModuleContainers: sinon.stub().resolves([]), assertReady: sinon.stub() },
         getStatusFromContainer: sinon.stub(),
-        restartContainer: sinon.stub().resolves(true)
+        stopContainer: sinon.stub().resolves({ stopped: true, seconds: 1, killed: false, exitCode: 0 }),
+        startContainer: sinon.stub().resolves(true)
     }
 }
 
@@ -62,7 +63,9 @@ function loadService(stubs) {
         '../state': { db: stubs.db },
         './docker_service': {
             getStatusFromContainer: stubs.getStatusFromContainer,
-            restartContainer: stubs.restartContainer
+            stopContainer: stubs.stopContainer,
+            startContainer: stubs.startContainer,
+            getContainerStopSettings: sinon.stub().resolves(null)
         },
         // Real descriptor table: asserts the actual opt-in flags too.
         './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
@@ -111,6 +114,6 @@ describe('AutohealService', () => {
         stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(NOW + 3 * 60000))
         const second = await service.runAutoheal({ now: NOW + 3 * 60000 })
         expect(second.restarted, 'a sustained wedge must eventually be restarted').to.have.length(1)
-        expect(stubs.restartContainer.calledOnceWith('ring')).to.equal(true)
+        expect(stubs.startContainer.calledOnceWith('ring')).to.equal(true)
     })
 })

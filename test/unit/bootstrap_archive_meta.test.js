@@ -266,3 +266,36 @@ describe('BootstrapArchiveMeta', function () {
         })
     })
 })
+
+// The tracker's restorebootstrap reads the same bootstrap.json trimmed and lowercased; node must
+// reach the same verdict on it, or one archive restores on one path and is refused on the other.
+describe('BootstrapArchiveMeta identity normalization', function () {
+    describe('compareArchiveIdentity() normalization shared with the tracker', function () {
+        const target = { module: 'xchain-utxo-tracker', coin: 'bitcoin', network: 'mainnet' }
+        const full = { format: 1, module: 'xchain-utxo-tracker', coin: 'bitcoin', network: 'mainnet', height: 1, created: null }
+
+        it('matches an identity that differs only in case or padding', function () {
+            const result = meta.compareArchiveIdentity({ ...full, coin: 'Bitcoin', network: ' MAINNET ' }, target)
+            expect(result).to.deep.equal({ status: 'match', mismatches: [], unchecked: [] })
+        })
+
+        it('reads a blank identity field as undeclared, not as a mismatch', function () {
+            for (const blank of ['', '   ']) {
+                const result = meta.compareArchiveIdentity({ ...full, coin: blank }, target)
+                expect(result).to.deep.equal({ status: 'unchecked', mismatches: [], unchecked: ['coin'] })
+            }
+        })
+
+        it('still refuses a different coin whatever its case', function () {
+            const result = meta.compareArchiveIdentity({ ...full, coin: 'DogeCoin' }, target)
+            expect(result.status).to.equal('mismatch')
+            expect(result.mismatches).to.deep.equal([{ field: 'coin', archive: 'DogeCoin', target: 'bitcoin' }])
+        })
+
+        it('keeps a target with no value for a declared field a mismatch', function () {
+            const result = meta.compareArchiveIdentity(full, { ...target, coin: undefined })
+            expect(result.status).to.equal('mismatch')
+            expect(result.mismatches.map(m => m.field)).to.deep.equal(['coin'])
+        })
+    })
+})

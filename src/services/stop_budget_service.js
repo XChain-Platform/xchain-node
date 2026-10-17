@@ -261,6 +261,21 @@ async function stopModuleContainer(stopContainerByName, module, coin, network, c
     return { ...outcome, budget }
 }
 
+// Restart a service container as the budgeted stop above, then a start. A bare `docker restart`
+// honours only a stamped --stop-timeout (docker's ten seconds without one) and never reads the exit code.
+async function restartModuleContainer(stopContainerById, startContainerById, module, coin, network, containerRef,
+    env = MODULE_STOP_TIMEOUT_ENV, readStopSettings = readContainerStopSettings) {
+    const outcome = await stopModuleContainer(stopContainerById, module, coin, network, containerRef, env, readStopSettings)
+    try {
+        await startContainerById(containerRef)
+    } catch (err) {
+        // Say the service is now down, since the stop half already happened
+        const reason = err && err.message ? err.message : String(err)
+        throw new Error(`${module} was stopped but failed to start again (${reason})`)
+    }
+    return outcome
+}
+
 module.exports = {
     DEFAULT_MODULE_STOP_TIMEOUT_SECONDS,
     MODULE_STOP_TIMEOUT_SECONDS,
@@ -274,5 +289,6 @@ module.exports = {
     effectiveStopBudgetSeconds,
     stoppedUnclean,
     describeModuleStopOutcome,
-    stopModuleContainer
+    stopModuleContainer,
+    restartModuleContainer
 }

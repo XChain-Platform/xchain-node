@@ -17,7 +17,8 @@
 const { getLogger } = require('../../observability/logger')
 // Reads /validators to the end: one unpaged read drops every stake past the newest 100 rows.
 const { readValidatorSet } = require('./validator_set_read')
-const { sumAmounts } = require('./free_key')
+// The stake command's own tip read and withdrawn-row test, so both commands judge one key alike.
+const { sumAmounts, readTip, isUndeactivated } = require('./free_key')
 const { sendLockFor, releaseOnIndexWait } = require('./send_lock')
 const { readAddressSleep, sleepRefusal, sleepUnknownRefusal } = require('./address_sleep')
 
@@ -66,11 +67,6 @@ function logUnstakeSuccess(log, active, timing, coins, pubkey, STAKE_TICK, paren
     log('')
 }
 
-// An empty deactivation_block is a stake no UNSTAKE or ROLLCALL eviction has touched.
-function isUndeactivated(row) {
-    return row.deactivation_block === null || row.deactivation_block === undefined || row.deactivation_block === ''
-}
-
 // Sort rows as the indexer admits an UNSTAKE landing at landBlock: undeactivated AND activation_block <= landBlock.
 // The explorer keeps status='valid' on deactivated rows, so status alone never means "active".
 function classifyUnstakeRows(rows, landBlock) {
@@ -96,20 +92,13 @@ function withdrawnStake(admissible) {
 }
 
 // The explorer's indexed tip for the stake coin; unreadable means refuse, never guess.
-async function readTip(sdk, coins, fail) {
-    let tip
+async function readTipOrRefuse(sdk, coins, fail) {
     try {
-        const status = await sdk.explorer.getStatus()
-        tip = Number(status && status.last_block && status.last_block[coins.stakeCoin])
+        return await readTip(sdk, coins)
     } catch (e) {
         throw fail('could not read the chain tip (' + e.message + '), so this run cannot tell ' +
                    'whether the stake is active yet. Nothing was sent.')
     }
-    if (!Number.isInteger(tip) || tip < 0) {
-        throw fail('the explorer reported no last block for ' + coins.stakeCoin + ', so this run cannot tell ' +
-                   'whether the stake is active yet. Nothing was sent.')
-    }
-    return tip
 }
 
 // Refuse unless `address` owns every undeactivated row: the indexer rejects an UNSTAKE v0
@@ -181,7 +170,7 @@ async function resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, 
     assertOwnsStake(rows.filter(isUndeactivated), address, fail)
 
     // The UNSTAKE lands no earlier than the next block, so that is the block admission is judged at.
-    const tip = await readTip(sdk, coins, fail)
+    const tip = await readTipOrRefuse(sdk, coins, fail)
     const { admissible, pending } = classifyUnstakeRows(rows, tip + 1)
     if (!admissible.length) {
         const from = Math.min(...pending.map(r => Number(r.activation_block)))

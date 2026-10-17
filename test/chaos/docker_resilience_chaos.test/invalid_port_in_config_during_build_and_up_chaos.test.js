@@ -52,7 +52,7 @@ function loadModuleServiceWithInvalidPort(stubs) {
             })
         },
         './status_service': { statusChanged: sinon.stub().resolves(), getStatus: sinon.stub().resolves({}) },
-        './docker_service': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves() },
+        './docker_service': { killContainer: sinon.stub().resolves(), removeContainer: sinon.stub().resolves(), getPublishedHostPorts: sinon.stub().resolves(new Map()) },
         './database_service': { setDatabaseParameters: sinon.stub().resolves() }
     })
 }

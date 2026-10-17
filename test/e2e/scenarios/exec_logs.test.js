@@ -130,7 +130,7 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
     this.timeout(30000)
     beforeEach(setupEnv)
     afterEach(teardownEnv)
-    // E2E-072: Restart calls docker restart for each module
+    // E2E-072: Restart stops each module within its stop budget, then starts it
     describe('E2E-072: Restart command', function () {
 
         it('calls docker restart for each installed module', async function () {
@@ -147,11 +147,17 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
 
             await cli.moduleOps.restartModules(serviceList)
 
-            const restartCmds = env.capture.findCommands(/docker restart/)
-            expect(restartCmds.length).to.be.greaterThanOrEqual(5)
-
-            for (const cmd of restartCmds) {
-                const restartedId = cmd.command.split(/\s+/).pop()
+            // A budgeted stop then a start per module, never a bare `docker restart` and docker's ten seconds
+            expect(env.capture.findCommands(/docker restart/)).to.have.length(0)
+            const stopCmds = env.capture.findCommands(/docker stop/)
+            expect(stopCmds.length).to.be.greaterThanOrEqual(5)
+            for (const cmd of stopCmds) {
+                expect(cmd.command, 'every restart stop carries a budget').to.match(/docker stop -t \d+ \S+$/)
+            }
+            const stoppedIds = stopCmds.map(cmd => cmd.command.split(/\s+/).pop())
+            const startedIds = env.capture.findCommands(/docker start/).map(cmd => cmd.command.split(/\s+/).pop())
+            expect(startedIds, 'every stopped module is started again').to.have.members(stoppedIds)
+            for (const restartedId of startedIds) {
                 expect(containerIds, `restarted ID ${restartedId} in LevelDB`).to.include(restartedId)
             }
         })

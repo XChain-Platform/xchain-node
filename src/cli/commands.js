@@ -26,6 +26,7 @@ const { assertArchiveIdentity } = require('../services/bootstrap_service/restore
 const { getWorkDir } = require('../services/bootstrap_service/workspace')
 const database = require('../services/database_service')
 const { getDefaultConfig, getModuleDatabaseName } = require('../services/config_service')
+const { configuredDatabaseName } = require('../utils/module_database_name')
 const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
 const { getLogger } = require('../observability/logger')
 
@@ -85,7 +86,6 @@ function showRowCount(stdout, table) {
     }
     return count
 }
-
 async function databaseCounts(context, databaseName) {
     const count = async table => {
         const { stdout } = await runMariaTool(context, 'mariadb-show', ['--count', databaseName, table])
@@ -97,7 +97,6 @@ async function databaseCounts(context, databaseName) {
         issuances: await count('issues')
     }
 }
-
 async function importRehearsal(context, innerArchive) {
     const command = mariaTool(context, 'mariadb', [rehearsalDatabase], true)
     const maria = spawn(command.file, command.args,
@@ -113,15 +112,18 @@ async function importRehearsal(context, innerArchive) {
         closed
     ])
 }
-
 function countsMatch(source, restored) {
     return source.rows === restored.rows && source.tokens === restored.tokens &&
         source.issuances === restored.issuances
 }
-
+async function rehearsalSourceDatabaseName(coin, network) {
+    const module = config.XChainService.XCHAIN_INDEXER
+    const moduleConfig = await getDefaultConfig(module, coin, network)
+    return configuredDatabaseName(module, moduleConfig, getModuleDatabaseName(module, coin, network))
+}
 async function rehearseBootstrapRestore(coin, network, options) {
     if (network !== 'mainnet') throw new Error('Bootstrap restore rehearsal requires mainnet')
-    const sourceName = getModuleDatabaseName(config.XChainService.XCHAIN_INDEXER, coin, network)
+    const sourceName = await rehearsalSourceDatabaseName(coin, network)
     const archive = await rehearsalArchive(coin, network, options.file)
     const context = await rehearsalContext(coin, network)
     let created = false
@@ -143,7 +145,6 @@ async function rehearseBootstrapRestore(coin, network, options) {
         }
     }
 }
-
 function registerBootstrapRestoreRehearsal(program, deps) {
     program.command('bootstrap-restore-rehearsal')
         .description('Restore a mainnet indexer bootstrap into a disposable database and compare counts')
@@ -396,4 +397,4 @@ function registerToolCommands(program, deps) {
     registerBootstrapRestoreRehearsal(program, deps)
 }
 
-module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch }
+module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch, rehearsalSourceDatabaseName }

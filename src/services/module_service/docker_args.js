@@ -119,7 +119,7 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
 //                 (--health-start-period); set long enough for npm start + DB connect
 //   autoheal  - opt-in flag consumed by AutohealService/`xchain-node autoheal`:
 //               when true, a container that stays unhealthy past the grace window
-//               gets `docker restart`ed. Default OFF. Only set it where a restart
+//               is restarted (a budgeted stop, then a start). Default OFF. Only set it where a restart
 //               plausibly clears the wedge (stalled event loop, dead DB pool).
 //               NEVER set it on xchain-utxo-tracker: that service deliberately
 //               enters a stable halted state (503 while halted) instead of

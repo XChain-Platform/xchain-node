@@ -26,8 +26,9 @@
 #     can verify provenance against the pinned public key.
 #   - Refuses an unhealthy source. `bootstrap create` runs a source health gate:
 #     a service that is stopped, crash-looping, reporting unhealthy,
-#     materially behind its tip, or carrying a durable halt marker (a decoder
-#     REORG_HALT row, an uncleared sync_halt) is NOT snapshotted. Such a combo is
+#     materially behind its tip, or carrying a durable halt marker (a live
+#     decoder REORG_HALT row that no newer REORG_HALT_CLEARED supersedes, an
+#     uncleared sync_halt) is NOT snapshotted. Such a combo is
 #     summarised as SOURCE-UNHEALTHY and the run exits non-zero, leaving the last
 #     good archive in place as the newest. This exists because the weekly cron
 #     once published a halted litecoin/mainnet decoder as the newest "good"

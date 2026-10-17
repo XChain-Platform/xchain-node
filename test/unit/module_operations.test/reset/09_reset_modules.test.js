@@ -82,7 +82,11 @@ describe('moduleOperations', function () {
             const result = await promise
             expect(result).to.be.true
             expect(stubs.resetDatabases.calledOnce).to.be.true
-            expect(stubs.restartContainer.called).to.be.true // bounce
+            // The bounce is a budgeted stop after the start pass (decoder 120 s, indexer 30 s), then a start
+            const bounceStops = stubs.stopContainer.getCalls().filter(c => c.calledAfter(stubs.startContainer.firstCall))
+            expect(bounceStops.map(c => c.args[1])).to.deep.equal([120, 30])
+            expect(stubs.startContainer.lastCall.calledAfter(stubs.stopContainer.lastCall)).to.be.true
+            expect(stubs.restartContainer.called).to.be.false
         })
 
         // Wiping the indexer DB restarts its push_generations at 0, which the

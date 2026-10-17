@@ -73,7 +73,10 @@ function loadModuleService(stubs, opts = {}) {
         './docker_service': {
             killContainer: opts.killContainer || sinon.stub().resolves(true),
             removeContainer: opts.removeContainer || sinon.stub().resolves(true),
-            getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } })
+            getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } }),
+            // An empty port map keeps the host-port conflict check off the real `docker ps`,
+            // which on a host running containers reports their ports as conflicts.
+            getPublishedHostPorts: sinon.stub().resolves(new Map())
         },
         './database_service': { setDatabaseParameters: sinon.stub().resolves() }
     })

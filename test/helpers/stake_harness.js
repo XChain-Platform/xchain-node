@@ -26,7 +26,14 @@ function makeExplorer(chain) {
             ? sinon.stub().rejects(Object.assign(
                 new Error('Explorer returned HTTP 404 for /RBTC/api/token/XCHAIN'),
                 { code: 'EXPLORER_HTTP_404', details: { status: 404 } }))
-            : sinon.stub().resolves({ mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000 } }),
+            : sinon.stub().resolves({
+                mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000,
+                    start_block: chain.mintStart ?? 0, stop_block: chain.mintStop ?? 0 },
+                locks: { mint: chain.mintLocked ?? false } }),
+        // The MINT rows the explorer's source lane holds for the stake address; none by default.
+        getMints: chain.mintsThrow
+            ? sinon.stub().rejects(new Error(chain.mintsThrow))
+            : sinon.stub().resolves({ total: (chain.priorMints || []).length, data: chain.priorMints || [] }),
         // The whole validator set, which is the method the SDK actually has.
         // Carries an unrelated validator too, so the pubkey filter is exercised
         // rather than "the only row wins".

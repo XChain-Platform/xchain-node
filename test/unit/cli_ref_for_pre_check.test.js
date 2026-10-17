@@ -75,6 +75,49 @@ describe('cli refForPreCheck()', function () {
     })
 })
 
+// A no-ref `update` that the CLI did not move hands its resolved tag on through
+// XCHAIN_NODE_UPDATE_TARGET; the hub preCheck stages must come from that tag too,
+// not from a second releases/latest lookup that can answer differently.
+describe('cli refForPreCheck() with a self-update tag handed on', function () {
+    let saved
+
+    beforeEach(function () {
+        saved = process.env.XCHAIN_NODE_UPDATE_TARGET
+        process.env.XCHAIN_NODE_UPDATE_TARGET = 'v0.11.0'
+    })
+
+    afterEach(function () {
+        if (saved === undefined) delete process.env.XCHAIN_NODE_UPDATE_TARGET
+        else process.env.XCHAIN_NODE_UPDATE_TARGET = saved
+    })
+
+    it('stages a no-ref update from the handed-on tag', function () {
+        expect(refForPreCheck('update', cmd([]))).to.equal('v0.11.0')
+        expect(refForPreCheck('update', cmd(undefined))).to.equal('v0.11.0')
+        expect(refForPreCheck('update', cmd(['xchain-indexer']))).to.equal('v0.11.0')
+    })
+
+    it('keeps a ref named on the update command over the handed-on tag', function () {
+        expect(refForPreCheck('update', cmd(['develop', 'xchain-indexer']))).to.equal('develop')
+        expect(refForPreCheck('update', cmd(['v0.9.0']))).to.equal('v0.9.0')
+    })
+
+    it('never lets the handed-on tag pin an install or another command', function () {
+        expect(refForPreCheck('install', cmd([]))).to.equal(null)
+        expect(refForPreCheck('install', cmd(['all', 'bitcoin', 'regtest']))).to.equal(null)
+        expect(refForPreCheck('ps', cmd([]))).to.equal(null)
+    })
+
+    it('still yields null for a refused argument shape', function () {
+        expect(refForPreCheck('update', cmd(['xchain-node']))).to.equal(null)
+    })
+
+    it('yields null for a no-ref update when no tag was handed on', function () {
+        delete process.env.XCHAIN_NODE_UPDATE_TARGET
+        expect(refForPreCheck('update', cmd([]))).to.equal(null)
+    })
+})
+
 // commandRepairsHub decides which commands survive a hub that is not answering.
 //
 // preCheck pushes local config to the hub before every state-changing command.

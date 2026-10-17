@@ -160,7 +160,8 @@ function commandLock(commandName, settings, acquireCommandLock,
 // the action uses rather than "the first positional", because the
 // args are order-independent and only resolveArgs knows which one
 // is a ref (`install regtest` names a network, not a branch). A
-// command that names no ref, or an arg shape resolveArgs refuses,
+// no-ref update takes the tag its self-update step handed on; any
+// other command naming no ref, or an arg shape resolveArgs refuses,
 // yields null and the previous default-branch behaviour.
 //
 // Whether this command could bring a crash-looping hub back, which

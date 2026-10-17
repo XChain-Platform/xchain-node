@@ -99,6 +99,33 @@ describe('BootstrapService', function () {
             expect(probeLog.map(p => p.restarted)).to.deep.equal([false, true])
             expect(recordedHeight(stubs)).to.equal(104)
         })
+    })
+})
+
+describe('BootstrapService', function () {
+    beforeEach(saveRequireSignedBootstrapSetting)
+    afterEach(restoreRequireSignedBootstrapSetting)
+    describe('makeBootstrapUtxoTracker(): archive height comes from the archived store', function () {
+        it('records the frozen store height, read after the compress and before the fallback restart', async function () {
+            const { stubs, probeLog } = trackerStubsWithProbe([100, 104], { snapshotFails: true })
+            const base = stubs.execFile
+            let startsAtFrozenRead = null
+            stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+                if (Array.isArray(args) && args[args.length - 1] === '/data/committed_height') {
+                    startsAtFrozenRead = stubs.dockerService.startContainer.callCount
+                    return Promise.resolve({ stdout: '103\n' })
+                }
+                return base(cmd, args)
+            })
+            makeAutoSpawn(stubs)
+
+            const bs = loadBootstrapService(stubs)
+            expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
+
+            expect(startsAtFrozenRead).to.equal(0)
+            expect(probeLog.length).to.be.greaterThan(0)
+            expect(recordedHeight(stubs)).to.equal(103)
+        })
 
         it('keeps the pre-stop height when a rollback leaves the post-restart reading lower', async function () {
             const { stubs } = trackerStubsWithProbe([100, 98])

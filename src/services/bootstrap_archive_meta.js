@@ -171,16 +171,24 @@ async function readBootstrapArchiveMeta(archivePath) {
 
 const ARCHIVE_IDENTITY_FIELDS = ['module', 'coin', 'network']
 
+// An identity value trimmed and lowercased, or null when it is absent or blank: the rule the tracker's
+// restore_validation.js applies to the same bootstrap.json, so both readers judge one archive alike.
+function identityValue(value) {
+    if (typeof value !== 'string') return null
+    const v = value.trim().toLowerCase()
+    return v === '' ? null : v
+}
+
 // Compare an archive's embedded identity with the restore target: { status: 'match' | 'unchecked' | 'mismatch', mismatches, unchecked }.
-// Only a present field that differs is a mismatch. A null meta or field is unchecked, not a mismatch: legacy archives carry none, and
-// the tracker's convert-bootstrap-to-classiclevel.sh writes coin/network null when BOOTSTRAP_COIN/BOOTSTRAP_NETWORK are unset.
+// Only a present field that differs, ignoring case and padding, is a mismatch; a target lacking a declared field is one too. A null
+// or blank meta field is unchecked: legacy archives carry none, and the converter writes coin/network null when unset.
 function compareArchiveIdentity(meta, target) {
     const mismatches = []
     const unchecked  = []
     for (const field of ARCHIVE_IDENTITY_FIELDS) {
-        const value = meta && typeof meta[field] === 'string' ? meta[field] : null
+        const value = identityValue(meta && meta[field])
         if (value === null) unchecked.push(field)
-        else if (value !== target[field]) mismatches.push({ field, archive: value, target: target[field] })
+        else if (value !== identityValue(target[field])) mismatches.push({ field, archive: meta[field], target: target[field] })
     }
     const status = mismatches.length > 0 ? 'mismatch' : unchecked.length > 0 ? 'unchecked' : 'match'
     return { status, mismatches, unchecked }

@@ -254,3 +254,35 @@ describe('CLI unhandled-rejection backstop', function () {
         expect(exitStub.calledWith(1)).to.be.true
     })
 })
+
+// A runbook that stops a service before a backup reads the exit status, so a
+// start, stop or restart that failed must not leave the shell with success.
+describe('CLI `start`/`stop`/`restart` exit code', function () {
+
+    let exitStub, errorStub
+
+    beforeEach(function () {
+        exitStub  = sinon.stub(process, 'exit')
+        errorStub = sinon.stub(console, 'error')
+    })
+
+    afterEach(function () { sinon.restore() })
+
+    for (const [verb, op] of [['start', 'startModules'], ['stop', 'stopModules'], ['restart', 'restartModules']]) {
+        it(`exits NON-ZERO and names the module when ${verb} fails`, async function () {
+            const failure = new Error(`${verb} failed for 1 module: xchain-indexer (bitcoin regtest): docker said no`)
+            const program = loadCli({ [op]: sinon.stub().rejects(failure) })
+            await program.parseAsync([verb, 'xchain-indexer', 'bitcoin', 'regtest'], { from: 'user' })
+            expect(errorStub.calledWithMatch(new RegExp(`${verb} failed: ${verb} failed for 1 module: xchain-indexer`))).to.be.true
+            expect(exitStub.calledWith(1)).to.be.true
+            expect(exitStub.calledWith(0)).to.be.false
+        })
+
+        it(`exits ZERO when ${verb} succeeds`, async function () {
+            const program = loadCli({ [op]: sinon.stub().resolves(true) })
+            await program.parseAsync([verb, 'xchain-indexer', 'bitcoin', 'regtest'], { from: 'user' })
+            expect(exitStub.calledWith(0)).to.be.true
+            expect(exitStub.calledWith(1)).to.be.false
+        })
+    }
+})

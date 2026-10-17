@@ -19,6 +19,8 @@ const fs     = require('fs')
 const os     = require('os')
 const path   = require('path')
 const crypto = require('crypto')
+const { getLogger } = require('../observability/logger')
+const logger = getLogger()
 
 const XCHAIN_NODE_DB = "xchain_node"
 const CREDENTIALS_DIR_NAME = ".xchain-node"
@@ -69,6 +71,50 @@ function loadCredentials() {
     }
 }
 
+// Read the current document for a save. A missing file is an empty one; any other read
+// error throws, because the rename in writeCredentialsAtomic() would replace a file this
+// user cannot read, where an in-place write would have refused to open it.
+function readCredentialsForUpdate(filePath) {
+    let content
+    try {
+        content = fs.readFileSync(filePath, 'utf8')
+    } catch (err) {
+        if (err && err.code === 'ENOENT') return {}
+        throw err
+    }
+    let parsed = null
+    try { parsed = JSON.parse(content) } catch { parsed = null }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+    // Move an unparseable file aside instead of saving over it, so the sibling blocks it held stay recoverable
+    const aside = filePath + '.corrupt-' + new Date().toISOString().replace(/[:.]/g, '-')
+    fs.renameSync(filePath, aside)
+    logger.warn(`WARNING: ${filePath} could not be parsed, so it was moved to ${aside} and a new one started. ` +
+        'Any stored user/password, dbRootPassword or externalDb entry it held may need recovering from that copy.')
+    return {}
+}
+
+// Write the whole document to a 0600 sibling temp file, flush it, then rename it over the
+// original, so a crash or a full disk mid-write never leaves credentials.json torn.
+function writeCredentialsAtomic(filePath, doc) {
+    const tmpName = '.' + CREDENTIALS_FILE_NAME + '.' + process.pid + '.' + crypto.randomBytes(6).toString('hex') + '.tmp'
+    const tmpPath = path.join(path.dirname(filePath), tmpName)
+    try {
+        fs.writeFileSync(tmpPath, JSON.stringify(doc, null, 2), { mode: 0o600, flag: 'wx' })
+        const fd = fs.openSync(tmpPath, 'r+')
+        try { fs.fsyncSync(fd) } finally { fs.closeSync(fd) }
+        fs.renameSync(tmpPath, filePath)
+    } catch (err) {
+        // Leave no temp file behind; the original is untouched until the rename
+        try { fs.unlinkSync(tmpPath) } catch { /* never created */ }
+        throw err
+    }
+    try {
+        fs.chmodSync(filePath, 0o600)
+    } catch {
+        // chmod may fail on Windows; file is in user's HOME so still protected by ACL
+    }
+}
+
 // Read-modify-write, mirroring saveExternalDbConfig() below: a whole-file
 // overwrite here would destroy the sibling `externalDb` block written moments
 // earlier in the same provisioning run (uuid:7ed329f7).
@@ -78,14 +124,9 @@ function saveCredentials(creds) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     }
     const filePath = getCredentialsPath()
-    const existing = readCredentialsRaw() || {}
+    const existing = readCredentialsForUpdate(filePath)
     Object.assign(existing, creds)
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), { mode: 0o600 })
-    try {
-        fs.chmodSync(filePath, 0o600)
-    } catch {
-        // chmod may fail on Windows; file is in user's HOME so still protected by ACL
-    }
+    writeCredentialsAtomic(filePath, existing)
 }
 
 // --- External DB config (host-native MariaDB mode) ---
@@ -124,10 +165,9 @@ function saveDbRootPassword(password) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     }
     const filePath = getCredentialsPath()
-    const existing = readCredentialsRaw() || {}
+    const existing = readCredentialsForUpdate(filePath)
     existing.dbRootPassword = String(password)
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), { mode: 0o600 })
-    try { fs.chmodSync(filePath, 0o600) } catch {}
+    writeCredentialsAtomic(filePath, existing)
 }
 
 function hasExternalDbConfig() {
@@ -151,15 +191,14 @@ function saveExternalDbConfig(cfg) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     }
     const filePath = getCredentialsPath()
-    const existing = readCredentialsRaw() || {}
+    const existing = readCredentialsForUpdate(filePath)
     existing.externalDb = {
         host:          String(cfg.host),
         port:          Number(cfg.port),
         root_user:     String(cfg.root_user),
         root_password: String(cfg.root_password)
     }
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), { mode: 0o600 })
-    try { fs.chmodSync(filePath, 0o600) } catch {}
+    writeCredentialsAtomic(filePath, existing)
 }
 
 module.exports = {

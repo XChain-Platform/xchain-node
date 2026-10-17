@@ -35,9 +35,10 @@ const {
 } = require('./validator_service')
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
-const { readKeyHolders } = require('./validator_stake_service/free_key')
+const { readKeyHolders, amountUnits, fromUnits } = require('./validator_stake_service/free_key')
 const { readSleepState } = require('./validator_stake_service/address_sleep')
 const { readTokenRow } = require('./validator_stake_service/token_balance_read')
+const { readMintState, overAddressCap } = require('./validator_stake_service/mint_rules')
 
 const STAKE_TICK = 'XCHAIN'
 // One stake that clears every capability floor at once. The highest is the hub's llm attestation
@@ -174,12 +175,10 @@ async function readChainState(sdk, address, pubkey, keyCtx) {
         if (!e || !e.incompleteRead) throw e
     }
 
-    // Read the faucet caps from the token's mints group; a token with no such
-    // group is an unreadable answer, not a MAX_MINT of 0.
+    // Read the token's mint rules the indexer judges a MINT by; an unreported
+    // value is an unreadable answer, not an unset 0.
     const token = entity(await getStakeToken(sdk))
-    const mints = (token && token.mints && typeof token.mints === 'object') ? token.mints : null
-    const mintUnreadable = mints ? null : 'the ' + STAKE_TICK + ' token read returned an unexpected shape (no mints group), ' +
-        'so its faucet caps are unknown'
+    const mintState = await readMintState(sdk, address, token, keyCtx.coins, STAKE_TICK)
 
     // An existing stake on this pubkey means v1 would be rejected (the indexer
     // refuses a pubkey that already carries one); say so instead of spending.
@@ -196,37 +195,57 @@ async function readChainState(sdk, address, pubkey, keyCtx) {
     // Read whether the stake address put itself to sleep: the indexer rejects its MINTs and STAKE then.
     const sleepState = await readSleepState(sdk, address, keyCtx.coins)
 
-    return { coinBal, coinPending, tokenBal, mintMax: num(mints && mints.max),
-        mintAddressMax: num(mints && mints.address_max), mintUnreadable, ...holders, ...sleepState }
+    return { coinBal, coinPending, tokenBal, ...mintState, ...holders, ...sleepState }
 }
 
 // Plan the mints: how many transactions, at what amount each, to lift the
 // balance to `amount`. Pure, so it is testable without a network.
 // `mintUnreadable` names why the caps could not be read, so it is not reported as MAX_MINT 0.
-function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnreadable) {
+// `mintRules` carries the read lock/window verdict (mintClosed), the address's
+// earlier self-mints (mintedSoFar) and a failed read of them (mintedUnknown).
+function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnreadable, mintRules = {}) {
     if (tokenBal === null) {
         return { short: null, mints: [], reason: 'the ' + STAKE_TICK + ' balance is unavailable (the explorer\'s ' +
             'balance list could not be read to the end), so the shortfall is unknown. Retry, or check the ' +
             'explorer; this does not mean the address holds none.' }
     }
-    const short = Math.max(0, amount - tokenBal)
-    if (short === 0) return { short, mints: [], reason: null }
+    if (tokenBal >= amount) return { short: 0, mints: [], reason: null }
+    // Subtract and split in exact 1e-8 units: float arithmetic on a fractional balance yields
+    // MINT amounts past 8 places, which the indexer rejects as malformed after the fee is spent.
+    const balUnits = amountUnits(tokenBal)
+    const amountU = amountUnits(amount)
+    if (balUnits === null || amountU === null) {
+        return { short: null, mints: [], reason: 'the ' + STAKE_TICK + ' balance (' + tokenBal + ') or the stake amount (' +
+            amount + ') is not an amount of at most 8 decimal places, so the shortfall cannot be planned exactly.' }
+    }
+    if (balUnits >= amountU) return { short: 0, mints: [], reason: null }
+    const shortUnits = amountU - balUnits
+    const short = Number(fromUnits(shortUnits))
     if (network === 'mainnet') {
-        return { short, mints: [], reason: 'XCHAIN is not mintable on mainnet: acquire ' + short + ' more and re-run.' }
+        return { short, mints: [], reason: 'XCHAIN is not mintable on mainnet: acquire ' + fromUnits(shortUnits) + ' more and re-run.' }
     }
     if (mintUnreadable) {
         return { short, mints: [], reason: mintUnreadable + '; cannot plan the mints for the shortfall. Retry, or check the explorer.' }
     }
-    if (!(mintMax > 0)) {
-        return { short, mints: [], reason: 'the ' + STAKE_TICK + ' token reports no open mint (MAX_MINT is 0); cannot mint the shortfall.' }
+    if (!Number.isFinite(mintMax) || mintMax < 0) {
+        return { short, mints: [], reason: 'the ' + STAKE_TICK + ' token\'s MAX_MINT is unknown; cannot plan the mints for the shortfall. Retry, or check the explorer.' }
     }
+    if (mintRules.mintClosed) return { short, mints: [], reason: mintRules.mintClosed }
+    if (mintRules.mintedUnknown) return { short, mints: [], reason: mintRules.mintedUnknown }
+    // MAX_MINT 0 is the indexer's "no per-transaction cap", so the whole shortfall goes in one MINT.
+    const capUnits = mintMax > 0 ? amountUnits(mintMax) : null
+    const perMint = capUnits !== null && capUnits > 0n ? capUnits : shortUnits
     const mints = []
-    let left = short
-    while (left > 0) { const a = Math.min(mintMax, left); mints.push(a); left -= a }
+    for (let left = shortUnits; left > 0n; ) {
+        const a = left < perMint ? left : perMint
+        mints.push(Number(fromUnits(a)))
+        left -= a
+    }
+    const minted = mintRules.mintedSoFar || 0
     let reason = null
-    if (mintAddressMax > 0 && short > mintAddressMax) {
-        reason = 'the shortfall (' + short + ') exceeds the per-address mint cap (' + mintAddressMax + '); ' +
-                 'this address cannot mint enough on its own.'
+    if (overAddressCap(minted, short, mintAddressMax)) {
+        reason = 'the shortfall (' + short + ')' + (minted ? ' plus the ' + minted + ' this address already minted' : '') +
+                 ' exceeds the per-address mint cap (' + mintAddressMax + '); this address cannot mint enough on its own.'
     }
     return { short, mints, reason }
 }

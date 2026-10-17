@@ -54,7 +54,8 @@ function configure(dependencies) {
 // native-fee validation failing closed on every fee-bearing LTC/DOGE action (audit
 // F-11). getCoinConfigByFullName applies the per-coin host-env override itself
 // (ignored + warned on mainnet: fee acceptance is consensus and must not depend on
-// operator env); the generic FEE_DESTINATION host var is honored on non-mainnet only.
+// operator env); the generic FEE_DESTINATION host var is honored on regtest only, since
+// testnet is a multi-operator federation whose consensus pin hashes only the static bundle.
 // Injected as a default, so a value in the <coin>-<network> config file still wins.
 // Address-deriving modules (encoder/decoder/utxo-tracker) resolve their bitcoinjs
 // network via CryptoNetworks, which keys on the COIN-PREFIXED name (e.g.
@@ -97,7 +98,7 @@ function applyCoinDefaults(defaultValues, module, coin, network) {
     }
     const feeDestEnvName = 'XCHAIN_FEE_DESTINATION_' + CoinTickerSymbol[coin] + '_' + network.toUpperCase()
     const registryFeeDestination = getCoinConfigByFullName(coin, network).addresses.FEE_DESTINATION
-    const feeDestination = (network !== Network.MAINNET && !config.FEE_DESTINATION_ENV[feeDestEnvName] && config.FEE_DESTINATION)
+    const feeDestination = (network === Network.REGTEST && !config.FEE_DESTINATION_ENV[feeDestEnvName] && config.FEE_DESTINATION)
         ? config.FEE_DESTINATION
         : registryFeeDestination
     if (feeDestination) {

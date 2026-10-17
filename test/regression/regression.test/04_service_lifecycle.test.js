@@ -145,12 +145,15 @@ describe('Regression Suite', function () {
             await env.insertModule('xchain-indexer', 'bitcoin', 'mainnet', containerId)
 
             const restartedIds = []
+            const stoppedWith = []
             const moduleOps = proxyquire('../../../src/operations/module_operations', {
                 '../services/docker_service': {
-                    restartContainer: async (id) => { restartedIds.push(id); return true },
+                    // A restart is a budgeted stop then a start, never a bare docker restart
+                    restartContainer: async () => { throw new Error('restart must not use a bare docker restart') },
                     createDockerNetwork: async () => true,
-                    startContainer: async () => true,
-                    stopContainer: async () => true,
+                    startContainer: async (id) => { restartedIds.push(id); return true },
+                    stopContainer: async (id, seconds) => { stoppedWith.push([id, seconds]); return true },
+                    getContainerStopSettings: async () => null,
                     killContainer: async () => true,
                     removeContainer: async () => true,
                     execContainer: async () => '',
@@ -165,6 +168,7 @@ describe('Regression Suite', function () {
             await moduleOps.restartModules(serviceList)
             expect(restartedIds).to.have.length(1)
             expect(restartedIds[0]).to.equal(containerId)
+            expect(stoppedWith).to.deep.equal([[containerId, 30]])
         })
     })
 })

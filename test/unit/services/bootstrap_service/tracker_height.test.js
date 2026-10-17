@@ -63,6 +63,51 @@ describe('tracker_height', function () {
         expect(trackerHeight.chooseArchiveHeight(null, null)).to.equal(null)
     })
 
+})
+
+describe('tracker_height frozen store', function () {
+    let fakes
+
+    beforeEach(function () {
+        fakes = configureTrackerHeight(sinon.stub())
+    })
+
+    it('readFrozenStoreHeight reads the height of the archived directory', async function () {
+        fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '4242\n', stderr: '' }))
+
+        const height = await trackerHeight.readFrozenStoreHeight('vol', '/data/.snap')
+
+        expect(height).to.equal(4242)
+        const args = fakes.execFile.firstCall.args[1]
+        expect(args).to.include('vol:/data:ro')
+        expect(args[args.length - 1]).to.equal('/data/.snap/committed_height')
+    })
+
+    it('readFrozenStoreHeight returns null on junk output or a failed read', async function () {
+        fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '12abc', stderr: '' }))
+        expect(await trackerHeight.readFrozenStoreHeight('vol', '/data')).to.equal(null)
+        fakes.execFile.callsFake((command, args, options, callback) => callback(new Error('no such file')))
+        expect(await trackerHeight.readFrozenStoreHeight('vol', '/data')).to.equal(null)
+    })
+
+    it('a frozen-store height wins over the live readings and lifts the pre-stop-only refusal', function () {
+        expect(trackerHeight.chooseArchiveHeight(100, null, 99)).to.equal(99)
+        expect(trackerHeight.chooseArchiveHeight(100, 105, 99)).to.equal(99)
+        expect(() => trackerHeight.refusePreStopOnlyHeight({ coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: 99 })).to.not.throw()
+        expect(() => trackerHeight.refusePreStopOnlyHeight({ coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: null })).to.throw()
+    })
+
+})
+
+describe('tracker_height live readings', function () {
+    let probeServiceStatus
+    let fakes
+
+    beforeEach(function () {
+        probeServiceStatus = sinon.stub()
+        fakes = configureTrackerHeight(probeServiceStatus)
+    })
+
     it('reads the committed height through configured fakes', async function () {
         probeServiceStatus.resolves({ committed_height: 321 })
 

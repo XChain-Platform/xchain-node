@@ -67,9 +67,11 @@ function evaluateContainerState(raw, { now = Date.now() } = {}) {
 // every known spelling is checked rather than one canonical key:
 //   decoder  health: status, lag_blocks/blockLag, reorg_halted, reorg_halt_checked_at,
 //                    reorg_halt_parked
-//   indexer  health: status, lag, decoderReorgHalted, stallClass, train_activation.status
-//   tracker  health: lag, synced, halted
-//   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'unhealthy')
+//   indexer  health: status, lag, decoderReorgHalted, stallClass (values: see stallReasons),
+//                    train_activation.status
+//   tracker  health: status, lag, halted, halt_reason, block_fetch_desync,
+//                    node_height_stale (synced is sent but not read here)
+//   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'stalled'|'unhealthy')
 function evaluateStatusPayload(payload, { maxLag = DEFAULT_MAX_LAG_BLOCKS } = {}) {
     const reasons = []
     if (!payload || typeof payload !== 'object')
@@ -130,9 +132,13 @@ function statusFlagReasons(payload) {
 // Refusal reasons from the indexer's wedged-counter verdict and a train-activation halt.
 function stallReasons(payload) {
     const reasons = []
-    // The indexer's own single-field verdict on its block counter:
-    // 'none' | 'future_block_wait' | 'barrier_defer' | 'wedged'. Only 'wedged' is a
-    // refusal, and it needs its own leg: the indexer reports status "healthy"
+    // The indexer's own single-field verdict on its block counter: 'none' |
+    // 'future_block_wait' | 'bridge_proof_wait' | 'price_landing_wait' | 'barrier_defer' |
+    // 'wedged', plus the published refinements 'upstream_halted' (only beside
+    // decoderReorgHalted: true, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck'.
+    // The set is defined in xchain-indexer src/XChainIndexer/stall_health.js (stallClassOf,
+    // publishedStallClass). Only 'wedged' is a refusal, and it needs its own
+    // leg: the indexer reports status "healthy"
     // whenever its process is up and its DB circuit is closed, so a freshly-wedged
     // indexer whose lag is still inside the ceiling passes every other check here.
     // NOT keyed on `degraded`, which stays true throughout the healthy

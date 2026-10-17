@@ -79,10 +79,36 @@ async function readTrackerHeightAfterRestart(coin, network, containerId, { attem
     return null
 }
 
+// File the tracker leaves in its store directory recording the height its last clean close committed. Plain text, one integer.
+const FROZEN_HEIGHT_MARKER = 'committed_height'
+
+// The height of the frozen store itself, read from the directory that was just archived (the hardlink snapshot, or /data on the
+// stopped-tracker fallback), or null. Unlike the live status surface this cannot run ahead of the archived data.
+async function readFrozenStoreHeight(volumeName, sourceDir) {
+    try {
+        const { stdout } = await execFileAsync('docker', [
+            'run', '--rm', '-v', `${volumeName}:/data:ro`, 'alpine', 'cat', `${sourceDir}/${FROZEN_HEIGHT_MARKER}`
+        ], { timeout: 60000 })
+        const text = String(stdout).trim()
+        const value = Number(text)
+        if (/^\d+$/.test(text) && Number.isSafeInteger(value)) return value
+        logger.info(`The frozen tracker store reported an unusable height (${redactSecrets(text.slice(0, 40))}); falling back to the status surface.`)
+        return null
+    } catch (err) {
+        logger.info(`Could not read the frozen tracker store height (${redactSecrets(err.message)}); falling back to the status surface.`)
+        return null
+    }
+}
+
 // Pick the height the archive records: never below the data it holds, since the restore guard treats nodeHeight >= archiveHeight as safe.
 // max() keeps a rollback during the restart from lowering it. A pre-stop reading alone can miss blocks committed while the tracker
 // stopped, so that case throws rather than sign an understated height; with no reading at all the archive honestly carries none.
-function chooseArchiveHeight(preStopHeight, postRestartHeight) {
+// A frozen-store reading is exact for the archived data, so it wins over both live readings.
+function chooseArchiveHeight(preStopHeight, postRestartHeight, frozenHeight = null) {
+    if (Number.isInteger(frozenHeight)) {
+        logger.info(`Archive height: ${frozenHeight} (read from the frozen store).`)
+        return frozenHeight
+    }
     const pre  = Number.isInteger(preStopHeight) ? preStopHeight : null
     const post = Number.isInteger(postRestartHeight) ? postRestartHeight : null
     if (post === null && pre !== null) {
@@ -95,7 +121,8 @@ function chooseArchiveHeight(preStopHeight, postRestartHeight) {
 }
 
 // Throw when only the pre-stop reading exists, naming the run, so the publish stops before any compress or signing.
-function refusePreStopOnlyHeight({ coin, network, preStopHeight, postRestartHeight }) {
+function refusePreStopOnlyHeight({ coin, network, preStopHeight, postRestartHeight, frozenHeight }) {
+    if (Number.isInteger(frozenHeight)) return
     if (!Number.isInteger(preStopHeight) || Number.isInteger(postRestartHeight)) return
     throw new Error(`utxo-tracker ${coin}/${network} did not report its committed height after the restart; ` +
         `refusing to sign an archive whose recorded height could understate its data (pre-stop reading ${preStopHeight}). ` +
@@ -106,6 +133,7 @@ module.exports = {
     configureDependencies,
     readTrackerCommittedHeight,
     readTrackerHeightAfterRestart,
+    readFrozenStoreHeight,
     chooseArchiveHeight,
     refusePreStopOnlyHeight
 }

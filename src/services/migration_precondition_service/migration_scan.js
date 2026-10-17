@@ -18,6 +18,7 @@ const path = require('path')
 const { EXTERNAL_DB, XChainService } = require('../../config')
 const { tableCountSql, tableExistsSql } = require('../../db/information_schema')
 const { appliedMigrationsSql } = require('../../db/migrations')
+const { readRecordedNames, wouldApplyNote } = require('./recorded_ledger')
 const { migrationFiles } = require('../../utils/migration_files')
 const { getDockerContainerImageName } = require('../config_service')
 const { readMigrateCli, migrateCliPathFor, migrateCliPathsFor, decoderStatusRows } = require('../../utils/indexer_migrate_cli')
@@ -209,7 +210,8 @@ async function runningBuildSupportsPerFileMigrations(container, deps = {}, modul
 /**
  * The gated files an unscoped migrate run inside the running build would apply:
  * its own pending rows (a row with no mode is the runners' manual default),
- * minus any whose end state the database already embodies.
+ * minus any the ledger records (re-keyed for renames). A schema-matched file with no
+ * ledger row still runs, unless its MIGRATION_PRECONDITIONS entry baselines it (recorded_ledger.js).
  */
 function runningBuildPendingManual(rows, applied) {
     return rows.filter(row => !row.applied && (row.mode == null || row.mode === 'manual') &&
@@ -241,7 +243,8 @@ function databaseLiteral(database) {
 /**
  * Read the applied-migration ledger of one module database.
  *
- * Returns { state: 'ledger', applied: Set<string> } when the ledger was read,
+ * Returns { state: 'ledger', applied: Set<string>, ledger: Set<string>|null } when
+ * the ledger was read (`applied` adds an indexer's schema-satisfied names, `ledger` does not),
  * { state: 'empty-database' } when the schema holds no tables at all (or does
  * not exist yet), and { state: 'unreadable', reason } for everything else. The
  * three are deliberately distinct: only the middle one is safe to proceed on.
@@ -313,7 +316,8 @@ async function readAppliedMigrations({ database, coin, network }, deps = {}) {
 
         const out = String(await runner(appliedMigrationsSql(database, LEDGER_TABLE)))
         const applied = new Set(out.split('\n').map(s => s.trim()).filter(Boolean))
-        return { state: 'ledger', applied }
+        // Keep the recorded names apart: the runner executes every pending file the ledger lacks unless MIGRATION_PRECONDITIONS baselines it.
+        return { state: 'ledger', applied, ledger: await readRecordedNames(runner, database, LEDGER_TABLE, applied) }
     } catch (err) {
         return { state: 'unreadable', reason: (err && err.message) ? err.message : String(err) }
     }
@@ -363,7 +367,7 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
                 : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +
             ' and apply EVERY pending manual migration on ' + dbName + ', which is ' +
             wouldApply.length + ' file(s)' + source + ':\n' +
-            wouldApply.map(f => '    ' + f + (carried.includes(f) ? '  (the one you need)' : '')).join('\n') + '\n' +
+            wouldApply.map(f => '    ' + f + wouldApplyNote(f, carried, remedy)).join('\n') + '\n' +
             '  Apply ' + (plural ? 'the needed files' : 'the needed file') + ' with a build that supports ' +
             '--file, or apply the statement by hand with the writer quiesced, then re-run the update.' +
             notCarriedNote

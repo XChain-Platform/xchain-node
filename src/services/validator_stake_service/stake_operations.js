@@ -17,6 +17,13 @@
 const { getLogger } = require('../../observability/logger')
 const { sendLockFor, releaseOnIndexWait, holdForSend } = require('./send_lock')
 const { sleepRefusal, sleepUnknownRefusal } = require('./address_sleep')
+const { amountUnits, fromUnits } = require('./free_key')
+
+// A planned MINT amount as the plain decimal the wire carries (at most 8 places, above 0), or null.
+function mintAmountText(amount) {
+    const units = amountUnits(amount)
+    return units === null || units === 0n ? null : fromUnits(units)
+}
 
 function defaultLog() {
     const logger = getLogger()
@@ -36,11 +43,16 @@ function logStakeBalances(log, network, coins, pubkey, address, amount, state, p
     const tokenHeld = state.tokenBal === null ? 'unavailable (balance list read incomplete)' : state.tokenBal + ' held'
     log('  ' + STAKE_TICK.padEnd(15) + ': ' + tokenHeld + ', ' + amount + ' to stake' +
         (plan.short ? ', short ' + plan.short : ''))
-    if (state.mintMax) log('  faucet caps    : ' + state.mintMax + ' per MINT, ' + (state.mintAddressMax || 'no') + ' per address')
+    // A MAX_MINT of 0 is a token with no per-transaction cap, so it prints as such rather than vanishing.
+    if (Number.isFinite(state.mintMax)) {
+        log('  faucet caps    : ' + (state.mintMax || 'no cap') + ' per MINT, ' + (state.mintAddressMax || 'no') + ' per address' +
+            (state.mintedSoFar ? ' (' + state.mintedSoFar + ' already minted)' : ''))
+    }
 }
 
 function logStakeSteps(log, amount, pubkey, plan, timing, STAKE_TICK, paren) {
-    const steps = plan.mints.map((a, i) => 'MINT ' + (i + 1) + '/' + plan.mints.length + ': ' + a + ' ' + STAKE_TICK)
+    const steps = plan.mints.map((a, i) => 'MINT ' + (i + 1) + '/' + plan.mints.length + ': ' +
+        (mintAmountText(a) || a) + ' ' + STAKE_TICK)
     steps.push('STAKE v1: ' + amount + ' ' + STAKE_TICK + ' to ' + pubkey)
     log('')
     log('  Steps:')
@@ -196,13 +208,20 @@ async function broadcastStake(context) {
     // the whole run lands in a single block (see chainedInputs). --serialize
     // restores the old one-action-per-block behaviour, which costs a block per
     // step and is only worth it if chaining ever misbehaves on a venue.
+    // Check every MINT amount before the first send: one past 8 places is rejected after its fee is spent.
+    const mintTexts = plan.mints.map(mintAmountText)
+    const malformed = plan.mints.filter((a, i) => mintTexts[i] === null)
+    if (malformed.length) {
+        throw context.fail('the planned MINT amount ' + malformed.join(', ') + ' is not a ' + STAKE_TICK + ' amount above 0 ' +
+            'with at most 8 decimal places, which the indexer rejects. Nothing was sent.')
+    }
     const progress = { chain: !opts.serialize, sent: [], prevTxid: null, chainBroken: false }
     for (let i = 0; i < plan.mints.length; i++) {
         log('')
-        log('  Sending MINT ' + (i + 1) + '/' + plan.mints.length + ' (' + plan.mints[i] + ' ' + STAKE_TICK + ')...')
+        log('  Sending MINT ' + (i + 1) + '/' + plan.mints.length + ' (' + mintTexts[i] + ' ' + STAKE_TICK + ')...')
         const inputs = await linkInputs(context, progress)
         await sendStakeAction(context, progress, 'MINT',
-            { VERSION: 0, TICK: STAKE_TICK, AMOUNT: String(plan.mints[i]) }, opts.serialize === true, inputs)
+            { VERSION: 0, TICK: STAKE_TICK, AMOUNT: mintTexts[i] }, opts.serialize === true, inputs)
     }
 
     // Form the STAKE's own link to the last mint BEFORE deciding whether to
@@ -255,7 +274,6 @@ async function finishStake(context, progress, stakeInputs) {
 }
 
 // Resolve --amount: the default only when it is absent, else whole XCHAIN above 0, refused rather than coerced.
-// Whole units only: the mint split is float arithmetic, so a fractional shortfall would send malformed MINT amounts.
 function resolveStakeAmount(raw, DEFAULT_STAKE_AMOUNT, fail, STAKE_TICK) {
     if (raw === undefined || raw === null) return DEFAULT_STAKE_AMOUNT
     const text = String(raw).trim()
@@ -304,7 +322,7 @@ function createStakeValidator(helpers) {
         // Take the lock before reading the plan, so no other broadcast sends between this read and these sends.
         sendLock.hold()
         const state = await readChainState(sdk, address, pubkey, { network, coins, cooldownBlocks: timing.cooldownBlocks })
-        const plan = planMints(network, state.tokenBal, amount, state.mintMax, state.mintAddressMax, state.mintUnreadable)
+        const plan = planMints(network, state.tokenBal, amount, state.mintMax, state.mintAddressMax, state.mintUnreadable, state)
 
         logStakeBalances(log, network, coins, pubkey, address, amount, state, plan, STAKE_TICK)
         if (state.existing || state.delegated) {
@@ -327,7 +345,7 @@ function createStakeValidator(helpers) {
         }
 
         return broadcastStake({ opts, sdk, session, address, coins, pubkey, amount, plan, log, timing,
-            explorerUrl, chainedInputs, waitForBalance, paren, STAKE_TICK, sendLock })
+            explorerUrl, chainedInputs, waitForBalance, paren, STAKE_TICK, sendLock, fail })
     }
 }
 

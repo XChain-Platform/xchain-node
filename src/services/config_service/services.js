@@ -181,6 +181,7 @@ function configureE2e(defaultValues, module, coin) {
 // admission-era canonical refuses a legacy-map row and halts the block loop.
 // XC_ANCHOR_FOLD_REGTEST_ACTIVATION arms the ANCHOR v3 fold gate the same way; unarmed,
 // a deployed regtest indexer rejects every v3 bundle as an unknown version.
+// EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME arms the exact-integer wire-field gate on a regtest indexer only.
 // The indexer pushes chain tips to HUB_API_URL; when that hub enforces
 // HUB_API_KEY, the indexer must present the same key or its writes 401.
 // Sourced from host env so it persists across `update`, then from the shared
@@ -220,7 +221,8 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
                                                                       "XC_MIRROR_ADMISSION_ACTIVATION",
                                                                       "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
                                                                       "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
-                                                                      "XC_ANCHOR_SLASH_REGTEST_ACTIVATION")
+                                                                      "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
+                                                                      "EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME")
         for (const varName of rollcallPassthroughVars) {
             if (config.INDEXER_ROLLCALL_ENV[varName] !== undefined && config.INDEXER_ROLLCALL_ENV[varName] !== "") {
                 defaultValues[varName] = config.INDEXER_ROLLCALL_ENV[varName]

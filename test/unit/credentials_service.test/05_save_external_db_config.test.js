@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const {
-    sinon, expect, loadCredentialsService, makeFs
+    sinon, expect, loadCredentialsService, makeFs, fsError
 } = require('./support/helpers')
 
 // saveExternalDbConfig
@@ -22,7 +22,7 @@ describe('CredentialsService', function () {
         it('creates dir if it does not exist', function () {
             const fs = makeFs({
                 existsSync: sinon.stub().returns(false),
-                readFileSync: sinon.stub().throws(new Error('ENOENT'))
+                readFileSync: sinon.stub().throws(fsError('ENOENT'))
             })
             const cs = loadCredentialsService(fs)
             const cfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' }
@@ -61,7 +61,7 @@ describe('CredentialsService', function () {
         it('coerces types: host/root_user/root_password to string, port to number', function () {
             const fs = makeFs({
                 existsSync: sinon.stub().returns(true),
-                readFileSync: sinon.stub().throws(new Error('ENOENT'))
+                readFileSync: sinon.stub().throws(fsError('ENOENT'))
             })
             const cs = loadCredentialsService(fs)
             cs.saveExternalDbConfig({ host: 127, port: '3306', root_user: 42, root_password: true })
