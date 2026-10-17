@@ -16,7 +16,7 @@
 
 'use strict'
 
-function configure(dependencies) {
+function createPathReaders(dependencies) {
     const { fs, moduleDir, tmpDir, cryptoNodesDir, Coin, stringToCoin } = dependencies
 
     function getModuleDir(module) {
@@ -32,6 +32,17 @@ function configure(dependencies) {
         return cryptoNodesDir + "/" + Coin[coin]
     }
 
+    function moduleDirExists(module) {
+        return fs.existsSync(getModuleDir(module))
+    }
+
+    return { getModuleDir, getModuleTmpDir, getCryptoNodeDir, moduleDirExists }
+}
+
+function createPathOperations(dependencies, readers) {
+    const { fs } = dependencies
+    const { getModuleDir, getModuleTmpDir, getCryptoNodeDir } = readers
+
     function removeModuleDir(module) {
         fs.rmSync(getModuleDir(module), { recursive: true })
     }
@@ -44,10 +55,6 @@ function configure(dependencies) {
     function createModuleTmpDir(module) {
         const dir = getModuleTmpDir(module)
         if (!fs.existsSync(dir)) fs.mkdirSync(dir)
-    }
-
-    function moduleDirExists(module) {
-        return fs.existsSync(getModuleDir(module))
     }
 
     function checkIfModuleExists(module) {
@@ -65,17 +72,18 @@ function configure(dependencies) {
             && fs.existsSync(dir + "/src")
     }
 
-    Object.assign(module.exports, {
-        getModuleDir,
-        getModuleTmpDir,
-        getCryptoNodeDir,
+    return {
         removeModuleDir,
         removeModuleTmpDir,
         createModuleTmpDir,
-        moduleDirExists,
         checkIfModuleExists,
         checkIfCryptoNodeSourceExists
-    })
+    }
+}
+
+function configure(dependencies) {
+    const readers = createPathReaders(dependencies)
+    Object.assign(module.exports, readers, createPathOperations(dependencies, readers))
 }
 
 module.exports = { configure }

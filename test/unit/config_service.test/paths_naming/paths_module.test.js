@@ -31,11 +31,7 @@ function configure(overrides = {}) {
     return dependencies
 }
 
-describe('config_service/paths', function () {
-    after(function () {
-        paths.configure({ fs, moduleDir, tmpDir, cryptoNodesDir, Coin, stringToCoin })
-    })
-
+describe('config_service/paths directory operations', function () {
     it('derives module, temporary, and crypto-node directories', function () {
         const dependencies = configure()
 
@@ -72,7 +68,9 @@ describe('config_service/paths', function () {
 
         expect(dependencies.fs.mkdirSync.calledOnceWithExactly('/temporary/xchain-decoder')).to.equal(true)
     })
+})
 
+describe('config_service/paths source checks', function () {
     it('reports module directory existence', function () {
         const dependencies = configure()
         dependencies.fs.existsSync.returns(false)
@@ -106,4 +104,8 @@ describe('config_service/paths', function () {
             '/crypto-nodes/bitcoin/src'
         ])
     })
+})
+
+after(function () {
+    paths.configure({ fs, moduleDir, tmpDir, cryptoNodesDir, Coin, stringToCoin })
 })

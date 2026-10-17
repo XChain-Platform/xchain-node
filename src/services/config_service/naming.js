@@ -16,11 +16,11 @@
 
 'use strict'
 
-function configure(dependencies) {
+function createContainerNames(dependencies) {
     const {
-        NODE_PREFIX, DEFAULT_NODE_PREFIX, SEP, DB_SEP,
+        NODE_PREFIX, DEFAULT_NODE_PREFIX, SEP,
         DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
-        CoinTickerSymbol, Network, XChainService, scopedNodePrefixSegment
+        XChainService
     } = dependencies
 
     function getDockerContainerImageNamePrefix(module, coin, network) {
@@ -45,6 +45,20 @@ function configure(dependencies) {
             + (network !== "" ? SEP + network : "")
     }
 
+    return {
+        getDockerContainerImageNamePrefix,
+        getDockerContainerImageName,
+        getUtxoTrackerVolumeName,
+        getDockerNetwork
+    }
+}
+
+function createDatabaseNames(dependencies) {
+    const {
+        NODE_PREFIX, DEFAULT_NODE_PREFIX, DB_SEP,
+        CoinTickerSymbol, Network, scopedNodePrefixSegment
+    } = dependencies
+
     const getModuleDatabaseName = function (module, coin, network) {
         if (coin !== "" && CoinTickerSymbol[coin] === undefined) {
             throw new Error("Unknown coin '" + coin + "'; cannot derive a database name")
@@ -68,14 +82,11 @@ function configure(dependencies) {
         }
     }
 
-    Object.assign(module.exports, {
-        getDockerContainerImageNamePrefix,
-        getDockerContainerImageName,
-        getUtxoTrackerVolumeName,
-        getDockerNetwork,
-        getModuleDatabaseName,
-        applyPrefixedModuleDbUsers
-    })
+    return { getModuleDatabaseName, applyPrefixedModuleDbUsers }
+}
+
+function configure(dependencies) {
+    Object.assign(module.exports, createContainerNames(dependencies), createDatabaseNames(dependencies))
 }
 
 module.exports = { configure }

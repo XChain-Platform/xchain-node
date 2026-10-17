@@ -33,24 +33,7 @@ function configure(overrides = {}) {
     })
 }
 
-describe('config_service/naming', function () {
-    after(function () {
-        naming.configure({
-            NODE_PREFIX: config.NODE_PREFIX,
-            DEFAULT_NODE_PREFIX: config.DEFAULT_NODE_PREFIX,
-            SEP: config.SEP,
-            DB_SEP: config.DB_SEP,
-            DB_MODULE_NAME: config.DB_MODULE_NAME,
-            HUB_MODULE_NAME: config.HUB_MODULE_NAME,
-            EXPLORER_MODULE_NAME: config.EXPLORER_MODULE_NAME,
-            SYNC_MODULE_NAME: config.SYNC_MODULE_NAME,
-            CoinTickerSymbol: config.CoinTickerSymbol,
-            Network: config.Network,
-            XChainService: config.XChainService,
-            scopedNodePrefixSegment
-        })
-    })
-
+describe('config_service/naming containers and networks', function () {
     it('uses a shared prefix for shared images and a scoped prefix for coin images', function () {
         configure()
 
@@ -79,7 +62,9 @@ describe('config_service/naming', function () {
         expect(naming.getDockerNetwork('bitcoin', '')).to.equal('xchain-node-bitcoin')
         expect(naming.getDockerNetwork('bitcoin', 'mainnet')).to.equal('xchain-node-bitcoin-mainnet')
     })
+})
 
+describe('config_service/naming database identities', function () {
     it('builds database names and scopes them for non-default stacks', function () {
         configure()
         expect(naming.getModuleDatabaseName('xchain-decoder', 'bitcoin', 'mainnet'))
@@ -112,5 +97,22 @@ describe('config_service/naming', function () {
             DECODER_DB_USER: 'xchain_' + segment + 'decoder_bitcoin_mainnet',
             INDEXER_DB_USER: 'xchain_' + segment + 'indexer_bitcoin_mainnet'
         })
+    })
+})
+
+after(function () {
+    naming.configure({
+        NODE_PREFIX: config.NODE_PREFIX,
+        DEFAULT_NODE_PREFIX: config.DEFAULT_NODE_PREFIX,
+        SEP: config.SEP,
+        DB_SEP: config.DB_SEP,
+        DB_MODULE_NAME: config.DB_MODULE_NAME,
+        HUB_MODULE_NAME: config.HUB_MODULE_NAME,
+        EXPLORER_MODULE_NAME: config.EXPLORER_MODULE_NAME,
+        SYNC_MODULE_NAME: config.SYNC_MODULE_NAME,
+        CoinTickerSymbol: config.CoinTickerSymbol,
+        Network: config.Network,
+        XChainService: config.XChainService,
+        scopedNodePrefixSegment
     })
 })
