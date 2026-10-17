@@ -267,8 +267,9 @@ describe('BootstrapArchiveMeta', function () {
     })
 })
 
-// The tracker's restorebootstrap reads the same bootstrap.json trimmed and lowercased; node must
-// reach the same verdict on it, or one archive restores on one path and is refused on the other.
+// The tracker's restorebootstrap reads the same bootstrap.json trimmed and lowercased; node must normalize identity
+// values the same way (case, padding, blank as undeclared). The one intended difference, a target with no value for
+// a declared field, is a mismatch here but unchecked in the tracker, and the last test below pins it.
 describe('BootstrapArchiveMeta identity normalization', function () {
     describe('compareArchiveIdentity() normalization shared with the tracker', function () {
         const target = { module: 'xchain-utxo-tracker', coin: 'bitcoin', network: 'mainnet' }
