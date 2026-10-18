@@ -229,14 +229,91 @@ async function getCryptoNode(coin, network, version) {
         await gitHubDownloader.downloadRepoVersion("dogecoin", "dogecoin", version, { outputPath: cryptoNodesDir + "/dogecoin" })
     } else if (coin === Coin.LITECOIN) {
         await gitHubDownloader.downloadRepoVersion("litecoin-project", "litecoin", version, { outputPath: cryptoNodesDir + "/litecoin" })
+    } else if (coin === Coin.KASPA) {
+        await getKaspaNode(version)
     } else {
         throw new Error("There's no support for " + coin + " in " + network + " network yet")
     }
     return true
 }
 
+// ── Kaspa ────────────────────────────────────────────────────────────────────
+// three differences from the other coins, each pinned by tests in crypto_nodes/kaspa/kaspa_node.js:
+//   1. the release asset is a .zip (other coins ship .tar.gz), so decompressTarGz does not apply;
+//      the system unzip is used (the image has it) and a missing one fails loudly.
+//   2. the repository is kaspanet/rusty-kaspa, not <coin>/<coin>.
+//   3. sha256 verification is fail-closed: an unrecorded hash refuses the download.
+const kaspaNode = require('../../../crypto_nodes/kaspa/kaspa_node.js')
+const crypto    = require('crypto')
+const path      = require('path')
+
+function kaspaPlatform() {
+    if (process.platform === 'linux' && process.arch === 'x64') return 'linux-amd64'
+    if (process.platform === 'win32') return 'win64'
+    if (process.platform === 'darwin') return 'osx'
+    throw new Error('no Kaspa release asset is recorded for ' + process.platform + '/' + process.arch + '')
+}
+
+function downloadFile(url, filePath) {
+    return new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(filePath)
+        https.get(url, (res) => {
+            if (res.statusCode !== 200) {
+                file.close()
+                reject(new Error('download failed HTTP ' + res.statusCode + ': ' + url))
+                return
+            }
+            res.pipe(file)
+            file.on('finish', () => file.close(() => resolve(filePath)))
+        }).on('error', (error) => {
+            file.close()
+            reject(error)
+        })
+    })
+}
+
+async function getKaspaNode(version) {
+    if (version.startsWith("v")) version = version.substring(1)
+    const tag = "v" + version
+    if (tag !== kaspaNode.VERSION) {
+        throw new Error('crypto_nodes/kaspa records only ' + kaspaNode.VERSION + ', got ' + tag +
+            '(add the hash to crypto_nodes/kaspa/ASSET-HASHES.md first, then allow the version)')
+    }
+
+    const platform = kaspaPlatform()
+    const expected = kaspaNode.assertHashKnown(platform)     // unrecorded means it throws (fail-closed)
+    const url      = kaspaNode.downloadUrl(platform)
+
+    const destination = cryptoNodesDir + "/kaspa"
+    fs.mkdirSync(destination, { recursive: true })
+    const zipPath = path.join(destination, path.basename(url))
+
+    // already placed with the right hash: skip the download, same intent as usePlacedBitcoinTarball
+    let placedOk = false
+    if (fs.existsSync(zipPath)) {
+        const actual = crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex')
+        placedOk = kaspaNode.verifySha256(actual, expected)
+        if (!placedOk) logger.log("placed Kaspa archive does not match the registered sha256; re-downloading")
+    }
+    if (!placedOk) await downloadFile(url, zipPath)
+
+    const actual = crypto.createHash('sha256').update(fs.readFileSync(zipPath)).digest('hex')
+    if (!kaspaNode.verifySha256(actual, expected)) {
+        throw new Error('Kaspa archive failed its sha256 check: expected ' + expected + ', got ' + actual)
+    }
+
+    // unpacking: the release archive is flat (kaspad / kaspa-wallet / rothschild / stratum-bridge)
+    try {
+        require('child_process').execFileSync('unzip', ['-o', '-q', zipPath, '-d', destination])
+    } catch (error) {
+        throw new Error('failed to unpack the Kaspa archive (system unzip required): ' + (error && error.message ? error.message : error))
+    }
+    return true
+}
+
 module.exports = {
     nodeVersion,
+    getKaspaNode,
     resolveMirrorAddresses,
     isTransportFailure,
     pinnedLookup,

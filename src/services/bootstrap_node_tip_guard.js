@@ -102,12 +102,71 @@ function defaultRunner(cmd, args) {
 // { blocks, headers, initialblockdownload } from the coin node container's own
 // CLI. Throws with a reason when the container is missing or the daemon does
 // not answer (still loading, RPC not up yet).
-async function readCoinNodeChainInfo(coin, network, { runner = defaultRunner, getModuleContainer } = {}) {
+  // Kaspa has no <coin>-cli (v2.1.0 ships only kaspad / kaspa-wallet / rothschild / stratum-bridge),
+  // so chain info is read from the host side on the container's wRPC-JSON port: the mapping comes from `docker port`,
+  // and the request shape and field mapping are pinned by tests in crypto_nodes/kaspa/kaspa_node.js.
+  // field mapping: blocks <- blockCount (blue score), headers <- headerCount,
+  //            initialblockdownload <- !isSynced (measured: every RPC returns an ibd error while syncing)
+  function kaspaRpc(url, method, params = {}) {
+      const WebSocket = require('ws')
+      return new Promise((resolve, reject) => {
+          const ws = new WebSocket(url)
+          const timer = setTimeout(() => {
+              try { ws.terminate() } catch (e) { /* a failed close must not mask the error */ }
+              reject(new Error(method + ' timed out (no response from ws://...)'))
+          }, 15000)
+          ws.on('open', () => ws.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })))
+          ws.on('message', (data) => {
+              clearTimeout(timer)
+              try {
+                  const json = JSON.parse(String(data))
+                  ws.close()
+                  if (json.error) reject(new Error(method + ': ' + JSON.stringify(json.error).slice(0, 160)))
+                  else resolve(json.params !== undefined ? json.params : json.result)
+              } catch (error) {
+                  ws.close()
+                  reject(error)
+              }
+          })
+          ws.on('error', (error) => { clearTimeout(timer); reject(error) })
+      })
+  }
+
+  async function readKaspaChainInfo(containerId, network, runner) {
+      const kaspaNode = require('../../crypto_nodes/kaspa/kaspa_node.js')
+      // the simnet default ports are unverified, so they must be passed explicitly (module convention)
+      const ports = kaspaNode.portsFor(network, network === 'simnet' ? { wrpcJson: 18510 } : undefined)
+      const { stdout } = await runner('docker', ['port', containerId, String(ports.wrpcJson)])
+      const match = String(stdout).match(/:(\d+)\s*$/)
+      if (!match) throw new Error('Kaspa container has no wRPC-JSON port mapped ' + ports.wrpcJson + '(docker port returned nothing)')
+      const plan = kaspaNode.tipGuardPlan({ wrpcJsonPort: Number(match[1]), network })
+      // two probes bracketing an observation window: isSynced alone is not trustworthy
+      // (an idle node read back false), so progress in headerCount/blockCount decides; pinned by unit tests
+      const first = await kaspaRpc(plan.url, plan.method, plan.params)
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+      const second = await kaspaRpc(plan.url, plan.method, plan.params)
+      const server = await kaspaRpc(plan.url, 'getServerInfo', {})
+      const verdict = kaspaNode.judgeInitialBlockDownload({
+          first: { headerCount: first.headerCount, blockCount: first.blockCount },
+          second: { headerCount: second.headerCount, blockCount: second.blockCount },
+          isSynced: server.isSynced
+      })
+      return {
+          blocks: Number(second.blockCount !== undefined ? second.blockCount : (second.blueScore || 0)),
+          headers: Number(second.headerCount !== undefined ? second.headerCount : 0),
+          initialblockdownload: verdict.initialblockdownload
+      }
+  }
+
+  async function readCoinNodeChainInfo(coin, network, { runner = defaultRunner, getModuleContainer } = {}) {
     const cliArgs = NODE_CLI_ARGS[coin]
-    if (!cliArgs) throw new Error(`no node CLI known for coin ${coin}`)
+    // Kaspa has no <coin>-cli, so it goes through the host-side wRPC query; other coins keep their path
+    const isKaspa = coin === 'kaspa'
+    if (!cliArgs && !isKaspa) throw new Error(`no node CLI known for coin ${coin}`)
     const lookup = getModuleContainer || require('../state').db.getModuleContainer.bind(require('../state').db)
     const containerId = await lookup(NODE_MODULE_NAME, coin, network)
     if (!containerId) throw new Error(`no ${coin}/${network} node container is registered`)
+    if (isKaspa) return await readKaspaChainInfo(containerId, network, runner)
     const { stdout } = await runner('docker', ['exec', containerId, ...cliArgs, 'getblockchaininfo'])
     let info
     try {
