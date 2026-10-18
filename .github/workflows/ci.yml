@@ -33,13 +33,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify signing module resolution
+      - name: Verify SDK signing module resolution
         run: |
           node -e '
-            for (const name of ["secp256k1", "elliptic"]) {
-              const resolved = require.resolve(name);
-              require(resolved);
-              console.log(name + " resolves at " + resolved);
+            const path = require("node:path");
+            const { createRequire } = require("node:module");
+            const sdkRoot = path.dirname(require.resolve("@dankest-llc/xchain-sdk/package.json"));
+            const authEntry = path.join(sdkRoot, "src", "auth.js");
+            const authRequire = createRequire(authEntry);
+            const messageEntry = authRequire.resolve("bitcoinjs-message");
+            const messageRequire = createRequire(messageEntry);
+            const secpEntry = messageRequire.resolve("secp256k1");
+            const secpRequire = createRequire(secpEntry);
+            const ellipticEntry = secpRequire.resolve("elliptic");
+
+            require(authEntry);
+
+            for (const [name, resolved] of [
+              ["bitcoinjs-message from SDK auth", messageEntry],
+              ["secp256k1 from bitcoinjs-message", secpEntry],
+              ["elliptic from secp256k1", ellipticEntry]
+            ]) {
+              if (!require.cache[resolved]) {
+                throw new Error(name + " was resolved but not loaded through the SDK signing path");
+              }
+              console.log(name + " loaded at " + resolved);
             }
           '
 
