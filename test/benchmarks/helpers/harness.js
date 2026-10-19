@@ -52,7 +52,7 @@ process.on('exit', () => {
     try { fs.rmSync(BENCH_ROOT, { recursive: true, force: true }) } catch { /* best effort cleanup */ }
 })
 
-const FIXTURE_CONFIG_DIR = path.join(__dirname, '../../../config/fixtures')
+const FIXTURE_CONFIG_DIR = path.join(__dirname, '../../fixtures/config')
 const CONFIG_FILES = {}
 for (const basename of fs.readdirSync(FIXTURE_CONFIG_DIR)) {
     CONFIG_FILES[basename] = fs.readFileSync(path.join(FIXTURE_CONFIG_DIR, basename), 'utf8')

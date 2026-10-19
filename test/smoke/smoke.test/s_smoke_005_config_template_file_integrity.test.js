@@ -17,12 +17,12 @@ const fs         = require('fs')
 const ROOT = path.join(__dirname, '..', '..', '..')
 
 // The per-coin/network main config files are operator-authored and untracked,
-// so this suite reads the tracked fixture set under config/fixtures instead of
+// so this suite reads the tracked fixture set under test/fixtures/config instead of
 // whatever an operator machine holds. Comment lines are allowed: the reader
 // skips any line without a KEY= prefix.
 describe('S-SMOKE-005 – Config Template File Integrity', function () {
 
-    const configDir = path.join(ROOT, 'config', 'fixtures')
+    const configDir = path.join(ROOT, 'test', 'fixtures', 'config')
 
     const coins = ['bitcoin', 'litecoin', 'dogecoin']
     const networks = ['mainnet', 'testnet', 'regtest']
