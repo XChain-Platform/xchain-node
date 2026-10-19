@@ -238,8 +238,8 @@ async function createDatabaseModule(coin, network) {
     const containerPrefix = getDockerContainerImageName(DB_MODULE_NAME, coin, network)
 
     logger.info("Building image of database")
-    await execFileAsync('docker', ['pull', 'mariadb:10.11'])
-    await execFileAsync('docker', ['tag', 'mariadb:10.11', containerPrefix])
+    await execFileAsync('docker', ['pull', 'mariadb:11.8'])
+    await execFileAsync('docker', ['tag', 'mariadb:11.8', containerPrefix])
     const { runArgs, dbHostPort } = createDatabaseRunArgs(containerPrefix, environmentVariables, coin, network)
     addDatabaseTuningArgs(runArgs)
     await prepareDatabaseContainer(containerPrefix, dbHostPort)

@@ -224,7 +224,7 @@ describe('DatabaseService', function () {
             expect(runArgs, 'docker run call not found').to.not.be.null
             const cmdIdx = runArgs.indexOf('--health-cmd')
             expect(cmdIdx, 'no --health-cmd on the DB container').to.be.greaterThan(-1)
-            // The image ships /usr/local/bin/healthcheck.sh (verified on mariadb:10.11).
+            // The probe uses the image's /usr/local/bin/healthcheck.sh entry point.
             expect(String(runArgs[cmdIdx + 1])).to.include('healthcheck.sh')
             expect(runArgs).to.include('--health-interval')
             expect(runArgs).to.include('--health-start-period')

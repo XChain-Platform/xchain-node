@@ -135,9 +135,11 @@ function stallReasons(payload) {
     // The indexer's own single-field verdict on its block counter: 'none' |
     // 'future_block_wait' | 'bridge_proof_wait' | 'price_landing_wait' | 'barrier_defer' |
     // 'wedged', plus the published refinements 'upstream_halted' (only beside
-    // decoderReorgHalted: true, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck'.
-    // The set is defined in xchain-indexer src/XChainIndexer/stall_health.js (stallClassOf,
-    // publishedStallClass). Only 'wedged' is a refusal, and it needs its own
+    // decoderReorgHalted: true, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck' |
+    // 'train_activation_halt'. The set is defined in xchain-indexer
+    // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). Only 'wedged'
+    // is a refusal by itself; 'train_activation_halt' never is because the
+    // train_activation.status === 'halt' leg below already refuses it. 'wedged' needs its own
     // leg: the indexer reports status "healthy"
     // whenever its process is up and its DB circuit is closed, so a freshly-wedged
     // indexer whose lag is still inside the ceiling passes every other check here.

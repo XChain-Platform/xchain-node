@@ -191,6 +191,8 @@ function describeReorgHaltNote(coin, network, reorgHalt) {
 // missing DOGE read, a VM executor down) shows at once, and so does any stall
 // the indexer graded wedged, or one an older image left ungraded. A bridge
 // proof wait shows too: it never wedges, so nothing else would surface it.
+// A train activation halt also reads stalled: its `train_activation_halt`
+// class is a diagnostic hint, not a healthy defer.
 function reduceIndexerStall(payload) {
     if (!payload || typeof payload !== 'object') return null
     const reason = typeof payload.stallReason === 'string' && payload.stallReason.trim() ? payload.stallReason.trim() : null

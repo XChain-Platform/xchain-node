@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-18
+
+### Changed
+- Raised the provisioned MariaDB image to the 11 line.
+- Split the config path and naming helpers into their own modules.
+- Clarified the train activation halt stall comments and added tests for its stall handling and for service restarts.
+
 ## [0.24.0] - 2026-10-17
 
 ### Added
