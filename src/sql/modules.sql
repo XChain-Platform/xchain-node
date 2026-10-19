@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS {{MODULES_TABLE}} (
+    module       VARCHAR(64)  NOT NULL,
+    coin         VARCHAR(32)  NOT NULL DEFAULT '',
+    network      VARCHAR(32)  NOT NULL DEFAULT '',
+    container_id VARCHAR(128) NOT NULL,
+    created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (module, coin, network)
+)
