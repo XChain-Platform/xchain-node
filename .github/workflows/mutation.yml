@@ -1,4 +1,4 @@
-# Scheduled Stryker mutation run over the modules listed in stryker.config.json.
+# Scheduled Stryker mutation run over the modules listed in test/mutation/stryker.config.json.
 # Too slow for the push gate, so it runs weekly and on demand. The report is
 # uploaded even when the break threshold fails the run, so a score drop can be
 # inspected from the artifact.
