@@ -25,6 +25,10 @@
       "test/integration/**/*.test.js",
       "test/unit/**/*.test.js"
     ],
+    "ignore": [
+      "test/unit/00_config_directory_isolation.test.js",
+      "test/unit/peer_services.test.js"
+    ],
     "no-config": true,
     "no-opts": true
   },

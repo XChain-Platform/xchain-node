@@ -16,12 +16,16 @@ run-name: >-
 # installing the three regtest stacks. The federation mnemonic the venue keeps in
 # at7.env is generated per job and masked.
 #
+# scheduled-disabled: the nightly schedule is off. Every scheduled run failed on the
+# GitHub-hosted runners: the legs need the standing explorer and indexers on the
+# rail venue (ECONNREFUSED on 127.0.0.1:18080) and the runner could not resolve the
+# leg files in the e2e checkout. Legs run by manual dispatch, or on the rail venue
+# through scripts/run-attest-mirror.js.
+#
 # EVIDENCE: artifact am-<leg stem> holds the runner output, the leg log and the
 # venue logs; the leg's verdict is its exit code, as on the venue.
 
 on:
-  schedule:
-    - cron: '30 6 * * *'
   workflow_dispatch:
     inputs:
       e2e_ref:
@@ -60,14 +64,9 @@ jobs:
         env:
           E2E_REF: ${{ inputs.e2e_ref || 'develop' }}
           LEGS_INPUT: ${{ inputs.legs }}
-          EVENT: ${{ github.event_name }}
         run: |
           DRIVE=.github/attest-mirror/run-leg.sh
           test -f "$DRIVE" || { echo "::error::missing drive script: $DRIVE"; exit 1; }
-          if [ "$EVENT" = schedule ]; then
-            E2E_REF=develop
-            LEGS_INPUT=$(node -e 'const fs=require("fs");const drive=process.argv[1];const l=require("./.github/rail-legs.json");if(!l.length)throw new Error("no scheduled attest-mirror legs");for(const x of l){if(x.drive!==drive)throw new Error("unsupported scheduled drive: "+x.drive);if(!fs.existsSync(x.drive)||!fs.statSync(x.drive).isFile())throw new Error("missing scheduled drive script: "+x.drive)}process.stdout.write(l.map(x=>x.leg).join(","))' "$DRIVE")
-          fi
           echo "e2e_ref=$E2E_REF" >> "$GITHUB_OUTPUT"
           git clone -q https://github.com/XChain-Platform/xchain-e2e-test.git e2e
           git -C e2e fetch -q origin "$E2E_REF" && git -C e2e checkout -q FETCH_HEAD
@@ -90,7 +89,7 @@ jobs:
     timeout-minutes: 240
     env:
       GITHUB_TOKEN: ${{ github.token }}
-      STACK_REF: ${{ github.event_name == 'schedule' && 'develop' || inputs.stack_ref || 'develop' }}
+      STACK_REF: ${{ inputs.stack_ref || 'develop' }}
       E2E_REF: ${{ needs.plan.outputs.e2e_ref }}
       XCHAIN_NODE_EXTERNAL_DB: '1'
       XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1'
@@ -204,7 +203,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/am-logs"
 
       # The llm attestation provider on the venue hubs, ONLY when the dispatch asks
-      # for it (hub_llm, off by default and off on the schedule). A validator on
+      # for it (hub_llm, off by default). A validator on
       # testnet or mainnet answers ATTEST with its own LLM setup, which the hub
       # resolves through xchain-hub src/lib/hub_credentials.js: a HUB_CLAUDE_CONFIG_DIR
       # the hub owns, and on this rail the session's HUB_CLAUDE_CODE_OAUTH_TOKEN
