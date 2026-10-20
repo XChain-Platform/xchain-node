@@ -11,10 +11,10 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai')
-const { isLoopbackHost } = require('../../../src/services/config_service/validation')
-const databaseModule = require('../../../src/services/config_service/database')
-const { buildHubModuleConfig } = require('../../../src/services/hub_service/hub_module_config')
-const { DB_MODULE_NAME } = require('../../../src/config')
+const { isLoopbackHost } = require('../../../../src/services/config_service/validation')
+const databaseModule = require('../../../../src/services/config_service/database')
+const { buildHubModuleConfig } = require('../../../../src/services/hub_service/hub_module_config')
+const { DB_MODULE_NAME } = require('../../../../src/config')
 
 const LOOPBACK = ['127.0.0.1', '127.1.2.3', 'localhost', 'LocalHost.', 'db.localhost', '::1', '[::1]', '::ffff:127.0.0.1', '0.0.0.0', ' 127.0.0.1 ']
 const REACHABLE = ['172.17.0.1', '172.18.0.1', '10.0.0.5', 'db.example.com', 'host.docker.internal', '128.0.0.1']
