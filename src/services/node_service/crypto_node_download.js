@@ -26,6 +26,7 @@ const {
 const nodeVersion = process.versions.node
 const { gitHubDownloader } = require('../../state')
 const { decompressTarGz }  = require('../../utils/helpers')
+const { normalizeNodeVersion } = require('./node_version_pin')
 const { getLogger } = require('../../observability/logger');
 const logger = getLogger();
 
@@ -223,12 +224,14 @@ async function getBitcoinNode(version) {
 }
 
 async function getCryptoNode(coin, network, version) {
+    // Spell a dogecoin or litecoin version as its v-prefixed release tag, so a bare 1.14.9 pin finds v1.14.9.
+    const releaseTag = 'v' + normalizeNodeVersion(version)
     if (coin === Coin.BITCOIN) {
         await getBitcoinNode(version)
     } else if (coin === Coin.DOGECOIN) {
-        await gitHubDownloader.downloadRepoVersion("dogecoin", "dogecoin", version, { outputPath: cryptoNodesDir + "/dogecoin" })
+        await gitHubDownloader.downloadRepoVersion("dogecoin", "dogecoin", releaseTag, { outputPath: cryptoNodesDir + "/dogecoin" })
     } else if (coin === Coin.LITECOIN) {
-        await gitHubDownloader.downloadRepoVersion("litecoin-project", "litecoin", version, { outputPath: cryptoNodesDir + "/litecoin" })
+        await gitHubDownloader.downloadRepoVersion("litecoin-project", "litecoin", releaseTag, { outputPath: cryptoNodesDir + "/litecoin" })
     } else {
         throw new Error("There's no support for " + coin + " in " + network + " network yet")
     }

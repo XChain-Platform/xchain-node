@@ -264,11 +264,15 @@ class GitHubDownloader {
   async getReleaseByTag(owner, repoName, tag) {
     try {
       const response = await axios.get(
-        `https://api.github.com/repos/${owner}/${repoName}/releases/tags/${tag}`,
+        `https://api.github.com/repos/${owner}/${repoName}/releases/tags/${encodeURIComponent(tag)}`,
         { headers: githubApiHeaders(), timeout: GITHUB_API_TIMEOUT_MS }
       );
       return response.data;
     } catch (error) {
+      // Name a missing tag plainly, so it cannot be mistaken for an outage or a network error.
+      if (error.response?.status === 404) {
+        throw new Error(`Error getting the release ${tag}: ${owner}/${repoName} has no release tagged ${tag} (the version must match the release tag exactly)`);
+      }
       throw githubRateLimitError(error) || new Error(`Error getting the release ${tag}: ${error.message}`);
     }
   }

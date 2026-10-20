@@ -76,6 +76,24 @@ describe("NodeService: node version pin (XCHAIN_NODE_NODE_VERSION_<COIN>)", func
         expect(stubs.checkRemoteNodeVersion.called).to.be.false
     })
 
+    it('installNode fetches the v-prefixed release tag for a bare pin', async function () {
+        process.env.XCHAIN_NODE_NODE_VERSION_LITECOIN = '0.21.4'
+        const stubs = makeNodeServiceStubs({
+            getLocalNodeVersion: sinon.stub().resolves(null),
+            getDockerContainerImageName: sinon.stub().returns('xchain-node-litecoin-regtest-node'),
+            getDockerNetwork:            sinon.stub().returns('xchain-node-litecoin-regtest')
+        })
+        stubs.execFile.callsFake((cmd, args, opts, cb) => {
+            if (args[0] === 'build') return cb(null)
+            if (args[0] === 'run')   return cb(null, 'f'.repeat(64) + '\n')
+        })
+
+        const ns = loadNodeService(stubs)
+        expect(await ns.installNode('litecoin', 'regtest')).to.be.true
+        expect(stubs.gitHubDownloader.downloadRepoVersion.calledOnce).to.be.true
+        expect(stubs.gitHubDownloader.downloadRepoVersion.firstCall.args[2]).to.equal('v0.21.4')
+    })
+
     it('installNode fails loudly when a cached local daemon mismatches the pin', async function () {
         process.env.XCHAIN_NODE_NODE_VERSION_LITECOIN = 'v0.21.4'
         const stubs = makeNodeServiceStubs({

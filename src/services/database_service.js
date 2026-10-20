@@ -93,7 +93,7 @@ async function ensureDatabasePool() {
     const dbCreds = await ensureXchainNodeAccess()
     // External mode: resolve host/port from getExternalDbConfig() (env →
     // saved credentials.json → prompt), not the load-time EXTERNAL_DB_HOST/PORT
-    // constants, which only reflect env vars or the 127.0.0.1:3306 defaults. A
+    // constants, which only reflect env vars or the built-in defaults. A
     // host/port the operator saved at the first-run prompt would otherwise be
     // ignored and the pool would open against the wrong server (uuid:52c5b5f1).
     let dbHost, dbPort

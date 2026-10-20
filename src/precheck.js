@@ -147,7 +147,7 @@ async function openNodeDatabase(dbCreds) {
     try {
         // External mode resolves host/port through getExternalDbConfig() (env →
         // saved credentials.json → prompt), NOT the load-time EXTERNAL_DB_HOST/PORT
-        // constants: those only carry env vars or the 127.0.0.1:3306 defaults, so a
+        // constants: those only carry env vars or the built-in defaults, so a
         // host the operator entered at the first-run prompt would be ignored and this
         // pool would open against the wrong server. Same resolution ensureDatabasePool
         // uses (uuid:52c5b5f1).

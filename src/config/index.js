@@ -51,10 +51,11 @@ const DEPENDENCY_HEALTH_START_PERIOD = '60s'
 // (hub, decoder, indexer) get pointed at that host via env-var injection
 // in ConfigService. Connection details come from credentials.json
 // (interactive prompt on first run) with env-var overrides for headless
-// flows. The bridge gateway IP (e.g. 172.18.0.1) is the typical value when
-// MariaDB runs on the docker host and services connect from container land.
+// flows. The host must be an address of the docker host that MariaDB listens
+// on, usually the default bridge gateway: every service container sits on a
+// bridge network, where a loopback host means the container itself.
 const EXTERNAL_DB                   = process.env.XCHAIN_NODE_EXTERNAL_DB === '1'
-const EXTERNAL_DB_DEFAULT_HOST      = "127.0.0.1"
+const EXTERNAL_DB_DEFAULT_HOST      = "172.17.0.1"
 const EXTERNAL_DB_DEFAULT_PORT      = 3306
 const EXTERNAL_DB_DEFAULT_ROOT_USER = "root"
 const EXTERNAL_DB_HOST              = process.env.XCHAIN_NODE_EXTERNAL_DB_HOST || EXTERNAL_DB_DEFAULT_HOST

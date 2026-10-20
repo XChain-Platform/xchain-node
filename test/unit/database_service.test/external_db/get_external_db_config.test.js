@@ -56,7 +56,7 @@ describe('DatabaseService', function () {
         })
 
         it('returns saved config from credentials when ping succeeds', async function () {
-            const savedCfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' }
+            const savedCfg = { host: '172.17.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' }
             const stubs = makeStubs({
                 hasExternalDbConfig: sinon.stub().returns(true),
                 loadExternalDbConfig: sinon.stub().returns(savedCfg)
@@ -89,7 +89,7 @@ describe('DatabaseService', function () {
         })
 
         it('re-prompts interactively when saved config ping fails', async function () {
-            const savedCfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'old-pass' }
+            const savedCfg = { host: '172.17.0.1', port: 3306, root_user: 'root', root_password: 'old-pass' }
             const stubs = makeStubs({
                 hasExternalDbConfig: sinon.stub().returns(true),
                 loadExternalDbConfig: sinon.stub().returns(savedCfg)
@@ -250,6 +250,61 @@ describe('DatabaseService', function () {
             try { await ds.getExternalDbConfig() } catch (e) { threw = e }
             expect(threw, 'expected a thrown error for an out-of-range port').to.be.an('error')
             expect(threw.message).to.match(/Invalid external-DB port/)
+        })
+        })
+})
+
+describe('DatabaseService', function () {
+
+        describe('getExternalDbConfig()', function () {
+
+        beforeEach(function () {
+            for (const k of ENV_KEYS) {
+                savedEnv[k] = process.env[k]
+                delete process.env[k]
+            }
+        })
+
+        afterEach(function () {
+            for (const k of ENV_KEYS) {
+                if (savedEnv[k] === undefined) delete process.env[k]
+                else process.env[k] = savedEnv[k]
+            }
+        })
+
+        it('throws on an external-DB port with trailing junk instead of parsing its digits', async function () {
+            process.env.XCHAIN_NODE_EXTERNAL_DB_HOST          = 'db.example.com'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_USER     = 'admin'
+            process.env.XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD = 'test-pass'
+            for (const port of ['3306x', '3307:', '1e4', ' 3306']) {
+                process.env.XCHAIN_NODE_EXTERNAL_DB_PORT = port
+                const ds = loadDatabaseService(makeStubs())
+                let threw = null
+                try { await ds.getExternalDbConfig() } catch (e) { threw = e }
+                expect(threw, 'expected a thrown error for port ' + JSON.stringify(port)).to.be.an('error')
+                expect(threw.message).to.match(/Invalid external-DB port/)
+            }
+        })
+
+        it('re-prompts for a saved loopback host instead of returning it', async function () {
+            const savedCfg = { host: '127.0.0.1', port: 3306, root_user: 'root', root_password: 'test-pass' }
+            const stubs = makeStubs({
+                hasExternalDbConfig: sinon.stub().returns(true),
+                loadExternalDbConfig: sinon.stub().returns(savedCfg)
+            })
+            stubs.mariadb._fakeConn.query.resolves([])
+            const savedIsTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+            Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
+            try {
+                const ds = loadDatabaseService(stubs)
+                const result = await ds.getExternalDbConfig()
+                expect(result.host).to.equal('172.17.0.1')
+                expect(stubs.saveExternalDbConfig.calledOnce).to.be.true
+                expect(stubs.mariadb.createConnection.firstCall.args[0].host).to.equal('172.17.0.1')
+            } finally {
+                if (savedIsTTY) Object.defineProperty(process.stdin, 'isTTY', savedIsTTY)
+                else delete process.stdin.isTTY
+            }
         })
         })
 })
