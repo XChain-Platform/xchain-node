@@ -47,7 +47,7 @@ async function resolveConfigContext(dependencies) {
     // Resolved once, outside the loops: in external-DB mode the module-config view
     // must report the host/port the pool actually opened against, which comes from
     // getExternalDbConfig() (env → saved credentials.json), not the load-time
-    // EXTERNAL_DB_HOST/PORT constants. Those default to 127.0.0.1:3306, so a host
+    // EXTERNAL_DB_HOST/PORT constants. Those fall back to built-in defaults, so a host
     // saved at the first-run prompt would be misreported to the hub.
     const externalDbCfg = EXTERNAL_DB ? await getExternalDbConfig() : null
 

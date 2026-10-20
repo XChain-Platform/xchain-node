@@ -16,6 +16,8 @@
 
 'use strict'
 
+const { assertContainerReachableDbHost } = require('./validation')
+
 let crypto, XChainService, sidecars
 
 function configure(dependencies) {
@@ -71,6 +73,8 @@ function mergeDefaults(defaultConfig, defaultValues) {
 function applyExternalDatabase(defaultConfig, externalConfig) {
     const dbHostKeys = ['HUB_DB_HOST', 'DECODER_DB_HOST', 'INDEXER_DB_HOST', 'DATABASE_URL']
     const dbPortKeys = ['HUB_DB_PORT', 'DECODER_DB_PORT', 'INDEXER_DB_PORT', 'DATABASE_PORT']
+    // Refuse a loopback host before it lands in a container env: every service container runs on a bridge network.
+    if (dbHostKeys.some(key => key in defaultConfig)) assertContainerReachableDbHost(externalConfig.host)
     for (const key of dbHostKeys) {
         if (key in defaultConfig) defaultConfig[key] = externalConfig.host
     }

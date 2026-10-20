@@ -184,7 +184,8 @@ function makeCoreStubs(stubs, defaultConstants, configService) {
         'mariadb': stubs.mariadb,
         'enquirer': {
             Password: class { run() { return Promise.resolve('rootpass') } },
-            Input: class { run() { return Promise.resolve('127.0.0.1') } },
+            // Answer the external-DB host prompt with a bridge gateway, which the prompt accepts.
+            Input: class { constructor(opts) { this.name = opts && opts.name } run() { return Promise.resolve(this.name === 'host' ? '172.17.0.1' : '127.0.0.1') } },
             NumberPrompt: class { run() { return Promise.resolve(3306) } }
         },
         '../state': {

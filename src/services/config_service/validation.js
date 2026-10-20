@@ -27,4 +27,22 @@ function validatePort(value) {
     return false
 }
 
-module.exports = { validatePort }
+// Say whether a DB host names this machine's own loopback (localhost, 127.x, ::1, 0.0.0.0).
+// Inside a bridge-networked container such a host is the container itself, not the docker host.
+function isLoopbackHost(host) {
+    const name = String(host == null ? '' : host).trim().toLowerCase().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '')
+    if (name === 'localhost' || name.endsWith('.localhost')) return true
+    if (name === '::1' || name === '::' || name === '0.0.0.0') return true
+    return /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name)
+}
+
+// Refuse a loopback external-DB host before it is handed to a service container.
+function assertContainerReachableDbHost(host) {
+    if (isLoopbackHost(host)) {
+        throw new Error('External-DB host ' + String(host) + ' is a loopback address, which every service container '
+            + 'resolves to itself. Set XCHAIN_NODE_EXTERNAL_DB_HOST to an address of the docker host that MariaDB '
+            + 'listens on, usually the docker bridge gateway (for example 172.17.0.1).')
+    }
+}
+
+module.exports = { validatePort, isLoopbackHost, assertContainerReachableDbHost }

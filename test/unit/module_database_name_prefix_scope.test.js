@@ -42,7 +42,7 @@ describe('prefix segment budget', function () {
     })
 })
 
-const EXTERNAL_ENV = { XCHAIN_NODE_EXTERNAL_DB: '1', XCHAIN_NODE_EXTERNAL_DB_HOST: '127.0.0.1',
+const EXTERNAL_ENV = { XCHAIN_NODE_EXTERNAL_DB: '1', XCHAIN_NODE_EXTERNAL_DB_HOST: '172.17.0.1',
     XCHAIN_NODE_EXTERNAL_DB_PORT: '3306', XCHAIN_NODE_EXTERNAL_DB_ROOT_USER: 'root',
     XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD: 'unit-test-only' }
 const prefixState = {}

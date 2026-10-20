@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-20
+
+### Changed
+- Refused stuck proof waits at the bootstrap gate.
+- Tightened the external database host and port checks.
+- Turned off the scheduled attest-mirror run.
+
+### Fixed
+- Fixed the halt marker reads.
+
 ## [0.25.0] - 2026-10-18
 
 ### Changed

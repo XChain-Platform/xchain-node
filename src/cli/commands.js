@@ -152,19 +152,15 @@ function registerBootstrapRestoreRehearsal(program, deps) {
         .argument('<network>', '(mainnet)')
         .option('--file <name>', 'restore this exact local archive instead of the newest one')
         .action(async (chain, network, options) => {
-            let release = null
+            // Run under the dispatch lock, held from preCheck to exit (it is a mutating command).
             let exitCode = 1
             try {
-                const waitMs = parseInt(config.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS || '0', 10) || 0
-                release = deps.acquireCommandLock({ command: 'bootstrap-restore-rehearsal', waitMs })
                 const matches = await rehearseBootstrapRestore(chain, network, options)
                 if (!matches) logger.error('Bootstrap restore rehearsal count mismatch')
                 exitCode = matches ? 0 : 1
             } catch (err) {
                 logger.error('Bootstrap restore rehearsal failed: ' +
                     deps.redactSecrets(err && err.message ? err.message : err))
-            } finally {
-                if (release) release()
             }
             return process.exit(exitCode)
         })

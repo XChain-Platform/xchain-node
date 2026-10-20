@@ -197,14 +197,16 @@ function reduceIndexerStall(payload) {
     if (!payload || typeof payload !== 'object') return null
     const reason = typeof payload.stallReason === 'string' && payload.stallReason.trim() ? payload.stallReason.trim() : null
     const stallClass = typeof payload.stallClass === 'string' ? payload.stallClass : null
+    // The reason word alone, for the table: 'train_activation_halt: ...' reads as train_activation_halt.
+    const word = reason ? reason.split(/[\s:]/)[0] : null
     // The price-landing wait is that same in-grace barrier defer, judged on its own longer window.
+    // Tests the word, as fallbackIndexerStallHint does, so exception prose ending in `_barrier` never reads healthy.
     const healthyDefer = stallClass === 'future_block_wait'
-        || ((stallClass === 'barrier_defer' || stallClass === 'price_landing_wait') && /_barrier$/.test(reason || ''))
+        || ((stallClass === 'barrier_defer' || stallClass === 'price_landing_wait') && /_barrier$/.test(word || ''))
     return {
         stalled:     reason !== null && !healthyDefer,
         reason,
-        // The reason word alone, for the table: 'train_activation_halt: ...' reads as train_activation_halt.
-        word:        reason ? reason.split(/[\s:]/)[0] : null,
+        word,
         stall_class: stallClass,
         since:       describeCommitInstant(payload.lastBlockCommittedAt)
     }
@@ -246,6 +248,7 @@ function describeCommitInstant(value) {
 // reason with no entry gets the hub-mirror line only when its word ends in
 // `_barrier` (the indexer's name for a hub-mirror barrier), else the log line.
 // The bridge proof wait ends in `_barrier` but no hub resync shortens it, so it has its own entry.
+// The capability proof wait is not a hub-mirror barrier either, and has its own entry too.
 const INDEXER_STALL_HINTS = {
     rollcall_proof_unavailable: (coin, network) =>
         "it cannot prove on Dogecoin who signed the roll call, so it defers the epoch close rather than read silence as absence."
@@ -266,6 +269,13 @@ const INDEXER_STALL_HINTS = {
         + " and neither a hub resync nor a restart shortens it: it clears once this node holds a quorum-established checkpoint"
         + " at or after the transfer's snapshot block, or an origin-chain indexer endpoint is configured and serves the proof."
         + " Look for BRIDGE ESCROW PROOF UNAVAILABLE in `xchain-node logs xchain-indexer " + coin + " " + network + "`.",
+    capability_proof_unavailable: (coin, network) =>
+        "it holds a mirrored capability snapshot row whose checkpoint proof it cannot verify yet, and defers the block rather than"
+        + " apply an unproven validator set. This is not a hub-mirror lag, and a hub resync does not supply the proof:"
+        + " held rows are re-checked every 15 seconds and the block moves once the proof verifies; a hold that outlasts the"
+        + " proof-wait grace earns one automatic restart, which clears proof state held only in memory."
+        + " `xchain-node logs xchain-indexer " + coin + " " + network + "` shows a \"Capability snapshot proof held\" line naming why,"
+        + " such as the hub not serving the proof or the checkpoint validator trust pin missing or unreadable.",
     list_share_halt: (coin, network) =>
         "it refuses to commit the block because a list version is missing or altered, and committing would fork it from its peers;"
         + " this is not a hub-mirror wait. `xchain-node logs xchain-indexer " + coin + " " + network + "` shows the LIST SHARE HALT line and its reason.",

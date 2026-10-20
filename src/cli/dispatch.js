@@ -36,7 +36,9 @@ function dispatchSettings(config) {
     // must stay serialized against install/update the same way the others are.
     // `clear-reorg-halt` is included, dry runs too: its database-intact check and
     // the audited clear it writes must not interleave with reset, restore or recreate.
-    const mutatingCommands = ['install', 'update', 'recreate', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt']
+    // `bootstrap-restore-rehearsal` is included: it creates and drops a disposable
+    // database on the shared MariaDB, so it holds the lock from preCheck to exit.
+    const mutatingCommands = ['install', 'update', 'recreate', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal']
     // How long a non-mutating command blocks for a lock-holding mutator before
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.

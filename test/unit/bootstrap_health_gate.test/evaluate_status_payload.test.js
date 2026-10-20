@@ -57,6 +57,15 @@ describe('BootstrapHealthGate', function () {
                 .to.deep.equal([])
         })
 
+    })
+})
+
+describe('BootstrapHealthGate', function () {
+
+    installEnvironmentHooks()
+
+    describe('evaluateStatusPayload()', function () {
+
         it('REFUSES an indexer reporting its block counter wedged', function () {
             const gate = loadGate()
             const reasons = gate.evaluateStatusPayload(
@@ -64,6 +73,26 @@ describe('BootstrapHealthGate', function () {
             expect(reasons).to.have.lengthOf(1)
             expect(reasons[0]).to.match(/WEDGED/)
             expect(reasons[0]).to.match(/vm_executor_host_fault/)
+        })
+
+        // A proof wait publishes its _stuck class past the hold ceiling, well before it wedges.
+        it('REFUSES an indexer whose proof wait is past its hold ceiling', function () {
+            const gate = loadGate()
+            for (const [stallClass, stallReason] of [['rollcall_proof_stuck', 'rollcall_proof_unavailable'],
+                ['capability_proof_stuck', 'capability_proof_unavailable']]) {
+                const reasons = gate.evaluateStatusPayload({ status: 'healthy', lag: 3, stallClass, stallReason })
+                expect(reasons, stallClass).to.have.lengthOf(1)
+                expect(reasons[0]).to.include(stallClass)
+                expect(reasons[0]).to.include(stallReason)
+            }
+        })
+
+        it('passes an indexer whose proof wait is still inside its hold ceiling', function () {
+            const gate = loadGate()
+            for (const [stallClass, stallReason] of [['rollcall_proof_wait', 'rollcall_proof_unavailable'],
+                ['capability_proof_wait', 'capability_proof_unavailable']])
+                expect(gate.evaluateStatusPayload({ status: 'healthy', lag: 3, stallClass, stallReason }), stallClass)
+                    .to.deep.equal([])
         })
 
     })

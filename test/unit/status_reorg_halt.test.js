@@ -60,12 +60,23 @@ describe('ps: indexer STALL surface', function () {
         expect(reduceIndexerStall({ stallReason: 'price_sync_barrier', stallClass: 'wedged' }).stalled).to.equal(true)
     })
 
+    it('grades a healthy defer by the reason word, so prose ending in _barrier still shows STALLED', function () {
+        expect(reduceIndexerStall({ stallReason: 'parse_exception: lookup failed near price_sync_barrier', stallClass: 'barrier_defer' }).stalled).to.equal(true)
+        expect(reduceIndexerStall({ stallReason: 'parse_exception: lookup failed near price_sync_barrier', stallClass: 'price_landing_wait' }).stalled).to.equal(true)
+        expect(reduceIndexerStall({ stallReason: 'train_activation_halt: waiting on oracle_sync_barrier', stallClass: 'barrier_defer' }).stalled).to.equal(true)
+        expect(reduceIndexerStall({ stallReason: 'price_sync_barrier', stallClass: 'barrier_defer' }).stalled).to.equal(false)
+    })
+
     it('does not show a price-landing wait inside its own grace window, and shows it once wedged', function () {
         expect(reduceIndexerStall({ stallReason: 'price_landing_barrier', stallClass: 'price_landing_wait' }).stalled).to.equal(false)
         expect(reduceIndexerStall({ stallReason: 'price_landing_barrier', stallClass: 'wedged' }).stalled).to.equal(true)
         expect(reduceIndexerStall({ stallReason: 'vm_executor_unavailable', stallClass: 'price_landing_wait' }).stalled).to.equal(true)
         expect(reduceIndexerStall({ stallReason: 'price_landing_barrier', stallClass: 'some_future_class' }).stalled).to.equal(true)
     })
+})
+
+// Pin the legacy payload reading and the notes `ps` prints for a stalled indexer.
+describe('ps: indexer STALL surface', function () {
 
     it('reads an older image that names a reason but grades nothing as stalled, and no reason as advancing', function () {
         expect(reduceIndexerStall({ stallReason: 'oracle_sync_barrier' }).stalled).to.equal(true)
@@ -113,6 +124,18 @@ describe('ps: indexer STALL surface', function () {
         expect(n).to.not.match(/hub-mirror barrier|grace window/)
         expect(n).to.match(/escrow proof/).and.to.match(/checkpoint/).and.to.match(/origin-chain indexer/)
         expect(n).to.match(/xchain-node logs xchain-indexer bitcoin mainnet/)
+    })
+
+    it('a capability proof wait names the held proof and the log line, not the generic or hub-mirror line', function () {
+        for (const stallClass of ['capability_proof_wait', 'capability_proof_stuck']) {
+            const n = note('capability_proof_unavailable', stallClass)
+            expect(n).to.match(/^bitcoin\/mainnet xchain-indexer is STALLED \(capability_proof_unavailable\): /)
+            expect(n).to.not.match(/no specific remedy|hub-mirror barrier|grace window/)
+            expect(n).to.match(/capability snapshot/).and.to.match(/restart/).and.to.match(/Capability snapshot proof held/)
+            expect(n).to.match(/xchain-node logs xchain-indexer bitcoin mainnet/)
+        }
+        expect(reduceIndexerStall({ stallReason: 'capability_proof_unavailable', stallClass: 'capability_proof_wait' }))
+            .to.include({ stalled: true, word: 'capability_proof_unavailable' })
     })
 
     it('a list share halt and a repeated parse error point at the indexer log, not the hub', function () {

@@ -22,6 +22,8 @@
  ********************************************************************/
 
 const crypto = require('crypto')
+const fs = require('fs')
+const path = require('path')
 const { NODE_PREFIX, DEFAULT_NODE_PREFIX } = require('../config')
 const { assertSafeDbIdentifier } = require('../utils/sql_safety')
 const { getLogger } = require('../observability/logger');
@@ -64,18 +66,10 @@ const MODULES_TABLE = NODE_PREFIX === DEFAULT_NODE_PREFIX
             + '_' + crypto.createHash('sha256').update(NODE_PREFIX).digest('hex').substring(0, 12),
         'registry table name')
 
-// The DDL for the table above. It is created on every open rather than
-// migrated, because the registry is derived state that precheck repopulates.
-const CREATE_MODULES_TABLE_SQL =
-    `CREATE TABLE IF NOT EXISTS ${MODULES_TABLE} (
-                    module       VARCHAR(64)  NOT NULL,
-                    coin         VARCHAR(32)  NOT NULL DEFAULT '',
-                    network      VARCHAR(32)  NOT NULL DEFAULT '',
-                    container_id VARCHAR(128) NOT NULL,
-                    created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-                    updated_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (module, coin, network)
-                )`
+const CREATE_MODULES_TABLE_SQL = fs.readFileSync(
+    path.join(__dirname, '../sql/modules.sql'),
+    'utf8'
+).replace('{{MODULES_TABLE}}', MODULES_TABLE)
 
 const modulesMixin = {
     async getAllModuleContainers(coin, network) {

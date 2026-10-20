@@ -17,6 +17,7 @@
 
 const { HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SERVICE_REGISTRY } = require('../../config')
 const { getDockerContainerImageName } = require('../config_service')
+const { assertContainerReachableDbHost } = require('../config_service/validation')
 const { readContainerEnv } = require('../db_credential_drift')
 const config = require('../../config');
 
@@ -35,9 +36,10 @@ function buildHubModuleConfig(nextModule, defaultConfigCoinNetwork, ctx) {
     if (hubConfig.type === 'database') {
         // External DB has no container; point the hub at the configured
         // external host so its module-config view reflects reality.
-        return ctx.EXTERNAL_DB
-            ? { host: ctx.externalDbCfg.host, port: ctx.externalDbCfg.port }
-            : { host: 'mariadb', port: 3306 }
+        if (!ctx.EXTERNAL_DB) return { host: 'mariadb', port: 3306 }
+        // Refuse a loopback host: the hub runs in a container and would resolve it to itself.
+        assertContainerReachableDbHost(ctx.externalDbCfg.host)
+        return { host: ctx.externalDbCfg.host, port: ctx.externalDbCfg.port }
     }
 
     const config = {}

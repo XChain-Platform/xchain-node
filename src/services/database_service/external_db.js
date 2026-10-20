@@ -22,6 +22,7 @@ let { Password, Input, NumberPrompt } = require('enquirer')
 let { EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER } = require('../../config')
 let { PING_SQL } = require('../../db/connectivity')
 let { validatePort } = require('../config_service')
+const { isLoopbackHost, assertContainerReachableDbHost } = require('../config_service/validation')
 let config = require('../../config')
 let { getLogger } = require('../../observability/logger')
 let logger = getLogger()
@@ -47,12 +48,12 @@ function configureDependencies(dependencies) {
 // INDEXER_/HUB_DB_PORT env via the ConfigService EXTERNAL_DB rewrite, surfacing
 // far from its cause as an opaque driver error. Fail loud at config resolution.
 function resolveExternalDbPort(raw) {
-    const port = typeof raw === 'number' ? raw : parseInt(String(raw), 10)
-    if (!validatePort(port)) {
+    // Validate the raw value before converting it, so '3306x' fails instead of parsing to 3306.
+    if (!validatePort(raw)) {
         throw new Error('Invalid external-DB port: ' + String(raw)
             + ' (set XCHAIN_NODE_EXTERNAL_DB_PORT to an integer 1-65535)')
     }
-    return port
+    return typeof raw === 'number' ? raw : parseInt(raw, 10)
 }
 
 async function getExternalDbConfig() {
@@ -72,7 +73,10 @@ async function getExternalDbConfig() {
     // Saved config wins next
     if (hasExternalDbConfig()) {
         const saved = loadExternalDbConfig()
-        if (saved) {
+        // Re-ask for a saved loopback host: it answers from this host but no service container can reach it.
+        if (saved && isLoopbackHost(saved.host)) {
+            logger.info("Saved external-DB host " + saved.host + " is a loopback address that service containers cannot reach. Please re-enter the details.")
+        } else if (saved) {
             // Verify still works; bad creds (or an out-of-range persisted port)
             // mean we should re-prompt rather than propagate a bad value.
             try {
@@ -112,7 +116,7 @@ async function promptForExternalDbConfig() {
 
     let cfg = null
     while (!cfg) {
-        const hostPrompt = new Input({ name: 'host', message: 'Host', initial: EXTERNAL_DB_HOST })
+        const hostPrompt = new Input({ name: 'host', message: 'Host (an address service containers can reach, such as the docker bridge gateway)', initial: EXTERNAL_DB_HOST })
         const host = await hostPrompt.run()
         const portPrompt = new NumberPrompt({ name: 'port', message: 'Port', initial: EXTERNAL_DB_PORT })
         const port = await portPrompt.run()
@@ -123,6 +127,9 @@ async function promptForExternalDbConfig() {
 
         try {
             const candidate = { host: String(host).trim(), port: resolveExternalDbPort(port), root_user: String(root_user).trim(), root_password }
+            // Refuse an empty or loopback host: the ping below runs from this host and would pass for it.
+            if (!candidate.host) throw new Error('a host is required')
+            assertContainerReachableDbHost(candidate.host)
             await pingMariaDb(candidate)
             saveExternalDbConfig(candidate)
             logger.info("External MariaDB connection verified. Saved to ~/.xchain-node/credentials.json")
