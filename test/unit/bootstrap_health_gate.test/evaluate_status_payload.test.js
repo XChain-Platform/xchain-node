@@ -57,6 +57,15 @@ describe('BootstrapHealthGate', function () {
                 .to.deep.equal([])
         })
 
+    })
+})
+
+describe('BootstrapHealthGate', function () {
+
+    installEnvironmentHooks()
+
+    describe('evaluateStatusPayload()', function () {
+
         it('REFUSES an indexer reporting its block counter wedged', function () {
             const gate = loadGate()
             const reasons = gate.evaluateStatusPayload(

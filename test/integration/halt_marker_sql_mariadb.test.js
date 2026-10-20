@@ -77,64 +77,153 @@ const CLEAR_CASES = [
     { name: 'an escaped first letter in a duplicate key', data: '{"reason":"long enough reason","\\u0072eason":"x"}', audited: false }
 ]
 
+const AUDITED = '{"reason":"range re-parsed and verified"}'
+const UNAUDITED = '{"reason":"oops"}'
+const HALT = '{"reason":"over-deep rollback"}'
+
+// Hold the connection and gate modules the before hook loads.
+let conn, mariadbExec, parseCountTokens, parseNewestClear
+
+// Create the scratch database the gate's SQL reads.
+async function createScratchDb() {
+    if (!HOST) this.skip()
+    const mariadb = require('mariadb')
+    mariadbExec = require('../../src/services/database_service/mariadb_exec')
+    ;({ parseCountTokens, parseNewestClear } = require('../../src/services/bootstrap_health_gate/halt_markers'))
+    conn = await mariadb.createConnection({
+        host: CFG.host, port: CFG.port, user: CFG.root_user, password: CFG.root_password
+    })
+    await conn.query(`DROP DATABASE IF EXISTS \`${DB}\``)
+    await conn.query(`CREATE DATABASE \`${DB}\``)
+    // Same shape as xchain-decoder src/sql/events.sql and xchain-sync's sync_state.
+    await conn.query(`CREATE TABLE \`${DB}\`.events (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, ` +
+        'time DATETIME, code VARCHAR(32), data MEDIUMTEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci')
+    await conn.query(`CREATE TABLE \`${DB}\`.sync_state (state_key VARCHAR(128) NOT NULL PRIMARY KEY, ` +
+        'state_value TEXT, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci')
+}
+
+// Drop the scratch database and close the connection, if one opened.
+async function dropScratchDb() {
+    if (!conn) return
+    await conn.query(`DROP DATABASE IF EXISTS \`${DB}\``)
+    await conn.end()
+}
+
+// Run one builder through the gate's own transport and parser.
+async function count(sql) {
+    const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, sql, '-BN')
+    return parseCountTokens(raw, { expected: 1, what: 'test probe' })[0]
+}
+
+async function events(rows) {
+    await conn.query(`TRUNCATE TABLE \`${DB}\`.events`)
+    for (const [code, data] of rows)
+        await conn.query(`INSERT INTO \`${DB}\`.events (time, code, data) VALUES (NOW(), ?, ?)`, [code, data])
+}
+
+// The gate's live reorg reading, composed as readLiveMarkers composes it.
+async function liveReorgHalts() {
+    const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, haltMarkers.newestReorgClearSql(DB), '-BN')
+    return (await count(haltMarkers.liveReorgHaltCountSql(DB))) + parseNewestClear(raw, 'test clear probe')
+}
+
+async function readsMarkerTables() {
+    const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, haltMarkers.markerTablesSql(DB), '-BN')
+    expect(parseCountTokens(raw, { expected: 3, max: 1, what: 'test probe' })).to.deep.equal([1, 0, 1])
+}
+
+function listsDecoderAnswers() {
+    const differ = CLEAR_CASES.filter(c => decoderAudited(c.data) !== c.audited).map(c => c.name)
+    expect(differ).to.deep.equal([])
+}
+
+// The reference above is a copy, so also ask the real decoder when that sibling is checked out.
+async function matchesRealDecoder() {
+    const decoderRoot = path.join(__dirname, '../../../xchain-decoder')
+    if (!fs.existsSync(path.join(decoderRoot, 'src/db.js'))) this.skip()
+    const Database = require(path.join(decoderRoot, 'src/db.js'))
+    const decoder = new Database(CFG.host, CFG.port, DB, CFG.root_user, CFG.root_password)
+    const differ = []
+    try {
+        for (const c of CLEAR_CASES) {
+            await events([['REORG_HALT', HALT], ['REORG_HALT_CLEARED', c.data]])
+            const halted = (await decoder.readReorgHaltState()).halted
+            if (halted !== ((await liveReorgHalts()) > 0)) differ.push(c.name)
+            if (halted !== !c.audited) differ.push(c.name + ' (table)')
+        }
+    } finally {
+        await decoder.close()
+    }
+    expect(differ).to.deep.equal([])
+}
+
+async function readsNewestMarkerRow() {
+    await events([])
+    expect(await liveReorgHalts()).to.equal(0)
+    await events([['REORG_HALT', '{}']])
+    expect(await liveReorgHalts()).to.equal(1)
+    await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', AUDITED], ['REORG_HALT', '{}']])
+    expect(await liveReorgHalts()).to.equal(1)
+    await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', UNAUDITED], ['REORG_HALT_CLEARED', AUDITED]])
+    expect(await liveReorgHalts()).to.equal(0)
+    await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', AUDITED], ['REORG_HALT_CLEARED', UNAUDITED]])
+    expect(await liveReorgHalts()).to.equal(1)
+    // Rows of other codes never decide it.
+    await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', AUDITED], ['REORG', '[]']])
+    expect(await liveReorgHalts()).to.equal(0)
+}
+
+async function countsClearsInWindow() {
+    await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', AUDITED]])
+    const [{ w }] = await conn.query(`SELECT MAX(id) AS w FROM \`${DB}\`.events`)
+    expect(await count(haltMarkers.reorgHaltsSinceSql(DB, Number(w)))).to.equal(0)
+    await conn.query(`INSERT INTO \`${DB}\`.events (time, code, data) VALUES (NOW(), 'REORG', '[]')`)
+    expect(await count(haltMarkers.reorgHaltsSinceSql(DB, Number(w)))).to.equal(0)
+    await conn.query(`INSERT INTO \`${DB}\`.events (time, code, data) VALUES (NOW(), 'REORG_HALT_CLEARED', ?)`, [AUDITED])
+    expect(await count(haltMarkers.reorgHaltsSinceSql(DB, Number(w)))).to.equal(1)
+    await conn.query(`INSERT INTO \`${DB}\`.events (time, code, data) VALUES (NOW(), 'REORG_HALT_CLEARED', ?)`, [UNAUDITED])
+    expect(await count(haltMarkers.reorgHaltsSinceSql(DB, Number(w)))).to.equal(2)
+}
+
+async function countsPendingSyncHalts() {
+    const set = async (rows) => {
+        await conn.query(`TRUNCATE TABLE \`${DB}\`.sync_state`)
+        for (const [k, v] of rows)
+            await conn.query(`INSERT INTO \`${DB}\`.sync_state (state_key, state_value) VALUES (?, ?)`, [k, v])
+    }
+    await set([['verified_tip:indexer', '812345']])
+    expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(0)
+    // A dropped copy is deleted or overwritten with '' (restorePendingHalt reads both as none).
+    await set([['halt_pending:indexer', ''], ['halt_pending:decoder', null]])
+    expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(0)
+    await set([['halt_pending:indexer', '{"blockIndex":5,"reason":"state-hash-mismatch"}']])
+    expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(1)
+    // A blank copy is not '' to the producer, which holds on it as unreadable.
+    await set([['halt_pending:decoder', ' ']])
+    expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(1)
+}
+
+// The reference above is a copy, so pin it to the decoder's source when that sibling is checked out.
+function pinsReferenceRule() {
+    const src = path.join(__dirname, '../../../xchain-decoder/src/db/reorg_halt.js')
+    if (!fs.existsSync(src)) this.skip()
+    const text = fs.readFileSync(src, 'utf8')
+    const gate = fs.readFileSync(path.join(__dirname, '../../src/services/bootstrap_health_gate/halt_markers.js'), 'utf8')
+    for (const rule of ["typeof payload.reason === 'string' && payload.reason.trim().length >= 8",
+        "payload == null || typeof payload !== 'object' || Array.isArray(payload)"]) {
+        expect(text, 'decoder rule').to.include(rule)
+        expect(gate, 'gate copy').to.include(rule)
+    }
+}
+
 describe('halt marker SQL on MariaDB', function () {
     this.timeout(30000)
-    let conn, mariadbExec, parseCountTokens, parseNewestClear
 
-    before(async function () {
-        if (!HOST) this.skip()
-        const mariadb = require('mariadb')
-        mariadbExec = require('../../src/services/database_service/mariadb_exec')
-        ;({ parseCountTokens, parseNewestClear } = require('../../src/services/bootstrap_health_gate/halt_markers'))
-        conn = await mariadb.createConnection({
-            host: CFG.host, port: CFG.port, user: CFG.root_user, password: CFG.root_password
-        })
-        await conn.query(`DROP DATABASE IF EXISTS \`${DB}\``)
-        await conn.query(`CREATE DATABASE \`${DB}\``)
-        // Same shape as xchain-decoder src/sql/events.sql and xchain-sync's sync_state.
-        await conn.query(`CREATE TABLE \`${DB}\`.events (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, ` +
-            'time DATETIME, code VARCHAR(32), data MEDIUMTEXT) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci')
-        await conn.query(`CREATE TABLE \`${DB}\`.sync_state (state_key VARCHAR(128) NOT NULL PRIMARY KEY, ` +
-            'state_value TEXT, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci')
-    })
+    before(createScratchDb)
+    after(dropScratchDb)
 
-    after(async function () {
-        if (!conn) return
-        await conn.query(`DROP DATABASE IF EXISTS \`${DB}\``)
-        await conn.end()
-    })
-
-    // Run one builder through the gate's own transport and parser.
-    async function count(sql) {
-        const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, sql, '-BN')
-        return parseCountTokens(raw, { expected: 1, what: 'test probe' })[0]
-    }
-
-    async function events(rows) {
-        await conn.query(`TRUNCATE TABLE \`${DB}\`.events`)
-        for (const [code, data] of rows)
-            await conn.query(`INSERT INTO \`${DB}\`.events (time, code, data) VALUES (NOW(), ?, ?)`, [code, data])
-    }
-
-    // The gate's live reorg reading, composed as readLiveMarkers composes it.
-    async function liveReorgHalts() {
-        const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, haltMarkers.newestReorgClearSql(DB), '-BN')
-        return (await count(haltMarkers.liveReorgHaltCountSql(DB))) + parseNewestClear(raw, 'test clear probe')
-    }
-
-    const AUDITED = '{"reason":"range re-parsed and verified"}'
-    const UNAUDITED = '{"reason":"oops"}'
-    const HALT = '{"reason":"over-deep rollback"}'
-
-    it('reads the three marker tables as three tokens', async function () {
-        const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, haltMarkers.markerTablesSql(DB), '-BN')
-        expect(parseCountTokens(raw, { expected: 3, max: 1, what: 'test probe' })).to.deep.equal([1, 0, 1])
-    })
-
-    it('lists each payload with the answer the decoder rule gives it', function () {
-        const differ = CLEAR_CASES.filter(c => decoderAudited(c.data) !== c.audited).map(c => c.name)
-        expect(differ).to.deep.equal([])
-    })
+    it('reads the three marker tables as three tokens', readsMarkerTables)
+    it('lists each payload with the answer the decoder rule gives it', listsDecoderAnswers)
 
     for (const c of CLEAR_CASES) {
         it(`a newest clear row with ${c.name} reads as the decoder reads it`, async function () {
@@ -143,82 +232,9 @@ describe('halt marker SQL on MariaDB', function () {
         })
     }
 
-    // The reference above is a copy, so also ask the real decoder when that sibling is checked out.
-    it('gives the real decoder readReorgHaltState answer on every payload', async function () {
-        const decoderRoot = path.join(__dirname, '../../../xchain-decoder')
-        if (!fs.existsSync(path.join(decoderRoot, 'src/db.js'))) this.skip()
-        const Database = require(path.join(decoderRoot, 'src/db.js'))
-        const decoder = new Database(CFG.host, CFG.port, DB, CFG.root_user, CFG.root_password)
-        const differ = []
-        try {
-            for (const c of CLEAR_CASES) {
-                await events([['REORG_HALT', HALT], ['REORG_HALT_CLEARED', c.data]])
-                const halted = (await decoder.readReorgHaltState()).halted
-                if (halted !== ((await liveReorgHalts()) > 0)) differ.push(c.name)
-                if (halted !== !c.audited) differ.push(c.name + ' (table)')
-            }
-        } finally {
-            await decoder.close()
-        }
-        expect(differ).to.deep.equal([])
-    })
-
-    it('reads the newest marker row, as the decoder does', async function () {
-        await events([])
-        expect(await liveReorgHalts()).to.equal(0)
-        await events([['REORG_HALT', '{}']])
-        expect(await liveReorgHalts()).to.equal(1)
-        await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', AUDITED], ['REORG_HALT', '{}']])
-        expect(await liveReorgHalts()).to.equal(1)
-        await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', UNAUDITED], ['REORG_HALT_CLEARED', AUDITED]])
-        expect(await liveReorgHalts()).to.equal(0)
-        await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', AUDITED], ['REORG_HALT_CLEARED', UNAUDITED]])
-        expect(await liveReorgHalts()).to.equal(1)
-        // Rows of other codes never decide it.
-        await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', AUDITED], ['REORG', '[]']])
-        expect(await liveReorgHalts()).to.equal(0)
-    })
-
-    it('counts every clear row raised inside the dump window, audited or not', async function () {
-        await events([['REORG_HALT', '{}'], ['REORG_HALT_CLEARED', AUDITED]])
-        const [{ w }] = await conn.query(`SELECT MAX(id) AS w FROM \`${DB}\`.events`)
-        expect(await count(haltMarkers.reorgHaltsSinceSql(DB, Number(w)))).to.equal(0)
-        await conn.query(`INSERT INTO \`${DB}\`.events (time, code, data) VALUES (NOW(), 'REORG', '[]')`)
-        expect(await count(haltMarkers.reorgHaltsSinceSql(DB, Number(w)))).to.equal(0)
-        await conn.query(`INSERT INTO \`${DB}\`.events (time, code, data) VALUES (NOW(), 'REORG_HALT_CLEARED', ?)`, [AUDITED])
-        expect(await count(haltMarkers.reorgHaltsSinceSql(DB, Number(w)))).to.equal(1)
-        await conn.query(`INSERT INTO \`${DB}\`.events (time, code, data) VALUES (NOW(), 'REORG_HALT_CLEARED', ?)`, [UNAUDITED])
-        expect(await count(haltMarkers.reorgHaltsSinceSql(DB, Number(w)))).to.equal(2)
-    })
-
-    it('counts every halt_pending copy that xchain-sync would restore', async function () {
-        const set = async (rows) => {
-            await conn.query(`TRUNCATE TABLE \`${DB}\`.sync_state`)
-            for (const [k, v] of rows)
-                await conn.query(`INSERT INTO \`${DB}\`.sync_state (state_key, state_value) VALUES (?, ?)`, [k, v])
-        }
-        await set([['verified_tip:indexer', '812345']])
-        expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(0)
-        // A dropped copy is deleted or overwritten with '' (restorePendingHalt reads both as none).
-        await set([['halt_pending:indexer', ''], ['halt_pending:decoder', null]])
-        expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(0)
-        await set([['halt_pending:indexer', '{"blockIndex":5,"reason":"state-hash-mismatch"}']])
-        expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(1)
-        // A blank copy is not '' to the producer, which holds on it as unreadable.
-        await set([['halt_pending:decoder', ' ']])
-        expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(1)
-    })
-
-    // The reference above is a copy, so pin it to the decoder's source when that sibling is checked out.
-    it('keeps the reference rule in step with the decoder', function () {
-        const src = path.join(__dirname, '../../../xchain-decoder/src/db/reorg_halt.js')
-        if (!fs.existsSync(src)) this.skip()
-        const text = fs.readFileSync(src, 'utf8')
-        const gate = fs.readFileSync(path.join(__dirname, '../../src/services/bootstrap_health_gate/halt_markers.js'), 'utf8')
-        for (const rule of ["typeof payload.reason === 'string' && payload.reason.trim().length >= 8",
-            "payload == null || typeof payload !== 'object' || Array.isArray(payload)"]) {
-            expect(text, 'decoder rule').to.include(rule)
-            expect(gate, 'gate copy').to.include(rule)
-        }
-    })
+    it('gives the real decoder readReorgHaltState answer on every payload', matchesRealDecoder)
+    it('reads the newest marker row, as the decoder does', readsNewestMarkerRow)
+    it('counts every clear row raised inside the dump window, audited or not', countsClearsInWindow)
+    it('counts every halt_pending copy that xchain-sync would restore', countsPendingSyncHalts)
+    it('keeps the reference rule in step with the decoder', pinsReferenceRule)
 })
