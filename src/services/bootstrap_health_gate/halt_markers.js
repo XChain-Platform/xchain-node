@@ -15,7 +15,8 @@
  * XChain Node - Bootstrap source health gate halt marker probe
  *
  * Reads the durable halt markers (a live decoder REORG_HALT row, one no newer
- * REORG_HALT_CLEARED row supersedes, and an uncleared sync_halt row) and the
+ * audited REORG_HALT_CLEARED row supersedes, an uncleared sync_halt row, and an
+ * xchain-sync halt_pending copy in sync_state) and the
  * dump-window watermarks straight out of the database
  * about to be dumped, and for an indexer source out of its paired decoder
  * database as well. Every unreadable answer throws, and the gate turns a throw
@@ -28,7 +29,7 @@ const { getDefaultConfig, getModuleDatabaseName } = require('../config_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 const { configuredDatabaseName } = require('../../utils/module_database_name')
 const {
-    markerTablesSql, liveReorgHaltCountSql, liveSyncHaltCountSql,
+    markerTablesSql, liveReorgHaltCountSql, newestReorgClearSql, liveSyncHaltCountSql, pendingSyncHaltCountSql,
     eventsWatermarkSql, syncHaltWatermarkSql, reorgHaltsSinceSql, syncHaltsSinceSql
 } = require('../../db/halt_markers')
 
@@ -54,6 +55,37 @@ function parseCountTokens(raw, { expected, max = null, what }) {
     if (bad)
         throw new Error(`the ${what} returned unreadable output: ${JSON.stringify(text)}`)
     return tokens.map(Number)
+}
+
+// Check a clear row's payload carries the reason bar clearReorgHalt enforces.
+// Same rule as isAuditedClear in xchain-decoder/src/db/reorg_halt.js, which is the source of truth.
+function isAuditedClear(payload) {
+    if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) return false
+    return typeof payload.reason === 'string' && payload.reason.trim().length >= 8
+}
+
+// Read newestReorgClearSql's one row into 1 when the newest marker row is a clear that
+// lifts nothing, else 0, judging the bytes exactly as the decoder's readReorgHaltState
+// does (JSON.parse, a parse failure is no payload). Any other output shape throws.
+function parseNewestClear(raw, what) {
+    const text   = String(raw == null ? '' : raw).replace(/\r?\n$/, '')
+    const fields = text.split('\t')
+    // The native client joins a NULL as '', the docker client prints NULL.
+    const hex    = (fields[1] === 'NULL') ? '' : fields[1]
+    const bad = fields.length !== 2
+        || !/^[01]$/.test(fields[0])
+        || !/^(?:[0-9A-F]{2})*$/.test(hex || '')
+        || (fields[0] === '0' && hex !== '')
+    if (bad)
+        throw new Error(`the ${what} returned unreadable output: ${JSON.stringify(text.slice(0, 80))}`)
+    if (fields[0] === '0') return 0
+    let payload = null
+    try {
+        payload = JSON.parse(Buffer.from(hex, 'hex').toString('utf8'))
+    } catch (_) {
+        payload = null
+    }
+    return isAuditedClear(payload) ? 0 : 1
 }
 
 // A watermark is interpolated into SQL below, and it comes back through a caller
@@ -146,13 +178,13 @@ async function readLiveMarkers(run, readCount, name) {
     // that 0 means is this function's job below, and it is not always "clean".
     const query = markerTablesSql(name)
 
-    // Two tokens, each 0 or 1: TABLE_SCHEMA + TABLE_NAME is unique in
+    // Three tokens, each 0 or 1: TABLE_SCHEMA + TABLE_NAME is unique in
     // information_schema.TABLES, so any other value means the output is not the
     // answer to the question that was asked. Capping at 1 is what makes
     // `1<TAB>0garbage` a refusal instead of a silent [1, 0] that skips the
     // sync_halt probe entirely.
-    const [hasEvents, hasSyncHalt] = parseCountTokens(await run(query),
-        { expected: 2, max: 1, what: `marker-table probe for ${name}` })
+    const [hasEvents, hasSyncHalt, hasSyncState] = parseCountTokens(await run(query),
+        { expected: 3, max: 1, what: `marker-table probe for ${name}` })
 
     // `events` is not optional on a decoder/indexer database: both provision it
     // unconditionally at startup (each repo's verifyTables creates every
@@ -163,17 +195,26 @@ async function readLiveMarkers(run, readCount, name) {
     if (hasEvents === 0)
         throw new Error(`${name} reports no events table, so the REORG_HALT marker could not be read`)
 
-    const found = { reorgHalt: 0, syncHalt: 0 }
+    const found = { reorgHalt: 0, syncHalt: 0, pendingSyncHalt: 0 }
     // LIVE halts only: a REORG_HALT row older than the newest REORG_HALT_CLEARED
     // row was cleared by an operator through `xchain-node clear-reorg-halt`
     // (audited in the decoder's events table) and no longer disqualifies the
     // database. The halt row itself is never deleted, so a plain count would
     // refuse a cleared database forever.
     found.reorgHalt = await readCount(liveReorgHaltCountSql(name), 'REORG_HALT marker')
+    // A newest clear row without an audited reason lifts nothing: the decoder reads it as
+    // a live halt, so it counts as one here too.
+    found.reorgHalt += parseNewestClear(await run(newestReorgClearSql(name)),
+        `REORG_HALT_CLEARED audit probe for ${name}`)
     // sync_halt IS optional: xchain-sync provisions it only where it runs, so an
     // absent table here is a genuine "no such marker", not an unread database.
     if (hasSyncHalt > 0)
         found.syncHalt = await readCount(liveSyncHaltCountSql(name), 'sync_halt marker')
+    // A halt whose sync_halt write failed lives only as xchain-sync's sync_state copy,
+    // which a restore re-installs as a halt; sync_state is optional for the same reason.
+    // It has no id sequence, so it is read live at each reading, never by watermark.
+    if (hasSyncState > 0)
+        found.pendingSyncHalt = await readCount(pendingSyncHaltCountSql(name), 'sync_state halt_pending marker')
 
     // The dump window watermark. Both marker tables are append-only and
     // id-ordered (decoder events: AUTO_INCREMENT, a clear is a NEW row, halt rows
@@ -268,5 +309,7 @@ async function readHaltMarkers(coin, network, module, deps, since) {
 
 module.exports = {
     parseCountTokens,
+    parseNewestClear,
+    isAuditedClear,
     readHaltMarkers
 }

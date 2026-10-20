@@ -91,7 +91,7 @@ describe('BootstrapHealthGate', function () {
 
         it('skips the sync_halt query on a schema that has no sync_halt table', async function () {
             const gate = loadGate()
-            const runner = makeRunner({ tables: '1\t0' })
+            const runner = makeRunner({ tables: '1\t0\t0' })
             await callGate(gate, { runner })
             const sqls = runner.getCalls().map(c => (c.args[1] || []).join(' '))
             expect(sqls.some(s => /FROM `[^`]+`\.sync_halt/.test(s))).to.equal(false)
@@ -174,7 +174,7 @@ describe('BootstrapHealthGate', function () {
         // is not looking at the database that is about to be dumped.
         it('REFUSES a MariaDB source whose schema reports no events table', async function () {
             const gate = loadGate()
-            const err = await refusal(callGate(gate, { runner: makeRunner({ tables: '0\t1' }) }))
+            const err = await refusal(callGate(gate, { runner: makeRunner({ tables: '0\t1\t1' }) }))
             expect(err.message).to.match(/reports no events table/)
         })
 
@@ -251,7 +251,7 @@ describe('BootstrapHealthGate', function () {
         // must not arrive as "the decoder has no halt marker".
         it('REFUSES an indexer when the paired decoder database is absent', async function () {
             const gate = loadGate()
-            const runner = pairedIndexerRunner({ tables: '0\t0' })
+            const runner = pairedIndexerRunner({ tables: '0\t0\t0' })
             const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
             expect(err.message).to.match(/paired decoder database[\s\S]*could not be probed/)
             expect(err.message).to.match(/reports no events table/)
@@ -300,7 +300,7 @@ describe('BootstrapHealthGate', function () {
 
             it('reports a null sync_halt watermark when the table does not exist', async function () {
                 const gate = loadGate()
-                const res = await callGate(gate, { runner: makeRunner({ tables: '1\t0', eventsWatermark: '9' }) })
+                const res = await callGate(gate, { runner: makeRunner({ tables: '1\t0\t0', eventsWatermark: '9' }) })
                 expect(res.watermark.own).to.deep.equal({ events: 9, syncHalt: null })
             })
 

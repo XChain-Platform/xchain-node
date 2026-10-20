@@ -133,12 +133,12 @@ function statusFlagReasons(payload) {
 function stallReasons(payload) {
     const reasons = []
     // The indexer's own single-field verdict on its block counter: 'none' |
-    // 'future_block_wait' | 'bridge_proof_wait' | 'price_landing_wait' | 'barrier_defer' |
-    // 'wedged', plus the published refinements 'upstream_halted' (only beside
+    // 'future_block_wait' | 'bridge_proof_wait' | 'train_activation_halt' | 'price_landing_wait' |
+    // 'barrier_defer' | 'wedged', plus the published refinements 'upstream_halted' (only beside
     // decoderReorgHalted: true, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck' |
-    // 'train_activation_halt'. The set is defined in xchain-indexer
-    // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). Only 'wedged'
-    // is a refusal by itself; 'train_activation_halt' never is because the
+    // 'capability_proof_wait' | 'capability_proof_stuck'. The set is defined in xchain-indexer
+    // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). 'wedged' and the
+    // two '_proof_stuck' classes are refusals by themselves; 'train_activation_halt' never is because the
     // train_activation.status === 'halt' leg below already refuses it. 'wedged' needs its own
     // leg: the indexer reports status "healthy"
     // whenever its process is up and its DB circuit is closed, so a freshly-wedged
@@ -151,6 +151,10 @@ function stallReasons(payload) {
     if (payload.stallClass === 'wedged')
         reasons.push('the service reports its block counter WEDGED (stallClass "wedged": no commit for longer ' +
             'than its stall grace window)' + (payload.stallReason ? `: ${payload.stallReason}` : ''))
+    // Refuse a proof wait past its hold ceiling: the indexer wedges on it only later, above the ceiling.
+    if (payload.stallClass === 'rollcall_proof_stuck' || payload.stallClass === 'capability_proof_stuck')
+        reasons.push(`the service reports its block counter held on a proof past its hold ceiling (stallClass ` +
+            `"${payload.stallClass}")` + (payload.stallReason ? `: ${payload.stallReason}` : ''))
     // Refuse only 'halt': the indexer stays "healthy" and never wedges after a restart while
     // halted, and 'pending'/'unevaluated' are still correct data. Strict, so older images pass.
     const train = payload.train_activation

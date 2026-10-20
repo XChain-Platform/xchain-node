@@ -410,10 +410,48 @@
       "ValidatorService capability-drift probe still compares a DISABLED validator, whose key can be staked and in a set",
       "ValidatorService capability-drift probe treats a TRUNCATED set as unknown, never as \"not in the set\""
     ],
-    "1f2aa9f88ca90972": [
-      "BootstrapHealthGate durable halt markers REFUSES an indexer whose OWN database carries an uncleared sync halt",
-      "BootstrapHealthGate durable halt markers does not run marker queries for the utxo-tracker (LevelDB, no such table)",
-      "BootstrapHealthGate durable halt markers gating a decoder queries no second database"
+    "1f41bd79a48d68a9": [
+      "halt marker SQL on MariaDB a newest clear row with JSON null reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with NBSP around a valid reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with NEL padding, which trim keeps reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with SQL NULL reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a JSON-escaped reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a byte-order mark before the object reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a clear-reorg-halt payload reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a duplicate key whose last copy is long reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a duplicate key whose last copy is short reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a lone escaped surrogate reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a nested reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a numeric reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a raw 0x01 inside the reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a raw newline inside the reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a raw tab inside the reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a reason holding an escaped quote reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a short reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a top-level array reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with a trailing comma reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with an array reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with an empty string reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with an escaped duplicate key whose last copy is long reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with an escaped duplicate key whose last copy is short reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with an escaped first letter in a duplicate key reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with an invalid \\x escape reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with eight NBSPs reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with eight byte-order marks reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with eight ideographic spaces reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with eight tabs reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with exactly eight chars after trim reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with no reason reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with padding that trims to six reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with plain text reads as the decoder reads it",
+      "halt marker SQL on MariaDB a newest clear row with trailing garbage reads as the decoder reads it",
+      "halt marker SQL on MariaDB counts every clear row raised inside the dump window, audited or not",
+      "halt marker SQL on MariaDB counts every halt_pending copy that xchain-sync would restore",
+      "halt marker SQL on MariaDB gives the real decoder readReorgHaltState answer on every payload",
+      "halt marker SQL on MariaDB keeps the reference rule in step with the decoder",
+      "halt marker SQL on MariaDB lists each payload with the answer the decoder rule gives it",
+      "halt marker SQL on MariaDB reads the newest marker row, as the decoder does",
+      "halt marker SQL on MariaDB reads the three marker tables as three tokens"
     ],
     "1f9845108589a523": [
       "E2E: Update Flow (Scenario 4.6) E2E-040: Update replaces container kills old container, removes it, builds new image, and runs new container",
@@ -780,25 +818,6 @@
       "Regression Suite [regression:p0] Security R-SEC-005: DockerService uses execFile (no shell) for all commands",
       "Regression Suite [regression:p0] Security R-SEC-006: shell metacharacters in env values pass literally via the child env, never argv",
       "Regression Suite [regression:p0] Security R-SEC-007: NODE_PREFIX regex rejects shell metacharacters"
-    ],
-    "33623e8a12ec8dfa": [
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a decoder parked on a REORG_HALT whose marker was never written, even under a raised lag ceiling",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a decoder that reports not-halted having never completed a probe",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a lag that is not a number, rather than coercing it to zero",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a negative lag: the committed tip sits above the node tip (orphaned view)",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a payload with no lag field at all: position unverifiable is not caught-up",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer reporting its block counter wedged",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer stopped on a train-activation halt",
-      "BootstrapHealthGate evaluateStatusPayload() does not demand a probe timestamp from an indexer payload",
-      "BootstrapHealthGate evaluateStatusPayload() formats a block-fetch desync object instead of printing [object Object]",
-      "BootstrapHealthGate evaluateStatusPayload() passes a healthy payload whose lag is zero",
-      "BootstrapHealthGate evaluateStatusPayload() passes a pending, unevaluated, absent or malformed train_activation",
-      "BootstrapHealthGate evaluateStatusPayload() passes the healthy future-block wait and an in-grace barrier defer",
-      "BootstrapHealthGate evaluateStatusPayload() passes the same decoder once a probe has actually completed",
-      "BootstrapHealthGate evaluateStatusPayload() refuses an indexer frozen behind a halted decoder",
-      "BootstrapHealthGate evaluateStatusPayload() refuses when the node tip is stale, since the lag is then unknowable",
-      "BootstrapHealthGate evaluateStatusPayload() still accepts the two shapes a producer legitimately emits",
-      "BootstrapHealthGate evaluateStatusPayload() treats an empty payload as a refusal, not a pass"
     ],
     "33a411988d29bb7b": [
       "parseCountTokens() accepts whole nonnegative integers",
@@ -1424,6 +1443,27 @@
       "BootstrapHealthGate durable halt markers passes an indexer when BOTH its own and the decoder database are clean",
       "BootstrapHealthGate durable halt markers skips the sync_halt query on a schema that has no sync_halt table"
     ],
+    "5290a0cef37c396c": [
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a decoder parked on a REORG_HALT whose marker was never written, even under a raised lag ceiling",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a decoder that reports not-halted having never completed a probe",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a lag that is not a number, rather than coercing it to zero",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a negative lag: the committed tip sits above the node tip (orphaned view)",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a payload with no lag field at all: position unverifiable is not caught-up",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer reporting its block counter wedged",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer stopped on a train-activation halt",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer whose proof wait is past its hold ceiling",
+      "BootstrapHealthGate evaluateStatusPayload() does not demand a probe timestamp from an indexer payload",
+      "BootstrapHealthGate evaluateStatusPayload() formats a block-fetch desync object instead of printing [object Object]",
+      "BootstrapHealthGate evaluateStatusPayload() passes a healthy payload whose lag is zero",
+      "BootstrapHealthGate evaluateStatusPayload() passes a pending, unevaluated, absent or malformed train_activation",
+      "BootstrapHealthGate evaluateStatusPayload() passes an indexer whose proof wait is still inside its hold ceiling",
+      "BootstrapHealthGate evaluateStatusPayload() passes the healthy future-block wait and an in-grace barrier defer",
+      "BootstrapHealthGate evaluateStatusPayload() passes the same decoder once a probe has actually completed",
+      "BootstrapHealthGate evaluateStatusPayload() refuses an indexer frozen behind a halted decoder",
+      "BootstrapHealthGate evaluateStatusPayload() refuses when the node tip is stale, since the lag is then unknowable",
+      "BootstrapHealthGate evaluateStatusPayload() still accepts the two shapes a producer legitimately emits",
+      "BootstrapHealthGate evaluateStatusPayload() treats an empty payload as a refusal, not a pass"
+    ],
     "5391d29ad9735760": [
       "Boundary Tests ConfigService: resolveArgs boundaries classifies args correctly regardless of order",
       "Boundary Tests ConfigService: resolveArgs boundaries handles empty args array",
@@ -1922,16 +1962,6 @@
     "7141a5716344fb9c": [
       "AutohealService restarts the grace clock when retained probes show a recovery after the persisted onset"
     ],
-    "7167d0becc0b4237": [
-      "halt marker exports and live SQL builders builds the live reorg halt query",
-      "halt marker exports and live SQL builders builds the live sync halt query",
-      "halt marker exports and live SQL builders builds the marker table discovery query",
-      "halt marker exports and live SQL builders exports exactly the supported builders",
-      "halt marker watermark SQL builders builds the events watermark query",
-      "halt marker watermark SQL builders builds the reorg halt query after a watermark",
-      "halt marker watermark SQL builders builds the sync halt query after a watermark",
-      "halt marker watermark SQL builders builds the sync halt watermark query"
-    ],
     "718e1e0ef8441e60": [
       "moduleOperations updateModules(): the `all` expansion collapses the absent services into one line under `all`, and keeps the per-service warning for a targeted update",
       "moduleOperations updateModules(): the `all` expansion continues the hub update when the validator repair fails, and says so",
@@ -2244,6 +2274,21 @@
       "Boundary Tests ModuleService: branch name validation rejects branch name with semicolon (shell injection)",
       "Boundary Tests ModuleService: branch name validation rejects branch name with spaces",
       "Boundary Tests ModuleService: branch name validation rejects module with unknown git URL"
+    ],
+    "85c2e9e3a52d23f9": [
+      "BootstrapHealthGate durable halt markers REFUSES a database whose sync_state carries a halt_pending copy",
+      "BootstrapHealthGate durable halt markers REFUSES a marker-table probe that still answers with two tokens",
+      "BootstrapHealthGate durable halt markers REFUSES an indexer whose OWN database carries an uncleared sync halt",
+      "BootstrapHealthGate durable halt markers REFUSES an indexer whose paired decoder database carries a halt_pending copy",
+      "BootstrapHealthGate durable halt markers REFUSES an unreadable halt_pending count",
+      "BootstrapHealthGate durable halt markers does not run marker queries for the utxo-tracker (LevelDB, no such table)",
+      "BootstrapHealthGate durable halt markers gating a decoder queries no second database",
+      "BootstrapHealthGate durable halt markers skips the sync_state query on a schema that has no sync_state table",
+      "BootstrapHealthGate durable halt markers: the newest clear row REFUSES a newest clear row whose reason is short",
+      "BootstrapHealthGate durable halt markers: the newest clear row REFUSES a newest clear row with no payload at all",
+      "BootstrapHealthGate durable halt markers: the newest clear row REFUSES an indexer whose paired decoder database has an unaudited newest clear row",
+      "BootstrapHealthGate durable halt markers: the newest clear row REFUSES unreadable clear-probe output",
+      "BootstrapHealthGate durable halt markers: the newest clear row passes a newest clear row whose reason clear-reorg-halt would accept"
     ],
     "8602a614e6adc857": [
       "ValidatorService getCapabilityConfigHostPath() returns CAPS_FILE path when initialized and caps file exists",
@@ -3734,6 +3779,19 @@
       "GitHubDownloader verifyFileHash() passes when the tarball hash matches the registered per-arch hash",
       "GitHubDownloader verifyFileHash() throws when the tarball hash does not match"
     ],
+    "dc6619171869b379": [
+      "halt marker exports and live SQL builders builds the live reorg halt query",
+      "halt marker exports and live SQL builders builds the live sync halt query",
+      "halt marker exports and live SQL builders builds the marker table discovery query",
+      "halt marker exports and live SQL builders builds the pending sync halt query over sync_state",
+      "halt marker exports and live SQL builders exports exactly the supported builders",
+      "halt marker exports and live SQL builders reads the newest marker row as a clear flag and its payload bytes",
+      "halt marker watermark SQL builders builds the events watermark query",
+      "halt marker watermark SQL builders builds the reorg halt query after a watermark",
+      "halt marker watermark SQL builders builds the sync halt query after a watermark",
+      "halt marker watermark SQL builders builds the sync halt watermark query",
+      "halt marker watermark SQL builders counts every clear row raised after a watermark, without reading its payload"
+    ],
     "dd1b100fce46a627": [
       "ValidatorService isInitialized() returns false when key file is missing",
       "ValidatorService isInitialized() returns false when neither file exists",
@@ -4823,7 +4881,7 @@
   "scripts": {
     "test": {
       "fileCount": 308,
-      "titleCount": 2936,
+      "titleCount": 2951,
       "files": {
         "test/unit/00_config_directory_isolation.test.js": "f13ced249dae415e",
         "test/unit/autoheal_service.test.js": "eae1a818e5f6a1fe",
@@ -4849,9 +4907,9 @@
         "test/unit/bootstrap_archive_meta.test.js": "f7ddf89f1e712c2f",
         "test/unit/bootstrap_health_gate.test.js": "52555b17f82ac069",
         "test/unit/bootstrap_health_gate.test/container_state.test.js": "ed8016ccb0fe8623",
-        "test/unit/bootstrap_health_gate.test/durable_halt_markers.test.js": "1f2aa9f88ca90972",
+        "test/unit/bootstrap_health_gate.test/durable_halt_markers.test.js": "85c2e9e3a52d23f9",
         "test/unit/bootstrap_health_gate.test/evaluate_container_state.test.js": "c9f879a004276208",
-        "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js": "33623e8a12ec8dfa",
+        "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js": "5290a0cef37c396c",
         "test/unit/bootstrap_health_gate.test/make_bootstrap_consults_the_source_health_gate.test.js": "54f2031de8d7e024",
         "test/unit/bootstrap_health_gate.test/parse_count_tokens.test.js": "33a411988d29bb7b",
         "test/unit/bootstrap_health_gate.test/service_health_probe.test.js": "9806bd4412e5d53d",
@@ -4912,7 +4970,7 @@
         "test/unit/database_service.test/purge_hub_cross_chain_rows.test.js": "fb4eaf65d15059af",
         "test/unit/database_service.test/reset_databases.test.js": "16b722b1d1f9fa39",
         "test/unit/database_service.test/set_database_parameters.test.js": "eefea4f8da594893",
-        "test/unit/db/halt_markers.test.js": "7167d0becc0b4237",
+        "test/unit/db/halt_markers.test.js": "dc6619171869b379",
         "test/unit/db/information_schema.test.js": "1bac4d9ab7be0cd2",
         "test/unit/db/price_fence.test.js": "33bb86ffb68d924e",
         "test/unit/db_credential_drift.test.js": "f832d89d8f2cdb21",
@@ -5136,8 +5194,8 @@
       }
     },
     "test:all": {
-      "fileCount": 418,
-      "titleCount": 3702,
+      "fileCount": 419,
+      "titleCount": 3758,
       "files": {
         "test/chaos/config_resilience_chaos.test.js": "e187ad3068ae0375",
         "test/chaos/config_resilience_chaos.test/argument_parsing_resilience_chaos.test.js": "24bd240f4198a15b",
@@ -5216,6 +5274,7 @@
         "test/integration/docker_commands.test/xchain_indexer_docker_run_command.test.js": "3aa22b5c17bf0837",
         "test/integration/docker_commands.test/xchain_regtest_miner_docker_run_command.test.js": "e85f9fd995faa7fc",
         "test/integration/docker_commands.test/xchain_utxo_tracker_docker_run_command.test.js": "3fa86dc751918535",
+        "test/integration/halt_marker_sql_mariadb.test.js": "1f41bd79a48d68a9",
         "test/integration/hub_config_update.test.js": "bbd3a050c99fdc1f",
         "test/integration/hub_config_update.test/01_hub_update_retry_logic.test.js": "cacb2b17a1b6db97",
         "test/integration/hub_config_update.test/02_update_hub_or_explorer_for_explorer.test.js": "62f79f2877e9a543",
@@ -5273,9 +5332,9 @@
         "test/unit/bootstrap_archive_meta.test.js": "f7ddf89f1e712c2f",
         "test/unit/bootstrap_health_gate.test.js": "52555b17f82ac069",
         "test/unit/bootstrap_health_gate.test/container_state.test.js": "ed8016ccb0fe8623",
-        "test/unit/bootstrap_health_gate.test/durable_halt_markers.test.js": "1f2aa9f88ca90972",
+        "test/unit/bootstrap_health_gate.test/durable_halt_markers.test.js": "85c2e9e3a52d23f9",
         "test/unit/bootstrap_health_gate.test/evaluate_container_state.test.js": "c9f879a004276208",
-        "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js": "33623e8a12ec8dfa",
+        "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js": "5290a0cef37c396c",
         "test/unit/bootstrap_health_gate.test/make_bootstrap_consults_the_source_health_gate.test.js": "54f2031de8d7e024",
         "test/unit/bootstrap_health_gate.test/parse_count_tokens.test.js": "33a411988d29bb7b",
         "test/unit/bootstrap_health_gate.test/service_health_probe.test.js": "9806bd4412e5d53d",
@@ -5336,7 +5395,7 @@
         "test/unit/database_service.test/purge_hub_cross_chain_rows.test.js": "fb4eaf65d15059af",
         "test/unit/database_service.test/reset_databases.test.js": "16b722b1d1f9fa39",
         "test/unit/database_service.test/set_database_parameters.test.js": "eefea4f8da594893",
-        "test/unit/db/halt_markers.test.js": "7167d0becc0b4237",
+        "test/unit/db/halt_markers.test.js": "dc6619171869b379",
         "test/unit/db/information_schema.test.js": "1bac4d9ab7be0cd2",
         "test/unit/db/price_fence.test.js": "33bb86ffb68d924e",
         "test/unit/db_credential_drift.test.js": "f832d89d8f2cdb21",
@@ -5652,8 +5711,8 @@
       }
     },
     "test:integration": {
-      "fileCount": 28,
-      "titleCount": 106,
+      "fileCount": 29,
+      "titleCount": 147,
       "files": {
         "test/integration/config_pipeline.test.js": "a5a5aa45a05118df",
         "test/integration/database_setup.test.js": "34be82a1cf77dc44",
@@ -5671,6 +5730,7 @@
         "test/integration/docker_commands.test/xchain_indexer_docker_run_command.test.js": "3aa22b5c17bf0837",
         "test/integration/docker_commands.test/xchain_regtest_miner_docker_run_command.test.js": "e85f9fd995faa7fc",
         "test/integration/docker_commands.test/xchain_utxo_tracker_docker_run_command.test.js": "3fa86dc751918535",
+        "test/integration/halt_marker_sql_mariadb.test.js": "1f41bd79a48d68a9",
         "test/integration/hub_config_update.test.js": "bbd3a050c99fdc1f",
         "test/integration/hub_config_update.test/01_hub_update_retry_logic.test.js": "cacb2b17a1b6db97",
         "test/integration/hub_config_update.test/02_update_hub_or_explorer_for_explorer.test.js": "62f79f2877e9a543",

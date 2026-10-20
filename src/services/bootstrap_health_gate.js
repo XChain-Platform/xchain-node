@@ -296,6 +296,14 @@ async function healthSurfaceReasons(containerId, module, coin, network, runner) 
     return reasons
 }
 
+// Refusal text for an xchain-sync halt_pending copy found in `where`.
+function pendingSyncHaltReason(where) {
+    return `${where} carries an xchain-sync halt_pending copy in sync_state (a divergence halt whose ` +
+        'sync_halt write never landed): xchain-sync re-installs that halt on every replica that restores ' +
+        'this archive. Clear the halt through xchain-sync (POST /halt/clear/<dbType>/<chain>/<network>), which drops ' +
+        'the copy, then re-run the publish.'
+}
+
 // Read the durable halt markers and turn them into refusal reasons. Returns the
 // reasons and the watermark the caller hands back (null when the probe failed).
 async function haltMarkerReasons(coin, network, module, dbDeps, since) {
@@ -310,7 +318,8 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
         reasons.push(...windowReasons(markers.raisedInWindow))
         if (markers.upstream) reasons.push(...windowReasons(markers.upstream.raisedInWindow))
         if (markers.reorgHalt > 0)
-            reasons.push("the database carries a durable REORG_HALT marker (events.code='REORG_HALT'): " +
+            reasons.push("the database carries a durable REORG_HALT marker (events.code='REORG_HALT', or a newest " +
+                'REORG_HALT_CLEARED row with no audited reason, which lifts nothing): ' +
                 'this decoder aborted mid-rollback and will halt at its next reorg. Restoring this archive ' +
                 'reproduces that fault on every consumer. Recovery is a full resync from a known-good snapshot, ' +
                 'or, once the rolled-back range is re-parsed and the database is verified intact, ' +
@@ -318,11 +327,16 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
         if (markers.syncHalt > 0)
             reasons.push('the database carries an uncleared xchain-sync divergence halt ' +
                 '(sync_halt with cleared_at IS NULL): its contents are known to diverge from the source of truth.')
+        // A halt whose sync_halt write failed survives only as this copy, and xchain-sync
+        // re-installs it on every replica that restores the archive.
+        if (markers.pendingSyncHalt > 0)
+            reasons.push(pendingSyncHaltReason('the database'))
         // Refuse on the paired decoder's markers too: REORG_HALT lives only there, and an
         // indexer frozen behind a halted decoder is exactly as unfit to publish.
         if (markers.upstream && markers.upstream.reorgHalt > 0)
             reasons.push(`the paired decoder database ${markers.upstream.dbName} carries a durable REORG_HALT ` +
-                "marker (events.code='REORG_HALT'), so this indexer is frozen behind a decoder that aborted " +
+                "marker (events.code='REORG_HALT', or a newest REORG_HALT_CLEARED row with no audited reason), " +
+                'so this indexer is frozen behind a decoder that aborted ' +
                 'mid-rollback. Its own health surface reports lag 0 only because that lag is measured against ' +
                 'the frozen decoder height. Recovery happens on the decoder: once its rolled-back range is ' +
                 're-parsed and its database is verified intact, `xchain-node clear-reorg-halt <chain> ' +
@@ -333,6 +347,8 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
             reasons.push(`the paired decoder database ${markers.upstream.dbName} carries an uncleared ` +
                 'xchain-sync divergence halt (sync_halt with cleared_at IS NULL), so the rows this indexer ' +
                 'derived from it are known to diverge from the source of truth.')
+        if (markers.upstream && markers.upstream.pendingSyncHalt > 0)
+            reasons.push(pendingSyncHaltReason(`the paired decoder database ${markers.upstream.dbName}`))
     } catch (err) {
         reasons.push(`could not read the halt markers from the ${module} database: ${err && err.message}`)
     }
@@ -346,7 +362,8 @@ function windowReasons(raised) {
     if (!raised) return []
     const out = []
     if (raised.reorgHalt > 0)
-        out.push("a REORG_HALT marker (events.code='REORG_HALT') was raised while the dump was streaming. " +
+        out.push("a REORG_HALT marker (events.code='REORG_HALT', or a REORG_HALT_CLEARED row, which is only " +
+            'written over a live halt) was raised while the dump was streaming. ' +
             'The archive is the snapshot taken inside that window, so it may carry the halt even though the ' +
             'database looks clean now. Re-run the publish once the source has settled.')
     if (raised.syncHalt > 0)
