@@ -271,8 +271,9 @@ const INDEXER_STALL_HINTS = {
         + " Look for BRIDGE ESCROW PROOF UNAVAILABLE in `xchain-node logs xchain-indexer " + coin + " " + network + "`.",
     capability_proof_unavailable: (coin, network) =>
         "it holds a mirrored capability snapshot row whose checkpoint proof it cannot verify yet, and defers the block rather than"
-        + " apply an unproven validator set. This is not a hub-mirror lag, and neither a hub resync nor a restart supplies the proof:"
-        + " held rows are re-checked every 15 seconds and the block moves once the proof verifies."
+        + " apply an unproven validator set. This is not a hub-mirror lag, and a hub resync does not supply the proof:"
+        + " held rows are re-checked every 15 seconds and the block moves once the proof verifies; a hold that outlasts the"
+        + " proof-wait grace earns one automatic restart, which clears proof state held only in memory."
         + " `xchain-node logs xchain-indexer " + coin + " " + network + "` shows a \"Capability snapshot proof held\" line naming why,"
         + " such as the hub not serving the proof or the checkpoint validator trust pin missing or unreadable.",
     list_share_halt: (coin, network) =>
