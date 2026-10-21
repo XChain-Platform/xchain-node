@@ -280,3 +280,24 @@ describe('ValidatorService', function () {
         })
     })
 })
+
+describe('ValidatorService oracle epoch default', function () {
+
+    it('defaults the regtest oracle epoch to the rail value when no flag is given', async function () {
+        const vs = loadValidatorService(makeFs())
+        const result = await vs.initValidator({ network: 'regtest', wallets: false })
+        expect(result.ORACLE_EPOCH_START).to.equal(1785000000000)
+    })
+
+    it('keeps an explicit regtest --oracle-epoch-start', async function () {
+        const vs = loadValidatorService(makeFs())
+        const result = await vs.initValidator({ network: 'regtest', wallets: false, oracleEpochStart: '1700000000000' })
+        expect(result.ORACLE_EPOCH_START).to.equal(1700000000000)
+    })
+
+    it('leaves the testnet default unchanged', async function () {
+        const vs = loadValidatorService(makeFs())
+        const result = await vs.initValidator({ network: 'testnet', wallets: false })
+        expect(result.ORACLE_EPOCH_START).to.equal(1787875200000)
+    })
+})

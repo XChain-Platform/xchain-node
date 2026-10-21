@@ -10,8 +10,10 @@
 # user, and failing on low/moderate trains people to ignore the gate. A red run
 # means a high/critical advisory now affects a production dependency.
 #
-# Triage when this goes red: bump the dependency, override the transitive
-# version, replace it, or document an accept-with-justification exception.
+# Each job runs bin/audit_gate.js, which runs that audit and fails on a
+# high/critical production advisory unless AUDIT-EXCEPTIONS.md accepts its GHSA
+# id. Triage when this goes red: bump the dependency, override the transitive
+# version, replace it, or document an accept-with-justification exception there.
 # Pre-launch, no high/critical prod advisory ships unresolved.
 name: audit
 
@@ -32,6 +34,9 @@ on:
     paths:
       - package.json
       - package-lock.json
+      - AUDIT-EXCEPTIONS.md
+      - bin/audit_gate.js
+      - .github/workflows/audit.yml
 
 jobs:
   audit:
@@ -48,7 +53,7 @@ jobs:
       # registry advisory endpoint; it needs no install, so skip `npm ci` for
       # speed and so private deps never need registry auth here.
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: node bin/audit_gate.js
 
   # Post-flip both-branch sweep.
   #
@@ -76,7 +81,7 @@ jobs:
         with:
           ref: master
       - name: Audit production dependencies (master)
-        run: npm audit --omit=dev --audit-level=high
+        run: node bin/audit_gate.js
 
   audit-develop:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -86,4 +91,4 @@ jobs:
         with:
           ref: develop
       - name: Audit production dependencies (develop)
-        run: npm audit --omit=dev --audit-level=high
+        run: node bin/audit_gate.js
