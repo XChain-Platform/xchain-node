@@ -21,8 +21,9 @@ function configure(dependencies) {
  * and only removed when nothing is left to serve. `--include-shared` is a request,
  * not an override: with bitcoin still installed, `uninstall all dogecoin mainnet
  * --include-shared` must not take the explorer down for bitcoin too. An explicitly
- * named shared service arrives under the empty coin/network bucket and is removed
- * directly; naming it is the operator's override. The database remains manual.
+ * named xchain-hub arrives under the empty coin/network bucket and is removed
+ * directly; naming it is the operator's override. Explorer, sync and the database
+ * keep requiring --include-shared.
  *
  * filterCommandParameters leaves the hub and sync out of `all` (the same
  * expansion serves install/start/stop), so an `all` teardown with
@@ -112,7 +113,7 @@ async function uninstallModules(servicesList, includeShared = false, opts = {}) 
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
                 if (sharedModules.includes(nextModule)) {
                     const explicitlyNamed = nextCoin === '' && nextNetwork === '' && !opts.all
-                    if (explicitlyNamed && nextModule !== DB_MODULE_NAME) {
+                    if (explicitlyNamed && nextModule === HUB_MODULE_NAME) {
                         await uninstallOne(nextModule, nextCoin, nextNetwork)
                         continue
                     }

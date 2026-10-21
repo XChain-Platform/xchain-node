@@ -41,6 +41,18 @@ describe('moduleOperations', function () {
             expect(stubs.db.getAllModuleContainers.called).to.be.false
         })
 
+        it('still skips an explicitly named explorer and sync without --include-shared', async function () {
+            for (const name of ['xchain-explorer', 'xchain-sync']) {
+                const stubs = makeStubs()
+                const ops = loadOperations(stubs)
+                const { filterCommandParameters } = requireFromUnit('../../src/services/config_service/filters.js')
+                const result = await ops.uninstallModules(filterCommandParameters(null, name))
+
+                expect(stubs.uninstallModule.called).to.be.false
+                expect(result.uninstalled).to.deep.equal([])
+            }
+        })
+
         it('skips shared modules by default', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
