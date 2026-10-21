@@ -316,6 +316,26 @@ moduleSuite('uninstallModule()', function () {it('returns true when module is no
         })
     })
 
+moduleSuite('uninstallModule() shared hub', function () {
+
+        it('stops and removes the installed xchain-hub container', async function () {
+            const stubs = makeStubs()
+            stubs.getStatus.resolves({
+                '': { '': { 'xchain-hub': {
+                    container_id: 'hub-123',
+                    status: { State: { Status: 'running' } }
+                } } }
+            })
+            const ms = loadModuleService(stubs)
+
+            await ms.uninstallModule('', '', 'xchain-hub')
+
+            expect(stubs.stopContainerByName.calledOnceWith('hub-123', 30)).to.be.true
+            expect(stubs.removeContainer.calledOnceWith('hub-123')).to.be.true
+            expect(stubs.stopContainerByName.calledBefore(stubs.removeContainer)).to.be.true
+        })
+    })
+
     // -------------------------------------------------------------------
     // cloneGit: branch coverage
     // -------------------------------------------------------------------
