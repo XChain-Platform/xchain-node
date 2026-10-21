@@ -64,6 +64,22 @@ describe('DockerService', function () {
             expect(result).to.be.true
         })
 
+        it('issues docker stop -t then docker rm for the hub container teardown', async function () {
+            const stubs = makeStubs()
+            const issued = []
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                issued.push([cmd, ...args])
+                if (args[0] === 'inspect') return cb(null, '0\n')
+                cb(null, 'xchain-hub\n')
+            })
+            const ds = loadDockerService(stubs)
+            await ds.stopContainerByName('xchain-hub', 30)
+            await ds.removeContainer('xchain-hub')
+            expect(issued[0]).to.deep.equal(['docker', 'stop', '-t', '30', 'xchain-hub'])
+            expect(issued[issued.length - 1]).to.deep.equal(['docker', 'rm', 'xchain-hub'])
+        })
+
         it('treats "No such container" as success (idempotent)', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
