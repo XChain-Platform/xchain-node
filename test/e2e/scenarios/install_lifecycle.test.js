@@ -390,8 +390,9 @@ describe('E2E: Install Lifecycle (Scenarios 4.1, 4.3)', function () {
             }
 
             // Uninstall
-            // Uninstall reports both removals and intentional skips.
-            const uninstallResult = await cli.moduleOps.uninstallModules(serviceList)
+            // Uninstall reports both removals and intentional skips. The run expanded from
+            // `all`, as the CLI marks it, so the shared explorer stays a bulk-teardown skip.
+            const uninstallResult = await cli.moduleOps.uninstallModules(serviceList, false, { all: true })
             expect(uninstallResult.uninstalled).to.have.lengthOf(5)
             expect(uninstallResult.skipped.map(s => `${s.module}:${s.reason}`)).to.deep.equal(['xchain-explorer:shared', 'node:not-installed'])
         })
