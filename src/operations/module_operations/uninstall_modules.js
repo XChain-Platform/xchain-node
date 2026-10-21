@@ -17,12 +17,12 @@ function configure(dependencies) {
  * `update` no-op fix removed elsewhere.
  *
  * Shared services (database, hub, explorer, sync) are installed ONCE and serve
- * every coin/network on the box, so they are ordered LAST and only removed when
- * nothing is left to serve. `--include-shared` is a request, not an override: with
- * bitcoin still installed, `uninstall all dogecoin mainnet --include-shared` must
- * not take the explorer down for bitcoin too. The shared pass runs after the
- * per-coin pass (so a genuine full teardown still reaches them, the remaining set
- * being empty by then) and skips with a reason naming what is still installed.
+ * every coin/network on the box. During a bulk teardown they are ordered LAST
+ * and only removed when nothing is left to serve. `--include-shared` is a request,
+ * not an override: with bitcoin still installed, `uninstall all dogecoin mainnet
+ * --include-shared` must not take the explorer down for bitcoin too. An explicitly
+ * named shared service arrives under the empty coin/network bucket and is removed
+ * directly; naming it is the operator's override. The database remains manual.
  *
  * filterCommandParameters leaves the hub and sync out of `all` (the same
  * expansion serves install/start/stop), so an `all` teardown with
@@ -111,6 +111,11 @@ async function uninstallModules(servicesList, includeShared = false, opts = {}) 
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
                 if (sharedModules.includes(nextModule)) {
+                    const explicitlyNamed = nextCoin === '' && nextNetwork === '' && !opts.all
+                    if (explicitlyNamed && nextModule !== DB_MODULE_NAME) {
+                        await uninstallOne(nextModule, nextCoin, nextNetwork)
+                        continue
+                    }
                     if (!includeShared) {
                         outcome.skipped.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: 'shared' })
                     } else {

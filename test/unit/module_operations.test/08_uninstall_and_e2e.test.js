@@ -27,6 +27,20 @@ describe('moduleOperations', function () {
 
     describe('uninstallModules(): includeShared', function () {
 
+        it('uninstalls an explicitly named hub without requiring --include-shared', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const { filterCommandParameters } = requireFromUnit('../../src/services/config_service/filters.js')
+            const serviceList = filterCommandParameters(null, 'xchain-hub')
+            const result = await ops.uninstallModules(serviceList)
+
+            expect(stubs.uninstallModule.calledOnceWith('', '', 'xchain-hub')).to.be.true
+            expect(result.uninstalled).to.deep.equal([
+                { module: 'xchain-hub', coin: '', network: '' }
+            ])
+            expect(stubs.db.getAllModuleContainers.called).to.be.false
+        })
+
         it('skips shared modules by default', async function () {
             const stubs = makeStubs()
             const ops = loadOperations(stubs)
