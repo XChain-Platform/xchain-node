@@ -1,0 +1,100 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@dankest-llc/xchain-sdk": {
+      "name": "@dankest-llc/xchain-sdk",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@oipwg/bitcoinjs-message"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/@dankest-llc/xchain-sdk"
+      ],
+      "fixAvailable": true
+    },
+    "@exodus/secp256k1": {
+      "name": "@exodus/secp256k1",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "elliptic"
+      ],
+      "effects": [
+        "@oipwg/bitcoinjs-message"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/secp256k1"
+      ],
+      "fixAvailable": true
+    },
+    "@oipwg/bitcoinjs-message": {
+      "name": "@oipwg/bitcoinjs-message",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@exodus/secp256k1"
+      ],
+      "effects": [
+        "@dankest-llc/xchain-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/bitcoinjs-message"
+      ],
+      "fixAvailable": true
+    },
+    "elliptic": {
+      "name": "elliptic",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1112030,
+          "name": "elliptic",
+          "dependency": "elliptic",
+          "title": "Elliptic Uses a Cryptographic Primitive with a Risky Implementation",
+          "url": "https://github.com/advisories/GHSA-848j-6mx2-7j84",
+          "severity": "high",
+          "cwe": [
+            "CWE-1240"
+          ],
+          "cvss": {
+            "score": 5.6,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L"
+          },
+          "range": "<=6.6.1"
+        }
+      ],
+      "effects": [
+        "@exodus/secp256k1"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/elliptic"
+      ],
+      "fixAvailable": true
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 4,
+      "critical": 0,
+      "total": 4
+    },
+    "dependencies": {
+      "prod": 207,
+      "dev": 291,
+      "optional": 1,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 497
+    }
+  }
+}
