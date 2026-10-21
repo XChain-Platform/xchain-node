@@ -124,6 +124,17 @@ Six env vars override where xchain-node stores its filesystem state. Set them in
 
 On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/configuration.md).
 
+### Unattended MariaDB installs
+
+Set `XCHAIN_NODE_DB_ROOT_PASSWORD` before an unattended install so xchain-node can initialize its bundled MariaDB container without prompting:
+
+```bash
+export XCHAIN_NODE_DB_ROOT_PASSWORD='replace-with-a-strong-password'
+xchain-node install master all bitcoin regtest
+```
+
+Supply the value through your deployment's secret manager, and do not commit it to the repository. On a fresh install, xchain-node uses it as the MariaDB root password and saves the accepted credential in `~/.xchain-node/credentials.json` with mode `0600` for later non-interactive commands. If the container already exists, xchain-node verifies the supplied password before accepting it. External MariaDB installations instead use `XCHAIN_NODE_EXTERNAL_DB_ROOT_PASSWORD` with the other `XCHAIN_NODE_EXTERNAL_DB_*` variables.
+
 ### Bundled MariaDB tuning
 
 When xchain-node manages its own MariaDB container, these optional env vars override server defaults. They are applied as `mysqld` startup args at install time, so they **persist across a container recreate** (a `conf.d` file edited inside a running container does not). Each is unset by default so image defaults remain unchanged, except `XCHAIN_NODE_DB_BUFFER_POOL_SIZE`, which defaults to `1G` (a value that is not digits with an optional `K`, `M` or `G` suffix logs a warning and falls back to `1G`), and `XCHAIN_NODE_DB_MAX_CONNECTIONS`, which defaults to `1000`. Set them before `xchain-node install`.
