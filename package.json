@@ -16,7 +16,7 @@
     "commander": "^14.0.2",
     "dotenv": "^16.4.5",
     "enquirer": "^2.4.1",
-    "follow-redirects": "^1.16.0",
+    "follow-redirects": "^1.16.1",
     "mariadb": "3.5.4",
     "semver": "^7.6.3"
   },
