@@ -17,12 +17,11 @@ function configure(dependencies) {
  * `update` no-op fix removed elsewhere.
  *
  * Shared services (database, hub, explorer, sync) are installed ONCE and serve
- * every coin/network on the box. During a bulk teardown they are ordered LAST
- * and only removed when nothing is left to serve. `--include-shared` is a request,
+ * every coin/network on the box, so a bulk teardown orders them LAST and only
+ * removes them when nothing is left to serve. `--include-shared` is a request,
  * not an override: with bitcoin still installed, `uninstall all dogecoin mainnet
- * --include-shared` must not take the explorer down for bitcoin too. An explicitly
- * named shared service arrives under the empty coin/network bucket and is removed
- * directly; naming it is the operator's override. The database remains manual.
+ * --include-shared` must not take the explorer down for bitcoin too. A shared
+ * service named explicitly (empty coin/network bucket) is removed directly.
  *
  * filterCommandParameters leaves the hub and sync out of `all` (the same
  * expansion serves install/start/stop), so an `all` teardown with
@@ -98,6 +97,16 @@ function noteDatabaseKept(outcome, stillServed) {
         console.warn(`uninstall: ${DB_MODULE_NAME} is not removed by this command; remove it manually.`)
 }
 
+// Throw one error listing every module that failed, after all were attempted.
+function throwOnFailures(failures, outcome) {
+    if (failures.length === 0) return
+    const detail = failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; ')
+    const err = new Error(`uninstall failed for ${failures.length} module${failures.length === 1 ? '' : 's'}: ${detail}`)
+    err.failures = failures
+    err.uninstalled = outcome.uninstalled
+    throw err
+}
+
 async function uninstallModules(servicesList, includeShared = false, opts = {}) {
     const fullTeardown = includeShared && !!opts.all
     if (fullTeardown) servicesList = includeSharedServicesForUninstall(servicesList)
@@ -132,13 +141,7 @@ async function uninstallModules(servicesList, includeShared = false, opts = {}) 
     const stillServed = deferredShared.length > 0 ? await runSharedPass(deferredShared, outcome, uninstallOne) : null
     if (fullTeardown) noteDatabaseKept(outcome, stillServed)
 
-    if (failures.length > 0) {
-        const detail = failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; ')
-        const err = new Error(`uninstall failed for ${failures.length} module${failures.length === 1 ? '' : 's'}: ${detail}`)
-        err.failures = failures
-        err.uninstalled = outcome.uninstalled
-        throw err
-    }
+    throwOnFailures(failures, outcome)
     return outcome
 }
 
