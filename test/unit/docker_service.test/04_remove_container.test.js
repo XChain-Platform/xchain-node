@@ -80,6 +80,12 @@ describe('DockerService', function () {
             expect(issued[issued.length - 1]).to.deep.equal(['docker', 'rm', 'xchain-hub'])
         })
 
+    })
+})
+
+describe('DockerService', function () {
+
+    describe('removeContainer() failure handling', function () {
         it('treats "No such container" as success (idempotent)', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, ...rest) => {
