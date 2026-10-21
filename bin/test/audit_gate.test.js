@@ -12,11 +12,24 @@ const REPORT = path.join(ROOT, 'test', 'fixtures', 'npm_audit_omit_dev.json')
 const ACCEPT = path.join(ROOT, 'test', 'fixtures', 'audit_exceptions_accept.md')
 const REJECT = path.join(ROOT, 'test', 'fixtures', 'audit_exceptions_reject.md')
 
-function gate(args) {
-    return spawnSync(process.execPath, [GATE, ...args], { cwd: ROOT, encoding: 'utf8' })
+function gate(args, input) {
+    return spawnSync(process.execPath, [GATE, ...args], { cwd: ROOT, encoding: 'utf8', input })
 }
 
 describe('audit gate', function () {
+    it('accepts the elliptic advisory through the repo-root ledger', function () {
+        const r = gate(['--input', REPORT])
+        assert.strictEqual(r.status, 0, r.stderr)
+    })
+
+    it('reads the report from standard input when --input is -', function () {
+        const accepted = gate(['--input', '-', '--exceptions', ACCEPT], fs.readFileSync(REPORT, 'utf8'))
+        assert.strictEqual(accepted.status, 0, accepted.stderr)
+        const rejected = gate(['--input', '-', '--exceptions', REJECT], fs.readFileSync(REPORT, 'utf8'))
+        assert.strictEqual(rejected.status, 1)
+        assert.match(rejected.stderr, /elliptic/)
+    })
+
     it('exits 0 when the elliptic advisory is accepted', function () {
         const r = gate(['--input', REPORT, '--exceptions', ACCEPT])
         assert.strictEqual(r.status, 0, r.stderr)

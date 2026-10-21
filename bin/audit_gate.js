@@ -16,10 +16,12 @@
  * exceptions ledger.
  *
  * USAGE
- *   npm audit --omit=dev --json | node bin/audit_gate.js
+ *   node bin/audit_gate.js                      run the audit live, as CI does
+ *   npm audit --omit=dev --json | node bin/audit_gate.js --input -
  *   node bin/audit_gate.js --input <report.json> [--exceptions <ledger.md>]
  *
- *   --input <path>       the report to read (default: standard input)
+ *   --input <path>       the report to read; `-` is standard input. Without it
+ *                        the gate runs `npm audit --omit=dev --json` in the repo
  *   --exceptions <path>  the ledger; replaces <repo root>/AUDIT-EXCEPTIONS.md
  *
  * Each flag may appear at most once, in either order.
@@ -30,7 +32,8 @@
  * EXIT CODES
  *   0  every high or critical production record is accepted
  *   1  at least one is not (each is listed on standard error)
- *   2  usage error, unreadable input, or a report that is not version 2
+ *   2  usage error, unreadable input, a failed audit run, or a report that is
+ *      not version 2
  *
  ********************************************************************/
 
@@ -38,6 +41,7 @@
 
 const fs   = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const REPO = path.resolve(__dirname, '..');
 const DEFAULT_LEDGER = path.join(REPO, 'AUDIT-EXCEPTIONS.md');
@@ -108,10 +112,25 @@ function gatedRecords(report) {
 
 function readText(file) {
     try {
-        return fs.readFileSync(file === null ? 0 : file, 'utf8');
+        return fs.readFileSync(file === '-' ? 0 : file, 'utf8');
     } catch (err) {
-        throw new UsageError(`cannot read ${file === null ? 'standard input' : file}: ${err.message}`);
+        throw new UsageError(`cannot read ${file === '-' ? 'standard input' : file}: ${err.message}`);
     }
+}
+
+// npm audit exits 1 whenever it finds any advisory at all, so 0 and 1 both
+// carry a report; the gate, not npm's exit code, decides what fails.
+function runAudit() {
+    const result = spawnSync('npm', ['audit', '--omit=dev', '--json'], {
+        cwd: REPO,
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
+    });
+    if (result.error) throw new UsageError(`cannot run npm audit: ${result.error.message}`);
+    if (result.status !== 0 && result.status !== 1) {
+        throw new UsageError(`npm audit exited ${result.status}${result.stderr ? ': ' + result.stderr.trim() : ''}`);
+    }
+    return result.stdout;
 }
 
 function run(argv) {
@@ -119,7 +138,7 @@ function run(argv) {
 
     let report;
     try {
-        report = JSON.parse(readText(opts.input));
+        report = JSON.parse(opts.input === null ? runAudit() : readText(opts.input));
     } catch (err) {
         if (err instanceof UsageError) throw err;
         throw new UsageError(`the report is not valid JSON: ${err.message}`);
