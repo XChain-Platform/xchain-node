@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-10-21
+
+### Added
+- Ran the audit workflow jobs through a new audit gate script.
+
+### Fixed
+- Removed an explicitly named shared service on uninstall while keeping bulk teardown safeguards.
+- Defaulted the regtest oracle epoch so a bare validator init no longer leaves it unset.
+- Raised follow-redirects to its patched release for two new advisories.
+
 ## [0.26.0] - 2026-10-20
 
 ### Changed
