@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-10-21
+
+### Changed
+- Released with the testnet arming patch; this component carries no code change.
+
 ## [0.26.1] - 2026-10-21
 
 ### Added
@@ -53,6 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Started the bundled MariaDB with a 1G InnoDB buffer pool by default, settable with `XCHAIN_NODE_DB_BUFFER_POOL_SIZE`.
+
+## [0.23.3] - 2026-10-22
+
+### Changed
+- Pinned the v0.23.3 base-image and Brotli-guard patch train in the release manifest.
 
 ## [0.23.0] - 2026-10-11
 
