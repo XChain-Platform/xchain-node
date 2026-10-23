@@ -47,7 +47,7 @@ function loadSteps() {
     }
     return {
         ports: find('Publish distinct host ports'), boot: find('Boot the regtest stack'), db: find('Start headless MariaDB'),
-        validator: find('Initialize the validator identity'),
+        validator: find('Initialize the validator identity'), seed: find('Enable the regtest validator seed'),
         // Step order matters for the validator step: it must precede the install.
         order: steps.map(s => s.name || ''),
     }
@@ -78,14 +78,16 @@ function runStep(step, env) {
     const bin = path.join(dir, 'stub-bin')
     fs.mkdirSync(bin)
     const log = path.join(dir, 'node-calls.log')
-    fs.writeFileSync(path.join(bin, 'node'), '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "' + log + '"\n', { mode: 0o755 })
+    const envLog = path.join(dir, 'node-env.log')
+    fs.writeFileSync(path.join(bin, 'node'), '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "' + log + '"\nprintf "%s\\n" "${XDEX_SEED_LOCAL_VALIDATOR-unset}" >> "' + envLog + '"\n', { mode: 0o755 })
     const stdout = execFileSync('bash', ['-e', '-c', step.run], {
         cwd: dir,
         env: Object.assign({ PATH: bin + ':' + process.env.PATH, HOME: dir }, env),
         encoding: 'utf8',
     })
     const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : []
-    return { dir, calls, stdout }
+    const callEnvs = fs.existsSync(envLog) ? fs.readFileSync(envLog, 'utf8').trim().split('\n').filter(Boolean) : []
+    return { dir, calls, callEnvs, stdout }
 }
 
 let steps
@@ -178,6 +180,14 @@ function registerValidatorModeChecks() {
             return out
         }
 
+        function runSeedStep(coin) {
+            const githubEnv = path.join(os.tmpdir(), 'nightly-e2e-seed-env-' + process.pid + '-' + coin)
+            fs.writeFileSync(githubEnv, '')
+            const out = runStep(steps.seed, { COIN: coin, GITHUB_ENV: githubEnv })
+            out.exported = parseConfigFile(githubEnv)
+            return out
+        }
+
         it('runs the validator init for every non-bitcoin leg, and for bitcoin only on the opt-in input', function () {
             expect(steps.validator.if).to.equal("github.event.inputs.validator == 'true' || env.COIN != 'bitcoin'")
         })
@@ -186,14 +196,21 @@ function registerValidatorModeChecks() {
             const at = (prefix) => steps.order.findIndex(n => n.startsWith(prefix))
             expect(at('Initialize the validator identity')).to.be.below(at('Publish distinct host ports'))
             expect(at('Publish distinct host ports')).to.be.below(at('Boot the regtest stack'))
+            expect(at('Boot the regtest stack')).to.be.below(at('Enable the regtest validator seed'))
+            expect(at('Enable the regtest validator seed')).to.be.below(at('Select this shard'))
+        })
+
+        it('gates validator seeding off the bitcoin leg', function () {
+            expect(steps.seed.if).to.equal("env.COIN != 'bitcoin'")
         })
 
         for (const coin of ['litecoin', 'dogecoin']) {
-            it(coin + ': inits a cross_chain-capable identity and exports the seed so the hub finalizes the gas lock', function () {
-                const { calls, exported } = runValidatorStep(coin)
+            it(coin + ': inits a cross_chain-capable identity without seeding it during stack boot', function () {
+                const { calls, callEnvs, exported } = runValidatorStep(coin)
                 expect(calls[0]).to.match(/^src\/index\.js validator init --network regtest --oracle-epoch-start \d+ --capabilities [a-z_,]+$/)
                 expect(calls[0].split('--capabilities ')[1].split(',')).to.include('cross_chain')
                 expect(calls[calls.length - 1]).to.equal('src/index.js validator status')
+                expect(callEnvs).to.deep.equal(['unset', 'unset'])
                 // The indexer URLs ride the same export: the hub's cross-chain
                 // engines resolve them once at start, before either stack exists
                 // on this runner, so the configs table cannot supply them in time.
@@ -203,12 +220,19 @@ function registerValidatorModeChecks() {
                 // engine held the leg "below depth 6" for the whole credit wait
                 // (run 35124072478). The hub clamps these up off regtest.
                 expect(exported).to.deep.equal({
-                    HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1', XDEX_SEED_LOCAL_VALIDATOR: '1',
+                    HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1',
                     BTC_INDEXER_API_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
                     BTC_INDEXER_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
                     [code + '_INDEXER_URL']: 'http://xchain-node-' + coin + '-regtest-xchain-indexer:3004',
                     XCHAIN_CONFIRMATIONS_BTC: '1', XCHAIN_CONFIRMATIONS_LTC: '1', XCHAIN_CONFIRMATIONS_DOGE: '1',
                 })
+            })
+
+            it(coin + ': seeds and recreates the hub only after both stacks are ready', function () {
+                const { calls, callEnvs, exported } = runSeedStep(coin)
+                expect(exported).to.deep.equal({ XDEX_SEED_LOCAL_VALIDATOR: '1' })
+                expect(calls).to.deep.equal(['src/index.js recreate xchain-hub'])
+                expect(callEnvs).to.deep.equal(['1'])
             })
         }
 
