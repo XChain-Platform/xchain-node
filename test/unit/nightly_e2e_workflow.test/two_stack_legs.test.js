@@ -90,6 +90,22 @@ function runStep(step, env) {
     return { dir, calls, callEnvs, stdout }
 }
 
+function runStepWithGithubEnv(step, coin, label) {
+    const githubEnv = path.join(os.tmpdir(), 'nightly-e2e-' + label + '-env-' + process.pid + '-' + coin)
+    fs.writeFileSync(githubEnv, '')
+    const out = runStep(step, { COIN: coin, GITHUB_ENV: githubEnv })
+    out.exported = parseConfigFile(githubEnv)
+    return out
+}
+
+function runValidatorStep(coin) {
+    return runStepWithGithubEnv(steps.validator, coin, 'github')
+}
+
+function runSeedStep(coin) {
+    return runStepWithGithubEnv(steps.seed, coin, 'seed')
+}
+
 let steps
 
 function registerSharedWorkflowChecks() {
@@ -162,86 +178,65 @@ function registerCoinLegChecks(coin) {
     })
 }
 
-function registerValidatorModeChecks() {
-    // The bridged credit needs a hub that FINALIZES transfers, which a standalone
-    // hub never does: startCrossChain returns before constructing
-    // CrossChainBridgeEngine without a peerManager, and even with an identity the
-    // engine signs against the cross_chain capability set, empty on a fresh
-    // regtest until XDEX_SEED_LOCAL_VALIDATOR=1 seeds the hub's own key into it
-    // (xchain-hub src/cross_chain/bridge/plumbing.js resolveCapabilityValidators).
-    // Runs 35115449692 and 35115452598 got the BTC lock valid and debited with no
-    // credit on the destination for exactly this reason.
-    describe('validator mode on the two-stack legs', function () {
-        function runValidatorStep(coin) {
-            const githubEnv = path.join(os.tmpdir(), 'nightly-e2e-github-env-' + process.pid + '-' + coin)
-            fs.writeFileSync(githubEnv, '')
-            const out = runStep(steps.validator, { COIN: coin, GITHUB_ENV: githubEnv })
-            out.exported = parseConfigFile(githubEnv)
-            return out
-        }
+function registerValidatorContractChecks() {
+    it('runs the validator init for every non-bitcoin leg, and for bitcoin only on the opt-in input', function () {
+        expect(steps.validator.if).to.equal("github.event.inputs.validator == 'true' || env.COIN != 'bitcoin'")
+    })
 
-        function runSeedStep(coin) {
-            const githubEnv = path.join(os.tmpdir(), 'nightly-e2e-seed-env-' + process.pid + '-' + coin)
-            fs.writeFileSync(githubEnv, '')
-            const out = runStep(steps.seed, { COIN: coin, GITHUB_ENV: githubEnv })
-            out.exported = parseConfigFile(githubEnv)
-            return out
-        }
+    it('initializes the identity BEFORE the ports and boot steps, which render the hub env from it', function () {
+        const at = (prefix) => steps.order.findIndex(n => n.startsWith(prefix))
+        expect(at('Initialize the validator identity')).to.be.below(at('Publish distinct host ports'))
+        expect(at('Publish distinct host ports')).to.be.below(at('Boot the regtest stack'))
+        expect(at('Boot the regtest stack')).to.be.below(at('Enable the regtest validator seed'))
+        expect(at('Enable the regtest validator seed')).to.be.below(at('Select this shard'))
+    })
 
-        it('runs the validator init for every non-bitcoin leg, and for bitcoin only on the opt-in input', function () {
-            expect(steps.validator.if).to.equal("github.event.inputs.validator == 'true' || env.COIN != 'bitcoin'")
-        })
+    it('gates validator seeding off the bitcoin leg', function () {
+        expect(steps.seed.if).to.equal("env.COIN != 'bitcoin'")
+    })
+}
 
-        it('initializes the identity BEFORE the ports and boot steps, which render the hub env from it', function () {
-            const at = (prefix) => steps.order.findIndex(n => n.startsWith(prefix))
-            expect(at('Initialize the validator identity')).to.be.below(at('Publish distinct host ports'))
-            expect(at('Publish distinct host ports')).to.be.below(at('Boot the regtest stack'))
-            expect(at('Boot the regtest stack')).to.be.below(at('Enable the regtest validator seed'))
-            expect(at('Enable the regtest validator seed')).to.be.below(at('Select this shard'))
-        })
-
-        it('gates validator seeding off the bitcoin leg', function () {
-            expect(steps.seed.if).to.equal("env.COIN != 'bitcoin'")
-        })
-
-        for (const coin of ['litecoin', 'dogecoin']) {
-            it(coin + ': inits a cross_chain-capable identity without seeding it during stack boot', function () {
-                const { calls, callEnvs, exported } = runValidatorStep(coin)
-                expect(calls[0]).to.match(/^src\/index\.js validator init --network regtest --oracle-epoch-start \d+ --capabilities [a-z_,]+$/)
-                expect(calls[0].split('--capabilities ')[1].split(',')).to.include('cross_chain')
-                expect(calls[calls.length - 1]).to.equal('src/index.js validator status')
-                expect(callEnvs).to.deep.equal(['unset', 'unset'])
-                // The indexer URLs ride the same export: the hub's cross-chain
-                // engines resolve them once at start, before either stack exists
-                // on this runner, so the configs table cannot supply them in time.
-                const code = { litecoin: 'LTC', dogecoin: 'DOGE' }[coin]
-                // The confirmation depths ride it too: at the hub's default six
-                // BTC blocks nothing on the runner mines behind the lock, so the
-                // engine held the leg "below depth 6" for the whole credit wait
-                // (run 35124072478). The hub clamps these up off regtest.
-                expect(exported).to.deep.equal({
-                    HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1',
-                    BTC_INDEXER_API_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
-                    BTC_INDEXER_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
-                    [code + '_INDEXER_URL']: 'http://xchain-node-' + coin + '-regtest-xchain-indexer:3004',
-                    XCHAIN_CONFIRMATIONS_BTC: '1', XCHAIN_CONFIRMATIONS_LTC: '1', XCHAIN_CONFIRMATIONS_DOGE: '1',
-                })
-            })
-
-            it(coin + ': seeds and recreates the hub only after both stacks are ready', function () {
-                const { calls, callEnvs, exported } = runSeedStep(coin)
-                expect(exported).to.deep.equal({ XDEX_SEED_LOCAL_VALIDATOR: '1' })
-                expect(calls).to.deep.equal(['src/index.js recreate xchain-hub'])
-                expect(callEnvs).to.deep.equal(['1'])
-            })
-        }
-
-        it('bitcoin (opt-in): keeps the identity but never seeds, so the input changes nothing beyond the price regime it documents', function () {
-            const { calls, exported } = runValidatorStep('bitcoin')
+function registerNonBitcoinValidatorChecks() {
+    for (const coin of ['litecoin', 'dogecoin']) {
+        it(coin + ': inits a cross_chain-capable identity without seeding it during stack boot', function () {
+            const { calls, callEnvs, exported } = runValidatorStep(coin)
             expect(calls[0]).to.match(/^src\/index\.js validator init --network regtest --oracle-epoch-start \d+ --capabilities [a-z_,]+$/)
+            expect(calls[0].split('--capabilities ')[1].split(',')).to.include('cross_chain')
             expect(calls[calls.length - 1]).to.equal('src/index.js validator status')
-            expect(exported).to.deep.equal({ HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1' })
+            expect(callEnvs).to.deep.equal(['unset', 'unset'])
+            const code = { litecoin: 'LTC', dogecoin: 'DOGE' }[coin]
+            expect(exported).to.deep.equal({
+                HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1',
+                BTC_INDEXER_API_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
+                BTC_INDEXER_URL: 'http://xchain-node-bitcoin-regtest-xchain-indexer:3004',
+                [code + '_INDEXER_URL']: 'http://xchain-node-' + coin + '-regtest-xchain-indexer:3004',
+                XCHAIN_CONFIRMATIONS_BTC: '1', XCHAIN_CONFIRMATIONS_LTC: '1', XCHAIN_CONFIRMATIONS_DOGE: '1',
+            })
         })
+
+        it(coin + ': seeds and recreates the hub only after both stacks are ready', function () {
+            const { calls, callEnvs, exported } = runSeedStep(coin)
+            expect(exported).to.deep.equal({ XDEX_SEED_LOCAL_VALIDATOR: '1' })
+            expect(calls).to.deep.equal(['src/index.js recreate xchain-hub'])
+            expect(callEnvs).to.deep.equal(['1'])
+        })
+    }
+}
+
+function registerBitcoinValidatorCheck() {
+    it('bitcoin (opt-in): keeps the identity but never seeds, so the input changes nothing beyond the price regime it documents', function () {
+        const { calls, exported } = runValidatorStep('bitcoin')
+        expect(calls[0]).to.match(/^src\/index\.js validator init --network regtest --oracle-epoch-start \d+ --capabilities [a-z_,]+$/)
+        expect(calls[calls.length - 1]).to.equal('src/index.js validator status')
+        expect(exported).to.deep.equal({ HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1' })
+    })
+}
+
+function registerValidatorModeChecks() {
+    describe('validator mode on the two-stack legs', function () {
+        registerValidatorContractChecks()
+        registerNonBitcoinValidatorChecks()
+        registerBitcoinValidatorCheck()
     })
 }
 
