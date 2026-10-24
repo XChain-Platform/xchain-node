@@ -63,7 +63,9 @@ function makeMariadbSpawnStub(cmdCapture) {
 function configureCapture(capture, options, dbContainerId) {
     capture.when(/docker pull/).returns({ stdout: '' })
     capture.when(/docker tag/).returns({ stdout: '' })
-    capture.when(/docker run/).returns({ stdout: dbContainerId + '\n' })
+    // Like real docker, the container exists once `docker run` has made it.
+    let started = Boolean(options.containerExists)
+    capture.when(/docker run/).respondsWith(() => { started = true; return { stdout: dbContainerId + '\n' } })
     capture.when(/docker exec.*SELECT 1/).returns({ stdout: '1' })
     capture.when(/docker exec.*SELECT COUNT\(SCHEMA/).returns({ stdout: '0' })
     capture.when(/docker exec.*SELECT COUNT\(\*\).*mysql.user/).returns({ stdout: '0' })
@@ -88,10 +90,10 @@ function configureCapture(capture, options, dbContainerId) {
     // regardless of options.dbContainerId. options.containerExists
     // toggles "database already installed" (used by the reuse/grant
     // tests) vs "fresh install" (the default, used by the first-install
-    // test) semantics.
-    capture.when(/docker inspect --type container --format/).returns(
-        options.containerExists ? { stdout: dbContainerId + '\n' } : { stdout: '' }
-    )
+    // test) semantics; a fresh install finds the container after its run.
+    capture.when(/docker inspect --type container --format/).respondsWith(() => (
+        started ? { stdout: dbContainerId + '\n' } : { stdout: '' }
+    ))
     capture.when(/docker inspect/).returns({
         stdout: JSON.stringify([{
             State: { Status: 'running' },

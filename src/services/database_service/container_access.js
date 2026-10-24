@@ -97,23 +97,43 @@ async function checkIfDatabaseModuleExists(coin, network) {
 // answer (ER_ACCESS_DENIED, unknown database) is not transient, so it must be able
 // to buy a shorter budget instead of paying ~100s to learn it. Same reasoning the
 // env-override ping and the provisioning precheck already act on above.
+//
+// The container id is resolved on every attempt. Right after `docker run` the
+// inspect can miss the new container, and an id read once before the loop made
+// every retry exec against nothing, so the whole budget ran out on a container
+// that came up seconds later. An attempt with no container counts as not ready.
 async function checkIfDatabaseIsReady(user, userPassword, database = null, { tries = 10, retryDelay = 10000 } = {}) {
-    const mariadbContainerId = await getDatabaseContainerId()
-
     let remaining = tries
     while (remaining > 0) {
-        try {
-            const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', user], { interactive: true })
-            if (database) args.push('-D', database)
-            args.push('-e', PING_SQL)
-            await execFileAsync('docker', args, { env: mariadbEnv(userPassword) })
-            return true
-        } catch {
-            remaining--
-            if (remaining > 0) await sleep(retryDelay)
+        const mariadbContainerId = await getDatabaseContainerId()
+        if (mariadbContainerId) {
+            try {
+                const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', user], { interactive: true })
+                if (database) args.push('-D', database)
+                args.push('-e', PING_SQL)
+                await execFileAsync('docker', args, { env: mariadbEnv(userPassword) })
+                return true
+            } catch { /* not accepting connections yet */ }
         }
+        remaining--
+        if (remaining > 0) await sleep(retryDelay)
     }
     return false
 }
 
-module.exports = { XCHAIN_NODE_DB_HOST, XCHAIN_NODE_DB_DEFAULT_PORT, getDatabaseContainerId, getDatabaseContainerPresence, getDatabaseHostPort, checkIfDatabaseModuleExists, checkIfDatabaseIsReady, configureDependencies }
+// How long a FRESH datadir gets to accept its first root login: 60 x 5 s. The
+// image initialises the datadir and restarts its server before it listens, which
+// on a busy disk ran past the 10 x 10 s wait of the first caller to touch it, and
+// install stopped on "MariaDB is not responding" against a database seconds away
+// from ready. Waited once, straight after `docker run`, so every later caller
+// meets a running server.
+const FIRST_BOOT_READY = { tries: 60, retryDelay: 5000 }
+
+async function waitForFirstBoot(containerName, mariadbRootPassword) {
+    if (await checkIfDatabaseIsReady("root", mariadbRootPassword, null, FIRST_BOOT_READY)) return
+    const waitedMin = Math.round(FIRST_BOOT_READY.tries * FIRST_BOOT_READY.retryDelay / 60000)
+    throw new Error("MariaDB container " + containerName + " did not accept connections within " + waitedMin +
+        " min of starting; check `docker logs " + containerName + "` and re-run install")
+}
+
+module.exports = { XCHAIN_NODE_DB_HOST, XCHAIN_NODE_DB_DEFAULT_PORT, FIRST_BOOT_READY, getDatabaseContainerId, getDatabaseContainerPresence, getDatabaseHostPort, checkIfDatabaseModuleExists, checkIfDatabaseIsReady, waitForFirstBoot, configureDependencies }

@@ -22,8 +22,10 @@ databaseSuite('checkIfDatabaseIsReady', function (fixture) {
         const dbContainerId = fakeContainerId('d')
         await env.insertModule(DB_MODULE_NAME, '', '', dbContainerId)
 
+        // The container id lookup answers at once; the mariadb ping fails twice first.
         let callCount = 0
         const execFileAsyncStub = async (command, args) => {
+            if (args[0] === 'inspect') return { stdout: dbContainerId + '\n', stderr: '' }
             callCount++
             if (callCount < 3) throw new Error('Connection refused')
             return { stdout: '1', stderr: '' }

@@ -229,12 +229,35 @@ async function finishServiceInstall(context, freshness) {
     return containerId
 }
 
+// The services a bootstrap archive restores. Only these take the forced restore.
+const BOOTSTRAP_RESTORED_MODULES = [XChainService.XCHAIN_UTXO_TRACKER, XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]
+
+// An installed module normally makes install a no-op. XCHAIN_NODE_FORCE_BOOTSTRAP
+// is the one reason to go on for a bootstrap-restored service: every restore
+// failure prints "re-run install with XCHAIN_NODE_FORCE_BOOTSTRAP=1", and this early
+// return made that remedy a silent no-op. Any other module still returns here, so
+// a flag left in the environment never rebuilds the hub or the encoder.
+function forcedBootstrapReinstall(module, containerVersion, remoteUpdate) {
+    if (!containerVersion || remoteUpdate) return false
+    return BOOTSTRAP_RESTORED_MODULES.includes(module) && bootstrapService.forceBootstrapRequested()
+}
+
+// The forced reinstall hands the running container over by id, so buildAndUp stops
+// it on its SIGTERM budget instead of force-removing it by name mid-block.
+async function forcedBootstrapContext(context) {
+    const { module, coin, network } = context
+    logger.info(`XCHAIN_NODE_FORCE_BOOTSTRAP is set: reinstalling the installed ${module} ${coin}/${network} to take the bootstrap restore again.`)
+    if (context.overwriteContainerId) return context
+    return { ...context, overwriteContainerId: await db.getModuleContainer(module, coin, network) }
+}
+
 async function installServiceModule(context) {
     const { module, coin, network, remoteUpdate, onlyExecution, branch } = context
     if (await singletonAlreadyInstalled(module, coin, network, remoteUpdate)) return false
     const { getLastStatus } = stateModule
     const containerVersion = getLastStatus()?.[coin ?? ""]?.[network ?? ""]?.[module]?.["container_version"] ?? null
-    if (containerVersion && !remoteUpdate) return false
+    if (forcedBootstrapReinstall(module, containerVersion, remoteUpdate)) context = await forcedBootstrapContext(context)
+    else if (containerVersion && !remoteUpdate) return false
     const { getLocalModuleVersion } = versionService
     let localModuleVersion = null
     try {

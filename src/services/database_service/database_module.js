@@ -41,7 +41,7 @@ let {
     hasCredentials, loadCredentials, saveCredentials
 } = require('../credentials_service')
 
-let { XCHAIN_NODE_DB_HOST, XCHAIN_NODE_DB_DEFAULT_PORT, getDatabaseContainerId, checkIfDatabaseModuleExists, checkIfDatabaseIsReady } = require('./container_access')
+let { XCHAIN_NODE_DB_HOST, XCHAIN_NODE_DB_DEFAULT_PORT, getDatabaseContainerId, checkIfDatabaseModuleExists, checkIfDatabaseIsReady, waitForFirstBoot } = require('./container_access')
 let { getExternalDbConfig, pingMariaDb } = require('./external_db')
 let { askMariadbRootPassword, executeNativeMariaDbCommand, executeDockerMariaDbCommand } = require('./mariadb_exec')
 let { dbDatadirState, confirmPersistedDatadirRootPassword } = require('./persisted_datadir')
@@ -246,8 +246,8 @@ async function createDatabaseModule(coin, network) {
     // Read before the start: a new container initialises an empty datadir, which then holds mysql/.
     const persisted = dbDatadirState() === 'initialised'
     const containerId = await startDatabaseContainer(runArgs, mariadbRootPassword)
-    // The image ignored MYSQL_ROOT_PASSWORD over a datadir that already held a database, so store one only once it authenticates.
-    if (persisted) await confirmPersistedDatadirRootPassword(containerId, mariadbRootPassword)
+    // A held datadir ignored MYSQL_ROOT_PASSWORD, so store one only once it authenticates; a fresh one waits out its first boot.
+    await (persisted ? confirmPersistedDatadirRootPassword(containerId, mariadbRootPassword) : waitForFirstBoot(containerPrefix, mariadbRootPassword))
     return containerId
 }
 

@@ -387,7 +387,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     ;({ coin, network } = dockerOptions)
     const memoryOptions = await resolveMemoryOptions(module, coin, network, onlyExecution)
     validatePortArgs(dockerOptions.portArgs)
-    await assertNoHostPortConflicts(dockerOptions.portArgs, containerPrefix)
+    await assertNoHostPortConflicts(dockerOptions.portArgs, containerPrefix, { module, environmentVariables })
     await assertReusableImage(reuseImage, containerPrefix, module, coin, network)
     const sourceMetadata = resolveSourceMetadata(reuseImage, dir)
     const containerEnvironment = resolveContainerEnvironment(environmentVariables, onlyExecution ? null : module)

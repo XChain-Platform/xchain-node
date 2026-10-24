@@ -172,27 +172,29 @@ moduleSuite('buildAndUp(): module-specific port/volume branches', function () {i
 
         })
 
-moduleSuite('buildAndUp(): module-specific port/volume branches', function () {it('runs the host-port preflight BEFORE docker build so a conflict fails fast', async function () {
+moduleSuite('buildAndUp(): module-specific port/volume branches', function () {it('runs the host-port preflight BEFORE docker build and moves a busy on-request port', async function () {
             const stubs = makeStubs()
             // ENCODER_PORT/ENCODER_API_PORT both resolve to 3003 (see makeStubs'
             // getDefaultConfig); report that host port as already published by a
-            // differently-named container so assertNoHostPortConflicts rejects.
-            stubs.getPublishedHostPorts = sinon.stub().resolves(new Map([['3003', new Set(['other-stack-container'])]]))
-            let buildInvoked = false
+            // differently-named container. The encoder port is published on request,
+            // so the preflight moves it (host_port_claim.js) before anything is built.
+            const order = []
+            stubs.getPublishedHostPorts = sinon.stub().callsFake(async () => {
+                order.push('preflight')
+                return new Map([['3003', new Set(['other-stack-container'])]])
+            })
+            let runArgs = null
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 let opts = {}, cb
                 if (typeof rest[0] === 'function') { cb = rest[0] } else { opts = rest[0] || {}; cb = rest[1] }
-                if (args[0] === 'build') { buildInvoked = true; cb(null) }
-                else if (args[0] === 'run') { cb(null, 'a'.repeat(64) + '\n') }
+                if (args[0] === 'build') { order.push('build'); cb(null) }
+                else if (args[0] === 'run') { runArgs = args; cb(null, 'a'.repeat(64) + '\n') }
             })
             const ms = loadModuleService(stubs)
-            try {
-                await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
-                expect.fail('Should have rejected on host port conflict')
-            } catch (err) {
-                expect(String(err)).to.include('Host port conflict')
-            }
-            expect(buildInvoked).to.be.false
+            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            expect(order.indexOf('preflight')).to.be.within(0, order.indexOf('build'))
+            expect(runArgs).to.include('3103:3003')
+            expect(runArgs).to.not.include('3003:3003')
         })
 
         it('includes --restart unless-stopped for non-execution containers', async function () {
