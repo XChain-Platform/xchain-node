@@ -139,9 +139,9 @@ describe('HubService.updateHubOrExplorer config delivery', function () {
         sinon.assert.calledOnceWithExactly(deps.sleep, 3000)
     })
 
-    it('exhausts ten attempts and reports the last hub error', async function () {
+    it('exhausts the boot-window attempts and reports the last hub error', async function () {
         const updateConfig = sinon.stub().rejects(new Error('earlier refusal'))
-        updateConfig.onCall(9).rejects(new Error('final refusal'))
+        updateConfig.onCall(59).rejects(new Error('final refusal'))
         const deps = configDeliveryDependencies({ updateConfig })
 
         let thrown
@@ -151,8 +151,8 @@ describe('HubService.updateHubOrExplorer config delivery', function () {
             thrown = err
         }
 
-        expect(updateConfig.callCount).to.equal(10)
-        expect(deps.sleep.callCount).to.equal(9)
+        expect(updateConfig.callCount).to.equal(60)
+        expect(deps.sleep.callCount).to.equal(59)
         expect(thrown).to.include('last error: final refusal')
         expect(thrown).not.to.include('earlier refusal')
     })

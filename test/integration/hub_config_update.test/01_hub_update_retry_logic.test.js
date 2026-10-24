@@ -69,6 +69,6 @@ hubConfigSuite('hub update retry logic', function (fixture) {
             expect(err).to.include('problem trying to update')
         }
 
-        expect(httpCapture.callCount('127.0.0.1:10000')).to.equal(10)
+        expect(httpCapture.callCount('127.0.0.1:10000')).to.equal(60)
     })
 })

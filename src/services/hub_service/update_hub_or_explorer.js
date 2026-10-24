@@ -152,10 +152,15 @@ async function writeExplorerConfig(module, jsonConfig, dependencies) {
     }
 }
 
+// A recreated hub takes 40 to 60 s to open its API (measured on the regtest rail,
+// 2026-10-24), so the push keeps trying for three minutes before it gives up.
+const HUB_CONFIG_RETRY_MS = 3000
+const HUB_CONFIG_ATTEMPTS = 60
+
 async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) {
     const { sleep, redactSecrets, logger } = dependencies
     let hubUpdated = false
-    let tries = 10
+    let tries = HUB_CONFIG_ATTEMPTS
     // Keep the last failure. updateConfig is an HTTP call to the module's own
     // API, so when the container is crash-looping every attempt fails with a
     // connection error and this loop reports only "there was a problem" - which
@@ -181,17 +186,16 @@ async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) 
             lastErr = moduleConnector.lastFailures.join('; ')
         }
 
+        if (hubUpdated) break
         tries--
         // Out of retries: give up, naming the last concrete error instead of a generic failure.
         if (tries <= 0) {
             throw "There was a problem trying to update a config in the " + module + " module" +
                 (lastErr ? " (last error: " + redactSecrets(lastErr) + "; if this is a connection failure, check `docker logs` for the module - the service is not starting)" : "")
         }
-        if (!hubUpdated) {
-            logger.info("There was a problem trying to update a config in the " + module + " module" +
-                (lastErr ? " (" + redactSecrets(lastErr) + ")" : "") + ". Trying again in 3 seconds...")
-            await sleep(3000)
-        }
+        logger.info("There was a problem trying to update a config in the " + module + " module" +
+            (lastErr ? " (" + redactSecrets(lastErr) + ")" : "") + ". Trying again in 3 seconds...")
+        await sleep(HUB_CONFIG_RETRY_MS)
     }
 }
 
