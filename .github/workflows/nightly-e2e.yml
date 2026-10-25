@@ -190,7 +190,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.22.3"
+          node-version: "22.23.4"
 
       # WHY THE COIN LIST IS EVENT-DEPENDENT. A scheduled run carries NO inputs, so
       # without this it would silently test bitcoin alone and the nightly would be
@@ -361,7 +361,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.22.3"
+          node-version: "22.23.4"
 
       - name: Reclaim runner disk (coin daemon + per-service images are large)
         run: |
@@ -777,7 +777,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.22.3"
+          node-version: "22.23.4"
 
       # A shard that never uploaded simply has no artifact here; the merge names
       # it as missing, so a failed download is not allowed to stop the job first.
