@@ -13,7 +13,6 @@
 const { expect } = require('chai')
 const sinon = require('sinon')
 const { Command } = require('commander')
-const resetOperations = require('../../../src/operations/module_operations/reset_modules')
 const { registerPreRecoveryCommands } = require('../../../src/cli/errors')
 
 const HUB = 'xchain-hub'
@@ -23,35 +22,39 @@ function row(name, state = 'running') {
     return { ID: name + '-id', Names: name, State: state }
 }
 
-function makeHarness({ failHub = null } = {}) {
-    const containers = [
-        row('rail-a-xchain-hub'),
-        row('rail-a-database'),
-        row('rail-a-bitcoin-regtest-xchain-indexer'),
-        row('rail-a-xchain-explorer'),
-        row('rail-b-xchain-hub'),
-        row('rail-b-database'),
-        row('rail-b-dogecoin-regtest-xchain-indexer'),
-        row('rail-b-xchain-explorer')
+function railContainers() {
+    return [
+        row('rail-a-xchain-hub'), row('rail-a-database'),
+        row('rail-a-bitcoin-regtest-xchain-indexer'), row('rail-a-xchain-explorer'),
+        row('rail-b-xchain-hub'), row('rail-b-database'),
+        row('rail-b-dogecoin-regtest-xchain-indexer'), row('rail-b-xchain-explorer')
     ]
-    const events = []
-    const sql = []
-    const environments = {
+}
+
+function railEnvironments() {
+    return {
         'rail-a-xchain-hub-id': ['HUB_DB_NAME=RailA_Hub'],
         'rail-b-xchain-hub-id': ['HUB_DB_NAME=RailB_Hub'],
         'rail-a-bitcoin-regtest-xchain-indexer-id': ['INDEXER_DB_NAME=RailA_Bitcoin_Regtest_Indexer'],
         'rail-b-dogecoin-regtest-xchain-indexer-id': ['INDEXER_DB_NAME=RailB_Dogecoin_Regtest_Indexer']
     }
+}
+
+function makeHarness({ failHub = null } = {}) {
+    const containers = railContainers()
+    const events = []
+    const databaseCalls = []
+    const environments = railEnvironments()
     const execFileAsync = sinon.stub().callsFake(async (command, args) => {
         expect(command).to.equal('docker')
         if (args[0] === 'ps') return { stdout: containers.map(value => JSON.stringify(value)).join('\n') }
         if (args[0] === 'inspect') return { stdout: JSON.stringify(environments[args[5]]) }
         if (args[0] === 'exec') {
-            const statement = args[args.length - 1]
-            sql.push(statement)
-            if (statement.startsWith('SELECT COUNT(*)')) return { stdout: '1\n' }
-            if (statement.includes('CREATE TABLE')) events.push('recreate:' + args[1])
-            if (statement.includes('TRUNCATE TABLE')) events.push('purge:' + args[1])
+            const [script, database, table] = [args[4], args[6], args[7]]
+            databaseCalls.push({ script, database, table })
+            if (script.includes('mariadb-show')) return { stdout: `| ${table} |\n` }
+            if (database === 'RailA_Hub' || database === 'RailB_Hub') events.push('recreate:' + args[1])
+            else events.push('purge:' + args[1])
             return { stdout: '' }
         }
         throw new Error('unexpected docker call: ' + args.join(' '))
@@ -66,34 +69,27 @@ function makeHarness({ failHub = null } = {}) {
         return true
     })
     const statusChanged = sinon.stub().resolves()
-    resetOperations.configure({
-        Coin: { BITCOIN: 'bitcoin', LITECOIN: 'litecoin', DOGECOIN: 'dogecoin' },
-        Network: { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' },
-        NODE_MODULE_NAME: 'node',
+    const dependencies = {
         HUB_MODULE_NAME: HUB,
-        XChainService: {
-            XCHAIN_UTXO_TRACKER: 'xchain-utxo-tracker',
-            XCHAIN_DECODER: 'xchain-decoder',
-            XCHAIN_INDEXER: INDEXER,
-            XCHAIN_REGTEST_MINER: 'xchain-regtest-miner'
-        },
+        INDEXER_MODULE_NAME: INDEXER,
         EXTERNAL_DB: false,
         execFileAsync,
-        readline: {},
         stopContainer,
         startContainer,
         stopModuleContainer: (...args) => args[0](args[4]),
         getContainerStopSettings: sinon.stub().resolves(null),
-        statusChanged,
-        failureReason: err => err && err.message ? err.message : String(err)
-    })
-    return { events, sql, statusChanged }
+        statusChanged
+    }
+    return { events, databaseCalls, dependencies, statusChanged }
 }
 
-async function driveReset() {
+async function driveReset(harness) {
     const program = new Command()
     program.exitOverride()
-    registerPreRecoveryCommands(program, { resetModules: resetOperations.resetModules })
+    registerPreRecoveryCommands(program, {
+        resetModules: sinon.stub().rejects(new Error('ordinary reset path called')),
+        hubCheckpointDependencies: harness.dependencies
+    })
     const exit = sinon.stub(process, 'exit')
     try {
         await program.parseAsync(['node', 'xchain-node', 'reset', 'hub-checkpoints', '--yes'])
@@ -111,7 +107,7 @@ describe('CLI reset hub-checkpoints', function () {
 
     it('stops every rail, recreates only checkpoint tables, purges every mirror, and restarts', async function () {
         const harness = makeHarness()
-        const exit = await driveReset()
+        const exit = await driveReset(harness)
 
         sinon.assert.calledOnceWithExactly(exit, 0)
         const lastStop = Math.max(...harness.events.map((event, index) => event.startsWith('stop:') ? index : -1))
@@ -129,19 +125,19 @@ describe('CLI reset hub-checkpoints', function () {
         expect(harness.events.filter(event => event.startsWith('start:'))).to.have.length(6)
         expect(harness.statusChanged.calledOnce).to.equal(true)
 
-        const mutationSql = harness.sql.filter(statement => /CREATE TABLE|TRUNCATE TABLE/.test(statement)).join('\n')
+        const mutations = harness.databaseCalls.filter(call => call.script.includes('mariadb-dump'))
         for (const table of ['state_checkpoints', 'snapshot_checkpoints', 'anchor_published_checkpoints']) {
-            expect(mutationSql).to.contain(table)
+            expect(mutations.map(call => call.table)).to.contain(table)
         }
-        expect(harness.sql.join('\n')).to.not.match(/price|validator|config|consensus_state/i)
+        expect(harness.databaseCalls.map(call => call.table).join('\n')).to.not.match(/price|validator|config|consensus_state/i)
     })
 
     it('refuses before any database mutation or mirror stop when one hub will not stop', async function () {
         const harness = makeHarness({ failHub: 'rail-b-xchain-hub-id' })
-        const exit = await driveReset()
+        const exit = await driveReset(harness)
 
         sinon.assert.calledOnceWithExactly(exit, 1)
-        expect(harness.sql.some(statement => /CREATE TABLE|TRUNCATE TABLE/.test(statement))).to.equal(false)
+        expect(harness.databaseCalls.some(call => call.script.includes('mariadb-dump'))).to.equal(false)
         expect(harness.events).to.deep.equal([
             'stop:rail-a-xchain-hub-id',
             'stop:rail-b-xchain-hub-id',
