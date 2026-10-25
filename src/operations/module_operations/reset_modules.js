@@ -3,11 +3,19 @@
 let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings
 let RESETTABLE_SERVICES
 const { WIPE_IMAGE, ensureWipeImage, reportPartialWipe } = require('./reset_wipe_safety')
+const HUB_CHECKPOINT_RESET = 'hub-checkpoints'
+const HUB_CHECKPOINT_TABLES = Object.freeze([
+    'state_checkpoints',
+    'snapshot_checkpoints',
+    'anchor_published_checkpoints'
+])
+const MIRROR_CHECKPOINT_TABLE = 'state_checkpoints'
 
 function configure(dependencies) {
     ({ askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings } = dependencies)
     RESETTABLE_SERVICES = [
         'all',
+        HUB_CHECKPOINT_RESET,
         NODE_MODULE_NAME,
         XChainService.XCHAIN_UTXO_TRACKER,
         XChainService.XCHAIN_DECODER,
@@ -24,6 +32,12 @@ async function resetModules(service, coin, network, force = false, withIndexer =
         throw new Error("reset: unknown service '" + service + "'; expected one of "
             + RESETTABLE_SERVICES.join(', '))
     }
+    if (service === HUB_CHECKPOINT_RESET) {
+        if (coin !== undefined || network !== undefined) {
+            throw new Error('reset: hub-checkpoints does not take a chain or network')
+        }
+        return resetHubCheckpoints(force)
+    }
     if (!Object.values(Coin).includes(coin)) {
         throw new Error("reset: unknown coin '" + coin + "'; expected one of "
             + Object.values(Coin).join(', '))
@@ -38,6 +52,238 @@ async function resetModules(service, coin, network, force = false, withIndexer =
     const resetDecoder     = resetAll || service === XChainService.XCHAIN_DECODER
     const resetIndexer     = resetAll || service === XChainService.XCHAIN_INDEXER || (withIndexer && resetDecoder)
     return validateDecoderPair({ service, coin, network, force, resetAll, resetNode, resetUtxoTracker, resetDecoder, resetIndexer })
+}
+
+function commandStdout(result) {
+    if (result && typeof result === 'object' && 'stdout' in result) return String(result.stdout || '')
+    return String(result || '')
+}
+
+function containerName(container) {
+    return String(container.Names || container.Name || '').replace(/^\//, '')
+}
+
+function containerIsRunning(container) {
+    return String(container.State || '').toLowerCase() === 'running'
+}
+
+function parseDockerRows(stdout) {
+    return String(stdout || '').split(/\r?\n/).filter(line => line.trim()).map((line) => JSON.parse(line))
+}
+
+function safeDatabaseName(value, label) {
+    const name = String(value || '')
+    if (!/^[A-Za-z0-9_$]+$/.test(name)) throw new Error(`${label} is not a safe database identifier`)
+    return name
+}
+
+function quoteIdentifier(value) {
+    return '`' + value + '`'
+}
+
+async function readContainerEnvironment(containerId) {
+    const result = await execFileAsync('docker', [
+        'inspect', '--type', 'container', '--format', '{{json .Config.Env}}', containerId
+    ])
+    const entries = JSON.parse(commandStdout(result).trim())
+    if (!Array.isArray(entries)) throw new Error(`container ${containerId} returned no environment array`)
+    const environment = {}
+    for (const entry of entries) {
+        const separator = String(entry).indexOf('=')
+        if (separator < 1) continue
+        environment[String(entry).slice(0, separator)] = String(entry).slice(separator + 1)
+    }
+    return environment
+}
+
+async function runRailDatabaseSql(databaseContainerId, databaseName, sql) {
+    const result = await execFileAsync('docker', [
+        'exec', databaseContainerId,
+        'sh', '-c',
+        'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mariadb -u root --batch --skip-column-names --database="$1" --execute="$2"',
+        'sh', databaseName, sql
+    ])
+    return commandStdout(result)
+}
+
+function buildRailStacks(containers) {
+    const hubSuffix = '-' + HUB_MODULE_NAME
+    const stacks = []
+    for (const hub of containers.filter(container => containerName(container).endsWith(hubSuffix))) {
+        const name = containerName(hub)
+        const prefix = name.slice(0, -hubSuffix.length)
+        const database = containers.find(container => containerName(container) === prefix + '-database')
+        if (!database) throw new Error(`reset hub-checkpoints: no database container found for ${name}`)
+        const mirrorPattern = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            + '-(?:bitcoin|litecoin|dogecoin)-(?:mainnet|testnet|regtest)-xchain-indexer$')
+        const mirrors = containers.filter((container) => {
+            const candidate = containerName(container)
+            return mirrorPattern.test(candidate) || candidate === prefix + '-xchain-explorer'
+        })
+        stacks.push({ prefix, hub, database, mirrors })
+    }
+    if (stacks.length === 0) throw new Error('reset hub-checkpoints: no rail hub containers were found')
+    return stacks
+}
+
+async function resolveRailCheckpointTargets(stacks) {
+    for (const stack of stacks) {
+        const hubEnvironment = await readContainerEnvironment(stack.hub.ID || containerName(stack.hub))
+        stack.hubDatabase = safeDatabaseName(hubEnvironment.HUB_DB_NAME,
+            `${containerName(stack.hub)} HUB_DB_NAME`)
+        stack.mirrorDatabases = new Set()
+        for (const mirror of stack.mirrors) {
+            if (!containerName(mirror).endsWith('-xchain-indexer')) continue
+            const environment = await readContainerEnvironment(mirror.ID || containerName(mirror))
+            const indexerDatabase = safeDatabaseName(environment.INDEXER_DB_NAME,
+                `${containerName(mirror)} INDEXER_DB_NAME`)
+            stack.mirrorDatabases.add(indexerDatabase)
+            stack.mirrorDatabases.add(indexerDatabase + '_HubMirror')
+        }
+    }
+    return stacks
+}
+
+async function tableExists(stack, databaseName, tableName) {
+    const sql = "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"
+        + databaseName + "' AND table_name = '" + tableName + "'"
+    const result = await runRailDatabaseSql(stack.database.ID || containerName(stack.database), stack.hubDatabase, sql)
+    return parseInt(String(result).trim(), 10) === 1
+}
+
+async function preflightRailCheckpointTables(stacks) {
+    for (const stack of stacks) {
+        for (const table of HUB_CHECKPOINT_TABLES) {
+            if (!(await tableExists(stack, stack.hubDatabase, table))) {
+                throw new Error(`reset hub-checkpoints: ${stack.hubDatabase}.${table} does not exist`)
+            }
+        }
+        const presentMirrors = []
+        for (const databaseName of stack.mirrorDatabases) {
+            if (await tableExists(stack, databaseName, MIRROR_CHECKPOINT_TABLE)) {
+                presentMirrors.push(databaseName)
+            }
+        }
+        stack.presentMirrorDatabases = presentMirrors
+    }
+}
+
+async function confirmHubCheckpointReset(stacks) {
+    if (!process.stdin.isTTY) {
+        throw new Error('reset: refusing to reset hub checkpoints on a non-interactive terminal without --yes. Re-run with --yes to confirm.')
+    }
+    console.warn('\nWARNING: this will IRREVERSIBLY replace checkpoint lineage on every discovered rail hub.')
+    console.warn(`  Rail hubs: ${stacks.map(stack => containerName(stack.hub)).join(', ')}`)
+    console.warn(`  Hub tables: ${HUB_CHECKPOINT_TABLES.join(', ')}`)
+    console.warn(`  Mirror table: ${MIRROR_CHECKPOINT_TABLE}\n`)
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    const answer = await new Promise(resolve => rl.question('Type "yes" to confirm: ', resolve))
+    rl.close()
+    return answer.trim().toLowerCase() === 'yes'
+}
+
+async function stopRailContainers(containers, stopped) {
+    for (const container of containers.filter(containerIsRunning)) {
+        const id = container.ID || containerName(container)
+        await stopModuleContainer(stopContainer,
+            containerName(container).endsWith('-xchain-explorer') ? 'xchain-explorer'
+                : (containerName(container).endsWith('-xchain-indexer') ? XChainService.XCHAIN_INDEXER : HUB_MODULE_NAME),
+            '', '', id, undefined, getContainerStopSettings)
+        stopped.push(container)
+    }
+}
+
+async function startRailContainers(containers, failures) {
+    for (const container of containers) {
+        try {
+            await startContainer(container.ID || containerName(container))
+        } catch (err) {
+            failures.push(`${containerName(container)} (${failureReason(err)})`)
+        }
+    }
+}
+
+async function recreateRailHubCheckpointTables(stacks) {
+    for (const stack of stacks) {
+        const databaseId = stack.database.ID || containerName(stack.database)
+        const database = quoteIdentifier(stack.hubDatabase)
+        for (const tableName of HUB_CHECKPOINT_TABLES) {
+            const table = quoteIdentifier(tableName)
+            const replacement = quoteIdentifier(tableName + '_reset')
+            const sql = `DROP TABLE IF EXISTS ${database}.${replacement}; `
+                + `CREATE TABLE ${database}.${replacement} LIKE ${database}.${table}; `
+                + `DROP TABLE ${database}.${table}; `
+                + `RENAME TABLE ${database}.${replacement} TO ${database}.${table}`
+            await runRailDatabaseSql(databaseId, stack.hubDatabase, sql)
+        }
+    }
+}
+
+async function purgeRailCheckpointMirrors(stacks) {
+    for (const stack of stacks) {
+        const databaseId = stack.database.ID || containerName(stack.database)
+        for (const mirrorDatabase of stack.presentMirrorDatabases) {
+            await runRailDatabaseSql(databaseId, stack.hubDatabase,
+                `TRUNCATE TABLE ${quoteIdentifier(mirrorDatabase)}.${quoteIdentifier(MIRROR_CHECKPOINT_TABLE)}`)
+        }
+    }
+}
+
+async function resetHubCheckpoints(force) {
+    if (EXTERNAL_DB) {
+        throw new Error('reset hub-checkpoints: the all-rail repair requires Docker-managed rail databases')
+    }
+    const listed = await execFileAsync('docker', ['ps', '-a', '--no-trunc', '--format', '{{json .}}'])
+    const stacks = await resolveRailCheckpointTargets(buildRailStacks(parseDockerRows(commandStdout(listed))))
+    if (!force && !(await confirmHubCheckpointReset(stacks))) {
+        console.log('Aborted: reset was not confirmed. No data was touched.')
+        return false
+    }
+    await preflightRailCheckpointTables(stacks)
+
+    const stoppedHubs = []
+    const stoppedMirrors = []
+    try {
+        await stopRailContainers(stacks.map(stack => stack.hub), stoppedHubs)
+    } catch (err) {
+        const restartFailures = []
+        await startRailContainers(stoppedHubs, restartFailures)
+        console.log(`Aborted: a rail hub failed to stop (${failureReason(err)}). No data was touched.`)
+        if (restartFailures.length) console.log(`  STILL DOWN: ${restartFailures.join(', ')}`)
+        return false
+    }
+
+    try {
+        await stopRailContainers(stacks.flatMap(stack => stack.mirrors), stoppedMirrors)
+    } catch (err) {
+        const restartFailures = []
+        await startRailContainers(stoppedMirrors, restartFailures)
+        await startRailContainers(stoppedHubs, restartFailures)
+        console.log(`Aborted: a checkpoint mirror failed to stop (${failureReason(err)}). No data was touched.`)
+        if (restartFailures.length) console.log(`  STILL DOWN: ${restartFailures.join(', ')}`)
+        return false
+    }
+
+    let resetFailure = null
+    try {
+        await recreateRailHubCheckpointTables(stacks)
+        await purgeRailCheckpointMirrors(stacks)
+    } catch (err) {
+        resetFailure = err
+    }
+
+    const restartFailures = []
+    await startRailContainers(stoppedHubs, restartFailures)
+    await startRailContainers(stoppedMirrors, restartFailures)
+    await statusChanged()
+    if (resetFailure) {
+        throw new Error(`reset hub-checkpoints failed after services stopped (${failureReason(resetFailure)})`
+            + (restartFailures.length ? `; restart failures: ${restartFailures.join(', ')}` : ''))
+    }
+    if (restartFailures.length) {
+        throw new Error(`reset hub-checkpoints completed but services failed to restart: ${restartFailures.join(', ')}`)
+    }
+    return true
 }
 
 async function validateDecoderPair(context) {

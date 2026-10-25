@@ -78,12 +78,16 @@ function registerReset(program, deps) {
     program
         .command('reset')
         .description('Reset data for a specific service or all services of a coin/network')
-        .argument('<service>', '(node, xchain-utxo-tracker, xchain-decoder, xchain-indexer, all)')
-        .argument('<chain>',   '(bitcoin, litecoin, dogecoin)')
-        .argument('<network>', '(mainnet, testnet, regtest)')
+        .argument('<service>', '(node, xchain-utxo-tracker, xchain-decoder, xchain-indexer, all, hub-checkpoints)')
+        .argument('[chain]',   '(bitcoin, litecoin, dogecoin); omit for hub-checkpoints')
+        .argument('[network]', '(mainnet, testnet, regtest); omit for hub-checkpoints')
         .option('--yes', 'Skip the destructive-reset confirmation prompt (for CI/scripted resets)')
         .option('--with-indexer', 'Reset xchain-indexer alongside xchain-decoder; the pair is only coherent when both move together')
         .action(async (service, chain, network, options) => {
+            if (service !== 'hub-checkpoints' && (!chain || !network)) {
+                process.stderr.write('reset: chain and network are required unless service is hub-checkpoints\n')
+                return process.exit(1)
+            }
             const confirmed = await resetModules(service, chain, network,
                 !!(options && options.yes), !!(options && options.withIndexer))
             return process.exit(confirmed ? 0 : 1)
