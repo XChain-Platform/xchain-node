@@ -50,10 +50,12 @@ function makeLogin(prefix, source, user, password, envDatabase) {
 }
 
 // One variable from a service container's environment, or null when it is unset or the container cannot answer.
+// Read from the container's config, not `docker exec`, because a reset runs with the stack's services stopped.
 async function readServiceEnv(containerId, name) {
     try {
-        const { stdout } = await execFileAsync('docker', ['exec', containerId, 'printenv', name])
-        return String(stdout).replace(/\r?\n$/, '') || null
+        const { stdout } = await execFileAsync('docker', ['inspect', '--type', 'container', '--format', '{{json .Config.Env}}', containerId])
+        const entry = JSON.parse(String(stdout)).find((pair) => String(pair).startsWith(name + '='))
+        return entry ? entry.slice(name.length + 1) || null : null
     } catch {
         return null
     }

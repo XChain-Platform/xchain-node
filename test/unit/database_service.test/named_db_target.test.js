@@ -171,11 +171,13 @@ function serviceServer(stubs, { env = SERVICE_ENV, decoderEnv = {}, grants = FUL
     const envs = { [INDEXER_ID]: env, [DECODER_ID]: decoderEnv }
     stubs.execFileAsync.callsFake(async (cmd, args, opts) => {
         if (args[0] === 'inspect' && args[args.length - 1] === NAMED) return { stdout: NAMED_ID + '\n' }
-        if (args[0] === 'exec' && args[2] === 'printenv') {
-            const value = (envs[args[1]] || {})[args[3]]
-            if (value) return { stdout: value + '\n' }
-            throw new Error('exit status 1')
+        // Service env is read from the container config, which a stopped container still answers.
+        if (args[0] === 'inspect' && args.includes('{{json .Config.Env}}')) {
+            const env = envs[args[args.length - 1]]
+            if (!env) throw new Error('Error: No such object')
+            return { stdout: JSON.stringify(Object.entries(env).map(([k, v]) => k + '=' + v)) + '\n' }
         }
+        if (args[0] === 'exec' && args[2] === 'printenv') throw new Error('exit status 1')
         if (args.includes('mariadb-admin')) throw new Error('Access denied for user root')
         throw new Error('unexpected docker call: ' + args.join(' '))
     })
@@ -222,6 +224,18 @@ describe('DatabaseService', function () {
             expectNoSecret(report)
             expectNoSecret(JSON.stringify(target))
             for (const call of stubs.spawn.getCalls()) expect(call.args[1]).to.not.include('root')
+        })
+
+        it('reads the service logins from container config, so a stack stopped for the reset still answers', async function () {
+            const stubs = makeStubs()
+            serviceServer(stubs)
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: DB.hub })
+
+            await ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', BOTH, finder())
+
+            const serviceExecs = stubs.execFileAsync.getCalls()
+                .filter((c) => c.args[1][0] === 'exec' && [INDEXER_ID, DECODER_ID].includes(c.args[1][1]))
+            expect(serviceExecs).to.have.length(0)
         })
 
         it('never reads a service login when the container\'s root logs in', async function () {
