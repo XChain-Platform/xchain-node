@@ -61,7 +61,7 @@ function dbOverrideFor(service, options, deps) {
     const findContainer = dbContainer
         ? containerByNameLookup(deps.execFileAsync, deps.getDockerContainerImageName)
         : (module, coin, network) => deps.db.getModuleContainerStrict(module, coin, network)
-    return { refusal, dbContainer, findContainer }
+    return { refusal, dbContainer, findContainer, check: !!(dbContainer && options.check) }
 }
 
 // The databases a reset drops and recreates, decoder first.
@@ -92,4 +92,12 @@ async function namedTargetBeforeStop(context, resolveNamedDatabaseTarget, failur
     return target
 }
 
-module.exports = { dbOverrideRefusal, containerByNameLookup, dbOverrideFor, dbModulesFor, namedTargetArgs, namedTargetBeforeStop }
+// Where a --db-container reset ends while nothing is stopped: a refused server (null, already reported) fails, and a
+// --check run (which skips the confirmation, since it changes nothing) passes here instead of reaching the stop loop.
+function endBeforeStop(target) {
+    if (!target) return false
+    console.log('Check passed: the reset would run as above. Nothing was stopped or changed.')
+    return true
+}
+
+module.exports = { dbOverrideRefusal, containerByNameLookup, dbOverrideFor, dbModulesFor, endBeforeStop, namedTargetArgs, namedTargetBeforeStop }

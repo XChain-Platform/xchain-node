@@ -243,6 +243,7 @@ module.exports = {
     get XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE() { return process.env.XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE || '' },
     get XCHAIN_NODE_CONTAINERD_ROOT() { return process.env.XCHAIN_NODE_CONTAINERD_ROOT || '/var/lib/containerd' },
     get XCHAIN_NODE_DATA_DIR() { return process.env.XCHAIN_NODE_DATA_DIR },
+    get XCHAIN_NODE_DB_CONTAINER_ROOT_PASSWORD() { return process.env.XCHAIN_NODE_DB_CONTAINER_ROOT_PASSWORD },
     get XCHAIN_NODE_DB_DATA_DIR() { return process.env.XCHAIN_NODE_DB_DATA_DIR },
     get XCHAIN_NODE_DB_MAX_CONNECTIONS() { return process.env.XCHAIN_NODE_DB_MAX_CONNECTIONS },
     get XCHAIN_NODE_DB_ROOT_PASSWORD() { return process.env.XCHAIN_NODE_DB_ROOT_PASSWORD },

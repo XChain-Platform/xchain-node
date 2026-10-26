@@ -199,3 +199,26 @@ describe('moduleOperations', function () {
         })
     })
 })
+
+describe('moduleOperations', function () {
+    registerLifecycleHooks(() => {})
+
+    describe('resetModules() with --db-container --check', function () {
+
+        it('with check, resolves the named server and stops before any stop, wipe or prompt', async function () {
+            const stubs = makeStubs()
+            dockerAnswersByName(stubs)
+            const ops = loadOperations(stubs)
+            const logged = []
+
+            const result = await runReset(ops, [DECODER, 'bitcoin', 'regtest', false, true, { dbContainer: NAMED_DB, check: true }], logged)
+
+            expect(result).to.be.true
+            sinon.assert.calledOnce(stubs.resolveNamedDatabaseTarget)
+            expect(stubs.stopContainer.called).to.be.false
+            expect(stubs.resetDatabases.called).to.be.false
+            expect(stubs.clearHubPriceIngestWatermark.called).to.be.false
+            expect(logged.join('\n')).to.contain('Nothing was stopped or changed')
+        })
+    })
+})

@@ -104,3 +104,46 @@ describe('DatabaseService', function () {
         })
     })
 })
+
+describe('DatabaseService', function () {
+    describe('resolveNamedDatabaseTarget() root override', function () {
+        const VAR = 'XCHAIN_NODE_DB_CONTAINER_ROOT_PASSWORD'
+        afterEach(function () { delete process.env[VAR] })
+
+        it('logs in with it when the container was started without a root env', async function () {
+            const stubs = makeStubs()
+            namedServer(stubs, { rootVar: 'NO_SUCH_VAR', root: 'moved-in-root' })
+            schemaAnswer(stubs, true)
+            process.env[VAR] = 'moved-in-root'
+            const ds = loadDatabaseService(stubs)
+
+            const target = await ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'regtest', ['xchain-decoder', 'xchain-indexer'])
+            expect(target.rootPassword).to.equal('moved-in-root')
+            expect(stubs.setDbRootPassword.called).to.be.false
+            expect(stubs.saveDbRootPassword.called).to.be.false
+        })
+
+        it('refuses by name when it does not log in, before any database read', async function () {
+            const stubs = makeStubs()
+            namedServer(stubs, { rootVar: 'NO_SUCH_VAR', root: 'real-root' })
+            process.env[VAR] = 'wrong-root'
+            const ds = loadDatabaseService(stubs)
+
+            const err = await rejection(ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'regtest', ['xchain-decoder']))
+            expect(err && err.message).to.contain(`${VAR} does not log in to ${NAMED}`)
+            expect(err.message).to.not.contain('wrong-root')
+            expect(stubs.spawn.called).to.be.false
+        })
+
+        it('is not read when the container env root logs in', async function () {
+            const stubs = makeStubs()
+            namedServer(stubs)
+            schemaAnswer(stubs, true)
+            process.env[VAR] = 'unused-root'
+            const ds = loadDatabaseService(stubs)
+
+            const target = await ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', ['xchain-decoder'])
+            expect(target.rootPassword).to.equal('named-root')
+        })
+    })
+})

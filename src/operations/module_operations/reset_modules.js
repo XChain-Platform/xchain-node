@@ -3,7 +3,7 @@
 let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, resolveNamedDatabaseTarget, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings
 let RESETTABLE_SERVICES
 const { WIPE_IMAGE, ensureWipeImage, reportPartialWipe } = require('./reset_wipe_safety')
-const { dbOverrideFor, dbModulesFor, namedTargetArgs, namedTargetBeforeStop } = require('./reset_db_override')
+const { dbOverrideFor, dbModulesFor, endBeforeStop, namedTargetArgs, namedTargetBeforeStop } = require('./reset_db_override')
 
 function configure(dependencies) {
     ({ askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, resolveNamedDatabaseTarget, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings } = dependencies)
@@ -34,14 +34,14 @@ async function resetModules(service, coin, network, force = false, withIndexer =
         throw new Error("reset: unknown network '" + network + "'; expected one of "
             + Object.values(Network).join(', '))
     }
-    const { refusal, dbContainer, findContainer } = dbOverrideFor(service, options, { EXTERNAL_DB, NODE_MODULE_NAME, XChainService, db, execFileAsync, getDockerContainerImageName })
+    const { refusal, dbContainer, findContainer, check } = dbOverrideFor(service, options, { EXTERNAL_DB, NODE_MODULE_NAME, XChainService, db, execFileAsync, getDockerContainerImageName })
     if (refusal) { console.log(`Aborted: ${refusal}. No data was touched.`); return false }
     const resetAll         = service === 'all'
     const resetNode        = resetAll || service === NODE_MODULE_NAME
     const resetUtxoTracker = resetAll || service === XChainService.XCHAIN_UTXO_TRACKER
     const resetDecoder     = resetAll || service === XChainService.XCHAIN_DECODER
     const resetIndexer     = resetAll || service === XChainService.XCHAIN_INDEXER || (withIndexer && resetDecoder)
-    return validateDecoderPair({ service, coin, network, force, resetAll, resetNode, resetUtxoTracker, resetDecoder, resetIndexer, dbContainer, findContainer })
+    return validateDecoderPair({ service, coin, network, force, resetAll, resetNode, resetUtxoTracker, resetDecoder, resetIndexer, dbContainer, findContainer, check })
 }
 
 async function validateDecoderPair(context) {
@@ -129,7 +129,7 @@ async function resolveResetPaths(context) {
 
 async function confirmReset(context) {
     const { blocksDir, blocksHostPath, coin, force, network, nodeDataPath, resetDecoder, resetIndexer, resetNode, resetUtxoTracker, txindexHostPath } = context
-    if (!force) {
+    if (!force && !context.check) {
         const targets = []
         if (resetNode) {
             if (nodeDataPath) targets.push(`node datadir (${nodeDataPath})`)
@@ -171,7 +171,7 @@ async function checkResetDatabase(context) {
     if (dbResetNeeded) {
         if (context.dbContainer) {
             namedDbTarget = await namedTargetBeforeStop(context, resolveNamedDatabaseTarget, failureReason, XChainService)
-            if (!namedDbTarget) return false
+            if (!namedDbTarget || context.check) return endBeforeStop(namedDbTarget)
         } else if (EXTERNAL_DB) {
             const probe = await pingExternalDatabase()
             if (!probe.ok) {

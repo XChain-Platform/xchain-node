@@ -18,6 +18,7 @@
 let { execFile } = require('child_process')
 const { promisify } = require('util')
 let execFileAsync = promisify(execFile)
+const config = require('../../config')
 let { assertSafeDbIdentifier } = require('../../utils/sql_safety')
 let { schemaExistsSql } = require('../../db/information_schema')
 let { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
@@ -51,19 +52,34 @@ async function findNamedContainerId(containerName) {
     return id
 }
 
-// Read the root password the container was started with, and keep it only if it logs in. It is never
-// cached or saved: the CLI's stored root belongs to its bundled server, and this one is another server's.
+// A server whose datadir was moved in from another install keeps that install's root and was started without the
+// env, so the operator can hand the root to this run in this variable instead. Read only after the container's own.
+const ROOT_PASSWORD_OVERRIDE_VAR = 'XCHAIN_NODE_DB_CONTAINER_ROOT_PASSWORD'
+
+async function rootLogsIn(containerId, value) {
+    const ping = await execFileAsync('docker', dockerMariadbArgs(containerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(value) })
+    return String(ping.stdout).includes('mysqld is alive')
+}
+
+// Read the root password the container was started with, else the override variable, and keep it only if it logs
+// in. It is never cached or saved: the CLI's stored root belongs to its bundled server, and this one is another's.
 async function rootPasswordForContainer(containerId, containerName) {
     for (const name of ROOT_PASSWORD_VARS) {
         try {
             const { stdout } = await execFileAsync('docker', ['exec', containerId, 'printenv', name])
             const value = String(stdout).replace(/\r?\n$/, '')
-            if (!value) continue
-            const ping = await execFileAsync('docker', dockerMariadbArgs(containerId, ['mariadb-admin', '-u', 'root', 'ping']), { env: mariadbEnv(value) })
-            if (String(ping.stdout).includes('mysqld is alive')) return value
+            if (value && await rootLogsIn(containerId, value)) return value
         } catch { /* unset in this container, or it did not log in: try the next name */ }
     }
-    throw new Error(`no root password in ${containerName}'s environment (${ROOT_PASSWORD_VARS.join(', ')}) logs in to it`)
+    const override = config[ROOT_PASSWORD_OVERRIDE_VAR]
+    if (override) {
+        try {
+            if (await rootLogsIn(containerId, override)) return override
+        } catch { /* refused below, naming the variable */ }
+        throw new Error(`${ROOT_PASSWORD_OVERRIDE_VAR} does not log in to ${containerName} as root`)
+    }
+    throw new Error(`no root password in ${containerName}'s environment (${ROOT_PASSWORD_VARS.join(', ')}) logs in to it,`
+        + ` and ${ROOT_PASSWORD_OVERRIDE_VAR} is not set`)
 }
 
 // Resolve everything the reset's DB steps need from the named server, before anything is stopped. Each target

@@ -67,7 +67,7 @@ describe('CLI reset --db-container', function () {
         const { deps, exit } = await drive(['reset', 'xchain-decoder', 'bitcoin', 'regtest', '--with-indexer', '--yes',
             '--db-container', 'xchain-rail-database'])
         sinon.assert.calledOnceWithExactly(deps.resetModules, 'xchain-decoder', 'bitcoin', 'regtest', true, true,
-            { dbContainer: 'xchain-rail-database' })
+            { dbContainer: 'xchain-rail-database', check: false })
         expect(deps.preCheck.firstCall.args).to.deep.equal([false, true, null, false, { localOnly: true }])
         sinon.assert.calledOnceWithExactly(exit, 0)
     })
@@ -84,6 +84,22 @@ describe('CLI reset --db-container', function () {
         write.restore()
         sinon.assert.calledWith(exit, 1)
         expect(write.args.map(a => String(a[0])).join('')).to.contain('--db-container does not apply to hub-checkpoints')
+        expect(deps.resetModules.called).to.be.false
+    })
+
+    it('passes --check through with the container', async function () {
+        const { deps } = await drive(['reset', 'xchain-decoder', 'bitcoin', 'regtest', '--with-indexer',
+            '--db-container', 'xchain-rail-database', '--check'])
+        sinon.assert.calledOnceWithExactly(deps.resetModules, 'xchain-decoder', 'bitcoin', 'regtest', false, true,
+            { dbContainer: 'xchain-rail-database', check: true })
+    })
+
+    it('refuses --check without --db-container', async function () {
+        const write = sinon.stub(process.stderr, 'write')
+        const { deps, exit } = await drive(['reset', 'xchain-decoder', 'bitcoin', 'regtest', '--check'])
+        write.restore()
+        sinon.assert.calledWith(exit, 1)
+        expect(write.args.map(a => String(a[0])).join('')).to.contain('--check needs --db-container')
         expect(deps.resetModules.called).to.be.false
     })
 })
