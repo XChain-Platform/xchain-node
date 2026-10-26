@@ -74,6 +74,11 @@ function makeStubs() {
         // Docker-mode reset resolves root before any stop; resolves by default so only the tests about it fail it.
         askMariadbRootPassword: sinon.stub().resolves('stub-root'),
         clearHubPriceIngestWatermark: sinon.stub().resolves(true),
+        // The server a --db-container reset runs its DB steps on, as resolveNamedDatabaseTarget answers it.
+        resolveNamedDatabaseTarget: sinon.stub().callsFake(async (containerName) => ({
+            containerName, containerId: 'd'.repeat(64), rootPassword: 'named-root',
+            databases: ['XChain_BTC_Regtest_Decoder', 'XChain_BTC_Regtest_Indexer']
+        })),
         // The regtest re-genesis purge of the hub's cross-chain relic rows. The
         // statements helper feeds the never-fatal catch's operator message.
         purgeHubCrossChainRows: sinon.stub().resolves(true),
@@ -162,6 +167,7 @@ function loadOperations(stubs, constantsOverrides = null) {
             resetDatabases: stubs.resetDatabases,
             askMariadbRootPassword: stubs.askMariadbRootPassword,
             clearHubPriceIngestWatermark: stubs.clearHubPriceIngestWatermark,
+            resolveNamedDatabaseTarget: stubs.resolveNamedDatabaseTarget,
             purgeHubCrossChainRows: stubs.purgeHubCrossChainRows,
             manualHubCrossChainPurgeStatements: stubs.manualHubCrossChainPurgeStatements,
             getDatabaseContainerId: stubs.getDatabaseContainerId,

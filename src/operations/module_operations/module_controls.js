@@ -251,8 +251,14 @@ async function shellModule(servicesList) {
     return true
 }
 
+// The reset's lookup finds each container: by name under --db-container, through the registry otherwise.
+function resetContainerLookup(context) {
+    return context.findContainer || ((module, coin, network) => db.getModuleContainerStrict(module, coin, network))
+}
+
 async function restartResetModules(context) {
     const { coin, modulesToStop, network } = context
+    const findContainer = resetContainerLookup(context)
     console.log(`Restarting ${coin} ${network} services...`)
     // Track restart failures instead of swallowing them: a silent skip here left a wiped stack DOWN (node never restarted, every dependent service crash-looped) while `reset` still reported success.
     // "Not installed" (registry miss) stays a legitimate skip; a failed docker start gets one retry, then is reported loudly at the end.
@@ -260,7 +266,7 @@ async function restartResetModules(context) {
     for (const module of modulesToStop) {
         let containerId = null
         try {
-            containerId = await db.getModuleContainerStrict(module, coin, network)
+            containerId = await findContainer(module, coin, network)
         } catch (err) {
             // Strict, like the stop loop: the swallowing read answered null on a SQL error too, so a registry blip here left a just-wiped service DOWN and still reported a clean reset
             // (uuid:846cc40d). Nothing can be undone at this point, so report it with the other start failures rather than aborting.
@@ -292,6 +298,7 @@ async function bounceResetModules(context) {
     // empirically deterministic and costs ~5s on the happy path.
     const bounceCandidates = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]
         .filter((m) => modulesToStop.includes(m))
+    const findContainer = resetContainerLookup(context)
     if (bounceCandidates.length > 0) {
         await sleep(5000)
         for (const module of bounceCandidates) {
@@ -299,7 +306,7 @@ async function bounceResetModules(context) {
             if (startFailures.some((f) => f.module === module)) continue
             let containerId = null
             try {
-                containerId = await db.getModuleContainerStrict(module, coin, network)
+                containerId = await findContainer(module, coin, network)
             } catch (err) {
                 // A failed read is not "not installed": the bounce did not happen, so report it like a start failure.
                 startFailures.push({ module, error: `registry lookup failed before the post-reset bounce (${failureReason(err)})` })
@@ -324,7 +331,13 @@ async function bounceResetModules(context) {
         }
     }
 
-    await statusChanged()
+    // A --db-container stack is not in this CLI's config, so pushing that config would overwrite the hub's and
+    // explorer's view of it with the wrong DB hosts.
+    if (context.dbContainer) {
+        console.log('Skipped the hub and explorer config push: --db-container names a stack outside this CLI\'s config.')
+    } else {
+        await statusChanged()
+    }
 
     if (startFailures.length > 0) {
         const detail = startFailures.map((f) => `${f.module}: ${f.error}`).join('; ')

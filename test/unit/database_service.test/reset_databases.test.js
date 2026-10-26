@@ -191,3 +191,53 @@ describe('DatabaseService', function () {
         })
         })
 })
+
+describe('DatabaseService', function () {
+
+    // A `reset --db-container` hands both DB steps the server it resolved. They must run there with that server's
+    // root, and must not ask for the bundled container or the CLI's cached root at all.
+    describe('resetDatabases() and clearHubPriceIngestWatermark() on a named server', function () {
+        const NAMED = { containerName: 'xchain-rail-database', containerId: 'c'.repeat(64), rootPassword: 'named-root' }
+
+        // Every mariadb child the source spawns, as the SQL it piped, its argv and its env.
+        function recordSpawns(stubs, respond) {
+            const calls = []
+            stubs.spawn.callsFake(fakeSpawn((sql, args, opts) => {
+                calls.push({ sql, args, env: (opts && opts.env) || {} })
+                return respond(sql)
+            }))
+            return calls
+        }
+
+        it('drops and recreates each database on the named container with its root', async function () {
+            const stubs = makeStubs()
+            const calls = recordSpawns(stubs, () => ({ stdout: '' }))
+            const ds = loadDatabaseService(stubs)
+            await ds.resetDatabases('bitcoin', 'mainnet', ['xchain-decoder', 'xchain-indexer'], NAMED)
+
+            expect(calls.map(c => c.sql).join(' | ')).to.contain('DROP DATABASE IF EXISTS XChain_BTC_Mainnet_Decoder')
+                .and.to.contain('DROP DATABASE IF EXISTS XChain_BTC_Mainnet_Indexer')
+            for (const call of calls) {
+                expect(call.args).to.include(NAMED.containerId)
+                expect(call.env.MYSQL_PWD).to.equal('named-root')
+            }
+            expect(stubs.getDbRootPassword.called).to.be.false
+            expect(stubs.execFileAsync.called).to.be.false
+        })
+
+        it('clears the price fence row on the named container', async function () {
+            const stubs = makeStubs()
+            const calls = recordSpawns(stubs, (sql) => ({ stdout: /information_schema/i.test(sql) ? '1' : '' }))
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub' })
+            expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest', NAMED)).to.be.true
+
+            expect(calls.map(c => c.sql).join(' | ')).to.match(/DELETE\s+FROM\s+`?XChain_Hub`?\.`?price_ingest_watermarks/i)
+            for (const call of calls) {
+                expect(call.args).to.include(NAMED.containerId)
+                expect(call.env.MYSQL_PWD).to.equal('named-root')
+            }
+            expect(stubs.getDbRootPassword.called).to.be.false
+            expect(stubs.execFileAsync.called).to.be.false
+        })
+    })
+})

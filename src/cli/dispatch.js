@@ -76,6 +76,14 @@ function skipsPreAction(actionCommand) {
     return commandName === 'bootstrap-republish-due'
 }
 
+// A reset aimed at a stack this CLI did not install (--db-container) gets only the local docker checks. The bundled
+// DB provisioning, the module scan, the hub install and the config push all act on this CLI's own stack, and the
+// push would carry its DB hosts over the other stack's entries on a shared hub and explorer.
+function preCheckOptionsFor(commandName, actionCommand) {
+    const opts = typeof actionCommand.opts === 'function' ? actionCommand.opts() : null
+    return commandName === 'reset' && opts && opts.dbContainer ? [{ localOnly: true }] : []
+}
+
 // Name the lock for a validator subcommand that must serialize, or null for one
 // that need not. `init` writes the signing key, settings, capabilities and wallets
 // one file at a time, and a concurrent `install`/`update xchain-hub` mounts them.
@@ -209,7 +217,8 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
             settings.commandsNeedingVersions.includes(commandName),
             !settings.readOnlyCommands.includes(commandName),
             refForPreCheck(commandName, actionCommand),
-            commandRepairsHub(commandName, actionCommand)
+            commandRepairsHub(commandName, actionCommand),
+            ...preCheckOptionsFor(commandName, actionCommand)
         )
     } finally {
         // Non-mutating commands hand the lock back as soon as provisioning is

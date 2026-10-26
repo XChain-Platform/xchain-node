@@ -63,8 +63,19 @@ async function resolveResetTargets(coin, network, modules) {
     return resetTargets
 }
 
-async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]) {
+// `namedTarget` is the server the operator named with --db-container (resolveNamedDatabaseTarget); without it
+// the bundled container or the external DB is used, as before.
+async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER], namedTarget = null) {
     const resetTargets = await resolveResetTargets(coin, network, modules)
+    // A stack with its own DB server: its id and root were resolved and checked before anything was stopped.
+    if (namedTarget) {
+        for (const dbName of resetTargets) {
+            await executeDockerMariaDbCommand(namedTarget.containerId, namedTarget.rootPassword,
+                `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`)
+            logger.info(`Database ${dbName} reset on ${namedTarget.containerName}!`)
+        }
+        return
+    }
     // External (host-native) MariaDB: there is no database container to exec
     // into it (`docker exec ... null` failed here and aborted the reset mid-way,
     // leaving data wiped, DBs stale, services stopped). Use the driver-based
@@ -165,7 +176,7 @@ async function clearPriceFence(runner, hubDbName, ticker, fenceNetwork) {
 // manual statement is printed. Only the calling chain's row on the calling
 // network is touched: every other chain's fence, and every other network's fence
 // for this chain, is still protecting its live ingest.
-async function clearHubPriceIngestWatermark(coin, network) {
+async function clearHubPriceIngestWatermark(coin, network, namedTarget = null) {
     const ticker = CoinTickerSymbol[coin]
     if (!ticker) {
         throw new Error("clearHubPriceIngestWatermark: unknown coin '" + coin + "'")
@@ -184,7 +195,10 @@ async function clearHubPriceIngestWatermark(coin, network) {
     assertSafeDbIdentifier(hubDbName, 'database name')
 
     let runner
-    if (EXTERNAL_DB) {
+    // A stack with its own DB server keeps its hub's fence row there; the probe below says so when it does not.
+    if (namedTarget) {
+        runner = (sql, options) => executeDockerMariaDbCommand(namedTarget.containerId, namedTarget.rootPassword, sql, options)
+    } else if (EXTERNAL_DB) {
         const externalCfg = await getExternalDbConfig()
         runner = (sql, options) => executeNativeMariaDbCommand(externalCfg, sql, options)
     } else {

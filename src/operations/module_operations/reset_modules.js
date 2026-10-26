@@ -1,11 +1,12 @@
 'use strict'
 
-let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings
+let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, resolveNamedDatabaseTarget, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings
 let RESETTABLE_SERVICES
 const { WIPE_IMAGE, ensureWipeImage, reportPartialWipe } = require('./reset_wipe_safety')
+const { dbOverrideFor, dbModulesFor, namedTargetArgs, namedTargetBeforeStop } = require('./reset_db_override')
 
 function configure(dependencies) {
-    ({ askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings } = dependencies)
+    ({ askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, resolveNamedDatabaseTarget, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings } = dependencies)
     RESETTABLE_SERVICES = [
         'all',
         NODE_MODULE_NAME,
@@ -19,7 +20,8 @@ function configure(dependencies) {
 // an unrecognised service (a typo, or a non-resettable module like xchain-encoder) leaves every reset flag false, so `targets` is empty, no branch fires, and resetModules returns true - the CLI exits
 // 0 reporting success after resetting nothing. Fail loud instead, matching resolveArgs/rollback and the "fail fast BEFORE any destructive wipe" convention this file already follows.
 
-async function resetModules(service, coin, network, force = false, withIndexer = false) {
+// `options.dbContainer` (--db-container) is a stack's own MariaDB container; see reset_db_override.js.
+async function resetModules(service, coin, network, force = false, withIndexer = false, options = {}) {
     if (!RESETTABLE_SERVICES.includes(service)) {
         throw new Error("reset: unknown service '" + service + "'; expected one of "
             + RESETTABLE_SERVICES.join(', '))
@@ -32,12 +34,14 @@ async function resetModules(service, coin, network, force = false, withIndexer =
         throw new Error("reset: unknown network '" + network + "'; expected one of "
             + Object.values(Network).join(', '))
     }
+    const { refusal, dbContainer, findContainer } = dbOverrideFor(service, options, { EXTERNAL_DB, NODE_MODULE_NAME, XChainService, db, execFileAsync, getDockerContainerImageName })
+    if (refusal) { console.log(`Aborted: ${refusal}. No data was touched.`); return false }
     const resetAll         = service === 'all'
     const resetNode        = resetAll || service === NODE_MODULE_NAME
     const resetUtxoTracker = resetAll || service === XChainService.XCHAIN_UTXO_TRACKER
     const resetDecoder     = resetAll || service === XChainService.XCHAIN_DECODER
     const resetIndexer     = resetAll || service === XChainService.XCHAIN_INDEXER || (withIndexer && resetDecoder)
-    return validateDecoderPair({ service, coin, network, force, resetAll, resetNode, resetUtxoTracker, resetDecoder, resetIndexer })
+    return validateDecoderPair({ service, coin, network, force, resetAll, resetNode, resetUtxoTracker, resetDecoder, resetIndexer, dbContainer, findContainer })
 }
 
 async function validateDecoderPair(context) {
@@ -50,7 +54,7 @@ async function validateDecoderPair(context) {
         try {
             // Strict read: getModuleContainer answers null on a SQL error and on an unopened pool as well as on a genuine miss, so a registry blip read as "no indexer installed" and waved through the
             // one wipe this guard exists to stop (uuid:7cbafa08). A lookup that FAILS is not evidence of absence. Only an empty result set still means "not installed", which stays allowed.
-            indexerInstalled = await db.getModuleContainerStrict(XChainService.XCHAIN_INDEXER, coin, network)
+            indexerInstalled = await context.findContainer(XChainService.XCHAIN_INDEXER, coin, network)
         } catch (err) {
             // abortBeforeAnyWipe is declared further down this function and nothing has been stopped yet, so the plain refusal is the correct shape here.
             console.log(`Aborted: cannot read the ${XChainService.XCHAIN_INDEXER} registry row `
@@ -163,8 +167,12 @@ async function checkResetDatabase(context) {
     // on a partial env, and NOTHING probed for it (uuid:41887889). Both modes are probed here. It sits ahead of the stop loop, not after it: this abort returns before the restart pass, so probing
     // later left every already-stopped service DOWN while still reporting that no data was touched (uuid:bb190060).
     const dbResetNeeded = resetDecoder || resetIndexer
+    let namedDbTarget = null
     if (dbResetNeeded) {
-        if (EXTERNAL_DB) {
+        if (context.dbContainer) {
+            namedDbTarget = await namedTargetBeforeStop(context, resolveNamedDatabaseTarget, failureReason, XChainService)
+            if (!namedDbTarget) return false
+        } else if (EXTERNAL_DB) {
             const probe = await pingExternalDatabase()
             if (!probe.ok) {
                 console.log(`Aborted: cannot reach the external MariaDB at ${probe.host}:${probe.port}`
@@ -198,7 +206,7 @@ async function checkResetDatabase(context) {
     if (resetDecoder)     modulesToStop.push(XChainService.XCHAIN_DECODER)
     if (resetIndexer)     modulesToStop.push(XChainService.XCHAIN_INDEXER)
     if (resetAll)         modulesToStop.push(XChainService.XCHAIN_REGTEST_MINER)
-    return stopResetModules({ ...context, modulesToStop })
+    return stopResetModules({ ...context, modulesToStop, namedDbTarget })
 }
 
 async function stopResetModules(context) {
@@ -210,7 +218,7 @@ async function stopResetModules(context) {
     const stoppedModules = []
     // Refuse the whole reset, put back whatever this run stopped, and report it. Only reachable while nothing has been wiped yet, which is why it may still promise that no data was touched.
     const abortBeforeAnyWipe = async (reason) => {
-        const restartFailures = await restartStoppedModules(stoppedModules, coin, network)
+        const restartFailures = await restartStoppedModules(stoppedModules, coin, network, context.findContainer)
         console.log(`Aborted: ${reason}. No data was touched.`)
         if (stoppedModules.length > 0) {
             console.log(`  Restarted ${stoppedModules.length - restartFailures.length} of `
@@ -224,7 +232,7 @@ async function stopResetModules(context) {
     for (const module of modulesToStop) {
         let containerId = null
         try {
-            containerId = await db.getModuleContainerStrict(module, coin, network)
+            containerId = await context.findContainer(module, coin, network)
         } catch (err) {
             // A registry read that FAILED is not evidence the module is absent. The swallowing read this replaced answered null on any SQL error, so a blip after the reachability precheck made a live
             // indexer look uninstalled: the loop skipped stopping it and the wipes below, resetDatabases included, ran underneath it (uuid:846cc40d).
@@ -273,7 +281,7 @@ async function classifyResetVolume(context) {
 }
 
 async function wipeResetStores(context) {
-    const { blocksHostPath, coin, network, nodeDataPath, resetDecoder, resetIndexer, resetNode, resetUtxoTracker, txindexHostPath, utxoVolumeName, utxoVolumePresent } = context
+    const { blocksHostPath, coin, network, nodeDataPath, resetNode, resetUtxoTracker, txindexHostPath, utxoVolumeName, utxoVolumePresent } = context
     // The node paths already cleared, so a later abort reports the stack's real state instead of promising an untouched one.
     const nodeCleared = []
     // A failed node wipe may have deleted part of its target, so it is reported as possibly partial with services left down, never sent to abortBeforeAnyWipe (see reportPartialWipe).
@@ -309,12 +317,9 @@ async function wipeResetStores(context) {
         }
     }
 
-    const dbModulesToReset = [
-        ...(resetDecoder ? [XChainService.XCHAIN_DECODER] : []),
-        ...(resetIndexer ? [XChainService.XCHAIN_INDEXER] : []),
-    ]
+    const dbModulesToReset = dbModulesFor(context, XChainService)
     if (dbModulesToReset.length > 0) {
-        await resetDatabases(coin, network, dbModulesToReset)
+        await resetDatabases(coin, network, dbModulesToReset, ...namedTargetArgs(context))
     }
 
     return cleanResetMetadata(context)
@@ -327,7 +332,7 @@ async function cleanResetMetadata(context) {
     // the restart pass and leave the stack down. It is reported loudly instead, with the statement to run by hand.
     if (resetIndexer) {
         try {
-            await clearHubPriceIngestWatermark(coin, network)
+            await clearHubPriceIngestWatermark(coin, network, ...namedTargetArgs(context))
         } catch (err) {
             console.warn('WARNING: clearing the hub price ingest fence failed: ' + (err && err.message ? err.message : err))
             console.warn("  Run on the hub DB before the indexer catches up:")
@@ -391,6 +396,5 @@ function recordResetReindex(context) {
     }
     return restartResetModules(context)
 }
-
 
 module.exports = { configure, resetModules }

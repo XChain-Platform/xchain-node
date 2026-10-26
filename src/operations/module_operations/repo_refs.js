@@ -110,11 +110,13 @@ function failureReason(err) {
 //
 // Reads the registry strictly: getModuleContainer answers null on a SQL error as well as on a miss, so a rollback run during the very registry outage that caused the abort restarted nothing and still
 // reported zero failures (uuid:846cc40d). A lookup that fails now lands in `failed` and is named in the STILL DOWN line.
-async function restartStoppedModules(modules, coin, network) {
+// `findContainer` is the reset's own lookup (by container name under --db-container); the registry otherwise.
+async function restartStoppedModules(modules, coin, network,
+    findContainer = (module, lookupCoin, lookupNetwork) => db.getModuleContainerStrict(module, lookupCoin, lookupNetwork)) {
     const failed = []
     for (const module of modules) {
         try {
-            const containerId = await db.getModuleContainerStrict(module, coin, network)
+            const containerId = await findContainer(module, coin, network)
             if (!containerId) continue
             await startContainer(containerId)
         } catch {

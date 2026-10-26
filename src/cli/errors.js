@@ -21,6 +21,7 @@ const config = require('../config')
 const dockerService = require('../services/docker_service')
 const { stopModuleContainer } = require('../services/stop_budget_service')
 const { statusChanged } = require('../services/status_service')
+const { registerReset } = require('./reset_command')
 
 const HUB_CHECKPOINT_TABLES = Object.freeze([
     'state_checkpoints', 'snapshot_checkpoints', 'anchor_published_checkpoints'
@@ -265,36 +266,6 @@ function registerE2eTest(program, deps) {
 
 }
 
-function registerReset(program, deps) {
-    const { resetModules } = deps
-    program
-        .command('reset')
-        .description('Reset data for a specific service or all services of a coin/network')
-        .argument('<service>', '(node, xchain-utxo-tracker, xchain-decoder, xchain-indexer, all, hub-checkpoints)')
-        .argument('[chain]',   '(bitcoin, litecoin, dogecoin); omit for hub-checkpoints')
-        .argument('[network]', '(mainnet, testnet, regtest); omit for hub-checkpoints')
-        .option('--yes', 'Skip the destructive-reset confirmation prompt (for CI/scripted resets)')
-        .option('--with-indexer', 'Reset xchain-indexer alongside xchain-decoder; the pair is only coherent when both move together')
-        .action(async (service, chain, network, options) => {
-            if (service === 'hub-checkpoints') {
-                if (chain || network) {
-                    process.stderr.write('reset: hub-checkpoints does not take a chain or network\n')
-                    return process.exit(1)
-                }
-                const completed = await resetHubCheckpoints(!!(options && options.yes), deps.hubCheckpointDependencies)
-                return process.exit(completed ? 0 : 1)
-            }
-            if (service !== 'hub-checkpoints' && (!chain || !network)) {
-                process.stderr.write('reset: chain and network are required unless service is hub-checkpoints\n')
-                return process.exit(1)
-            }
-            const confirmed = await resetModules(service, chain, network,
-                !!(options && options.yes), !!(options && options.withIndexer))
-            return process.exit(confirmed ? 0 : 1)
-        })
-
-}
-
 function registerRollback(program) {
     program
         .command('rollback')
@@ -382,7 +353,7 @@ Notes:
 
 function registerPreRecoveryCommands(program, deps) {
     registerE2eTest(program, deps)
-    registerReset(program, deps)
+    registerReset(program, deps, resetHubCheckpoints)
 }
 
 function registerRecoveryCommands(program, deps) {
