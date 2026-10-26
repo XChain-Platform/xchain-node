@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Kept bootstrap publisher capture logs on its configured temporary work volume.
+
 ## [0.26.3] - 2026-10-23
 
 ### Changed
