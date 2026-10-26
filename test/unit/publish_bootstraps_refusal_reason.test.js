@@ -38,6 +38,7 @@ function runWithCreateOutput(binDir, workDir, lines) {
         env: {
             ...process.env,
             PATH: `${binDir}:${process.env.PATH}`,
+            TMPDIR: path.join(workDir, 'unavailable-host-tmp'),
             STAGE_DIR: path.join(workDir, 'stage'),
             TMP_DIR: path.join(workDir, 'tmp'),
             LOCK_FILE: path.join(workDir, 'publish.lock'),

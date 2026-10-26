@@ -351,6 +351,8 @@ log "publish plan (${#SELECTED[@]}): ${SELECTED[*]}"
 [ "$WITH_TRACKERS" = 1 ] && log "NOTE: tracker creates STOP the tracker container (downtime) for the compress."
 if [ "$DRY_RUN" = 1 ]; then log "dry-run: nothing executed."; exit 0; fi
 
+mkdir -p "$TMP_DIR"
+
 # ── Single-instance lock (cron-safe) ──────────────────────────────────────
 exec 9>"$LOCK_FILE"
 flock -n 9 || die "another publish run holds $LOCK_FILE - exiting."
@@ -373,7 +375,7 @@ for c in "${SELECTED[@]}"; do
   # CLI does not also wait and multiply the budget.
   lock_deadline=$(( $(date +%s) + LOCK_WAIT_MIN * 60 ))
   while : ; do
-    create_log="$(mktemp)"
+    create_log="$(mktemp "$TMP_DIR/publish-create.XXXXXX")"
     create_rc=0
     XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY="$SIGNING_KEY" \
     XCHAIN_NODE_DATA_DIR="$STAGE_DIR" \
