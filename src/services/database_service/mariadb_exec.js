@@ -290,6 +290,12 @@ async function askMariadbRootPassword(coin, network) {
 }
 
 async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPassword, command, commandOptions = "") {
+    return executeDockerMariaDbCommandAs(mariadbContainerId, 'root', mariadbRootPassword, command, commandOptions)
+}
+
+// The same client run as another MariaDB user, for a server whose root is not available to this CLI. The caller
+// checks the user name first: it reaches argv, and a name starting with a dash would read as a client option.
+async function executeDockerMariaDbCommandAs(mariadbContainerId, user, password, command, commandOptions = "") {
     return new Promise((resolve, reject) => {
         // The SQL is fed to the mariadb client over STDIN, never as an
         // `-e <sql>` argv entry. User-creation statements embed a secret
@@ -298,14 +304,14 @@ async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPasswo
         // entirely, closing the transient exposure that a `-e <sql>` argv left
         // open during the exec. The mariadb client reads statements from stdin
         // when no -e is given; `docker exec -i` (interactive) pipes our stdin
-        // through to it. The root password still travels via MYSQL_PWD env (see
+        // through to it. The password still travels via MYSQL_PWD env (see
         // dockerMariadbArgs), never argv.
-        const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', 'root'], { interactive: true })
+        const args = dockerMariadbArgs(mariadbContainerId, ['mariadb', '-u', user], { interactive: true })
         if (commandOptions) {
             args.push(...commandOptions.trim().split(/\s+/))
         }
 
-        const child = spawn('docker', args, { env: mariadbEnv(mariadbRootPassword) })
+        const child = spawn('docker', args, { env: mariadbEnv(password) })
         let stdout = ''
         let stderr = ''
         child.stdout.on('data', (chunk) => { stdout += chunk })
@@ -331,4 +337,4 @@ async function executeDockerMariaDbCommand(mariadbContainerId, mariadbRootPasswo
     })
 }
 
-module.exports = { parseMariaDbClientOptions, executeNativeMariaDbCommand, scrubSqlFromError, askMariadbRootPassword, executeDockerMariaDbCommand, configureDependencies }
+module.exports = { parseMariaDbClientOptions, executeNativeMariaDbCommand, scrubSqlFromError, askMariadbRootPassword, executeDockerMariaDbCommand, executeDockerMariaDbCommandAs, configureDependencies }

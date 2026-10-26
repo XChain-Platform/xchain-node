@@ -77,18 +77,26 @@ function namedTargetArgs(context) {
     return context.namedDbTarget ? [context.namedDbTarget] : []
 }
 
-// Resolve the named server while nothing is stopped: its id, a root that logs in, and the target databases already
-// on it. Answers null after printing the refusal, so the caller returns before the stop loop.
+// Resolve the named server while nothing is stopped: its id, a root or the stack's own database users that log in,
+// and the target databases already on it. The stack's services are found by the same name lookup the stop loop
+// uses, so their env can supply those users. Answers null after printing the refusal, so the caller returns early.
 async function namedTargetBeforeStop(context, resolveNamedDatabaseTarget, failureReason, XChainService) {
     const { coin, dbContainer, network } = context
+    const findServiceContainer = (module) => context.findContainer(module, coin, network)
     let target
     try {
-        target = await resolveNamedDatabaseTarget(dbContainer, coin, network, dbModulesFor(context, XChainService))
+        target = await resolveNamedDatabaseTarget(dbContainer, coin, network, dbModulesFor(context, XChainService), findServiceContainer)
     } catch (err) {
         console.log(`Aborted: cannot use the MariaDB container ${dbContainer} (${failureReason(err)}). No data was touched.`)
         return null
     }
     console.log(`Database steps run on ${dbContainer} (${target.databases.join(', ')}); the hub and explorer config push is skipped.`)
+    // Users and the grants that allowed them, never a password. A root run says so only under --check, so its output is unchanged.
+    if (target.authReport) {
+        for (const line of target.authReport) console.log(line)
+    } else if (context.check) {
+        console.log(`Logs in to ${dbContainer} as root.`)
+    }
     return target
 }
 

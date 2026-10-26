@@ -147,3 +147,185 @@ describe('DatabaseService', function () {
         })
     })
 })
+
+// A named server with no usable root, whose stack's service containers carry their own database logins. Each user
+// logs in only with its own password and answers SHOW GRANTS with the lines given, as `mariadb -B -N` prints them
+// (backslashes doubled). `env` is the indexer container's environment; the decoder container's is `decoderEnv`.
+const INDEXER_ID = 'b'.repeat(64)
+const DECODER_ID = 'a'.repeat(64)
+const DB = { decoder: 'XChain_BTC_Mainnet_Decoder', indexer: 'XChain_BTC_Mainnet_Indexer', hub: 'XChain_Hub' }
+const SECRETS = { dec_user: 'dec-secret-1', idx_user: 'idx-secret-2', hub_user: 'hub-secret-3' }
+const SERVICE_ENV = {
+    DECODER_DB_NAME: DB.decoder, DECODER_DB_USER: 'dec_user', DECODER_DB_PASS: SECRETS.dec_user,
+    INDEXER_DB_NAME: DB.indexer, INDEXER_DB_USER: 'idx_user', INDEXER_DB_PASS: SECRETS.idx_user,
+    HUB_DB_NAME: DB.hub, HUB_DB_USER: 'hub_user', HUB_DB_PASS: SECRETS.hub_user
+}
+const FULL_GRANTS = {
+    dec_user: ['GRANT USAGE ON *.* TO `dec_user`@`%` IDENTIFIED BY PASSWORD \'*AB12\'',
+        'GRANT ALL PRIVILEGES ON `XChain\\\\_BTC\\\\_Mainnet\\\\_Decoder`.* TO `dec_user`@`%`'],
+    idx_user: ['GRANT USAGE ON *.* TO `idx_user`@`%`', 'GRANT SELECT, INSERT, DROP, CREATE ON `XChain_BTC_Mainnet_Indexer`.* TO `idx_user`@`%`'],
+    hub_user: ['GRANT USAGE ON *.* TO `hub_user`@`%`', 'GRANT SELECT, DELETE ON `XChain_Hub`.`price_ingest_watermarks` TO `hub_user`@`%`']
+}
+
+function serviceServer(stubs, { env = SERVICE_ENV, decoderEnv = {}, grants = FULL_GRANTS, passwords = SECRETS } = {}) {
+    const envs = { [INDEXER_ID]: env, [DECODER_ID]: decoderEnv }
+    stubs.execFileAsync.callsFake(async (cmd, args, opts) => {
+        if (args[0] === 'inspect' && args[args.length - 1] === NAMED) return { stdout: NAMED_ID + '\n' }
+        if (args[0] === 'exec' && args[2] === 'printenv') {
+            const value = (envs[args[1]] || {})[args[3]]
+            if (value) return { stdout: value + '\n' }
+            throw new Error('exit status 1')
+        }
+        if (args.includes('mariadb-admin')) throw new Error('Access denied for user root')
+        throw new Error('unexpected docker call: ' + args.join(' '))
+    })
+    stubs.spawn.callsFake(fakeSpawn((sql, args, opts) => {
+        const user = args[args.indexOf('-u') + 1]
+        if (!passwords[user] || opts.env.MYSQL_PWD !== passwords[user]) {
+            return { code: 1, stderr: `ERROR 1045 (28000): Access denied for user '${user}'@'localhost' (using password: YES)` }
+        }
+        if (/SHOW GRANTS/.test(sql)) return { stdout: (grants[user] || []).join('\n') }
+        if (/SCHEMATA/.test(sql)) return { stdout: '1' }
+        return { stdout: '' }
+    }))
+}
+
+// The stack's service containers as the reset's name lookup finds them.
+function finder() {
+    return sinon.stub().callsFake(async (module) => ({ 'xchain-indexer': INDEXER_ID, 'xchain-decoder': DECODER_ID })[module] || null)
+}
+
+function expectNoSecret(text) {
+    for (const secret of Object.values(SECRETS)) expect(String(text)).to.not.contain(secret)
+}
+
+const BOTH = ['xchain-decoder', 'xchain-indexer']
+
+describe('DatabaseService', function () {
+    describe('resolveNamedDatabaseTarget() service logins', function () {
+
+        it('falls back to the stack\'s own users only when no root logs in, and reports their grants', async function () {
+            const stubs = makeStubs()
+            serviceServer(stubs)
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: DB.hub })
+
+            const target = await ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', BOTH, finder())
+
+            expect(target.authMode).to.equal('service')
+            expect(target).to.not.have.property('rootPassword')
+            expect(target.logins[DB.decoder].user).to.equal('dec_user')
+            expect(target.logins[DB.indexer].user).to.equal('idx_user')
+            expect(target.hubLogin.user).to.equal('hub_user')
+            const report = target.authReport.join('\n')
+            expect(report).to.contain('no root password').and.to.contain('dec_user').and.to.contain('ALL PRIVILEGES ON')
+                .and.to.contain('SELECT, DELETE ON `XChain_Hub`.`price_ingest_watermarks`')
+            expectNoSecret(report)
+            expectNoSecret(JSON.stringify(target))
+            for (const call of stubs.spawn.getCalls()) expect(call.args[1]).to.not.include('root')
+        })
+
+        it('never reads a service login when the container\'s root logs in', async function () {
+            const stubs = makeStubs()
+            namedServer(stubs)
+            schemaAnswer(stubs, true)
+            const find = finder()
+            const ds = loadDatabaseService(stubs)
+
+            const target = await ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', BOTH, find)
+            expect(target.rootPassword).to.equal('named-root')
+            expect(find.called).to.be.false
+        })
+
+        it('reads a login from the decoder container when the indexer\'s env lacks it', async function () {
+            const stubs = makeStubs()
+            const { DECODER_DB_USER, DECODER_DB_PASS, DECODER_DB_NAME, ...indexerOnly } = SERVICE_ENV
+            serviceServer(stubs, { env: indexerOnly, decoderEnv: { DECODER_DB_USER, DECODER_DB_PASS, DECODER_DB_NAME } })
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: DB.hub })
+
+            const target = await ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', BOTH, finder())
+            expect(target.logins[DB.decoder].source).to.equal('xchain-decoder')
+        })
+    })
+})
+
+describe('DatabaseService', function () {
+    describe('resolveNamedDatabaseTarget() service hub login', function () {
+
+        it('does not need a hub login for a decoder-only reset', async function () {
+            const stubs = makeStubs()
+            const { HUB_DB_USER, HUB_DB_PASS, ...noHub } = SERVICE_ENV
+            serviceServer(stubs, { env: noHub })
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: DB.hub })
+
+            const target = await ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', ['xchain-decoder'], finder())
+            expect(target.hubLogin).to.equal(null)
+        })
+
+        it('skips the fence clear with a note when the stack\'s hub uses another database', async function () {
+            const stubs = makeStubs()
+            serviceServer(stubs, { env: { ...SERVICE_ENV, HUB_DB_NAME: 'Rail_Hub' } })
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: DB.hub })
+
+            const target = await ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', BOTH, finder())
+            expect(target.hubLogin).to.equal(null)
+            expect(target.authReport.join('\n')).to.contain('names Rail_Hub, not XChain_Hub')
+        })
+    })
+})
+
+describe('DatabaseService', function () {
+    describe('resolveNamedDatabaseTarget() service login refusals', function () {
+
+        async function refusal(options, modules = BOTH) {
+            const stubs = makeStubs()
+            serviceServer(stubs, options)
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: DB.hub })
+            const err = await rejection(ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', modules, finder()))
+            expect(err, 'expected a refusal').to.not.equal(null)
+            expectNoSecret(err.message)
+            // The root failure stays in the message beside the service one.
+            expect(err.message).to.contain('no root password')
+            return err.message
+        }
+
+        it('refuses when a target database has no login in either container\'s env', async function () {
+            const { INDEXER_DB_PASS, ...env } = SERVICE_ENV
+            expect(await refusal({ env })).to.contain('carries INDEXER_DB_USER and INDEXER_DB_PASS')
+        })
+
+        it('refuses a login that does not log in, naming the user', async function () {
+            expect(await refusal({ passwords: { ...SECRETS, dec_user: 'not-the-env-one' } }))
+                .to.contain('DECODER_DB_USER dec_user does not log in to ' + NAMED)
+        })
+
+        it('refuses when the stack\'s services cannot be found', async function () {
+            const stubs = makeStubs()
+            serviceServer(stubs)
+            const ds = loadDatabaseService(stubs)
+            const err = await rejection(ds.resolveNamedDatabaseTarget(NAMED, 'bitcoin', 'mainnet', BOTH))
+            expect(err && err.message).to.contain('no indexer or decoder container was found')
+        })
+
+        for (const [missing, privileges] of [['DROP', 'SELECT, INSERT, CREATE, CREATE VIEW'], ['CREATE', 'SELECT, DROP, CREATE VIEW, CREATE ROUTINE']]) {
+            it(`refuses a database user whose grants lack ${missing}`, async function () {
+                const grants = { ...FULL_GRANTS, idx_user: [`GRANT ${privileges} ON \`XChain_BTC_Mainnet_Indexer\`.* TO \`idx_user\`@\`%\``] }
+                expect(await refusal({ grants })).to.contain(`INDEXER_DB_USER idx_user has no ${missing} grant on ${DB.indexer}`)
+            })
+        }
+
+        it('refuses a grant on another database, even with ALL PRIVILEGES', async function () {
+            const grants = { ...FULL_GRANTS, dec_user: ['GRANT ALL PRIVILEGES ON `XChain_BTC_Regtest_Decoder`.* TO `dec_user`@`%`'] }
+            expect(await refusal({ grants })).to.contain(`has no DROP or CREATE grant on ${DB.decoder}`)
+        })
+
+        it('refuses a hub user without DELETE on the fence table', async function () {
+            const grants = { ...FULL_GRANTS, hub_user: ['GRANT SELECT ON `XChain_Hub`.* TO `hub_user`@`%`'] }
+            expect(await refusal({ grants })).to.contain('HUB_DB_USER hub_user has no DELETE grant on XChain_Hub.price_ingest_watermarks')
+        })
+
+        it('refuses when the stack names another database than the reset targets', async function () {
+            expect(await refusal({ env: { ...SERVICE_ENV, DECODER_DB_NAME: 'Other_Decoder' } }))
+                .to.contain(`DECODER_DB_NAME in the xchain-indexer container names Other_Decoder, not ${DB.decoder}`)
+        })
+    })
+})

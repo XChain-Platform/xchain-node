@@ -241,3 +241,60 @@ describe('DatabaseService', function () {
         })
     })
 })
+
+describe('DatabaseService', function () {
+
+    // With no root for the named server, each database is dropped and recreated by the user that owns it, and the
+    // fence clear runs as the hub's user: the users resolveNamedDatabaseTarget checked before anything was stopped.
+    describe('resetDatabases() and clearHubPriceIngestWatermark() as the stack\'s own users', function () {
+        const login = (user, password) => ({ user, password, prefix: 'X', grants: [] })
+        const SERVICE = {
+            containerName: 'xchain-rail-database', containerId: 'c'.repeat(64), authMode: 'service',
+            logins: { XChain_BTC_Mainnet_Decoder: login('dec_user', 'dec-pw'), XChain_BTC_Mainnet_Indexer: login('idx_user', 'idx-pw') },
+            hubLogin: login('hub_user', 'hub-pw')
+        }
+
+        function recordSpawns(stubs, respond) {
+            const calls = []
+            stubs.spawn.callsFake(fakeSpawn((sql, args, opts) => {
+                calls.push({ sql, user: args[args.indexOf('-u') + 1], password: opts.env.MYSQL_PWD })
+                return respond(sql)
+            }))
+            return calls
+        }
+
+        it('drops and recreates each database as its own user', async function () {
+            const stubs = makeStubs()
+            const calls = recordSpawns(stubs, () => ({ stdout: '' }))
+            const ds = loadDatabaseService(stubs)
+            await ds.resetDatabases('bitcoin', 'mainnet', ['xchain-decoder', 'xchain-indexer'], SERVICE)
+
+            expect(calls.map(({ sql, user, password }) => [sql.match(/DROP DATABASE IF EXISTS (\w+)/)[1], user, password])).to.deep.equal([
+                ['XChain_BTC_Mainnet_Decoder', 'dec_user', 'dec-pw'],
+                ['XChain_BTC_Mainnet_Indexer', 'idx_user', 'idx-pw']
+            ])
+            expect(stubs.getDbRootPassword.called).to.be.false
+        })
+
+        it('clears the price fence as the hub user', async function () {
+            const stubs = makeStubs()
+            const calls = recordSpawns(stubs, (sql) => ({ stdout: /information_schema/i.test(sql) ? '1' : '' }))
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub' })
+            expect(await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest', SERVICE)).to.be.true
+
+            expect(calls.some((c) => /DELETE\s+FROM\s+`XChain_Hub`\.price_ingest_watermarks/.test(c.sql))).to.be.true
+            for (const call of calls) expect([call.user, call.password]).to.deep.equal(['hub_user', 'hub-pw'])
+        })
+
+        it('runs nothing and throws when no hub login was resolved', async function () {
+            const stubs = makeStubs()
+            const calls = recordSpawns(stubs, () => ({ stdout: '1' }))
+            const ds = loadDatabaseService(stubs, {}, { HUB_DB_NAME: 'XChain_Hub' })
+            let err = null
+            try { await ds.clearHubPriceIngestWatermark('bitcoin', 'regtest', { ...SERVICE, hubLogin: null }) } catch (e) { err = e }
+
+            expect(err && err.message).to.contain('no hub login was resolved on xchain-rail-database')
+            expect(calls).to.have.length(0)
+        })
+    })
+})

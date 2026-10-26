@@ -24,6 +24,7 @@ let { schemaExistsSql } = require('../../db/information_schema')
 let { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 let { executeDockerMariaDbCommand } = require('./mariadb_exec')
 let { resolveResetTargets } = require('./reset_databases')
+let { resolveServiceLogins, serviceAuthReport, namedTargetRunner } = require('./service_db_logins')
 
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
@@ -82,12 +83,45 @@ async function rootPasswordForContainer(containerId, containerName) {
         + ` and ${ROOT_PASSWORD_OVERRIDE_VAR} is not set`)
 }
 
-// Resolve everything the reset's DB steps need from the named server, before anything is stopped. Each target
-// database must already exist there: a name that differs from the stack's own would otherwise DROP nothing and
-// CREATE an empty database beside the live one, and the reset would report success.
-async function resolveNamedDatabaseTarget(containerName, coin, network, modules) {
+// Each target database must already exist on the named server: a name that differs from the stack's own would
+// otherwise DROP nothing and CREATE an empty database beside the live one, and the reset would report success.
+async function checkTargetDatabasesExist(target) {
+    for (const dbName of target.databases) {
+        const found = await namedTargetRunner(target, dbName)(schemaExistsSql(dbName), '-B -N')
+        if (parseInt(String(found).trim(), 10) !== 1) {
+            throw new Error(`${target.containerName} holds no database ${dbName}, so this is not the server that stack uses`)
+        }
+    }
+}
+
+// No root logs in, so each step runs as the database user the stack's own services use, read from their env. Every
+// login and grant is checked here; a refusal names both why root failed and which user or grant fell short.
+async function resolveServiceTarget(containerName, containerId, coin, network, modules, findServiceContainer, rootErr) {
+    const databases = await resolveResetTargets(coin, network, modules)
+    for (const dbName of databases) assertSafeDbIdentifier(dbName, 'database name')
+    let resolved
+    try {
+        resolved = await resolveServiceLogins({ containerName, containerId, modules, databases, findServiceContainer })
+    } catch (err) {
+        throw new Error(`${rootErr.message}; the stack's own database users cannot stand in: ${err.message}`)
+    }
+    const target = { containerName, containerId, databases, authMode: 'service', rootRefusal: rootErr.message, ...resolved }
+    await checkTargetDatabasesExist(target)
+    target.authReport = serviceAuthReport(target)
+    return target
+}
+
+// Resolve everything the reset's DB steps need from the named server, before anything is stopped. A root that logs
+// in is used as before; without one, `findServiceContainer(module)` finds the stack's services whose env carries
+// their own database logins, and the reset runs as those users instead.
+async function resolveNamedDatabaseTarget(containerName, coin, network, modules, findServiceContainer = async () => null) {
     const containerId = await findNamedContainerId(containerName)
-    const rootPassword = await rootPasswordForContainer(containerId, containerName)
+    let rootPassword
+    try {
+        rootPassword = await rootPasswordForContainer(containerId, containerName)
+    } catch (rootErr) {
+        return resolveServiceTarget(containerName, containerId, coin, network, modules, findServiceContainer, rootErr)
+    }
     const databases = await resolveResetTargets(coin, network, modules)
     for (const dbName of databases) {
         assertSafeDbIdentifier(dbName, 'database name')

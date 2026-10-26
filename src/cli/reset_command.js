@@ -27,7 +27,7 @@ function registerReset(program, deps, resetHubCheckpoints) {
         .option('--yes', 'Skip the destructive-reset confirmation prompt (for CI/scripted resets)')
         .option('--with-indexer', 'Reset xchain-indexer alongside xchain-decoder; the pair is only coherent when both move together')
         .option('--db-container <name>', 'Run the database steps on this MariaDB container, for a stack this CLI did not install; finds its services by container name and skips the hub and explorer config push (xchain-decoder and xchain-indexer only)')
-        .option('--check', 'With --db-container: check the server, its root login and the target databases, then stop before anything is stopped or changed')
+        .option('--check', 'With --db-container: check the server, its root login (or, without one, the stack\'s own database users and their grants) and the target databases, then stop before anything is stopped or changed')
         .action(async (service, chain, network, options) => {
             if (options && options.check && !options.dbContainer) {
                 process.stderr.write('reset: --check needs --db-container\n')

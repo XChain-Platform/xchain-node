@@ -71,7 +71,11 @@ describe('moduleOperations', function () {
             const result = await runReset(ops, [DECODER, 'bitcoin', 'regtest', true, true, { dbContainer: NAMED_DB }])
 
             expect(result).to.be.true
-            sinon.assert.calledOnceWithExactly(stubs.resolveNamedDatabaseTarget, NAMED_DB, 'bitcoin', 'regtest', [DECODER, INDEXER])
+            sinon.assert.calledOnce(stubs.resolveNamedDatabaseTarget)
+            const [name, coin, network, modules, findServiceContainer] = stubs.resolveNamedDatabaseTarget.firstCall.args
+            expect([name, coin, network, modules]).to.deep.equal([NAMED_DB, 'bitcoin', 'regtest', [DECODER, INDEXER]])
+            // The resolver finds the stack's services by container name, the source of their own database logins.
+            expect(await findServiceContainer(INDEXER)).to.equal(SERVICE_IDS['bitcoin-regtest-xchain-indexer'])
             const target = await stubs.resolveNamedDatabaseTarget.firstCall.returnValue
             expect(stubs.resetDatabases.firstCall.args).to.deep.equal(['bitcoin', 'regtest', [DECODER, INDEXER], target])
             expect(stubs.clearHubPriceIngestWatermark.firstCall.args).to.deep.equal(['bitcoin', 'regtest', target])
@@ -219,6 +223,52 @@ describe('moduleOperations', function () {
             expect(stubs.resetDatabases.called).to.be.false
             expect(stubs.clearHubPriceIngestWatermark.called).to.be.false
             expect(logged.join('\n')).to.contain('Nothing was stopped or changed')
+        })
+    })
+})
+
+describe('moduleOperations', function () {
+    registerLifecycleHooks(() => {})
+
+    describe('resetModules() with --db-container --check, auth report', function () {
+        const checkArgs = [DECODER, 'bitcoin', 'regtest', false, true, { dbContainer: NAMED_DB, check: true }]
+
+        it('prints the service users and grants it would run as, and stops', async function () {
+            const stubs = makeStubs()
+            dockerAnswersByName(stubs)
+            const report = ['No root login works on ' + NAMED_DB + ' (no root password), so each step runs as the stack\'s own database user:',
+                '  XChain_BTC_Regtest_Decoder: dec_user (DECODER_DB_USER from the xchain-indexer container), granted ALL PRIVILEGES ON `XChain_BTC_Regtest_Decoder`.*']
+            stubs.resolveNamedDatabaseTarget.callsFake(async (containerName) => ({ containerName, containerId: 'd'.repeat(64),
+                authMode: 'service', databases: ['XChain_BTC_Regtest_Decoder'], authReport: report }))
+            const ops = loadOperations(stubs)
+            const logged = []
+
+            expect(await runReset(ops, checkArgs, logged)).to.be.true
+            const out = logged.join('\n')
+            for (const line of report) expect(out).to.contain(line)
+            expect(out).to.not.contain('as root')
+            expect(stubs.stopContainer.called).to.be.false
+            expect(stubs.resetDatabases.called).to.be.false
+        })
+
+        it('says it logs in as root when a root logged in', async function () {
+            const stubs = makeStubs()
+            dockerAnswersByName(stubs)
+            const ops = loadOperations(stubs)
+            const logged = []
+
+            expect(await runReset(ops, checkArgs, logged)).to.be.true
+            expect(logged.join('\n')).to.contain('Logs in to ' + NAMED_DB + ' as root.')
+        })
+
+        it('prints no auth line on a root reset without --check', async function () {
+            const stubs = makeStubs()
+            dockerAnswersByName(stubs)
+            const ops = loadOperations(stubs)
+            const logged = []
+
+            expect(await runReset(ops, [DECODER, 'bitcoin', 'regtest', true, true, { dbContainer: NAMED_DB }], logged)).to.be.true
+            expect(logged.join('\n')).to.not.contain('as root')
         })
     })
 })

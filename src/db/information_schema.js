@@ -90,6 +90,9 @@ function createTimeSql(tableCount) {
 /** The session pin the create-time read above depends on. Run it on the same connection, first. */
 const SESSION_UTC_SQL = "SET SESSION time_zone = '+00:00'"
 
+/** The grants of the account this session logged in as, one GRANT line each; any user may read its own. */
+const CURRENT_USER_GRANTS_SQL = 'SHOW GRANTS FOR CURRENT_USER()'
+
 module.exports = {
     schemaExistsSql,
     tableCountSql,
@@ -97,5 +100,6 @@ module.exports = {
     tablesExistSql,
     schemaSizeSql,
     createTimeSql,
-    SESSION_UTC_SQL
+    SESSION_UTC_SQL,
+    CURRENT_USER_GRANTS_SQL
 }

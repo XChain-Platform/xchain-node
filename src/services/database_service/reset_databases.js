@@ -29,6 +29,7 @@ let logger = getLogger()
 let { getDatabaseContainerId } = require('./container_access')
 let { getExternalDbConfig } = require('./external_db')
 let { executeNativeMariaDbCommand, askMariadbRootPassword, executeDockerMariaDbCommand } = require('./mariadb_exec')
+const { namedTargetRunner } = require('./service_db_logins')
 
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
@@ -67,11 +68,11 @@ async function resolveResetTargets(coin, network, modules) {
 // the bundled container or the external DB is used, as before.
 async function resetDatabases(coin, network, modules = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER], namedTarget = null) {
     const resetTargets = await resolveResetTargets(coin, network, modules)
-    // A stack with its own DB server: its id and root were resolved and checked before anything was stopped.
+    // A stack with its own DB server: its id and its root, or each database's own user, were resolved and checked
+    // before anything was stopped. A database user with DROP and CREATE on its own database can recreate it.
     if (namedTarget) {
         for (const dbName of resetTargets) {
-            await executeDockerMariaDbCommand(namedTarget.containerId, namedTarget.rootPassword,
-                `DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`)
+            await namedTargetRunner(namedTarget, dbName)(`DROP DATABASE IF EXISTS ${dbName}; CREATE DATABASE ${dbName}`)
             logger.info(`Database ${dbName} reset on ${namedTarget.containerName}!`)
         }
         return
@@ -196,8 +197,9 @@ async function clearHubPriceIngestWatermark(coin, network, namedTarget = null) {
 
     let runner
     // A stack with its own DB server keeps its hub's fence row there; the probe below says so when it does not.
+    // Without a root it runs as the hub's own user, whose DELETE grant was checked before anything was stopped.
     if (namedTarget) {
-        runner = (sql, options) => executeDockerMariaDbCommand(namedTarget.containerId, namedTarget.rootPassword, sql, options)
+        runner = namedTargetRunner(namedTarget, null)
     } else if (EXTERNAL_DB) {
         const externalCfg = await getExternalDbConfig()
         runner = (sql, options) => executeNativeMariaDbCommand(externalCfg, sql, options)
