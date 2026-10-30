@@ -113,6 +113,16 @@ class HubConnector {
             params: { config: newConfigJson },
             id: 1
         }, 60000);  // config pushes on multi-coin nodes can exceed a 10s ceiling (prod-validated)
+        // The hub reports a refused push (e.g. PBFT "Not the leader for seq N")
+        // as a normal JSON-RPC result of the form {error}, not as a transport
+        // failure. Treat it as a failed push and record the text so the retry
+        // loop retries and finally surfaces the real cause.
+        if(result && typeof result === 'object' && result.error){
+            const e = result.error;
+            const text = typeof e === 'string' ? e : (e && e.message) || JSON.stringify(e);
+            this.lastFailures.push('hub refused config push → ' + text);
+            return false;
+        }
         return result !== null;
     }
 }
