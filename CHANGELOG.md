@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Capped the hub config push at three minutes of wall time so a hung hub no longer holds the command lock for an hour.
 - Made a hub config push that the hub answers with an error count as failed instead of delivered.
 - Stopped the read-only ps, tail, logs and monitor commands from installing the hub and restarting one the operator stopped.
+- Made exec exit non-zero with a short reason when the in-container command fails or matches no installed service.
 
 ## [0.26.3] - 2026-10-23
 

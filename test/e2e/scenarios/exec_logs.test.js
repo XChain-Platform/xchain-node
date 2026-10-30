@@ -71,13 +71,14 @@ describe('E2E: Exec and Logs Commands (Scenarios 4.11, 4.12)', function () {
             expect(hasCommand, 'exec includes the user command').to.be.true
         })
 
-        it('skips exec when module has no container in LevelDB', async function () {
+        it('reports failure and runs nothing when module has no container in LevelDB', async function () {
             env.setupDefaultRoutes()
             cli = env.createCLI()
 
             const serviceList = filterCommandParameters(null, 'xchain-decoder', 'bitcoin', 'regtest')
+            // A selection that matches no installed container is a failure, so the exec CLI exits 1.
             const result = await cli.moduleOps.execModules(serviceList, 'ls /app')
-            expect(result).to.be.true
+            expect(result).to.equal(false)
 
             const execCmds = env.capture.findCommands(/docker exec/)
             expect(execCmds).to.have.lengthOf(0)

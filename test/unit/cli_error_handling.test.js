@@ -44,7 +44,7 @@ function loadCli(opsOverrides = {}) {
             restartModules: sinon.stub().resolves(),
             stopModules: sinon.stub().resolves(),
             startModules: sinon.stub().resolves(),
-            execModules: sinon.stub().resolves(),
+            execModules: sinon.stub().resolves(true),
             shellModule: sinon.stub().resolves(),
             runE2ETest: sinon.stub().resolves({ logFile: '', exitCode: 0 }),
             resetModules: sinon.stub().resolves(),

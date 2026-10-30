@@ -171,33 +171,7 @@ describe('moduleOperations', function () {
     })
 })
 
-describe('moduleOperations', function () {
-    let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
-    registerLifecycleHooks(stubs => {
-        ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
-    })
-
-
-        describe('execModules(): error path', function () {
-
-        it('continues after execContainer error', async function () {
-            const stubs = makeStubs()
-            stubs.execContainer.rejects(new Error('exec failed'))
-            const ops = loadOperations(stubs)
-            const result = await ops.execModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'ls')
-            expect(result).to.be.true
-        })
-
-        it('skips when container ID is null', async function () {
-            const stubs = makeStubs()
-            stubs.db.getModuleContainer.resolves(null)
-            const ops = loadOperations(stubs)
-            const result = await ops.execModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, 'ls')
-            expect(result).to.be.true
-            expect(stubs.execContainer.called).to.be.false
-        })
-    })
-})
+// execModules failure and no-match cases live in 20_exec_failure.test.js.
 
 // The post-reset bounce of decoder + indexer is the last thing reset does to them, so a
 // restart failure swallowed there leaves a freshly wiped service stopped while reset exits 0.

@@ -329,8 +329,9 @@ function registerExec(program, deps) {
         .argument('<command>', 'The shell command to execute')
         .action(async (service, chain, network, command) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await execModules(serviceList, command)
-            return process.exit(0)
+            // execModules has already printed the reason; scripts chaining on exec need the status.
+            const ok = await execModules(serviceList, command)
+            return process.exit(ok === true ? 0 : 1)
         })
 
 }

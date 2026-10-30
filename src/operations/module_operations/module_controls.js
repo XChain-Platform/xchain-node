@@ -214,23 +214,52 @@ async function clearDecoderReorgHalt(servicesList, { reason, force = false, dryR
     return ok
 }
 
+// Print why one in-container command failed: whatever it wrote, then its exit code (or the
+// spawn error when it never ran) on stderr, never the raw error object with its stack.
+function reportExecFailure(target, err) {
+    const out = err && typeof err.stdout === 'string' ? err.stdout.trim() : ''
+    if (out) console.log(out)
+    const why = err && typeof err.code === 'number'
+        ? 'exit code ' + err.code
+        : String((err && err.message) || err).split('\n')[0]
+    console.error(`exec failed in ${target.module} (${target.coin} ${target.network}): ${why}`)
+    const errText = err && typeof err.stderr === 'string' ? err.stderr.trim() : ''
+    if (errText) console.error(errText)
+}
+
+// Run one command in every selected container that is installed. Returns true only when at
+// least one container matched and every run exited 0, so the CLI can exit non-zero when the
+// command failed anywhere or the selection (a typo'd service, one not installed here) ran nothing.
 async function execModules(servicesList, command) {
     const commandArgs = command.split(/\s+/)
-    for (const nextCoin in servicesList) {
-        for (const nextNetwork in servicesList[nextCoin]) {
-            for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                if (!containerId) continue
+    const unmatched = []
+    let matched = 0
+    let ok = true
+    for (const coin in servicesList) {
+        for (const network in servicesList[coin]) {
+            for (const module of servicesList[coin][network]) {
+                const target = { module, coin, network }
+                const containerId = await db.getModuleContainer(module, coin, network)
+                if (!containerId) {
+                    unmatched.push(target)
+                    continue
+                }
+                matched++
                 try {
-                    const execStdOut = await execContainer(containerId, commandArgs)
-                    console.log(execStdOut)
+                    console.log(await execContainer(containerId, commandArgs))
                 } catch (err) {
-                    console.log(err)
+                    reportExecFailure(target, err)
+                    ok = false
                 }
             }
         }
     }
-    return true
+    if (matched === 0) {
+        const asked = unmatched.map(t => `${t.module} (${t.coin} ${t.network})`).join(', ')
+        console.error(`exec matched no installed service: ${asked || 'nothing was selected'}; nothing was run`)
+        return false
+    }
+    return ok
 }
 
 async function shellModule(servicesList) {
