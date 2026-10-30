@@ -55,9 +55,11 @@ function registerStart(program, deps) {
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
             // Every selected module is still attempted; a failed one only changes the exit status.
+            // An unknown chain or network, or a selection with nothing installed, also exits 1 with its reason.
             try {
+                const serviceList = filterCommandParameters(null, service, chain, network,
+                    { includeSharedExplorer: false })
                 await startModules(serviceList)
             } catch (err) {
                 console.error('start failed: ' + redactSecrets(err && err.message ? err.message : err))
@@ -77,9 +79,11 @@ function registerStop(program, deps) {
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
             // Every selected module is still attempted; a failed one only changes the exit status.
+            // An unknown chain or network, or a selection with nothing installed, also exits 1 with its reason.
             try {
+                const serviceList = filterCommandParameters(null, service, chain, network,
+                    { includeSharedExplorer: false })
                 await stopModules(serviceList)
             } catch (err) {
                 console.error('stop failed: ' + redactSecrets(err && err.message ? err.message : err))
@@ -99,9 +103,11 @@ function registerRestart(program, deps) {
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
             // Every selected module is still attempted; a failed one only changes the exit status.
+            // An unknown chain or network, or a selection with nothing installed, also exits 1 with its reason.
             try {
+                const serviceList = filterCommandParameters(null, service, chain, network,
+                    { includeSharedExplorer: false })
                 await restartModules(serviceList)
             } catch (err) {
                 console.error('restart failed: ' + redactSecrets(err && err.message ? err.message : err))

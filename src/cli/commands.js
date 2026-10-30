@@ -214,7 +214,7 @@ function registerUninstall(program, deps) {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .option('--include-shared', 'Also uninstall shared services (xchain-explorer, xchain-sync, xchain-hub) once no chain/network is still installed; the database is never removed and must be removed manually')
         .action(async (service, chain, network, options) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
+            const serviceList = filterCommandParameters(null, service, chain, network, { includeSharedExplorer: false })
             // A module that failed to uninstall must not be printed and forgotten,
             // leaving the command exiting 0 with containers still running. The
             // remaining modules are still attempted (uninstallModules finishes the

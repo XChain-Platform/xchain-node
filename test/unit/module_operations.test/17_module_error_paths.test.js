@@ -124,17 +124,18 @@ describe('moduleOperations', function () {
 
 
     // -------------------------------------------------------------------
-    // stopModules/startModules: skip when no container
+    // stopModules/startModules: reject when no container
     // -------------------------------------------------------------------
 
-        describe('stopModules(): skip when no container', function () {
+        describe('stopModules(): reject when no container is registered', function () {
 
-        it('skips when container ID is not found', async function () {
+        it('rejects with a no-installed-service error and stops nothing', async function () {
             const stubs = makeStubs()
             stubs.db.getModuleContainerStrict.resolves(null)
             const ops = loadOperations(stubs)
-            const result = await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            const err = await ops.stopModules({ bitcoin: { mainnet: ['xchain-encoder'] } }).then(() => null, e => e)
+            expect(err).to.be.an('error')
+            expect(err.message).to.match(/stop matched no installed service: xchain-encoder \(bitcoin mainnet\)/)
             expect(stubs.stopContainer.called).to.be.false
         })
 

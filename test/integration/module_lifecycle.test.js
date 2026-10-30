@@ -297,11 +297,11 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
     beforeEach(setupModuleEnv)
     afterEach(cleanupModuleEnv)
     describe('moduleOperations uses LevelDB for container lookups', function () {
-        it('startModules gracefully handles missing LevelDB entry', async function () {
-            // No modules inserted; the registry is empty
+        it('startModules fails with a named no-installed-service error on a missing LevelDB entry', async function () {
+            const startContainer = sinon.stub().resolves(true)
             const moduleOps = proxyquire('../../src/operations/module_operations', {
                 '../services/docker_service': {
-                    startContainer: sinon.stub().resolves(true),
+                    startContainer,
                     createDockerNetwork: async () => true,
                     stopContainer: async () => true,
                     restartContainer: async () => true,
@@ -315,10 +315,10 @@ describe('Integration: Module Lifecycle (LevelDB state)', function () {
             })
 
             const serviceList = { 'bitcoin': { 'mainnet': ['xchain-encoder'] } }
-            // Should not throw; the operation catches errors and logs them. A missing
-            // container ID must not throw: the operation catches and logs it.
-            const result = await moduleOps.startModules(serviceList)
-            expect(result).to.be.true
+            // The registry is empty, so nothing selected is installed: fail with a reason.
+            const err = await moduleOps.startModules(serviceList).then(() => null, e => e)
+            expect(err && err.message).to.match(/no installed service: xchain-encoder \(bitcoin mainnet\)/)
+            expect(startContainer.called).to.be.false
         })
     })
 })

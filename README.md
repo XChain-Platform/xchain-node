@@ -77,6 +77,10 @@ xchain-node stop all bitcoin regtest
 xchain-node start all bitcoin regtest
 ```
 
+The `start`, `stop`, `restart`, and `uninstall` commands leave the shared explorer
+out when `all` is scoped to one chain, because one explorer serves every chain. Name it directly
+when needed, for example `xchain-node restart explorer`.
+
 ### Run a validator
 
 By default the bundled `xchain-hub` runs as a standalone config oracle. To run it

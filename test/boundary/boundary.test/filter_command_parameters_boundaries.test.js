@@ -102,9 +102,10 @@ describeBoundaryTests('ConfigService: filterCommandParameters unknown chain or n
             .to.throw(/unknown network.*regtset/i)
     })
 
-    it('still expands all with a valid chain and network or all/all', function () {
-        const one = filterCommandParameters(null, 'all', 'litecoin', 'regtest')
-        expect(one['']['']).to.deep.equal(['xchain-explorer'])
+    it('still expands all with a valid chain and network or all/all; lifecycle policy leaves the explorer out', function () {
+        const one = filterCommandParameters(null, 'all', 'litecoin', 'regtest',
+            { includeSharedExplorer: false })
+        expect(one).to.not.have.property('')
         expect(one['litecoin']['regtest']).to.include('xchain-decoder')
         const every = filterCommandParameters(null, 'all', 'all', 'all')
         expect(every['']['']).to.include('xchain-explorer')

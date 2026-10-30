@@ -85,14 +85,23 @@ async function readRegisteredContainer(target, failures) {
 
 // Run one docker action on every selected module that is installed, attempting all of them, and
 // throw one error naming each module that failed so the command can exit non-zero.
+// A selection in which nothing is installed is a failure too: a typo'd service name, or a real one
+// that is not installed on this chain and network, would otherwise act on nothing and report success,
+// and a scripted `stop` would believe a service was down while it kept running.
 async function controlModules(verb, servicesList, act) {
     const failures = []
+    const unmatched = []
+    let matched = 0
     for (const coin in servicesList) {
         for (const network in servicesList[coin]) {
             for (const module of servicesList[coin][network]) {
                 const target = { module, coin, network }
                 const containerId = await readRegisteredContainer(target, failures)
-                if (!containerId) continue
+                if (!containerId) {
+                    unmatched.push(target)
+                    continue
+                }
+                matched++
                 try {
                     await act(target, containerId)
                 } catch (err) {
@@ -106,6 +115,12 @@ async function controlModules(verb, servicesList, act) {
         const detail = failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; ')
         const err = new Error(`${verb} failed for ${failures.length} module${failures.length === 1 ? '' : 's'}: ${detail}`)
         err.failures = failures
+        throw err
+    }
+    if (matched === 0) {
+        const asked = unmatched.map(t => `${t.module} (${t.coin || 'shared'} ${t.network || 'shared'})`).join(', ')
+        const err = new Error(`${verb} matched no installed service: ${asked || 'nothing was selected'}; nothing was changed`)
+        err.failures = unmatched.map(t => ({ ...t, reason: 'not installed' }))
         throw err
     }
     return true
