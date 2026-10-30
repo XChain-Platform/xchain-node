@@ -25,8 +25,25 @@ function configure(dependencies) {
 }
 
 
+// Replace a file via a flushed temp file and rename (as credentials.json), so a crash
+// never leaves a torn sidecar whose missing keys the next load re-mints; symlinks survive.
+function writeFileAtomic(filePath, data, mode) {
+    let target = filePath
+    try { target = fs.realpathSync(filePath) } catch { /* not created yet */ }
+    const tmpName = '.' + path.basename(target) + '.' + process.pid + '.' + crypto.randomBytes(6).toString('hex') + '.tmp'
+    const tmpPath = path.join(path.dirname(target), tmpName)
+    try {
+        fs.writeFileSync(tmpPath, data, { mode, flag: 'wx', flush: true })
+        fs.renameSync(tmpPath, target)
+    } catch (err) {
+        try { fs.unlinkSync(tmpPath) } catch { /* never created */ }
+        throw err
+    }
+    try { fs.chmodSync(target, mode) } catch { /* best effort, as credentials.json */ }
+}
+
 // Persist RPC credentials to the untracked <coin>-<network>.local sidecar. A fresh sidecar
-// is created with writeFileSync; an existing one is appended to, unless overwrite is set
+// is created; new keys are added after an existing one's content, unless overwrite is set
 // (used by the legacy-migration path to replace it outright). The sidecar holds the live
 // node RPC user/password, so it is forced to 0600 the same way credentials.json is: without
 // an explicit mode the file lands at the process umask (commonly 0644), leaving the RPC
@@ -36,30 +53,12 @@ function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
     if (overwrite || !fs.existsSync(localFilePath)) {
         const dir = path.dirname(localFilePath)
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(localFilePath, body, { mode: 0o600 })
+        writeFileAtomic(localFilePath, body, 0o600)
     } else {
-        let needsLeadingNewline = false
-        try {
-            const size = fs.statSync(localFilePath).size
-            if (size > 0) {
-                const fd = fs.openSync(localFilePath, 'r')
-                try {
-                    const buf = Buffer.alloc(1)
-                    fs.readSync(fd, buf, 0, 1, size - 1)
-                    needsLeadingNewline = buf.toString('utf8') !== '\n'
-                } finally {
-                    fs.closeSync(fd)
-                }
-            }
-        } catch {
-            needsLeadingNewline = false
-        }
-        fs.appendFileSync(localFilePath, needsLeadingNewline ? '\n' + body : body)
+        const existing = String(fs.readFileSync(localFilePath, 'utf8'))
+        const needsLeadingNewline = existing.length > 0 && !existing.endsWith('\n')
+        writeFileAtomic(localFilePath, existing + (needsLeadingNewline ? '\n' : '') + body, 0o600)
     }
-    // chmod unconditionally: writeFileSync's mode only applies on create, and an
-    // already-existing sidecar (append path, or one written before this fix) keeps its
-    // old permissions otherwise.
-    try { fs.chmodSync(localFilePath, 0o600) } catch {}
 }
 
 // Update specific KEY=VALUE entries in a sidecar while PRESERVING all other keys. Unlike
@@ -272,7 +271,10 @@ function migrateMainCredentials(defaultConfig, configFilePath, localFilePath) {
     for (const key in defaultConfig) {
         if (key !== "NODE_USER" && key !== "NODE_PASSWORD") remaining.push(`${key}=${defaultConfig[key]}`)
     }
-    fs.writeFileSync(configFilePath, remaining.length ? remaining.join("\n") + "\n" : "")
+    // Keep the main config's own permissions across the replace (it is not a 0600 file).
+    let mode = 0o644
+    try { mode = fs.statSync(configFilePath).mode & 0o777 } catch { /* not created yet */ }
+    writeFileAtomic(configFilePath, remaining.length ? remaining.join("\n") + "\n" : "", mode)
 }
 
 function generateRpcCredentials(defaultConfig, localFilePath) {

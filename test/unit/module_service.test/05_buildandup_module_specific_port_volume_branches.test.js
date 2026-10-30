@@ -245,6 +245,22 @@ moduleSuite('buildAndUp(): module-specific port/volume branches', function () {i
             }
         })
 
+        it('leaves the container it was asked to replace running when docker build fails', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, ...rest) => {
+                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+                if (args[0] === 'build') { cb(new Error('build failed')) }
+                else { cb(null, '') }
+            })
+            const ms = loadModuleService(stubs)
+            let threw = null
+            try { await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', 'old-id-123') } catch (err) { threw = err }
+            expect(String(threw)).to.include('Error creating Docker image')
+            expect(stubs.stopContainerByName.called).to.be.false
+            expect(stubs.removeContainer.called).to.be.false
+            expect(stubs.forceRemoveContainerByName.called).to.be.false
+        })
+
         // xchain-hub issue 23: on a buildx-less host the legacy builder died on
         // the module Dockerfiles' optional COPY glob after the clone and the DB
         // provisioning had already run. The probe has to refuse BEFORE the

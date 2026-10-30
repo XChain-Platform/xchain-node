@@ -37,6 +37,7 @@ function makeServiceWithConfig(configContent) {
         readFileSync: sinon.stub().returns(''),
         appendFileSync: sinon.stub(),
         writeFileSync: sinon.stub(),
+        renameSync: sinon.stub(),
         rmSync: sinon.stub(),
         mkdirSync: sinon.stub(),
         chmodSync: sinon.stub()

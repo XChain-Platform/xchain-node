@@ -49,6 +49,7 @@ describe('Chaos: Config Resilience', function () {
                 existsSync: sinon.stub().returns(false),
                 createReadStream: sinon.stub(),
                 writeFileSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -69,6 +70,7 @@ describe('Chaos: Config Resilience', function () {
                 existsSync: sinon.stub().returns(false),
                 createReadStream: sinon.stub(),
                 writeFileSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }

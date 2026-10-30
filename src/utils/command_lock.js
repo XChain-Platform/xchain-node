@@ -130,7 +130,7 @@ function breakAbandonedReclaimMarker(reclaimFile) {
 function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
     const marker = JSON.stringify({ pid, nonce, startedAt: new Date().toISOString() }) + '\n'
     try {
-        fs.writeFileSync(reclaimFile, marker, { flag: 'wx', mode: 0o600 })
+        publishLockAtomically(reclaimFile, marker, nonce)
     } catch (err) {
         if (err.code !== 'EEXIST') throw err
         // Break-then-loop, never break-and-reclaim in the same pass: reclaiming on
@@ -155,9 +155,9 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
     }
 }
 
-// Create the lock so its path never exists empty. An O_EXCL writeFileSync opens
-// and writes in two steps; a contender reading between them sees an empty file,
-// cannot tell it from a crashed creator's, and reclaims a LIVE creator's lock.
+// Create the lock or reclaim marker so its path never exists empty. An O_EXCL
+// writeFileSync opens and writes in two steps; a contender reading between them
+// sees an empty file, cannot tell it from a crashed creator's, and removes a LIVE one.
 // Write the full payload to a private temp file first, then link() it to the lock
 // path: link fails with EEXIST like O_EXCL, and the path appears already complete.
 function publishLockAtomically(lockFile, payload, nonce) {

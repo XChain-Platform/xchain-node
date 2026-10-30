@@ -37,6 +37,7 @@ function makeServiceWithConfig(configContent) {
         existsSync: sinon.stub().returns(true),
         appendFileSync: sinon.stub(),
         writeFileSync: sinon.stub(),
+        renameSync: sinon.stub(),
         rmSync: sinon.stub(),
         mkdirSync: sinon.stub()
     }
@@ -200,6 +201,7 @@ describe('Fuzz: Config File Parsing', function () {
             createReadStream: sinon.stub(),
             existsSync: sinon.stub().returns(false),
             writeFileSync: sinon.stub(),
+            renameSync: sinon.stub(),
             rmSync: sinon.stub(),
             mkdirSync: sinon.stub()
         }

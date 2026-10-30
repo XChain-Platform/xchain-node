@@ -69,6 +69,7 @@ function makeServiceWithConfig(configContent) {
         readFileSync: sinon.stub().returns(''),
         appendFileSync: sinon.stub(),
         writeFileSync: sinon.stub(),
+        renameSync: sinon.stub(),
         rmSync: sinon.stub(),
         mkdirSync: sinon.stub()
     }
@@ -91,6 +92,7 @@ function makeMemoryConfigService(initialFiles = {}, { dbContainerId = null, exte
         readFileSync: (p) => files[p] != null ? String(files[p]) : '',
         writeFileSync: (p, body) => { files[p] = String(body) },
         appendFileSync: (p, body) => { files[p] = (files[p] || '') + String(body) },
+        renameSync: (from, to) => { files[to] = files[from]; delete files[from] },
         chmodSync: () => {},
         mkdirSync: () => {},
         rmSync: (p) => { delete files[p] }
