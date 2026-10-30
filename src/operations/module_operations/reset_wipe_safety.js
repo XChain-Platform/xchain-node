@@ -40,21 +40,27 @@ async function ensureWipeImage(execFileAsync, failureReason) {
 // Report a wipe that started and failed, then end the reset with every stopped service LEFT DOWN. A non-zero exit does not prove nothing was deleted: `find -delete` removes every entry it can
 // before it exits non-zero on a per-entry error, and a daemon can die mid-run, so the target may be partly cleared. Restarting a service over it, or dropping the decoder/indexer databases around
 // it, would run a store that no longer describes the chain, so nothing restarts and nothing else is wiped until the operator re-runs the same reset. Returns false for the caller to return.
-function reportPartialWipe(context, { target, err, failureReason, nodeCleared = [], trackerUntouched = false }) {
+function reportPartialWipe(context, { target, err, failureReason, nodeCleared = [], trackerUntouched = false, trackerCleared = false, databasesAttempted = false }) {
     const { resetDecoder, resetIndexer, stoppedModules = [], utxoVolumeName } = context
     console.log(`Aborted: clearing ${target} failed (${failureReason(err)}).`)
     console.log(`  ${target} may be PARTLY cleared.`)
     if (nodeCleared.length > 0) {
         console.log(`  The node data for this stack WAS already cleared: ${nodeCleared.join(', ')}.`)
     }
-    // Name only the stores this reset was going to wipe and never reached, so the operator knows what still holds its old data.
+    if (trackerCleared) console.log(`  The Docker volume ${utxoVolumeName} WAS already cleared.`)
+    // Name only the stores this reset was going to wipe and never reached, so the operator knows what still holds its old data. The database step itself is not "untouched" once it was attempted.
     const untouched = []
     if (trackerUntouched) untouched.push(`the Docker volume ${utxoVolumeName}`)
-    if (resetDecoder || resetIndexer) untouched.push('the decoder/indexer databases')
+    if (!databasesAttempted && (resetDecoder || resetIndexer)) untouched.push('the decoder/indexer databases')
     if (untouched.length > 0) console.log(`  NOT touched: ${untouched.join(', ')}.`)
     console.log(`  The stopped services are left down: ${stoppedModules.length > 0 ? stoppedModules.join(', ') : 'none'}.`)
     console.log('  Fix the problem and re-run the same reset command.')
     return false
 }
 
-module.exports = { WIPE_IMAGE, ensureWipeImage, reportPartialWipe }
+// The database step is the last wipe and the services are already stopped, so its failure is reported like any other started wipe: a DROP may have run, nothing restarts, the stopped services are named.
+function reportDatabaseWipeFailure(context, { err, failureReason, nodeCleared = [], trackerCleared = false }) {
+    return reportPartialWipe(context, { target: 'the decoder/indexer databases', err, failureReason, nodeCleared, trackerCleared, databasesAttempted: true })
+}
+
+module.exports = { WIPE_IMAGE, ensureWipeImage, reportPartialWipe, reportDatabaseWipeFailure }

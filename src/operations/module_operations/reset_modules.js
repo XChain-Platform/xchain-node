@@ -2,7 +2,7 @@
 
 let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, resolveNamedDatabaseTarget, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings
 let RESETTABLE_SERVICES
-const { WIPE_IMAGE, ensureWipeImage, reportPartialWipe } = require('./reset_wipe_safety')
+const { WIPE_IMAGE, ensureWipeImage, reportPartialWipe, reportDatabaseWipeFailure } = require('./reset_wipe_safety')
 const { dbOverrideFor, dbModulesFor, endBeforeStop, namedTargetArgs, namedTargetBeforeStop } = require('./reset_db_override')
 
 function configure(dependencies) {
@@ -319,7 +319,7 @@ async function wipeResetStores(context) {
 
     const dbModulesToReset = dbModulesFor(context, XChainService)
     if (dbModulesToReset.length > 0) {
-        await resetDatabases(coin, network, dbModulesToReset, ...namedTargetArgs(context))
+        try { await resetDatabases(coin, network, dbModulesToReset, ...namedTargetArgs(context)) } catch (err) { return reportDatabaseWipeFailure(context, { err, failureReason, nodeCleared, trackerCleared: Boolean(resetUtxoTracker && utxoVolumePresent) }) }
     }
 
     return cleanResetMetadata(context)
