@@ -156,9 +156,16 @@ async function writeExplorerConfig(module, jsonConfig, dependencies) {
 // 2026-10-24), so the push keeps trying for three minutes before it gives up.
 const HUB_CONFIG_RETRY_MS = 3000
 const HUB_CONFIG_ATTEMPTS = 60
+// The attempt count assumes fast connection refusals. A paused or hung hub accepts
+// the connection and answers nothing, so each attempt burns the connector's 60 s
+// timeout and 60 attempts would hold the command lock for about an hour. The
+// wall-clock budget bounds the loop whatever each attempt costs.
+const HUB_CONFIG_WALL_MS = 180000
 
 async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) {
     const { sleep, redactSecrets, logger } = dependencies
+    const now = dependencies.now || Date.now
+    const startedAt = now()
     let hubUpdated = false
     let tries = HUB_CONFIG_ATTEMPTS
     // Keep the last failure. updateConfig is an HTTP call to the module's own
@@ -189,7 +196,7 @@ async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) 
         if (hubUpdated) break
         tries--
         // Out of retries: give up, naming the last concrete error instead of a generic failure.
-        if (tries <= 0) {
+        if (tries <= 0 || now() - startedAt >= HUB_CONFIG_WALL_MS) {
             throw "There was a problem trying to update a config in the " + module + " module" +
                 (lastErr ? " (last error: " + redactSecrets(lastErr) + "; if this is a connection failure, check `docker logs` for the module - the service is not starting)" : "")
         }
