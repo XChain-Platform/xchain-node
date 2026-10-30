@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made a hub config push that the hub answers with an error count as failed instead of delivered.
 - Stopped the read-only ps, tail, logs and monitor commands from installing the hub and restarting one the operator stopped.
 - Made exec exit non-zero with a short reason when the in-container command fails or matches no installed service.
+- Made start, stop and restart exit non-zero when they match no installed service.
+- Kept the shared explorer out of a start, stop, restart or uninstall scoped to one chain.
 
 ## [0.26.3] - 2026-10-23
 
