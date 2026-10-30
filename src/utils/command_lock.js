@@ -155,6 +155,27 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
     }
 }
 
+// Create the lock so its path never exists empty. An O_EXCL writeFileSync opens
+// and writes in two steps; a contender reading between them sees an empty file,
+// cannot tell it from a crashed creator's, and reclaims a LIVE creator's lock.
+// Write the full payload to a private temp file first, then link() it to the lock
+// path: link fails with EEXIST like O_EXCL, and the path appears already complete.
+function publishLockAtomically(lockFile, payload, nonce) {
+    const tmpFile = `${lockFile}.${process.pid}.${nonce}.tmp`
+    fs.writeFileSync(tmpFile, payload, { flag: 'wx', mode: 0o600 })
+    try {
+        try {
+            fs.linkSync(tmpFile, lockFile)
+        } catch (err) {
+            // A filesystem without hard links: fall back to the exclusive create.
+            if (!['EPERM', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV'].includes(err.code)) throw err
+            fs.writeFileSync(lockFile, payload, { flag: 'wx', mode: 0o600 })
+        }
+    } finally {
+        try { fs.unlinkSync(tmpFile) } catch { /* already gone */ }
+    }
+}
+
 // One acquire pass with serialized stale-lock removal and bounded retries.
 // A live or unreadable holder throws ELOCKHELD, which callers can retry;
 // filesystem failures and lost races stay fatal.
@@ -162,7 +183,7 @@ function tryAcquireOnce(lockFile, payload, pid, nonce) {
     const reclaimFile = lockFile + RECLAIM_FILE_SUFFIX
     for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt++) {
         try {
-            fs.writeFileSync(lockFile, payload, { flag: 'wx', mode: 0o600 })
+            publishLockAtomically(lockFile, payload, nonce)
             return function release() { releaseCommandLock(lockFile, pid, nonce) }
         } catch (err) {
             if (err.code !== 'EEXIST') throw err

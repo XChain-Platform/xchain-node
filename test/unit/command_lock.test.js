@@ -134,6 +134,57 @@ describe('commandLock unreadable files', () => {
     })
 })
 
+describe('commandLock publishes atomically', () => {
+    beforeEach(prepareCommandLock)
+    afterEach(cleanCommandLock)
+
+    // A creator between open and write leaves an empty lock that a contender
+    // reclaims as stale. The lock path must therefore only ever appear complete.
+    it('never creates the lock path with a separate open-then-write', () => {
+        const lockFile = getLockFilePath()
+        const realWrite = fs.writeFileSync
+        const realLink  = fs.linkSync
+        const directWrites = []
+        let contentAtAppearance = null
+        fs.writeFileSync = function (file, ...args) {
+            if (file === lockFile) directWrites.push(file)
+            return realWrite.call(fs, file, ...args)
+        }
+        fs.linkSync = function (from, to) {
+            const r = realLink.call(fs, from, to)
+            if (to === lockFile) contentAtAppearance = fs.readFileSync(lockFile, 'utf8')
+            return r
+        }
+        let release
+        try {
+            release = acquireCommandLock({ command: 'install' })
+        } finally {
+            fs.writeFileSync = realWrite
+            fs.linkSync = realLink
+        }
+        assert.deepStrictEqual(directWrites, [], 'lock path must not be created by a two-step open+write')
+        assert.ok(contentAtAppearance && JSON.parse(contentAtAppearance).pid === process.pid,
+            'lock must be complete the moment it appears')
+        assert.deepStrictEqual(fs.readdirSync(tmpDir), ['command.lock'], 'no temp file left behind')
+        release()
+    })
+
+    it('a contender never sees an empty lock from a live creator mid-acquire', () => {
+        const lockFile = getLockFilePath()
+        const realLink = fs.linkSync
+        const seen = []
+        fs.linkSync = function (from, to) {
+            // Just before the lock appears, nothing is at the path to be reclaimed.
+            seen.push(fs.existsSync(lockFile))
+            return realLink.call(fs, from, to)
+        }
+        let release
+        try { release = acquireCommandLock({ command: 'install' }) } finally { fs.linkSync = realLink }
+        assert.deepStrictEqual(seen, [false])
+        release()
+    })
+})
+
 describe('commandLock handoff', () => {
     beforeEach(prepareCommandLock)
     afterEach(cleanCommandLock)
