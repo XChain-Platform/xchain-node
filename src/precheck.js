@@ -314,7 +314,12 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     // this never mints (a host with no sidecar stays keyless exactly as before).
     await applyHubApiKeyFromSidecar(hostEnv())
 
-    await installHubAtRef(moduleRef)
+    // Provisioning the hub is state-changing: installHubModule ends in
+    // useInstalledHub, which restarts a hub whose State is 'exited'. A read-only
+    // command (syncHubConfig=false: ps, tail, logs, monitor) must not change any
+    // container's run state, or `ps` starts a hub the operator stopped and then
+    // prints its stale 'exited' status. Mutating commands still install here.
+    if (syncHubConfig) await installHubAtRef(moduleRef)
 
     await pushConfigToHubAndExplorer(syncHubConfig, repairsHub)
 
