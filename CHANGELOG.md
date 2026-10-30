@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Kept bootstrap publisher capture logs on its configured temporary work volume.
 - Published the command lock file complete so a contender never reclaims a live creator's empty lock.
+- Made clear-reorg-halt name an unknown chain or network instead of reporting no decoder container installed.
 
 ## [0.26.3] - 2026-10-23
 

@@ -350,6 +350,9 @@ function registerClearReorgHalt(program, deps) {
                 console.log("clear-reorg-halt takes one chain and one network; 'all' is invalid")
                 return process.exit(1)
             }
+            // Refuse a typo here, before it reaches the container lookup and gets reported as "no container installed".
+            const bad = [['chain', chain, config.Coin], ['network', network, config.Network]].find(([, v, known]) => !Object.values(known).includes(v))
+            if (bad) { console.log(`clear-reorg-halt: unknown ${bad[0]} '${bad[1]}'; expected one of ${Object.values(bad[2]).join(', ')}`); return process.exit(1) }
             const serviceList = filterCommandParameters(null, 'xchain-decoder', chain, network)
             const ok = await clearDecoderReorgHalt(serviceList, {
                 reason: options.reason, force: !!options.force, dryRun: !!options.dryRun
