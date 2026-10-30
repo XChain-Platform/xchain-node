@@ -60,10 +60,18 @@ describe('Fuzz: filterCommandParameters()', function () {
         'bitcoin; echo pwned',
     ]
 
+    // An empty value means "all"; any other unknown chain is refused by name rather than
+    // expanded, so a typo can never act on the shared services.
     for (const coin of invalidCoins) {
-        it(`does not crash with invalid coin: ${JSON.stringify(coin)}`, function () {
-            const result = filterCommandParameters(null, 'xchain-encoder', coin, 'mainnet')
-            expect(result).to.be.an('object')
+        if (coin === '') {
+            it('treats an empty coin as all and does not crash', function () {
+                expect(filterCommandParameters(null, 'xchain-encoder', coin, 'mainnet')).to.be.an('object')
+            })
+            continue
+        }
+        it(`refuses invalid coin ${JSON.stringify(coin)} with a named error`, function () {
+            expect(() => filterCommandParameters(null, 'xchain-encoder', coin, 'mainnet'))
+                .to.throw(Error, 'unknown coin: ' + coin)
         })
     }
 })
@@ -79,9 +87,15 @@ describe('Fuzz: filterCommandParameters()', function () {
     ]
 
     for (const net of invalidNetworks) {
-        it(`does not crash with invalid network: ${JSON.stringify(net)}`, function () {
-            const result = filterCommandParameters(null, 'xchain-encoder', 'bitcoin', net)
-            expect(result).to.be.an('object')
+        if (net === '') {
+            it('treats an empty network as all and does not crash', function () {
+                expect(filterCommandParameters(null, 'xchain-encoder', 'bitcoin', net)).to.be.an('object')
+            })
+            continue
+        }
+        it(`refuses invalid network ${JSON.stringify(net)} with a named error`, function () {
+            expect(() => filterCommandParameters(null, 'xchain-encoder', 'bitcoin', net))
+                .to.throw(Error, 'unknown network: ' + net)
         })
     }
 })

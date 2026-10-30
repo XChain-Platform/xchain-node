@@ -41,14 +41,15 @@ describe('Regression Suite', function () {
             expect(result).to.be.true
         })
 
-        it('R-PRE-002: startModules gracefully handles missing LevelDB entry', async function () {
+        it('R-PRE-002: startModules fails with a named no-installed-service error on a missing LevelDB entry', async function () {
             const env = new TestEnv()
+            const startContainer = sinon.stub().resolves(true)
             await env.setup()
 
             try {
                 const moduleOps = proxyquire('../../../src/operations/module_operations', {
                     '../services/docker_service': {
-                        startContainer: sinon.stub().resolves(true),
+                        startContainer,
                         createDockerNetwork: async () => true,
                         stopContainer: async () => true,
                         restartContainer: async () => true,
@@ -62,8 +63,10 @@ describe('Regression Suite', function () {
                 })
 
                 const serviceList = { 'bitcoin': { 'mainnet': ['xchain-encoder'] } }
-                const result = await moduleOps.startModules(serviceList)
-                expect(result).to.be.true
+                // The registry is empty, so nothing selected is installed: fail with a reason.
+                const err = await moduleOps.startModules(serviceList).then(() => null, e => e)
+                expect(err && err.message).to.match(/no installed service: xchain-encoder \(bitcoin mainnet\)/)
+                expect(startContainer.called).to.be.false
             } finally {
                 await env.teardown()
             }
