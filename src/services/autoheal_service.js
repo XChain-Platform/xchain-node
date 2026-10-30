@@ -230,7 +230,7 @@ function establishEpisode(candidate, health, state, now, probationMs, result) {
     return { since: episode.since, changed: episode.onsetReseeded || restartCountCleared }
 }
 
-async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now) {
+async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now, wallStart) {
     const { module, coin, network, containerId, label } = candidate
     if (now - since < timing.graceMs) {
         result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
@@ -269,7 +269,12 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
         // With the stop budget `stop` uses, so the restart gives a block-bound drain its time
         await restartModuleContainer(stopContainer, startContainer, module, coin, network, containerId,
             undefined, getContainerStopSettings)
-        state.restarts[containerId] = now
+        // Stamp the moment the restart finished, not the pass start: the cooldown
+        // and the recovery probation both run "after a restart", and a drain that
+        // hits its kill budget (120s for a decoder) plus earlier restarts in the
+        // same pass would otherwise shorten both windows. `now` may be injected,
+        // so advance it by the real time the restart consumed.
+        state.restarts[containerId] = now + Math.max(0, Date.now() - wallStart)
         state.restartCount[containerId] = attempts + 1
         result.restarted.push({ module, coin, network, containerId })
         logger.info(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
@@ -300,6 +305,7 @@ function persistState(stateFile, state, modules) {
 // Returns { candidates, restarted, failed, skipped, escalated } where each array holds
 // { module, coin, network, containerId, reason? }; escalated entries carry attempts instead.
 async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
+    const wallStart = Date.now()
     const timing = autohealTiming()
     const stateFile = getStateFilePath()
     const state = readState(stateFile)
@@ -337,7 +343,7 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         const episode = establishEpisode(candidate, health, state, now, timing.probationMs, result)
         if (!episode) continue
         if (episode.changed) onsetChanged = true
-        await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now)
+        await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now, wallStart)
     }
 
     if (!dryRun && (onsetChanged || result.restarted.length > 0)) persistState(stateFile, state, modules)
