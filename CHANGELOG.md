@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made clear-reorg-halt name an unknown chain or network instead of reporting no decoder container installed.
 - Made a reset whose database step fails after the stop report the failure and name the services it left down.
 - Stamped each autoheal restart when it finishes so the cooldown and recovery probation no longer start early.
+- Made a stop, start or other service command reject an unknown chain or network instead of acting on the shared explorer.
 
 ## [0.26.3] - 2026-10-23
 

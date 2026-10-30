@@ -53,6 +53,15 @@ function filterCommandParameters(branch, modules, coins, networks) {
     let addExplorer = false
     const aliases = serviceAliases()
     if (modules && aliases[modules]) modules = aliases[modules]
+    // An unknown chain or network must fail here, before any service list is
+    // built: otherwise `stop all <typo>` still yields the shared explorer entry,
+    // stops it, matches no chain container and exits 0.
+    if (coins && coins !== "all" && !Object.values(Coin).includes(coins)) {
+        throw new Error(`unknown coin: ${coins}`)
+    }
+    if (networks && networks !== "all" && !Object.values(Network).includes(networks)) {
+        throw new Error(`unknown network: ${networks}`)
+    }
     coins = coins && coins !== "all" ? [coins] : Object.values(Coin)
     networks = networks && networks !== "all" ? [networks] : Object.values(Network)
     const sharedServices = [HUB_MODULE_NAME, EXPLORER_MODULE_NAME, DB_MODULE_NAME, SYNC_MODULE_NAME]
