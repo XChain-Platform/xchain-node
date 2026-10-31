@@ -82,6 +82,17 @@ describe('halt marker exports and live SQL builders', () => {
         expect(sql).to.match(/;$/)
     })
 
+    it('reads exact rollback guard keys as encoded values', () => {
+        const sql = haltMarkers.rollbackGuardStateSql('xchain_btc')
+
+        expect(sql).to.include('`xchain_btc`.sync_state')
+        expect(sql).to.include("LEFT(state_key, 15) = 'rollback_guard:'")
+        expect(sql).to.include("CONCAT('V', HEX(state_value))")
+        expect(sql).to.include("state_value IS NULL, 'N'")
+        expect(sql).to.not.include('LIKE')
+        expect(sql).to.match(/;$/)
+    })
+
     it('builds the live sync halt query', () => {
         const sql = haltMarkers.liveSyncHaltCountSql('xchain_btc')
 
