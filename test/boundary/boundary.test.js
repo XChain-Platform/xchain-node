@@ -32,6 +32,7 @@ function withInertFsWrites(fsStub) {
     return {
         readFileSync: sinon.stub().returns(''),
         writeFileSync: sinon.stub(),
+        renameSync: sinon.stub(),
         appendFileSync: sinon.stub(),
         chmodSync: sinon.stub(),
         ...fsStub
@@ -64,6 +65,7 @@ describeBoundaryTests('ConfigService: config file parsing', function () {
                 createReadStream: sinon.stub().callsFake(() => streamFromString('NODE_PASSWORD=p@ss=word=123\n')),
                 appendFileSync: sinon.stub(),
                 writeFileSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -166,6 +168,7 @@ describeBoundaryTests('ConfigService: config file parsing', function () {
                 existsSync: sinon.stub().returns(false),
                 createReadStream: sinon.stub(),
                 writeFileSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }

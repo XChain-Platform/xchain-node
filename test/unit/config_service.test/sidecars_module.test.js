@@ -108,21 +108,129 @@ function parsingAndGenerationTests() {
     })
 }
 
+function configureSidecars(fsImpl) {
+    sidecars.configure({
+        crypto,
+        fs: fsImpl,
+        path,
+        readline,
+        configDir,
+        preferredSecretEnvName,
+        foldSecretEnvAliases,
+        deprecatedSecretEnvNames: () => [],
+        logger: { warn() {} }
+    })
+}
+
+// Real fs with one method replaced, so a failure lands at an exact step of the write.
+function fsWith(overrides) {
+    return Object.assign(Object.create(fs), overrides)
+}
+
+function failingRename(match) {
+    return fsWith({
+        renameSync(from, to) {
+            if (match(to)) throw Object.assign(new Error('rename failed'), { code: 'EIO' })
+            return fs.renameSync(from, to)
+        }
+    })
+}
+
+function tempFilesIn(dir) {
+    return fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))
+}
+
+function tornWriteTests() {
+    it('keeps the old sidecar byte for byte when the replacing rename fails', function () {
+        const file = path.join(configDir, 'bitcoin-mainnet.local')
+        const original = 'NODE_USER=alice\nNODE_SECRET=old-secret\n'
+        fs.writeFileSync(file, original, { mode: 0o600 })
+        configureSidecars(failingRename((to) => to === fs.realpathSync(file)))
+        expect(() => sidecars.upsertSidecarValues(file, { DECODER_DB_PASS: 'new' })).to.throw('rename failed')
+        expect(fs.readFileSync(file, 'utf8')).to.equal(original)
+        expect(tempFilesIn(configDir)).to.deep.equal([])
+    })
+
+    it('keeps the old sidecar when the disk fills while writing the replacement', function () {
+        const file = path.join(configDir, 'hub.local')
+        const original = 'HUB_DB_PASS=old\n'
+        fs.writeFileSync(file, original, { mode: 0o600 })
+        configureSidecars(fsWith({
+            writeFileSync(target, data, options) {
+                if (String(target).endsWith('.tmp')) {
+                    fs.writeFileSync(target, String(data).slice(0, 3), options)
+                    throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
+                }
+                return fs.writeFileSync(target, data, options)
+            }
+        }))
+        expect(() => sidecars.upsertSidecarValues(file, { HUB_API_KEY: 'k' })).to.throw('no space left')
+        expect(fs.readFileSync(file, 'utf8')).to.equal(original)
+        expect(tempFilesIn(configDir)).to.deep.equal([])
+    })
+
+    it('keeps the old sidecar when adding a missing credential fails mid-write', function () {
+        const file = path.join(configDir, 'bitcoin-regtest.local')
+        const original = 'NODE_USER=existing-user\n'
+        fs.writeFileSync(file, original, { mode: 0o600 })
+        configureSidecars(failingRename(() => true))
+        expect(() => sidecars.generateRpcCredentials({ NODE_USER: 'existing-user' }, file)).to.throw('rename failed')
+        expect(fs.readFileSync(file, 'utf8')).to.equal(original)
+        expect(tempFilesIn(configDir)).to.deep.equal([])
+    })
+}
+
+function replacedFileShapeTests() {
+    it('leaves a replaced sidecar at 0600 with no temp file beside it', function () {
+        const file = path.join(configDir, 'bitcoin-mainnet.local')
+        fs.writeFileSync(file, 'NODE_USER=alice\n', { mode: 0o644 })
+        sidecars.upsertSidecarValues(file, { INDEXER_DB_PASS: 'p' })
+        expect(fs.readFileSync(file, 'utf8')).to.equal('NODE_USER=alice\nINDEXER_DB_PASS=p\n')
+        expect(fs.statSync(file).mode & 0o777).to.equal(0o600)
+        expect(fs.readdirSync(configDir)).to.deep.equal(['bitcoin-mainnet.local'])
+    })
+
+    it('rewrites the file a symlinked sidecar points at and keeps the link', function () {
+        const real = path.join(configDir, 'real.local')
+        const link = path.join(configDir, 'bitcoin-mainnet.local')
+        fs.writeFileSync(real, 'NODE_USER=alice\n', { mode: 0o600 })
+        fs.symlinkSync(real, link)
+        sidecars.upsertSidecarValues(link, { DECODER_DB_PASS: 'd' })
+        expect(fs.lstatSync(link).isSymbolicLink()).to.equal(true)
+        expect(fs.readFileSync(real, 'utf8')).to.equal('NODE_USER=alice\nDECODER_DB_PASS=d\n')
+    })
+}
+
+function migrationTornWriteTests() {
+    it('keeps the old main config when its rewrite fails during credential migration', function () {
+        const configFile = path.join(configDir, 'bitcoin-mainnet')
+        const sidecarFile = configFile + '.local'
+        const original = 'DUST_AMOUNT=546\nNODE_USER=alice\nNODE_PASSWORD=secret\n'
+        fs.writeFileSync(configFile, original, { mode: 0o640 })
+        configureSidecars(failingRename((to) => to === fs.realpathSync(configFile)))
+        const defaults = { DUST_AMOUNT: '546', NODE_USER: 'alice', NODE_PASSWORD: 'secret' }
+        expect(() => sidecars.migrateMainCredentials(defaults, configFile, sidecarFile)).to.throw('rename failed')
+        expect(fs.readFileSync(configFile, 'utf8')).to.equal(original)
+        expect(tempFilesIn(configDir)).to.deep.equal([])
+    })
+
+    it('keeps the main config permissions across a credential migration', function () {
+        const configFile = path.join(configDir, 'bitcoin-mainnet')
+        fs.writeFileSync(configFile, 'DUST_AMOUNT=546\nNODE_USER=alice\nNODE_PASSWORD=secret\n')
+        fs.chmodSync(configFile, 0o640)
+        const defaults = { DUST_AMOUNT: '546', NODE_USER: 'alice', NODE_PASSWORD: 'secret' }
+        sidecars.migrateMainCredentials(defaults, configFile, configFile + '.local')
+        expect(fs.readFileSync(configFile, 'utf8')).to.equal('DUST_AMOUNT=546\n')
+        expect(fs.statSync(configFile).mode & 0o777).to.equal(0o640)
+        expect(fs.readFileSync(configFile + '.local', 'utf8')).to.equal('NODE_USER=alice\nNODE_PASSWORD=secret\n')
+    })
+}
+
 describe('config_service/sidecars', function () {
     beforeEach(function () {
         fs.mkdirSync(scratchRoot, { recursive: true })
         configDir = fs.mkdtempSync(path.join(scratchRoot, 'case-'))
-        sidecars.configure({
-            crypto,
-            fs,
-            path,
-            readline,
-            configDir,
-            preferredSecretEnvName,
-            foldSecretEnvAliases,
-            deprecatedSecretEnvNames: () => [],
-            logger: { warn() {} }
-        })
+        configureSidecars(fs)
     })
 
     afterEach(function () {
@@ -136,4 +244,25 @@ describe('config_service/sidecars', function () {
     persistenceTests()
     hubKeyTests()
     parsingAndGenerationTests()
+})
+
+describe('config_service/sidecars crash-safe writes', function () {
+    beforeEach(function () {
+        fs.mkdirSync(scratchRoot, { recursive: true })
+        configDir = fs.mkdtempSync(path.join(scratchRoot, 'case-'))
+        configureSidecars(fs)
+    })
+
+    afterEach(function () {
+        configureSidecars(fs)
+        fs.rmSync(configDir, { recursive: true, force: true })
+    })
+
+    after(function () {
+        fs.rmSync(scratchRoot, { recursive: true, force: true })
+    })
+
+    tornWriteTests()
+    replacedFileShapeTests()
+    migrationTornWriteTests()
 })

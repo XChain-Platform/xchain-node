@@ -21,6 +21,7 @@ function withSidecarCalls(fsStub) {
     return {
         readFileSync: sinon.stub().returns(''),
         writeFileSync: sinon.stub(),
+        renameSync: sinon.stub(),
         chmodSync: sinon.stub(),
         ...fsStub
     }
@@ -120,6 +121,7 @@ describe('Chaos: Config Resilience', function () {
                 createReadStream: sinon.stub().callsFake(() => Readable.from(configContent + '\n')),
                 appendFileSync: sinon.stub(),
                 writeFileSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }
@@ -146,6 +148,7 @@ describe('Chaos: Config Resilience', function () {
                 createReadStream: sinon.stub().callsFake(() => Readable.from(configContent + '\n')),
                 appendFileSync: sinon.stub(),
                 writeFileSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 rmSync: sinon.stub(),
                 mkdirSync: sinon.stub()
             }

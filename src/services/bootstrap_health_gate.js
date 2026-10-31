@@ -65,7 +65,9 @@ const logger = getLogger();
 const {
     DEFAULT_MAX_LAG_BLOCKS, evaluateContainerState, evaluateStatusPayload
 } = require('./bootstrap_health_gate/status_evaluation.js')
-const { parseCountTokens, readHaltMarkers } = require('./bootstrap_health_gate/halt_markers.js')
+const {
+    parseCountTokens, readHaltMarkers, pendingSyncHaltReason
+} = require('./bootstrap_health_gate/halt_markers.js')
 
 // Which env key carries the container-internal API port for each module.
 // Mirrors ModuleService's SERVICE_HEALTHCHECK portKeys, deliberately: the probe
@@ -294,14 +296,6 @@ async function healthSurfaceReasons(containerId, module, coin, network, runner) 
         }
     }
     return reasons
-}
-
-// Refusal text for an xchain-sync halt_pending copy found in `where`.
-function pendingSyncHaltReason(where) {
-    return `${where} carries an xchain-sync halt_pending copy in sync_state (a divergence halt whose ` +
-        'sync_halt write never landed): xchain-sync re-installs that halt on every replica that restores ' +
-        'this archive. Clear the halt through xchain-sync (POST /halt/clear/<dbType>/<chain>/<network>), which drops ' +
-        'the copy, then re-run the publish.'
 }
 
 // Read the durable halt markers and turn them into refusal reasons. Returns the

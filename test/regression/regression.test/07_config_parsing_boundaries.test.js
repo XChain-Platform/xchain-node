@@ -57,6 +57,7 @@ describe('Regression Suite', function () {
                 // getDefaultConfig now persists generated RPC creds to the
                 // .local sidecar (6648722): persistSidecarCreds needs these.
                 writeFileSync: sinon.stub(),
+                renameSync: sinon.stub(),
                 appendFileSync: sinon.stub(),
                 chmodSync: sinon.stub()
             }

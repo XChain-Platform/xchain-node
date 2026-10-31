@@ -169,6 +169,31 @@ async function probeDatabase(run, readCount, name, since) {
     return found
 }
 
+// Count the live halt rows in each optional marker table of `name`, for readLiveMarkers.
+async function readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState }) {
+    const found = { reorgHalt: 0, syncHalt: 0, pendingSyncHalt: 0 }
+    // LIVE halts only: a REORG_HALT row older than the newest REORG_HALT_CLEARED
+    // row was cleared by an operator through `xchain-node clear-reorg-halt`
+    // (audited in the decoder's events table) and no longer disqualifies the
+    // database. The halt row itself is never deleted, so a plain count would
+    // refuse a cleared database forever.
+    found.reorgHalt = await readCount(liveReorgHaltCountSql(name), 'REORG_HALT marker')
+    // A newest clear row without an audited reason lifts nothing: the decoder reads it as
+    // a live halt, so it counts as one here too.
+    found.reorgHalt += parseNewestClear(await run(newestReorgClearSql(name)),
+        `REORG_HALT_CLEARED audit probe for ${name}`)
+    // sync_halt IS optional: xchain-sync provisions it only where it runs, so an
+    // absent table here is a genuine "no such marker", not an unread database.
+    if (hasSyncHalt > 0)
+        found.syncHalt = await readCount(liveSyncHaltCountSql(name), 'sync_halt marker')
+    // A halt whose sync_halt write failed lives only as xchain-sync's sync_state copy,
+    // which a restore re-installs as a halt; sync_state is optional for the same reason.
+    // It has no id sequence, so it is read live at each reading, never by watermark.
+    if (hasSyncState > 0)
+        found.pendingSyncHalt = await readCount(pendingSyncHaltCountSql(name), 'sync_state halt_pending marker')
+    return found
+}
+
 // Read which marker tables exist in `name`, how many live halt rows each holds,
 // and the id watermark of each, for probeDatabase.
 async function readLiveMarkers(run, readCount, name) {
@@ -195,26 +220,7 @@ async function readLiveMarkers(run, readCount, name) {
     if (hasEvents === 0)
         throw new Error(`${name} reports no events table, so the REORG_HALT marker could not be read`)
 
-    const found = { reorgHalt: 0, syncHalt: 0, pendingSyncHalt: 0 }
-    // LIVE halts only: a REORG_HALT row older than the newest REORG_HALT_CLEARED
-    // row was cleared by an operator through `xchain-node clear-reorg-halt`
-    // (audited in the decoder's events table) and no longer disqualifies the
-    // database. The halt row itself is never deleted, so a plain count would
-    // refuse a cleared database forever.
-    found.reorgHalt = await readCount(liveReorgHaltCountSql(name), 'REORG_HALT marker')
-    // A newest clear row without an audited reason lifts nothing: the decoder reads it as
-    // a live halt, so it counts as one here too.
-    found.reorgHalt += parseNewestClear(await run(newestReorgClearSql(name)),
-        `REORG_HALT_CLEARED audit probe for ${name}`)
-    // sync_halt IS optional: xchain-sync provisions it only where it runs, so an
-    // absent table here is a genuine "no such marker", not an unread database.
-    if (hasSyncHalt > 0)
-        found.syncHalt = await readCount(liveSyncHaltCountSql(name), 'sync_halt marker')
-    // A halt whose sync_halt write failed lives only as xchain-sync's sync_state copy,
-    // which a restore re-installs as a halt; sync_state is optional for the same reason.
-    // It has no id sequence, so it is read live at each reading, never by watermark.
-    if (hasSyncState > 0)
-        found.pendingSyncHalt = await readCount(pendingSyncHaltCountSql(name), 'sync_state halt_pending marker')
+    const found = await readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState })
 
     // The dump window watermark. Both marker tables are append-only and
     // id-ordered (decoder events: AUTO_INCREMENT, a clear is a NEW row, halt rows
@@ -307,7 +313,16 @@ async function readHaltMarkers(coin, network, module, deps, since) {
     return markers
 }
 
+// Refusal text for an xchain-sync halt_pending copy found in `where`.
+function pendingSyncHaltReason(where) {
+    return `${where} carries an xchain-sync halt_pending copy in sync_state (a divergence halt whose ` +
+        'sync_halt write never landed): xchain-sync re-installs that halt on every replica that restores ' +
+        'this archive. Clear the halt through xchain-sync (POST /halt/clear/<dbType>/<chain>/<network>), which drops ' +
+        'the copy, then re-run the publish.'
+}
+
 module.exports = {
+    pendingSyncHaltReason,
     parseCountTokens,
     parseNewestClear,
     isAuditedClear,
