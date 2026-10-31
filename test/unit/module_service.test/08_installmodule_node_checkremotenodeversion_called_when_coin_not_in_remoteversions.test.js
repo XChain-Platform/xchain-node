@@ -110,7 +110,7 @@ moduleSuite('containerExistsByName(): via singleton installModule with inspect r
                 // getPublishedHostPorts must be stubbed: this load calls through, and
                 // HUB_PORT below is published as a host port, so the real probe would
                 // shell out to the host's docker and fail wherever 10000 is taken.
-                './docker_service': { killContainer: stubs.killContainer, stopContainerByName: stubs.stopContainerByName, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName, getPublishedHostPorts: stubs.getPublishedHostPorts, checkBuildKitAvailable: stubs.checkBuildKitAvailable },
+                './docker_service': { killContainer: stubs.killContainer, stopContainerByName: stubs.stopContainerByName, removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName, getPublishedHostPorts: stubs.getPublishedHostPorts, checkBuildKitAvailable: stubs.checkBuildKitAvailable, probeContainerPresenceByName: sinon3.stub().resolves('gone') },
                 './database_service': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './version_service': { getLocalNodeVersion: sinon3.stub().resolves(null), getLocalModuleVersion: sinon3.stub().resolves(null), checkRemoteNodeVersion: sinon3.stub().resolves() },
                 './node_service': { buildCryptoNode: sinon3.stub().resolves(true), getCryptoNode: sinon3.stub().resolves() },

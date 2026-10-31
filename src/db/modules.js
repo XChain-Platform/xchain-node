@@ -167,6 +167,21 @@ const modulesMixin = {
         }
     },
 
+    async deleteModuleContainerIfMatches(module, coin, network, containerId) {
+        if (!this.pool) return false
+        try {
+            const result = await this.pool.query(
+                `DELETE FROM ${MODULES_TABLE}
+                 WHERE module = ? AND coin = ? AND network = ? AND container_id = ?`,
+                [module, coin || '', network || '', containerId]
+            )
+            return result.affectedRows > 0
+        } catch (err) {
+            logger.info(err)
+            return false
+        }
+    },
+
     async getModuleCount() {
         if (!this.pool) return 0
         const rows = await this.pool.query(`SELECT COUNT(*) AS cnt FROM ${MODULES_TABLE}`)

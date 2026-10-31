@@ -30,7 +30,8 @@ function loadMarkers(cfg) {
 function nativeDeps() {
     // The newest-clear probe answers "no clear" as a count and an empty payload column.
     const executeNativeMariaDbCommand = sinon.stub().callsFake(async (c, sql) =>
-        (/information_schema\.TABLES/.test(sql) ? '1\t1\t1' : (/HEX\(data\)/.test(sql) ? '0\t' : '0')))
+        (/information_schema\.TABLES/.test(sql) ? '1\t1\t1' :
+            (/HEX\(data\)|rollback_guard/.test(sql) ? '0\t' : '0')))
     return { executeNativeMariaDbCommand, getExternalDbConfig: sinon.stub().resolves({ host: 'h' }) }
 }
 

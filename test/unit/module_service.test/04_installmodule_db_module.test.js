@@ -244,7 +244,8 @@ moduleSuite('installModule(): generic module, container version already known', 
                     killContainer: stubs.killContainer, stopContainerByName: stubs.stopContainerByName,
                     removeContainer: stubs.removeContainer,
                     forceRemoveContainerByName: stubs.forceRemoveContainerByName,
-                    getStatusFromContainer: stubs.getStatusFromContainer
+                    getStatusFromContainer: stubs.getStatusFromContainer,
+                    probeContainerPresenceByName: sinon.stub().resolves('exists')
                 },
                 './database_service': {
                     setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves()

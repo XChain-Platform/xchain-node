@@ -194,13 +194,18 @@ class E2EEnv extends TestEnv {
      */
     setupDefaultRoutes() {
         const self = this
+        const databaseContainerId = 'd'.repeat(64)
+        const containerIdsByName = new Map([['xchain-node-database', databaseContainerId]])
 
         // docker build always succeeds
         this.capture.when(/docker build/).returns({ stdout: '' })
 
         // docker run returns a unique container ID each time
-        this.capture.when(/docker run/).respondsWith(() => {
-            return { stdout: self.nextContainerId() + '\n' }
+        this.capture.when(/docker run/).respondsWith((command) => {
+            const containerId = self.nextContainerId()
+            const name = command.match(/(?:^|\s)--name\s+(\S+)/)?.[1]
+            if (name) containerIdsByName.set(name, containerId)
+            return { stdout: containerId + '\n' }
         })
 
         // docker kill/rm/stop/start/restart echo back the container ID
@@ -229,13 +234,15 @@ class E2EEnv extends TestEnv {
         // setup inspect always succeeds so createDockerNetwork skips creation)
         this.capture.when(/docker network create/).returns({ stdout: '' })
 
-        // docker inspect --type container --format {{.Id}}: the DB fail-fast
-        // precheck (getDatabaseContainerId, 32224ab) expects a bare 64-hex id;
-        // the generic inspect route below would feed it a JSON blob and the
-        // precheck would abort installs with "MariaDB container not found".
-        // Must be registered BEFORE the generic route (first match wins).
-        this.capture.when(/docker inspect --type container --format/).returns({
-            stdout: 'd'.repeat(64) + '\n'
+        // Named presence checks see only containers created in this environment.
+        this.capture.when(/docker inspect --type container --format \{\{\.Id\}\}/).respondsWith((command) => {
+            const name = command.trim().split(/\s+/).pop()
+            const containerId = containerIdsByName.get(name)
+            if (containerId) return { stdout: containerId + '\n' }
+            const message = `Error: No such object: ${name}`
+            const error = new Error(message)
+            error.stderr = message
+            return { error, stderr: message }
         })
 
         // docker inspect (container) returns running status

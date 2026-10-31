@@ -108,6 +108,50 @@ function parsingAndGenerationTests() {
     })
 }
 
+function migrateFixture(mainBody, sidecarBody) {
+    const configFile = path.join(configDir, 'bitcoin-mainnet')
+    const sidecarFile = configFile + '.local'
+    fs.writeFileSync(configFile, mainBody)
+    if (sidecarBody !== undefined) fs.writeFileSync(sidecarFile, sidecarBody, { mode: 0o600 })
+    const defaults = {}
+    for (const line of mainBody.split(/\r?\n/)) sidecars.readMainConfigLine(defaults, line)
+    sidecars.normalizeMainConfig(defaults, configFile)
+    if (sidecarBody !== undefined) {
+        const sidecar = {}
+        for (const line of sidecarBody.split(/\r?\n/)) sidecars.readSidecarConfigLine(sidecar, line)
+        sidecars.mergeSidecarConfig(defaults, sidecar, sidecarFile)
+    }
+    sidecars.migrateMainCredentials(defaults, configFile, sidecarFile)
+    return { configFile, sidecarFile }
+}
+
+function migrationSafetyTests() {
+    it('preserves sidecar-only values and sidecar credential precedence during migration', function () {
+        const files = migrateFixture(
+            'DUST_AMOUNT=546\nNODE_USER=alice\nNODE_PASSWORD=old\n',
+            'NODE_SECRET=live\nDECODER_DB_PASS=d\nINDEXER_DB_PASS=i\nXCHAIN_NODE_BLOCKS_DIR=/data\n')
+        expect(fs.readFileSync(files.configFile, 'utf8')).to.equal('DUST_AMOUNT=546\n')
+        expect(fs.readFileSync(files.sidecarFile, 'utf8')).to.equal(
+            'NODE_SECRET=live\nDECODER_DB_PASS=d\nINDEXER_DB_PASS=i\nXCHAIN_NODE_BLOCKS_DIR=/data\nNODE_USER=alice\n')
+        expect(fs.statSync(files.sidecarFile).mode & 0o777).to.equal(0o600)
+    })
+
+    it('peels glued credentials while preserving comments and main-file values', function () {
+        const files = migrateFixture(
+            'DUST_AMOUNT=546NODE_USER=aliceNODE_PASSWORD=secret\n# keep me\nCUSTOM=main\n',
+            'CUSTOM=sidecar\n')
+        expect(fs.readFileSync(files.configFile, 'utf8')).to.equal('DUST_AMOUNT=546\n# keep me\nCUSTOM=main\n')
+        expect(fs.readFileSync(files.sidecarFile, 'utf8')).to.equal(
+            'CUSTOM=sidecar\nNODE_USER=alice\nNODE_SECRET=secret\n')
+    })
+
+    it('removes a safe password alias from the main file', function () {
+        const files = migrateFixture('KEEP=value\nNODE_SECRET=secret\n\n')
+        expect(fs.readFileSync(files.configFile, 'utf8')).to.equal('KEEP=value\n\n')
+        expect(fs.readFileSync(files.sidecarFile, 'utf8')).to.equal('NODE_SECRET=secret\n')
+    })
+}
+
 function configureSidecars(fsImpl) {
     sidecars.configure({
         crypto,
@@ -222,7 +266,7 @@ function migrationTornWriteTests() {
         sidecars.migrateMainCredentials(defaults, configFile, configFile + '.local')
         expect(fs.readFileSync(configFile, 'utf8')).to.equal('DUST_AMOUNT=546\n')
         expect(fs.statSync(configFile).mode & 0o777).to.equal(0o640)
-        expect(fs.readFileSync(configFile + '.local', 'utf8')).to.equal('NODE_USER=alice\nNODE_PASSWORD=secret\n')
+        expect(fs.readFileSync(configFile + '.local', 'utf8')).to.equal('NODE_USER=alice\nNODE_SECRET=secret\n')
     })
 }
 
@@ -244,6 +288,7 @@ describe('config_service/sidecars', function () {
     persistenceTests()
     hubKeyTests()
     parsingAndGenerationTests()
+    migrationSafetyTests()
 })
 
 describe('config_service/sidecars crash-safe writes', function () {

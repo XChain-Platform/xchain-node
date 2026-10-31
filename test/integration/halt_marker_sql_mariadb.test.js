@@ -82,14 +82,15 @@ const UNAUDITED = '{"reason":"oops"}'
 const HALT = '{"reason":"over-deep rollback"}'
 
 // Hold the connection and gate modules the before hook loads.
-let conn, mariadbExec, parseCountTokens, parseNewestClear
+let conn, mariadbExec, parseCountTokens, parseNewestClear, parseRollbackGuardRows
 
 // Create the scratch database the gate's SQL reads.
 async function createScratchDb() {
     if (!HOST) this.skip()
     const mariadb = require('mariadb')
     mariadbExec = require('../../src/services/database_service/mariadb_exec')
-    ;({ parseCountTokens, parseNewestClear } = require('../../src/services/bootstrap_health_gate/halt_markers'))
+    ;({ parseCountTokens, parseNewestClear, parseRollbackGuardRows } =
+        require('../../src/services/bootstrap_health_gate/halt_markers'))
     conn = await mariadb.createConnection({
         host: CFG.host, port: CFG.port, user: CFG.root_user, password: CFG.root_password
     })
@@ -203,6 +204,21 @@ async function countsPendingSyncHalts() {
     expect(await count(haltMarkers.pendingSyncHaltCountSql(DB))).to.equal(1)
 }
 
+async function readsRollbackGuardStates() {
+    await conn.query(`TRUNCATE TABLE \`${DB}\`.sync_state`)
+    const rows = [
+        ['rollback_guard:indexer', '{"peak":5,"low":3}'],
+        ['rollback_guard:decoder', '{"peak":1,"low":2}'],
+        ['rollback_guard:empty', ''],
+        ['rollback_guard:null', null],
+        ['rollbackXguard:ignored', 'not json']
+    ]
+    for (const [key, value] of rows)
+        await conn.query(`INSERT INTO \`${DB}\`.sync_state (state_key, state_value) VALUES (?, ?)`, [key, value])
+    const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, haltMarkers.rollbackGuardStateSql(DB), '-BN')
+    expect(parseRollbackGuardRows(raw, 'test rollback guard probe')).to.equal(2)
+}
+
 // The reference above is a copy, so pin it to the decoder's source when that sibling is checked out.
 function pinsReferenceRule() {
     const src = path.join(__dirname, '../../../xchain-decoder/src/db/reorg_halt.js')
@@ -236,5 +252,6 @@ describe('halt marker SQL on MariaDB', function () {
     it('reads the newest marker row, as the decoder does', readsNewestMarkerRow)
     it('counts every clear row raised inside the dump window, audited or not', countsClearsInWindow)
     it('counts every halt_pending copy that xchain-sync would restore', countsPendingSyncHalts)
+    it('reads valid, invalid, empty and NULL rollback guard rows', readsRollbackGuardStates)
     it('keeps the reference rule in step with the decoder', pinsReferenceRule)
 })

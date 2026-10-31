@@ -54,6 +54,52 @@ describe('BootstrapHealthGate', function () {
     })
 })
 
+describe('BootstrapHealthGate rollback guard markers', function () {
+
+    installEnvironmentHooks()
+
+    const encoded = value => 'V' + Buffer.from(value, 'utf8').toString('hex').toUpperCase()
+
+    it('REFUSES an invalid rollback guard row in the gated database', async function () {
+        const gate = loadGate()
+        const runner = makeRunner({ rollbackGuardRows: '1\t' + encoded('{"peak":1,"low":2}') })
+        const err = await refusal(callGate(gate, { runner }))
+        expect(err.message).to.match(/database carries an invalid xchain-sync rollback_guard row/)
+    })
+
+    it('REFUSES an invalid rollback guard row in the paired decoder database', async function () {
+        const gate = loadGate()
+        const runner = makeRunner({
+            decoder: { rollbackGuardRows: '1\t' + encoded('not json') }
+        })
+        const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
+        expect(err.message).to.match(/paired decoder database \S+ carries an invalid xchain-sync rollback_guard row/)
+    })
+
+    it('accepts valid and NULL rollback guard rows', async function () {
+        const gate = loadGate()
+        await callGate(gate, { runner: makeRunner({
+            rollbackGuardRows: '2\t' + encoded('{"peak":5,"low":3}') + ',N'
+        }) })
+    })
+
+    it('REFUSES unreadable rollback guard probe output', async function () {
+        const gate = loadGate()
+        const err = await refusal(callGate(gate, {
+            runner: makeRunner({ rollbackGuardRows: '2\t' + encoded('{"peak":5,"low":3}') })
+        }))
+        expect(err.message).to.match(/rollback_guard probe[\s\S]*returned unreadable output/)
+    })
+
+    it('does not probe rollback guards when sync_state is absent', async function () {
+        const gate = loadGate()
+        const runner = makeRunner({ tables: '1\t1\t0', rollbackGuardRows: 'broken' })
+        await callGate(gate, { runner })
+        const sqls = runner.getCalls().map(c => (c.args[1] || []).join(' '))
+        expect(sqls.some(sql => /rollback_guard/.test(sql))).to.equal(false)
+    })
+})
+
 // xchain-sync parks a halt in sync_state when its sync_halt write fails, and
 // restorePendingHalt re-installs it on any replica that restores the archive.
 describe('BootstrapHealthGate', function () {

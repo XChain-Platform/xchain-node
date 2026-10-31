@@ -225,7 +225,7 @@ function readPublishedPorts(containerStatus) {
     return portParts.length > 0 ? portParts.join(", ") : "-"
 }
 
-async function recordContainerFailure(err, nextModule, nextCoin, nextCoinNetwork, moduleStatus, toRemove, rows) {
+async function recordContainerFailure(err, nextModule, nextCoin, nextCoinNetwork, containerId, moduleStatus, toRemove, rows) {
     if (isContainerGoneError(err)) {
         // Docker confirms the container no longer exists:
         // reconcile the persistent registry too, not only
@@ -236,7 +236,7 @@ async function recordContainerFailure(err, nextModule, nextCoin, nextCoinNetwork
         // happens even if the registry delete fails.
         toRemove.push(nextModule)
         try {
-            await db.deleteModuleContainer(nextModule, nextCoin, nextCoinNetwork)
+            await db.deleteModuleContainerIfMatches(nextModule, nextCoin, nextCoinNetwork, containerId)
         } catch { /* registry cleanup is best-effort */ }
         return
     }
@@ -266,7 +266,7 @@ async function inspectModule(nextModule, nextCoin, nextCoinNetwork, nextCoinNetw
         rows.push({ name: nextModule, coin: nextCoin || "-", network: nextCoinNetwork || "-", branch, commit,
             state: display.state, isChurning: display.isChurning, ports: readPublishedPorts(containerStatus) })
     } catch (err) {
-        await recordContainerFailure(err, nextModule, nextCoin, nextCoinNetwork, moduleStatus, toRemove, rows)
+        await recordContainerFailure(err, nextModule, nextCoin, nextCoinNetwork, containerId, moduleStatus, toRemove, rows)
     }
 }
 

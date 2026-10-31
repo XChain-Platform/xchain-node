@@ -44,6 +44,7 @@ function makeStubs() {
         db: {
             setModuleContainer: sinon.stub().resolves(true),
             getModuleContainer: sinon.stub().resolves('old-container-id'),
+            getModuleContainerStrict: sinon.stub().resolves('old-container-id'),
             deleteModuleContainer: sinon.stub().resolves('removed-id')
         },
         statusChanged: sinon.stub().resolves(),
@@ -56,6 +57,7 @@ function makeStubs() {
         // No published host ports by default → buildAndUp's pre-flight conflict
         // check is a no-op. Conflict tests override this with a populated Map.
         getPublishedHostPorts: sinon.stub().resolves(new Map()),
+        probeContainerPresenceByName: sinon.stub().resolves('gone'),
         // buildx present by default → buildAndUp's BuildKit probe passes. The
         // legacy-builder tests override this with a rejection.
         checkBuildKitAvailable: sinon.stub().resolves(true)
@@ -138,7 +140,8 @@ function makeBaseProxies(stubs, configServiceStub) {
             forceRemoveContainerByName: stubs.forceRemoveContainerByName,
             getStatusFromContainer: stubs.getStatusFromContainer,
             getPublishedHostPorts: stubs.getPublishedHostPorts,
-            checkBuildKitAvailable: stubs.checkBuildKitAvailable
+            checkBuildKitAvailable: stubs.checkBuildKitAvailable,
+            probeContainerPresenceByName: stubs.probeContainerPresenceByName
         },
         './database_service': {
             setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves()
