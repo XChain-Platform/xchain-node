@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Pinned xchain-utxo-tracker v0.23.5, which stops the mempool store leaking memory until the tracker is OOM-killed.
 
+### Security
+- Updated npm dependencies to clear the advisories published after v0.23.4.
+
 ## [0.23.4] - 2026-10-23
 
 ### Security
