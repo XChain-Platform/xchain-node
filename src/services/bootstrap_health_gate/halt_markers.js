@@ -16,7 +16,7 @@
  *
  * Reads the durable halt markers (a live decoder REORG_HALT row, one no newer
  * audited REORG_HALT_CLEARED row supersedes, an uncleared sync_halt row, and an
- * xchain-sync halt_pending copy in sync_state) and the
+ * xchain-sync halt_pending copy and invalid rollback_guard state in sync_state) and the
  * dump-window watermarks straight out of the database
  * about to be dumped, and for an indexer source out of its paired decoder
  * database as well. Every unreadable answer throws, and the gate turns a throw
@@ -30,6 +30,7 @@ const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 const { configuredDatabaseName } = require('../../utils/module_database_name')
 const {
     markerTablesSql, liveReorgHaltCountSql, newestReorgClearSql, liveSyncHaltCountSql, pendingSyncHaltCountSql,
+    rollbackGuardStateSql,
     eventsWatermarkSql, syncHaltWatermarkSql, reorgHaltsSinceSql, syncHaltsSinceSql
 } = require('../../db/halt_markers')
 
@@ -86,6 +87,34 @@ function parseNewestClear(raw, what) {
         payload = null
     }
     return isAuditedClear(payload) ? 0 : 1
+}
+
+// Same validity rule as xchain-sync ClientSync.loadRollbackGuardState.
+function isValidRollbackGuardState(raw) {
+    try {
+        const state = JSON.parse(raw)
+        return Number.isSafeInteger(state.peak) && Number.isSafeInteger(state.low) &&
+            state.peak >= 0 && state.low >= 0 && state.low <= state.peak
+    } catch (_) {
+        return false
+    }
+}
+
+function parseRollbackGuardRows(raw, what) {
+    const text = String(raw == null ? '' : raw).replace(/\r?\n$/, '')
+    const fields = text.split('\t')
+    const count = /^\d+$/.test(fields[0] || '') ? Number(fields[0]) : NaN
+    const encoded = fields[1] === 'NULL' ? '' : (fields[1] || '')
+    const tokens = encoded === '' ? [] : encoded.split(',')
+    const bad = fields.length !== 2 || !Number.isSafeInteger(count) || count < 0 ||
+        tokens.length !== count || tokens.some(token => !/^(?:N|V(?:[0-9A-F]{2})*)$/.test(token))
+    if (bad)
+        throw new Error(`the ${what} returned unreadable output: ${JSON.stringify(text.slice(0, 80))}`)
+    return tokens.reduce((invalid, token) => {
+        if (token === 'N') return invalid
+        const value = Buffer.from(token.slice(1), 'hex').toString('utf8')
+        return invalid + (isValidRollbackGuardState(value) ? 0 : 1)
+    }, 0)
 }
 
 // A watermark is interpolated into SQL below, and it comes back through a caller
@@ -171,7 +200,7 @@ async function probeDatabase(run, readCount, name, since) {
 
 // Count the live halt rows in each optional marker table of `name`, for readLiveMarkers.
 async function readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState }) {
-    const found = { reorgHalt: 0, syncHalt: 0, pendingSyncHalt: 0 }
+    const found = { reorgHalt: 0, syncHalt: 0, pendingSyncHalt: 0, rollbackGuardInvalid: 0 }
     // LIVE halts only: a REORG_HALT row older than the newest REORG_HALT_CLEARED
     // row was cleared by an operator through `xchain-node clear-reorg-halt`
     // (audited in the decoder's events table) and no longer disqualifies the
@@ -189,8 +218,11 @@ async function readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState 
     // A halt whose sync_halt write failed lives only as xchain-sync's sync_state copy,
     // which a restore re-installs as a halt; sync_state is optional for the same reason.
     // It has no id sequence, so it is read live at each reading, never by watermark.
-    if (hasSyncState > 0)
+    if (hasSyncState > 0) {
         found.pendingSyncHalt = await readCount(pendingSyncHaltCountSql(name), 'sync_state halt_pending marker')
+        found.rollbackGuardInvalid = parseRollbackGuardRows(await run(rollbackGuardStateSql(name)),
+            `sync_state rollback_guard probe for ${name}`)
+    }
     return found
 }
 
@@ -325,6 +357,8 @@ module.exports = {
     pendingSyncHaltReason,
     parseCountTokens,
     parseNewestClear,
+    parseRollbackGuardRows,
+    isValidRollbackGuardState,
     isAuditedClear,
     readHaltMarkers
 }

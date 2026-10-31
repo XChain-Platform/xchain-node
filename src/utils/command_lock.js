@@ -151,7 +151,7 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
             if (unlinkErr.code !== 'ENOENT') throw unlinkErr
         }
     } finally {
-        try { fs.unlinkSync(reclaimFile) } catch { /* already gone */ }
+        unlinkIfOwned(reclaimFile, pid, nonce)
     }
 }
 
@@ -268,10 +268,13 @@ function releaseCommandLock(lockFile, pid, nonce) {
     // Only delete a lock we still own; never clobber a successor's lock. The nonce
     // is what makes ownership provable: a successor that happens to run under a
     // RECYCLED pid matches on pid alone, and would be clobbered on our exit.
-    const holder = readLockHolder(lockFile)
-    if (!holder || holder.pid !== pid) return
-    if (holder.nonce !== nonce) return
-    try { fs.unlinkSync(lockFile) } catch { /* already gone */ }
+    unlinkIfOwned(lockFile, pid, nonce)
+}
+
+function unlinkIfOwned(file, pid, nonce) {
+    const holder = readLockHolder(file)
+    if (!holder || holder.pid !== pid || holder.nonce !== nonce) return
+    try { fs.unlinkSync(file) } catch { /* already gone */ }
 }
 
 module.exports = { acquireCommandLock, adoptCommandLock, getLockFilePath, isPidAlive }

@@ -28,6 +28,7 @@ function installedStatus(module) {
 
 function loadWith({ module, force }) {
     const stubs = makeStubs()
+    stubs.probeContainerPresenceByName.resolves('exists')
     const buildAndUp = sinon.stub().resolves('new-container-id')
     const bootstrap = {
         FRESHNESS_EMPTY: 'empty',
@@ -66,7 +67,7 @@ moduleSuite('installModule(): XCHAIN_NODE_FORCE_BOOTSTRAP on an installed module
         // The running container is handed over by id, so buildAndUp stops it gracefully.
         expect(buildAndUp.firstCall.args.slice(0, 4))
             .to.deep.equal([XChainService.XCHAIN_DECODER, COIN, NETWORK, 'old-container-id'])
-        expect(stubs.db.getModuleContainer.calledWith(XChainService.XCHAIN_DECODER, COIN, NETWORK)).to.equal(true)
+        expect(stubs.db.getModuleContainerStrict.calledWith(XChainService.XCHAIN_DECODER, COIN, NETWORK)).to.equal(true)
         expect(bootstrap.ensureBootstrapMariaDb.calledOnceWith(COIN, NETWORK, XChainService.XCHAIN_DECODER)).to.equal(true)
     })
 

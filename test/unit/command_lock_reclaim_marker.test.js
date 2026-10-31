@@ -25,7 +25,7 @@ function findDeadPid() {
     return deadPid
 }
 
-describe('commandLock publishes the reclaim marker atomically', () => {
+function registerLockDirectoryHooks() {
     beforeEach(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-node-lock-'))
         process.env.XCHAIN_NODE_LOCK_DIR = tmpDir
@@ -35,6 +35,10 @@ describe('commandLock publishes the reclaim marker atomically', () => {
         delete process.env.XCHAIN_NODE_LOCK_DIR
         fs.rmSync(tmpDir, { recursive: true, force: true })
     })
+}
+
+describe('commandLock publishes the reclaim marker atomically', () => {
+    registerLockDirectoryHooks()
 
     // An empty marker reads as abandoned, so a contender could break a live reclaimer's marker.
     it('never creates the reclaim marker with a separate open-then-write', () => {
@@ -67,5 +71,36 @@ describe('commandLock publishes the reclaim marker atomically', () => {
         assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).pid, process.pid)
         assert.deepStrictEqual(fs.readdirSync(tmpDir), ['command.lock'], 'no marker or temp file left behind')
         release()
+    })
+})
+
+describe('commandLock publishes the reclaim marker atomically', () => {
+    registerLockDirectoryHooks()
+
+    it('does not remove a reclaim marker it no longer owns', () => {
+        const lockFile = getLockFilePath()
+        const reclaimFile = lockFile + '.reclaim'
+        const deadPid = findDeadPid()
+        fs.writeFileSync(lockFile, JSON.stringify({ pid: deadPid, command: 'install' }) + '\n')
+        const realKill = process.kill
+        let replaced = false
+        process.kill = function (pid, signal) {
+            if (!replaced && pid === deadPid && signal === 0 && fs.existsSync(reclaimFile)) {
+                replaced = true
+                fs.writeFileSync(reclaimFile,
+                    JSON.stringify({ pid: process.pid, nonce: 'the-successor' }) + '\n')
+            }
+            return realKill.call(process, pid, signal)
+        }
+        let release
+        try {
+            release = acquireCommandLock({ command: 'update' })
+        } finally {
+            process.kill = realKill
+        }
+        assert.ok(replaced, 'the marker ownership change must occur inside reclamation')
+        assert.strictEqual(JSON.parse(fs.readFileSync(reclaimFile, 'utf8')).nonce, 'the-successor')
+        release()
+        fs.unlinkSync(reclaimFile)
     })
 })

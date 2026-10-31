@@ -39,7 +39,8 @@ function nativeHelperStub(nativeResolves) {
     if (nativeResolves !== null) return sinon.stub().resolves(nativeResolves)
     // The native client joins the clear probe's NULL payload column as ''.
     return sinon.stub().callsFake(async (cfg, sql) =>
-        (/information_schema\.TABLES/.test(sql) ? '1\t1\t1' : (/HEX\(data\)/.test(sql) ? '0\t' : '0')))
+        (/information_schema\.TABLES/.test(sql) ? '1\t1\t1' :
+            (/HEX\(data\)|rollback_guard/.test(sql) ? '0\t' : '0')))
 }
 
 function loadGate({ external = false, nativeResolves = null } = {}) {
@@ -97,6 +98,7 @@ function makeRunner({
     syncHaltRows  = '0',
     // Live halt_pending copies in sync_state (xchain-sync's fallback when sync_halt fails).
     pendingSyncHaltRows = '0',
+    rollbackGuardRows = '0\t',
     inspectThrows = null,
     statusThrows  = null,
     sqlThrows     = null,
@@ -104,6 +106,7 @@ function makeRunner({
     // null, that database answers exactly as the gated one does; set it to express
     // the scenario the gate exists for and a single-database fake cannot reach:
     // decoder dirty, indexer clean. Accepts { tables, reorgHaltRows, newestClear, syncHaltRows, pendingSyncHaltRows,
+    // rollbackGuardRows,
     // eventsWatermark, syncHaltWatermark, reorgHaltWindowRows, syncHaltWindowRows,
     // throws }.
     decoder       = null,
@@ -135,6 +138,7 @@ function makeRunner({
         if (up && up.throws) throw up.throws
         const pick = (key, fallback) => (up && up[key] !== undefined) ? up[key] : fallback
         if (/information_schema\.TABLES/.test(sql)) return { stdout: pick('tables', tables) }
+        if (/rollback_guard/.test(sql)) return { stdout: pick('rollbackGuardRows', rollbackGuardRows) }
         if (/`[^`]+`\.sync_state/.test(sql)) return { stdout: pick('pendingSyncHaltRows', pendingSyncHaltRows) }
         // Watermark and dump-window queries first: both mention the table names the
         // live-marker branches below match on.

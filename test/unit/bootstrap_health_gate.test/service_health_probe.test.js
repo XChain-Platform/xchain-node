@@ -94,6 +94,7 @@ describe('BootstrapHealthGate', function () {
                 if (/information_schema\.TABLES/.test(sql)) return { stdout: '1\t1\t1' }
                 // The newest-clear probe: no clear row, and the docker client prints NULL.
                 if (/HEX\(data\)/.test(sql)) return { stdout: '0\tNULL\n' }
+                if (/rollback_guard/.test(sql)) return { stdout: '0\t' }
                 return { stdout: '0' }
             })
             const res = await callGate(gate, { runner })

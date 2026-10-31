@@ -345,7 +345,7 @@ describe('secret-env', function () {
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
             expect(config['NODE_PASSWORD']).to.equal('inmainfile')
             expect(files[coinMain]).to.not.include('inmainfile')
-            expect(files[coinSidecar]).to.include('NODE_PASSWORD=inmainfile')
+            expect(files[coinSidecar]).to.include('NODE_SECRET=inmainfile')
         })
     })
 })

@@ -172,8 +172,7 @@ async function readBootstrapArchiveMeta(archivePath) {
 const ARCHIVE_IDENTITY_FIELDS = ['module', 'coin', 'network']
 
 // An identity value trimmed and lowercased, or null when it is absent or blank: the same normalization the tracker's
-// restore_validation.js applies to bootstrap.json. Only the normalization is shared: a target lacking a value for a
-// declared field is a mismatch here but unchecked in the tracker, so the two readers can reach different verdicts.
+// restore_validation.js applies to bootstrap.json. Both readers treat a target lacking a declared field as a mismatch.
 function identityValue(value) {
     if (typeof value !== 'string') return null
     const v = value.trim().toLowerCase()
