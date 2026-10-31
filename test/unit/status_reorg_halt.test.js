@@ -145,6 +145,12 @@ describe('ps: indexer STALL surface', function () {
         const parse = note('parse_exception: TypeError: boom', 'wedged')
         expect(parse).to.not.match(/hub-mirror barrier/)
         expect(parse).to.match(/same exception hit the same block twice/).and.to.match(/xchain-node logs xchain-indexer bitcoin mainnet/)
+        const needsGo = note('retroactive_replay_needs_go', 'operator_action_hold')
+        expect(needsGo).to.not.match(/no specific remedy/)
+        expect(needsGo).to.match(/operator go row/).and.to.match(/exact go command/)
+        const diverged = note('retroactive_replay_diverged', 'operator_action_hold')
+        expect(diverged).to.not.match(/no specific remedy/)
+        expect(diverged).to.match(/data fault/).and.to.match(/hub resync clears/).and.to.match(/rewitness command/)
     })
 
     it('an unknown reason gets the hub-mirror line only when its word ends in _barrier', function () {
