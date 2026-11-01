@@ -258,6 +258,37 @@ const INVALID_STAMPS = {
     'Feb 30 in the past': '20260230_000000',
 }
 
+// Runs one stubbed download whose redirect lands on resolvedUrl and returns
+// every console.log line it printed.
+async function downloadLogLines(resolvedUrl) {
+    const stubs = makeStubs()
+    stubs.fs.existsSync.returns(true)
+    const dataStream  = new PassThrough()
+    const writeStream = new PassThrough()
+    drainPassThrough(writeStream)
+    stubs.fs.createWriteStream.returns(writeStream)
+    stubs.axios.onFirstCall().resolves({
+        status:  200,
+        headers: { 'content-length': '100' },
+        data:    dataStream,
+        request: { res: { responseUrl: resolvedUrl } },
+    })
+    stubs.axios.onSecondCall().resolves({ status: 200, data: 'sig-bytes' })
+
+    const logged = []
+    const origLog = console.log
+    console.log = (...args) => logged.push(args.join(' '))
+    try {
+        const bs = loadBootstrapService(stubs)
+        const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+        setImmediate(() => { dataStream.end(); writeStream.emit('finish') })
+        await promise
+    } finally {
+        console.log = origLog
+    }
+    return logged
+}
+
 describe('BootstrapService', function () {
     beforeEach(saveRequireSignedBootstrapSetting)
     afterEach(restoreRequireSignedBootstrapSetting)
@@ -284,33 +315,8 @@ describe('BootstrapService', function () {
             })
 
             it('warns at download time that the age is unknown', async function () {
-                const stubs = makeStubs()
-                stubs.fs.existsSync.returns(true)
-                const dataStream  = new PassThrough()
-                const writeStream = new PassThrough()
-                drainPassThrough(writeStream)
-                stubs.fs.createWriteStream.returns(writeStream)
-                const badUrl = 'https://sync.example/b/testnet-xchain-utxo-tracker-20991399_996199.tar.gz'
-                stubs.axios.onFirstCall().resolves({
-                    status:  200,
-                    headers: { 'content-length': '100' },
-                    data:    dataStream,
-                    request: { res: { responseUrl: badUrl } },
-                })
-                stubs.axios.onSecondCall().resolves({ status: 200, data: 'sig-bytes' })
-
-                const logged = []
-                const origLog = console.log
-                console.log = (...args) => logged.push(args.join(' '))
-                try {
-                    const bs = loadBootstrapService(stubs)
-                    const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
-                    setImmediate(() => { dataStream.end(); writeStream.emit('finish') })
-                    await promise
-                } finally {
-                    console.log = origLog
-                }
-
+                const logged = await downloadLogLines(
+                    'https://sync.example/b/testnet-xchain-utxo-tracker-20991399_996199.tar.gz')
                 const warning = logged.find(l => l.includes('WARNING: the published'))
                 expect(warning, 'no warning for an archive of unknown age').to.be.a('string')
                 expect(warning).to.contain('unreadable publication stamp')
