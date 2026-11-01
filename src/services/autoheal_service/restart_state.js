@@ -73,7 +73,8 @@ function readState(stateFile) {
     // {
     //   restarts:       { <containerId>: <epoch ms of last autoheal restart> },
     //   unhealthySince: { <containerId>: <epoch ms this unhealthy episode began> },
-    //   restartCount:   { <containerId>: <restarts since this container last was healthy> }
+    //   restartCount:   { <containerId>: <restarts since this container last was healthy> },
+    //   stoppedByAutoheal: { <containerId>: true when a stopped container still needs starting }
     // }
     try {
         const parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
@@ -88,13 +89,16 @@ function readState(stateFile) {
             if (typeof parsed.restartCount !== 'object' || parsed.restartCount === null) {
                 parsed.restartCount = {}
             }
+            if (typeof parsed.stoppedByAutoheal !== 'object' || parsed.stoppedByAutoheal === null) {
+                parsed.stoppedByAutoheal = {}
+            }
             return parsed
         }
     } catch {
         // Missing or corrupt state file: start clean. Worst case a container
         // gets one extra restart after a state loss, which is acceptable.
     }
-    return { restarts: {}, unhealthySince: {}, restartCount: {} }
+    return { restarts: {}, unhealthySince: {}, restartCount: {}, stoppedByAutoheal: {} }
 }
 
 function writeState(stateFile, state) {

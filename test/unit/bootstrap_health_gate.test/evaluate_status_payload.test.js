@@ -73,6 +73,11 @@ describe('BootstrapHealthGate', function () {
             expect(reasons).to.have.lengthOf(1)
             expect(reasons[0]).to.match(/WEDGED/)
             expect(reasons[0]).to.match(/vm_executor_host_fault/)
+            const held = gate.evaluateStatusPayload(
+                { status: 'healthy', lag: 3, stallClass: 'operator_action_hold', stallReason: 'retroactive_replay_diverged' })
+            expect(held).to.have.lengthOf(1)
+            expect(held[0]).to.include('operator acts')
+            expect(held[0]).to.include('retroactive_replay_diverged')
         })
 
         // A proof wait publishes its _stuck class past the hold ceiling, well before it wedges.

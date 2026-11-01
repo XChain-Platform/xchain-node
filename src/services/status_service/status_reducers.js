@@ -264,6 +264,13 @@ const INDEXER_STALL_HINTS = {
         "the signed release manifest names a rule set this build does not implement; `xchain-node update xchain-indexer " + coin + " " + network + "`.",
     reorg_rollback: () =>
         "a reorg rollback is in progress; it resumes on its own once the rolled-back range is re-parsed.",
+    retroactive_replay_needs_go: (coin, network) =>
+        "the replay exceeded its block cap and needs an operator go row."
+        + " `xchain-node logs xchain-indexer " + coin + " " + network + "` prints the exact go command.",
+    retroactive_replay_diverged: (coin, network) =>
+        "a replay witness did not reproduce its recorded result, so no block applies."
+        + " Neither a restart nor a hub resync clears this data fault; fix the input named by"
+        + " `xchain-node logs xchain-indexer " + coin + " " + network + "`, then run the rewitness command for the target.",
     bridge_proof_barrier: (coin, network) =>
         "it is waiting for a bridge escrow proof and defers the block rather than mint unproven. This is not a hub-mirror fault,"
         + " and neither a hub resync nor a restart shortens it: it clears once this node holds a quorum-established checkpoint"

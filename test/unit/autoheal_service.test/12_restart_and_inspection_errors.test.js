@@ -71,39 +71,42 @@ function loadService(stubs) {
     })
 }
 
-describe('AutohealService', () => {
-    let stubs, service, stateDir, logStub
-
+function restartErrorHarness() {
+    const h = {}
     beforeEach(() => {
-        stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autoheal-test-'))
-        process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR = stateDir
-        stubs = makeStubs()
-        service = loadService(stubs)
-        logStub = sinon.stub(console, 'log')
+        h.stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autoheal-test-'))
+        process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR = h.stateDir
+        h.stubs = makeStubs()
+        h.service = loadService(h.stubs)
+        h.logStub = sinon.stub(console, 'log')
     })
-
     afterEach(() => {
-        logStub.restore()
+        h.logStub.restore()
         delete process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR
         delete process.env.XCHAIN_NODE_AUTOHEAL_GRACE_MS
         delete process.env.XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS
-        fs.rmSync(stateDir, { recursive: true, force: true })
+        fs.rmSync(h.stateDir, { recursive: true, force: true })
     })
+    return h
+}
 
-    function registryRow(module, containerId) {
-        return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
-    }
+function registryRow(module, containerId) {
+    return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
+}
+
+describe('AutohealService', () => {
+    const h = restartErrorHarness()
 
     it('records a failed restart without aborting the pass and reports it', async () => {
-        stubs.db.getAllModuleContainers.resolves([
+        h.stubs.db.getAllModuleContainers.resolves([
             registryRow('xchain-indexer', 'iii'),
             { module: 'xchain-decoder', coin: 'litecoin', network: 'regtest', container_id: 'jjj' }
         ])
-        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
-        stubs.stopContainer.withArgs('iii').rejects(new Error('docker daemon gone'))
-        stubs.stopContainer.withArgs('jjj').resolves({ stopped: true, seconds: 1, killed: false, exitCode: 0 })
+        h.stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        h.stubs.stopContainer.withArgs('iii').rejects(new Error('docker daemon gone'))
+        h.stubs.stopContainer.withArgs('jjj').resolves({ stopped: true, seconds: 1, killed: false, exitCode: 0 })
 
-        const result = await service.runAutoheal({ now: NOW })
+        const result = await h.service.runAutoheal({ now: NOW })
 
         expect(result.failed).to.have.length(1)
         expect(result.failed[0].containerId).to.equal('iii')
@@ -112,12 +115,53 @@ describe('AutohealService', () => {
     })
 
     it('skips a container that cannot be inspected instead of failing the pass', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'kkk')])
-        stubs.getStatusFromContainer.rejects(new Error('No such container'))
+        h.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'kkk')])
+        h.stubs.getStatusFromContainer.rejects(new Error('No such container'))
 
-        const result = await service.runAutoheal({ now: NOW })
+        const result = await h.service.runAutoheal({ now: NOW })
 
         expect(result.skipped[0].reason).to.equal('inspect failed')
         expect(result.failed).to.have.length(0)
+    })
+})
+
+describe('AutohealService', () => {
+    const h = restartErrorHarness()
+
+    it('retries only the start after a failed restart left the container stopped', async () => {
+        h.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'left-down')])
+        h.stubs.getStatusFromContainer.onFirstCall().resolves(unhealthyPastGrace())
+        h.stubs.getStatusFromContainer.onSecondCall().resolves(inspectStatus('unhealthy', [], 'exited'))
+        h.stubs.startContainer.onFirstCall().rejects(new Error('port is already allocated'))
+        h.stubs.startContainer.onSecondCall().resolves(true)
+
+        const failed = await h.service.runAutoheal({ now: NOW })
+        const stateAfterFailure = JSON.parse(fs.readFileSync(path.join(h.stateDir, 'autoheal-state.json'), 'utf8'))
+        const recovered = await h.service.runAutoheal({ now: NOW + 1000, resumeStopped: true })
+
+        expect(failed.failed).to.have.length(1)
+        expect(stateAfterFailure.stoppedByAutoheal['left-down']).to.equal(true)
+        expect(h.stubs.stopContainer.calledOnce).to.equal(true)
+        expect(h.stubs.startContainer.callCount).to.equal(2)
+        expect(recovered.restarted[0].containerId).to.equal('left-down')
+        const finalState = JSON.parse(fs.readFileSync(path.join(h.stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(finalState.stoppedByAutoheal).to.not.have.property('left-down')
+    })
+
+    it('escalates a left-down container without overriding operator intent', async () => {
+        h.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'left-down')])
+        h.stubs.getStatusFromContainer.onFirstCall().resolves(unhealthyPastGrace())
+        h.stubs.getStatusFromContainer.onSecondCall().resolves(inspectStatus('unhealthy', [], 'exited'))
+        h.stubs.startContainer.rejects(new Error('port is already allocated'))
+
+        await h.service.runAutoheal({ now: NOW })
+        const unattended = await h.service.runAutoheal({ now: NOW + 1000 })
+        const state = JSON.parse(fs.readFileSync(path.join(h.stateDir, 'autoheal-state.json'), 'utf8'))
+
+        expect(h.stubs.stopContainer.calledOnce).to.equal(true)
+        expect(h.stubs.startContainer.calledOnce).to.equal(true)
+        expect(unattended.escalated[0].containerId).to.equal('left-down')
+        expect(h.service.autohealExitCode(unattended)).to.equal(2)
+        expect(state.stoppedByAutoheal['left-down']).to.equal(true)
     })
 })
