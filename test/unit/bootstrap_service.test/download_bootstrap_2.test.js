@@ -242,3 +242,81 @@ describe('BootstrapService', function () {
         })
     })
 })
+
+// Date.UTC rolls out-of-range fields forward (month 13 is next January,
+// minute 61 is the next hour), so an impossible stamp taken at face value is a
+// later, often future, date: a future date reads as null and would silence the
+// stale warning for an archive whose age nobody knows.
+const INVALID_STAMPS = {
+    'month 13': '20261301_000000',
+    'day 32': '20260832_000000',
+    'hour 25': '20260823_250000',
+    'minute 61': '20260823_236100',
+    'second 61': '20260823_235961',
+    'Feb 30': '20270230_000000',
+    'every field out of range': '20261399_996199',
+    'Feb 30 in the past': '20260230_000000',
+}
+
+describe('BootstrapService', function () {
+    beforeEach(saveRequireSignedBootstrapSetting)
+    afterEach(restoreRequireSignedBootstrapSetting)
+    describe('downloadBootstrap()', function () {
+        describe('an archive name whose stamp names no real instant', function () {
+            for (const [label, stamp] of Object.entries(INVALID_STAMPS)) {
+                it(`treats ${label} (${stamp}) as unreadable, never as a rolled-over date`, function () {
+                    const bs = loadBootstrapService(makeStubs())
+                    const url = `https://sync.example/b/regtest-xchain-indexer-${stamp}.tar.gz`
+                    const age = bs.bootstrapArchiveAgeDays(url, AUG_23)
+                    expect(age, 'null would silence the stale warning').to.not.be.null
+                    expect(age).to.equal(Infinity)
+                    expect(age >= bs.BOOTSTRAP_STALE_AFTER_DAYS, 'the stale warning must fire').to.be.true
+                })
+            }
+
+            it('keeps a valid stamp at the same age as before', function () {
+                const bs = loadBootstrapService(makeStubs())
+                expect(bs.bootstrapArchiveAgeDays(
+                    'https://sync.example/b/testnet-xchain-utxo-tracker-20260801_082909.tar.gz', AUG_23)).to.equal(22)
+                expect(bs.bootstrapArchiveAgeDays(
+                    'https://sync.example/b/testnet-xchain-utxo-tracker-20240229_235959.tar.gz',
+                    Date.UTC(2024, 2, 1, 0, 0, 0))).to.equal(0)
+            })
+
+            it('warns at download time that the age is unknown', async function () {
+                const stubs = makeStubs()
+                stubs.fs.existsSync.returns(true)
+                const dataStream  = new PassThrough()
+                const writeStream = new PassThrough()
+                drainPassThrough(writeStream)
+                stubs.fs.createWriteStream.returns(writeStream)
+                const badUrl = 'https://sync.example/b/testnet-xchain-utxo-tracker-20991399_996199.tar.gz'
+                stubs.axios.onFirstCall().resolves({
+                    status:  200,
+                    headers: { 'content-length': '100' },
+                    data:    dataStream,
+                    request: { res: { responseUrl: badUrl } },
+                })
+                stubs.axios.onSecondCall().resolves({ status: 200, data: 'sig-bytes' })
+
+                const logged = []
+                const origLog = console.log
+                console.log = (...args) => logged.push(args.join(' '))
+                try {
+                    const bs = loadBootstrapService(stubs)
+                    const promise = bs.downloadBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, '/tmp/dest')
+                    setImmediate(() => { dataStream.end(); writeStream.emit('finish') })
+                    await promise
+                } finally {
+                    console.log = origLog
+                }
+
+                const warning = logged.find(l => l.includes('WARNING: the published'))
+                expect(warning, 'no warning for an archive of unknown age').to.be.a('string')
+                expect(warning).to.contain('unreadable publication stamp')
+                expect(warning).to.contain('20991399_996199')
+                expect(warning).to.not.contain('Infinity')
+            })
+        })
+    })
+})

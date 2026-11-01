@@ -39,12 +39,22 @@ function configureDependencies(dependencies) {
 // Age in whole days of the resolved archive, from the UTC <YYYYMMDD_HHMMSS>
 // stamp in its name (the field latest.php orders by). Null when the name
 // carries none, as a hand-placed latest.tgz does.
+//
+// Infinity when a stamp is present but names no real UTC instant (month 13,
+// day 32, Feb 30, minute 61). Date.UTC rolls such fields over into a LATER
+// date, which would read as a future publish and silence the warning for an
+// archive of unknown age; the installer has no other clock to fall back on,
+// so an unreadable stamp is warned about rather than trusted.
 function bootstrapArchiveAgeDays(archiveUrl, now = Date.now()) {
     const stamp = /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(path.basename(archiveUrl || ''))
     if (!stamp) return null
-    const [, y, mo, d, h, mi, s] = stamp
-    const published = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s))
-    if (!Number.isFinite(published)) return null
+    const [y, mo, d, h, mi, s] = stamp.slice(1).map(Number)
+    const published = Date.UTC(y, mo - 1, d, h, mi, s)
+    const back = new Date(published)
+    const exact = Number.isFinite(published)
+        && back.getUTCFullYear() === y && back.getUTCMonth() === mo - 1 && back.getUTCDate() === d
+        && back.getUTCHours() === h && back.getUTCMinutes() === mi && back.getUTCSeconds() === s
+    if (!exact) return Infinity
     const days = Math.floor((now - published) / 86400000)
     return days >= 0 ? days : null
 }
@@ -131,8 +141,11 @@ function reportBootstrapAge(finalUrl, module, coin, network) {
           '  archive is the cause, not your host.'
         : '  It still restores; the service resyncs forward from the archive height, which just takes longer\n' +
           '  the older the archive is.'
+    const age = Number.isFinite(ageDays)
+        ? `is ${ageDays} days old`
+        : 'has an unreadable publication stamp, so its age is unknown and it may be many days old'
     logger.info(
-        `WARNING: the published ${module} bootstrap for ${coin}/${network} is ${ageDays} days old ` +
+        `WARNING: the published ${module} bootstrap for ${coin}/${network} ${age} ` +
         `(${path.basename(finalUrl)}).\n` + consequence
     )
 }
