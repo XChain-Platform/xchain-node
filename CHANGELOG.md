@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-01
+
+### Added
+- Added coordinated hub checkpoint reset, and reset can now run on a named MariaDB container without the hub push.
+
+### Changed
+- Reset can use a root password variable or the stack's own database logins, and moved service ports are now persisted.
+
+### Fixed
+- Lifecycle commands now exit non-zero when the in-container command fails or matches nothing, and read-only commands no longer install or restart the hub.
+- A hub answer carrying an error now counts as a failed config push, and the push is capped at three minutes.
+- A failed reset database step is reported with the services left down, and the command lock file is published whole.
+- Autoheal now restarts only running containers, backs off repeated restarts, and keeps going when a container vanishes mid-pass.
+- The bootstrap health gate now ignores halts an operator has cleared and counts a sync halt held only in sync state.
+- Module, explorer and config sidecar handling and the command lock were corrected, and status reports more accurately.
+
 ### Fixed
 - Kept bootstrap publisher capture logs on its configured temporary work volume.
 - Published the command lock file complete so a contender never reclaims a live creator's empty lock.
