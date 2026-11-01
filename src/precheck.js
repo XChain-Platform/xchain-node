@@ -280,13 +280,17 @@ async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
 // `repairsHub` says the command about to run rebuilds, recreates, updates or
 // removes the hub container (cli.js commandRepairsHub decides). It only ever
 // relaxes the config push below, and only while the hub is not answering.
-async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false) {
+//
+// `localOnly` stops after the docker and directory checks, for a reset aimed at a stack this CLI did not install
+// (`reset --db-container`): no bundled DB provisioning, no module scan, no hub install, no hub or explorer push.
+async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false, { localOnly = false } = {}) {
     await requireDocker()
     await warnIfContainerdStoreOnRoot()
     await warnIfMemoryLimitsUnsupported()
 
     if (isVerbose()) console.log("Checking/Creating directories")
     createDirectories()
+    if (localOnly) return true
 
     await createBaseNetwork()
     await installDatabaseContainer()
@@ -310,7 +314,12 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     // this never mints (a host with no sidecar stays keyless exactly as before).
     await applyHubApiKeyFromSidecar(hostEnv())
 
-    await installHubAtRef(moduleRef)
+    // Provisioning the hub is state-changing: installHubModule ends in
+    // useInstalledHub, which restarts a hub whose State is 'exited'. A read-only
+    // command (syncHubConfig=false: ps, tail, logs, monitor) must not change any
+    // container's run state, or `ps` starts a hub the operator stopped and then
+    // prints its stale 'exited' status. Mutating commands still install here.
+    if (syncHubConfig) await installHubAtRef(moduleRef)
 
     await pushConfigToHubAndExplorer(syncHubConfig, repairsHub)
 

@@ -276,3 +276,32 @@ describe('preCheck(): hub/explorer config push @regression', function () {
         expect(updateExplorer.calledOnce).to.be.true
     })
 })
+
+// A read-only command (ps, tail, logs, monitor) must never change a container's run
+// state. installHubModule ends in useInstalledHub, which restarts a hub whose State is
+// 'exited', so running it for `ps` started a hub the operator had stopped and then
+// printed the stale 'exited' status. Read-only commands pass syncHubConfig=false, and
+// that must also skip the hub install; mutating commands still install.
+describe('preCheck(): read-only commands never install or restart the hub @regression', function () {
+
+    it('does not call installHubModule or updateHub when syncHubConfig is false', async function () {
+        const installHubModule = sinon.stub().resolves()
+        const updateHub        = sinon.stub().resolves()
+        const { precheck }     = loadPrecheck({ installHubModule, updateHub })
+
+        await precheck.preCheck(false, false, null, false)
+
+        expect(installHubModule.called).to.be.false
+        expect(updateHub.called).to.be.false
+    })
+
+    it('still installs the hub once for a mutating command (syncHubConfig true)', async function () {
+        const installHubModule = sinon.stub().resolves()
+        const { precheck }     = loadPrecheck({ installHubModule })
+
+        await precheck.preCheck(false, true, 'v1.2.3', false)
+
+        expect(installHubModule.calledOnce).to.be.true
+        expect(installHubModule.firstCall.args[0]).to.equal('v1.2.3')
+    })
+})

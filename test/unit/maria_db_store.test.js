@@ -45,9 +45,12 @@ function dispatchFakeSql(rows, sql, params = []) {
         return undefined
     }
     if (/^DELETE FROM modules WHERE/i.test(trimmed)) {
-        const [module, coin, network] = params
-        rows.delete(`${module}|${coin}|${network}`)
-        return undefined
+        const [module, coin, network, containerId] = params
+        const key = `${module}|${coin}|${network}`
+        const current = rows.get(key)
+        const matches = containerId === undefined || (current && current.container_id === containerId)
+        if (matches) rows.delete(key)
+        return { affectedRows: matches && current ? 1 : 0 }
     }
     throw new Error(`buildFakeMariadbModule: unhandled SQL: ${trimmed}`)
 }

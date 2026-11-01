@@ -32,7 +32,10 @@ const {
     getDockerContainerImageName, getUtxoTrackerVolumeName, getDockerNetwork, getDefaultConfig, validatePort
 } = require('./config_service')
 const { statusChanged, getStatus } = require('./status_service')
-const { stopContainerByName, removeContainer, getPublishedHostPorts, forceRemoveContainerByName, addContainerToNetwork, checkBuildKitAvailable } = require('./docker_service')
+const {
+    stopContainerByName, removeContainer, getPublishedHostPorts, forceRemoveContainerByName,
+    addContainerToNetwork, checkBuildKitAvailable, probeContainerPresenceByName
+} = require('./docker_service')
 const { stopModuleContainer, stopTimeoutArgs } = require('./stop_budget_service')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./database_service')
 const { redactSecrets, sleep } = require('../utils/helpers')
@@ -69,25 +72,6 @@ configureBuildAndUp({ execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRAR
 
 for (const part of ['git_checkout', 'clone_and_refs', 'docker_args', 'container_networks', 'build_and_up']) {
     delete require.cache[require.resolve('./module_service/' + part + '.js')]
-}
-
-// Singleton modules share one coin/network-independent container name (see
-// getDockerContainerImageNamePrefix). DB and EXPLORER have dedicated install
-// branches that are already idempotent; HUB and SYNC fall through to the
-// generic branch whose "already built?" check is keyed per coin/network, which
-// can't see the one shared container, so installing across multiple networks
-// would re-run `docker run` with a duplicate name and crash.
-const SINGLETON_MODULES = [HUB_MODULE_NAME, SYNC_MODULE_NAME]
-
-// True if a container with this exact name already exists (running or stopped).
-// Mirrors getDatabaseContainerId's inspect-by-name probe.
-async function containerExistsByName(name) {
-    try {
-        const { stdout } = await execFileAsync('docker', ['inspect', '--type', 'container', '--format', '{{.Id}}', name])
-        return /^[a-f0-9]{64}$/.test(stdout.trim())
-    } catch {
-        return false
-    }
 }
 
 async function installNodeModule(coin, network, remoteUpdate, overwriteContainerId = null) {
@@ -138,11 +122,6 @@ async function installExplorer(branch, remoteUpdate) {
     await installExplorerModule(remoteUpdate, branch)
     await statusChanged()
     return true
-}
-
-async function singletonAlreadyInstalled(module, coin, network, remoteUpdate) {
-    if (!SINGLETON_MODULES.includes(module) || remoteUpdate) return false
-    return containerExistsByName(getDockerContainerImageName(module, coin, network))
 }
 
 // Refuse credential rotations while the working container is still intact.
@@ -229,12 +208,50 @@ async function finishServiceInstall(context, freshness) {
     return containerId
 }
 
+// The services a bootstrap archive restores. Only these take the forced restore.
+const BOOTSTRAP_RESTORED_MODULES = [XChainService.XCHAIN_UTXO_TRACKER, XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]
+
+// An installed module normally makes install a no-op. XCHAIN_NODE_FORCE_BOOTSTRAP
+// is the one reason to go on for a bootstrap-restored service: every restore
+// failure prints "re-run install with XCHAIN_NODE_FORCE_BOOTSTRAP=1", and this early
+// return made that remedy a silent no-op. Any other module still returns here, so
+// a flag left in the environment never rebuilds the hub or the encoder.
+function forcedBootstrapReinstall(module, presence, remoteUpdate) {
+    if (presence !== 'exists' || remoteUpdate) return false
+    return BOOTSTRAP_RESTORED_MODULES.includes(module) && bootstrapService.forceBootstrapRequested()
+}
+
+// The forced reinstall hands the running container over by id, so buildAndUp stops
+// it on its SIGTERM budget instead of force-removing it by name mid-block.
+async function forcedBootstrapContext(context) {
+    const { module, coin, network } = context
+    logger.info(`XCHAIN_NODE_FORCE_BOOTSTRAP is set: reinstalling the installed ${module} ${coin}/${network} to take the bootstrap restore again.`)
+    if (context.overwriteContainerId) return context
+    const containerId = await db.getModuleContainerStrict(module, coin, network)
+    if (!containerId) {
+        throw new Error(`Cannot reinstall ${module} ${coin}/${network}: its container exists but its module registry row is missing`)
+    }
+    return { ...context, overwriteContainerId: containerId }
+}
+
+async function guardIdempotentInstall(context) {
+    const { module, coin, network, remoteUpdate, overwriteContainerId } = context
+    if (remoteUpdate || overwriteContainerId) return context
+    const name = getDockerContainerImageName(module, coin, network)
+    const presence = await probeContainerPresenceByName(name)
+    if (forcedBootstrapReinstall(module, presence, remoteUpdate)) return forcedBootstrapContext(context)
+    if (presence === 'exists') return false
+    if (presence === 'unknown') {
+        throw new Error(`Cannot install ${module} ${coin}/${network}: Docker could not confirm whether ${name} exists; nothing was changed`)
+    }
+    return context
+}
+
 async function installServiceModule(context) {
+    const guardedContext = await guardIdempotentInstall(context)
+    if (guardedContext === false) return false
+    context = guardedContext
     const { module, coin, network, remoteUpdate, onlyExecution, branch } = context
-    if (await singletonAlreadyInstalled(module, coin, network, remoteUpdate)) return false
-    const { getLastStatus } = stateModule
-    const containerVersion = getLastStatus()?.[coin ?? ""]?.[network ?? ""]?.[module]?.["container_version"] ?? null
-    if (containerVersion && !remoteUpdate) return false
     const { getLocalModuleVersion } = versionService
     let localModuleVersion = null
     try {

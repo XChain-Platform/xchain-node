@@ -178,4 +178,24 @@ describe('AutohealService escalation', () => {
             exit.restore()
         }
     })
+
+    it('passes explicit resume-stopped intent to the autoheal service', async () => {
+        const { registerLifecycleCommands } = require('../../../../src/cli/options')
+        const program = new Command().exitOverride()
+        const result = { candidates: [], restarted: [], failed: [], skipped: [], escalated: [] }
+        let received
+        const loadModule = () => ({
+            runAutoheal: async options => { received = options; return result },
+            autohealExitCode: h.service.autohealExitCode
+        })
+        registerLifecycleCommands(program, { loadModule })
+        const exit = sinon.stub(process, 'exit')
+        try {
+            await program.parseAsync(['node', 'xchain-node', 'autoheal', '--resume-stopped'])
+            expect(received).to.deep.equal({ dryRun: false, resumeStopped: true })
+            expect(exit.calledOnceWith(0)).to.be.true
+        } finally {
+            exit.restore()
+        }
+    })
 })

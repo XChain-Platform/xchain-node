@@ -223,13 +223,14 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
     // E2E-064: Start with no installed modules
     describe('E2E-064: Start with empty LevelDB', function () {
 
-        it('startModules succeeds gracefully with no installed modules', async function () {
+        it('startModules fails with a named no-installed-service error when nothing is installed', async function () {
             env.setupDefaultRoutes()
             cli = env.createCLI()
 
+            // Nothing selected is installed, so the command fails with a reason instead of reporting success.
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
-            const result = await cli.moduleOps.startModules(serviceList)
-            expect(result).to.be.true
+            const err = await cli.moduleOps.startModules(serviceList).then(() => null, e => e)
+            expect(err && err.message).to.match(/start matched no installed service/)
 
             // No docker start commands should have been issued
             const startCmds = env.capture.findCommands(/docker start/)
@@ -245,13 +246,13 @@ describe('E2E: Error Handling (Scenario 4.10)', function () {
     // E2E-065: Stop with no installed modules
     describe('E2E-065: Stop with empty LevelDB', function () {
 
-        it('stopModules succeeds gracefully with no installed modules', async function () {
+        it('stopModules fails with a named no-installed-service error when nothing is installed', async function () {
             env.setupDefaultRoutes()
             cli = env.createCLI()
 
             const serviceList = filterCommandParameters(null, 'all', 'bitcoin', 'regtest')
-            const result = await cli.moduleOps.stopModules(serviceList)
-            expect(result).to.be.true
+            const err = await cli.moduleOps.stopModules(serviceList).then(() => null, e => e)
+            expect(err && err.message).to.match(/stop matched no installed service/)
 
             const stopCmds = env.capture.findCommands(/docker stop/)
             expect(stopCmds).to.have.lengthOf(0)

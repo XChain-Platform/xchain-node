@@ -21,29 +21,17 @@
  * exits. An alive-but-stalled service therefore stays wedged forever,
  * visible only in `docker ps`.
  *
- * `xchain-node autoheal` is a ONE-SHOT pass meant to run from cron or
- * a systemd timer (it never prompts and never daemonizes): it walks
- * the module registry, inspects each container whose service opted in
- * via `autoheal: true` in SERVICE_HEALTHCHECK, and restarts the ones
- * whose Docker health status is `unhealthy` AND which have been
+ * `xchain-node autoheal` is a one-shot cron or systemd timer pass. It walks
+ * opted-in module containers and restarts the ones whose Docker status is unhealthy and
  * continuously unhealthy past a grace window. An on-disk state file
  * (~/.xchain-node/autoheal-state.json) throttles restarts of the same
  * container: the first retry waits the base cooldown, and each further
  * restart of a container that never recovers DOUBLES the wait, up to a
  * ceiling. So a wedge a restart does not clear costs one restart per
  * cooldown, then per 2x, 4x, 8x... rather than one per cooldown forever.
- * The counter is dropped on evidence the container RECOVERED: an observed
- * `healthy`, or a retained passing probe that landed more than the restart
- * probation window after the last autoheal restart. A pass inside that
- * window is the restart's own artifact and is not recovery. So a transient
- * wedge always starts again from the base cooldown, including when the
- * recovery fell entirely between two passes and only the probe log ever
- * witnessed it.
- *
- * Deliberately no attempt CAP and no terminal suppression: this is a
- * watchdog on node containers, and a cap that stops retrying can leave a
- * RECOVERABLE service down through an outage that would have self-cleared.
- * Backing off ends the churn; giving up would trade it for an outage.
+ * The counter is dropped only on evidence the container recovered, including
+ * a retained passing probe beyond the restart probation window.
+ * There is deliberately no attempt cap: backoff ends churn without leaving a recoverable service down forever.
  * The escalation path instead: once a container has been restarted twice
  * in one episode without recovering, every pass that sees it logs an
  * "investigate" line at warn (stderr) and the command exits 2, so a
@@ -112,8 +100,39 @@ async function inspectCandidate(candidate, result) {
     }
 }
 
-// Heal only what is actually RUNNING. Docker freezes State.Health.Status
-// at its last value the moment a container stops (the probe goroutine
+async function handleAutohealStopped(candidate, state, result, dryRun, resumeStopped, now) {
+    const { module, coin, network, containerId, label, status } = candidate
+    if (!state.stoppedByAutoheal[containerId]) return null
+    if (status && status.State && status.State.Status === 'running') {
+        delete state.stoppedByAutoheal[containerId]
+        return { handled: false, changed: true }
+    }
+    result.candidates.push({ module, coin, network, containerId })
+    if (!resumeStopped) {
+        result.escalated.push({ module, coin, network, containerId, attempts: state.restartCount[containerId] || 0 })
+        logger.warn(`autoheal: ${label} remains stopped after a failed restart; investigate or rerun with --resume-stopped`)
+        return { handled: true, changed: false }
+    }
+    if (dryRun) {
+        logger.info(`autoheal: DRY RUN, would retry starting ${label}`)
+        return { handled: true, changed: false }
+    }
+    try {
+        await startContainer(containerId)
+        delete state.stoppedByAutoheal[containerId]
+        state.restarts[containerId] = now
+        state.restartCount[containerId] = (state.restartCount[containerId] || 0) + 1
+        result.restarted.push({ module, coin, network, containerId })
+        logger.info(`autoheal: started ${label} after an earlier restart left it stopped`)
+        return { handled: true, changed: true }
+    } catch (err) {
+        result.failed.push({ module, coin, network, containerId, reason: String(err) })
+        logger.error(`autoheal: FAILED to start ${label} after an earlier restart left it stopped: ${err}`)
+        return { handled: true, changed: false }
+    }
+}
+
+// Heal only what is running. Docker freezes State.Health.Status when a container stops (the probe goroutine
 // runs only while the container is up), so a container that happened to
 // be unhealthy when an operator stopped it keeps reporting `unhealthy`
 // while State.Status is `exited` - and a restart (stop, then start) of a
@@ -230,7 +249,7 @@ function establishEpisode(candidate, health, state, now, probationMs, result) {
     return { since: episode.since, changed: episode.onsetReseeded || restartCountCleared }
 }
 
-async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now) {
+async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now, wallStart) {
     const { module, coin, network, containerId, label } = candidate
     if (now - since < timing.graceMs) {
         result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
@@ -269,13 +288,20 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
         // With the stop budget `stop` uses, so the restart gives a block-bound drain its time
         await restartModuleContainer(stopContainer, startContainer, module, coin, network, containerId,
             undefined, getContainerStopSettings)
-        state.restarts[containerId] = now
+        // Stamp the moment the restart finished, not the pass start: the cooldown
+        // and the recovery probation both run "after a restart", and a drain that
+        // hits its kill budget (120s for a decoder) plus earlier restarts in the
+        // same pass would otherwise shorten both windows. `now` may be injected,
+        // so advance it by the real time the restart consumed.
+        state.restarts[containerId] = now + Math.max(0, Date.now() - wallStart)
         state.restartCount[containerId] = attempts + 1
         result.restarted.push({ module, coin, network, containerId })
         logger.info(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
     } catch (err) {
+        if (err && err.containerStopped) state.stoppedByAutoheal[containerId] = true
         result.failed.push({ module, coin, network, containerId, reason: String(err) })
         logger.error(`autoheal: FAILED to restart ${label}: ${err}`)
+        return Boolean(err && err.containerStopped)
     }
 }
 
@@ -292,14 +318,15 @@ function persistState(stateFile, state, modules) {
     for (const id of Object.keys(state.restartCount)) {
         if (!known.has(id)) delete state.restartCount[id]
     }
+    for (const id of Object.keys(state.stoppedByAutoheal)) {
+        if (!known.has(id)) delete state.stoppedByAutoheal[id]
+    }
     writeState(stateFile, state)
 }
 
-// One autoheal pass over the module registry. Never throws for a single bad
-// container (a vanished container id must not abort the whole sweep).
-// Returns { candidates, restarted, failed, skipped, escalated } where each array holds
-// { module, coin, network, containerId, reason? }; escalated entries carry attempts instead.
-async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
+// One pass. A vanished container does not abort the sweep; failures and escalation reach the CLI.
+async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.now() } = {}) {
+    const wallStart = Date.now()
     const timing = autohealTiming()
     const stateFile = getStateFilePath()
     const state = readState(stateFile)
@@ -321,6 +348,12 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         if (!candidate) continue
         if (!await inspectCandidate(candidate, result)) continue
 
+        const startRetry = await handleAutohealStopped(candidate, state, result, dryRun, resumeStopped, now)
+        if (startRetry) {
+            if (startRetry.changed) onsetChanged = true
+            if (startRetry.handled) continue
+        }
+
         const stoppedStateChanged = skipNonRunning(candidate, state, result)
         if (stoppedStateChanged !== null) {
             if (stoppedStateChanged) onsetChanged = true
@@ -337,7 +370,9 @@ async function runAutoheal({ dryRun = false, now = Date.now() } = {}) {
         const episode = establishEpisode(candidate, health, state, now, timing.probationMs, result)
         if (!episode) continue
         if (episode.changed) onsetChanged = true
-        await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now)
+        if (await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now, wallStart)) {
+            onsetChanged = true
+        }
     }
 
     if (!dryRun && (onsetChanged || result.restarted.length > 0)) persistState(stateFile, state, modules)

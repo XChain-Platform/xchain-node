@@ -85,14 +85,23 @@ async function readRegisteredContainer(target, failures) {
 
 // Run one docker action on every selected module that is installed, attempting all of them, and
 // throw one error naming each module that failed so the command can exit non-zero.
+// A selection in which nothing is installed is a failure too: a typo'd service name, or a real one
+// that is not installed on this chain and network, would otherwise act on nothing and report success,
+// and a scripted `stop` would believe a service was down while it kept running.
 async function controlModules(verb, servicesList, act) {
     const failures = []
+    const unmatched = []
+    let matched = 0
     for (const coin in servicesList) {
         for (const network in servicesList[coin]) {
             for (const module of servicesList[coin][network]) {
                 const target = { module, coin, network }
                 const containerId = await readRegisteredContainer(target, failures)
-                if (!containerId) continue
+                if (!containerId) {
+                    unmatched.push(target)
+                    continue
+                }
+                matched++
                 try {
                     await act(target, containerId)
                 } catch (err) {
@@ -106,6 +115,12 @@ async function controlModules(verb, servicesList, act) {
         const detail = failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; ')
         const err = new Error(`${verb} failed for ${failures.length} module${failures.length === 1 ? '' : 's'}: ${detail}`)
         err.failures = failures
+        throw err
+    }
+    if (matched === 0) {
+        const asked = unmatched.map(t => `${t.module} (${t.coin || 'shared'} ${t.network || 'shared'})`).join(', ')
+        const err = new Error(`${verb} matched no installed service: ${asked || 'nothing was selected'}; nothing was changed`)
+        err.failures = unmatched.map(t => ({ ...t, reason: 'not installed' }))
         throw err
     }
     return true
@@ -214,23 +229,52 @@ async function clearDecoderReorgHalt(servicesList, { reason, force = false, dryR
     return ok
 }
 
+// Print why one in-container command failed: whatever it wrote, then its exit code (or the
+// spawn error when it never ran) on stderr, never the raw error object with its stack.
+function reportExecFailure(target, err) {
+    const out = err && typeof err.stdout === 'string' ? err.stdout.trim() : ''
+    if (out) console.log(out)
+    const why = err && typeof err.code === 'number'
+        ? 'exit code ' + err.code
+        : String((err && err.message) || err).split('\n')[0]
+    console.error(`exec failed in ${target.module} (${target.coin} ${target.network}): ${why}`)
+    const errText = err && typeof err.stderr === 'string' ? err.stderr.trim() : ''
+    if (errText) console.error(errText)
+}
+
+// Run one command in every selected container that is installed. Returns true only when at
+// least one container matched and every run exited 0, so the CLI can exit non-zero when the
+// command failed anywhere or the selection (a typo'd service, one not installed here) ran nothing.
 async function execModules(servicesList, command) {
     const commandArgs = command.split(/\s+/)
-    for (const nextCoin in servicesList) {
-        for (const nextNetwork in servicesList[nextCoin]) {
-            for (const nextModule of servicesList[nextCoin][nextNetwork]) {
-                const containerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
-                if (!containerId) continue
+    const unmatched = []
+    let matched = 0
+    let ok = true
+    for (const coin in servicesList) {
+        for (const network in servicesList[coin]) {
+            for (const module of servicesList[coin][network]) {
+                const target = { module, coin, network }
+                const containerId = await db.getModuleContainer(module, coin, network)
+                if (!containerId) {
+                    unmatched.push(target)
+                    continue
+                }
+                matched++
                 try {
-                    const execStdOut = await execContainer(containerId, commandArgs)
-                    console.log(execStdOut)
+                    console.log(await execContainer(containerId, commandArgs))
                 } catch (err) {
-                    console.log(err)
+                    reportExecFailure(target, err)
+                    ok = false
                 }
             }
         }
     }
-    return true
+    if (matched === 0) {
+        const asked = unmatched.map(t => `${t.module} (${t.coin} ${t.network})`).join(', ')
+        console.error(`exec matched no installed service: ${asked || 'nothing was selected'}; nothing was run`)
+        return false
+    }
+    return ok
 }
 
 async function shellModule(servicesList) {
@@ -251,8 +295,14 @@ async function shellModule(servicesList) {
     return true
 }
 
+// The reset's lookup finds each container: by name under --db-container, through the registry otherwise.
+function resetContainerLookup(context) {
+    return context.findContainer || ((module, coin, network) => db.getModuleContainerStrict(module, coin, network))
+}
+
 async function restartResetModules(context) {
     const { coin, modulesToStop, network } = context
+    const findContainer = resetContainerLookup(context)
     console.log(`Restarting ${coin} ${network} services...`)
     // Track restart failures instead of swallowing them: a silent skip here left a wiped stack DOWN (node never restarted, every dependent service crash-looped) while `reset` still reported success.
     // "Not installed" (registry miss) stays a legitimate skip; a failed docker start gets one retry, then is reported loudly at the end.
@@ -260,7 +310,7 @@ async function restartResetModules(context) {
     for (const module of modulesToStop) {
         let containerId = null
         try {
-            containerId = await db.getModuleContainerStrict(module, coin, network)
+            containerId = await findContainer(module, coin, network)
         } catch (err) {
             // Strict, like the stop loop: the swallowing read answered null on a SQL error too, so a registry blip here left a just-wiped service DOWN and still reported a clean reset
             // (uuid:846cc40d). Nothing can be undone at this point, so report it with the other start failures rather than aborting.
@@ -292,6 +342,7 @@ async function bounceResetModules(context) {
     // empirically deterministic and costs ~5s on the happy path.
     const bounceCandidates = [XChainService.XCHAIN_DECODER, XChainService.XCHAIN_INDEXER]
         .filter((m) => modulesToStop.includes(m))
+    const findContainer = resetContainerLookup(context)
     if (bounceCandidates.length > 0) {
         await sleep(5000)
         for (const module of bounceCandidates) {
@@ -299,7 +350,7 @@ async function bounceResetModules(context) {
             if (startFailures.some((f) => f.module === module)) continue
             let containerId = null
             try {
-                containerId = await db.getModuleContainerStrict(module, coin, network)
+                containerId = await findContainer(module, coin, network)
             } catch (err) {
                 // A failed read is not "not installed": the bounce did not happen, so report it like a start failure.
                 startFailures.push({ module, error: `registry lookup failed before the post-reset bounce (${failureReason(err)})` })
@@ -324,7 +375,13 @@ async function bounceResetModules(context) {
         }
     }
 
-    await statusChanged()
+    // A --db-container stack is not in this CLI's config, so pushing that config would overwrite the hub's and
+    // explorer's view of it with the wrong DB hosts.
+    if (context.dbContainer) {
+        console.log('Skipped the hub and explorer config push: --db-container names a stack outside this CLI\'s config.')
+    } else {
+        await statusChanged()
+    }
 
     if (startFailures.length > 0) {
         const detail = startFailures.map((f) => `${f.module}: ${f.error}`).join('; ')

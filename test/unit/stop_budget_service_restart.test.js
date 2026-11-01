@@ -98,6 +98,7 @@ describe('StopBudgetService restartModuleContainer() failures', function () {
             .then(() => null, e => e)
         expect(err).to.be.an('error')
         expect(err.message).to.equal('xchain-indexer was stopped but failed to start again (port is already allocated)')
+        expect(err.containerStopped).to.equal(true)
     })
 
     it('never starts a container whose stop failed, and passes docker\'s error through', async function () {

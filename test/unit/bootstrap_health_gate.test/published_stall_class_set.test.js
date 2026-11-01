@@ -20,7 +20,7 @@ const GATE_SOURCE = path.join(__dirname, '../../../src/services/bootstrap_health
 // Every class the indexer publishes today; the grid below must reach each one.
 const EXPECTED = [
     'none', 'future_block_wait', 'bridge_proof_wait', 'train_activation_halt', 'price_landing_wait',
-    'barrier_defer', 'wedged', 'upstream_halted', 'rollcall_proof_wait', 'rollcall_proof_stuck',
+    'operator_action_hold', 'barrier_defer', 'wedged', 'upstream_halted', 'rollcall_proof_wait', 'rollcall_proof_stuck',
     'capability_proof_wait', 'capability_proof_stuck'
 ]
 
@@ -30,7 +30,8 @@ function publishedClasses({ stallClassOf, publishedStallClass }) {
     const now = 1760000000000
     const graceMs = 120000
     const reasons = [null, 'bridge_proof_barrier', 'train_activation_halt: rule set 3 required at 900',
-        'price_landing_barrier', 'price_sync_barrier', 'rollcall_proof_unavailable', 'capability_proof_unavailable']
+        'retroactive_replay_diverged', 'price_landing_barrier', 'price_sync_barrier',
+        'rollcall_proof_unavailable', 'capability_proof_unavailable']
     const seen = new Set()
     for (const reason of reasons)
         for (const lastCommit of [null, now - 1000, now - 10 * 60000])

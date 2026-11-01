@@ -107,12 +107,13 @@ describe('moduleOperations', function () {
             expect(stubs.startContainer.calledWith('container-id-123')).to.be.true
         })
 
-        it('skips module when container ID is not found', async function () {
+        it('rejects with a no-installed-service error when the container ID is not found', async function () {
             const stubs = makeStubs()
             stubs.db.getModuleContainerStrict.resolves(null)
             const ops = loadOperations(stubs)
-            const result = await ops.startModules({ bitcoin: { mainnet: ['xchain-encoder'] } })
-            expect(result).to.be.true
+            const err = await ops.startModules({ bitcoin: { mainnet: ['xchain-encoder'] } }).then(() => null, e => e)
+            expect(err).to.be.an('error')
+            expect(err.message).to.match(/start matched no installed service: xchain-encoder \(bitcoin mainnet\)/)
             expect(stubs.startContainer.called).to.be.false
         })
     })

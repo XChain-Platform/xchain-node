@@ -34,13 +34,20 @@ function makeDatadir({ initialised = true } = {}) {
 
 // Answer docker the way a host with no DB container, a working run, and a server whose root
 // password is `realRoot` would; `down` makes every ping fail as a server that never came up.
+// The container is absent until `docker run`, then inspect finds it; a root login
+// through the mariadb client (the first-boot wait) succeeds only with `realRoot`.
 function fakeDocker(stubs, { realRoot, down = false }) {
+    let started = false
     stubs.execFileAsync.callsFake(async (cmd, args, opts) => {
-        if (args[0] === 'inspect') throw new Error('Error: No such container: xchain-node-database')
-        if (args[0] === 'run') return { stdout: VALID_CONTAINER_ID + '\n', stderr: '' }
-        if (args[0] === 'exec' && args.includes('mariadb-admin')) {
+        if (args[0] === 'inspect') {
+            if (!started) throw new Error('Error: No such container: xchain-node-database')
+            return { stdout: VALID_CONTAINER_ID + '\n', stderr: '' }
+        }
+        if (args[0] === 'run') { started = true; return { stdout: VALID_CONTAINER_ID + '\n', stderr: '' } }
+        if (args[0] === 'exec' && (args.includes('mariadb-admin') || args.includes('mariadb'))) {
             if (down) throw Object.assign(new Error('ping failed'), { stderr: "Can't connect to local server through socket" })
             if (opts && opts.env && opts.env.MYSQL_PWD === realRoot) return { stdout: 'mysqld is alive\n', stderr: '' }
+            if (args.includes('mariadb')) throw Object.assign(new Error('denied'), { stderr: DENIED })
             return { stdout: '', stderr: DENIED }
         }
         return { stdout: '', stderr: '' }
@@ -207,12 +214,22 @@ describe('DatabaseService', function () {
             expect(stubs.saveDbRootPassword.called).to.equal(false)
         })
 
-        it('checks nothing after the start on a fresh datadir, which takes the password it was given', async function () {
+        it('waits on a fresh datadir until the password it was given logs in, with no persisted-password check', async function () {
             const { stubs, err } = await install({ datadir: makeDatadir({ initialised: false }), envPassword: 'env-root', realRoot: 'env-root' })
             expect(err).to.equal(null)
             expect(stubs.saveDbRootPassword.calledOnceWithExactly('env-root')).to.equal(true)
-            const pings = stubs.execFileAsync.getCalls().filter(c => c.args[1].includes('mariadb-admin'))
-            expect(pings).to.have.lengthOf(0)
+            const confirms = stubs.execFileAsync.getCalls().filter(c => c.args[1].includes('mariadb-admin'))
+            expect(confirms).to.have.lengthOf(0)
+            const logins = stubs.execFileAsync.getCalls().filter(c => c.args[1].includes('mariadb') && c.args[1].includes('root'))
+            expect(logins.length).to.be.greaterThan(0)
+            expect(logins[0].args[2].env.MYSQL_PWD).to.equal('env-root')
+        })
+
+        it('stops the install with an actionable error when a fresh container never accepts a login', async function () {
+            const { err } = await install({ datadir: makeDatadir({ initialised: false }), envPassword: 'env-root', realRoot: 'env-root', down: true })
+            expect(err).to.be.an('error')
+            expect(err.message).to.match(/did not accept connections within 5 min of starting/)
+            expect(err.message).to.include('docker logs xchain-node-database')
         })
     })
 })

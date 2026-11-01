@@ -65,7 +65,9 @@ const logger = getLogger();
 const {
     DEFAULT_MAX_LAG_BLOCKS, evaluateContainerState, evaluateStatusPayload
 } = require('./bootstrap_health_gate/status_evaluation.js')
-const { parseCountTokens, readHaltMarkers } = require('./bootstrap_health_gate/halt_markers.js')
+const {
+    parseCountTokens, readHaltMarkers, pendingSyncHaltReason
+} = require('./bootstrap_health_gate/halt_markers.js')
 
 // Which env key carries the container-internal API port for each module.
 // Mirrors ModuleService's SERVICE_HEALTHCHECK portKeys, deliberately: the probe
@@ -101,8 +103,8 @@ class BootstrapSourceUnhealthyError extends Error {
             'A bootstrap archive becomes the newest (and therefore default) recovery source for the whole ' +
             'fleet, so publishing an unverified one is worse than publishing nothing. Fix the service, then ' +
             're-run: a durable halt marker takes the recovery its line above names (a decoder REORG_HALT ' +
-            'also clears in place with `xchain-node clear-reorg-halt` once verified; any other marker means ' +
-            'a full resync from a known-good snapshot). To snapshot ' +
+            'also clears in place once verified, and an invalid rollback_guard row clears through xchain-sync; ' +
+            'a divergence marker requires a full resync from a known-good snapshot). To snapshot ' +
             'a known-bad database deliberately, set XCHAIN_NODE_BOOTSTRAP_SKIP_HEALTH_GATE=1.'
         )
         this.name = 'BootstrapSourceUnhealthyError'
@@ -296,14 +298,6 @@ async function healthSurfaceReasons(containerId, module, coin, network, runner) 
     return reasons
 }
 
-// Refusal text for an xchain-sync halt_pending copy found in `where`.
-function pendingSyncHaltReason(where) {
-    return `${where} carries an xchain-sync halt_pending copy in sync_state (a divergence halt whose ` +
-        'sync_halt write never landed): xchain-sync re-installs that halt on every replica that restores ' +
-        'this archive. Clear the halt through xchain-sync (POST /halt/clear/<dbType>/<chain>/<network>), which drops ' +
-        'the copy, then re-run the publish.'
-}
-
 // Read the durable halt markers and turn them into refusal reasons. Returns the
 // reasons and the watermark the caller hands back (null when the probe failed).
 async function haltMarkerReasons(coin, network, module, dbDeps, since) {
@@ -331,6 +325,10 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
         // re-installs it on every replica that restores the archive.
         if (markers.pendingSyncHalt > 0)
             reasons.push(pendingSyncHaltReason('the database'))
+        if (markers.rollbackGuardInvalid > 0)
+            reasons.push('the database carries an invalid xchain-sync rollback_guard row in sync_state. ' +
+                'xchain-sync halts on this row at startup on every replica that restores the archive; clear ' +
+                'the halt through xchain-sync, then re-run the publish.')
         // Refuse on the paired decoder's markers too: REORG_HALT lives only there, and an
         // indexer frozen behind a halted decoder is exactly as unfit to publish.
         if (markers.upstream && markers.upstream.reorgHalt > 0)
@@ -349,6 +347,10 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
                 'derived from it are known to diverge from the source of truth.')
         if (markers.upstream && markers.upstream.pendingSyncHalt > 0)
             reasons.push(pendingSyncHaltReason(`the paired decoder database ${markers.upstream.dbName}`))
+        if (markers.upstream && markers.upstream.rollbackGuardInvalid > 0)
+            reasons.push(`the paired decoder database ${markers.upstream.dbName} carries an invalid xchain-sync ` +
+                'rollback_guard row in sync_state. xchain-sync halts on it at startup on every replica that ' +
+                'restores the archive; clear the halt through xchain-sync, then re-run the publish.')
     } catch (err) {
         reasons.push(`could not read the halt markers from the ${module} database: ${err && err.message}`)
     }

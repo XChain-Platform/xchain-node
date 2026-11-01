@@ -190,7 +190,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.22.3"
+          node-version: "22.23.4"
 
       # WHY THE COIN LIST IS EVENT-DEPENDENT. A scheduled run carries NO inputs, so
       # without this it would silently test bitcoin alone and the nightly would be
@@ -361,7 +361,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.22.3"
+          node-version: "22.23.4"
 
       - name: Reclaim runner disk (coin daemon + per-service images are large)
         run: |
@@ -463,12 +463,6 @@ jobs:
             echo "HUB_NETWORK=regtest"
             echo "ORACLE_MIN_SUBMISSIONS=1"
           } >> "$GITHUB_ENV"
-          # An identity alone does not finalize a bridge transfer: the engine signs
-          # against the cross_chain capability set, which is EMPTY on a fresh regtest
-          # until something STAKEs, and an empty set fails closed. This host-env
-          # passthrough (ConfigService hubPassthroughVars) makes the hub seed itself
-          # as the single validator on an empty set; the hub honours it on regtest
-          # only. Non-bitcoin legs only, so the bitcoin opt-in keeps its regime.
           # The hub's cross-chain engines resolve each chain's indexer URL ONCE, at
           # engine start, from env or from the configs table, and skip a chain with
           # none on every later tick. On this runner the hub boots before either
@@ -487,7 +481,6 @@ jobs:
           # regtest rail pins them; the hub clamps them back up to the default off
           # regtest, so the same three names are inert on any real network.
           if [ "$COIN" != "bitcoin" ]; then
-            echo "XDEX_SEED_LOCAL_VALIDATOR=1" >> "$GITHUB_ENV"
             code=$(case "$COIN" in litecoin) echo LTC ;; dogecoin) echo DOGE ;; esac)
             {
               echo "BTC_INDEXER_API_URL=http://xchain-node-bitcoin-regtest-xchain-indexer:3004"
@@ -593,6 +586,13 @@ jobs:
             echo "Installing the bitcoin gas rail beside $COIN at ref: $STACK_REF"
             node src/index.js install "$STACK_REF" all bitcoin regtest
           fi
+
+      - name: Enable the regtest validator seed after both stacks are ready
+        if: env.COIN != 'bitcoin'
+        run: |
+          export XDEX_SEED_LOCAL_VALIDATOR=1
+          echo "XDEX_SEED_LOCAL_VALIDATOR=1" >> "$GITHUB_ENV"
+          node src/index.js recreate xchain-hub
 
       - name: Select this shard's action suites
         # The plan job owns the split; this only reads this shard's entry, so the
@@ -777,7 +777,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.22.3"
+          node-version: "22.23.4"
 
       # A shard that never uploaded simply has no artifact here; the merge names
       # it as missing, so a failed download is not allowed to stop the job first.

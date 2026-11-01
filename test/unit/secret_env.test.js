@@ -66,6 +66,7 @@ function makeMemoryConfigService(initialFiles = {}, { dbContainerId = null, exte
         readFileSync: (p) => files[p] != null ? String(files[p]) : '',
         writeFileSync: (p, body) => { files[p] = String(body) },
         appendFileSync: (p, body) => { files[p] = (files[p] || '') + String(body) },
+        renameSync: (from, to) => { files[to] = files[from]; delete files[from] },
         statSync: (p) => ({ size: String(files[p] || '').length }),
         openSync: () => 1,
         readSync: () => 0,
@@ -344,7 +345,7 @@ describe('secret-env', function () {
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
             expect(config['NODE_PASSWORD']).to.equal('inmainfile')
             expect(files[coinMain]).to.not.include('inmainfile')
-            expect(files[coinSidecar]).to.include('NODE_PASSWORD=inmainfile')
+            expect(files[coinSidecar]).to.include('NODE_SECRET=inmainfile')
         })
     })
 })

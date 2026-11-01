@@ -200,6 +200,7 @@ moduleSuite('installModule() singleton guard', function () {
             // `docker run` with a duplicate name. The guard must
             // detect the existing named container and return without rebuilding.
             const stubs = makeStubs()
+            stubs.probeContainerPresenceByName.resolves('exists')
             const VALID_ID = 'b'.repeat(64)
             stubs.execFile.callsFake((cmd, args, ...rest) => {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]

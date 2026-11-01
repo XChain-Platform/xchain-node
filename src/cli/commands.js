@@ -214,7 +214,7 @@ function registerUninstall(program, deps) {
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .option('--include-shared', 'Also uninstall shared services (xchain-explorer, xchain-sync, xchain-hub) once no chain/network is still installed; the database is never removed and must be removed manually')
         .action(async (service, chain, network, options) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
+            const serviceList = filterCommandParameters(null, service, chain, network, { includeSharedExplorer: false })
             // A module that failed to uninstall must not be printed and forgotten,
             // leaving the command exiting 0 with containers still running. The
             // remaining modules are still attempted (uninstallModules finishes the
@@ -329,8 +329,9 @@ function registerExec(program, deps) {
         .argument('<command>', 'The shell command to execute')
         .action(async (service, chain, network, command) => {
             const serviceList = filterCommandParameters(null, service, chain, network)
-            await execModules(serviceList, command)
-            return process.exit(0)
+            // execModules has already printed the reason; scripts chaining on exec need the status.
+            const ok = await execModules(serviceList, command)
+            return process.exit(ok === true ? 0 : 1)
         })
 
 }
@@ -350,6 +351,9 @@ function registerClearReorgHalt(program, deps) {
                 console.log("clear-reorg-halt takes one chain and one network; 'all' is invalid")
                 return process.exit(1)
             }
+            // Refuse a typo here, before it reaches the container lookup and gets reported as "no container installed".
+            const bad = [['chain', chain, config.Coin], ['network', network, config.Network]].find(([, v, known]) => !Object.values(known).includes(v))
+            if (bad) { console.log(`clear-reorg-halt: unknown ${bad[0]} '${bad[1]}'; expected one of ${Object.values(bad[2]).join(', ')}`); return process.exit(1) }
             const serviceList = filterCommandParameters(null, 'xchain-decoder', chain, network)
             const ok = await clearDecoderReorgHalt(serviceList, {
                 reason: options.reason, force: !!options.force, dryRun: !!options.dryRun

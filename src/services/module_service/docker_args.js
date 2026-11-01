@@ -21,6 +21,7 @@ let { XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SY
 let { getUtxoTrackerVolumeName } = require('../config_service')
 let { getPublishedHostPorts } = require('../docker_service')
 const { healthcheckCommand } = require('./healthcheck_command')
+const { claimFreeHostPorts } = require('./host_port_claim')
 const requiredGetUtxoTrackerVolumeName = getUtxoTrackerVolumeName
 const requiredGetPublishedHostPorts = getPublishedHostPorts
 let config = require('../../config');
@@ -60,8 +61,8 @@ function parsePortSpec(pair) {
 // already allocated" AFTER the image build wastes minutes. `selfName` is the
 // container we're (re)creating (excluded so re-installs/updates of the same
 // service don't flag themselves; the old container is already killed+removed
-// before this runs, but the name-exclusion is belt-and-suspenders).
-async function assertNoHostPortConflicts(portArgs, selfName) {
+// before this runs, but the name-exclusion is belt-and-suspenders). `claim` lets buildAndUp move a busy on-request port (host_port_claim.js).
+async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
     const requested = []
     for (let i = 0; i < portArgs.length; i++) {
         if (portArgs[i] === '-p') {
@@ -79,7 +80,7 @@ async function assertNoHostPortConflicts(portArgs, selfName) {
         const others = [...holders].filter(n => n !== selfName)
         if (others.length > 0) conflicts.push({ hostPort, holders: others })
     }
-    if (conflicts.length > 0) {
+    if (claimFreeHostPorts(conflicts, portArgs, requested, published, claim && { ...claim, registry: SERVICE_REGISTRY, logger }).length > 0) {
         const lines = conflicts.map(c => `  host port ${c.hostPort} is already published by: ${c.holders.join(', ')}`)
         throw new Error(
             'Host port conflict: cannot publish the following port(s):\n' +

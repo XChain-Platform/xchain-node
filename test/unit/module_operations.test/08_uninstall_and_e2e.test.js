@@ -328,8 +328,10 @@ function registerFullTeardownTests() {
         const { filterCommandParameters } = requireFromUnit('../../src/services/config_service/filters.js')
         const stubs = makeStubs()
         const ops = loadOperations(stubs)
-        await ops.uninstallModules(filterCommandParameters(null, 'all', 'bitcoin', 'mainnet'), true, { all: true })
-        expect(called(stubs).slice(-3)).to.deep.equal(['xchain-explorer', 'xchain-sync', 'xchain-hub'])
+        await ops.uninstallModules(filterCommandParameters(null, 'all', 'bitcoin', 'mainnet',
+            { includeSharedExplorer: false }), true, { all: true })
+        expect(called(stubs).slice(-2)).to.deep.equal(['xchain-sync', 'xchain-hub'])
+        expect(called(stubs)).to.not.include('xchain-explorer')
         expect(called(stubs)).to.not.include('database')
     })
 }

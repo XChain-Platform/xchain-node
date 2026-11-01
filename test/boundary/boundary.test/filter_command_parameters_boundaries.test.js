@@ -82,3 +82,32 @@ describeBoundaryTests('ConfigService: filterCommandParameters boundaries', funct
         expect(result['bitcoin']).to.be.undefined
     })
 })
+
+// 3b. unknown chain or network is rejected, never passed through
+describeBoundaryTests('ConfigService: filterCommandParameters unknown chain or network', function () {
+    it('rejects an unknown chain for service=all instead of returning the shared explorer', function () {
+        let result
+        expect(() => { result = filterCommandParameters(null, 'all', 'litecion', 'regtest') })
+            .to.throw(/unknown coin.*litecion/i)
+        expect(result).to.be.undefined
+    })
+
+    it('rejects an unknown chain for a named service', function () {
+        expect(() => filterCommandParameters(null, 'xchain-decoder', 'litecion', 'regtest'))
+            .to.throw(/unknown coin.*litecion/i)
+    })
+
+    it('rejects an unknown network with a valid chain', function () {
+        expect(() => filterCommandParameters(null, 'all', 'litecoin', 'regtset'))
+            .to.throw(/unknown network.*regtset/i)
+    })
+
+    it('still expands all with a valid chain and network or all/all; lifecycle policy leaves the explorer out', function () {
+        const one = filterCommandParameters(null, 'all', 'litecoin', 'regtest',
+            { includeSharedExplorer: false })
+        expect(one).to.not.have.property('')
+        expect(one['litecoin']['regtest']).to.include('xchain-decoder')
+        const every = filterCommandParameters(null, 'all', 'all', 'all')
+        expect(every['']['']).to.include('xchain-explorer')
+    })
+})

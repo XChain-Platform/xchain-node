@@ -271,7 +271,9 @@ async function restartModuleContainer(stopContainerById, startContainerById, mod
     } catch (err) {
         // Say the service is now down, since the stop half already happened
         const reason = err && err.message ? err.message : String(err)
-        throw new Error(`${module} was stopped but failed to start again (${reason})`)
+        const restartError = new Error(`${module} was stopped but failed to start again (${reason})`)
+        restartError.containerStopped = true
+        throw restartError
     }
     return outcome
 }

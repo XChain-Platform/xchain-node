@@ -25,8 +25,25 @@ function configure(dependencies) {
 }
 
 
+// Replace a file via a flushed temp file and rename (as credentials.json), so a crash
+// never leaves a torn sidecar whose missing keys the next load re-mints; symlinks survive.
+function writeFileAtomic(filePath, data, mode) {
+    let target = filePath
+    try { target = fs.realpathSync(filePath) } catch { /* not created yet */ }
+    const tmpName = '.' + path.basename(target) + '.' + process.pid + '.' + crypto.randomBytes(6).toString('hex') + '.tmp'
+    const tmpPath = path.join(path.dirname(target), tmpName)
+    try {
+        fs.writeFileSync(tmpPath, data, { mode, flag: 'wx', flush: true })
+        fs.renameSync(tmpPath, target)
+    } catch (err) {
+        try { fs.unlinkSync(tmpPath) } catch { /* never created */ }
+        throw err
+    }
+    try { fs.chmodSync(target, mode) } catch { /* best effort, as credentials.json */ }
+}
+
 // Persist RPC credentials to the untracked <coin>-<network>.local sidecar. A fresh sidecar
-// is created with writeFileSync; an existing one is appended to, unless overwrite is set
+// is created; new keys are added after an existing one's content, unless overwrite is set
 // (used by the legacy-migration path to replace it outright). The sidecar holds the live
 // node RPC user/password, so it is forced to 0600 the same way credentials.json is: without
 // an explicit mode the file lands at the process umask (commonly 0644), leaving the RPC
@@ -36,30 +53,12 @@ function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
     if (overwrite || !fs.existsSync(localFilePath)) {
         const dir = path.dirname(localFilePath)
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(localFilePath, body, { mode: 0o600 })
+        writeFileAtomic(localFilePath, body, 0o600)
     } else {
-        let needsLeadingNewline = false
-        try {
-            const size = fs.statSync(localFilePath).size
-            if (size > 0) {
-                const fd = fs.openSync(localFilePath, 'r')
-                try {
-                    const buf = Buffer.alloc(1)
-                    fs.readSync(fd, buf, 0, 1, size - 1)
-                    needsLeadingNewline = buf.toString('utf8') !== '\n'
-                } finally {
-                    fs.closeSync(fd)
-                }
-            }
-        } catch {
-            needsLeadingNewline = false
-        }
-        fs.appendFileSync(localFilePath, needsLeadingNewline ? '\n' + body : body)
+        const existing = String(fs.readFileSync(localFilePath, 'utf8'))
+        const needsLeadingNewline = existing.length > 0 && !existing.endsWith('\n')
+        writeFileAtomic(localFilePath, existing + (needsLeadingNewline ? '\n' : '') + body, 0o600)
     }
-    // chmod unconditionally: writeFileSync's mode only applies on create, and an
-    // already-existing sidecar (append path, or one written before this fix) keeps its
-    // old permissions otherwise.
-    try { fs.chmodSync(localFilePath, 0o600) } catch {}
 }
 
 // Update specific KEY=VALUE entries in a sidecar while PRESERVING all other keys. Unlike
@@ -214,9 +213,9 @@ async function applyHubApiKeyFromSidecar(target) {
 // would fire on what is really just the ordinary sidecar-wins precedence.
 // Credentials from the sidecar take precedence over anything in the main file.
 // One-time migration for legacy installs: older versions appended NODE_USER /
-// NODE_PASSWORD into the main config file alongside non-secret settings. Move the
-// credentials into the sidecar and strip them from the main file so the two never
-// share a file again. Existing creds keep working; they are simply relocated.
+// NODE_PASSWORD into the main config file alongside non-secret settings. Preserve
+// every existing sidecar value, then rewrite only the main file's own lines without
+// credentials. Sidecar values keep precedence over stale values in the main file.
 // Generate and persist to the sidecar whichever RPC credential is missing,
 // evaluated PER KEY. The old both-absent (&&) guard meant a partial sidecar (one
 // key present, one absent) generated nothing, and the missing half then silently
@@ -230,21 +229,30 @@ function coinConfigPaths(coin, network) {
     return { configFilePath, localFilePath: configFilePath + ".local" }
 }
 
+function peelGluedCredentials(value) {
+    const credentials = {}
+    let cleanValue = value
+    for (const credKey of ["NODE_PASSWORD", "NODE_USER"]) {
+        const at = cleanValue.indexOf(credKey + "=")
+        if (at >= 0) {
+            credentials[credKey] = cleanValue.substring(at + credKey.length + 1)
+            cleanValue = cleanValue.substring(0, at)
+        }
+    }
+    return { cleanValue, credentials }
+}
+
 function readMainConfigLine(defaultConfig, line) {
     const eqIndex = line.indexOf("=")
     if (eqIndex <= 0) return false
     const key = line.substring(0, eqIndex)
-    let value = line.substring(eqIndex + 1)
+    const peeled = peelGluedCredentials(line.substring(eqIndex + 1))
     let hasCredentials = false
-    for (const credKey of ["NODE_PASSWORD", "NODE_USER"]) {
-        const at = value.indexOf(credKey + "=")
-        if (at >= 0) {
-            defaultConfig[credKey] = value.substring(at + credKey.length + 1)
-            value = value.substring(0, at)
-            hasCredentials = true
-        }
+    for (const credKey of Object.keys(peeled.credentials)) {
+        defaultConfig[credKey] = peeled.credentials[credKey]
+        hasCredentials = true
     }
-    defaultConfig[key] = value
+    defaultConfig[key] = peeled.cleanValue
     return hasCredentials || key === "NODE_USER" || key === "NODE_PASSWORD" || key === "NODE_SECRET"
 }
 
@@ -267,12 +275,21 @@ function migrateMainCredentials(defaultConfig, configFilePath, localFilePath) {
     const creds = {}
     if ("NODE_USER" in defaultConfig) creds["NODE_USER"] = defaultConfig["NODE_USER"]
     if ("NODE_PASSWORD" in defaultConfig) creds["NODE_PASSWORD"] = defaultConfig["NODE_PASSWORD"]
-    persistSidecarCreds(localFilePath, creds, { overwrite: true })
-    const remaining = []
-    for (const key in defaultConfig) {
-        if (key !== "NODE_USER" && key !== "NODE_PASSWORD") remaining.push(`${key}=${defaultConfig[key]}`)
-    }
-    fs.writeFileSync(configFilePath, remaining.length ? remaining.join("\n") + "\n" : "")
+    upsertSidecarValues(localFilePath, creds)
+    const lines = String(fs.readFileSync(configFilePath, "utf8")).split(/\r?\n/)
+    if (lines[lines.length - 1] === "") lines.pop()
+    const remaining = lines.flatMap((line) => {
+        const eqIndex = line.indexOf("=")
+        if (eqIndex <= 0) return [line]
+        const key = line.substring(0, eqIndex)
+        if (["NODE_USER", "NODE_PASSWORD", "NODE_SECRET"].includes(key)) return []
+        const peeled = peelGluedCredentials(line.substring(eqIndex + 1))
+        return [`${key}=${peeled.cleanValue}`]
+    })
+    // Keep the main config's own permissions across the replace (it is not a 0600 file).
+    let mode = 0o644
+    try { mode = fs.statSync(configFilePath).mode & 0o777 } catch { /* not created yet */ }
+    writeFileAtomic(configFilePath, remaining.length ? remaining.join("\n") + "\n" : "", mode)
 }
 
 function generateRpcCredentials(defaultConfig, localFilePath) {

@@ -55,12 +55,15 @@
 
 const { execFile } = require('child_process')
 const { promisify } = require('util')
+const fs = require('fs')
+const path = require('path')
 const execFileAsync = promisify(execFile)
 
 const { XChainService, NODE_MODULE_NAME } = require('../config')
 const gate = require('./bootstrap_health_gate');
 const archiveMeta = require('./bootstrap_archive_meta');
 const config = require('../config');
+const configService = require('./config_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -298,6 +301,83 @@ async function assessNodeTipForRestore({ coin, network, module, archivePath }, d
     }
     return result
 }
+
+function movedPortTarget(environmentVariables, constants) {
+    const ticker = String(environmentVariables.INDEXER_COIN || '')
+    const network = String(environmentVariables.INDEXER_NETWORK || '')
+    const coin = Object.entries(constants.CoinTickerSymbol || {})
+        .find(([, value]) => String(value) === ticker)?.[0]
+    return coin && network ? { coin, network } : null
+}
+
+function configuredPortKeys(...fileContents) {
+    const keys = new Set()
+    for (const contents of fileContents) {
+        for (const line of String(contents || '').split(/\r?\n/)) {
+            const at = line.indexOf('=')
+            if (at > 0) keys.add(line.substring(0, at))
+        }
+    }
+    return keys
+}
+
+function createMovedPortClaim(baseClaimFreeHostPorts, deps = {}) {
+    return function claimFreeHostPortsWithFollowups(conflicts, portArgs, requested, published, claim) {
+        if (!claim || conflicts.length === 0) {
+            return baseClaimFreeHostPorts(conflicts, portArgs, requested, published, claim)
+        }
+
+        const constants = deps.constants || config
+        const target = movedPortTarget(claim.environmentVariables, constants)
+        const configDir = deps.configDir || constants.configDir
+        const configPath = target && configDir
+            ? path.resolve(configDir, `${target.coin}-${target.network}`)
+            : null
+        const readConfigFile = deps.readConfigFile || ((file) => {
+            try { return fs.readFileSync(file, 'utf8') } catch { return '' }
+        })
+        const explicitKeys = configuredPortKeys(
+            configPath ? readConfigFile(configPath) : '',
+            configPath ? readConfigFile(configPath + '.local') : '')
+        const ports = claim.registry?.[claim.module]?.docker?.ports || []
+        const originalConflicts = conflicts.slice()
+        const movable = conflicts.filter(({ hostPort }) => ports.some((entry) =>
+            !entry.always && !explicitKeys.has(entry.host) &&
+            String(claim.environmentVariables[entry.host]) === hostPort))
+        const candidates = new Set(movable)
+        const before = new Map(ports.map(entry => [entry.host, claim.environmentVariables[entry.host]]))
+
+        baseClaimFreeHostPorts(movable, portArgs, requested, published, claim)
+        const unresolved = new Set(movable)
+        conflicts.splice(0, conflicts.length,
+            ...originalConflicts.filter(conflict => !candidates.has(conflict) || unresolved.has(conflict)))
+
+        const movedValues = {}
+        for (const entry of ports) {
+            if (before.get(entry.host) !== claim.environmentVariables[entry.host]) {
+                movedValues[entry.host] = claim.environmentVariables[entry.host]
+            }
+        }
+        if (target && Object.keys(movedValues).length > 0) {
+            const service = deps.configService || configService
+            service.upsertSidecarValues(configPath + '.local', movedValues)
+        }
+        return conflicts
+    }
+}
+
+function installMovedPortClaim(hostPortClaim, deps = {}) {
+    const current = hostPortClaim.claimFreeHostPorts
+    const base = current.baseClaimFreeHostPorts || current
+    if (!current.baseClaimFreeHostPorts) {
+        hostPortClaim.claimFreeHostPorts = createMovedPortClaim(base, deps)
+        hostPortClaim.claimFreeHostPorts.baseClaimFreeHostPorts = base
+    }
+    return hostPortClaim.claimFreeHostPorts
+}
+
+const hostPortClaim = require('./module_service/host_port_claim')
+installMovedPortClaim(hostPortClaim)
 
 module.exports = {
     VERDICT,

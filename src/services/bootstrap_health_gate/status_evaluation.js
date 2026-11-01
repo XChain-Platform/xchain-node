@@ -129,12 +129,12 @@ function statusFlagReasons(payload) {
     return reasons
 }
 
-// Refusal reasons from the indexer's wedged-counter verdict and a train-activation halt.
+// Refusal reasons from the indexer's wedged-counter verdict and durable halts.
 function stallReasons(payload) {
     const reasons = []
     // The indexer's own single-field verdict on its block counter: 'none' |
-    // 'future_block_wait' | 'bridge_proof_wait' | 'train_activation_halt' | 'price_landing_wait' |
-    // 'barrier_defer' | 'wedged', plus the published refinements 'upstream_halted' (only beside
+    // 'future_block_wait' | 'bridge_proof_wait' | 'train_activation_halt' | 'operator_action_hold' |
+    // 'price_landing_wait' | 'barrier_defer' | 'wedged', plus the published refinements 'upstream_halted' (only beside
     // decoderReorgHalted: true, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck' |
     // 'capability_proof_wait' | 'capability_proof_stuck'. The set is defined in xchain-indexer
     // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). 'wedged' and the
@@ -151,6 +151,9 @@ function stallReasons(payload) {
     if (payload.stallClass === 'wedged')
         reasons.push('the service reports its block counter WEDGED (stallClass "wedged": no commit for longer ' +
             'than its stall grace window)' + (payload.stallReason ? `: ${payload.stallReason}` : ''))
+    if (payload.stallClass === 'operator_action_hold')
+        reasons.push('the service reports its block counter held until an operator acts (stallClass ' +
+            '"operator_action_hold": a restart cannot clear it)' + (payload.stallReason ? `: ${payload.stallReason}` : ''))
     // Refuse a proof wait past its hold ceiling: the indexer wedges on it only later, above the ceiling.
     if (payload.stallClass === 'rollcall_proof_stuck' || payload.stallClass === 'capability_proof_stuck')
         reasons.push(`the service reports its block counter held on a proof past its hold ceiling (stallClass ` +

@@ -126,7 +126,7 @@ jobs:
       # on some images, v22.23.3 on others, the latter failing the consensus pin).
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.22.3'
+          node-version: '22.23.4'
 
       - name: Resolve the anchor arm height
         id: anchor-arms

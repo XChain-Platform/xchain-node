@@ -130,7 +130,7 @@ function breakAbandonedReclaimMarker(reclaimFile) {
 function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
     const marker = JSON.stringify({ pid, nonce, startedAt: new Date().toISOString() }) + '\n'
     try {
-        fs.writeFileSync(reclaimFile, marker, { flag: 'wx', mode: 0o600 })
+        publishLockAtomically(reclaimFile, marker, nonce)
     } catch (err) {
         if (err.code !== 'EEXIST') throw err
         // Break-then-loop, never break-and-reclaim in the same pass: reclaiming on
@@ -151,7 +151,28 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
             if (unlinkErr.code !== 'ENOENT') throw unlinkErr
         }
     } finally {
-        try { fs.unlinkSync(reclaimFile) } catch { /* already gone */ }
+        unlinkIfOwned(reclaimFile, pid, nonce)
+    }
+}
+
+// Create the lock or reclaim marker so its path never exists empty. An O_EXCL
+// writeFileSync opens and writes in two steps; a contender reading between them
+// sees an empty file, cannot tell it from a crashed creator's, and removes a LIVE one.
+// Write the full payload to a private temp file first, then link() it to the lock
+// path: link fails with EEXIST like O_EXCL, and the path appears already complete.
+function publishLockAtomically(lockFile, payload, nonce) {
+    const tmpFile = `${lockFile}.${process.pid}.${nonce}.tmp`
+    fs.writeFileSync(tmpFile, payload, { flag: 'wx', mode: 0o600 })
+    try {
+        try {
+            fs.linkSync(tmpFile, lockFile)
+        } catch (err) {
+            // A filesystem without hard links: fall back to the exclusive create.
+            if (!['EPERM', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV'].includes(err.code)) throw err
+            fs.writeFileSync(lockFile, payload, { flag: 'wx', mode: 0o600 })
+        }
+    } finally {
+        try { fs.unlinkSync(tmpFile) } catch { /* already gone */ }
     }
 }
 
@@ -162,7 +183,7 @@ function tryAcquireOnce(lockFile, payload, pid, nonce) {
     const reclaimFile = lockFile + RECLAIM_FILE_SUFFIX
     for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt++) {
         try {
-            fs.writeFileSync(lockFile, payload, { flag: 'wx', mode: 0o600 })
+            publishLockAtomically(lockFile, payload, nonce)
             return function release() { releaseCommandLock(lockFile, pid, nonce) }
         } catch (err) {
             if (err.code !== 'EEXIST') throw err
@@ -247,10 +268,13 @@ function releaseCommandLock(lockFile, pid, nonce) {
     // Only delete a lock we still own; never clobber a successor's lock. The nonce
     // is what makes ownership provable: a successor that happens to run under a
     // RECYCLED pid matches on pid alone, and would be clobbered on our exit.
-    const holder = readLockHolder(lockFile)
-    if (!holder || holder.pid !== pid) return
-    if (holder.nonce !== nonce) return
-    try { fs.unlinkSync(lockFile) } catch { /* already gone */ }
+    unlinkIfOwned(lockFile, pid, nonce)
+}
+
+function unlinkIfOwned(file, pid, nonce) {
+    const holder = readLockHolder(file)
+    if (!holder || holder.pid !== pid || holder.nonce !== nonce) return
+    try { fs.unlinkSync(file) } catch { /* already gone */ }
 }
 
 module.exports = { acquireCommandLock, adoptCommandLock, getLockFilePath, isPidAlive }

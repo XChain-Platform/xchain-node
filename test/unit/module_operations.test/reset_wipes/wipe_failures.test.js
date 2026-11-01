@@ -111,4 +111,21 @@ describe('moduleOperations', function () {
             expect(output).to.not.include('No data was touched.')
         })
     })
+
+    describe('resetModules() a database step that fails after the stop', function () {
+
+        it('resolves false, names the stopped services as left down and restarts nothing', async function () {
+            const stubs = makeStubs()
+            stubs.resetDatabases.rejects(new Error('Container x is paused, unpause the container before exec'))
+            const { result, output } = await resetCapturing(stubs, 'xchain-indexer')
+            expect(stubs.stopContainer.called || stubs.execFile.called).to.be.true
+            expect(result).to.be.false
+            expect(stubs.startContainer.called).to.be.false
+            expect(output).to.include('Aborted: clearing the decoder/indexer databases failed')
+            expect(output).to.include('is paused')
+            expect(output).to.match(/The stopped services are left down: .*xchain-indexer/)
+            expect(output).to.include('re-run the same reset')
+            expect(output).to.not.include('NOT touched: the decoder/indexer databases')
+        })
+    })
 })

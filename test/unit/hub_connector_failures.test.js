@@ -73,6 +73,48 @@ describe('HubConnector: a non-throwing failure still records why', () => {
     })
 })
 
+describe('HubConnector: a hub answer carrying an error is not a delivered push', () => {
+    let srv
+
+    afterEach(async () => {
+        if (srv) await new Promise((r) => srv.close(r))
+        srv = null
+    })
+
+    function answer(result) {
+        return server((req, res) => {
+            res.writeHead(200, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result }))
+        })
+    }
+
+    it('a {error} result (PBFT not-the-leader) makes updateConfig false and records the text', async () => {
+        srv = await answer({ error: 'Not the leader for seq 256 (leader: abc)' })
+        const c = new HubConnector('127.0.0.1', srv.address().port)
+
+        const ok = await c.updateConfig({})
+
+        expect(ok).to.equal(false)
+        expect(c.lastFailures.join('; ')).to.include('Not the leader for seq 256')
+    })
+
+    it('a non-string error value still fails the push', async () => {
+        srv = await answer({ error: { message: 'boom' } })
+        const c = new HubConnector('127.0.0.1', srv.address().port)
+
+        expect(await c.updateConfig({})).to.equal(false)
+        expect(c.lastFailures.join('; ')).to.include('boom')
+    })
+
+    it('control: a {status:success} result still reads as delivered', async () => {
+        srv = await answer({ status: 'success' })
+        const c = new HubConnector('127.0.0.1', srv.address().port)
+
+        expect(await c.updateConfig({})).to.equal(true)
+        expect(c.lastFailures).to.be.empty
+    })
+})
+
 describe('HubConnector: a non-throwing failure still records why', () => {
     let srv
 

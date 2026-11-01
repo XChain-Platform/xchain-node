@@ -61,15 +61,17 @@ const {
 
 const { XCHAIN_NODE_DB_HOST, XCHAIN_NODE_DB_DEFAULT_PORT, getDatabaseContainerId, getDatabaseContainerPresence, getDatabaseHostPort, checkIfDatabaseModuleExists, checkIfDatabaseIsReady, configureDependencies: configureContainerAccess } = require('./database_service/container_access')
 const { getExternalDbConfig, pingExternalDatabase, configureDependencies: configureExternalDb } = require('./database_service/external_db')
-const { askMariadbRootPassword, executeDockerMariaDbCommand, executeNativeMariaDbCommand, configureDependencies: configureMariadbExec } = require('./database_service/mariadb_exec')
+const { askMariadbRootPassword, executeDockerMariaDbCommand, executeDockerMariaDbCommandAs, executeNativeMariaDbCommand, configureDependencies: configureMariadbExec } = require('./database_service/mariadb_exec')
 const { configureDependencies: configurePersistedDatadir } = require('./database_service/persisted_datadir')
 const { addUserPasswordToDatabase, configureDependencies: configureUserProvisioning } = require('./database_service/user_provisioning')
 const { setDatabaseParameters, setHubDatabaseParameters, configureDependencies: configureDbParameters } = require('./database_service/db_parameters')
-const { resetDatabases, clearHubPriceIngestWatermark, configureDependencies: configureResetDatabases } = require('./database_service/reset_databases')
+const { resetDatabases, clearHubPriceIngestWatermark, resolveResetTargets, configureDependencies: configureResetDatabases } = require('./database_service/reset_databases')
+const { configureDependencies: configureServiceDbLogins } = require('./database_service/service_db_logins')
+const { resolveNamedDatabaseTarget, configureDependencies: configureNamedDbTarget } = require('./database_service/named_db_target')
 const { purgeHubCrossChainRows, manualHubCrossChainPurgeStatements, configureDependencies: configureHubCrossChainPurge } = require('./database_service/hub_cross_chain_purge')
 const { buildDatabaseModule, ensureXchainNodeAccess, configureDependencies: configureDatabaseModule } = require('./database_service/database_module')
 
-const databaseServiceDependencies = { execFile, spawn, promisify, execFileAsync, mariadb, Password, Input, NumberPrompt, DB_MODULE_NAME, HUB_MODULE_NAME, XChainService, SEP, CoinTickerSymbol, EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER, DEPENDENCY_HEALTH_START_PERIOD, db, getDbRootPassword, setDbRootPassword, sleep, redactSecrets, assertSafeDbIdentifier, escapeSqlStringLiteral, dockerMariadbArgs, mariadbEnv, PING_SQL, schemaExistsSql, tableExistsSql, tablesExistSql, PRICE_FENCE_TABLE, FENCE_NETWORK_COLUMN, clearChainFenceSql, clearNetworkFenceSql, manualClearStatement, CROSS_CHAIN_MATCH_TABLE, CROSS_CHAIN_CALL_TABLE, CAPABILITY_SNAPSHOT_TABLE, purgeAllMatchesSql, purgeAllCallsSql, purgeChainMatchesSql, purgeChainCallsSql, purgeCapabilitySnapshotsSql, foreignNetworkMatchCountSql, manualPurgeStatements, manualSnapshotPurgeStatement, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort, getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName, assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError, statusChanged, config, statusService, peers, getLogger, logger, XCHAIN_NODE_DB, getOsUserDbName, generatePassword, hasCredentials, loadCredentials, saveCredentials, hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig, loadDbRootPassword, saveDbRootPassword }
+const databaseServiceDependencies = { execFile, spawn, promisify, execFileAsync, mariadb, Password, Input, NumberPrompt, DB_MODULE_NAME, HUB_MODULE_NAME, XChainService, SEP, CoinTickerSymbol, EXTERNAL_DB, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER, DEPENDENCY_HEALTH_START_PERIOD, db, getDbRootPassword, setDbRootPassword, sleep, redactSecrets, assertSafeDbIdentifier, escapeSqlStringLiteral, dockerMariadbArgs, mariadbEnv, PING_SQL, schemaExistsSql, tableExistsSql, tablesExistSql, PRICE_FENCE_TABLE, FENCE_NETWORK_COLUMN, clearChainFenceSql, clearNetworkFenceSql, manualClearStatement, CROSS_CHAIN_MATCH_TABLE, CROSS_CHAIN_CALL_TABLE, CAPABILITY_SNAPSHOT_TABLE, purgeAllMatchesSql, purgeAllCallsSql, purgeChainMatchesSql, purgeChainCallsSql, purgeCapabilitySnapshotsSql, foreignNetworkMatchCountSql, manualPurgeStatements, manualSnapshotPurgeStatement, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, getModuleDatabaseName, validatePort, getStatusFromContainer, getDockerNetworkInspect, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName, assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError, statusChanged, config, statusService, peers, getLogger, logger, XCHAIN_NODE_DB, getOsUserDbName, generatePassword, hasCredentials, loadCredentials, saveCredentials, hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig, loadDbRootPassword, saveDbRootPassword, executeDockerMariaDbCommand, executeDockerMariaDbCommandAs, resolveResetTargets }
 configureContainerAccess(databaseServiceDependencies)
 configureExternalDb(databaseServiceDependencies)
 configureMariadbExec(databaseServiceDependencies)
@@ -78,6 +80,8 @@ configureUserProvisioning(databaseServiceDependencies)
 configureDbParameters(databaseServiceDependencies)
 configureResetDatabases(databaseServiceDependencies)
 configureHubCrossChainPurge(databaseServiceDependencies)
+configureServiceDbLogins(databaseServiceDependencies)
+configureNamedDbTarget(databaseServiceDependencies)
 configureDatabaseModule(databaseServiceDependencies)
 
 // Open the shared MariaDB connection pool if it isn't already open.
@@ -128,6 +132,7 @@ module.exports = {
     buildDatabaseModule,
     resetDatabases,
     clearHubPriceIngestWatermark,
+    resolveNamedDatabaseTarget,
     purgeHubCrossChainRows,
     manualHubCrossChainPurgeStatements,
     getDatabaseContainerId,

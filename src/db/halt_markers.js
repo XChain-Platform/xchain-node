@@ -81,6 +81,17 @@ function pendingSyncHaltCountSql(name) {
 }
 
 /**
+ * Saved rollback guards, encoded for the caller to judge with xchain-sync's
+ * loadRollbackGuardState rule. LEFT avoids treating '_' as a wildcard.
+ */
+function rollbackGuardStateSql(name) {
+    return `SELECT COUNT(*), COALESCE(GROUP_CONCAT(` +
+        `IF(state_value IS NULL, 'N', CONCAT('V', HEX(state_value))) ` +
+        `ORDER BY state_key SEPARATOR ','), '') FROM \`${name}\`.sync_state ` +
+        `WHERE LEFT(state_key, 15) = 'rollback_guard:';`
+}
+
+/**
  * The dump-window watermark for the events table.
  *
  * Both marker tables are append-only and id-ordered (decoder events:
@@ -122,6 +133,7 @@ module.exports = {
     newestReorgClearSql,
     liveSyncHaltCountSql,
     pendingSyncHaltCountSql,
+    rollbackGuardStateSql,
     eventsWatermarkSql,
     syncHaltWatermarkSql,
     reorgHaltsSinceSql,

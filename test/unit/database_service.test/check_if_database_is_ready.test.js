@@ -10,77 +10,111 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const { sinon, expect, VALID_CONTAINER_ID, fakeSpawn, mariadbAttempts, makeStubs, loadDatabaseService } = require('./helpers/harness')
+const { sinon, expect, VALID_CONTAINER_ID, mariadbAttempts, makeStubs, loadDatabaseService } = require('./helpers/harness')
+
+// Answer `docker inspect` with the container id (or `inspect(n)`'s answer on the nth
+// inspect) and every mariadb ping with `ping(n)` on the nth ping.
+function answerDocker(stubs, { ping = () => true, inspect = () => VALID_CONTAINER_ID } = {}) {
+    let inspects = 0
+    let pings = 0
+    stubs.execFileAsync.callsFake(async (cmd, args) => {
+        if (args[0] === 'inspect') {
+            const id = inspect(++inspects)
+            if (!id) throw new Error('Error: No such container: xchain-node-database')
+            return { stdout: id + '\n' }
+        }
+        if (Array.isArray(args) && args.includes('mariadb')) {
+            if (ping(++pings)) return { stdout: '1\n' }
+            throw new Error('ERROR 2002 (HY000): Can\'t connect to local server through socket')
+        }
+        return { stdout: '' }
+    })
+}
+
+function registerAnswerTests() {
+    it('returns true when database responds', async function () {
+        const stubs = makeStubs()
+        answerDocker(stubs)
+        const ds = loadDatabaseService(stubs)
+        expect(await ds.checkIfDatabaseIsReady('root', 'rootpass')).to.be.true
+    })
+
+    it('passes -D database arg when database is specified', async function () {
+        const stubs = makeStubs()
+        answerDocker(stubs)
+        const ds = loadDatabaseService(stubs)
+        expect(await ds.checkIfDatabaseIsReady('root', 'rootpass', 'xchain_node')).to.be.true
+        const dockerCall = mariadbAttempts(stubs)[0]
+        expect(dockerCall.args[1]).to.include('-D')
+        expect(dockerCall.args[1]).to.include('xchain_node')
+        expect(dockerCall.args[1]).to.include(VALID_CONTAINER_ID)
+    })
+
+    it('passes the password via MYSQL_PWD env, never in argv', async function () {
+        const stubs = makeStubs()
+        answerDocker(stubs)
+        const ds = loadDatabaseService(stubs)
+        await ds.checkIfDatabaseIsReady('root', 's3cret-pw')
+        const dockerCall = mariadbAttempts(stubs)[0]
+        expect(dockerCall.args[1]).to.include('MYSQL_PWD')
+        expect(dockerCall.args[1].some(a => String(a).includes('s3cret-pw'))).to.be.false
+        expect(dockerCall.args[2].env.MYSQL_PWD).to.equal('s3cret-pw')
+    })
+}
+
+function registerBudgetTests() {
+    it('retries a server that is still starting and succeeds once it answers', async function () {
+        const stubs = makeStubs()
+        answerDocker(stubs, { ping: (n) => n >= 3 })
+        const ds = loadDatabaseService(stubs)
+        expect(await ds.checkIfDatabaseIsReady('root', 'rootpass')).to.be.true
+        expect(mariadbAttempts(stubs)).to.have.length(3)
+    })
+
+    // The 10x10s budget belongs to the post-`docker run` readiness wait. A
+    // caller asking "do these credentials still work" gets a PERMANENT answer,
+    // so it must be able to buy a shorter budget than ~100s of sleeps.
+    it('honours a caller-supplied retry budget', async function () {
+        const stubs = makeStubs()
+        answerDocker(stubs, { ping: () => false })
+        const ds = loadDatabaseService(stubs)
+        expect(await ds.checkIfDatabaseIsReady('u', 'p', 'xchain_node', { tries: 2, retryDelay: 1 })).to.be.false
+        expect(mariadbAttempts(stubs)).to.have.length(2)
+    })
+
+    it('still spends the full readiness budget when the caller passes none', async function () {
+        const stubs = makeStubs()
+        answerDocker(stubs, { ping: () => false })
+        const ds = loadDatabaseService(stubs)
+        expect(await ds.checkIfDatabaseIsReady('root', 'rootpass')).to.be.false
+        expect(mariadbAttempts(stubs)).to.have.length(10)
+    })
+}
+
+function registerContainerLookupTests() {
+    it('looks the container up again on every attempt, so one missed inspect does not spend the budget', async function () {
+        const stubs = makeStubs()
+        answerDocker(stubs, { inspect: (n) => (n <= 2 ? null : VALID_CONTAINER_ID) })
+        const ds = loadDatabaseService(stubs)
+        expect(await ds.checkIfDatabaseIsReady('root', 'rootpass')).to.be.true
+        expect(mariadbAttempts(stubs)).to.have.length(1)
+        expect(mariadbAttempts(stubs)[0].args[1]).to.include(VALID_CONTAINER_ID)
+    })
+
+    it('never execs against a missing container, and gives up after the budget', async function () {
+        const stubs = makeStubs()
+        answerDocker(stubs, { inspect: () => null })
+        const ds = loadDatabaseService(stubs)
+        expect(await ds.checkIfDatabaseIsReady('root', 'rootpass', null, { tries: 3, retryDelay: 1 })).to.be.false
+        expect(mariadbAttempts(stubs)).to.have.length(0)
+    })
+}
 
 describe('DatabaseService', function () {
-
-        describe('checkIfDatabaseIsReady()', function () {
-
-        it('returns true when database responds', async function () {
-            const stubs = makeStubs()
-            stubs.execFileAsync.resolves({ stdout: 'OK' })
-            const ds = loadDatabaseService(stubs)
-            const result = await ds.checkIfDatabaseIsReady('root', 'rootpass')
-            expect(result).to.be.true
-        })
-
-        it('retries up to 10 times then returns false', async function () {
-            const stubs = makeStubs()
-            stubs.execFileAsync.rejects(new Error('connection refused'))
-            const ds = loadDatabaseService(stubs)
-            const result = await ds.checkIfDatabaseIsReady('root', 'badpass')
-            expect(result).to.be.false
-        })
-
-        it('passes -D database arg when database is specified', async function () {
-            const stubs = makeStubs()
-            stubs.execFileAsync.resolves({ stdout: 'OK' })
-            const ds = loadDatabaseService(stubs)
-            const result = await ds.checkIfDatabaseIsReady('root', 'rootpass', 'xchain_node')
-            expect(result).to.be.true
-            const dockerCall = stubs.execFileAsync.getCalls().find(c =>
-                c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1].includes('mariadb'))
-            expect(dockerCall.args[1]).to.include('-D')
-            expect(dockerCall.args[1]).to.include('xchain_node')
-        })
-
-        it('passes the password via MYSQL_PWD env, never in argv', async function () {
-            const stubs = makeStubs()
-            stubs.execFileAsync.resolves({ stdout: 'OK' })
-            const ds = loadDatabaseService(stubs)
-            await ds.checkIfDatabaseIsReady('root', 's3cret-pw')
-            const dockerCall = stubs.execFileAsync.getCalls().find(c =>
-                c.args[0] === 'docker' && Array.isArray(c.args[1]) && c.args[1].includes('mariadb'))
-            expect(dockerCall.args[1]).to.include('MYSQL_PWD')
-            expect(dockerCall.args[1].some(a => String(a).includes('s3cret-pw'))).to.be.false
-            expect(dockerCall.args[2].env.MYSQL_PWD).to.equal('s3cret-pw')
-        })
-
-
-        // The 10x10s budget belongs to the post-`docker run` readiness wait. A
-        // caller asking "do these credentials still work" gets a PERMANENT answer,
-        // so it must be able to buy a shorter budget than ~100s of sleeps.
-        it('honours a caller-supplied retry budget', async function () {
-            const stubs = makeStubs()
-            stubs.execFileAsync.rejects(new Error('ERROR 1045 (28000): Access denied for user'))
-            const ds = loadDatabaseService(stubs)
-            const result = await ds.checkIfDatabaseIsReady('u', 'p', 'xchain_node', { tries: 2, retryDelay: 1 })
-            expect(result).to.be.false
-            expect(mariadbAttempts(stubs)).to.have.length(2)
-        })
-        })
-})
-
-describe('DatabaseService', function () {
-
-        describe('checkIfDatabaseIsReady()', function () {
-
-        it('still spends the full readiness budget when the caller passes none', async function () {
-            const stubs = makeStubs()
-            stubs.execFileAsync.rejects(new Error('connection refused'))
-            const ds = loadDatabaseService(stubs)
-            expect(await ds.checkIfDatabaseIsReady('root', 'rootpass')).to.be.false
-            expect(mariadbAttempts(stubs)).to.have.length(10)
-        })
-        })
+    afterEach(() => sinon.restore())
+    describe('checkIfDatabaseIsReady()', function () {
+        registerAnswerTests()
+        registerBudgetTests()
+        registerContainerLookupTests()
+    })
 })

@@ -22,7 +22,7 @@ const { db, getLastStatus, isStatusUpdated } = require('../state')
 const { sleep, redactSecrets }               = require('../utils/helpers')
 const { getDefaultConfig, getDockerNetwork } = require('./config_service')
 const { statusChanged, getStatus, getInstalledCoinsAndNetworks } = require('./status_service')
-const { addContainerToNetwork, killContainer, removeContainer } = require('./docker_service')
+const { addContainerToNetwork }              = require('./docker_service')
 const { cloneGit, buildAndUp }               = require('./module_service')
 const ExplorerConnector                      = require('./explorer_connector.js')
 // Destructured where it is used, so each call reads the export at that moment.
@@ -83,18 +83,6 @@ async function updateExplorer() {
     }
 
     return true
-}
-
-async function removeExistingExplorer() {
-    // Force-rebuild: tear down any existing explorer container + DB row so
-    // the fresh clone + buildAndUp below doesn't collide with stale state.
-    const existingContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "")
-    if (existingContainerId) {
-        logger.info("Force rebuild: removing existing xchain-explorer container")
-        try { await killContainer(existingContainerId) }   catch { /* may already be exited */ }
-        try { await removeContainer(existingContainerId) } catch { /* may already be gone */ }
-        try { await db.deleteModuleContainer(EXPLORER_MODULE_NAME, "", "") } catch { /* row may already be gone */ }
-    }
 }
 
 async function waitForInstalledExplorer(explorerConnector) {
@@ -161,6 +149,9 @@ async function installExplorerModule(force = false, branch = null) {
     logger.info("Checking if xchain-explorer module is running")
     const explorerConnector = new ExplorerConnector(defaultConfig["EXPLORER_HOST"], defaultConfig["EXPLORER_PORT"])
 
+    // A forced rebuild hands the running explorer to buildAndUp, which stops and
+    // replaces it only after the image builds, so a failed clone or build keeps it.
+    let overwriteContainerId = null
     if (!force) {
         const pingExplorer = await explorerConnector.ping()
         if (pingExplorer) return true
@@ -172,7 +163,7 @@ async function installExplorerModule(force = false, branch = null) {
             if (explorerStatus !== undefined) return true
         }
     } else {
-        await removeExistingExplorer()
+        overwriteContainerId = await db.getModuleContainer(EXPLORER_MODULE_NAME, "", "") || null
     }
 
     logger.info("Downloading xchain-explorer...")
@@ -180,7 +171,7 @@ async function installExplorerModule(force = false, branch = null) {
     const explorerPin = resolveComponentRef(EXPLORER_MODULE_NAME, branch)
     await cloneGit(EXPLORER_MODULE_NAME, true, false, explorerPin.ref, explorerPin.commit)
     logger.info("Installing xchain-explorer module...")
-    await buildAndUp(EXPLORER_MODULE_NAME, null, null)
+    await buildAndUp(EXPLORER_MODULE_NAME, null, null, overwriteContainerId)
     await getStatus(null, null, false)
     logger.info("Waiting for the xchain-explorer to respond")
     return waitForInstalledExplorer(explorerConnector)

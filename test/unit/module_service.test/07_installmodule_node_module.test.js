@@ -248,7 +248,7 @@ moduleSuite('installModule(): branch switch path', function () { it('reclones wh
                     getDefaultConfig: sinon3.stub().resolves({ ENCODER_PORT: 3003, ENCODER_API_PORT: 3003 })
                 },
                 './status_service': { statusChanged: sinon3.stub().resolves(), getStatus: sinon3.stub().resolves({}) },
-                './docker_service': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()), checkBuildKitAvailable: sinon3.stub().resolves(true) },
+                './docker_service': { killContainer: sinon3.stub().resolves(true), removeContainer: sinon3.stub().resolves(true), forceRemoveContainerByName: sinon3.stub().resolves(true), getPublishedHostPorts: sinon3.stub().resolves(new Map()), checkBuildKitAvailable: sinon3.stub().resolves(true), probeContainerPresenceByName: sinon3.stub().resolves('gone') },
                 './database_service': { setDatabaseParameters: sinon3.stub().resolves(), setHubDatabaseParameters: sinon3.stub().resolves() },
                 './version_service': {
                     getLocalNodeVersion: sinon3.stub().resolves(null),

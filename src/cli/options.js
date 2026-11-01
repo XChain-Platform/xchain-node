@@ -55,9 +55,11 @@ function registerStart(program, deps) {
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
             // Every selected module is still attempted; a failed one only changes the exit status.
+            // An unknown chain or network, or a selection with nothing installed, also exits 1 with its reason.
             try {
+                const serviceList = filterCommandParameters(null, service, chain, network,
+                    { includeSharedExplorer: false })
                 await startModules(serviceList)
             } catch (err) {
                 console.error('start failed: ' + redactSecrets(err && err.message ? err.message : err))
@@ -77,9 +79,11 @@ function registerStop(program, deps) {
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
             // Every selected module is still attempted; a failed one only changes the exit status.
+            // An unknown chain or network, or a selection with nothing installed, also exits 1 with its reason.
             try {
+                const serviceList = filterCommandParameters(null, service, chain, network,
+                    { includeSharedExplorer: false })
                 await stopModules(serviceList)
             } catch (err) {
                 console.error('stop failed: ' + redactSecrets(err && err.message ? err.message : err))
@@ -99,9 +103,11 @@ function registerRestart(program, deps) {
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
         .action(async (service, chain, network) => {
-            const serviceList = filterCommandParameters(null, service, chain, network)
             // Every selected module is still attempted; a failed one only changes the exit status.
+            // An unknown chain or network, or a selection with nothing installed, also exits 1 with its reason.
             try {
+                const serviceList = filterCommandParameters(null, service, chain, network,
+                    { includeSharedExplorer: false })
                 await restartModules(serviceList)
             } catch (err) {
                 console.error('restart failed: ' + redactSecrets(err && err.message ? err.message : err))
@@ -118,9 +124,13 @@ function registerAutoheal(program, deps) {
         .command('autoheal')
         .description('Restart containers stuck in the Docker "unhealthy" state (opt-in per service); one-shot, cron/timer safe')
         .option('--dry-run', 'report restart candidates without acting')
+        .option('--resume-stopped', 'retry starting a container that an earlier autoheal restart left stopped')
         .action(async (options) => {
             const { runAutoheal, autohealExitCode } = loadModule('./services/autoheal_service')
-            const result = await runAutoheal({ dryRun: options.dryRun ?? false })
+            const result = await runAutoheal({
+                dryRun: options.dryRun ?? false,
+                resumeStopped: options.resumeStopped ?? false
+            })
             // Exit 1 when a restart was attempted and failed, 2 when a container
             // outlived two restarts this episode (the escalation), and 0 otherwise,
             // so a timer unit alerts on both without paging on "nothing to do" passes.

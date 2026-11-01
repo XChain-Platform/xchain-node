@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-01
+
+### Added
+- Added coordinated hub checkpoint reset, and reset can now run on a named MariaDB container without the hub push.
+
+### Changed
+- Reset can use a root password variable or the stack's own database logins, and moved service ports are now persisted.
+
+### Fixed
+- Lifecycle commands now exit non-zero when the in-container command fails or matches nothing, and read-only commands no longer install or restart the hub.
+- A hub answer carrying an error now counts as a failed config push, and the push is capped at three minutes.
+- A failed reset database step is reported with the services left down, and the command lock file is published whole.
+- Autoheal now restarts only running containers, backs off repeated restarts, and keeps going when a container vanishes mid-pass.
+- The bootstrap health gate now ignores halts an operator has cleared and counts a sync halt held only in sync state.
+- Module, explorer and config sidecar handling and the command lock were corrected, and status reports more accurately.
+
+### Fixed
+- Kept bootstrap publisher capture logs on its configured temporary work volume.
+- Published the command lock file complete so a contender never reclaims a live creator's empty lock.
+- Made clear-reorg-halt name an unknown chain or network instead of reporting no decoder container installed.
+- Made a reset whose database step fails after the stop report the failure and name the services it left down.
+- Stamped each autoheal restart when it finishes so the cooldown and recovery probation no longer start early.
+- Made a stop, start or other service command reject an unknown chain or network instead of acting on the shared explorer.
+- Capped the hub config push at three minutes of wall time so a hung hub no longer holds the command lock for an hour.
+- Made a hub config push that the hub answers with an error count as failed instead of delivered.
+- Stopped the read-only ps, tail, logs and monitor commands from installing the hub and restarting one the operator stopped.
+- Made exec exit non-zero with a short reason when the in-container command fails or matches no installed service.
+- Made start, stop and restart exit non-zero when they match no installed service.
+- Kept the shared explorer out of a start, stop, restart or uninstall scoped to one chain.
+
 ## [0.26.3] - 2026-10-23
 
 ### Changed
@@ -63,6 +93,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Started the bundled MariaDB with a 1G InnoDB buffer pool by default, settable with `XCHAIN_NODE_DB_BUFFER_POOL_SIZE`.
+
+## [0.23.3] - 2026-10-22
+
+### Changed
+- Pinned the v0.23.3 base-image and Brotli-guard patch train in the release manifest.
 
 ## [0.23.0] - 2026-10-11
 
