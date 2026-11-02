@@ -227,6 +227,7 @@ module.exports = {
     get HUB_PUBLIC_API_URL() { return process.env.HUB_PUBLIC_API_URL },
     get HUB_SEED_URLS() { return process.env.HUB_SEED_URLS },
     get INDEXER_API_KEY() { return process.env.INDEXER_API_KEY },
+    get INDEXER_HEALTH_STALL_GRACE_MS() { return process.env.INDEXER_HEALTH_STALL_GRACE_MS },
     get LEVELDB_CACHE_BYTES() { return process.env.LEVELDB_CACHE_BYTES },
     get LEVELDB_WRITE_BUFFER_BYTES() { return process.env.LEVELDB_WRITE_BUFFER_BYTES },
     get TELEMETRY_ADMIN_KEY() { return process.env.TELEMETRY_ADMIN_KEY || "" },

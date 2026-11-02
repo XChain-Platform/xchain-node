@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The testnet indexer now waits 10 minutes before its health check reports a stall, and `INDEXER_HEALTH_STALL_GRACE_MS` on the host overrides it on any network.
+
 ## [0.27.0] - 2026-11-01
 
 ### Added

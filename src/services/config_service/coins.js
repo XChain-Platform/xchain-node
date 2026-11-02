@@ -57,6 +57,9 @@ function configure(dependencies) {
 // operator env); the generic FEE_DESTINATION host var is honored on regtest only, since
 // testnet is a multi-operator federation whose consensus pin hashes only the static bundle.
 // Injected as a default, so a value in the <coin>-<network> config file still wins.
+// Stall grace the testnet indexer gets by default (10 minutes, in ms).
+const TESTNET_INDEXER_STALL_GRACE_MS = "600000"
+
 // Address-deriving modules (encoder/decoder/utxo-tracker) resolve their bitcoinjs
 // network via CryptoNetworks, which keys on the COIN-PREFIXED name (e.g.
 // "bitcoin-regtest"). A bare network ("regtest") matches no case → getBitcoinJsNetwork
@@ -110,6 +113,13 @@ function applyCoinDefaults(defaultValues, module, coin, network) {
         module === XChainService.XCHAIN_REGTEST_MINER) {
         defaultValues["NETWORK"] = coin + "-" + network
     }
+    // Give the testnet indexer a 10-minute stall grace before /status reports 503 (hub barrier waits there run about 8 minutes).
+    // Operational only, never consensus; a set host INDEXER_HEALTH_STALL_GRACE_MS wins on any network.
+    if (module === XChainService.XCHAIN_INDEXER) {
+        const grace = config.INDEXER_HEALTH_STALL_GRACE_MS
+        if (grace !== undefined && grace !== "") defaultValues["INDEXER_HEALTH_STALL_GRACE_MS"] = grace
+        else if (network === "testnet") defaultValues["INDEXER_HEALTH_STALL_GRACE_MS"] = TESTNET_INDEXER_STALL_GRACE_MS
+    }
     if (module === XChainService.XCHAIN_UTXO_TRACKER) {
         const levelDbPassthrough = {
             LEVELDB_CACHE_BYTES:        config.LEVELDB_CACHE_BYTES,
@@ -123,4 +133,4 @@ function applyCoinDefaults(defaultValues, module, coin, network) {
     }
 }
 
-module.exports = { configure, applyCoinDefaults }
+module.exports = { configure, applyCoinDefaults, TESTNET_INDEXER_STALL_GRACE_MS }
