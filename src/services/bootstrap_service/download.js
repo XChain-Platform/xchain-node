@@ -36,6 +36,14 @@ function configureDependencies(dependencies) {
     BOOTSTRAP_STALE_AFTER_DAYS = dependencies.staleAfterDays
 }
 
+// The archive's own URL with any query string or fragment cut off. A mirror or
+// CDN may redirect to <archive>?cache-buster; the archive name and the
+// <archive>.sig sibling live in the path, so neither may be read from or
+// appended after the query.
+function archiveUrlWithoutQuery(archiveUrl) {
+    return String(archiveUrl || '').replace(/[?#].*$/s, '')
+}
+
 // Age in whole days of the resolved archive, from the UTC <YYYYMMDD_HHMMSS>
 // stamp in its name (the field latest.php orders by). Null when the name
 // carries none, as a hand-placed latest.tgz does.
@@ -46,7 +54,7 @@ function configureDependencies(dependencies) {
 // archive of unknown age; the installer has no other clock to fall back on,
 // so an unreadable stamp is warned about rather than trusted.
 function bootstrapArchiveAgeDays(archiveUrl, now = Date.now()) {
-    const stamp = /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(path.basename(archiveUrl || ''))
+    const stamp = /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(path.basename(archiveUrlWithoutQuery(archiveUrl)))
     if (!stamp) return null
     const [y, mo, d, h, mi, s] = stamp.slice(1).map(Number)
     const published = Date.UTC(y, mo - 1, d, h, mi, s)
@@ -146,7 +154,7 @@ function reportBootstrapAge(finalUrl, module, coin, network) {
         : 'has an unreadable publication stamp, so its age is unknown and it may be many days old'
     logger.info(
         `WARNING: the published ${module} bootstrap for ${coin}/${network} ${age} ` +
-        `(${path.basename(finalUrl)}).\n` + consequence
+        `(${path.basename(archiveUrlWithoutQuery(finalUrl))}).\n` + consequence
     )
 }
 
@@ -154,7 +162,7 @@ async function downloadBootstrapSignature(finalUrl, destPath) {
     const sigPath = destPath + BOOTSTRAP_SIG_SUFFIX
     const sigResponse = await axios({
         method: 'get',
-        url: finalUrl + BOOTSTRAP_SIG_SUFFIX,
+        url: archiveUrlWithoutQuery(finalUrl) + BOOTSTRAP_SIG_SUFFIX,
         responseType: 'text',
         maxRedirects: 5,
         timeout: 60000,
