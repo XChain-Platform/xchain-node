@@ -69,7 +69,8 @@ function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
 function upsertSidecarValues(localFilePath, values) {
     const merged = {}
     if (fs.existsSync(localFilePath)) {
-        for (const line of fs.readFileSync(localFilePath, "utf8").split(/\r?\n/)) {
+        for (const rawLine of fs.readFileSync(localFilePath, "utf8").split(/\r?\n/)) {
+            const line = stripBom(rawLine)
             const eqIndex = line.indexOf("=")
             if (eqIndex > 0) merged[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
         }
@@ -101,7 +102,8 @@ async function readSidecarValue(localFilePath, key) {
     let aliasValue  = undefined
     const stream = fs.createReadStream(localFilePath)
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
-    for await (const line of rl) {
+    for await (const rawLine of rl) {
+        const line = stripBom(rawLine)
         const eqIndex = line.indexOf("=")
         if (eqIndex <= 0) continue
         const lineKey = line.substring(0, eqIndex)
@@ -258,11 +260,18 @@ function peelGluedCredentials(value) {
     return { cleanValue: value.substring(0, marks[0].at), credentials }
 }
 
+// A UTF-8 BOM (U+FEFF) saved at the head of a file by some editors survives readline and
+// would glue itself to the first key, so that key no longer matches its name.
+function stripBom(line) {
+    return line.charCodeAt(0) === 0xFEFF ? line.slice(1) : line
+}
+
 function isCommentLine(line) {
     return line.trimStart().startsWith("#")
 }
 
-function readMainConfigLine(defaultConfig, line) {
+function readMainConfigLine(defaultConfig, rawLine) {
+    const line = stripBom(rawLine)
     if (isCommentLine(line)) return false
     const eqIndex = line.indexOf("=")
     if (eqIndex <= 0) return false
@@ -282,7 +291,8 @@ function normalizeMainConfig(defaultConfig, configFilePath) {
     foldSecretEnvAliases(defaultConfig)
 }
 
-function readSidecarConfigLine(sidecarConfig, line) {
+function readSidecarConfigLine(sidecarConfig, rawLine) {
+    const line = stripBom(rawLine)
     const eqIndex = line.indexOf("=")
     if (eqIndex > 0) sidecarConfig[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
 }
@@ -301,7 +311,8 @@ function migrateMainCredentials(defaultConfig, configFilePath, localFilePath) {
     if (Object.keys(creds).length) upsertSidecarValues(localFilePath, creds)
     const lines = String(fs.readFileSync(configFilePath, "utf8")).split(/\r?\n/)
     if (lines[lines.length - 1] === "") lines.pop()
-    const remaining = lines.flatMap((line) => {
+    const remaining = lines.flatMap((rawLine) => {
+        const line = stripBom(rawLine)
         const eqIndex = line.indexOf("=")
         if (eqIndex <= 0 || isCommentLine(line)) return [line]
         const key = line.substring(0, eqIndex)
