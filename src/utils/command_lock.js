@@ -123,10 +123,50 @@ function adoptCommandLock(release) {
 // Break a reclaim marker left behind by a crash, and ONLY that: a marker whose
 // recorded pid is still alive belongs to a contender currently inside the reclaim
 // section, and removing it would restore the very race the marker prevents.
+//
+// Removing by path after a read is a check-then-act race: between the read and the
+// unlink a contender can replace the file with its own live one, and the unlink
+// then removes that. So the file is first renamed to a private name (atomic, and
+// it moves exactly the file at the path at that instant), and the ownership
+// verdict is taken on the moved file. A live file caught by mistake is linked
+// back at once.
 function breakAbandonedReclaimMarker(reclaimFile) {
-    const owner = readLockHolder(reclaimFile)
-    if (isLockHolderActive(owner)) return
-    try { fs.unlinkSync(reclaimFile) } catch { /* already gone */ }
+    // Cheap pre-read so a live marker is never touched in the common case.
+    if (isLockHolderActive(readLockHolder(reclaimFile))) return
+    const claimed = claimPath(reclaimFile)
+    if (!claimed) return
+    if (isLockHolderActive(readLockHolder(claimed))) {
+        restoreClaimedPath(claimed, reclaimFile)
+        return
+    }
+    try { fs.unlinkSync(claimed) } catch { /* already gone */ }
+}
+
+// Private, sweepable name for a file moved out of the way (matches the orphan
+// temp pattern, so a crash leaves nothing that sweepOrphanPublishTempFiles skips).
+function claimedPathFor(file) {
+    return `${file}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`
+}
+
+// Atomically move whatever sits at `file` to a private name. Returns that name,
+// or null when the path was already gone.
+function claimPath(file) {
+    const claimed = claimedPathFor(file)
+    try {
+        fs.renameSync(file, claimed)
+    } catch (err) {
+        if (err.code === 'ENOENT') return null
+        throw err
+    }
+    return claimed
+}
+
+// Put a claimed file that turned out to be live back under its name. link() keeps
+// the inode and refuses to overwrite a file published since, which is then left
+// alone.
+function restoreClaimedPath(claimed, file) {
+    try { fs.linkSync(claimed, file) } catch { /* a newer file owns the name */ }
+    try { fs.unlinkSync(claimed) } catch { /* already gone */ }
 }
 
 // Serialize one stale-lock reclamation behind the O_EXCL marker. Returns nothing:
@@ -152,8 +192,16 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
         const holder = readLockHolder(lockFile)
         if (isLockHolderActive(holder)) return
         if (!sameFile(observed, current)) return
-        try { fs.unlinkSync(lockFile) } catch (unlinkErr) {
-            if (unlinkErr.code !== 'ENOENT') throw unlinkErr
+        // The checks above are about a file that may be replaced before an unlink by
+        // path lands, so move the file away first and judge the moved file itself.
+        const claimed = claimPath(lockFile)
+        if (!claimed) return
+        if (sameFile(observed, statLock(claimed)) && !isLockHolderActive(readLockHolder(claimed))) {
+            try { fs.unlinkSync(claimed) } catch (unlinkErr) {
+                if (unlinkErr.code !== 'ENOENT') throw unlinkErr
+            }
+        } else {
+            restoreClaimedPath(claimed, lockFile)
         }
     } finally {
         unlinkIfOwned(reclaimFile, pid, nonce)

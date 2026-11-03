@@ -104,3 +104,85 @@ describe('commandLock publishes the reclaim marker atomically', () => {
         fs.unlinkSync(reclaimFile)
     })
 })
+
+// Replace `file` with a live owner's file on a NEW inode: the new file is created
+// while the old one still exists, so the inode numbers cannot be reused.
+function replaceWithLiveOwner(file, nonce) {
+    const staged = file + '.test-staged'
+    fs.writeFileSync(staged, JSON.stringify({ pid: process.pid, nonce, command: 'install' }) + '\n')
+    fs.renameSync(staged, file)
+}
+
+// Runs fn with a hook that fires once, just before the first removal of `target`
+// (an unlink by path or a rename away), the point where a preempted contender's
+// earlier check has gone stale.
+function withHookBeforeRemoval(target, hook, fn) {
+    const realUnlink = fs.unlinkSync
+    const realRename = fs.renameSync
+    let fired = false
+    const fire = () => {
+        if (fired) return
+        fired = true
+        hook()
+    }
+    fs.unlinkSync = function (file, ...rest) {
+        if (file === target) fire()
+        return realUnlink.call(fs, file, ...rest)
+    }
+    fs.renameSync = function (from, ...rest) {
+        if (from === target) fire()
+        return realRename.call(fs, from, ...rest)
+    }
+    try {
+        fn()
+    } finally {
+        fs.unlinkSync = realUnlink
+        fs.renameSync = realRename
+    }
+    return fired
+}
+
+describe('commandLock reclaim removals are bound to the file they checked', () => {
+    registerLockDirectoryHooks()
+
+    it('breaking an abandoned marker never removes a live contender marker that replaced it', () => {
+        const lockFile = getLockFilePath()
+        const reclaimFile = lockFile + '.reclaim'
+        const deadPid = findDeadPid()
+        fs.writeFileSync(lockFile, JSON.stringify({ pid: deadPid, nonce: 'stale-lock' }) + '\n')
+        fs.writeFileSync(reclaimFile, JSON.stringify({ pid: deadPid, nonce: 'stale-marker' }) + '\n')
+
+        let acquired = null
+        const fired = withHookBeforeRemoval(reclaimFile,
+            () => replaceWithLiveOwner(reclaimFile, 'live-marker'),
+            () => {
+                try { acquired = acquireCommandLock({ command: 'update' }) } catch (err) { acquired = err }
+            })
+
+        assert.ok(fired, 'the stale marker removal must be attempted')
+        assert.ok(acquired instanceof Error, 'no acquirer may take the lock while a live marker guards reclamation')
+        assert.strictEqual(JSON.parse(fs.readFileSync(reclaimFile, 'utf8')).nonce, 'live-marker')
+        assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).nonce, 'stale-lock',
+            'the stale lock stays until the live marker owner finishes')
+    })
+
+    it('reclaiming a stale lock never deletes a live lock created after the observation', () => {
+        const lockFile = getLockFilePath()
+        const reclaimFile = lockFile + '.reclaim'
+        fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), nonce: 'stale-lock' }) + '\n')
+
+        let acquired = null
+        const fired = withHookBeforeRemoval(lockFile,
+            () => replaceWithLiveOwner(lockFile, 'live-lock'),
+            () => {
+                try { acquired = acquireCommandLock({ command: 'update' }) } catch (err) { acquired = err }
+            })
+
+        assert.ok(fired, 'the stale lock removal must be attempted')
+        assert.ok(acquired instanceof Error && acquired.code === 'ELOCKHELD',
+            'the acquirer must refuse the live holder, not take the lock on top of it')
+        assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).nonce, 'live-lock')
+        assert.strictEqual(fs.existsSync(reclaimFile), false, 'the reclaim marker is released')
+        assert.deepStrictEqual(fs.readdirSync(tmpDir), ['command.lock'], 'no claimed or temp file left behind')
+    })
+})
