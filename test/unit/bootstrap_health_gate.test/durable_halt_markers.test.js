@@ -58,7 +58,7 @@ describe('BootstrapHealthGate rollback guard markers', function () {
 
     installEnvironmentHooks()
 
-    const encoded = value => 'V' + Buffer.from(value, 'utf8').toString('hex').toUpperCase()
+    const encoded = value => 'V' + Buffer.from(value, 'utf8').toString('hex').toUpperCase() + ';'
 
     it('REFUSES an invalid rollback guard row in the gated database', async function () {
         const gate = loadGate()
@@ -79,7 +79,7 @@ describe('BootstrapHealthGate rollback guard markers', function () {
     it('accepts valid and NULL rollback guard rows', async function () {
         const gate = loadGate()
         await callGate(gate, { runner: makeRunner({
-            rollbackGuardRows: '2\t' + encoded('{"peak":5,"low":3}') + ',N'
+            rollbackGuardRows: '2\t' + encoded('{"peak":5,"low":3}') + ',N;'
         }) })
     })
 

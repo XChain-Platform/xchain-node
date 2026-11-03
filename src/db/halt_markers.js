@@ -82,11 +82,13 @@ function pendingSyncHaltCountSql(name) {
 
 /**
  * Saved rollback guards, encoded for the caller to judge with xchain-sync's
- * loadRollbackGuardState rule. LEFT avoids treating '_' as a wildcard.
+ * loadRollbackGuardState rule. LEFT avoids treating '_' as a wildcard. Every token ends in
+ * ';' so a GROUP_CONCAT cut by group_concat_max_len, at any byte, loses a terminator or a
+ * token and is refused by the parser instead of reading as a shorter valid value.
  */
 function rollbackGuardStateSql(name) {
     return `SELECT COUNT(*), COALESCE(GROUP_CONCAT(` +
-        `IF(state_value IS NULL, 'N', CONCAT('V', HEX(state_value))) ` +
+        `IF(state_value IS NULL, 'N;', CONCAT('V', HEX(state_value), ';')) ` +
         `ORDER BY state_key SEPARATOR ','), '') FROM \`${name}\`.sync_state ` +
         `WHERE LEFT(state_key, 15) = 'rollback_guard:';`
 }

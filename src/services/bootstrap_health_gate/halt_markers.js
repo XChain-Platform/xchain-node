@@ -107,12 +107,12 @@ function parseRollbackGuardRows(raw, what) {
     const encoded = fields[1] === 'NULL' ? '' : (fields[1] || '')
     const tokens = encoded === '' ? [] : encoded.split(',')
     const bad = fields.length !== 2 || !Number.isSafeInteger(count) || count < 0 ||
-        tokens.length !== count || tokens.some(token => !/^(?:N|V(?:[0-9A-F]{2})*)$/.test(token))
+        tokens.length !== count || tokens.some(token => !/^(?:N;|V(?:[0-9A-F]{2})*;)$/.test(token))
     if (bad)
         throw new Error(`the ${what} returned unreadable output: ${JSON.stringify(text.slice(0, 80))}`)
     return tokens.reduce((invalid, token) => {
-        if (token === 'N') return invalid
-        const value = Buffer.from(token.slice(1), 'hex').toString('utf8')
+        if (token === 'N;') return invalid
+        const value = Buffer.from(token.slice(1, -1), 'hex').toString('utf8')
         return invalid + (isValidRollbackGuardState(value) ? 0 : 1)
     }, 0)
 }
