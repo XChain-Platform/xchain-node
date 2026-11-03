@@ -295,11 +295,13 @@ function configureManagedHubDiscovery(defaultValues, module) {
     }
 }
 
-// Host INDEX_MAP_PARITY_CHECK reaches the xchain-sync server container only,
-// so a recreate keeps it instead of reverting to the image default.
+// Host INDEX_MAP_PARITY_CHECK and TRUST_PROXY reach the xchain-sync server
+// container only, so a recreate keeps them instead of reverting to the image
+// default. Without TRUST_PROXY a sync behind its reverse proxy sees every caller
+// as the proxy's address, and all of them share one rate-limit bucket.
 function configureSyncPassthrough(defaultValues, module) {
     if (module !== SYNC_MODULE_NAME) return
-    for (const k of ["INDEX_MAP_PARITY_CHECK"]) {
+    for (const k of ["INDEX_MAP_PARITY_CHECK", "TRUST_PROXY"]) {
         if (config.SYNC_PASSTHROUGH_ENV[k] !== undefined && config.SYNC_PASSTHROUGH_ENV[k] !== "") {
             defaultValues[k] = config.SYNC_PASSTHROUGH_ENV[k]
         }

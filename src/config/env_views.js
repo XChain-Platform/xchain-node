@@ -66,7 +66,9 @@ const LIST_VIEWS = {
     ]],
     // The host names the xchain-sync server container is handed (defaults.js
     // configureSharedAfterHubKey), so a recreate keeps the operator's value.
-    SYNC_PASSTHROUGH_ENV: ['sync passthrough', ["INDEX_MAP_PARITY_CHECK"]],
+    // TRUST_PROXY is the one way to give sync per-client rate-limit buckets
+    // behind its reverse proxy.
+    SYNC_PASSTHROUGH_ENV: ['sync passthrough', ["INDEX_MAP_PARITY_CHECK", "TRUST_PROXY"]],
     // The indexer's regtest genesis bootstrap (ConfigService genesisPassthroughVars).
     INDEXER_GENESIS_ENV: ['indexer genesis', [
         "XCHAIN_GENESIS_BLOCK", "XCHAIN_GENESIS_LEDGER_HASH", "XCHAIN_GENESIS_DUMP_HASH",
