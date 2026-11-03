@@ -45,6 +45,11 @@
  * slipped into the gap delays the update; it refuses only if that mutator
  * still holds the lock when the wait runs out.
  *
+ * Both paths are published through a private temp file
+ * (<path>.<pid>.<nonce>.tmp). A crash between writing it and unlinking
+ * it leaves the temp file behind; it never blocks an acquire, and each
+ * successful acquire sweeps every such file whose pid is gone.
+ *
  * Ops note: clearing a wedged lock by hand may mean deleting both
  * command.lock and command.lock.reclaim.
  ********************************************************************/
@@ -176,6 +181,28 @@ function publishLockAtomically(lockFile, payload, nonce) {
     }
 }
 
+// Remove publish temp files orphaned by a crash between their write and their
+// unlink. Only names publishLockAtomically produces for this lock or its reclaim
+// marker match, and only when the pid in the name is gone: a live pid may be a
+// contender mid-publish, whose temp file must survive until its own unlink. A
+// recycled live pid only defers the sweep. Best effort: housekeeping must never
+// fail an acquire that already succeeded.
+function sweepOrphanPublishTempFiles(lockFile) {
+    const dir  = path.dirname(lockFile)
+    const base = path.basename(lockFile)
+    let names
+    try { names = fs.readdirSync(dir) } catch { return }
+    for (const name of names) {
+        if (!name.startsWith(base + '.')) continue
+        const rest = name.slice(base.length + 1)
+        const m = /^(?:reclaim\.)?([1-9]\d*)\.[0-9a-f]+\.tmp$/.exec(rest)
+        if (!m) continue
+        const pid = Number(m[1])
+        if (pid === process.pid || isPidAlive(pid)) continue
+        try { fs.unlinkSync(path.join(dir, name)) } catch { /* already gone */ }
+    }
+}
+
 // One acquire pass with serialized stale-lock removal and bounded retries.
 // A live or unreadable holder throws ELOCKHELD, which callers can retry;
 // filesystem failures and lost races stay fatal.
@@ -237,8 +264,9 @@ function acquireCommandLock({ pid = process.pid, command = '', waitMs = 0, pollM
     const deadline = Date.now() + Math.max(0, waitMs)
     for (;;) {
         const payload = JSON.stringify({ pid, nonce, command, startedAt: new Date().toISOString() }) + '\n'
+        let release
         try {
-            return tryAcquireOnce(lockFile, payload, pid, nonce)
+            release = tryAcquireOnce(lockFile, payload, pid, nonce)
         } catch (err) {
             // Only a live-held lock is retryable; anything else is fatal.
             if (err.code === 'ELOCKHELD' && Date.now() < deadline) {
@@ -247,6 +275,9 @@ function acquireCommandLock({ pid = process.pid, command = '', waitMs = 0, pollM
             }
             throw err
         }
+        // Swept only once the lock is held, so concurrent acquirers never race the sweep.
+        try { sweepOrphanPublishTempFiles(lockFile) } catch { /* best effort */ }
+        return release
     }
 }
 
