@@ -247,20 +247,24 @@ describe('BootstrapRepublishLedger', function () {
 
     describe('reading a damaged ledger', function () {
 
-        it('starts clean on unparseable JSON rather than throwing inside a reset', function () {
+        // Reporting unparseable JSON as an empty ledger would read as "nothing
+        // due" and cancel the forced republish. A reset does not come through
+        // this read: it moves the damaged file aside and its mark still lands.
+        it('refuses unparseable JSON on read, while a reset still marks over it', function () {
             writeRaw('{ not json')
-            expect(ledger.readReindexLedger().combos).to.deep.equal({})
-            expect(ledger.listRepublishDue()).to.deep.equal([])
-            // and a fresh mark still lands
+            expect(() => ledger.readReindexLedger()).to.throw(/could not be read/)
+            expect(() => ledger.listRepublishDue()).to.throw(/could not be read/)
             expect(ledger.recordReindex([DECODER], 'bitcoin', 'testnet', {})).to.have.length(1)
             expect(ledger.listRepublishDue()).to.have.length(1)
         })
 
-        it('starts clean on a well-formed file of the wrong shape', function () {
+        it('refuses a well-formed file of the wrong shape on read', function () {
             writeRaw(JSON.stringify({ version: 1, combos: 'nope' }))
-            expect(ledger.readReindexLedger().combos).to.deep.equal({})
+            expect(() => ledger.readReindexLedger()).to.throw(/not a ledger object/)
             writeRaw(JSON.stringify([1, 2, 3]))
-            expect(ledger.readReindexLedger().combos).to.deep.equal({})
+            expect(() => ledger.readReindexLedger()).to.throw(/not a ledger object/)
+            writeRaw(JSON.stringify({ version: 1, combos: [{ reindexedAt: '2026-11-02T10:00:00Z' }] }))
+            expect(() => ledger.listRepublishDue()).to.throw(/not a ledger object/)
         })
 
         // The publisher feeds these strings into its shell plan, so a key that

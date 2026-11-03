@@ -263,16 +263,36 @@ fi
 # tracker is reported loudly on every run instead and republished by the weekly
 # --with-trackers run; --force-due-trackers overrides that for an operator who
 # wants the downtime now. --no-forced-due disables the whole mechanism.
-declare -a DUE=()
-detect_due() {
-  local svc_pattern
-  svc_pattern="$(IFS='|'; echo "${ALL_SERVICES[*]}")"
-  "$XCHAIN_NODE_BIN" bootstrap-republish-due 2>/dev/null \
-    | grep -E "^($svc_pattern):$COMBO_FIELD:$COMBO_FIELD$" \
-    | sort -u
+#
+# The listing is captured with its exit status BEFORE it is filtered. A ledger
+# that exists but cannot be read makes the command fail, and that must stop the
+# run: read as empty output it would mean "nothing due" and publish the stale
+# lineage. Its stderr stays visible so the message naming the ledger reaches
+# the log. The one failure tolerated is an older pinned CLI that has no such
+# subcommand at all (its --help does not list it): it has no ledger either, so
+# the run goes on with nothing due, as it always has on those boxes.
+node_lists_republish_due() {
+  local help_text
+  help_text="$("$XCHAIN_NODE_BIN" --help 2>/dev/null)" || true
+  local line
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*bootstrap-republish-due([[:space:]]|$) ]] && return 0
+  done <<< "$help_text"
+  return 1
 }
+declare -a DUE=()
 if [ "$FORCE_DUE" = 1 ]; then
-  mapfile -t DUE < <(detect_due)
+  if ! due_raw="$("$XCHAIN_NODE_BIN" bootstrap-republish-due)"; then
+    if node_lists_republish_due; then
+      die "bootstrap-republish-due failed (the republish ledger could not be read), so which combos are due is unknown; refusing to publish a possibly stale lineage. Repair the ledger or rerun with --no-forced-due."
+    fi
+    log "WARNING: this xchain-node has no bootstrap-republish-due command, so no combo is forced in as due."
+    due_raw=""
+  fi
+  svc_pattern="$(IFS='|'; echo "${ALL_SERVICES[*]}")"
+  mapfile -t DUE < <(printf '%s\n' "$due_raw" \
+    | grep -E "^($svc_pattern):$COMBO_FIELD:$COMBO_FIELD$" \
+    | sort -u)
   if [ "${#DUE[@]}" -gt 0 ]; then
     log "reindexed since their last publish (${#DUE[@]}): ${DUE[*]}"
   fi
