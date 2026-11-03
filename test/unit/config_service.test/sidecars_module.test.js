@@ -126,6 +126,48 @@ function migrateFixture(mainBody, sidecarBody) {
 }
 
 function migrationSafetyTests() {
+    it("never ships or persists a blank RPC password and stays byte-identical on the second load", function () {
+        const configFile = path.join(configDir, "bitcoin-regtest")
+        const sidecarFile = configFile + ".local"
+        fs.writeFileSync(configFile, "RPC_PORT=18443\nDUST_AMOUNT=546\nNODE_USER=fake-user-1\nNODE_PASSWORD=\n")
+        // Mirrors the config loader: main file, then sidecar, migrate when the main file held credentials, then mint.
+        const load = () => {
+            const cfg = {}
+            let armed = false
+            for (const line of fs.readFileSync(configFile, "utf8").split(/\r?\n/)) {
+                if (sidecars.readMainConfigLine(cfg, line)) armed = true
+            }
+            sidecars.normalizeMainConfig(cfg, configFile)
+            if (fs.existsSync(sidecarFile)) {
+                const side = {}
+                for (const line of fs.readFileSync(sidecarFile, "utf8").split(/\r?\n/)) sidecars.readSidecarConfigLine(side, line)
+                sidecars.mergeSidecarConfig(cfg, side, sidecarFile)
+            }
+            if (armed) sidecars.migrateMainCredentials(cfg, configFile, sidecarFile)
+            sidecars.generateRpcCredentials(cfg, sidecarFile)
+            return cfg
+        }
+        const first = load()
+        const firstBytes = fs.readFileSync(sidecarFile, "utf8")
+        expect(first.NODE_PASSWORD).to.match(/^[0-9a-f]{48}$/)
+        expect(first.NODE_USER).to.equal("fake-user-1")
+        expect(firstBytes).to.not.match(/^NODE_(SECRET|PASSWORD)=$/m)
+        const second = load()
+        expect(second.NODE_PASSWORD).to.equal(first.NODE_PASSWORD)
+        expect(fs.readFileSync(sidecarFile, "utf8")).to.equal(firstBytes)
+        expect(firstBytes.split("\n").filter(l => l.startsWith("NODE_SECRET=")).length).to.equal(1)
+        expect(firstBytes).to.include("NODE_USER=fake-user-1")
+    })
+
+    it("replaces a blank NODE_SECRET already on disk instead of appending a second line", function () {
+        const file = path.join(configDir, "bitcoin-regtest.local")
+        fs.writeFileSync(file, "NODE_USER=u\nNODE_SECRET=\n", { mode: 0o600 })
+        const cfg = { NODE_USER: "u" }
+        sidecars.generateRpcCredentials(cfg, file)
+        const body = fs.readFileSync(file, "utf8")
+        expect(body).to.equal("NODE_USER=u\nNODE_SECRET=" + cfg.NODE_PASSWORD + "\n")
+    })
+
     it('preserves sidecar-only values and sidecar credential precedence during migration', function () {
         const files = migrateFixture(
             'DUST_AMOUNT=546\nNODE_USER=alice\nNODE_PASSWORD=old\n',

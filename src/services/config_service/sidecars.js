@@ -273,9 +273,11 @@ function mergeSidecarConfig(defaultConfig, sidecarConfig, localFilePath) {
 
 function migrateMainCredentials(defaultConfig, configFilePath, localFilePath) {
     const creds = {}
-    if ("NODE_USER" in defaultConfig) creds["NODE_USER"] = defaultConfig["NODE_USER"]
-    if ("NODE_PASSWORD" in defaultConfig) creds["NODE_PASSWORD"] = defaultConfig["NODE_PASSWORD"]
-    upsertSidecarValues(localFilePath, creds)
+    // A blank value is absent, as foldSecretEnvAliases treats it: copying it would
+    // ship an empty RPC credential now and have the next load mint a second one.
+    if (defaultConfig["NODE_USER"]) creds["NODE_USER"] = defaultConfig["NODE_USER"]
+    if (defaultConfig["NODE_PASSWORD"]) creds["NODE_PASSWORD"] = defaultConfig["NODE_PASSWORD"]
+    if (Object.keys(creds).length) upsertSidecarValues(localFilePath, creds)
     const lines = String(fs.readFileSync(configFilePath, "utf8")).split(/\r?\n/)
     if (lines[lines.length - 1] === "") lines.pop()
     const remaining = lines.flatMap((line) => {
@@ -294,10 +296,11 @@ function migrateMainCredentials(defaultConfig, configFilePath, localFilePath) {
 
 function generateRpcCredentials(defaultConfig, localFilePath) {
     const generated = {}
-    if (!("NODE_USER" in defaultConfig)) {
+    // Blank counts as missing (same rule as the alias fold), so a blank credential is never used.
+    if (!defaultConfig["NODE_USER"]) {
         generated["NODE_USER"] = defaultConfig["NODE_USER"] = crypto.randomBytes(12).toString('hex')
     }
-    if (!("NODE_PASSWORD" in defaultConfig)) {
+    if (!defaultConfig["NODE_PASSWORD"]) {
         // Absent under NODE_PASSWORD means absent under NODE_SECRET too, since the
         // fold above already collapsed either spelling onto this key. Nothing on
         // disk to preserve, so the new credential goes straight to its
@@ -306,7 +309,8 @@ function generateRpcCredentials(defaultConfig, localFilePath) {
         defaultConfig["NODE_PASSWORD"] = value
         generated[preferredSecretEnvName("NODE_PASSWORD")] = value
     }
-    if (Object.keys(generated).length) persistSidecarCreds(localFilePath, generated)
+    // Upsert, not append: a blank NODE_SECRET/NODE_USER line already on disk is replaced in place.
+    if (Object.keys(generated).length) upsertSidecarValues(localFilePath, generated)
 }
 
 module.exports = {
