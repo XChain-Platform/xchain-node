@@ -54,6 +54,8 @@ const path = require('path')
 
 const { XChainService, Coin, Network } = require('../config')
 const config = require('../config');
+const { getLogger } = require('../observability/logger')
+const logger = getLogger()
 
 const LEDGER_DIR_NAME  = '.xchain-node'
 const LEDGER_FILE_NAME = 'bootstrap-reindex.json'
@@ -117,11 +119,16 @@ function readReindexLedger() {
     try {
         parsed = JSON.parse(raw)
     } catch {
-        return emptyLedger()   // corrupt: start clean rather than throw inside a reset
+        return emptyLedger()   // corrupt: a read-only caller sees nothing due rather than an error
     }
-    if (!parsed || typeof parsed !== 'object' || !parsed.combos || typeof parsed.combos !== 'object') {
-        return emptyLedger()
-    }
+    return isLedgerShape(parsed) ? normalizeLedger(parsed) : emptyLedger()
+}
+
+function isLedgerShape(parsed) {
+    return Boolean(parsed && typeof parsed === 'object' && parsed.combos && typeof parsed.combos === 'object')
+}
+
+function normalizeLedger(parsed) {
     const combos = {}
     for (const [key, entry] of Object.entries(parsed.combos)) {
         if (!parseComboKey(key)) continue
@@ -133,6 +140,41 @@ function readReindexLedger() {
         }
     }
     return { version: LEDGER_VERSION, combos }
+}
+
+// Read the ledger for a write that will rename a new file over it. Returns the
+// ledger, or null when the write must not happen. The read-only path above can
+// treat damage as empty, but a write cannot: renaming over a file it could not
+// read or parse would erase every other combo's due marker without a word.
+//
+//   absent      -> empty ledger, no warning (a box that never reindexed)
+//   unreadable  -> null: the bytes cannot be kept, so nothing is replaced
+//   unparseable -> moved aside to a .corrupt-<time> sibling, warned, then empty
+function readReindexLedgerForUpdate() {
+    const target = getReindexLedgerPath()
+    let raw
+    try {
+        raw = fs.readFileSync(target, 'utf8')
+    } catch (err) {
+        if (err && err.code === 'ENOENT') return emptyLedger()
+        logger.warn(`WARNING: the bootstrap republish ledger ${target} could not be read `
+            + `(${(err && err.code) || err}), so it was left untouched and this reindex was not recorded.`)
+        return null
+    }
+    let parsed = null
+    try { parsed = JSON.parse(raw) } catch { parsed = null }
+    if (isLedgerShape(parsed)) return normalizeLedger(parsed)
+    const aside = `${target}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`
+    try {
+        fs.renameSync(target, aside)
+    } catch (err) {
+        logger.warn(`WARNING: the bootstrap republish ledger ${target} could not be parsed or moved aside `
+            + `(${(err && err.code) || err}), so it was left untouched and this reindex was not recorded.`)
+        return null
+    }
+    logger.warn(`WARNING: the bootstrap republish ledger ${target} could not be parsed, so it was moved to `
+        + `${aside} and a new one started. Any republish-due combos it held are listed in that copy.`)
+    return emptyLedger()
 }
 
 // Atomic replace (write a sibling temp file, then rename) so a crash or a
@@ -185,7 +227,8 @@ function reindexAffectedModules({ node = false, utxoTracker = false, decoder = f
  */
 function recordReindex(modules, coin, network, { at = new Date(), reason = null } = {}) {
     const when   = at instanceof Date ? at.toISOString() : String(at)
-    const ledger = readReindexLedger()
+    const ledger = readReindexLedgerForUpdate()
+    if (!ledger) return []
     const marked = []
     for (const module of modules || []) {
         const key = comboKey(module, coin, network)
