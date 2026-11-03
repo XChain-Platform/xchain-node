@@ -125,7 +125,7 @@ function migrateFixture(mainBody, sidecarBody) {
     return { configFile, sidecarFile }
 }
 
-function migrationSafetyTests() {
+function blankPasswordTests() {
     it("never ships or persists a blank RPC password and stays byte-identical on the second load", function () {
         const configFile = path.join(configDir, "bitcoin-regtest")
         const sidecarFile = configFile + ".local"
@@ -159,6 +159,10 @@ function migrationSafetyTests() {
         expect(firstBytes).to.include("NODE_USER=fake-user-1")
     })
 
+}
+
+function migrationSafetyTests() {
+    blankPasswordTests()
     it("replaces a blank NODE_SECRET already on disk instead of appending a second line", function () {
         const file = path.join(configDir, "bitcoin-regtest.local")
         fs.writeFileSync(file, "NODE_USER=u\nNODE_SECRET=\n", { mode: 0o600 })

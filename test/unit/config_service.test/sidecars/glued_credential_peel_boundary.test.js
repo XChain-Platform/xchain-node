@@ -15,9 +15,9 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const readline = require('readline')
-const sidecars = require('../../../src/services/config_service/sidecars')
+const sidecars = require('../../../../src/services/config_service/sidecars')
 
-const scratchRoot = path.resolve(__dirname, '../../../tmp/glued-credential-peel-boundary')
+const scratchRoot = path.resolve(__dirname, '../../../../tmp/glued-credential-peel-boundary')
 
 // Reads a main config the way configure() does, then migrates when a credential was found.
 function load(text, name) {

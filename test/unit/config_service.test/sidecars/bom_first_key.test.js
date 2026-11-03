@@ -15,9 +15,9 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const readline = require('readline')
-const sidecars = require('../../../src/services/config_service/sidecars')
+const sidecars = require('../../../../src/services/config_service/sidecars')
 
-const scratchRoot = path.resolve(__dirname, '../../../tmp/bom-first-key')
+const scratchRoot = path.resolve(__dirname, '../../../../tmp/bom-first-key')
 const BOM = '﻿'
 
 async function readLines(file) {
@@ -27,18 +27,7 @@ async function readLines(file) {
     return lines
 }
 
-describe('a UTF-8 BOM on line 1 never changes how a config key is recognised', function () {
-    before(function () {
-        fs.mkdirSync(scratchRoot, { recursive: true })
-        sidecars.configure({
-            crypto, fs, path, readline, configDir: scratchRoot,
-            preferredSecretEnvName: (k) => (k === 'NODE_PASSWORD' ? 'NODE_SECRET' : undefined),
-            foldSecretEnvAliases: (c) => c,
-            deprecatedSecretEnvNames: () => [],
-            logger: { warn() {} }
-        })
-    })
-
+function recognitionTests() {
     it('flags a BOM-prefixed NODE_USER in the main file as a credential', function () {
         const cfg = {}
         expect(sidecars.readMainConfigLine(cfg, BOM + 'NODE_USER=fake-user-1')).to.equal(true)
@@ -63,7 +52,9 @@ describe('a UTF-8 BOM on line 1 never changes how a config key is recognised', f
         fs.writeFileSync(f, BOM + 'NODE_USER=u2\nOTHER=1\n')
         expect(await sidecars.readSidecarValue(f, 'NODE_USER')).to.equal('u2')
     })
+}
 
+function migrationTests() {
     it('migrates a BOM-prefixed NODE_USER out of the main file (CRLF, no trailing newline)', async function () {
         const dir = fs.mkdtempSync(path.join(scratchRoot, 'mig-'))
         const main = path.join(dir, 'bitcoin-regtest')
@@ -92,4 +83,20 @@ describe('a UTF-8 BOM on line 1 never changes how a config key is recognised', f
         for (const line of await readLines(main)) sidecars.readMainConfigLine(after, line)
         expect(after.RPC_PORT).to.equal('18443')
     })
+}
+
+describe('a UTF-8 BOM on line 1 never changes how a config key is recognised', function () {
+    before(function () {
+        fs.mkdirSync(scratchRoot, { recursive: true })
+        sidecars.configure({
+            crypto, fs, path, readline, configDir: scratchRoot,
+            preferredSecretEnvName: (k) => (k === 'NODE_PASSWORD' ? 'NODE_SECRET' : undefined),
+            foldSecretEnvAliases: (c) => c,
+            deprecatedSecretEnvNames: () => [],
+            logger: { warn() {} }
+        })
+    })
+
+    recognitionTests()
+    migrationTests()
 })
