@@ -89,34 +89,40 @@ describe('preCheck(): a command that does not need the hub config survives an an
     })
 })
 
-describe('CLI dispatch: autoheal tells preCheck its hub push is optional @regression', function () {
-    const { Command } = require('commander')
-    const { installDispatch } = require('../../../src/cli/dispatch')
-    const SIGNALS = ['exit', 'SIGINT', 'SIGTERM']
-    let before
+const SIGNALS = ['exit', 'SIGINT', 'SIGTERM']
 
+// installDispatch adds exit and signal listeners; drop the ones a test added.
+function isolateSignalListeners() {
+    let before
     beforeEach(() => { before = {}; for (const ev of SIGNALS) before[ev] = process.listeners(ev) })
     afterEach(() => {
         for (const ev of SIGNALS) for (const fn of process.listeners(ev)) if (!before[ev].includes(fn)) process.removeListener(ev, fn)
         sinon.restore()
     })
+}
 
-    async function run(argv) {
-        const deps = {
-            config: {}, action: sinon.stub(), setVerbose: sinon.stub(),
-            maybeSelfUpdateBeforeUpdate: sinon.stub().resolves(), redactSecrets: (s) => s,
-            acquireCommandLock: sinon.stub().returns(sinon.stub()), preCheck: sinon.stub().resolves(),
-            refForPreCheck: sinon.stub().returns(null), commandRepairsHub: sinon.stub().returns(true),
-            maybeReportTelemetry: sinon.stub().resolves(), noticeNewerRelease: sinon.stub().resolves()
-        }
-        const program = new Command()
-        program.exitOverride()
-        program.option('--verbose').option('--no-telemetry')
-        installDispatch(program, deps)
-        for (const name of ['autoheal', 'update']) program.command(name).allowUnknownOption().argument('[args...]').action(deps.action)
-        await program.parseAsync(argv, { from: 'user' })
-        return deps
+async function runDispatch(argv) {
+    const { Command } = require('commander')
+    const { installDispatch } = require('../../../src/cli/dispatch')
+    const deps = {
+        config: {}, action: sinon.stub(), setVerbose: sinon.stub(),
+        maybeSelfUpdateBeforeUpdate: sinon.stub().resolves(), redactSecrets: (s) => s,
+        acquireCommandLock: sinon.stub().returns(sinon.stub()), preCheck: sinon.stub().resolves(),
+        refForPreCheck: sinon.stub().returns(null), commandRepairsHub: sinon.stub().returns(true),
+        maybeReportTelemetry: sinon.stub().resolves(), noticeNewerRelease: sinon.stub().resolves()
     }
+    const program = new Command()
+    program.exitOverride()
+    program.option('--verbose').option('--no-telemetry')
+    installDispatch(program, deps)
+    for (const name of ['autoheal', 'update']) program.command(name).allowUnknownOption().argument('[args...]').action(deps.action)
+    await program.parseAsync(argv, { from: 'user' })
+    return deps
+}
+
+describe('CLI dispatch: autoheal tells preCheck its hub push is optional @regression', function () {
+    isolateSignalListeners()
+    const run = runDispatch
 
     it('passes hubPushOptional for autoheal --dry-run and reaches the action', async function () {
         const deps = await run(['autoheal', '--dry-run'])
@@ -128,5 +134,35 @@ describe('CLI dispatch: autoheal tells preCheck its hub push is optional @regres
     it('does not pass it for another command', async function () {
         const deps = await run(['update', 'xchain-hub'])
         expect(deps.preCheck.firstCall.args[4]).to.equal(undefined)
+    })
+})
+
+describe('CLI dispatch: an update of the indexer or decoder survives a hub that refuses its push @regression', function () {
+    isolateSignalListeners()
+    const run = runDispatch
+
+    it('passes it for an update of the indexer or decoder, whatever the argument order', async function () {
+        for (const argv of [
+            ['update', 'xchain-indexer', 'dogecoin', 'regtest', 'develop'],
+            ['update', 'regtest', 'develop', 'litecoin', 'xchain-indexer'],
+            ['update', 'xchain-decoder', 'bitcoin', 'regtest']
+        ]) {
+            const deps = await run(argv)
+            expect(deps.preCheck.firstCall.args[4], argv.join(' ')).to.deep.equal({ hubPushOptional: true })
+            expect(deps.action.calledOnce).to.be.true
+        }
+    })
+
+    it('does not pass it for update all, another service, or an argument shape resolveArgs refuses', async function () {
+        for (const argv of [
+            ['update', 'develop'],
+            ['update', 'all', 'regtest', 'develop'],
+            ['update', 'xchain-explorer', 'develop'],
+            ['update', 'xchain-encoder', 'bitcoin', 'regtest'],
+            ['update', 'xchain-node']
+        ]) {
+            const deps = await run(argv)
+            expect(deps.preCheck.firstCall.args[4], argv.join(' ')).to.equal(undefined)
+        }
     })
 })

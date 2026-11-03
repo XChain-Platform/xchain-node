@@ -17,6 +17,8 @@
 
 // How long a release update re-taking the lock its self-update step handed back waits
 // at least, so a mutator that slipped into that gap delays the update instead of refusing it.
+const { resolveArgs } = require('../services/config_service')
+
 const SELF_UPDATE_HANDOFF_WAIT_MS = 30000
 
 function dispatchSettings(config) {
@@ -84,7 +86,25 @@ function preCheckOptionsFor(commandName, actionCommand) {
     if (commandName === 'reset' && opts && opts.dbContainer) return [{ localOnly: true }]
     // autoheal only watches decoder and indexer containers; a hub that answers but refuses the push must not block it.
     if (commandName === 'autoheal') return [{ hubPushOptional: true }]
+    if (updatesAPipelineService(commandName, actionCommand)) return [{ hubPushOptional: true }]
     return []
+}
+
+// An `update` of the decoder or indexer gets the same allowance as autoheal.
+// Those are the containers whose fault leaves an answering hub unable to commit
+// a push: an indexer stalled far behind its tip fails the hub's stake-weight
+// read closed and empties its validator set. Refusing the update would block the
+// one redeploy that clears that stall. Targeting goes through resolveArgs, the
+// classifier the action itself uses; `all` and every other service still abort.
+const PUSH_OPTIONAL_UPDATE_SERVICES = ['xchain-decoder', 'xchain-indexer']
+function updatesAPipelineService(commandName, actionCommand) {
+    if (commandName !== 'update') return false
+    try {
+        const resolved = resolveArgs((actionCommand && actionCommand.args) || [], { expectBranch: true, defaultBranch: null })
+        return PUSH_OPTIONAL_UPDATE_SERVICES.includes(resolved.service)
+    } catch {
+        return false
+    }
 }
 
 // Name the lock for a validator subcommand that must serialize, or null for one
