@@ -229,20 +229,41 @@ function coinConfigPaths(coin, network) {
     return { configFilePath, localFilePath: configFilePath + ".local" }
 }
 
+// Older appenders glued NODE_USER= / NODE_PASSWORD= onto the end of the previous
+// value with no newline. A marker counts only when it is not the tail of another
+// key or word: a marker preceded by "_" or whitespace is part of some other name
+// or free text (FOO_NODE_USER=, "x NODE_PASSWORD=") and stays in the value.
+// Either glue order peels; each credential runs to the next marker.
 function peelGluedCredentials(value) {
-    const credentials = {}
-    let cleanValue = value
+    const marks = []
     for (const credKey of ["NODE_PASSWORD", "NODE_USER"]) {
-        const at = cleanValue.indexOf(credKey + "=")
-        if (at >= 0) {
-            credentials[credKey] = cleanValue.substring(at + credKey.length + 1)
-            cleanValue = cleanValue.substring(0, at)
+        const needle = credKey + "="
+        let from = 0
+        for (;;) {
+            const at = value.indexOf(needle, from)
+            if (at < 0) break
+            from = at + needle.length
+            if (at > 0 && /[_\s]/.test(value[at - 1])) continue
+            marks.push({ credKey, at })
+            break
         }
     }
-    return { cleanValue, credentials }
+    if (!marks.length) return { cleanValue: value, credentials: {} }
+    marks.sort((x, y) => x.at - y.at)
+    const credentials = {}
+    marks.forEach((m, i) => {
+        const end = i + 1 < marks.length ? marks[i + 1].at : value.length
+        credentials[m.credKey] = value.substring(m.at + m.credKey.length + 1, end)
+    })
+    return { cleanValue: value.substring(0, marks[0].at), credentials }
+}
+
+function isCommentLine(line) {
+    return line.trimStart().startsWith("#")
 }
 
 function readMainConfigLine(defaultConfig, line) {
+    if (isCommentLine(line)) return false
     const eqIndex = line.indexOf("=")
     if (eqIndex <= 0) return false
     const key = line.substring(0, eqIndex)
@@ -282,11 +303,11 @@ function migrateMainCredentials(defaultConfig, configFilePath, localFilePath) {
     if (lines[lines.length - 1] === "") lines.pop()
     const remaining = lines.flatMap((line) => {
         const eqIndex = line.indexOf("=")
-        if (eqIndex <= 0) return [line]
+        if (eqIndex <= 0 || isCommentLine(line)) return [line]
         const key = line.substring(0, eqIndex)
         if (["NODE_USER", "NODE_PASSWORD", "NODE_SECRET"].includes(key)) return []
         const peeled = peelGluedCredentials(line.substring(eqIndex + 1))
-        return [`${key}=${peeled.cleanValue}`]
+        return peeled.cleanValue === line.substring(eqIndex + 1) ? [line] : [`${key}=${peeled.cleanValue}`]
     })
     // Keep the main config's own permissions across the replace (it is not a 0600 file).
     let mode = 0o644
