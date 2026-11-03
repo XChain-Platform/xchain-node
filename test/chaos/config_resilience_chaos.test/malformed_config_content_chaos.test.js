@@ -155,7 +155,9 @@ describe('Chaos: Config Resilience', function () {
             const cs = makeConfigService(fsStub)
             const config = await cs.getDefaultConfig('xchain-encoder', 'bitcoin', 'mainnet')
 
-            expect(config).to.have.property('NODE_PASSWORD', '')
+            // A blank NODE_PASSWORD counts as missing, so a real RPC password is minted
+            // instead of an empty one being carried forward.
+            expect(config.NODE_PASSWORD).to.be.a('string').and.match(/^[0-9a-f]{16,}$/)
         })
 
         it('handles config with only whitespace lines', async function () {
