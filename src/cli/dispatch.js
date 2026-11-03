@@ -81,7 +81,10 @@ function skipsPreAction(actionCommand) {
 // push would carry its DB hosts over the other stack's entries on a shared hub and explorer.
 function preCheckOptionsFor(commandName, actionCommand) {
     const opts = typeof actionCommand.opts === 'function' ? actionCommand.opts() : null
-    return commandName === 'reset' && opts && opts.dbContainer ? [{ localOnly: true }] : []
+    if (commandName === 'reset' && opts && opts.dbContainer) return [{ localOnly: true }]
+    // autoheal only watches decoder and indexer containers; a hub that answers but refuses the push must not block it.
+    if (commandName === 'autoheal') return [{ hubPushOptional: true }]
+    return []
 }
 
 // Name the lock for a validator subcommand that must serialize, or null for one

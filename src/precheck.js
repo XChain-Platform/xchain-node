@@ -226,7 +226,7 @@ async function installHubAtRef(moduleRef) {
     }
 }
 
-async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
+async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub, hubPushOptional = false) {
     // Only push local config to the hub/explorer for state-changing commands.
     // Read-only commands (ps, tail, logs, …) pass syncHubConfig=false to skip
     // this step. The updateconfig round-trip can be slow on multi-coin nodes and
@@ -263,6 +263,16 @@ async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
             if (firstErr) console.log(redactSecrets(firstErr))
             return true
         }
+        if (firstErr && hubPushOptional) {
+            // A command whose action never talks to the hub (autoheal watches the decoder
+            // and indexer containers) must not be blocked by a hub that answers HTTP but
+            // cannot commit the push. That hub is usually unhealthy because of the very
+            // indexer fault such a command exists to heal.
+            console.log("Warning: the xchain-hub refused its config push, so it was skipped. " +
+                "This command does not need the hub config, so it continues.")
+            console.log(redactSecrets(firstErr))
+            return true
+        }
         if (firstErr) {
             console.log(redactSecrets(firstErr))
             throw new Error("There was an error trying to update the hub module" +
@@ -283,7 +293,7 @@ async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
 //
 // `localOnly` stops after the docker and directory checks, for a reset aimed at a stack this CLI did not install
 // (`reset --db-container`): no bundled DB provisioning, no module scan, no hub install, no hub or explorer push.
-async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false, { localOnly = false } = {}) {
+async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false, { localOnly = false, hubPushOptional = false } = {}) {
     await requireDocker()
     await warnIfContainerdStoreOnRoot()
     await warnIfMemoryLimitsUnsupported()
@@ -321,7 +331,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     // prints its stale 'exited' status. Mutating commands still install here.
     if (syncHubConfig) await installHubAtRef(moduleRef)
 
-    await pushConfigToHubAndExplorer(syncHubConfig, repairsHub)
+    await pushConfigToHubAndExplorer(syncHubConfig, repairsHub, hubPushOptional)
 
     return true
 }
