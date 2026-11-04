@@ -87,6 +87,8 @@ function preCheckOptionsFor(commandName, actionCommand) {
     // autoheal only watches decoder and indexer containers; a hub that answers but refuses the push must not block it.
     if (commandName === 'autoheal') return [{ hubPushOptional: true }]
     if (updatesAPipelineService(commandName, actionCommand)) return [{ hubPushOptional: true }]
+    // reset hub-checkpoints is the repair for a federation that cannot commit, so that hub's refusal must not block it.
+    if (commandName === 'reset' && (actionCommand.args || [])[0] === 'hub-checkpoints') return [{ hubPushOptional: true }]
     return []
 }
 

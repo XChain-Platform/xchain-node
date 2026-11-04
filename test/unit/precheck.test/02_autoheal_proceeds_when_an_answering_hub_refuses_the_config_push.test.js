@@ -115,7 +115,7 @@ async function runDispatch(argv) {
     program.exitOverride()
     program.option('--verbose').option('--no-telemetry')
     installDispatch(program, deps)
-    for (const name of ['autoheal', 'update']) program.command(name).allowUnknownOption().argument('[args...]').action(deps.action)
+    for (const name of ['autoheal', 'update', 'reset']) program.command(name).allowUnknownOption().argument('[args...]').action(deps.action)
     await program.parseAsync(argv, { from: 'user' })
     return deps
 }
@@ -164,5 +164,17 @@ describe('CLI dispatch: an update of the indexer or decoder survives a hub that 
             const deps = await run(argv)
             expect(deps.preCheck.firstCall.args[4], argv.join(' ')).to.equal(undefined)
         }
+    })
+})
+
+describe('CLI dispatch: reset hub-checkpoints survives the hub it repairs refusing the push @regression', function () {
+    isolateSignalListeners()
+
+    it('passes hubPushOptional for reset hub-checkpoints and nothing for an indexer reset', async function () {
+        const repair = await runDispatch(['reset', 'hub-checkpoints', '--yes', '--with-capabilities'])
+        expect(repair.preCheck.firstCall.args[4]).to.deep.equal({ hubPushOptional: true })
+        expect(repair.action.calledOnce).to.be.true
+        const indexer = await runDispatch(['reset', 'xchain-indexer', 'dogecoin', 'regtest'])
+        expect(indexer.preCheck.firstCall.args[4]).to.equal(undefined)
     })
 })
