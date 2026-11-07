@@ -112,7 +112,7 @@ function statusFlagReasons(payload) {
     // either and the lag leg below already refuses it. Do not restate this as "one
     // field implies the other": that claim was false for the /status fallback for as
     // long as it stood here. The indexer's decoderReorgHalted has no companion
-    // timestamp yet; extend this to it when the indexer publishes one.
+    // timestamp yet, so its never-probed state is refused below through stallClass/stallReason.
     if (Object.prototype.hasOwnProperty.call(payload, 'reorg_halted')
         && (payload.reorg_halt_checked_at === null || payload.reorg_halt_checked_at === undefined))
         reasons.push('the decoder has never completed a REORG_HALT marker probe (reorg_halt_checked_at is ' +
@@ -120,6 +120,14 @@ function statusFlagReasons(payload) {
     reasons.push(...reorgParkReasons(payload))
     if (payload.decoderReorgHalted === true)
         reasons.push('the upstream decoder carries a durable REORG_HALT marker, so this database is frozen behind it')
+    const stallWord = typeof payload.stallReason === 'string'
+        ? payload.stallReason.trim().split(/[\s:]/)[0]
+        : null
+    if (payload.decoderReorgHalted !== true
+        && (payload.stallClass === 'upstream_halted' || stallWord === 'decoder_reorg_halt_unverified'))
+        reasons.push('the indexer is holding its pass behind the decoder REORG_HALT gate without a completed marker probe, ' +
+            'so its decoder halt boolean is an untested default rather than a reading' +
+            (payload.stallReason ? `: ${payload.stallReason}` : ''))
     reasons.push(...stallReasons(payload))
     if (payload.block_fetch_desync)
         reasons.push(`the service reports a block-fetch desync (${formatBlockFetchDesync(payload.block_fetch_desync)})`)
@@ -134,8 +142,8 @@ function stallReasons(payload) {
     const reasons = []
     // The indexer's own single-field verdict on its block counter: 'none' |
     // 'future_block_wait' | 'bridge_proof_wait' | 'train_activation_halt' | 'operator_action_hold' |
-    // 'price_landing_wait' | 'barrier_defer' | 'wedged', plus the published refinements 'upstream_halted' (only beside
-    // decoderReorgHalted: true, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck' |
+    // 'price_landing_wait' | 'barrier_defer' | 'wedged', plus the published refinements 'upstream_halted' (whenever
+    // the pass is held behind the decoder REORG_HALT gate, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck' |
     // 'capability_proof_wait' | 'capability_proof_stuck'. The set is defined in xchain-indexer
     // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). 'wedged' and the
     // two '_proof_stuck' classes are refusals by themselves; 'train_activation_halt' never is because the

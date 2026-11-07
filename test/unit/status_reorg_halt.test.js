@@ -103,6 +103,16 @@ describe('ps: indexer STALL surface', function () {
         const decoder = describeIndexerStallNote('bitcoin', 'mainnet', { reason: 'decoder_reorg_halt: decoder wrote a REORG_HALT marker', word: 'decoder_reorg_halt', since: null })
         expect(decoder).to.match(/see the decoder's line/)
     })
+
+    it('an unverified decoder halt probe names the read fault without a halt remedy', function () {
+        const stall = reduceIndexerStall({ stallClass: 'upstream_halted',
+            stallReason: 'decoder_reorg_halt_unverified: no REORG_HALT probe has completed a read since start' })
+        const note = describeIndexerStallNote('bitcoin', 'mainnet', stall)
+        expect(note).to.match(/^bitcoin\/mainnet xchain-indexer is STALLED \(decoder_reorg_halt_unverified:/)
+        expect(note).to.not.match(/no specific remedy|hub-mirror barrier|clear-reorg-halt/)
+        expect(note).to.match(/REORG_HALT probe failed/)
+        expect(note).to.match(/`xchain-node logs xchain-indexer bitcoin mainnet`/)
+    })
 })
 
 // Only a hub-mirror barrier gets the hub-mirror line. A consensus halt, a

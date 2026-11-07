@@ -323,9 +323,9 @@ async function readHaltMarkers(coin, network, module, deps, since) {
     // the REORG_HALT count above is a guaranteed zero for an indexer and this backstop had
     // no reach there at all: the indexer writes only REORG and TRAIN_ACTIVATION_HALT
     // rows into its own events table and reads the halt marker out of the DECODER's connection, while
-    // the marker row is written solely into the decoder database. Nothing else in the
-    // gate covers the gap either - the indexer's decoderReorgHalted mirror defaults
-    // false and keeps its last value on any probe fault, and its published lag is
+    // the marker row is written solely into the decoder database. The status gate refuses
+    // current images' null mirror through stallClass/stallReason, but older images expose
+    // neither signal and the published boolean collapses null to false. Their lag is
     // measured against the halted decoder's own frozen height, so it reads 0. Probe
     // the paired decoder database as well, fail-closed: probeDatabase throws on an
     // absent database, an absent events table and an unreadable count alike, and every

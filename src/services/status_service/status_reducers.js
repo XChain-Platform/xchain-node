@@ -260,6 +260,10 @@ const INDEXER_STALL_HINTS = {
         "the VM executor is not answering; `xchain-node logs xchain-indexer " + coin + " " + network + "` names the host fault.",
     decoder_reorg_halt: () =>
         "its decoder carries a REORG_HALT marker (see the decoder's line); the indexer follows once the decoder is resynced or cleared.",
+    decoder_reorg_halt_unverified: (coin, network) =>
+        "it has not completed a read of its decoder's REORG_HALT marker since start, so it holds its pass rather than risk following a halted decoder."
+        + " This is not a confirmed halt: check the decoder's line and database readability, then look for the REORG_HALT probe failed warning in"
+        + " `xchain-node logs xchain-indexer " + coin + " " + network + "`; the pass resumes once a probe read succeeds.",
     train_activation_halt: (coin, network) =>
         "the signed release manifest names a rule set this build does not implement; `xchain-node update xchain-indexer " + coin + " " + network + "`.",
     reorg_rollback: () =>

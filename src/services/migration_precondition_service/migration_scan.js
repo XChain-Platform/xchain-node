@@ -55,9 +55,9 @@ function migrationDeclaresDeployPrecondition(raw) {
  * Prologue-anchored like migrationDeclaresDeployPrecondition, so a token in body prose
  * or a data literal cannot answer for the file.
  *
- * Twin of Database.prototype.migrationMode in xchain-indexer src/db/database/migration_scan.js
- * and xchain-decoder src/db/migration_statements.js, duplicated for the reason given
- * above. Keep the scan, the tag regex and the default in step.
+ * Keep aligned with xchain-indexer/src/db/database/migration_scan.js,
+ * xchain-decoder/src/db/migration_statements.js, and
+ * xchain-hub/src/db/schema/sql_migration_files.js.
  */
 function migrationMode(raw) {
     const prologue = []
@@ -66,8 +66,8 @@ function migrationMode(raw) {
         if (trimmed === '' || trimmed.startsWith('--')) { prologue.push(line); continue }
         break
     }
-    const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im)
-    return m ? m[1].toLowerCase() : 'manual'
+    const modes = prologue.flatMap(line => { const header = /^\s*--\s*xchain:migration\b(.*)$/i.exec(line); return header ? [...header[1].matchAll(/\bmode\s*=\s*([A-Za-z]+)\b/gi)].map(token => token[1].toLowerCase()) : [] })
+    return modes.length > 0 && modes.every(mode => mode === 'auto') ? 'auto' : 'manual'
 }
 
 const LEDGER_RENAMES_FILE = 'src/db/database/migration_registry.js'

@@ -66,6 +66,24 @@ describe('BootstrapHealthGate', function () {
 
     describe('evaluateStatusPayload()', function () {
 
+        it('refuses an indexer whose decoder halt probe has not completed', function () {
+            const gate = loadGate()
+            const reason = 'decoder_reorg_halt_unverified: no REORG_HALT probe has completed a read since start'
+            const base = { status: 'healthy', lag: 0, decoderReorgHalted: false }
+            for (const payload of [{ ...base, stallClass: 'upstream_halted', stallReason: reason },
+                { ...base, stallReason: reason }, { ...base, stallClass: 'upstream_halted' }]) {
+                const reasons = gate.evaluateStatusPayload(payload)
+                expect(reasons).to.have.lengthOf(1)
+                expect(reasons[0]).to.match(/without a completed marker probe/)
+            }
+            expect(gate.evaluateStatusPayload({ ...base, stallClass: 'barrier_defer',
+                stallReason: 'price_sync_barrier: see decoder_reorg_halt_unverified' })).to.deep.equal([])
+            const confirmed = gate.evaluateStatusPayload({ ...base, decoderReorgHalted: true,
+                stallClass: 'upstream_halted', stallReason: 'decoder_reorg_halt: marker present' })
+            expect(confirmed).to.have.lengthOf(1)
+            expect(confirmed[0]).to.match(/durable REORG_HALT/)
+        })
+
         it('REFUSES an indexer reporting its block counter wedged', function () {
             const gate = loadGate()
             const reasons = gate.evaluateStatusPayload(
