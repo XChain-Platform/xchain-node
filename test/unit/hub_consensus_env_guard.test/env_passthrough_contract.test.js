@@ -12,13 +12,13 @@
 
 const { expect } = require('chai')
 
-const { HUB_PASSTHROUGH_VARS } = require('../../src/services/config_service/networks')
-const { HUB_PASSTHROUGH_ENV } = require('../../src/config')
+const { HUB_PASSTHROUGH_VARS } = require('../../../src/services/config_service/networks')
+const { HUB_PASSTHROUGH_ENV } = require('../../../src/config')
 const {
     CONSENSUS_ENV_KEYS,
     isConsensusEnvKeyHonoredOn,
     findHubConsensusEnvDrift
-} = require('../../src/services/hub_consensus_env_guard')
+} = require('../../../src/services/hub_consensus_env_guard')
 
 // Read through the process env's own child-process view, so the host env view
 // does not list them.
@@ -27,9 +27,8 @@ const TIMING_VARS = ['ATTESTATION_ROUND_TIMEOUT_MS', 'ADMISSION_WATERMARK_SAMPLE
 const ROUND_CADENCE_KEYS = ['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW']
 const ARM_KEYS = HUB_PASSTHROUGH_VARS.filter(name => /^XC_[A-Z_]+_ACTIVATION$/.test(name))
 
-describe('hub env passthrough contract', () => {
-
-    describe('the passthrough list', () => {
+function registerPassthroughListContract() {
+    describe('the passthrough list', function passthroughListContract() {
         it('names each variable once', () => {
             const seen = new Set()
             const repeated = HUB_PASSTHROUGH_VARS.filter(name => seen.has(name) || !seen.add(name))
@@ -44,8 +43,10 @@ describe('hub env passthrough contract', () => {
             expect(undeclared.sort()).to.deep.equal([...TIMING_VARS].sort())
         })
     })
+}
 
-    describe('network-gated consensus keys', () => {
+function registerNetworkGatedContract() {
+    describe('network-gated consensus keys', function networkGatedContract() {
         it('finds the regtest arm names in the passthrough list', () => {
             expect(ARM_KEYS.length).to.be.greaterThan(0)
         })
@@ -97,4 +98,11 @@ describe('hub env passthrough contract', () => {
             }
         })
     })
-})
+}
+
+function hubEnvPassthroughContract() {
+    registerPassthroughListContract()
+    registerNetworkGatedContract()
+}
+
+describe('hub env passthrough contract', hubEnvPassthroughContract)

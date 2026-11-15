@@ -17,7 +17,7 @@
 
 const { expect } = require('chai')
 const http = require('http')
-const HubConnector = require('../../src/services/hub_connector')
+const HubConnector = require('../../../src/services/hub_connector')
 
 const RESULT = JSON.stringify({ jsonrpc: '2.0', result: 'ok', id: 1 })
 
@@ -44,19 +44,23 @@ function trickle(req, res) {
 const silent = () => {}
 const url = (server) => 'http://127.0.0.1:' + server.address().port
 const rpc = { jsonrpc: '2.0', method: 'ping', id: 1 }
+const servers = []
 
-describe('HubConnector: the call timeout is a total deadline', () => {
-    const servers = []
-    const start = async (handler) => { const s = await listen(handler); servers.push(s); return s }
+async function start(handler) {
+    const server = await listen(handler)
+    servers.push(server)
+    return server
+}
 
-    afterEach(async () => {
-        while (servers.length) {
-            const s = servers.pop()
-            s.closeAllConnections()
-            await new Promise((r) => s.close(r))
-        }
-    })
+async function closeServers() {
+    while (servers.length) {
+        const server = servers.pop()
+        server.closeAllConnections()
+        await new Promise((resolve) => server.close(resolve))
+    }
+}
 
+function registerDeadlineCases() {
     it('cuts off a hub that sends headers and then trickles its body', async () => {
         const slow = await start(trickle)
         const c = new HubConnector([url(slow)])
@@ -88,7 +92,9 @@ describe('HubConnector: the call timeout is a total deadline', () => {
         expect(await c.callRpc(rpc, 300)).to.equal('ok')
         expect(c.lastFailures).to.deep.equal([])
     })
+}
 
+function registerBudgetCases() {
     it('a budget caps an endpoint below its own timeout and skips the rest', async () => {
         const hung = await start(silent)
         let reached = 0
@@ -124,4 +130,12 @@ describe('HubConnector: the call timeout is a total deadline', () => {
         expect(Date.now() - startedAt).to.be.below(1500)
         expect(c.lastFailures[0]).to.match(/timeout: no complete response within [0-9]+ms/)
     })
-})
+}
+
+function hubConnectorDeadlineSuite() {
+    afterEach(closeServers)
+    registerDeadlineCases()
+    registerBudgetCases()
+}
+
+describe('HubConnector: the call timeout is a total deadline', hubConnectorDeadlineSuite)

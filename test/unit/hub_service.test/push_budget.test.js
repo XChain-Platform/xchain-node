@@ -19,7 +19,7 @@ const sinon = require('sinon')
 const assert = require('node:assert/strict')
 const { expect } = require('chai')
 
-const { updateHubOrExplorer } = require('../../src/services/hub_service/update_hub_or_explorer')
+const { updateHubOrExplorer } = require('../../../src/services/hub_service/update_hub_or_explorer')
 
 const WALL_MS = 180000
 
