@@ -121,7 +121,7 @@ describe('cli refForPreCheck() with a self-update tag handed on', function () {
 // commandRepairsHub decides which commands survive a hub that is not answering.
 //
 // preCheck pushes local config to the hub before every state-changing command.
-// A crash-looping hub answers nothing, so that push failed after ten attempts
+// A crash-looping hub answers nothing, so that push failed after exhausting its retries
 // and aborted the command - `update xchain-hub` included, which is the command
 // that rebuilds the hub and ends the crash loop. Deleting the container by hand
 // was the only escape. The answer here buys a SKIPPED config push, so it has to

@@ -32,7 +32,7 @@ const ENV_STYLE_NAME = /^[A-Z][A-Z0-9_]*$/
 
 // Views over a list of names: export name -> [label, declared names].
 const LIST_VIEWS = {
-    // The hub's host passthrough (ConfigService hubPassthroughVars), plus the
+    // The hub's host passthrough (ConfigService HUB_PASSTHROUGH_VARS), plus the
     // redaction-safe spelling of its one secret-bearing name, which
     // src/config/secret_env.js prefers when both are present.
     HUB_PASSTHROUGH_ENV: ['hub passthrough', [

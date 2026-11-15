@@ -159,7 +159,11 @@ const HUB_CONFIG_ATTEMPTS = 60
 // The attempt count assumes fast connection refusals. A paused or hung hub accepts
 // the connection and answers nothing, so each attempt burns the connector's 60 s
 // timeout and 60 attempts would hold the command lock for about an hour. The
-// wall-clock budget bounds the loop whatever each attempt costs.
+// wall-clock budget is handed to every attempt, which caps each endpoint's
+// timeout by what remains, so the loop ends within the budget plus one retry
+// sleep whatever each attempt costs or how many endpoints the connector has. A
+// push cut off at the budget may still have been applied by the hub, so a
+// re-run is the remedy.
 const HUB_CONFIG_WALL_MS = 180000
 
 async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) {
@@ -168,17 +172,22 @@ async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) 
     const startedAt = now()
     let hubUpdated = false
     let tries = HUB_CONFIG_ATTEMPTS
-    // Keep the last failure. updateConfig is an HTTP call to the module's own
+    // Keep the most recent attempt's failure. updateConfig is an HTTP call to the module's own
     // API, so when the container is crash-looping every attempt fails with a
     // connection error and this loop reports only "there was a problem" - which
     // hides the fact that the CONFIG is fine and the SERVICE never came up. That
     // misdirection cost real debugging time: the true cause was in the
     // container's own log, not here.
     let lastErr = null
+    const giveUp = () => "There was a problem trying to update a config in the " + module + " module" +
+        (lastErr ? " (last error: " + redactSecrets(lastErr) + "; if this is a connection failure, check `docker logs` for the module - the service is not starting)" : "")
     while (!hubUpdated) {
+        const remaining = HUB_CONFIG_WALL_MS - (now() - startedAt)
+        if (remaining <= 0) throw giveUp()
+        let attemptErr = null
         try {
-            hubUpdated = await moduleConnector.updateConfig(jsonConfig)
-        } catch (err) { lastErr = err }
+            hubUpdated = await moduleConnector.updateConfig(jsonConfig, { budgetMs: remaining })
+        } catch (err) { attemptErr = err }
 
         // A FALSY RETURN is a failure too, and it was the one reported with no
         // cause at all. callRpc() catches its own transport errors and returns
@@ -187,21 +196,24 @@ async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) 
         // "There was a problem trying to update a config" and nothing else, on
         // the single most informative fact about the failure. The connector
         // already records why each endpoint failed, for exactly this purpose.
-        if (!hubUpdated && !lastErr
-            && Array.isArray(moduleConnector.lastFailures)
-            && moduleConnector.lastFailures.length) {
-            lastErr = moduleConnector.lastFailures.join('; ')
+        if (!hubUpdated) {
+            if (attemptErr === null
+                && Array.isArray(moduleConnector.lastFailures)
+                && moduleConnector.lastFailures.length) {
+                attemptErr = moduleConnector.lastFailures.join('; ')
+            }
+            lastErr = attemptErr
         }
 
         if (hubUpdated) break
         tries--
         // Out of retries: give up, naming the last concrete error instead of a generic failure.
         if (tries <= 0 || now() - startedAt >= HUB_CONFIG_WALL_MS) {
-            throw "There was a problem trying to update a config in the " + module + " module" +
-                (lastErr ? " (last error: " + redactSecrets(lastErr) + "; if this is a connection failure, check `docker logs` for the module - the service is not starting)" : "")
+            throw giveUp()
         }
         logger.info("There was a problem trying to update a config in the " + module + " module" +
-            (lastErr ? " (" + redactSecrets(lastErr) + ")" : "") + ". Trying again in 3 seconds...")
+            (lastErr ? " (" + redactSecrets(lastErr) + ")" : "") + ". Trying again in " +
+            (HUB_CONFIG_RETRY_MS / 1000) + " seconds...")
         await sleep(HUB_CONFIG_RETRY_MS)
     }
 }

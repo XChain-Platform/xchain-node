@@ -127,8 +127,8 @@ async function attachSharedContainer(moduleLabel, containerId, installedCoinsAnd
 // status, so every check that reads docker state calls it installed; only a
 // request to its API tells the truth. Callers use this to decide whether the
 // config push below is worth attempting at all, so it must stay cheap: the
-// push itself already spends ten attempts three seconds apart on a hub that is
-// down, which is the delay this is meant to avoid paying twice.
+// push itself can spend its full three-minute retry budget on a hub that is down,
+// which is the delay this is meant to avoid paying twice.
 async function isHubAnswering() {
     const defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
     const hubConnector  = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])

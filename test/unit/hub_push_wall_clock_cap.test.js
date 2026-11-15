@@ -35,7 +35,12 @@ function deps({ updateConfig, clock }) {
         getStatus: sinon.stub().resolves(),
         getExternalDbConfig: sinon.stub().resolves(null),
         readContainerEnv: sinon.stub().resolves(null),
-        HubConnector: class { constructor() { this.updateConfig = updateConfig } },
+        HubConnector: class {
+            constructor() {
+                this.lastFailures = []
+                this.updateConfig = updateConfig
+            }
+        },
         ExplorerConnector: class {},
         dockerService: {},
         buildHubModuleConfig: sinon.stub().returns(null),
@@ -73,5 +78,53 @@ describe('hub config push wall-clock cap', function () {
         const updateConfig = sinon.spy(async () => { clock.t += 60000; return updateConfig.callCount >= 3 })
         expect(await updateHubOrExplorer('xchain-hub', deps({ updateConfig, clock }))).to.be.true
         expect(updateConfig.callCount).to.equal(3)
+    })
+
+})
+
+describe('hub config push failure reporting', function () {
+    it('reports a later HTTP failure instead of the first connection failure', async function () {
+        let calls = 0
+        const updateConfig = sinon.spy(async function () {
+            calls++
+            this.lastFailures = [calls === 1 ? 'ECONNREFUSED' : 'HTTP 401 ERR_BAD_REQUEST']
+            return null
+        })
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', deps({ updateConfig })),
+            err => String(err).includes('last error: HTTP 401 ERR_BAD_REQUEST') &&
+                !String(err).includes('ECONNREFUSED')
+        )
+    })
+
+    it('replaces a thrown error with a later connector refusal', async function () {
+        let calls = 0
+        const updateConfig = sinon.spy(async function () {
+            calls++
+            if (calls === 1) throw new Error('connect ECONNREFUSED')
+            this.lastFailures = ['hub refused config push: Not the leader for seq 7']
+            return false
+        })
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', deps({ updateConfig })),
+            err => String(err).includes('Not the leader for seq 7') &&
+                !String(err).includes('ECONNREFUSED')
+        )
+    })
+
+    it('clears a stale cause when the final failures have no recorded cause', async function () {
+        let calls = 0
+        const updateConfig = sinon.spy(async function () {
+            calls++
+            this.lastFailures = calls === 1 ? ['ECONNREFUSED'] : []
+            return null
+        })
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', deps({ updateConfig })),
+            err => !String(err).includes('ECONNREFUSED')
+        )
     })
 })

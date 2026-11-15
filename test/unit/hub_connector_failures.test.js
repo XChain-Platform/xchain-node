@@ -71,6 +71,44 @@ describe('HubConnector: a non-throwing failure still records why', () => {
         expect(ok).to.equal(false)
         expect(c.lastFailures.join('; ')).to.match(/ECONNREFUSED|ECONNRESET|socket hang up/)
     })
+
+})
+
+describe('HubConnector: malformed success responses still record why', () => {
+    let srv
+
+    afterEach(async () => {
+        if (srv) await new Promise((r) => srv.close(r))
+        srv = null
+    })
+
+    it('a 200 JSON-RPC error records the status and error detail', async () => {
+        srv = await server((req, res) => {
+            res.writeHead(200, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({
+                jsonrpc: '2.0', id: 1,
+                error: { code: -32601, message: 'Method not found' }
+            }))
+        })
+        const c = new HubConnector('127.0.0.1', srv.address().port)
+
+        expect(await c.updateConfig({})).to.equal(false)
+        expect(c.lastFailures.join('; ')).to.include('HTTP 200')
+        expect(c.lastFailures.join('; ')).to.include('Method not found')
+    })
+
+    it('a 200 non-JSON body records the missing result without copying the body', async () => {
+        srv = await server((req, res) => {
+            res.writeHead(200, { 'content-type': 'text/html' })
+            res.end('<html>proxy-only-marker</html>')
+        })
+        const c = new HubConnector('127.0.0.1', srv.address().port)
+
+        expect(await c.updateConfig({})).to.equal(false)
+        expect(c.lastFailures.join('; ')).to.include('HTTP 200')
+        expect(c.lastFailures.join('; ')).to.include('no JSON-RPC result')
+        expect(c.lastFailures.join('; ')).not.to.include('proxy-only-marker')
+    })
 })
 
 describe('HubConnector: a hub answer carrying an error is not a delivered push', () => {
@@ -132,6 +170,21 @@ describe('HubConnector: a non-throwing failure still records why', () => {
         const ok = await c.updateConfig({ any: 'config' })
 
         expect(ok).to.equal(false)
+        expect(c.lastFailures).to.have.lengthOf(2)
+        expect(c.lastFailures.join('; ')).to.include(live)
+        expect(c.lastFailures.join('; ')).to.include(dead)
+    })
+
+    it('records both a 200 without a result and an unreachable endpoint', async () => {
+        srv = await server((req, res) => {
+            res.writeHead(200, { 'content-type': 'application/json' })
+            res.end('{}')
+        })
+        const live = 'http://127.0.0.1:' + srv.address().port
+        const dead = 'http://127.0.0.1:1'
+        const c = new HubConnector([live, dead])
+
+        expect(await c.updateConfig({})).to.equal(false)
         expect(c.lastFailures).to.have.lengthOf(2)
         expect(c.lastFailures.join('; ')).to.include(live)
         expect(c.lastFailures.join('; ')).to.include(dead)

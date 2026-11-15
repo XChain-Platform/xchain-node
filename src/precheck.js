@@ -240,8 +240,8 @@ async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub, hubPushOpti
     // operator sees, and the command still fails.
     //
     // A hub that is crash-looping (a rebuild that left it holding the wrong
-    // database password is the usual way in) answers nothing, so the push spends
-    // ten attempts on connection refusals and then aborts the command. It aborted
+    // database password is the usual way in) answers nothing, so the push exhausts
+    // its retry budget on connection refusals and then aborts the command. It aborted
     // EVERY command, including the ones that rebuild the hub and end the crash
     // loop, which left deleting the container by hand as the only way out. So a
     // command that can repair the hub is let through on a warning while the hub

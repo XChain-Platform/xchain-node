@@ -159,6 +159,8 @@ function stallReasons(payload) {
     // refuse forever; stallClassOf resolves that wait to 'future_block_wait' before
     // it can ever reach 'wedged'. Strict equality, so an older image publishing no
     // stallClass keeps today's behavior exactly.
+    // bridge_proof_wait remains eligible because it represents correctly deferred data;
+    // the separate lag check below refuses it after the ordinary block-lag ceiling.
     if (payload.stallClass === 'wedged')
         reasons.push('the service reports its block counter WEDGED (stallClass "wedged": no commit for longer ' +
             'than its stall grace window)' + (payload.stallReason ? `: ${payload.stallReason}` : ''))

@@ -82,7 +82,7 @@ function configureE2e(defaultValues, module, coin) {
 // are frozen-pinned in the indexer's configs/<COIN>.js, but regtest reads the activation
 // block + ledger/dump hashes from env so an operator can dry-run genesis at a current
 // regtest block. Without this passthrough those host vars never reach the container, so
-// genesis can't be enabled on a regtest/dev stack. Mirrors hubPassthroughVars: only set,
+// genesis can't be enabled on a regtest/dev stack. Mirrors HUB_PASSTHROUGH_VARS: only set,
 // non-empty host vars are injected (and a config-file value still wins), so an unset env
 // leaves GENESIS_BLOCK at its 0/default and genesis stays off. The path vars point at
 // in-container files; override them only when a custom CSV/dump is volume-mounted.

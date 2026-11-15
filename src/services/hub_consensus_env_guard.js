@@ -13,15 +13,16 @@
  **********************************************************************
  * XChain Node - Hub Consensus Env Guard
  *
- * ConfigService's hubPassthroughVars only inject a value when the INVOKING
+ * ConfigService's HUB_PASSTHROUGH_VARS only inject a value when the INVOKING
  * SHELL happens to export it; a var it does not export is simply left out of
  * the container env, and the hub falls back to its own built-in default with
- * no message anywhere. For most of the ~30 hub passthrough vars that is fine
+ * no message anywhere. For most of the hub passthrough vars that is fine
  * (they are genuinely optional). A handful are not: HUB_NETWORK,
- * ORACLE_MIN_SUBMISSIONS, ORACLE_ROUND_INTERVAL, ORACLE_SUBMISSION_WINDOW,
- * XCHAIN_PRICE_INDEXER_DB_* and (on regtest, see below) the four XCHAIN/BTC
- * derivation overrides are CONSENSUS-SHAPED (they change what the hub's
- * oracle finalizes, or whether it finalizes at all), so a `recreate` run from
+ * ORACLE_MIN_SUBMISSIONS, XCHAIN_PRICE_INDEXER_DB_* and, on regtest (see
+ * below), the round-cadence pair, the four XCHAIN/BTC derivation overrides
+ * and the XC_*_ACTIVATION gate arms are CONSENSUS-SHAPED (they change what
+ * the hub's oracle finalizes, or whether it finalizes at all, or which
+ * consensus rules it applies), so a `recreate` run from
  * a shell that lacks one of them silently deploys a hub with different
  * consensus behavior than the one that was just torn down. That is the same
  * silent-drop class this row's predecessor closed for docker cp and the
@@ -56,7 +57,14 @@
  * _MIN_BTC_VOLUME) are the case that forced this: XchainPriceSource's
  * pinOffRegtest honors them ONLY when HUB_NETWORK is regtest, and pins them to
  * the constants.js values (with a "set but IGNORED" warning) on mainnet,
- * testnet and standalone alike.
+ * testnet and standalone alike. The round-cadence pair (ORACLE_ROUND_INTERVAL,
+ * ORACLE_SUBMISSION_WINDOW) and the XC_*_ACTIVATION gate arms follow the same
+ * rule: the hub reads them from the environment on regtest only.
+ *
+ * XCHAIN_CONFIRMATIONS_* is deliberately not guarded. It is a per-hub wait
+ * depth: off regtest the hub clamps a lower value up to the per-coin floor, so
+ * a drop there can only return a locally raised depth to that floor, and a
+ * regtest drill that needs a shallower depth exports it again.
  *
  * Adding them to the flat key list unconditionally would have been the wrong
  * fix, and worse than leaving them out. This guard counts a DROP as drift, so
@@ -104,8 +112,26 @@ const CONSENSUS_ENV_GROUPS = [
     },
     {
         keys: ['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW'],
-        why: 'oracle round cadence, CONSENSUS-UNIFORM across a federation; a hub that loses its override ' +
-            'reverts to the mainnet-length default while its federation peers may still run the shorter one'
+        // Honored only on regtest (oracle/round_cadence.js warns and ignores the
+        // env value everywhere else), so guarded only on regtest.
+        honoredOn: ['regtest'],
+        why: 'oracle round cadence, CONSENSUS-UNIFORM across a federation and honored on regtest only; a ' +
+            'regtest hub that loses its override reverts to the mainnet-length default while its venue ' +
+            'peers may still run the shorter one'
+    },
+    {
+        keys: [
+            'XC_ROLLCALL_REGTEST_ACTIVATION', 'XC_ROLLCALL_GATES_REGTEST_ACTIVATION',
+            'XC_MIRROR_ADMISSION_ACTIVATION', 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION',
+            'XC_ANCHOR_STAKE_REGTEST_ACTIVATION', 'XC_ANCHOR_SLASH_REGTEST_ACTIVATION',
+            'XC_OFFER_LIST_REGTEST_ACTIVATION'
+        ],
+        // The hub reads each arm from the environment on regtest only; every
+        // other network takes the literal activation height.
+        honoredOn: ['regtest'],
+        why: 'regtest consensus gate arms, honored on regtest only; a regtest hub that loses one is ' +
+            'silently de-armed and applies different consensus rules than the hub it replaced, which an ' +
+            'armed indexer on the same venue reports as a rules MISMATCH'
     },
     {
         keys: [

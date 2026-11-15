@@ -74,7 +74,7 @@ const TESTNET_INDEXER_STALL_GRACE_MS = "600000"
 // getDefaultConfig never forwarded either host var into the tracker's
 // defaultValues, so an operator exporting LEVELDB_CACHE_BYTES before
 // install/update got silence: the container never saw it and LevelUpDb fell
-// back to its in-container default every time. Mirrors hubPassthroughVars /
+// back to its in-container default every time. Mirrors HUB_PASSTHROUGH_VARS /
 // genesisPassthroughVars: only set, non-empty host vars are injected, so an
 // unset env leaves the tracker's own default untouched.
 // Read by name rather than through a loop: the env-var doc-coverage gate can

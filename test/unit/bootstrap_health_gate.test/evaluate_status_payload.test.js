@@ -121,6 +121,21 @@ describe('BootstrapHealthGate', function () {
     })
 })
 
+describe('BootstrapHealthGate bridge proof wait', function () {
+
+    installEnvironmentHooks()
+
+    it('bounds a bridge proof wait only through the ordinary lag check', function () {
+        const gate = loadGate()
+        const wait = { status: 'healthy', stallClass: 'bridge_proof_wait',
+            stallReason: 'bridge_proof_barrier' }
+        expect(gate.evaluateStatusPayload({ ...wait, lag: 50 }, { maxLag: 100 })).to.deep.equal([])
+        const reasons = gate.evaluateStatusPayload({ ...wait, lag: 101 }, { maxLag: 100 })
+        expect(reasons).to.have.lengthOf(1)
+        expect(reasons[0]).to.include('101 blocks behind')
+    })
+})
+
 describe('BootstrapHealthGate', function () {
 
     installEnvironmentHooks()

@@ -63,6 +63,7 @@ const { XChainService, NODE_MODULE_NAME } = require('../config')
 const gate = require('./bootstrap_health_gate');
 const archiveMeta = require('./bootstrap_archive_meta');
 const config = require('../config');
+const { sleep } = require('../utils/helpers')
 const configService = require('./config_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -185,10 +186,6 @@ function evaluateNodeTipAgainstArchive({ archiveHeight, chainInfo, serviceWaits,
         verdict: VERDICT.BEHIND_REFUSE, archiveHeight, nodeHeight, gap, ibd,
         detail: `${position}, and the node is not in initial block download, so the ${module} would read its lower tip as a rollback rather than wait; ${later}`
     }
-}
-
-async function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 // The service's own status payload, or null when it cannot be read within the

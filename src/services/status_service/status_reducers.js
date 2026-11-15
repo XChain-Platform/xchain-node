@@ -305,6 +305,7 @@ const INDEXER_STALL_HINTS = {
     },
     reorg_rollback: () =>
         "a reorg rollback is in progress; it resumes on its own once the rolled-back range is re-parsed.",
+    ...require('./indexer_stall_hints'),
     retroactive_replay_needs_go: (coin, network) =>
         "the replay exceeded its block cap and needs an operator go row."
         + " `xchain-node logs xchain-indexer " + coin + " " + network + "` prints the exact go command.",

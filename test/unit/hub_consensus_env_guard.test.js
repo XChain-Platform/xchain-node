@@ -206,8 +206,8 @@ describe('HubConsensusEnvGuard', () => {
 
         it('flags every drifted key in one pass, not just the first', () => {
             const drift = findHubConsensusEnvDrift(
-                {},
-                { ORACLE_ROUND_INTERVAL: '5000', ORACLE_SUBMISSION_WINDOW: '3000' }
+                { HUB_NETWORK: 'regtest' },
+                { HUB_NETWORK: 'regtest', ORACLE_ROUND_INTERVAL: '5000', ORACLE_SUBMISSION_WINDOW: '3000' }
             )
             expect(drift.map(d => d.key).sort()).to.deep.equal(['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW'])
         })

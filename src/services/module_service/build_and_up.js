@@ -86,8 +86,8 @@ async function assertDeploymentReady(module, coin, network, environmentVariables
     }
 
     // Hub consensus-shaped settings (HUB_NETWORK, ORACLE_MIN_SUBMISSIONS,
-    // ORACLE_ROUND_INTERVAL/SUBMISSION_WINDOW, XCHAIN_PRICE_INDEXER_DB_*, and
-    // on regtest the four XCHAIN/BTC derivation overrides) are
+    // XCHAIN_PRICE_INDEXER_DB_*, and on regtest the round cadence, the four
+    // XCHAIN/BTC derivation overrides and the XC_*_ACTIVATION arms) are
     // passed through from the INVOKING SHELL with no warning when absent, so a
     // recreate/update run from a shell that lacks one quietly deploys a hub
     // with different consensus behavior than the one just torn down. Refuses

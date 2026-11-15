@@ -35,6 +35,7 @@ const {
 } = require('./validator_service')
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
+const { sleep } = require('../utils/helpers')
 const { readKeyHolders, amountUnits, fromUnits } = require('./validator_stake_service/free_key')
 const { readSleepState } = require('./validator_stake_service/address_sleep')
 const { readTokenRow } = require('./validator_stake_service/token_balance_read')
@@ -253,8 +254,6 @@ function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnrea
 function explorerUrl(coins, pathPart) {
     return (config.EXPLORER_URL || PUBLIC_EXPLORER).replace(/\/$/, '') + '/' + coins.stakeCoin + '/' + pathPart
 }
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 function requireEncoder(sdk) {
     return typeof sdk.requireEncoder === 'function' ? sdk.requireEncoder() : sdk['_requireEncoder']()
