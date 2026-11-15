@@ -219,6 +219,35 @@ describe('BootstrapHealthGate', function () {
 
     describe('evaluateStatusPayload()', function () {
 
+        it('REFUSES an indexer whose barrier hold is past its ceiling', function () {
+            const gate = loadGate()
+            const base = { status: 'healthy', lag: 3, degraded: true, stallReason: 'price_sync_barrier' }
+            for (const stallClass of ['barrier_defer', 'price_landing_wait']) {
+                const reasons = gate.evaluateStatusPayload({ ...base, stallClass, barrierCeilingExceeded: true })
+                expect(reasons, stallClass).to.have.lengthOf(1)
+                expect(reasons[0]).to.include('past its hold ceiling')
+                expect(reasons[0]).to.include('price_sync_barrier')
+            }
+            for (const value of [false, 'true', 1])
+                expect(gate.evaluateStatusPayload({ ...base, stallClass: 'barrier_defer',
+                    barrierCeilingExceeded: value }), String(value)).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({ ...base, stallClass: 'barrier_defer' })).to.deep.equal([])
+            for (const stallClass of ['rollcall_proof_stuck', 'capability_proof_stuck']) {
+                const reasons = gate.evaluateStatusPayload({ ...base, stallClass, barrierCeilingExceeded: true })
+                expect(reasons, stallClass).to.have.lengthOf(1)
+                expect(reasons[0]).to.include(stallClass)
+            }
+        })
+
+    })
+})
+
+describe('BootstrapHealthGate', function () {
+
+    installEnvironmentHooks()
+
+    describe('evaluateStatusPayload()', function () {
+
         // Number('') / Number(' ') / Number(false) / Number([]) are all 0, so a
         // coerce-then-isFinite check read each of these as "0 blocks behind" and
         // certified an unknown position as caught up. A gate whose contract is

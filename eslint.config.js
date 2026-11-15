@@ -107,6 +107,7 @@ const tests = {
 const nodePrints = {
     files: [
         'src/cli.js',
+        'src/cli/**/*.js',
         'src/precheck.js',
         'src/ui/**/*.js',
         'src/operations/**/*.js',

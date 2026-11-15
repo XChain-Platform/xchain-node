@@ -44,7 +44,7 @@ function makeMariadbSpawnStub(cmdCapture) {
             cmdCapture.history().push({
                 command: fullCommand, args, options: {}, type: 'spawn', timestamp: Date.now()
             })
-            const response = cmdCapture._matchRoute(fullCommand)
+            const response = cmdCapture._matchRoute(fullCommand) // eslint-disable-line no-underscore-dangle
             process.nextTick(() => {
                 if (response.error) {
                     child.stderr.emit('data', String(response.error.message || response.error))
@@ -121,6 +121,11 @@ function proxyDatabaseService(capture, options) {
             statusChanged: async () => true,
             getStatus: async () => ({}),
             getInstalledCoinsAndNetworks: async () => options.installedCoins || {}
+        },
+        // Bundled-mode fixtures cannot inherit an operator's persisted external-DB marker.
+        './credentials_service': {
+            isKnownExternalDbHost: () => false,
+            '@noCallThru': false
         },
         './docker_service': {
             getStatusFromContainer: async () => ({

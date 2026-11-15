@@ -15,10 +15,10 @@
  * Commander setup and command definitions
  ********************************************************************/
 
-// How long a release update re-taking the lock its self-update step handed back waits
-// at least, so a mutator that slipped into that gap delays the update instead of refusing it.
 const { resolveArgs } = require('../services/config_service')
 
+// How long a release update re-taking the lock its self-update step handed back waits
+// at least, so a mutator that slipped into that gap delays the update instead of refusing it.
 const SELF_UPDATE_HANDOFF_WAIT_MS = 30000
 
 function dispatchSettings(config) {

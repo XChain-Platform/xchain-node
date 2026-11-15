@@ -68,7 +68,7 @@ function evaluateContainerState(raw, { now = Date.now() } = {}) {
 //   decoder  health: status, lag_blocks/blockLag, reorg_halted, reorg_halt_checked_at,
 //                    reorg_halt_parked
 //   indexer  health: status, lag, decoderReorgHalted, stallClass (values: see stallReasons),
-//                    train_activation.status
+//                    barrierCeilingExceeded, train_activation.status
 //   tracker  health: status, lag, halted, halt_reason, block_fetch_desync,
 //                    node_height_stale (synced is sent but not read here)
 //   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'stalled'|'unhealthy')
@@ -147,6 +147,8 @@ function stallReasons(payload) {
     // 'capability_proof_wait' | 'capability_proof_stuck'. The set is defined in xchain-indexer
     // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). 'wedged',
     // 'operator_action_hold' and the two '_proof_stuck' classes are refusals by themselves;
+    // 'price_landing_wait' and 'barrier_defer' are refused only after
+    // barrierCeilingExceeded becomes true, when their bounded wait has expired.
     // 'train_activation_halt' never is because the train_activation.status === 'halt' leg below
     // already refuses it. 'wedged' needs its own
     // leg: the indexer reports status "healthy"
@@ -167,6 +169,12 @@ function stallReasons(payload) {
     if (payload.stallClass === 'rollcall_proof_stuck' || payload.stallClass === 'capability_proof_stuck')
         reasons.push(`the service reports its block counter held on a proof past its hold ceiling (stallClass ` +
             `"${payload.stallClass}")` + (payload.stallReason ? `: ${payload.stallReason}` : ''))
+    const alreadyRefused = ['wedged', 'operator_action_hold', 'rollcall_proof_stuck',
+        'capability_proof_stuck'].includes(payload.stallClass)
+    if (payload.barrierCeilingExceeded === true && !alreadyRefused)
+        reasons.push('the service reports its block held behind a barrier past its hold ceiling ' +
+            '(barrierCeilingExceeded is true; the block is not advancing)' +
+            (payload.stallReason ? `: ${payload.stallReason}` : ''))
     // Refuse only 'halt': the indexer stays "healthy" and never wedges after a restart while
     // halted, and 'pending'/'unevaluated' are still correct data. Strict, so older images pass.
     const train = payload.train_activation

@@ -1894,6 +1894,30 @@
       "BootstrapHealthGate durable halt markers passes an indexer when BOTH its own and the decoder database are clean",
       "BootstrapHealthGate durable halt markers skips the sync_halt query on a schema that has no sync_halt table"
     ],
+    "52f174b886d9fc65": [
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a decoder parked on a REORG_HALT whose marker was never written, even under a raised lag ceiling",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a decoder that reports not-halted having never completed a probe",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a lag that is not a number, rather than coercing it to zero",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a negative lag: the committed tip sits above the node tip (orphaned view)",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES a payload with no lag field at all: position unverifiable is not caught-up",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer reporting its block counter wedged",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer stopped on a train-activation halt",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer whose barrier hold is past its ceiling",
+      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer whose proof wait is past its hold ceiling",
+      "BootstrapHealthGate evaluateStatusPayload() describes a train-activation halt whose gate could not name a rule set",
+      "BootstrapHealthGate evaluateStatusPayload() does not demand a probe timestamp from an indexer payload",
+      "BootstrapHealthGate evaluateStatusPayload() formats a block-fetch desync object instead of printing [object Object]",
+      "BootstrapHealthGate evaluateStatusPayload() passes a healthy payload whose lag is zero",
+      "BootstrapHealthGate evaluateStatusPayload() passes a pending, unevaluated, absent or malformed train_activation",
+      "BootstrapHealthGate evaluateStatusPayload() passes an indexer whose proof wait is still inside its hold ceiling",
+      "BootstrapHealthGate evaluateStatusPayload() passes the healthy future-block wait and an in-grace barrier defer",
+      "BootstrapHealthGate evaluateStatusPayload() passes the same decoder once a probe has actually completed",
+      "BootstrapHealthGate evaluateStatusPayload() refuses an indexer frozen behind a halted decoder",
+      "BootstrapHealthGate evaluateStatusPayload() refuses an indexer whose decoder halt probe has not completed",
+      "BootstrapHealthGate evaluateStatusPayload() refuses when the node tip is stale, since the lag is then unknowable",
+      "BootstrapHealthGate evaluateStatusPayload() still accepts the two shapes a producer legitimately emits",
+      "BootstrapHealthGate evaluateStatusPayload() treats an empty payload as a refusal, not a pass"
+    ],
     "52f89f62d0c0dfca": [
       "config_service/arguments classifies service aliases, coins, networks, and a release ref",
       "config_service/arguments rejects the CLI package name instead of expanding it to all services",
@@ -5027,29 +5051,6 @@
       "CLI dispatch: validator subcommands validator unstake --broadcast takes no lock and runs no preCheck",
       "CLI dispatch: validator subcommands validator unstake takes no lock and runs no preCheck"
     ],
-    "e23f7cf696a5f6aa": [
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a decoder parked on a REORG_HALT whose marker was never written, even under a raised lag ceiling",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a decoder that reports not-halted having never completed a probe",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a lag that is not a number, rather than coercing it to zero",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a negative lag: the committed tip sits above the node tip (orphaned view)",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES a payload with no lag field at all: position unverifiable is not caught-up",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer reporting its block counter wedged",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer stopped on a train-activation halt",
-      "BootstrapHealthGate evaluateStatusPayload() REFUSES an indexer whose proof wait is past its hold ceiling",
-      "BootstrapHealthGate evaluateStatusPayload() describes a train-activation halt whose gate could not name a rule set",
-      "BootstrapHealthGate evaluateStatusPayload() does not demand a probe timestamp from an indexer payload",
-      "BootstrapHealthGate evaluateStatusPayload() formats a block-fetch desync object instead of printing [object Object]",
-      "BootstrapHealthGate evaluateStatusPayload() passes a healthy payload whose lag is zero",
-      "BootstrapHealthGate evaluateStatusPayload() passes a pending, unevaluated, absent or malformed train_activation",
-      "BootstrapHealthGate evaluateStatusPayload() passes an indexer whose proof wait is still inside its hold ceiling",
-      "BootstrapHealthGate evaluateStatusPayload() passes the healthy future-block wait and an in-grace barrier defer",
-      "BootstrapHealthGate evaluateStatusPayload() passes the same decoder once a probe has actually completed",
-      "BootstrapHealthGate evaluateStatusPayload() refuses an indexer frozen behind a halted decoder",
-      "BootstrapHealthGate evaluateStatusPayload() refuses an indexer whose decoder halt probe has not completed",
-      "BootstrapHealthGate evaluateStatusPayload() refuses when the node tip is stale, since the lag is then unknowable",
-      "BootstrapHealthGate evaluateStatusPayload() still accepts the two shapes a producer legitimately emits",
-      "BootstrapHealthGate evaluateStatusPayload() treats an empty payload as a refusal, not a pass"
-    ],
     "e2a37cba9ad15e6d": [
       "BootstrapHealthGate: train_activation_halt stall class does not refuse the stall class by itself",
       "BootstrapHealthGate: train_activation_halt stall class refuses a halt exactly once through the train-activation leg"
@@ -5864,7 +5865,7 @@
   "scripts": {
     "test": {
       "fileCount": 406,
-      "titleCount": 3708,
+      "titleCount": 3709,
       "files": {
         "test/unit/00_config_directory_isolation.test.js": "f13ced249dae415e",
         "test/unit/autoheal_service.test.js": "eae1a818e5f6a1fe",
@@ -5897,7 +5898,7 @@
         "test/unit/bootstrap_health_gate.test/container_state.test.js": "ed8016ccb0fe8623",
         "test/unit/bootstrap_health_gate.test/durable_halt_markers.test.js": "a69de0b08aec9d6d",
         "test/unit/bootstrap_health_gate.test/evaluate_container_state.test.js": "c9f879a004276208",
-        "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js": "e23f7cf696a5f6aa",
+        "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js": "52f174b886d9fc65",
         "test/unit/bootstrap_health_gate.test/make_bootstrap_consults_the_source_health_gate.test.js": "54f2031de8d7e024",
         "test/unit/bootstrap_health_gate.test/parse_count_tokens.test.js": "33a411988d29bb7b",
         "test/unit/bootstrap_health_gate.test/published_stall_class_set.test.js": "9d1b9f38d1189fd6",
@@ -6276,7 +6277,7 @@
     },
     "test:all": {
       "fileCount": 518,
-      "titleCount": 4521,
+      "titleCount": 4522,
       "files": {
         "test/chaos/config_resilience_chaos.test.js": "e187ad3068ae0375",
         "test/chaos/config_resilience_chaos.test/argument_parsing_resilience_chaos.test.js": "24bd240f4198a15b",
@@ -6421,7 +6422,7 @@
         "test/unit/bootstrap_health_gate.test/container_state.test.js": "ed8016ccb0fe8623",
         "test/unit/bootstrap_health_gate.test/durable_halt_markers.test.js": "a69de0b08aec9d6d",
         "test/unit/bootstrap_health_gate.test/evaluate_container_state.test.js": "c9f879a004276208",
-        "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js": "e23f7cf696a5f6aa",
+        "test/unit/bootstrap_health_gate.test/evaluate_status_payload.test.js": "52f174b886d9fc65",
         "test/unit/bootstrap_health_gate.test/make_bootstrap_consults_the_source_health_gate.test.js": "54f2031de8d7e024",
         "test/unit/bootstrap_health_gate.test/parse_count_tokens.test.js": "33a411988d29bb7b",
         "test/unit/bootstrap_health_gate.test/published_stall_class_set.test.js": "9d1b9f38d1189fd6",
