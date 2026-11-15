@@ -27,7 +27,8 @@
 #   - Refuses an unhealthy source. `bootstrap create` runs a source health gate:
 #     a service that is stopped, crash-looping, reporting unhealthy,
 #     materially behind its tip, or carrying a durable halt marker (a live
-#     decoder REORG_HALT row that no newer REORG_HALT_CLEARED supersedes, an
+#     decoder REORG_HALT row that no newer audited REORG_HALT_CLEARED supersedes,
+#     where a clear without a reason of at least 8 characters lifts nothing, an
 #     uncleared sync_halt) is NOT snapshotted. Such a combo is
 #     summarised as SOURCE-UNHEALTHY and the run exits non-zero, leaving the last
 #     good archive in place as the newest. This exists because the weekly cron

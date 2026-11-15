@@ -1,3 +1,4 @@
+/* Copyright © 2025-2026 Dankest, LLC; SPDX-License-Identifier: AGPL-3.0-or-later */
 'use strict'
 
 let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, resolveNamedDatabaseTarget, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings
@@ -396,5 +397,4 @@ function recordResetReindex(context) {
     }
     return restartResetModules(context)
 }
-
 module.exports = { configure, resetModules }

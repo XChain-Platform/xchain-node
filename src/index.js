@@ -35,6 +35,9 @@ if (nodeMajor < MIN_NODE_MAJOR) {
 
 require('dotenv').config()
 
+const { verifyConsensusPinsAtBoot } = require('./operations/consensus_pin_boot')
+verifyConsensusPinsAtBoot()
+
 const { parseCommand } = require('./cli')
 
 parseCommand()

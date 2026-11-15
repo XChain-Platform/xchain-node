@@ -35,11 +35,12 @@ let {
     reduceNodeUnreachable, describeNodeUnreachableNote,
     reduceDecoderReorgHalt, describeReorgHaltNote,
     reduceIndexerStall, describeIndexerStallNote,
+    reduceTrainActivationPending, describeTrainActivationPendingNote,
     reduceTrackerHalt, describeTrackerHaltNote
 } = require('./status_reducers')
 
 function configureDependencies(dependencies) {
-    ;({ NODE_MODULE_NAME, SEP, XChainService, db, getInstalledModules, resetInstalledModules, getRemoteModuleVersions, isStatusUpdated, setStatusUpdated, getLastStatus, setLastStatus, getLastPrintedStatus, setLastPrintedStatus, getStatusFromContainer, getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion, peers, getLogger, logger, checkRemoteNodeVersionAdvisory, loadInstalledModules, isContainerGoneError, probeServiceHealthPayload, probeReadinessPayload, reduceNotReady, describeNotReadyNote, reduceNodeCatchingUp, describeNodeCatchingUpNote, reduceNodeUnreachable, describeNodeUnreachableNote, reduceDecoderReorgHalt, describeReorgHaltNote, reduceIndexerStall, describeIndexerStallNote, reduceTrackerHalt, describeTrackerHaltNote } = dependencies)
+    ;({ NODE_MODULE_NAME, SEP, XChainService, db, getInstalledModules, resetInstalledModules, getRemoteModuleVersions, isStatusUpdated, setStatusUpdated, getLastStatus, setLastStatus, getLastPrintedStatus, setLastPrintedStatus, getStatusFromContainer, getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion, peers, getLogger, logger, checkRemoteNodeVersionAdvisory, loadInstalledModules, isContainerGoneError, probeServiceHealthPayload, probeReadinessPayload, reduceNotReady, describeNotReadyNote, reduceNodeCatchingUp, describeNodeCatchingUpNote, reduceNodeUnreachable, describeNodeUnreachableNote, reduceDecoderReorgHalt, describeReorgHaltNote, reduceIndexerStall, describeIndexerStallNote, reduceTrainActivationPending, describeTrainActivationPendingNote, reduceTrackerHalt, describeTrackerHaltNote } = dependencies)
 }
 
 async function recordVersions(moduleStatus, nextModule, nextCoin, nextCoinNetwork, containerId, remoteModuleVersions) {
@@ -164,14 +165,16 @@ async function annotatePublishedHealth(nextModule, containerId, nextCoin, nextCo
     } catch { /* advisory: an unreadable surface is not a halt */ }
     const findings = [
         [nextModule === XChainService.XCHAIN_DECODER ? reduceDecoderReorgHalt(payload) : null,
-            "reorg_halt", " REORG_HALT", describeReorgHaltNote],
+            "reorg_halt", " REORG_HALT", describeReorgHaltNote, "halted"],
         [nextModule === XChainService.XCHAIN_INDEXER ? reduceIndexerStall(payload) : null,
-            "stall", null, describeIndexerStallNote],
+            "stall", null, describeIndexerStallNote, "stalled"],
+        [nextModule === XChainService.XCHAIN_INDEXER ? reduceTrainActivationPending(payload) : null,
+            "train_activation_pending", " UPGRADE PENDING", describeTrainActivationPendingNote, "pending"],
         [nextModule === XChainService.XCHAIN_UTXO_TRACKER ? reduceTrackerHalt(payload) : null,
-            "halt", " HALTED", describeTrackerHaltNote]
+            "halt", " HALTED", describeTrackerHaltNote, "halted"]
     ]
-    for (const [finding, key, suffix, describe] of findings) {
-        if (finding && (finding.halted || finding.stalled)) {
+    for (const [finding, key, suffix, describe, activeKey] of findings) {
+        if (finding && finding[activeKey]) {
             display.state += suffix || " STALL " + finding.word
             display.isChurning = true
             moduleStatus[key] = finding

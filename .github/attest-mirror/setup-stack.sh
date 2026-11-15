@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+#*********************************************************************
+#
+# Copyright © 2025-2026 Dankest, LLC
+# Based on XChain Platform by Dankest, LLC - https://dankest.llc
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This file is part of XChain Platform. Licensed under the GNU Affero
+# General Public License v3.0 or later; see LICENSE.md. A commercial
+# license (without AGPL source-disclosure terms) is available -
+# contact legal@dankest.llc.
+#
+#*********************************************************************
 # Bring up one xca7 isolated stack (BTC, LTC and DOGE regtest services) and seed the stack hub's chain config.
 set -eu
 stack=$1

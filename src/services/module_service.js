@@ -33,7 +33,7 @@ const {
 } = require('./config_service')
 const { statusChanged, getStatus } = require('./status_service')
 const {
-    stopContainerByName, removeContainer, getPublishedHostPorts, forceRemoveContainerByName,
+    stopContainerByName, removeContainer, getPublishedHostPorts, getAllBoundHostPorts, forceRemoveContainerByName,
     addContainerToNetwork, checkBuildKitAvailable, probeContainerPresenceByName
 } = require('./docker_service')
 const { stopModuleContainer, stopTimeoutArgs } = require('./stop_budget_service')
@@ -66,7 +66,7 @@ const { configureDependencies: configureBuildAndUp, buildAndUp } = require('./mo
 
 configureGitCheckout({ execFile, execFileAsync, fs, path, modulesUrls, redactSecrets, logger })
 configureCloneAndRefs({ execFileAsync, fs, modulesUrls, DEFAULT_MODULE_BRANCH, getModuleDir, getModuleTmpDir, moduleDirExists, removeModuleTmpDir, createModuleTmpDir, redactSecrets, releaseManifestService, CLONE_STAGING_SUFFIX, CLONE_PREVIOUS_SUFFIX, runGitClone, assertCheckoutCommit, verifyDeploySource, reportDeployedSource, logger })
-configureDockerArgs({ fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD, getUtxoTrackerVolumeName, getPublishedHostPorts, config, validatorService, logger })
+configureDockerArgs({ fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD, getUtxoTrackerVolumeName, getPublishedHostPorts, getAllBoundHostPorts, config, validatorService, logger })
 configureContainerNetworks({ execFile, XChainService, Coin, Network, getDockerNetwork, getStatus, addContainerToNetwork, redactSecrets, sleep, memoryLimitService, logger })
 configureBuildAndUp({ execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort, stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable, stopModuleContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config, goLiveGate, memoryLimitService, hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk, cloneGit, resolveBundledLibRef, assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs, attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings, logger })
 

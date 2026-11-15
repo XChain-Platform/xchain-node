@@ -19,11 +19,12 @@ let fs = require('fs')
 let path = require('path')
 let { XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD } = require('../../config')
 let { getUtxoTrackerVolumeName } = require('../config_service')
-let { getPublishedHostPorts } = require('../docker_service')
+let { getPublishedHostPorts, getAllBoundHostPorts } = require('../docker_service')
 const { healthcheckCommand } = require('./healthcheck_command')
-const { claimFreeHostPorts } = require('./host_port_claim')
+const { claimFreeHostPorts, parsePortSpec, reservedHostPorts } = require('./host_port_claim')
 const requiredGetUtxoTrackerVolumeName = getUtxoTrackerVolumeName
 const requiredGetPublishedHostPorts = getPublishedHostPorts
+const requiredGetAllBoundHostPorts = getAllBoundHostPorts
 let config = require('../../config');
 let validatorService = require('../validator_service')
 const { getLogger } = require('../../observability/logger');
@@ -34,24 +35,10 @@ function configureDependencies(dependencies) {
         fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME,
         EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD,
         getUtxoTrackerVolumeName = requiredGetUtxoTrackerVolumeName,
-        getPublishedHostPorts = requiredGetPublishedHostPorts, config, validatorService,
+        getPublishedHostPorts = requiredGetPublishedHostPorts,
+        getAllBoundHostPorts = requiredGetAllBoundHostPorts, config, validatorService,
         logger
     } = dependencies)
-}
-
-// Split a `-p` value on its last colon into [IP:]HOST:CONTAINER fields (ip is
-// '' when absent); null for a non-string or colon-less value.
-function parsePortSpec(pair) {
-    if (typeof pair !== 'string') return null
-    const colonIdx = pair.lastIndexOf(':')
-    if (colonIdx === -1) return null
-    const beforeContainer = pair.substring(0, colonIdx)
-    const hostIdx = beforeContainer.lastIndexOf(':')
-    return {
-        ip: hostIdx === -1 ? '' : beforeContainer.substring(0, hostIdx),
-        hostPort: beforeContainer.substring(hostIdx + 1),
-        containerPort: pair.substring(colonIdx + 1)
-    }
 }
 
 // Fail fast on host-port collisions before `docker run`. On a single-stack
@@ -60,8 +47,10 @@ function parsePortSpec(pair) {
 // the same host port, which `docker run` only surfaces as a cryptic "port is
 // already allocated" AFTER the image build wastes minutes. `selfName` is the
 // container we're (re)creating (excluded so re-installs/updates of the same
-// service don't flag themselves; the old container is already killed+removed
-// before this runs, but the name-exclusion is belt-and-suspenders). `claim` lets buildAndUp move a busy on-request port (host_port_claim.js).
+// service don't flag themselves; the old container is still running when this
+// check runs and is removed by name right before `docker run`, so its ports are
+// also free for a replacement claim). `claim` lets buildAndUp move a busy
+// on-request port (host_port_claim.js).
 async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
     const requested = []
     for (let i = 0; i < portArgs.length; i++) {
@@ -80,7 +69,11 @@ async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
         const others = [...holders].filter(n => n !== selfName)
         if (others.length > 0) conflicts.push({ hostPort, holders: others })
     }
-    if (claimFreeHostPorts(conflicts, portArgs, requested, published, claim && { ...claim, registry: SERVICE_REGISTRY, logger }).length > 0) {
+    const claimContext = claim && {
+        ...claim, selfName, registry: SERVICE_REGISTRY, logger,
+        reserved: conflicts.length > 0 ? reservedHostPorts(await getAllBoundHostPorts(), selfName) : new Set()
+    }
+    if (claimFreeHostPorts(conflicts, portArgs, requested, published, claimContext).length > 0) {
         const lines = conflicts.map(c => `  host port ${c.hostPort} is already published by: ${c.holders.join(', ')}`)
         throw new Error(
             'Host port conflict: cannot publish the following port(s):\n' +

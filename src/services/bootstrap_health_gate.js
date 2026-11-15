@@ -31,8 +31,10 @@
  *   - missing, not running, restarting, or crash-looping
  *   - reporting an unhealthy/halted status on its own health surface
  *   - carrying a durable halt marker in its database: a live decoder REORG_HALT
- *     row (events.code = 'REORG_HALT' with no newer REORG_HALT_CLEARED row
- *     superseding it) or an uncleared xchain-sync divergence halt
+ *     row (events.code = 'REORG_HALT' with no newer AUDITED REORG_HALT_CLEARED row
+ *     superseding it; a clear whose payload lacks a reason of at least 8 characters
+ *     lifts nothing, see isAuditedClear in xchain-decoder/src/db/reorg_halt.js)
+ *     or an uncleared xchain-sync divergence halt
  *     (sync_halt with cleared_at IS NULL). For an indexer source both its own
  *     database and the PAIRED DECODER's are read: REORG_HALT is written only in the
  *     decoder's (an indexer's own events table carries REORG and TRAIN_ACTIVATION_HALT

@@ -69,7 +69,7 @@ const MODULES_TABLE = NODE_PREFIX === DEFAULT_NODE_PREFIX
 const CREATE_MODULES_TABLE_SQL = fs.readFileSync(
     path.join(__dirname, '../sql/modules.sql'),
     'utf8'
-).replace('{{MODULES_TABLE}}', MODULES_TABLE)
+).replace(/^(--[^\n]*\n)+/, '').replace('{{MODULES_TABLE}}', MODULES_TABLE)
 
 const modulesMixin = {
     async getAllModuleContainers(coin, network) {

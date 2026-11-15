@@ -124,6 +124,8 @@ async function installDatabaseContainer() {
     try {
         await buildDatabaseModule("", "")
     } catch (err) {
+        // The lost-mode refusal already says what to do; wrapping it would hide that.
+        if (err && err.code === 'EXTERNAL_DB_MODE_LOST') throw err
         console.log(redactSecrets(err))
         throw new Error("There was an error installing the mariadb container")
     }
@@ -205,7 +207,7 @@ async function fetchRemoteVersions(checkVersions) {
             // GitHub API 403 rate limits (or transient network failures) must
             // not abort the whole command: version info is advisory. Degrade
             // to a status listing without remote-version columns.
-            console.log("Warning: couldn't fetch remote versions (GitHub unreachable or rate-limited); continuing without version check: " + redactSecrets(err))
+            console.log("Warning: couldn't fetch remote versions (GitHub unreachable or rate-limited); continuing without version check: " + redactSecrets(err && err.message ? err.message : err))
             checkVersions = false
         }
     }

@@ -27,7 +27,6 @@ function configure(dependencies) {
     sidecarLock.configure({ crypto, fs, path })
 }
 
-
 // Replace a file via a flushed temp file and rename (as credentials.json), so a crash
 // never leaves a torn sidecar whose missing keys the next load re-mints; symlinks survive.
 function writeFileAtomic(filePath, data, mode) {
@@ -112,6 +111,18 @@ function upsertSidecarUnlocked(localFilePath, values) {
     writeSidecarUnlocked(localFilePath, merged, { overwrite: true })
 }
 
+function adoptOrMintSidecarValues(localFilePath, keys, mint, isMissing = value => !value) {
+    return withSidecarLock(localFilePath, () => {
+        const onDisk = readSidecarEntriesSync(localFilePath)
+        const values = {}, generated = {}
+        for (const key of keys) {
+            values[key] = resolvedSidecarValue(onDisk, key)
+            if (isMissing(values[key])) generated[key] = values[key] = mint(key)
+        }
+        if (Object.keys(generated).length) upsertSidecarUnlocked(localFilePath, generated)
+        return { values, generated }
+    })
+}
 // Read a single KEY=VALUE from a sidecar file, or undefined if the file or key is absent.
 // Uses the same createReadStream + readline path as the main config reader above.
 //
@@ -382,7 +393,7 @@ function mintRpcCredentialsUnlocked(defaultConfig, localFilePath) {
 }
 
 module.exports = {
-    configure, persistSidecarCreds, upsertSidecarValues, readSidecarValue,
+    configure, persistSidecarCreds, upsertSidecarValues, adoptOrMintSidecarValues, readSidecarValue,
     warnDeprecatedSecretNames, hubSidecarPath, ensureHubApiKey, readHubApiKey,
     applyHubApiKeyFromSidecar, coinConfigPaths, readMainConfigLine, normalizeMainConfig,
     readSidecarConfigLine, mergeSidecarConfig, migrateMainCredentials, generateRpcCredentials

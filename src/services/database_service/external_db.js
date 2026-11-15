@@ -16,6 +16,7 @@
  ********************************************************************/
 
 
+const path = require('path')
 let { execFile } = require('child_process')
 let mariadb = require('mariadb')
 let { Password, Input, NumberPrompt } = require('enquirer')
@@ -26,12 +27,12 @@ const { isLoopbackHost, assertContainerReachableDbHost } = require('../config_se
 let config = require('../../config')
 let { getLogger } = require('../../observability/logger')
 let logger = getLogger()
-let { hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig } = require('../credentials_service')
+let { hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig, markExternalDbMode, isKnownExternalDbHost } = require('../credentials_service')
 
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
     if (dependencies.execFile === nativeExecFile) return
-    ;({ execFile, mariadb, Password, Input, NumberPrompt, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER, PING_SQL, validatePort, config, getLogger, logger, hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig } = dependencies)
+    ;({ execFile, mariadb, Password, Input, NumberPrompt, EXTERNAL_DB_HOST, EXTERNAL_DB_PORT, EXTERNAL_DB_ROOT_USER, PING_SQL, validatePort, config, getLogger, logger, hasExternalDbConfig, loadExternalDbConfig, saveExternalDbConfig, markExternalDbMode, isKnownExternalDbHost } = dependencies)
 }
 
 
@@ -175,4 +176,40 @@ async function pingExternalDatabase() {
     }
 }
 
-module.exports = { resolveExternalDbPort, getExternalDbConfig, pingMariaDb, pingExternalDatabase, configureDependencies }
+// External (host-native) MariaDB mode: xchain-node doesn't own the DB engine,
+// so confirm the configured host answers and that is all. Records the host as
+// an external-DB host once it does, so assertBundledModeAllowed can tell a run
+// that lost the flag from a fresh install. A failed marker write only warns.
+async function verifyExternalDatabase() {
+    const cfg = await getExternalDbConfig()
+    try {
+        await pingMariaDb(cfg)
+    } catch (err) {
+        throw new Error("Cannot reach external MariaDB at " + cfg.host + ":" + cfg.port + ": " + (err.message || err))
+    }
+    try {
+        markExternalDbMode()
+    } catch (err) {
+        logger.info("Could not record external-DB mode in credentials.json: " + (err.message || err))
+    }
+    return true
+}
+
+// Refuse to create the bundled MariaDB container on a host that is known to use
+// an external one: the mode comes from process env only, so a run from another
+// directory, or a shell that never read the .env, would otherwise provision an
+// empty bundled server and point the hub, explorer and modules at it.
+function assertBundledModeAllowed() {
+    if (!isKnownExternalDbHost()) return
+    const err = new Error(
+        'This host is configured for an external MariaDB (~/.xchain-node/credentials.json) but ' +
+        'XCHAIN_NODE_EXTERNAL_DB=1 is not set for this run, so no bundled MariaDB container was created. ' +
+        'Export XCHAIN_NODE_EXTERNAL_DB=1, or run from the directory whose .env sets it ' +
+        '(this run read only ' + path.join(process.cwd(), '.env') + '). To move this host to the ' +
+        'bundled MariaDB on purpose, remove the externalDb and externalDbMode keys from credentials.json first.'
+    )
+    err.code = 'EXTERNAL_DB_MODE_LOST'
+    throw err
+}
+
+module.exports = { resolveExternalDbPort, getExternalDbConfig, pingMariaDb, pingExternalDatabase, verifyExternalDatabase, assertBundledModeAllowed, configureDependencies }

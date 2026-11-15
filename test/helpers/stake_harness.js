@@ -19,6 +19,16 @@ const { stakeValidator } = require('../../src/services/validator_stake_service')
 const PUBKEY  = 'ab'.repeat(32)
 const ADDRESS = 'mStakeAddress'
 
+// The token body the explorer serves: the full mints and locks groups, which
+// readTokenMintRules requires before it reads the mint rules as known.
+function tokenBody(chain = {}) {
+    return {
+        mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000,
+            start_block: chain.mintStart ?? 0, stop_block: chain.mintStop ?? 0 },
+        locks: { mint: chain.mintLocked ?? false }
+    }
+}
+
 function makeExplorer(chain) {
     return {
         getAddress: sinon.stub().resolves({ balances: { confirmed: chain.coin ?? '0.001', pending: '0' } }),
@@ -26,10 +36,7 @@ function makeExplorer(chain) {
             ? sinon.stub().rejects(Object.assign(
                 new Error('Explorer returned HTTP 404 for /RBTC/api/token/XCHAIN'),
                 { code: 'EXPLORER_HTTP_404', details: { status: 404 } }))
-            : sinon.stub().resolves({
-                mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000,
-                    start_block: chain.mintStart ?? 0, stop_block: chain.mintStop ?? 0 },
-                locks: { mint: chain.mintLocked ?? false } }),
+            : sinon.stub().resolves(tokenBody(chain)),
         // The MINT rows the explorer's source lane holds for the stake address; none by default.
         getMints: chain.mintsThrow
             ? sinon.stub().rejects(new Error(chain.mintsThrow))
@@ -128,4 +135,4 @@ function run(opts, chain, settingsExtra = {}) {
     return stakeValidator(opts, deps).then(result => ({ result, calls, logged }))
 }
 
-module.exports = { PUBKEY, ADDRESS, makeSdk, run }
+module.exports = { PUBKEY, ADDRESS, makeSdk, run, tokenBody }

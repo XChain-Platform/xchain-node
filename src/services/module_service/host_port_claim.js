@@ -38,6 +38,49 @@ function nextFreeHostPort(from, taken) {
     return null
 }
 
+// Split a `-p` value on its last colon into [IP:]HOST:CONTAINER fields (ip is
+// '' when absent); null for a non-string or colon-less value.
+function parsePortSpec(pair) {
+    if (typeof pair !== 'string') return null
+    const colonIdx = pair.lastIndexOf(':')
+    if (colonIdx === -1) return null
+    const beforeContainer = pair.substring(0, colonIdx)
+    const hostIdx = beforeContainer.lastIndexOf(':')
+    return {
+        ip: hostIdx === -1 ? '' : beforeContainer.substring(0, hostIdx),
+        hostPort: beforeContainer.substring(hostIdx + 1),
+        containerPort: pair.substring(colonIdx + 1)
+    }
+}
+
+// Host ports (from getAllBoundHostPorts' map) that some container other than
+// `selfName` has saved in its port bindings, stopped containers included: a
+// replacement port must not be one of these, or starting that container later
+// fails with "port is already allocated".
+function reservedHostPorts(bound, selfName) {
+    const reserved = new Set()
+    for (const [port, holders] of bound) {
+        if ([...holders].some(name => name !== selfName)) reserved.add(port)
+    }
+    return reserved
+}
+
+// Host ports a replacement port must avoid. A port published only by the
+// container being recreated (`claim.selfName`) is free: that container is
+// removed by name before `docker run`, so counting it would flip the claimed
+// port between two values on every rebuild. `claim.reserved` adds the ports a
+// stopped container will bind again on start, which `published` (running
+// containers only) cannot see.
+function takenHostPorts(published, requested, claim) {
+    const taken = new Set(requested.map(String))
+    for (const [port, holders] of published) {
+        if (claim.selfName && [...holders].every(name => name === claim.selfName)) continue
+        taken.add(String(port))
+    }
+    for (const port of claim.reserved || []) taken.add(String(port))
+    return taken
+}
+
 // Move each conflicting on-request port of `claim.module` to a free host port:
 // rewrites its `-p` value in `portArgs` and its host key in
 // `claim.environmentVariables`, and drops it from `conflicts`. Returns
@@ -48,7 +91,7 @@ function claimFreeHostPorts(conflicts, portArgs, requested, published, claim) {
     const { module, environmentVariables, registry, logger } = claim
     const facet = registry[module] && registry[module].docker
     const ports = (facet && facet.ports) || []
-    const taken = new Set([...published.keys(), ...requested].map(String))
+    const taken = takenHostPorts(published, requested, claim)
     for (let c = conflicts.length - 1; c >= 0; c--) {
         const { hostPort, holders } = conflicts[c]
         const entry = ports.find(p => !p.always && String(environmentVariables[p.host]) === hostPort)
@@ -67,4 +110,4 @@ function claimFreeHostPorts(conflicts, portArgs, requested, published, claim) {
     return conflicts
 }
 
-module.exports = { PORT_STEP, nextFreeHostPort, claimFreeHostPorts }
+module.exports = { PORT_STEP, nextFreeHostPort, claimFreeHostPorts, parsePortSpec, reservedHostPorts }

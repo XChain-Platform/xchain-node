@@ -138,6 +138,18 @@ describe('BootstrapHealthGate', function () {
             expect(reasons[0]).to.match(/rs-2/)
         })
 
+        it('describes a train-activation halt whose gate could not name a rule set', function () {
+            const gate = loadGate()
+            const reasons = gate.evaluateStatusPayload(trainPayload({
+                status: 'halt', required_rule_set: null, required_at_height: null,
+                reason: 'activation gate failed to evaluate'
+            }))
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/train-activation halt/)
+            expect(reasons[0]).to.match(/could not determine the required rule set/)
+            expect(reasons[0]).to.not.match(/build does not implement/)
+        })
+
         it('passes a pending, unevaluated, absent or malformed train_activation', function () {
             const gate = loadGate()
             for (const train of [{ status: 'pending' }, { status: 'unevaluated' }, { status: 'clear' }, null, 'halt'])

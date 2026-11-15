@@ -36,7 +36,9 @@
  * in one episode without recovering, every pass that sees it logs an
  * "investigate" line at warn (stderr) and the command exits 2, so a
  * systemd OnFailure= hook or cron mail can act on a wedge that has stopped
- * being transient. A failed restart logs at error and exits 1.
+ * being transient. A failed restart logs at error and exits 1. An opted-in
+ * container Docker cannot inspect (daemon down, socket permission, timeout;
+ * not "no such container") logs at error and exits 3.
  *
  * Detection-to-restart latency is the timer interval plus the health
  * retry budget plus the grace window; this is deliberate, restarts
@@ -65,6 +67,7 @@ const {
     getLastHealthyProbeMs,
     isRecoveryEstablished
 } = require('./autoheal_service/restart_state.js')
+const { recordInspectFailure, logPassSummary, autohealExitCode } = require('./autoheal_service/pass_signals.js')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -88,14 +91,13 @@ function autohealCandidate(row) {
 }
 
 async function inspectCandidate(candidate, result) {
-    const { module, coin, network, containerId } = candidate
     try {
-        candidate.status = await getStatusFromContainer(containerId)
+        candidate.status = await getStatusFromContainer(candidate.containerId)
         return true
-    } catch {
-        // Container gone or Docker unreachable for this id; the registry
-        // reconcile on the next precheck cleans it up. Not our job here.
-        result.skipped.push({ module, coin, network, containerId, reason: 'inspect failed' })
+    } catch (err) {
+        // A gone container is reconciled out of the registry by the next precheck;
+        // any other failure is reported so the pass cannot read as clean.
+        recordInspectFailure(candidate, err, result)
         return false
     }
 }
@@ -330,7 +332,7 @@ async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.n
     const timing = autohealTiming()
     const stateFile = getStateFilePath()
     const state = readState(stateFile)
-    const result = { candidates: [], restarted: [], failed: [], skipped: [], escalated: [] }
+    const result = { candidates: [], restarted: [], failed: [], skipped: [], escalated: [], inspectErrors: [] }
     // Set whenever an episode-onset or attempt-count entry is recorded or cleared,
     // so the pass persists it even when nothing was restarted. Without this the
     // onset never survives to the next pass and the grace window can never be
@@ -376,15 +378,8 @@ async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.n
     }
 
     if (!dryRun && (onsetChanged || result.restarted.length > 0)) persistState(stateFile, state, modules)
-    if (result.candidates.length === 0) logger.info('autoheal: nothing to do')
+    logPassSummary(result)
     return result
-}
-
-// The CLI exit code for one pass: 1 when a restart failed, 2 when a wedge outlived two restarts, else 0.
-function autohealExitCode(result) {
-    if (result.failed.length > 0) return 1
-    if (result.escalated && result.escalated.length > 0) return 2
-    return 0
 }
 
 module.exports = {

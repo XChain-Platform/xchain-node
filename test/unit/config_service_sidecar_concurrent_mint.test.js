@@ -25,6 +25,7 @@ const path = require('path')
 const readline = require('readline')
 const { spawn } = require('child_process')
 const sidecars = require('../../src/services/config_service/sidecars')
+const database = require('../../src/services/config_service/database')
 const secretEnv = require('../../src/config/secret_env')
 const sidecarLock = require('../../src/services/config_service/sidecar_lock')
 
@@ -154,7 +155,7 @@ function interleaveTests() {
         expect(fs.readFileSync(sidecarFile, 'utf8')).to.equal('NODE_USER=other-user\nNODE_PASSWORD=other-pass\n')
     })
 
-    it('concurrent upserts of different keys never drop each other', function () {
+    it('concurrent upserts of different keys never drop each other', async function () {
         const sidecarFile = path.join(configDir, 'bitcoin-regtest.local')
         sidecars.generateRpcCredentials({}, sidecarFile)
         sidecars.upsertSidecarValues(sidecarFile, { DECODER_DB_PASS: 'd' })
@@ -163,6 +164,42 @@ function interleaveTests() {
         expect(disk.NODE_PASSWORD).to.be.a('string').and.not.equal('')
         expect(disk.DECODER_DB_PASS).to.equal('d')
         expect(fs.existsSync(sidecarFile + '.lock')).to.equal(false)
+    })
+}
+
+function databaseInterleaveTests() {
+    it('every loader that read an empty database sidecar ends with the one minted password', function () {
+        const dbFile = path.join(configDir, 'litecoin-regtest.local')
+        const dbLoaders = [0, 1, 2, 3].map(() => ({}))
+        for (const cfg of dbLoaders) database.generateDatabaseCredentials(cfg, dbFile)
+        const dbDisk = readDisk(dbFile)
+        for (const cfg of dbLoaders) {
+            expect(cfg.DECODER_DB_PASS).to.equal(dbDisk.DECODER_DB_PASS)
+            expect(cfg.INDEXER_DB_PASS).to.equal(dbDisk.INDEXER_DB_PASS)
+        }
+        expect(countLines(dbFile, 'DECODER_DB_SECRET')).to.equal(1)
+        expect(countLines(dbFile, 'INDEXER_DB_SECRET')).to.equal(1)
+    })
+
+    it('a blank database password already on disk is kept as written', function () {
+        const blankDbFile = path.join(configDir, 'dogecoin-regtest.local')
+        fs.writeFileSync(blankDbFile, 'DECODER_DB_PASS=\n', { mode: 0o600 })
+        const blankConfig = {}
+        database.generateDatabaseCredentials(blankConfig, blankDbFile)
+        expect(blankConfig.DECODER_DB_PASS).to.equal('')
+        expect(readDisk(blankDbFile).DECODER_DB_PASS).to.equal('')
+    })
+
+    it('a hub password another loader wrote first is adopted, not replaced', async function () {
+        const hubFile = path.join(configDir, 'hub.local')
+        fs.writeFileSync(hubFile, 'HUB_DB_SECRET=winner\n', { mode: 0o600 })
+        database.configure({ crypto, XChainService: {}, sidecars: {
+            ...sidecars,
+            hubSidecarPath: () => hubFile,
+            readSidecarValue: async () => undefined
+        } })
+        expect(await database.getOrCreateHubDbPass()).to.equal('winner')
+        expect(fs.readFileSync(hubFile, 'utf8')).to.equal('HUB_DB_SECRET=winner\n')
     })
 }
 
@@ -210,6 +247,7 @@ describe('config_service sidecar: concurrent first-time RPC credential mint', fu
     beforeEach(function () {
         configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xcn-sidecar-mint-'))
         configureSidecars(configDir)
+        database.configure({ crypto, XChainService: {}, sidecars })
     })
 
     afterEach(function () {
@@ -217,6 +255,7 @@ describe('config_service sidecar: concurrent first-time RPC credential mint', fu
     })
 
     describe('loaders that all read before any wrote', interleaveTests)
+    describe('database loaders that all read before any wrote', databaseInterleaveTests)
     describe('separate processes released together', processRaceTests)
     describe('a lock left behind by a crashed writer', lockRecoveryTests)
 })

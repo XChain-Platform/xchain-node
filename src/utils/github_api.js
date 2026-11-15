@@ -46,21 +46,46 @@ function githubApiHeaders() {
     return headers;
 }
 
+// When the limit lifts, as an ISO time, or 'unknown'. retry-after is the wait
+// GitHub asks for on this response (delta seconds or an HTTP date) and wins when
+// present. x-ratelimit-reset is the primary window's absolute reset, so it only
+// applies when quota is exhausted or unreported: on a secondary limit that still
+// shows quota remaining it points at an unrelated window.
+function rateLimitResetAt(headers) {
+    const retryAfter = headers['retry-after'];
+    if (retryAfter !== undefined && retryAfter !== '') {
+        const waitMs = Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+        if (Number.isFinite(waitMs)) return new Date(Date.now() + waitMs).toISOString();
+    }
+    const remaining = headers['x-ratelimit-remaining'];
+    const reset = Number(headers['x-ratelimit-reset']);
+    const exhaustedOrUnreported = remaining === undefined || remaining === '0';
+    if (exhaustedOrUnreported && headers['x-ratelimit-reset'] !== '' && Number.isFinite(reset) && reset > 0) {
+        return new Date(reset * 1000).toISOString();
+    }
+    return 'unknown';
+}
+
 /**
- * The rate-limit error behind a 403, or null when the 403 means something else.
- * Told apart by the remaining-quota header rather than by the status alone,
- * because a 403 is also what a genuinely forbidden request returns and the two
- * need different advice.
+ * The rate-limit error behind a 429, or behind a 403 that is a rate limit, or
+ * null when the response means something else. A 429 is always a rate limit. A
+ * 403 is told apart by the remaining-quota header (primary limit) or a
+ * retry-after header (secondary limit) rather than by the status alone, because
+ * a 403 is also what a genuinely forbidden request returns and the two need
+ * different advice.
  *
  * @param {Error} error the HTTP client's error
  * @returns {Error|null} an error naming the reset time, or null
  */
 function githubRateLimitError(error) {
-    const res = error.response;
-    if (!res || res.status !== 403 || res.headers?.['x-ratelimit-remaining'] !== '0') return null;
-    const resetSec = Number(res.headers['x-ratelimit-reset']);
-    const resetAt  = Number.isFinite(resetSec) ? new Date(resetSec * 1000).toISOString() : 'unknown';
-    return new Error(`GitHub API rate limit exhausted for this IP (resets ${resetAt}); set GITHUB_TOKEN to raise the limit`);
+    const res = error && error.response;
+    if (!res || (res.status !== 403 && res.status !== 429)) return null;
+    const headers = res.headers || {};
+    const limited = res.status === 429
+        || headers['x-ratelimit-remaining'] === '0'
+        || headers['retry-after'] !== undefined;
+    if (!limited) return null;
+    return new Error(`GitHub API rate limit exhausted for this IP (resets ${rateLimitResetAt(headers)}); set GITHUB_TOKEN to raise the limit`);
 }
 
 module.exports = { githubApiHeaders, githubRateLimitError, GITHUB_API_TIMEOUT_MS, GITHUB_DOWNLOAD_TIMEOUT_MS };

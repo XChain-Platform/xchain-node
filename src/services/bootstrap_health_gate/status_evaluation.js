@@ -145,9 +145,10 @@ function stallReasons(payload) {
     // 'price_landing_wait' | 'barrier_defer' | 'wedged', plus the published refinements 'upstream_halted' (whenever
     // the pass is held behind the decoder REORG_HALT gate, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck' |
     // 'capability_proof_wait' | 'capability_proof_stuck'. The set is defined in xchain-indexer
-    // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). 'wedged' and the
-    // two '_proof_stuck' classes are refusals by themselves; 'train_activation_halt' never is because the
-    // train_activation.status === 'halt' leg below already refuses it. 'wedged' needs its own
+    // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). 'wedged',
+    // 'operator_action_hold' and the two '_proof_stuck' classes are refusals by themselves;
+    // 'train_activation_halt' never is because the train_activation.status === 'halt' leg below
+    // already refuses it. 'wedged' needs its own
     // leg: the indexer reports status "healthy"
     // whenever its process is up and its DB circuit is closed, so a freshly-wedged
     // indexer whose lag is still inside the ceiling passes every other check here.
@@ -169,12 +170,15 @@ function stallReasons(payload) {
     // Refuse only 'halt': the indexer stays "healthy" and never wedges after a restart while
     // halted, and 'pending'/'unevaluated' are still correct data. Strict, so older images pass.
     const train = payload.train_activation
-    if (train && typeof train === 'object' && train.status === 'halt')
-        reasons.push('the service has stopped on a train-activation halt (its build does not implement the rule set ' +
-            'the release manifest requires, so its data is frozen at the activation boundary)' +
+    if (train && typeof train === 'object' && train.status === 'halt') {
+        const haltDetail = train.required_rule_set
+            ? 'its build does not implement the rule set the release manifest requires, so its data is frozen at the activation boundary'
+            : 'the activation gate could not determine the required rule set, so its data is frozen at the current block'
+        reasons.push('the service has stopped on a train-activation halt (' + haltDetail + ')' +
             (train.required_rule_set ? `: requires ${train.required_rule_set}` : '') +
             (train.required_at_height != null ? ` from height ${train.required_at_height}` : '') +
             (train.reason ? ` (${train.reason})` : ''))
+    }
     return reasons
 }
 

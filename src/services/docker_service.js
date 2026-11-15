@@ -29,6 +29,7 @@ const {
     createDockerNetwork,
     addContainerToNetwork,
     getPublishedHostPorts,
+    getAllBoundHostPorts,
     getDockerContainerFileData,
     getDockerContainerFileCat,
     stringToDockerContainerFile
@@ -313,6 +314,7 @@ module.exports = {
     createDockerNetwork,
     addContainerToNetwork,
     getPublishedHostPorts,
+    getAllBoundHostPorts,
     getDockerContainerFileData,
     getDockerContainerFileCat,
     stringToDockerContainerFile,

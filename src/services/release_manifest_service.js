@@ -155,7 +155,7 @@ async function fetchManifestAtTag(tag) {
  * carry it (which the caller reads as "this release publishes no signature").
  */
 async function fetchReleaseAsset(tag, assetName) {
-    const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/releases/tags/${tag}`
+    const url = `https://api.github.com/repos/${MANIFEST_OWNER}/${MANIFEST_REPO}/releases/tags/${encodeURIComponent(tag)}`
     let release
     try {
         release = await axios.get(url, { headers: githubApiHeaders(), timeout: GITHUB_API_TIMEOUT_MS })

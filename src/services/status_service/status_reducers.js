@@ -193,23 +193,52 @@ function describeReorgHaltNote(coin, network, reorgHalt) {
 // proof wait shows too: it never wedges, so nothing else would surface it.
 // A train activation halt also reads stalled: its `train_activation_halt`
 // class is a diagnostic hint, not a healthy defer.
+function reduceTrainActivationPending(payload) {
+    if (!payload || typeof payload !== 'object') return null
+    const train = payload.train_activation
+    if (!train || typeof train !== 'object' || train.status !== 'pending') return null
+    return {
+        pending: true,
+        required_rule_set: train.required_rule_set == null ? null : train.required_rule_set,
+        required_at_height: train.required_at_height == null ? null : train.required_at_height,
+        reason: train.reason == null ? null : train.reason
+    }
+}
+
+function describeTrainActivationPendingNote(coin, network, finding) {
+    const rule = finding.required_rule_set == null ? ' a rule set this build does not implement'
+        : ' rule set ' + finding.required_rule_set + ', which this build does not implement'
+    const height = finding.required_at_height == null ? ' at the activation boundary'
+        : ' from BTC height ' + finding.required_at_height
+    return coin + "/" + network + " xchain-indexer has an UPGRADE PENDING: the signed release manifest requires"
+        + rule + height + ". It is advancing now but will halt at that boundary; run `xchain-node update xchain-indexer "
+        + coin + " " + network + "` before activation."
+}
+
 function reduceIndexerStall(payload) {
     if (!payload || typeof payload !== 'object') return null
     const reason = typeof payload.stallReason === 'string' && payload.stallReason.trim() ? payload.stallReason.trim() : null
     const stallClass = typeof payload.stallClass === 'string' ? payload.stallClass : null
+    const train = payload.train_activation
+    const trainRuleSet = train && typeof train === 'object'
+        ? (typeof train.required_rule_set === 'string' && train.required_rule_set.trim()
+            ? train.required_rule_set.trim() : null)
+        : undefined
     // The reason word alone, for the table: 'train_activation_halt: ...' reads as train_activation_halt.
     const word = reason ? reason.split(/[\s:]/)[0] : null
     // The price-landing wait is that same in-grace barrier defer, judged on its own longer window.
     // Tests the word, as fallbackIndexerStallHint does, so exception prose ending in `_barrier` never reads healthy.
     const healthyDefer = stallClass === 'future_block_wait'
         || ((stallClass === 'barrier_defer' || stallClass === 'price_landing_wait') && /_barrier$/.test(word || ''))
-    return {
+    const stall = {
         stalled:     reason !== null && !healthyDefer,
         reason,
         word,
         stall_class: stallClass,
         since:       describeCommitInstant(payload.lastBlockCommittedAt)
     }
+    if (trainRuleSet !== undefined) stall.train_required_rule_set = trainRuleSet
+    return stall
 }
 
 // The readiness verdict a service publishes: the indexer's `ready` / `notReadyReasons`
@@ -264,8 +293,16 @@ const INDEXER_STALL_HINTS = {
         "it has not completed a read of its decoder's REORG_HALT marker since start, so it holds its pass rather than risk following a halted decoder."
         + " This is not a confirmed halt: check the decoder's line and database readability, then look for the REORG_HALT probe failed warning in"
         + " `xchain-node logs xchain-indexer " + coin + " " + network + "`; the pass resumes once a probe read succeeds.",
-    train_activation_halt: (coin, network) =>
-        "the signed release manifest names a rule set this build does not implement; `xchain-node update xchain-indexer " + coin + " " + network + "`.",
+    train_activation_halt: (coin, network, stall) => {
+        if (stall.train_required_rule_set === undefined)
+            return "the signed release manifest names a rule set this build does not implement; `xchain-node update xchain-indexer " + coin + " " + network + "`."
+        if (stall.train_required_rule_set)
+            return "the signed release manifest names rule set " + stall.train_required_rule_set + ", which this build does not implement; "
+                + "`xchain-node update xchain-indexer " + coin + " " + network + "`."
+        return "the activation gate could not determine the required rule set because the manifest block is unreadable or the gate faulted. "
+            + "An update is not by itself the fix; check the release manifest and `xchain-node logs xchain-indexer "
+            + coin + " " + network + "`."
+    },
     reorg_rollback: () =>
         "a reorg rollback is in progress; it resumes on its own once the rolled-back range is re-parsed.",
     retroactive_replay_needs_go: (coin, network) =>
@@ -310,7 +347,7 @@ function describeIndexerStallNote(coin, network, stall) {
     const hint = INDEXER_STALL_HINTS[stall.word] || fallbackIndexerStallHint(stall)
     return coin + "/" + network + " xchain-indexer is STALLED (" + stall.reason + ")"
         + (stall.since ? ", no block committed since " + stall.since : "")
-        + ": " + hint(coin, network)
+        + ": " + hint(coin, network, stall)
 }
 
 // The halt a tracker publishes after an unrecoverable reorg (`halted`, with
@@ -354,6 +391,8 @@ module.exports = {
     describeReorgHaltNote,
     reduceIndexerStall,
     describeIndexerStallNote,
+    reduceTrainActivationPending,
+    describeTrainActivationPendingNote,
     reduceTrackerHalt,
     describeTrackerHaltNote,
     configureDependencies

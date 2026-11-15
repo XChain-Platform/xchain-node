@@ -132,8 +132,9 @@ function registerAutoheal(program, deps) {
                 resumeStopped: options.resumeStopped ?? false
             })
             // Exit 1 when a restart was attempted and failed, 2 when a container
-            // outlived two restarts this episode (the escalation), and 0 otherwise,
-            // so a timer unit alerts on both without paging on "nothing to do" passes.
+            // outlived two restarts this episode (the escalation), 3 when an opted-in
+            // container could not be inspected (Docker unreachable), and 0 otherwise,
+            // so a timer unit alerts on each without paging on "nothing to do" passes.
             return process.exit(autohealExitCode(result))
         })
 

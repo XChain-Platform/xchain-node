@@ -30,24 +30,20 @@ async function dbPasswordCanRotate() {
 
 async function getOrCreateHubDbPass() {
     const hubLocalPath = sidecars.hubSidecarPath()
-    let pass = await sidecars.readSidecarValue(hubLocalPath, "HUB_DB_PASS")
-    if (!pass) {
-        pass = crypto.randomBytes(24).toString('hex')
-        sidecars.upsertSidecarValues(hubLocalPath, { HUB_DB_PASS: pass })
-    }
-    return pass
+    const pass = await sidecars.readSidecarValue(hubLocalPath, "HUB_DB_PASS")
+    if (pass) return pass
+    return sidecars.adoptOrMintSidecarValues(
+        hubLocalPath, ["HUB_DB_PASS"], () => crypto.randomBytes(24).toString('hex')
+    ).values.HUB_DB_PASS
 }
 
 function generateDatabaseCredentials(defaultConfig, localFilePath) {
-    const freshDbCreds = {}
-    for (const key of ["DECODER_DB_PASS", "INDEXER_DB_PASS"]) {
-        if (!(key in defaultConfig)) {
-            const value = crypto.randomBytes(24).toString('hex')
-            defaultConfig[key] = value
-            freshDbCreds[key] = value
-        }
-    }
-    if (Object.keys(freshDbCreds).length) sidecars.upsertSidecarValues(localFilePath, freshDbCreds)
+    const missing = ["DECODER_DB_PASS", "INDEXER_DB_PASS"].filter(key => !(key in defaultConfig))
+    if (!missing.length) return
+    const resolved = sidecars.adoptOrMintSidecarValues(
+        localFilePath, missing, () => crypto.randomBytes(24).toString('hex'), value => value === undefined
+    )
+    Object.assign(defaultConfig, resolved.values)
 }
 
 function setIndexerHubPassword(defaultConfig, defaultValues, module) {

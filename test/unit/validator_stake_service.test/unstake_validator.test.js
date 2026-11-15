@@ -24,11 +24,6 @@ const TIP     = 150400
 function makeExplorer(chain) {
     return {
         getAddress: sinon.stub().resolves({ balances: { confirmed: chain.coin ?? '0.001', pending: '0' } }),
-        getToken:   chain.tokenMissing
-            ? sinon.stub().rejects(Object.assign(
-                new Error('Explorer returned HTTP 404 for /RBTC/api/token/XCHAIN'),
-                { code: 'EXPLORER_HTTP_404', details: { status: 404 } }))
-            : sinon.stub().resolves({ mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000 } }),
         // The whole validator set, which is the method the SDK actually has.
         // Carries an unrelated validator too, so the pubkey filter is exercised
         // rather than "the only row wins".

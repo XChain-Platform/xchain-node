@@ -48,6 +48,7 @@ const {
     reduceNodeUnreachable, describeNodeUnreachableNote, describeDuration,
     reduceDecoderReorgHalt, describeReorgHaltNote,
     reduceIndexerStall, describeIndexerStallNote,
+    reduceTrainActivationPending, describeTrainActivationPendingNote,
     reduceTrackerHalt, describeTrackerHaltNote,
     configureDependencies: configureStatusReducers
 } = require('./status_service/status_reducers.js')
@@ -66,6 +67,7 @@ configureGetStatus({
     reduceNodeCatchingUp, describeNodeCatchingUpNote,
     reduceNodeUnreachable, describeNodeUnreachableNote, reduceDecoderReorgHalt,
     describeReorgHaltNote, reduceIndexerStall, describeIndexerStallNote,
+    reduceTrainActivationPending, describeTrainActivationPendingNote,
     reduceTrackerHalt, describeTrackerHaltNote
 })
 
@@ -119,6 +121,8 @@ module.exports = {
     describeDuration,
     reduceIndexerStall,
     describeIndexerStallNote,
+    reduceTrainActivationPending,
+    describeTrainActivationPendingNote,
     reduceTrackerHalt,
     describeTrackerHaltNote,
     reduceNotReady,

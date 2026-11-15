@@ -99,6 +99,37 @@ describe('tracker_height frozen store', function () {
 
 })
 
+describe('tracker_height archive height edge inputs', function () {
+    let fakes
+
+    beforeEach(function () {
+        fakes = configureTrackerHeight(sinon.stub())
+    })
+
+    it('records a frozen-store height alone when neither live reading exists', function () {
+        expect(trackerHeight.chooseArchiveHeight(null, null, 99)).to.equal(99)
+        expect(fakes.logger.info.lastCall.args[0]).to.match(/Archive height: 99 \(read from the frozen store\)/)
+    })
+
+    it('treats a frozen-store height of zero as a reading, not as missing', function () {
+        expect(trackerHeight.chooseArchiveHeight(100, 105, 0)).to.equal(0)
+        expect(() => trackerHeight.refusePreStopOnlyHeight({ coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: 0 })).to.not.throw()
+    })
+
+    it('ignores non-integer readings instead of recording them', function () {
+        expect(trackerHeight.chooseArchiveHeight('100', 105)).to.equal(105)
+        expect(trackerHeight.chooseArchiveHeight(100.5, 105)).to.equal(105)
+        expect(trackerHeight.chooseArchiveHeight(NaN, null)).to.equal(null)
+        expect(trackerHeight.chooseArchiveHeight(null, 105, '99')).to.equal(105)
+    })
+
+    it('refuses a pre-stop reading that has no post-restart reading and no frozen height', function () {
+        const run = { coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: null }
+        expect(() => trackerHeight.refusePreStopOnlyHeight(run)).to.throw(/did not report its committed height after the restart/)
+        expect(() => trackerHeight.chooseArchiveHeight(run.preStopHeight, run.postRestartHeight, run.frozenHeight)).to.throw(/refusing to record the pre-stop height 100/)
+    })
+})
+
 describe('tracker_height live readings', function () {
     let probeServiceStatus
     let fakes

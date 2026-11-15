@@ -53,7 +53,8 @@ describe('Chaos: Download Resilience', function () {
                 await dl.getReleases('owner', 'repo')
                 expect.fail('should have thrown')
             } catch (e) {
-                expect(e.message).to.include('GitHub API Error')
+                expect(e.message).to.include('rate limit exhausted')
+                expect(e.message).to.include('GITHUB_TOKEN')
             }
         })
     })
