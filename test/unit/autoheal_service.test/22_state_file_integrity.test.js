@@ -20,24 +20,27 @@ const proxyquire = require('proxyquire').noCallThru()
 // The state file carries the restart cooldown, the backoff counts, the escalation
 // history and the stopped-container flags. A torn write or a silent reset of it
 // re-arms every one of them at once.
-describe('autoheal restart state file integrity', () => {
-    let dir, file, warn, restartState
+let dir, file, warn, restartState
 
-    beforeEach(() => {
-        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autoheal-state-'))
-        file = path.join(dir, 'autoheal-state.json')
-        warn = sinon.stub()
-        restartState = proxyquire('../../../src/services/autoheal_service/restart_state', {
-            '../../observability/logger': { getLogger: () => ({ warn, info: sinon.stub(), error: sinon.stub() }) }
-        })
+function prepareStateFileTest() {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autoheal-state-'))
+    file = path.join(dir, 'autoheal-state.json')
+    warn = sinon.stub()
+    restartState = proxyquire('../../../src/services/autoheal_service/restart_state', {
+        '../../observability/logger': { getLogger: () => ({ warn, info: sinon.stub(), error: sinon.stub() }) }
     })
+}
 
-    afterEach(() => {
-        sinon.restore()
-        fs.rmSync(dir, { recursive: true, force: true })
-    })
+function cleanUpStateFileTest() {
+    sinon.restore()
+    fs.rmSync(dir, { recursive: true, force: true })
+}
 
-    const asideFiles = () => fs.readdirSync(dir).filter(n => n.includes('.corrupt-'))
+function asideFiles() {
+    return fs.readdirSync(dir).filter(n => n.includes('.corrupt-'))
+}
+
+function defineStateFileReadTests() {
 
     it('reads a missing state file as empty without a warning', () => {
         const state = restartState.readState(file)
@@ -77,7 +80,9 @@ describe('autoheal restart state file integrity', () => {
         expect(warn.called).to.equal(false)
         expect(asideFiles()).to.have.length(0)
     })
+}
 
+function defineStateFileWriteTests() {
     it('writes through a sibling temp file renamed over the live path, never onto it', () => {
         fs.writeFileSync(file, JSON.stringify({ restarts: { old: 1 } }))
         const write = sinon.spy(fs, 'writeFileSync')
@@ -102,4 +107,13 @@ describe('autoheal restart state file integrity', () => {
 
         expect(fs.readdirSync(dir)).to.deep.equal(['blocked'])
     })
-})
+}
+
+function defineStateFileIntegrityTests() {
+    beforeEach(prepareStateFileTest)
+    afterEach(cleanUpStateFileTest)
+    defineStateFileReadTests()
+    defineStateFileWriteTests()
+}
+
+describe('autoheal restart state file integrity', defineStateFileIntegrityTests)
