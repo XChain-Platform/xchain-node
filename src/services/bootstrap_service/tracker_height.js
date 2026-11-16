@@ -25,7 +25,7 @@ let execFileAsync         = promisify(execFile)
 let { XChainService } = require('../../config')
 let { getDefaultConfig } = require('../config_service')
 let bootstrapHealthGate = require('../bootstrap_health_gate')
-const { redactSecrets } = require('../../utils/helpers')
+const { redactSecrets, sleep } = require('../../utils/helpers')
 const { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 
@@ -74,7 +74,7 @@ async function readTrackerHeightAfterRestart(coin, network, containerId, { attem
     for (let i = 0; i < attempts; i++) {
         const height = await readTrackerCommittedHeight(coin, network, containerId, { quiet: true })
         if (height !== null) return height
-        if (i + 1 < attempts) await new Promise(resolve => setTimeout(resolve, delayMs))
+        if (i + 1 < attempts) await sleep(delayMs)
     }
     return null
 }

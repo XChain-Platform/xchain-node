@@ -20,10 +20,6 @@ const {
     findHubConsensusEnvDrift
 } = require('../../../src/services/hub_consensus_env_guard')
 
-// Read through the process env's own child-process view, so the host env view
-// does not list them.
-const TIMING_VARS = ['ATTESTATION_ROUND_TIMEOUT_MS', 'ADMISSION_WATERMARK_SAMPLE_MS']
-
 const ROUND_CADENCE_KEYS = ['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW']
 const ARM_KEYS = HUB_PASSTHROUGH_VARS.filter(name => /^XC_[A-Z_]+_ACTIVATION$/.test(name))
 
@@ -40,7 +36,13 @@ function registerPassthroughListContract() {
             const undeclared = HUB_PASSTHROUGH_VARS.filter(name => {
                 try { void HUB_PASSTHROUGH_ENV[name]; return false } catch { return true }
             })
-            expect(undeclared.sort()).to.deep.equal([...TIMING_VARS].sort())
+            expect(undeclared).to.deep.equal([])
+        })
+
+        it('declares both admission timing reads in the host env view', () => {
+            for (const name of ['ATTESTATION_ROUND_TIMEOUT_MS', 'ADMISSION_WATERMARK_SAMPLE_MS']) {
+                expect(() => void HUB_PASSTHROUGH_ENV[name]).not.to.throw()
+            }
         })
     })
 }

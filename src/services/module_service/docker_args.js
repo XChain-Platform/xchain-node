@@ -213,7 +213,7 @@ function resolveStartPeriod(module, fallback) {
     if (/^\d+$/.test(value)) return value + 's'
     // Malformed override: say so rather than silently standing on the default,
     // mirroring the loud-drift guard in buildHealthcheckArgs below.
-    logger.info("WARNING: ignoring " + key + "=" + value
+    logger.warn("WARNING: ignoring " + key + "=" + value
         + ": expected bare seconds (900) or a duration with an ms/s/m/h unit (900s)")
     return fallback
 }
@@ -256,7 +256,7 @@ function buildHealthcheckArgs(module, environmentVariables) {
         // the key, the container would otherwise be created with NO healthcheck and no
         // trace of why: make that drift loud at install/update time. Empty-array return
         // is preserved so callers stay safe.
-        logger.info("WARNING: no healthcheck for " + module + ": env " + hc.portKey + " is unset")
+        logger.warn("WARNING: no healthcheck for " + module + ": env " + hc.portKey + " is unset")
         return []
     }
 

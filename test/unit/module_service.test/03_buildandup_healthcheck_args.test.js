@@ -89,14 +89,14 @@ moduleSuite('buildAndUp() healthcheck args', function () {
         it('returns [] with no warning for a module that has no healthcheck descriptor', function () {
             const stubs = makeStubs()
             const ms = loadModuleService(stubs)
-            const logSpy = sinon.spy(console, 'log')
+            const spies = [sinon.spy(console, 'warn'), sinon.spy(console, 'log')]
             try {
                 const args = ms.buildHealthcheckArgs('xchain-e2e-test', { WHATEVER: '1' })
                 expect(args).to.deep.equal([])
-                const warned = logSpy.getCalls().map(c => c.args.join(' ')).join('\n')
+                const warned = spies.flatMap(s => s.getCalls()).map(c => c.args.join(' ')).join('\n')
                 expect(warned).to.not.match(/WARNING: no healthcheck/)
             } finally {
-                logSpy.restore()
+                spies.forEach(s => s.restore())
             }
         })
 

@@ -120,3 +120,40 @@ describe('StopBudgetService restart callers', function () {
         expect(callers).to.deep.equal(['services/docker_service.js', 'services/hub_service.js'])
     })
 })
+
+describe('stopUnrecordedContainer()', function () {
+    beforeEach(() => {
+        prepareConsoleStubs()
+        sinon.stub(require('../../src/services/docker_service'), 'getContainerStopSettings').resolves(null)
+    })
+    afterEach(() => {
+        restoreConsoleStubs()
+        sinon.restore()
+    })
+    const cleanStop = () => sinon.stub().resolves({ stopped: true, seconds: 5, killed: false, exitCode: 0 })
+    const NAME = 'xchain-node-no-such-bitcoin-mainnet-xchain-decoder'
+
+    it('gives a container docker cannot confirm gone the budgeted stop, by name', async function () {
+        for (const presence of ['exists', 'unknown']) {
+            const stop = cleanStop()
+            const outcome = await sbs.stopUnrecordedContainer(sinon.stub().resolves(presence), stop, 'xchain-decoder', 'bitcoin', 'mainnet', NAME)
+            expect(stop.calledOnceWith(NAME, 120), presence).to.be.true
+            expect(outcome.budget, presence).to.equal(120)
+        }
+    })
+
+    it('stops nothing when docker confirms the name is free', async function () {
+        const stop = cleanStop()
+        const outcome = await sbs.stopUnrecordedContainer(sinon.stub().resolves('gone'), stop, 'xchain-decoder', 'bitcoin', 'mainnet', NAME)
+        expect(stop.called).to.be.false
+        expect(outcome).to.equal(null)
+    })
+
+    it('never throws, so the force-remove after it still runs', async function () {
+        const probeFails = sinon.stub().rejects(new Error('daemon down'))
+        expect(await sbs.stopUnrecordedContainer(probeFails, cleanStop(), 'xchain-decoder', 'bitcoin', 'mainnet', NAME)).to.equal(null)
+        const stopFails = sinon.stub().rejects(new Error('stop failed'))
+        expect(await sbs.stopUnrecordedContainer(sinon.stub().resolves('exists'), stopFails, 'xchain-decoder', 'bitcoin', 'mainnet', NAME)).to.equal(null)
+        expect(warnStub.args.map(a => String(a[0])).some(l => /could not give .* its budgeted stop/.test(l))).to.be.true
+    })
+})

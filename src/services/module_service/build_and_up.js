@@ -23,8 +23,8 @@ let path = require('path')
 let { HUB_MODULE_NAME, LIBRARY_BUNDLES } = require('../../config')
 let { db } = require('../../state')
 let { getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort } = require('../config_service')
-let { stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable } = require('../docker_service')
-let { stopModuleContainer, stopTimeoutArgs, shutdownTimeoutEnv } = require('../stop_budget_service')
+let { stopContainerByName, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, checkBuildKitAvailable } = require('../docker_service')
+let { stopModuleContainer, stopUnrecordedContainer, stopTimeoutArgs, shutdownTimeoutEnv } = require('../stop_budget_service')
 let { statusChanged } = require('../status_service')
 let { setHubDatabaseParameters } = require('../database_service')
 let { redactSecrets } = require('../../utils/helpers')
@@ -46,8 +46,8 @@ function configureDependencies(dependencies) {
     ;({
         execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir,
         checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort,
-        stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable,
-        stopModuleContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config,
+        stopContainerByName, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, checkBuildKitAvailable,
+        stopModuleContainer, stopUnrecordedContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config,
         goLiveGate, memoryLimitService, hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk,
         cloneGit, resolveBundledLibRef, assertNoHostPortConflicts, resolveObservabilityEnv,
         buildHealthcheckArgs, buildModuleDockerArgs, attachCrossChainNetworks, verifyContainerMemoryLimit,
@@ -249,13 +249,12 @@ async function removeExistingContainer(context) {
         } catch { /* container may have been removed manually */ }
     }
 
-    // Name-keyed cleanup immediately before `docker run --name`, making
-    // (re)creation idempotent against a leftover carcass the registry
-    // never recorded: an interrupted onlyExecution run (registry insert
-    // skipped, ModuleService.js ~L416), or a container that exists but
-    // whose registry insert failed. The overwriteContainerId removal
-    // above is id-keyed and misses both cases.
+    // Name-keyed cleanup immediately before `docker run --name`, making (re)creation
+    // idempotent against a carcass the registry never recorded (an interrupted
+    // onlyExecution run, or a failed registry insert). A RUNNING container may hold
+    // the name too, and `docker rm -f` is SIGKILL, so it gets its budgeted stop first.
     try {
+        await stopUnrecordedContainer(probeContainerPresenceByName, stopContainerByName, module, coin, network, containerPrefix)
         await forceRemoveContainerByName(containerPrefix)
     } catch { /* tolerant by design; see DockerService.forceRemoveContainerByName */ }
 }

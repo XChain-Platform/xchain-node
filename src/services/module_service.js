@@ -36,7 +36,7 @@ const {
     stopContainerByName, removeContainer, getPublishedHostPorts, getAllBoundHostPorts, forceRemoveContainerByName,
     addContainerToNetwork, checkBuildKitAvailable, probeContainerPresenceByName
 } = require('./docker_service')
-const { stopModuleContainer, stopTimeoutArgs } = require('./stop_budget_service')
+const { stopModuleContainer, stopUnrecordedContainer, stopTimeoutArgs } = require('./stop_budget_service')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./database_service')
 const { redactSecrets, sleep } = require('../utils/helpers')
 const config = require('../config');
@@ -68,7 +68,7 @@ configureGitCheckout({ execFile, execFileAsync, fs, path, modulesUrls, redactSec
 configureCloneAndRefs({ execFileAsync, fs, modulesUrls, DEFAULT_MODULE_BRANCH, getModuleDir, getModuleTmpDir, moduleDirExists, removeModuleTmpDir, createModuleTmpDir, redactSecrets, releaseManifestService, CLONE_STAGING_SUFFIX, CLONE_PREVIOUS_SUFFIX, runGitClone, assertCheckoutCommit, verifyDeploySource, reportDeployedSource, logger })
 configureDockerArgs({ fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD, getUtxoTrackerVolumeName, getPublishedHostPorts, getAllBoundHostPorts, config, validatorService, logger })
 configureContainerNetworks({ execFile, XChainService, Coin, Network, getDockerNetwork, getStatus, addContainerToNetwork, redactSecrets, sleep, memoryLimitService, logger })
-configureBuildAndUp({ execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort, stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable, stopModuleContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config, goLiveGate, memoryLimitService, hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk, cloneGit, resolveBundledLibRef, assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs, attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings, logger })
+configureBuildAndUp({ execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort, stopContainerByName, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, checkBuildKitAvailable, stopModuleContainer, stopUnrecordedContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config, goLiveGate, memoryLimitService, hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk, cloneGit, resolveBundledLibRef, assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs, attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings, logger })
 
 for (const part of ['git_checkout', 'clone_and_refs', 'docker_args', 'container_networks', 'build_and_up']) {
     delete require.cache[require.resolve('./module_service/' + part + '.js')]

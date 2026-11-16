@@ -49,4 +49,24 @@ dockerSuite('buildAndUp with overwriteContainerId', function (fixture) {
         const runCmds = capture.findCommands(/docker run/)
         expect(runCmds).to.have.length(1)
     })
+
+    it('stops a container that holds the name but is not in the registry before force-removing it', async function () {
+        const { env, capture, makeBuildAndUp } = fixture()
+        env.writeConfigFile('bitcoin-mainnet', '')
+        env.createFakeModule('xchain-encoder')
+        capture.nameHeld = true
+
+        const { ModuleService } = makeBuildAndUp()
+        await ModuleService.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet', null, true)
+
+        const name = 'xchain-node-bitcoin-mainnet-xchain-encoder'
+        const stops = capture.findCommands(/docker stop -t \d+ /)
+        const removes = capture.findCommands(/docker rm -f /)
+        expect(stops).to.have.length(1)
+        expect(stops[0].command).to.include(name)
+        expect(removes).to.have.length(1)
+        expect(capture.findCommands(/docker kill/)).to.have.length(0)
+        const order = capture._history.map(c => c.command)
+        expect(order.indexOf(stops[0].command)).to.be.lessThan(order.indexOf(removes[0].command))
+    })
 })

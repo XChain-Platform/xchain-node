@@ -14,11 +14,14 @@
  * XChain Node - Autoheal restart state
  ********************************************************************/
 
-const fs   = require('fs')
-const os   = require('os')
-const path = require('path')
+const crypto = require('crypto')
+const fs     = require('fs')
+const os     = require('os')
+const path   = require('path')
 
 const config = require('../../config');
+const { getLogger } = require('../../observability/logger');
+const logger = getLogger();
 
 // A container must be continuously unhealthy for at least this long before
 // a restart is considered (on top of Docker's own retries budget).
@@ -69,6 +72,24 @@ function restartBackoffMs(attempts, cooldownMs, ceilingMs) {
     return Math.min(cooldownMs * Math.pow(2, attempts - 1), ceilingMs)
 }
 
+const EMPTY_STATE = () => ({ restarts: {}, unhealthySince: {}, restartCount: {}, stoppedByAutoheal: {} })
+
+// Keep an unreadable state file for inspection and say so. Without this the pass
+// would persist the empty state over it and the loss of the cooldown stamps, the
+// backoff counts and the escalation history would leave no trace.
+function setCorruptStateAside(stateFile, why) {
+    const aside = stateFile + '.corrupt-' + new Date().toISOString().replace(/[:.]/g, '-')
+    let kept = aside
+    try {
+        fs.renameSync(stateFile, aside)
+    } catch {
+        kept = null
+    }
+    logger.warn('autoheal: state file ' + stateFile + ' is unreadable (' + why + '), so the restart cooldown, backoff counts, '
+        + 'escalation history and stopped-container flags start empty this pass'
+        + (kept ? '; the unreadable file was kept as ' + kept : ''))
+}
+
 function readState(stateFile) {
     // {
     //   restarts:       { <containerId>: <epoch ms of last autoheal restart> },
@@ -76,34 +97,57 @@ function readState(stateFile) {
     //   restartCount:   { <containerId>: <restarts since this container last was healthy> },
     //   stoppedByAutoheal: { <containerId>: true when a stopped container still needs starting }
     // }
+    let raw
     try {
-        const parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
-        if (parsed && typeof parsed.restarts === 'object' && parsed.restarts !== null) {
-            // unhealthySince arrived after restarts; an older state file has none.
-            if (typeof parsed.unhealthySince !== 'object' || parsed.unhealthySince === null) {
-                parsed.unhealthySince = {}
-            }
-            // restartCount arrived after both. An older file reads as zero attempts,
-            // which costs a wedge one un-backed-off retry after an upgrade, never a
-            // missed restart.
-            if (typeof parsed.restartCount !== 'object' || parsed.restartCount === null) {
-                parsed.restartCount = {}
-            }
-            if (typeof parsed.stoppedByAutoheal !== 'object' || parsed.stoppedByAutoheal === null) {
-                parsed.stoppedByAutoheal = {}
-            }
-            return parsed
+        raw = fs.readFileSync(stateFile, 'utf8')
+    } catch (err) {
+        // A missing file is the first pass and stays quiet; any other read failure is not.
+        if (!err || err.code !== 'ENOENT') {
+            logger.warn('autoheal: state file ' + stateFile + ' could not be read (' + (err && err.message) + '), '
+                + 'so the restart cooldown, backoff counts and escalation history start empty this pass')
         }
-    } catch {
-        // Missing or corrupt state file: start clean. Worst case a container
-        // gets one extra restart after a state loss, which is acceptable.
+        return EMPTY_STATE()
     }
-    return { restarts: {}, unhealthySince: {}, restartCount: {}, stoppedByAutoheal: {} }
+    let parsed = null
+    try {
+        parsed = JSON.parse(raw)
+    } catch (err) {
+        setCorruptStateAside(stateFile, 'invalid JSON: ' + err.message)
+        return EMPTY_STATE()
+    }
+    if (!parsed || typeof parsed.restarts !== 'object' || parsed.restarts === null) {
+        setCorruptStateAside(stateFile, 'no restarts map')
+        return EMPTY_STATE()
+    }
+    // unhealthySince arrived after restarts; an older state file has none.
+    if (typeof parsed.unhealthySince !== 'object' || parsed.unhealthySince === null) {
+        parsed.unhealthySince = {}
+    }
+    // restartCount arrived after both. An older file reads as zero attempts,
+    // which costs a wedge one un-backed-off retry after an upgrade, never a
+    // missed restart.
+    if (typeof parsed.restartCount !== 'object' || parsed.restartCount === null) {
+        parsed.restartCount = {}
+    }
+    if (typeof parsed.stoppedByAutoheal !== 'object' || parsed.stoppedByAutoheal === null) {
+        parsed.stoppedByAutoheal = {}
+    }
+    return parsed
 }
 
+// Replace the file through a flushed sibling temp file and a rename, so a crash or
+// a full disk mid-write leaves the previous state intact rather than a torn file.
 function writeState(stateFile, state) {
     fs.mkdirSync(path.dirname(stateFile), { recursive: true })
-    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n')
+    const tmpPath = path.join(path.dirname(stateFile),
+        '.' + path.basename(stateFile) + '.' + process.pid + '.' + crypto.randomBytes(6).toString('hex') + '.tmp')
+    try {
+        fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2) + '\n', { flag: 'wx', flush: true })
+        fs.renameSync(tmpPath, stateFile)
+    } catch (err) {
+        try { fs.unlinkSync(tmpPath) } catch { /* never created */ }
+        throw err
+    }
 }
 
 // How long the container has been CONTINUOUSLY unhealthy, derived from the

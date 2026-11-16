@@ -150,10 +150,6 @@ const HUB_PASSTHROUGH_VARS = [
     "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
     "XC_OFFER_LIST_REGTEST_ACTIVATION"
 ]
-const HUB_ADMISSION_TIMING_VARS = new Set([
-    "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS"
-])
-
 // Hub telemetry secrets come from host env; unset, ip_hash stays null and admin is 401.
 // BTC indexer JSON-RPC URL comes from host env for a hub not co-located with one. Left
 // empty, it is composed from the co-located indexer, else the hub uses its configs table.
@@ -303,9 +299,7 @@ function configureHubBeforeKey(defaultValues, module) {
         defaultValues["TELEMETRY_ADMIN_KEY"]      = config.TELEMETRY_ADMIN_KEY
         defaultValues["BTC_INDEXER_API_URL"]      = config.BTC_INDEXER_API_URL
         for (const varName of HUB_PASSTHROUGH_VARS) {
-            const value = HUB_ADMISSION_TIMING_VARS.has(varName)
-                ? config.childProcessEnv()[varName]
-                : readSecretHostEnv(varName)
+            const value = readSecretHostEnv(varName)
             if (value !== undefined && value !== "") {
                 defaultValues[varName] = value
             }
