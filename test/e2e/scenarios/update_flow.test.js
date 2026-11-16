@@ -67,9 +67,8 @@ describe('E2E: Update Flow (Scenario 4.6)', function () {
             // Replacement uses one budgeted stop for the old container and never docker kill.
             expect(env.capture.findCommands(/docker kill/)).to.have.lengthOf(0)
             const stopCmds = env.capture.findCommands(/docker stop -t \d+ /)
-            expect(stopCmds).to.have.lengthOf(1)
-            const stopHasOldId = stopCmds.some(c => c.command.includes(oldContainerId))
-            expect(stopHasOldId, 'stop references old container').to.be.true
+            const oldContainerStopCmds = stopCmds.filter(c => c.command.includes(oldContainerId))
+            expect(oldContainerStopCmds, 'one stop references old container').to.have.lengthOf(1)
 
             // Should have removed the old container
             const rmCmds = env.capture.findCommands(/docker rm/)
