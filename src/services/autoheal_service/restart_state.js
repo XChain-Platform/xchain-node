@@ -73,12 +73,14 @@ function restartBackoffMs(attempts, cooldownMs, ceilingMs) {
 }
 
 const EMPTY_STATE = () => ({ restarts: {}, unhealthySince: {}, restartCount: {}, stoppedByAutoheal: {} })
+let corruptFileSequence = 0
 
 // Keep an unreadable state file for inspection and say so. Without this the pass
 // would persist the empty state over it and the loss of the cooldown stamps, the
 // backoff counts and the escalation history would leave no trace.
 function setCorruptStateAside(stateFile, why) {
     const aside = stateFile + '.corrupt-' + new Date().toISOString().replace(/[:.]/g, '-')
+        + '-' + process.pid + '-' + corruptFileSequence++
     let kept = aside
     try {
         fs.renameSync(stateFile, aside)

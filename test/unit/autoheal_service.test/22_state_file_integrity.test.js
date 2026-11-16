@@ -65,12 +65,20 @@ function defineStateFileReadTests() {
     })
 
     it('warns on a zero-byte state file and on a document with no restarts map', () => {
-        fs.writeFileSync(file, '')
+        const zeroByte = ''
+        const noRestarts = JSON.stringify({ unhealthySince: { abc: 1 } })
+        sinon.useFakeTimers({ now: new Date('2026-11-16T12:34:56.789Z') })
+
+        fs.writeFileSync(file, zeroByte)
         restartState.readState(file)
-        fs.writeFileSync(file, JSON.stringify({ unhealthySince: { abc: 1 } }))
+        fs.writeFileSync(file, noRestarts)
         restartState.readState(file)
+
         expect(warn.callCount).to.equal(2)
-        expect(asideFiles()).to.have.length(2)
+        const aside = asideFiles()
+        expect(aside).to.have.length(2)
+        expect(aside.map(name => fs.readFileSync(path.join(dir, name), 'utf8')))
+            .to.have.members([zeroByte, noRestarts])
     })
 
     it('reads an intact state file back without a warning or an aside copy', () => {
