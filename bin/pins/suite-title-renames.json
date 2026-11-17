@@ -229,6 +229,10 @@
     },
     "test/unit/release_manifest_service.test/resolve_install_target.test.js": {
       "ReleaseManifestService resolveInstallTarget() falls back to the default branch when the lookup fails outright": "ReleaseManifestService resolveInstallTarget() fails closed on a thrown lookup error even when a branch fallback is allowed"
+    },
+    "test/unit/security/configuration/dependency_advisories.test.js": {
+      "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 11.0.9",
+      "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 11.0.9"
     }
   }
 }
