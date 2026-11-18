@@ -157,7 +157,7 @@ function oracleBatchPassthrough() {
 
 // The hub-side regtest-only override seams. The gate that keeps
 // them inert off regtest lives at the point of consumption (attest_response_timing.js,
-// and the not-yet-built AttestationBatchPublisher on the same pattern), so this
+// which the hub's batch_publisher.js also uses to resolve the batch window), so this
 // suite only pins that the passthrough itself reaches the container config.
 function attestOverridePassthrough() {
     const ATTEST_OVERRIDE_VARS = [

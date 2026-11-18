@@ -152,7 +152,9 @@ async function readAnsweredCapabilitySets(pubkey, network, capabilities, deps = 
     if (block === undefined || block === null) {
         try {
             const status = await sdk.explorer.getStatus()
-            block = Number(status && status.last_block && status.last_block[coins.stakeCoin])
+            // An unavailable tip is an explicit null, which Number() would turn into block 0.
+            const raw = status && status.last_block ? status.last_block[coins.stakeCoin] : undefined
+            block = typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== '') ? Number(raw) : NaN
         } catch (e) {
             return { unavailable: true, error: e.message }
         }

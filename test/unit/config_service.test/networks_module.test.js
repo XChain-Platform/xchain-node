@@ -40,6 +40,7 @@ function configure(overrides = {}) {
         config,
         peers: {
             validatorService: {
+                getValidatorSettings: () => null,
                 getValidatorEnv: () => ({}),
                 validatorModeReport: () => ({ mode: 'absent', dir: '/config/validator' })
             }

@@ -295,7 +295,9 @@ async function installHubFromResolvedRef(branch, defaultConfig, hubConnector) {
         await sleep(2000)
     }
 
-    throw "Couldn't install hub module"
+    const failures = Array.isArray(hubConnector.lastFailures) ? hubConnector.lastFailures : []
+    throw "Couldn't install hub module" +
+        (failures.length ? " (last error: " + redactSecrets(failures.join('; ')) + ")" : "")
 }
 
 module.exports = {

@@ -165,6 +165,22 @@ const HUB_CONFIG_ATTEMPTS = 60
 // push cut off at the budget may still have been applied by the hub, so a
 // re-run is the remedy.
 const HUB_CONFIG_WALL_MS = 180000
+// These responses cannot become successful while the request, payload and API
+// key stay unchanged. Other statuses, including 429, may clear and still retry.
+const PERMANENT_HUB_REFUSALS = new Set([401, 403, 413])
+
+function permanentRefusalStatuses(moduleConnector, attemptErr) {
+    if (attemptErr !== null || !Array.isArray(moduleConnector.lastFailureStatuses)) return []
+    const statuses = moduleConnector.lastFailureStatuses
+    return statuses.length && statuses.every(status => PERMANENT_HUB_REFUSALS.has(status)) ? statuses : []
+}
+
+function permanentRefusalHint(statuses) {
+    if (statuses.some(status => status === 401 || status === 403)) {
+        return "The hub refused this host's API key. HUB_API_KEY must match the key the hub was started with; retrying cannot help."
+    }
+    return "The config payload exceeds the hub's 100 KB request limit; retrying cannot help."
+}
 
 async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) {
     const { sleep, redactSecrets, logger } = dependencies
@@ -188,6 +204,7 @@ async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) 
         try {
             hubUpdated = await moduleConnector.updateConfig(jsonConfig, { budgetMs: remaining })
         } catch (err) { attemptErr = err }
+        const permanentStatuses = permanentRefusalStatuses(moduleConnector, attemptErr)
 
         // A FALSY RETURN is a failure too, and it was the one reported with no
         // cause at all. callRpc() catches its own transport errors and returns
@@ -206,6 +223,11 @@ async function pushHubConfig(module, moduleConnector, jsonConfig, dependencies) 
         }
 
         if (hubUpdated) break
+        if (permanentStatuses.length) {
+            throw "There was a problem trying to update a config in the " + module + " module" +
+                (lastErr ? " (last error: " + redactSecrets(lastErr) + ")" : "") + ". " +
+                permanentRefusalHint(permanentStatuses)
+        }
         tries--
         // Out of retries: give up, naming the last concrete error instead of a generic failure.
         if (tries <= 0 || now() - startedAt >= HUB_CONFIG_WALL_MS) {

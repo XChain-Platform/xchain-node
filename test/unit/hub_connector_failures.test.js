@@ -56,6 +56,7 @@ describe('HubConnector: a non-throwing failure still records why', () => {
         expect(ok).to.equal(false)
         expect(c.lastFailures).to.be.an('array').that.is.not.empty
         expect(c.lastFailures.join('; ')).to.match(/401/)
+        expect(c.lastFailureStatuses).to.deep.equal([401])
     })
 
     it('an unreachable endpoint records the connection code, not a bare null', async () => {
@@ -70,6 +71,7 @@ describe('HubConnector: a non-throwing failure still records why', () => {
 
         expect(ok).to.equal(false)
         expect(c.lastFailures.join('; ')).to.match(/ECONNREFUSED|ECONNRESET|socket hang up/)
+        expect(c.lastFailureStatuses).to.deep.equal([null])
     })
 
 })
@@ -95,6 +97,7 @@ describe('HubConnector: malformed success responses still record why', () => {
         expect(await c.updateConfig({})).to.equal(false)
         expect(c.lastFailures.join('; ')).to.include('HTTP 200')
         expect(c.lastFailures.join('; ')).to.include('Method not found')
+        expect(c.lastFailureStatuses).to.deep.equal([200])
     })
 
     it('a 200 non-JSON body records the missing result without copying the body', async () => {
@@ -134,6 +137,7 @@ describe('HubConnector: a hub answer carrying an error is not a delivered push',
 
         expect(ok).to.equal(false)
         expect(c.lastFailures.join('; ')).to.include('Not the leader for seq 256')
+        expect(c.lastFailureStatuses).to.deep.equal([null])
     })
 
     it('a non-string error value still fails the push', async () => {
@@ -150,6 +154,7 @@ describe('HubConnector: a hub answer carrying an error is not a delivered push',
 
         expect(await c.updateConfig({})).to.equal(true)
         expect(c.lastFailures).to.be.empty
+        expect(c.lastFailureStatuses).to.be.empty
     })
 })
 
@@ -173,6 +178,7 @@ describe('HubConnector: a non-throwing failure still records why', () => {
         expect(c.lastFailures).to.have.lengthOf(2)
         expect(c.lastFailures.join('; ')).to.include(live)
         expect(c.lastFailures.join('; ')).to.include(dead)
+        expect(c.lastFailureStatuses).to.deep.equal([401, null])
     })
 
     it('records both a 200 without a result and an unreachable endpoint', async () => {
@@ -197,6 +203,7 @@ describe('HubConnector: a non-throwing failure still records why', () => {
         })
         const c = new HubConnector('127.0.0.1', srv.address().port)
         c.lastFailures = ['stale → from an earlier call']
+        c.lastFailureStatuses = [401]
 
         const ok = await c.updateConfig({ any: 'config' })
 
@@ -204,5 +211,6 @@ describe('HubConnector: a non-throwing failure still records why', () => {
         // chasing a failure that already resolved.
         expect(ok).to.equal(true)
         expect(c.lastFailures).to.be.an('array').that.is.empty
+        expect(c.lastFailureStatuses).to.be.an('array').that.is.empty
     })
 })

@@ -91,6 +91,7 @@ async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
 //   probe     - 'http_get' uses wget GET on `path` (default /status); 'jsonrpc_ping'
 //               uses wget POST with a JSON-RPC ping payload; absent means no
 //               healthcheck added
+//   authEnv   - name of a container env var the probe sends as x-api-key when it is set
 //   path      - http_get only: route to probe. Defaults to /status. Set it for
 //               services whose /status is expensive: sync's /status runs a
 //               SELECT COUNT(*) census over every replicated table, which on a
@@ -145,7 +146,9 @@ const SERVICE_HEALTHCHECK = {
     // tracker was still inside the 60s window it declares one line below.
     // Deliberately no autoheal: that same probe 503s on tracker state, a
     // deliberate tracker halt included, which restarting the encoder cannot clear.
-    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
+    // /status sits behind the encoder's API-key gate whenever API_KEY is set in the
+    // container, so the probe sends that key (authEnv) or a keyed encoder reads unhealthy.
+    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     authEnv: 'API_KEY', interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
     [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
     [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
     // The miner's API is JSON-RPC only (no GET /status route); an http_get probe 500s
@@ -277,7 +280,7 @@ function buildHealthcheckArgs(module, environmentVariables) {
         url = `http://localhost:${port}${hc.path || '/status'}`
     }
     return [
-        '--health-cmd',      healthcheckCommand({ url, postData, timeoutSeconds: parseInt(hc.timeout, 10) }),
+        '--health-cmd',      healthcheckCommand({ url, postData, timeoutSeconds: parseInt(hc.timeout, 10), authEnv: hc.authEnv }),
         '--health-interval', hc.interval,
         '--health-timeout',  hc.timeout,
         '--health-retries',  String(hc.retries),

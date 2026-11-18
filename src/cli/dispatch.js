@@ -22,7 +22,7 @@ const { resolveArgs } = require('../services/config_service')
 const SELF_UPDATE_HANDOFF_WAIT_MS = 30000
 
 function dispatchSettings(config) {
-    const commandsNeedingVersions = ['install', 'update', 'reinstall']
+    const commandsNeedingVersions = ['install', 'update']
     // Read-only commands only display state and never change which services
     // are installed/running, so they don't need to push local config to the
     // hub/explorer. Skipping the push keeps them fast and avoids the lengthy
@@ -40,7 +40,7 @@ function dispatchSettings(config) {
     // the audited clear it writes must not interleave with reset, restore or recreate.
     // `bootstrap-restore-rehearsal` is included: it creates and drops a disposable
     // database on the shared MariaDB, so it holds the lock from preCheck to exit.
-    const mutatingCommands = ['install', 'update', 'recreate', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal']
+    const mutatingCommands = ['install', 'update', 'recreate', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal']
     // How long a non-mutating command blocks for a lock-holding mutator before
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.

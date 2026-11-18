@@ -10,6 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
+const sinon = require('sinon')
 const { expect } = require('chai')
 
 const { HUB_PASSTHROUGH_VARS } = require('../../../src/services/config_service/networks')
@@ -17,7 +18,11 @@ const { HUB_PASSTHROUGH_ENV } = require('../../../src/config')
 const {
     CONSENSUS_ENV_KEYS,
     isConsensusEnvKeyHonoredOn,
-    findHubConsensusEnvDrift
+    consensusEnvKeysForNetwork,
+    describeConsensusEnvSupply,
+    findHubConsensusEnvDrift,
+    assertNoHubConsensusEnvDrift,
+    isHubConsensusEnvDriftError
 } = require('../../../src/services/hub_consensus_env_guard')
 
 const ROUND_CADENCE_KEYS = ['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW']
@@ -102,9 +107,118 @@ function registerNetworkGatedContract() {
     })
 }
 
+const ATTEST_TIMING_KEYS = ['ATTEST_RESPONSE_FORWARD_S_OVERRIDE', 'ATTEST_BATCH_WINDOW_S_OVERRIDE']
+
+function inspectStub(env) {
+    const rows = Object.keys(env).map(k => `${k}=${env[k]}`)
+    return sinon.stub().resolves({ stdout: JSON.stringify(rows) + '\n' })
+}
+
+function registerAttestTimingContract() {
+    describe('attestation timing overrides', function attestTimingContract() {
+        it('passes both overrides through and guards both', () => {
+            for (const key of ATTEST_TIMING_KEYS) {
+                expect(HUB_PASSTHROUGH_VARS, key).to.include(key)
+                expect(CONSENSUS_ENV_KEYS, key).to.include(key)
+            }
+        })
+
+        it('honors both on regtest and nowhere else', () => {
+            for (const key of ATTEST_TIMING_KEYS) {
+                expect(isConsensusEnvKeyHonoredOn(key, 'regtest'), key).to.equal(true)
+                for (const network of ['mainnet', 'testnet', '']) {
+                    expect(isConsensusEnvKeyHonoredOn(key, network), key + ' on ' + network).to.equal(false)
+                }
+            }
+            expect(consensusEnvKeysForNetwork('mainnet')).to.not.include.members(ATTEST_TIMING_KEYS)
+            expect(consensusEnvKeysForNetwork('regtest')).to.include.members(ATTEST_TIMING_KEYS)
+        })
+
+        it('flags a regtest recreate from a clean shell that drops either override', () => {
+            const live = { HUB_NETWORK: 'regtest', ATTEST_RESPONSE_FORWARD_S_OVERRIDE: '2', ATTEST_BATCH_WINDOW_S_OVERRIDE: '30' }
+            const keys = drift => drift.map(d => d.key).sort()
+            expect(keys(findHubConsensusEnvDrift({ HUB_NETWORK: 'regtest' }, live))).to.deep.equal(ATTEST_TIMING_KEYS.slice().sort())
+            expect(keys(findHubConsensusEnvDrift({}, live))).to.deep.equal(['ATTEST_BATCH_WINDOW_S_OVERRIDE', 'ATTEST_RESPONSE_FORWARD_S_OVERRIDE', 'HUB_NETWORK'])
+            expect(findHubConsensusEnvDrift({ HUB_NETWORK: 'regtest', ...live }, live)).to.deep.equal([])
+        })
+
+        it('does not refuse dropping a stale override off regtest', () => {
+            const live = { HUB_NETWORK: 'mainnet', ATTEST_RESPONSE_FORWARD_S_OVERRIDE: '2', ATTEST_BATCH_WINDOW_S_OVERRIDE: '30' }
+            expect(findHubConsensusEnvDrift({ HUB_NETWORK: 'mainnet' }, live)).to.deep.equal([])
+        })
+
+        it('refuses the deploy through the assert path and names only the keys', async () => {
+            const live = { HUB_NETWORK: 'regtest', ATTEST_RESPONSE_FORWARD_S_OVERRIDE: '2' }
+            let thrown = null
+            try {
+                await assertNoHubConsensusEnvDrift({ HUB_NETWORK: 'regtest' }, { execFileAsync: inspectStub(live), env: {} })
+            } catch (err) { thrown = err }
+            expect(isHubConsensusEnvDriftError(thrown)).to.equal(true)
+            expect(thrown.drift).to.deep.equal([{ key: 'ATTEST_RESPONSE_FORWARD_S_OVERRIDE' }])
+            expect(thrown.message).to.contain('ATTEST_RESPONSE_FORWARD_S_OVERRIDE')
+        })
+
+        it('reports an unsupplied override as defaulted on regtest only', () => {
+            expect(describeConsensusEnvSupply({ HUB_NETWORK: 'regtest' }).defaulted).to.include.members(ATTEST_TIMING_KEYS)
+            expect(describeConsensusEnvSupply({ HUB_NETWORK: 'mainnet' }).defaulted).to.not.include.members(ATTEST_TIMING_KEYS)
+        })
+    })
+}
+
+const SNAPSHOT_SEAM_KEYS = ['XDEX_SEED_LOCAL_VALIDATOR', 'XDEX_SNAPSHOT_BLOCK']
+
+function registerSnapshotSeamContract() {
+    describe('regtest snapshot seams', function snapshotSeamContract() {
+        it('guards every XDEX_ name the hub passthrough carries', () => {
+            const xdex = HUB_PASSTHROUGH_VARS.filter(name => /^XDEX_/.test(name))
+            expect(xdex.slice().sort()).to.deep.equal(SNAPSHOT_SEAM_KEYS.slice().sort())
+            for (const key of xdex) expect(CONSENSUS_ENV_KEYS, key).to.include(key)
+        })
+
+        it('honors both on regtest and nowhere else', () => {
+            for (const key of SNAPSHOT_SEAM_KEYS) {
+                expect(isConsensusEnvKeyHonoredOn(key, 'regtest'), key).to.equal(true)
+                for (const network of ['mainnet', 'testnet', '']) {
+                    expect(isConsensusEnvKeyHonoredOn(key, network), key + ' on ' + network).to.equal(false)
+                }
+            }
+        })
+
+        it('flags a regtest update from a clean shell that drops either seam', () => {
+            const keys = drift => drift.map(d => d.key)
+            const live = { HUB_NETWORK: 'regtest', XDEX_SEED_LOCAL_VALIDATOR: '1' }
+            expect(keys(findHubConsensusEnvDrift({ HUB_NETWORK: 'regtest' }, live))).to.deep.equal(['XDEX_SEED_LOCAL_VALIDATOR'])
+            expect(keys(findHubConsensusEnvDrift({}, live)).sort()).to.deep.equal(['HUB_NETWORK', 'XDEX_SEED_LOCAL_VALIDATOR'])
+            const anchored = { HUB_NETWORK: 'regtest', XDEX_SNAPSHOT_BLOCK: '100' }
+            expect(keys(findHubConsensusEnvDrift({ HUB_NETWORK: 'regtest' }, anchored))).to.deep.equal(['XDEX_SNAPSHOT_BLOCK'])
+        })
+
+        it('accepts a deploy that carries the seam forward', () => {
+            const live = { HUB_NETWORK: 'regtest', XDEX_SEED_LOCAL_VALIDATOR: '1' }
+            expect(findHubConsensusEnvDrift({ ...live }, live)).to.deep.equal([])
+        })
+
+        it('does not refuse dropping a stale seam off regtest', () => {
+            for (const network of ['mainnet', 'testnet']) {
+                const live = { HUB_NETWORK: network, XDEX_SEED_LOCAL_VALIDATOR: '1', XDEX_SNAPSHOT_BLOCK: '100' }
+                expect(findHubConsensusEnvDrift({ HUB_NETWORK: network }, live), network).to.deep.equal([])
+            }
+            const standalone = { XDEX_SEED_LOCAL_VALIDATOR: '1' }
+            expect(findHubConsensusEnvDrift({}, standalone)).to.deep.equal([])
+        })
+
+        it('reports an unsupplied seam as defaulted on regtest only', () => {
+            expect(describeConsensusEnvSupply({ HUB_NETWORK: 'regtest' }).defaulted).to.include.members(SNAPSHOT_SEAM_KEYS)
+            expect(describeConsensusEnvSupply({ HUB_NETWORK: 'mainnet' }).defaulted).to.not.include.members(SNAPSHOT_SEAM_KEYS)
+        })
+    })
+}
+
 function hubEnvPassthroughContract() {
     registerPassthroughListContract()
     registerNetworkGatedContract()
+    registerAttestTimingContract()
+    registerSnapshotSeamContract()
 }
 
 describe('hub env passthrough contract', hubEnvPassthroughContract)

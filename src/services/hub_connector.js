@@ -75,6 +75,14 @@ class HubConnector {
         // "url → code|message" strings for each failed endpoint so callers
         // can report exactly what was tried and why, instead of a bare null.
         this.lastFailures = [];
+        // Kept parallel with lastFailures so callers can act on an HTTP status
+        // without parsing operator-facing text. null means no HTTP response.
+        this.lastFailureStatuses = [];
+    }
+
+    recordFailure(message, status = null) {
+        this.lastFailures.push(message);
+        this.lastFailureStatuses.push(status);
     }
 
     // Internal: call a JSON-RPC method, trying each endpoint starting from the
@@ -96,13 +104,14 @@ class HubConnector {
         // the remaining endpoints in case one is fully healthy.
         let degraded = null;
         this.lastFailures = [];
+        this.lastFailureStatuses = [];
         const budgetEnd = Date.now() + budgetMs;
         for(let i = 0; i < this.urls.length; i++){
             let idx = (this._lastGoodIdx + i) % this.urls.length;
             let url = this.urls[idx];
             const attemptMs = Math.min(timeout, budgetEnd - Date.now());
             if(attemptMs <= 0){
-                this.lastFailures.push(url + ' → wall-clock budget exhausted');
+                this.recordFailure(url + ' → wall-clock budget exhausted');
                 break;
             }
             const expiry = AbortSignal.timeout(attemptMs);
@@ -118,7 +127,7 @@ class HubConnector {
                     this._lastGoodIdx = idx;
                     return response.data.result;
                 }
-                this.lastFailures.push(missingResultFailure(url, response));
+                this.recordFailure(missingResultFailure(url, response), response.status || null);
             } catch(err){
                 if(err.response && err.response.data && err.response.data.result !== undefined){
                     degraded = err.response.data.result;
@@ -126,7 +135,10 @@ class HubConnector {
                     // Unreachable, cut off by its deadline, or answered with a status
                     // carrying no JSON-RPC result. Record why so the caller can
                     // report which endpoints failed instead of an undiagnosable null.
-                    this.lastFailures.push(transportFailure(url, err, expiry.aborted, attemptMs));
+                    this.recordFailure(
+                        transportFailure(url, err, expiry.aborted, attemptMs),
+                        (err.response && err.response.status) || null
+                    );
                 }
             }
         }
@@ -163,7 +175,7 @@ class HubConnector {
         if(result && typeof result === 'object' && result.error){
             const e = result.error;
             const text = typeof e === 'string' ? e : (e && e.message) || JSON.stringify(e);
-            this.lastFailures.push('hub refused config push → ' + text);
+            this.recordFailure('hub refused config push → ' + text);
             return false;
         }
         return result !== null;

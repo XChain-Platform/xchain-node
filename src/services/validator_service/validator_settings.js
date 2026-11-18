@@ -100,7 +100,10 @@ function getValidatorEnv() {
 
     // The hub refuses to boot in validator mode without HUB_NETWORK. Host env
     // wins (the passthrough list already copied it); the recorded network
-    // fills the gap so a fresh install needs no .env edit for it.
+    // fills the gap so a fresh install needs no .env edit for it. The hub's
+    // indexer URLs are composed from the same recorded network first, and a
+    // value outside the known networks is still declared here so the hub
+    // refuses it loudly rather than deploying on a derived one.
     if (!config.HUB_NETWORK && s.network) env.HUB_NETWORK = s.network
 
     // DOGE publisher wiring, from the wallet init made. Every value here is

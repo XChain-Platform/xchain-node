@@ -44,11 +44,11 @@ const FS_WITHOUT_SIDECAR = Object.assign({}, realFs, {
     existsSync: (p) => (String(p).endsWith('hub.local') ? false : realFs.existsSync(p))
 })
 
-function makeConfigService() {
+function makeConfigService(validatorService = NO_VALIDATOR) {
     return proxyquire('../../src/services/config_service', {
         'fs': FS_WITHOUT_SIDECAR,
         './database_service': NO_DATABASE,
-        './validator_service': NO_VALIDATOR
+        './validator_service': validatorService
     })
 }
 
@@ -81,8 +81,8 @@ function runningCommand(...args) {
     process.argv = ['/usr/bin/node', '/usr/local/bin/xchain-node', ...args]
 }
 
-async function hubConfig() {
-    return await makeConfigService().getDefaultConfig(HUB_MODULE_NAME, null, null)
+async function hubConfig(validatorService) {
+    return await makeConfigService(validatorService).getDefaultConfig(HUB_MODULE_NAME, null, null)
 }
 
 const btcIndexerUrl = (network) =>
@@ -226,5 +226,63 @@ describe('ConfigService hub network and BTC indexer composition', function () {
                 .filter(w => w.includes('this hub has no BTC indexer'))
             expect(warnings.length).to.equal(1)
         })
+    })
+})
+
+// A validator host declares the network `validator init` recorded, and the host env's value
+// still wins. The stub reproduces getValidatorEnv's own rule for that, so the composed
+// indexer URLs are checked against the network the container will actually declare.
+function validatorRecording(network) {
+    return {
+        getValidatorSettings: () => ({ enabled: true, network }),
+        getValidatorEnv: () => (process.env.HUB_NETWORK ? {} : { HUB_NETWORK: network }),
+        validatorModeReport: () => ({ mode: 'validator', dir: '/tmp/test-xchain-config/validator', missing: [] })
+    }
+}
+
+describe('ConfigService hub network on a validator host', function () {
+    beforeEach(prepareHubConfig)
+    afterEach(cleanHubConfig)
+
+    const dogeIndexerUrl = (network) => 'http://xchain-node-dogecoin-' + network + '-xchain-indexer:3004'
+    const ambiguityWarnings = () => console.warn.getCalls()
+        .map(c => String(c.args[0])).filter(w => w.includes('cannot derive one network'))
+
+    it('composes the indexer URLs for the recorded network when the stacks span two networks', async function () {
+        registry.resolves([
+            stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.TESTNET),
+            stack(XChainService.XCHAIN_INDEXER, Coin.DOGECOIN, Network.TESTNET),
+            stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.REGTEST)
+        ])
+        runningCommand('update', 'xchain-hub')
+        const cfg = await hubConfig(validatorRecording(Network.TESTNET))
+        expect(cfg['HUB_NETWORK']).to.equal(Network.TESTNET)
+        expect(cfg['BTC_INDEXER_API_URL']).to.equal(btcIndexerUrl(Network.TESTNET))
+        expect(cfg['DOGE_INDEXER_URL']).to.equal(dogeIndexerUrl(Network.TESTNET))
+        expect(ambiguityWarnings()).to.have.length(0)
+    })
+
+    it('does not compose a BTC URL from an indexer on a network other than the recorded one', async function () {
+        registry.resolves([stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.REGTEST)])
+        runningCommand('update', 'xchain-hub')
+        const cfg = await hubConfig(validatorRecording(Network.TESTNET))
+        expect(cfg['HUB_NETWORK']).to.equal(Network.TESTNET)
+        expect(cfg['BTC_INDEXER_API_URL']).to.equal('')
+    })
+
+    it('lets the host env network win over the recorded one', async function () {
+        process.env.HUB_NETWORK = Network.REGTEST
+        registry.resolves([stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.REGTEST)])
+        runningCommand('update', 'xchain-hub')
+        const cfg = await hubConfig(validatorRecording(Network.TESTNET))
+        expect(cfg['HUB_NETWORK']).to.equal(Network.REGTEST)
+        expect(cfg['BTC_INDEXER_API_URL']).to.equal(btcIndexerUrl(Network.REGTEST))
+    })
+
+    it('still declares a recorded value outside the known networks, so the hub refuses it', async function () {
+        registry.resolves([stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.TESTNET)])
+        runningCommand('update', 'xchain-hub')
+        const cfg = await hubConfig(validatorRecording('testnett'))
+        expect(cfg['HUB_NETWORK']).to.equal('testnett')
     })
 })

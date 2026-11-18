@@ -46,6 +46,14 @@ const MANIFEST_FILE  = 'release-manifest.json'
 
 const localManifestPath = path.join(__dirname, '..', MANIFEST_FILE)
 
+function githubLookupError(lookup, error) {
+    const message = error && error.message ? error.message : String(error)
+    const wrapped = new Error(`GitHub ${lookup} failed: ${message}`, { cause: error })
+    if (error && error.response) wrapped.response = error.response
+    if (error && error.code) wrapped.code = error.code
+    return wrapped
+}
+
 // A release ref is `vMAJOR.MINOR.PATCH`, optionally with a pre-release or build
 // suffix. The leading `v` is REQUIRED and is what makes classification
 // unambiguous: it is what distinguishes the release ref `v2.7.17` from a branch
@@ -126,7 +134,7 @@ async function fetchManifestAtTag(tag) {
                 + ` xchain-node release, or it predates the release-manifest rails.`
             )
         }
-        throw error
+        throw githubLookupError(`release manifest lookup for ${tag}`, error)
     }
 
     const body = result.data
@@ -236,7 +244,7 @@ async function resolveLatestReleaseTag() {
             // install rather than failing.
             return null
         }
-        throw error
+        throw githubLookupError('latest-release lookup', error)
     }
 
     return result.data && result.data.tag_name ? result.data.tag_name : null
