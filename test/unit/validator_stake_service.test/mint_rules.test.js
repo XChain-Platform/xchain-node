@@ -95,7 +95,6 @@ describe('validator stake mint rules', function () {
 })
 
 describe('validator stake mint rules', function () {
-
     it('refuses when the tip cannot be read, instead of reading the window as open', async function () {
         const { plan } = await planFor(fakeSdk({ tip: null, mints: { ...OPEN, stop_block: TIP + 5 } }))
         expect(plan.mints).to.deep.equal([])

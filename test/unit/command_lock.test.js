@@ -308,22 +308,18 @@ describe('commandLock', () => {
 describe('commandLock', () => {
     beforeEach(prepareCommandLock)
     afterEach(cleanCommandLock)
-
     describe('stale reclamation is serialized', () => {
-
         it('leaves no reclaim marker behind after a successful steal', () => {
             fs.writeFileSync(getLockFilePath(), JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
             const release = acquireCommandLock({ command: 'update' })
             assert.deepStrictEqual(fs.readdirSync(tmpDir), ['command.lock'])
             release()
         })
-
         it('a reclaim marker held by a LIVE pid stops the steal instead of racing it', () => {
             const lockFile = getLockFilePath()
             fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
             const before = fs.statSync(lockFile).ino
             fs.writeFileSync(lockFile + '.reclaim', JSON.stringify({ pid: process.pid, nonce: 'other' }) + '\n')
-
             assert.throws(() => acquireCommandLock({ command: 'reset' }), /lost the race/)
             // The stale lock is untouched: only the marker's owner may remove it.
             assert.strictEqual(fs.statSync(lockFile).ino, before)
@@ -335,9 +331,7 @@ describe('commandLock', () => {
 describe('commandLock', () => {
     beforeEach(prepareCommandLock)
     afterEach(cleanCommandLock)
-
     describe('stale reclamation is serialized', () => {
-
         it('a reclaim marker abandoned by a dead pid does not deadlock acquisition', () => {
             const lockFile = getLockFilePath()
             const reclaimFile = lockFile + '.reclaim'
@@ -347,7 +341,6 @@ describe('commandLock', () => {
             fs.writeFileSync(reclaimFile, staleMarker)
             const lockInode = fs.statSync(lockFile).ino
             const markerInode = fs.statSync(reclaimFile).ino
-
             assert.throws(
                 () => acquireCommandLock({ command: 'update' }),
                 err => err.code === 'ELOCKWEDGED' && err.message.includes(reclaimFile)
@@ -357,7 +350,14 @@ describe('commandLock', () => {
             assert.strictEqual(fs.readFileSync(lockFile, 'utf8'), staleLock)
             assert.strictEqual(fs.readFileSync(reclaimFile, 'utf8'), staleMarker)
         })
+    })
+})
 
+describe('commandLock', () => {
+    beforeEach(prepareCommandLock)
+    afterEach(cleanCommandLock)
+
+    describe('stale reclamation is serialized', () => {
         it('treats an EPERM reclaim marker read as held and preserves the marker', () => {
             const lockFile = getLockFilePath()
             const reclaimFile = lockFile + '.reclaim'

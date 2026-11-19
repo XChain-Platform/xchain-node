@@ -27,7 +27,7 @@ const TRACKER_STORE_DIR = 'xchain-utxo-tracker'
 const VALIDATE_SCRIPT = `
 require('./src/bootstrap/staged_restore')
     .assertStagedLayoutOrThrow(process.argv[1])
-    .catch(err => { console.error(err.message); process.exitCode = 1 })
+    .catch(err => { process.stderr.write(err.message + '\n'); process.exitCode = 1 })
 `
 
 function configureDependencies(dependencies) {

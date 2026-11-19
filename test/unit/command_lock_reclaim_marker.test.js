@@ -190,6 +190,10 @@ describe('commandLock reclaim removals are bound to the file they checked', () =
         assert.deepStrictEqual(fs.readdirSync(tmpDir), ['command.lock'])
         release()
     })
+})
+
+describe('commandLock reclaim removals are bound to the file they checked', () => {
+    registerLockDirectoryHooks()
 
     it('reclaiming a stale lock never deletes a live lock created after the observation', () => {
         const lockFile = getLockFilePath()

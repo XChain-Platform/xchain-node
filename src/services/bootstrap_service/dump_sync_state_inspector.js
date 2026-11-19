@@ -18,10 +18,10 @@
 
 const { Writable } = require('stream')
 const { TextDecoder } = require('util')
+const { syncStateDumpPrefixes } = require('../../db/dump_syntax')
 const { isValidRollbackGuardState } = require('../bootstrap_health_gate/halt_markers')
 
-const CREATE_PREFIX = Buffer.from('CREATE TABLE `sync_state`')
-const INSERT_PREFIX = Buffer.from('INSERT INTO `sync_state` VALUES ')
+const { create: CREATE_PREFIX, insert: INSERT_PREFIX } = syncStateDumpPrefixes()
 const EXPECTED_COLUMNS = ['state_key', 'state_value', 'updated_at']
 const DEFAULT_LIMIT = 16 * 1024 * 1024
 
@@ -91,7 +91,10 @@ function parseTuples(line) {
 
 class SyncStateInspector extends Writable {
     constructor(byteLimit) {
-        super()
+        super({
+            write: (...args) => this.writeChunk(...args),
+            final: callback => this.finalize(callback)
+        })
         this.byteLimit = byteLimit
         this.verdict = { pendingHalt: 0, rollbackGuardInvalid: 0, unreadable: [] }
         this.line = []
@@ -159,7 +162,7 @@ class SyncStateInspector extends Writable {
         this.mode = 'undecided'
     }
 
-    _write(chunk, encoding, callback) {
+    writeChunk(chunk, encoding, callback) {
         try {
             for (const byte of chunk) {
                 if (byte === 0x0a) {
@@ -191,7 +194,7 @@ class SyncStateInspector extends Writable {
         }
     }
 
-    _final(callback) {
+    finalize(callback) {
         if (this.line.length > 0) this.finishLine()
         if (this.collectingCreate) this.fail('dump ended inside sync_state CREATE TABLE')
         callback()

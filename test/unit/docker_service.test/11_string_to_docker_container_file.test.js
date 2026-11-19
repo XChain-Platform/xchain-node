@@ -187,7 +187,6 @@ function registerContainerLogSaveFailure() {
         const stubs = makeStubs()
         const EventEmitter = require('events')
         const { Readable } = require('stream')
-
         const mockWriteStream = new EventEmitter()
         mockWriteStream.write = sinon.stub()
         mockWriteStream.end = sinon.stub()
@@ -217,7 +216,6 @@ function registerContainerLogSaveFailure() {
             expect(err.message).to.include('spawn error')
         }
     })
-
     for (const failure of [
         { code: 1, signal: null, message: 'exited with code 1' },
         { code: null, signal: 'SIGTERM', message: 'terminated by signal SIGTERM' }

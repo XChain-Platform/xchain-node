@@ -174,82 +174,79 @@ describe('bootstrap archive frozen height contract', function () {
     })
 })
 
+async function rejectInvalidStagedLayout() {
+    const stubs = makeStubs()
+    const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+    stubVerifiedInner(stubs, { archivePath, initiallyPresent: true })
+    stubs.databaseService.ensureDatabasePool.resolves()
+    stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+    stubs.fs.promises.stat.resolves({ size: 512 })
+    stubs.execFile.withArgs('docker', sinon.match(args => args.includes('inspect')))
+        .resolves({ stdout: 'sha256:tracker-image\n' })
+    stubs.execFile.withArgs('docker', sinon.match(args => args.some(arg => String(arg).includes('assertStagedLayoutOrThrow'))))
+        .rejects(new Error('layout 1 is not supported'))
+    const tarProc = makeSpawnProc()
+    stubs.spawn = sinon.stub().callsFake(() => {
+        setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 0) })
+        return tarProc
+    })
+    const bs = loadBootstrapService(stubs)
+    let error
+    try { await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz') } catch (err) { error = err }
+    expect(error && error.message).to.include('layout 1')
+    expect(error && error.postWipe).to.not.equal(true)
+    const scripts = stubs.execFile.getCalls().map(call => String((call.args[1] || []).at(-1)))
+    expect(scripts.some(script => script.includes("! -name '.restore-staging'"))).to.equal(false)
+    expect(stubs.dockerService.startContainer.calledOnceWithExactly(FAKE_CONTAINER_ID)).to.equal(true)
+}
+
+async function validateNestedTrackerStore() {
+    const stubs = makeStubs()
+    const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+    stubVerifiedInner(stubs, { archivePath, initiallyPresent: true })
+    stubs.databaseService.ensureDatabasePool.resolves()
+    stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+    stubs.fs.promises.stat.resolves({ size: 512 })
+    const tarProc = makeSpawnProc()
+    stubs.spawn = sinon.stub().callsFake(() => {
+        setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 0) })
+        return tarProc
+    })
+    const bs = loadBootstrapService(stubs)
+    expect(await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')).to.equal(true)
+    const calls = stubs.execFile.getCalls()
+    const validation = calls.find(call => (call.args[1] || []).some(arg => String(arg).includes('assertStagedLayoutOrThrow')))
+    const wipe = calls.find(call => String((call.args[1] || []).at(-1)).includes("! -name '.restore-staging'"))
+    const promote = calls.find(call => String((call.args[1] || []).at(-1)).includes('-exec mv {} /data/'))
+    expect(validation.args[1]).to.include('/store/.restore-staging/xchain-utxo-tracker')
+    expect(validation.calledBefore(wipe)).to.equal(true)
+    expect(wipe.calledBefore(promote)).to.equal(true)
+}
+
+async function leaveTrackerStoppedAfterPromotionFailure() {
+    const stubs = makeStubs()
+    const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
+    stubVerifiedInner(stubs, { archivePath, initiallyPresent: true })
+    stubs.databaseService.ensureDatabasePool.resolves()
+    stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
+    stubs.fs.promises.stat.resolves({ size: 512 })
+    stubs.execFile.withArgs('docker', sinon.match(args =>
+        String(args.at(-1)).includes('-exec mv {} /data/'))).rejects(new Error('promotion failed'))
+    const tarProc = makeSpawnProc()
+    stubs.spawn = sinon.stub().callsFake(() => {
+        setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 0) })
+        return tarProc
+    })
+    const bs = loadBootstrapService(stubs)
+    let error
+    try { await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz') } catch (err) { error = err }
+    expect(error && error.message).to.include('promotion failed')
+    expect(error && error.postWipe).to.equal(true)
+    expect(stubs.dockerService.startContainer.called).to.equal(false)
+}
+
 describe('bootstrap tracker restore validation contract', function () {
-    it('restarts the tracker without wiping when staged layout validation fails', async function () {
-        const stubs = makeStubs()
-        const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
-        stubVerifiedInner(stubs, { archivePath, initiallyPresent: true })
-        stubs.databaseService.ensureDatabasePool.resolves()
-        stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
-        stubs.fs.promises.stat.resolves({ size: 512 })
-
-        stubs.execFile.withArgs('docker', sinon.match(args => args.includes('inspect')))
-            .resolves({ stdout: 'sha256:tracker-image\n' })
-        stubs.execFile.withArgs('docker', sinon.match(args => args.some(arg => String(arg).includes('assertStagedLayoutOrThrow'))))
-            .rejects(new Error('layout 1 is not supported'))
-        const tarProc = makeSpawnProc()
-        stubs.spawn = sinon.stub().callsFake(() => {
-            setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 0) })
-            return tarProc
-        })
-
-        const bs = loadBootstrapService(stubs)
-        let error
-        try { await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz') } catch (err) { error = err }
-
-        expect(error && error.message).to.include('layout 1')
-        expect(error && error.postWipe).to.not.equal(true)
-        const scripts = stubs.execFile.getCalls().map(call => String((call.args[1] || []).at(-1)))
-        expect(scripts.some(script => script.includes("! -name '.restore-staging'"))).to.equal(false)
-        expect(stubs.dockerService.startContainer.calledOnceWithExactly(FAKE_CONTAINER_ID)).to.equal(true)
-    })
-
-    it('validates the nested tracker store before wiping and promoting the staged volume', async function () {
-        const stubs = makeStubs()
-        const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
-        stubVerifiedInner(stubs, { archivePath, initiallyPresent: true })
-        stubs.databaseService.ensureDatabasePool.resolves()
-        stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
-        stubs.fs.promises.stat.resolves({ size: 512 })
-        const tarProc = makeSpawnProc()
-        stubs.spawn = sinon.stub().callsFake(() => {
-            setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 0) })
-            return tarProc
-        })
-
-        const bs = loadBootstrapService(stubs)
-        expect(await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz')).to.equal(true)
-
-        const calls = stubs.execFile.getCalls()
-        const validation = calls.find(call => (call.args[1] || []).some(arg => String(arg).includes('assertStagedLayoutOrThrow')))
-        const wipe = calls.find(call => String((call.args[1] || []).at(-1)).includes("! -name '.restore-staging'"))
-        const promote = calls.find(call => String((call.args[1] || []).at(-1)).includes('-exec mv {} /data/'))
-        expect(validation.args[1]).to.include('/store/.restore-staging/xchain-utxo-tracker')
-        expect(validation.calledBefore(wipe)).to.equal(true)
-        expect(wipe.calledBefore(promote)).to.equal(true)
-    })
-
-    it('leaves the tracker stopped when promotion fails after the live-volume wipe', async function () {
-        const stubs = makeStubs()
-        const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
-        stubVerifiedInner(stubs, { archivePath, initiallyPresent: true })
-        stubs.databaseService.ensureDatabasePool.resolves()
-        stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
-        stubs.fs.promises.stat.resolves({ size: 512 })
-        stubs.execFile.withArgs('docker', sinon.match(args =>
-            String(args.at(-1)).includes('-exec mv {} /data/'))).rejects(new Error('promotion failed'))
-        const tarProc = makeSpawnProc()
-        stubs.spawn = sinon.stub().callsFake(() => {
-            setImmediate(() => { drainPassThrough(tarProc.stdin); tarProc.emit('close', 0) })
-            return tarProc
-        })
-
-        const bs = loadBootstrapService(stubs)
-        let error
-        try { await bs.restoreBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER, 'data.tar.gz') } catch (err) { error = err }
-
-        expect(error && error.message).to.include('promotion failed')
-        expect(error && error.postWipe).to.equal(true)
-        expect(stubs.dockerService.startContainer.called).to.equal(false)
-    })
+    it('restarts the tracker without wiping when staged layout validation fails', rejectInvalidStagedLayout)
+    it('validates the nested tracker store before wiping and promoting the staged volume', validateNestedTrackerStore)
+    it('leaves the tracker stopped when promotion fails after the live-volume wipe', leaveTrackerStoppedAfterPromotionFailure)
 })
