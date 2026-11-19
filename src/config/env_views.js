@@ -123,13 +123,8 @@ const LIST_VIEWS = {
     GO_LIVE_HOST_ENV: ['go-live host', [
         "INDEXER_API_KEY", "HUB_API_KEY", "API_KEY", "ENCODER_API_KEY", "SYNC_API_KEY", "XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP"
     ]],
-    // Declare the observability names a service container may inherit from the host.
-    OBSERVABILITY_ENV: ['observability', [
-        "LOG_LEVEL", "LOG_FORMAT", "METRICS_ENABLED", "XCHAIN_LOG_PATCH",
-        "SQL_TIMING_ENABLED", "SQL_TIMING_URL", "SQL_TIMING_KEY", "SQL_TIMING_PROJECT",
-        "SQL_TIMING_REQUEST_RATE", "SQL_TIMING_STATEMENT_RATE", "SQL_TIMING_INTERVAL_MS",
-        "SQL_TIMING_MAX_BUFFER"
-    ]]
+    // The observability names a service container inherits from the host (ModuleService OBSERVABILITY_ENV_KEYS).
+    OBSERVABILITY_ENV: ['observability', ["LOG_LEVEL", "LOG_FORMAT", "METRICS_ENABLED", "XCHAIN_LOG_PATCH"]]
 }
 
 // Views over a family of names that carries a coin, network or module:
