@@ -274,11 +274,9 @@ moduleSuite('buildAndUp(): hub consensus-env drift guard wiring', function () {i
 moduleSuite('resolveObservabilityEnv()', function () {
         const ms = require('../../../src/services/module_service')
 
-        it('names exactly the four shim controls and the eight SQL timing controls', function () {
+        it('names exactly the four shim controls', function () {
             expect(ms.OBSERVABILITY_ENV_KEYS).to.deep.equal(
-                ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH',
-                    'SQL_TIMING_ENABLED', 'SQL_TIMING_URL', 'SQL_TIMING_KEY', 'SQL_TIMING_PROJECT',
-                    'SQL_TIMING_REQUEST_RATE', 'SQL_TIMING_STATEMENT_RATE', 'SQL_TIMING_INTERVAL_MS', 'SQL_TIMING_MAX_BUFFER'])
+                ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH'])
         })
 
         it('carries a deploy-host value into the container env', function () {
@@ -301,7 +299,7 @@ moduleSuite('resolveObservabilityEnv()', function () {
             expect(ms.resolveObservabilityEnv({}, { LOG_LEVEL: '' })).to.deep.equal({})
         })
 
-        it('never carries a name that is not one of the named controls', function () {
+        it('never carries a name that is not one of the four', function () {
             const overlay = ms.resolveObservabilityEnv({}, { HUB_DB_PASS: 'x', LOG_LEVEL: 'debug' })
             expect(Object.keys(overlay)).to.deep.equal(['LOG_LEVEL'])
         })
