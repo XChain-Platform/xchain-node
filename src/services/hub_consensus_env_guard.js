@@ -13,36 +13,12 @@
  **********************************************************************
  * XChain Node - Hub Consensus Env Guard
  *
- * ConfigService's HUB_PASSTHROUGH_VARS only inject a value when the INVOKING
- * SHELL happens to export it; a var it does not export is simply left out of
- * the container env, and the hub falls back to its own built-in default with
- * no message anywhere. For most passthrough vars that is fine; a handful are
- * not: HUB_NETWORK, ORACLE_MIN_SUBMISSIONS, XCHAIN_PRICE_INDEXER_DB_* and, on
- * regtest (see below), the round-cadence pair, the two ATTEST_*_OVERRIDE timing seams, the
- * two XDEX_* snapshot seams, the four XCHAIN/BTC derivation overrides and the
- * XC_*_ACTIVATION gate arms are CONSENSUS-SHAPED (they change what the hub's
- * oracle finalizes, or whether it finalizes at all, or which consensus rules
- * it applies), so a deploy run from a shell that lacks one of them silently
- * deploys a hub with different consensus behavior than the one it replaced:
- * an absence that produces no output.
- *
- * The fix does not gate on "is this var unset" alone: unset is the CORRECT,
- * documented state for a first install on a real network (see the comments
- * in ConfigService), so refusing on bare absence would break every normal
- * mainnet onboarding. What must never happen silently is a RUNNING hub
- * losing a value it already had. So the guard compares the env this deploy
- * is about to write against the env the CURRENTLY RUNNING container already
- * carries (the same "read the live container, not the config file" pattern
- * DbCredentialDrift.js uses for HUB_DB_PASS/DECODER_DB_PASS/INDEXER_DB_PASS):
- *
- *   - no running container (fresh install): nothing to protect. WARN so the
- *     operator can catch a first-time mistake, but proceed - taking the
- *     hub's own default is a legitimate choice here.
- *   - running container agrees, or never carried the var: proceed silently.
- *   - running container carries a value this deploy would change or drop:
- *     REFUSE. A value already trusted by a live hub (or by its DB/oracle
- *     federation peers, for the round-cadence and network vars) must not
- *     change because of which shell happened to invoke `recreate`.
+ * Protects consensus-shaped hub settings from silent changes. Install and
+ * update write the composed host config, so the guard refuses when that env
+ * changes or drops a value the running container carries. Recreate carries
+ * old values by default; XCHAIN_NODE_RECREATE_DROP_ENV can omit named carried
+ * values, and this guard then requires the normal drift override for a
+ * consensus-shaped removal.
  *
  * Values are never logged, only compared: XCHAIN_PRICE_INDEXER_DB_PASS is a credential.
  *
@@ -55,7 +31,8 @@
  * pinOffRegtest honors them ONLY when HUB_NETWORK is regtest, and pins them to
  * the constants.js values (with a "set but IGNORED" warning) on mainnet,
  * testnet and standalone alike. The round-cadence pair (ORACLE_ROUND_INTERVAL,
- * ORACLE_SUBMISSION_WINDOW), the attestation timing seams
+ * ORACLE_SUBMISSION_WINDOW), checkpoint cadence pair (CHECKPOINT_INTERVAL_BLOCKS,
+ * ANCHOR_CHECKPOINT_EVERY_N), the attestation timing seams
  * (ATTEST_RESPONSE_FORWARD_S_OVERRIDE, ATTEST_BATCH_WINDOW_S_OVERRIDE), the
  * snapshot seams (XDEX_SEED_LOCAL_VALIDATOR, XDEX_SNAPSHOT_BLOCK) and the
  * XC_*_ACTIVATION gate arms follow the same rule: the hub reads them from the
@@ -113,6 +90,12 @@ const CONSENSUS_ENV_GROUPS = [
         why: 'oracle round cadence, CONSENSUS-UNIFORM across a federation and honored on regtest only; a ' +
             'regtest hub that loses its override reverts to the mainnet-length default while its venue ' +
             'peers may still run the shorter one'
+    },
+    {
+        keys: ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N'],
+        honoredOn: ['regtest'],
+        why: 'state-checkpoint cadence, fleet-uniform and honored on regtest only; losing an override ' +
+            'reverts to the canonical cadence and makes the hub decline venue peers as off-cadence'
     },
     {
         keys: [
@@ -240,19 +223,23 @@ function consensusEnvKeysForNetwork(network) {
  *
  * @param {Object<string,string>} intended The env this deploy is about to write.
  * @param {string} [network] Effective network; defaults to this deploy's own HUB_NETWORK.
- * @returns {{supplied: string[], defaulted: string[]}}
+ * @param {string[]} [carriedKeys] Names copied from the running container.
+ * @returns {{supplied: string[], carried: string[], defaulted: string[]}}
  */
-function describeConsensusEnvSupply(intended, network) {
+function describeConsensusEnvSupply(intended, network, carriedKeys = []) {
     const src = intended || {}
     const scope = consensusEnvKeysForNetwork(network === undefined ? resolveHubNetwork(src, null) : network)
     const supplied = []
+    const carried = []
     const defaulted = []
+    const carriedSet = new Set(carriedKeys)
     for (const key of scope) {
         const v = src[key]
         if (v === undefined || v === null || v === '') defaulted.push(key)
+        else if (carriedSet.has(key)) carried.push(key)
         else supplied.push(key)
     }
-    return { supplied, defaulted }
+    return { supplied, carried, defaulted }
 }
 
 /**
@@ -316,8 +303,8 @@ function formatHubConsensusEnvDriftError(drift) {
  * @param {Object<string,string>} intended The env this deploy is about to write.
  * @param {string} [network] Effective network; defaults to this deploy's own HUB_NETWORK.
  */
-function logConsensusEnvSupplyState(intended, network) {
-    const { supplied, defaulted } = describeConsensusEnvSupply(intended, network)
+function logConsensusEnvSupplyState(intended, network, carriedKeys = []) {
+    const { supplied, carried, defaulted } = describeConsensusEnvSupply(intended, network, carriedKeys)
     if (defaulted.length > 0) {
         logger.warn(
             'WARNING: hub consensus-shaped settings NOT supplied by the invoking shell (the hub will use ' +
@@ -330,6 +317,11 @@ function logConsensusEnvSupplyState(intended, network) {
     }
     if (supplied.length > 0) {
         logger.info(`hub consensus-shaped settings supplied from the host env: ${supplied.join(', ')}`)
+    }
+    if (carried.length > 0) {
+        logger.warn('WARNING: hub consensus-shaped settings carried from the running container and NOT supplied ' +
+            `by the invoking shell: ${carried.join(', ')}. To remove one during recreate, name it in ` +
+            'XCHAIN_NODE_RECREATE_DROP_ENV and set XCHAIN_NODE_ALLOW_HUB_CONSENSUS_ENV_DRIFT=1.')
     }
 }
 
@@ -353,7 +345,7 @@ async function assertNoHubConsensusEnvDrift(environmentVariables, deps = {}) {
     // HUB_NETWORK still resolves regtest from the running container, and its
     // regtest-only derivation overrides belong in the report. readContainerEnv
     // returns null rather than throwing, so this still logs on a fresh install.
-    logConsensusEnvSupplyState(environmentVariables, resolveHubNetwork(environmentVariables, liveEnv))
+    logConsensusEnvSupplyState(environmentVariables, resolveHubNetwork(environmentVariables, liveEnv), deps.carriedKeys)
 
     if (!liveEnv) return [] // no running hub container: fresh install, nothing to drift against
 

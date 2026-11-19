@@ -74,27 +74,6 @@ function columnSql(database, table, column, dataType, opts = {}) {
     if (collation) conditions.push(inSql('collation_name', collation))
     return '(SELECT COUNT(1) FROM information_schema.columns WHERE ' + conditions.join(' AND ') + ') = 1'
 }
-function tableShapeSql(database, table, engine, collation) {
-    return "(SELECT COUNT(1) FROM information_schema.tables" +
-        " WHERE table_schema = '" + database + "' AND table_name = '" + table + "'" +
-        " AND engine = '" + engine + "' AND " + inSql('table_collation', collation) + ') = 1'
-}
-function tableColumnsSql(database, table, columns) {
-    const perColumn = columns.map(([name, dataType, opts], index) =>
-        columnSql(database, table, name, dataType, Object.assign({ ordinal: index + 1 }, opts))
-    ).join(' AND ')
-    const total = "(SELECT COUNT(1) FROM information_schema.columns" +
-        " WHERE table_schema = '" + database + "' AND table_name = '" + table +
-        "') = " + columns.length
-    return perColumn + ' AND ' + total
-}
-function tableIndexesSql(database, table, indexes) {
-    const perIndex = indexes.map(([name, columns, nonUnique]) => exactIndexSql(database, table, name, columns, nonUnique)).join(' AND ')
-    const total = "(SELECT COUNT(DISTINCT index_name) FROM information_schema.statistics" +
-        " WHERE table_schema = '" + database + "' AND table_name = '" + table +
-        "') = " + indexes.length
-    return perIndex + ' AND ' + total
-}
 function migrationFactSql(name, predicate) {
     return "SELECT '" + name + "' AS name WHERE " + predicate
 }
@@ -173,98 +152,11 @@ function rawWireFieldsSatisfiedSql(database) {
         "(table_name = 'attests' AND column_name = 'provider_id'" +
         " AND data_type = 'varchar' AND character_maximum_length = 32))) = 11"
 }
-const ADMIT_BLOCK_COLUMNS = ['btc', 'ltc', 'doge'].map(chain =>
-    ['admit_block_' + chain, 'bigint', { unsigned: true, nullable: true }])
-const SIGNED_ROW_TAIL_COLUMNS = [
-    ['finalizing_view', 'int', { unsigned: false, default: '0' }], ['validator_signatures', 'text', {}],
-    ['status', 'varchar', { length: 20, default: 'finalized' }], ['push_generation', 'bigint', { unsigned: false, default: '0' }],
-    ['btc_chain_id', 'char', { length: 64, nullable: true }],
-    ['created_at', 'timestamp', { nullable: true, default: 'CURRENT_TIMESTAMP' }]
-]
-// Every column and index in 2026-09-12-bridge-tables.sql's end state.
-const BRIDGE_TABLE_SHAPES = {
-    bridge_transfers: {
-        admitBlockColumns: true,
-        columns: [
-            ['id', 'bigint', { unsigned: true, autoIncrement: true }], ['transfer_id', 'char', { length: 64 }],
-            ['snapshot_block', 'bigint', { unsigned: true }], ['network', 'varchar', { length: 20 }],
-            ['src_chain', 'varchar', { length: 10 }], ['src_action_index', 'bigint', { unsigned: true }],
-            ['src_address', 'varchar', { length: 255 }], ['dest_chain', 'varchar', { length: 10 }],
-            ['dest_address', 'varchar', { length: 255 }], ['tick', 'varchar', { length: 250 }],
-            ['decimals', 'tinyint', { unsigned: true }], ['amount', 'varchar', { length: 250 }],
-            ['effective_time', 'bigint', { unsigned: true }],
-            ...SIGNED_ROW_TAIL_COLUMNS
-        ],
-        indexes: [
-            ['PRIMARY', ['id'], 0], ['uq_transfer_id', ['transfer_id'], 0],
-            ['idx_snapshot_block', ['snapshot_block'], 1], ['idx_src_ref', ['src_chain', 'src_action_index'], 1],
-            ['idx_dest_chain', ['dest_chain'], 1], ['idx_effective', ['effective_time'], 1],
-            ['idx_status', ['status'], 1], ['idx_tick', ['tick'], 1]
-        ]
-    },
-    bridge_settlements: {
-        columns: [
-            ['action_index', 'bigint', { unsigned: true }], ['transfer_id', 'char', { length: 64 }],
-            ['kind', 'varchar', { length: 10, default: 'transfer' }], ['block_index', 'bigint', { unsigned: true }],
-            ['src_chain', 'varchar', { length: 10, nullable: true }], ['src_action_index', 'bigint', { unsigned: true, nullable: true }],
-            ['dest_chain', 'varchar', { length: 10, nullable: true }], ['dest_address', 'varchar', { length: 255, nullable: true }],
-            ['tick', 'varchar', { length: 250, nullable: true }]
-        ],
-        indexes: [
-            ['uq_transfer_kind', ['transfer_id', 'kind'], 0], ['idx_action_index', ['action_index'], 1],
-            ['idx_block_index', ['block_index'], 1],
-            ['idx_src_ref', ['src_chain', 'src_action_index'], 1]
-        ]
-    },
-    policy_snapshots: {
-        admitBlockColumns: true,
-        columns: [
-            ['id', 'bigint', { unsigned: true, autoIncrement: true }], ['snapshot_id', 'char', { length: 64 }],
-            ['snapshot_block', 'bigint', { unsigned: true }], ['origin_chain', 'varchar', { length: 10 }],
-            ['tick', 'varchar', { length: 250 }], ['policy_seq', 'bigint', { unsigned: true }],
-            ['origin_block', 'bigint', { unsigned: true }], ['policy_hash', 'char', { length: 64 }],
-            ['allow_list', 'mediumtext', { nullable: true }], ['block_list', 'mediumtext', { nullable: true }],
-            ['sleeping', 'tinyint', { unsigned: false, default: '0' }], ['effective_time', 'bigint', { unsigned: true }],
-            ['network', 'varchar', { length: 20 }],
-            ...SIGNED_ROW_TAIL_COLUMNS
-        ],
-        indexes: [
-            ['PRIMARY', ['id'], 0], ['uq_policy_seq', ['network', 'origin_chain', 'tick', 'policy_seq'], 0],
-            ['uq_snapshot_id', ['snapshot_id'], 0], ['idx_effective', ['effective_time'], 1],
-            ['idx_origin_tick', ['origin_chain', 'tick'], 1]
-        ]
-    },
-    xbridges: {
-        columns: [
-            ['action_index', 'bigint', { unsigned: true }], ['version', 'tinyint', { unsigned: true, nullable: true }],
-            ['tick_id', 'bigint', { unsigned: true, nullable: true }], ['dest_chain', 'varchar', { length: 10, nullable: true }],
-            ['dest_address_id', 'bigint', { unsigned: true, nullable: true }],
-            ['amount', 'varchar', { length: 250, nullable: true, charset: 'utf8mb4', collation: 'utf8mb4_general_ci' }],
-            ['decimals', 'tinyint', { unsigned: true, nullable: true }], ['min_depth', 'bigint', { unsigned: true, nullable: true }],
-            ['memo_id', 'bigint', { unsigned: true, nullable: true }], ['status_id', 'bigint', { unsigned: true, nullable: true }],
-            ['block_index', 'bigint', { unsigned: true }]
-        ],
-        indexes: [
-            ['uq_action_index', ['action_index'], 0], ['idx_tick_id', ['tick_id'], 1],
-            ['idx_dest_address_id', ['dest_address_id'], 1], ['idx_status_id', ['status_id'], 1],
-            ['idx_block_index', ['block_index'], 1],
-            ['idx_version_block', ['version', 'block_index'], 1]
-        ]
-    }
-}
-function bridgeTableColumnsSql(database, table, { columns, admitBlockColumns }) {
-    const base = tableColumnsSql(database, table, columns)
-    if (!admitBlockColumns) return base
-    const tailStart = columns.length - SIGNED_ROW_TAIL_COLUMNS.length
-    const withAdmit = columns.slice(0, tailStart).concat(ADMIT_BLOCK_COLUMNS, columns.slice(tailStart))
-    return '((' + base + ') OR (' + tableColumnsSql(database, table, withAdmit) + '))'
-}
+// The indexer baselines this CREATE TABLE IF NOT EXISTS migration when all four
+// tables exist. Later ALTERs must not make the node reject a schema the indexer accepts.
 function bridgeTablesSatisfiedSql(database) {
-    return Object.entries(BRIDGE_TABLE_SHAPES).map(([table, shape]) => [
-        bridgeTableColumnsSql(database, table, shape),
-        tableIndexesSql(database, table, shape.indexes),
-        tableShapeSql(database, table, 'InnoDB', COLLATION_UTF8_ALIASES)
-    ].join(' AND ')).join(' AND ')
+    return "(SELECT COUNT(1) FROM information_schema.tables WHERE table_schema = '" + database + "'" +
+        " AND table_name IN ('bridge_transfers', 'bridge_settlements', 'policy_snapshots', 'xbridges')) = 4"
 }
 // The indexer's own baseline test: the file is CREATE TABLE IF NOT EXISTS only, so with both
 // tables present running it changes nothing and no shape check could be satisfied by applying it.

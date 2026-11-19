@@ -16,6 +16,7 @@
  ********************************************************************/
 
 const { resolveArgs } = require('../services/config_service')
+const { resolveNoRefInstallTarget: defaultResolveNoRefInstallTarget } = require('../services/install_target_service')
 
 // How long a release update re-taking the lock its self-update step handed back waits
 // at least, so a mutator that slipped into that gap delays the update instead of refusing it.
@@ -185,6 +186,18 @@ function commandLock(commandName, settings, acquireCommandLock,
     return { holdThroughAction, release }
 }
 
+// A no-ref install decides its release or recorded-branch target once, here, so the hub
+// preCheck provisions and the modules the action installs are staged from the same ref.
+async function noRefInstallTarget(commandName, actionCommand, resolver) {
+    if (commandName !== 'install') return null
+    let resolved = null
+    try { resolved = resolveArgs(actionCommand.args || [], { expectBranch: true, defaultBranch: null }) }
+    catch { return null }
+    if (resolved.branch) return null
+    const resolveTarget = resolver || defaultResolveNoRefInstallTarget
+    return resolveTarget()
+}
+
 // The CLI moves itself BEFORE anything else runs for a release update:
 // ahead of the lock (the re-executed child takes it), ahead of preCheck
 // (the child's preCheck is the one that should run, at the new code).
@@ -213,7 +226,7 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
     const {
         setVerbose, maybeSelfUpdateBeforeUpdate, redactSecrets,
         acquireCommandLock, preCheck, refForPreCheck, commandRepairsHub,
-        maybeReportTelemetry, noticeNewerRelease
+        maybeReportTelemetry, noticeNewerRelease, resolveNoRefInstallTarget
     } = deps
     setVerbose(thisCommand.opts().verbose ?? false)
     if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
@@ -238,12 +251,21 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
     const lock = commandLock(commandName, lockSettingsFor(commandName, settings, deps.config), acquireCommandLock)
     if (!lock) return
     try {
+        let installTarget = null
+        try { installTarget = await noRefInstallTarget(commandName, actionCommand, resolveNoRefInstallTarget) }
+        catch (err) {
+            console.error('install failed: ' + redactSecrets(err && err.message ? err.message : err))
+            return process.exit(1)
+        }
+        if (installTarget) actionCommand.resolvedInstallTarget = installTarget
+        const preCheckArgs = preCheckOptionsFor(commandName, actionCommand)
+        if (installTarget) preCheckArgs[0] = { ...preCheckArgs[0], installTarget }
         await preCheck(
             settings.commandsNeedingVersions.includes(commandName),
             !settings.readOnlyCommands.includes(commandName),
             refForPreCheck(commandName, actionCommand),
             commandRepairsHub(commandName, actionCommand),
-            ...preCheckOptionsFor(commandName, actionCommand)
+            ...preCheckArgs
         )
     } finally {
         // Non-mutating commands hand the lock back as soon as provisioning is

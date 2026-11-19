@@ -38,10 +38,9 @@ let { cloneGit, resolveBundledLibRef } = require('./clone_and_refs')
 let { assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs } = require('./docker_args')
 const { parsePortSpec } = require('./docker_args')
 let { attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings } = require('./container_networks')
-const { carryContainerEnv } = require('./carry_container_env')
+const { carryContainerEnvWithProvenance } = require('./carry_container_env')
 const { getLogger } = require('../../observability/logger');
 let logger = getLogger();
-
 function configureDependencies(dependencies) {
     ;({
         execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir,
@@ -67,14 +66,12 @@ function assertNoLegacyDbNameCollision(module, coin, network, environmentVariabl
         `and the database is external, so this stack would share it with the default "${config.DEFAULT_NODE_PREFIX}" stack. ` +
         `Set ${key} to a name unique to this stack.`)
 }
-
-async function assertDeploymentReady(module, coin, network, environmentVariables, dir, onlyExecution) {
+async function assertDeploymentReady(module, coin, network, environmentVariables, dir, onlyExecution, deploy = {}) {
     assertNoLegacyDbNameCollision(module, coin, network, environmentVariables)
     // Go-live pre-flight: warns pre-launch, refuses a mainnet write-surface
     // deploy with un-armed settings once XCHAIN_NODE_GO_LIVE=1.
     const { assertGoLiveReady } = goLiveGate
     assertGoLiveReady(module, coin, network, environmentVariables, dir)
-
     // A BTC indexer or validator hub with no DOGE indexer read wedges at its
     // first roll-call epoch close on any network with a ROLLCALL activation,
     // days after the deploy, with every container reading healthy. Refuse here
@@ -84,7 +81,6 @@ async function assertDeploymentReady(module, coin, network, environmentVariables
         const { assertDogeReadWired } = rollcallWiring
         assertDogeReadWired(module, coin, network, environmentVariables)
     }
-
     // Hub consensus-shaped settings (HUB_NETWORK, ORACLE_MIN_SUBMISSIONS,
     // XCHAIN_PRICE_INDEXER_DB_*, and on regtest the round cadence, the two
     // ATTEST_*_OVERRIDE timing seams, the four XCHAIN/BTC derivation overrides
@@ -96,7 +92,7 @@ async function assertDeploymentReady(module, coin, network, environmentVariables
     // blocks) when there is no running hub to lose anything from.
     if (module === HUB_MODULE_NAME) {
         const { assertNoHubConsensusEnvDrift } = hubConsensusEnvGuard
-        await assertNoHubConsensusEnvDrift(environmentVariables)
+        await assertNoHubConsensusEnvDrift(environmentVariables, { carriedKeys: deploy.carriedKeys })
     }
 }
 // Stage any bundled library modules into this service's build context.
@@ -190,7 +186,6 @@ async function assertReusableImage(reuseImage, containerPrefix, module, coin, ne
             (coin && network ? " " + coin + " " + network : "") + "` to build one.")
     }
 }
-
 // Stamp the source commit onto the IMAGE, not just onto a log line that
 // scrolls away. Neither of the two things an operator can read off a running
 // container answers "which code is this": the image tag is a fixed name, and
@@ -379,9 +374,13 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     let environmentVariables = await getDefaultConfig(module, coin, network)
     const dir = getModuleDir(module)
     const containerPrefix = getDockerContainerImageName(module, coin, network)
-    environmentVariables = await carryContainerEnv(environmentVariables,
-        { reuseImage, overwriteContainerId, containerName: containerPrefix }, { execFileAsync })
-    await assertDeploymentReady(module, coin, network, environmentVariables, dir, onlyExecution)
+    const carried = await carryContainerEnvWithProvenance(environmentVariables,
+        { reuseImage, overwriteContainerId, containerName: containerPrefix },
+        { execFileAsync, dropList: config.RECREATE_DROP_ENV.XCHAIN_NODE_RECREATE_DROP_ENV })
+    environmentVariables = carried.env
+    if (carried.droppedKeys.length) logger.info(`recreate: not carrying env names: ${carried.droppedKeys.join(', ')}`)
+    if (carried.unknownDropKeys.length) logger.warn(`recreate: requested env names were not present: ${carried.unknownDropKeys.join(', ')}`)
+    await assertDeploymentReady(module, coin, network, environmentVariables, dir, onlyExecution, carried)
     await stageBundledLibraries(module, dir, reuseImage)
     const dockerOptions = resolveDockerOptions(module, environmentVariables, coin, network)
     ;({ coin, network } = dockerOptions)

@@ -30,6 +30,10 @@ function tokenBody(chain = {}) {
 }
 
 function makeExplorer(chain) {
+    const status = { last_block: {
+        BTC: chain.tip ?? 200000, TBTC: chain.tip ?? 200000, RBTC: chain.tip ?? 200000 } }
+    if (chain.stale !== undefined) status.stale = chain.stale
+    if (chain.tipAgeSeconds !== undefined) status.tip_age_seconds = chain.tipAgeSeconds
     return {
         getAddress: sinon.stub().resolves({ balances: { confirmed: chain.coin ?? '0.001', pending: '0' } }),
         getToken:   chain.tokenMissing
@@ -57,8 +61,7 @@ function makeExplorer(chain) {
             : sinon.stub().resolves(chain.delegationsBody || {
                 total: (chain.delegations || []).length, data: chain.delegations || [] }),
         // The explorer's indexed tip, keyed by route code (BTC/TBTC/RBTC) as the real /status is.
-        getStatus: sinon.stub().resolves({ last_block: {
-            BTC: chain.tip ?? 200000, TBTC: chain.tip ?? 200000, RBTC: chain.tip ?? 200000 } }),
+        getStatus: sinon.stub().resolves(status),
         // The SLEEP rows the explorer's address lane holds for the stake address; none by default.
         getSleeps: chain.sleepsThrow
             ? sinon.stub().rejects(new Error(chain.sleepsThrow))
@@ -96,6 +99,9 @@ function makeSdk(chain = {}) {
         session: () => ({
             address: ADDRESS,
             submit: async (actionData, enc, opts) => {
+                if (chain.submitStale && opts.strictFreshness) {
+                    throw Object.assign(new Error('stale before signing'), { code: 'COIN_DATA_STALE' })
+                }
                 const rec = { params: actionData.params, enc, opts }
                 if (actionData.action === 'MINT') calls.mint.push(rec)
                 if (actionData.action === 'STAKE') calls.stake.push(rec)

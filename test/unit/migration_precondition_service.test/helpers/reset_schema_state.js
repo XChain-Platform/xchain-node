@@ -64,78 +64,7 @@ const SYNTHESIZED_ROWS = new Set(`
     2026-09-02-utf8mb4-raw-wire-fields-not-null.sql 2026-09-10-markets-native-coin-side.sql 2026-09-12-bridge-tables.sql
 `.trim().split(/\s+/))
 
-const ADMIT_BLOCK_COLUMNS = ['btc', 'ltc', 'doge'].map(chain =>
-    ['admit_block_' + chain, 'bigint', { unsigned: true, nullable: true }])
-const SIGNED_ROW_TAIL_COLUMNS = [
-    ['finalizing_view', 'int', { default: '0' }], ['validator_signatures', 'text'],
-    ['status', 'varchar', { length: 20, default: 'finalized' }], ['push_generation', 'bigint', { default: '0' }],
-    ['btc_chain_id', 'char', { length: 64, nullable: true }],
-    ['created_at', 'timestamp', { nullable: true, default: 'CURRENT_TIMESTAMP' }]
-]
-const BRIDGE_SCHEMA = {
-    bridge_transfers: {
-        columns: [
-            ['id', 'bigint', { unsigned: true, autoIncrement: true }], ['transfer_id', 'char', { length: 64 }],
-            ['snapshot_block', 'bigint', { unsigned: true }], ['network', 'varchar', { length: 20 }],
-            ['src_chain', 'varchar', { length: 10 }], ['src_action_index', 'bigint', { unsigned: true }],
-            ['src_address', 'varchar', { length: 255 }], ['dest_chain', 'varchar', { length: 10 }],
-            ['dest_address', 'varchar', { length: 255 }], ['tick', 'varchar', { length: 250 }],
-            ['decimals', 'tinyint', { unsigned: true }], ['amount', 'varchar', { length: 250 }],
-            ['effective_time', 'bigint', { unsigned: true }], ...ADMIT_BLOCK_COLUMNS, ...SIGNED_ROW_TAIL_COLUMNS
-        ],
-        indexes: [
-            ['PRIMARY', ['id'], 0], ['uq_transfer_id', ['transfer_id'], 0],
-            ['idx_snapshot_block', ['snapshot_block'], 1], ['idx_src_ref', ['src_chain', 'src_action_index'], 1],
-            ['idx_dest_chain', ['dest_chain'], 1], ['idx_effective', ['effective_time'], 1],
-            ['idx_status', ['status'], 1], ['idx_tick', ['tick'], 1]
-        ]
-    },
-    bridge_settlements: {
-        columns: [
-            ['action_index', 'bigint', { unsigned: true }], ['transfer_id', 'char', { length: 64 }],
-            ['kind', 'varchar', { length: 10, default: 'transfer' }], ['block_index', 'bigint', { unsigned: true }],
-            ['src_chain', 'varchar', { length: 10, nullable: true }], ['src_action_index', 'bigint', { unsigned: true, nullable: true }],
-            ['dest_chain', 'varchar', { length: 10, nullable: true }], ['dest_address', 'varchar', { length: 255, nullable: true }],
-            ['tick', 'varchar', { length: 250, nullable: true }]
-        ],
-        indexes: [
-            ['uq_transfer_kind', ['transfer_id', 'kind'], 0], ['idx_action_index', ['action_index'], 1],
-            ['idx_block_index', ['block_index'], 1], ['idx_src_ref', ['src_chain', 'src_action_index'], 1]
-        ]
-    },
-    policy_snapshots: {
-        columns: [
-            ['id', 'bigint', { unsigned: true, autoIncrement: true }], ['snapshot_id', 'char', { length: 64 }],
-            ['snapshot_block', 'bigint', { unsigned: true }], ['origin_chain', 'varchar', { length: 10 }],
-            ['tick', 'varchar', { length: 250 }], ['policy_seq', 'bigint', { unsigned: true }],
-            ['origin_block', 'bigint', { unsigned: true }], ['policy_hash', 'char', { length: 64 }],
-            ['allow_list', 'mediumtext', { nullable: true }], ['block_list', 'mediumtext', { nullable: true }],
-            ['sleeping', 'tinyint', { default: '0' }], ['effective_time', 'bigint', { unsigned: true }],
-            ['network', 'varchar', { length: 20 }], ...ADMIT_BLOCK_COLUMNS, ...SIGNED_ROW_TAIL_COLUMNS
-        ],
-        indexes: [
-            ['PRIMARY', ['id'], 0], ['uq_policy_seq', ['network', 'origin_chain', 'tick', 'policy_seq'], 0],
-            ['uq_snapshot_id', ['snapshot_id'], 0], ['idx_effective', ['effective_time'], 1],
-            ['idx_origin_tick', ['origin_chain', 'tick'], 1]
-        ]
-    },
-    xbridges: {
-        columns: [
-            ['action_index', 'bigint', { unsigned: true }], ['version', 'tinyint', { unsigned: true, nullable: true }],
-            ['tick_id', 'bigint', { unsigned: true, nullable: true }], ['dest_chain', 'varchar', { length: 10, nullable: true }],
-            ['dest_address_id', 'bigint', { unsigned: true, nullable: true }],
-            ['amount', 'varchar', { length: 250, nullable: true, charset: 'utf8mb4', collation: 'utf8mb4_general_ci' }],
-            ['decimals', 'tinyint', { unsigned: true, nullable: true }], ['min_depth', 'bigint', { unsigned: true, nullable: true }],
-            ['memo_id', 'bigint', { unsigned: true, nullable: true }], ['status_id', 'bigint', { unsigned: true, nullable: true }],
-            ['block_index', 'bigint', { unsigned: true }]
-        ],
-        indexes: [
-            ['uq_action_index', ['action_index'], 0], ['idx_tick_id', ['tick_id'], 1],
-            ['idx_dest_address_id', ['dest_address_id'], 1], ['idx_status_id', ['status_id'], 1],
-            ['idx_block_index', ['block_index'], 1], ['idx_version_block', ['version', 'block_index'], 1]
-        ]
-    }
-}
+const BRIDGE_TABLES = ['bridge_transfers', 'bridge_settlements', 'policy_snapshots', 'xbridges']
 
 function resetLedger() {
     const ledger = new Set(V0190_MIGRATIONS.filter(name => !SYNTHESIZED_ROWS.has(name) || RESET_BASELINED_ROWS.has(name)))
@@ -220,10 +149,7 @@ function resetSchemaModel() {
             ['source_id', 'signing_pubkey_id', 'reward_type', 'round_reference', 'round_qualifier'], 0)
     ]
     const tables = [{ table_schema: DATABASE, table_name: 'sweeps', engine: 'InnoDB', table_collation: 'utf8mb3_general_ci', table_type: 'BASE TABLE' }]
-    for (const [table, shape] of Object.entries(BRIDGE_SCHEMA)) {
-        shape.columns.forEach(([name, type, options = {}], offset) =>
-            columns.push(column(table, name, type, { ...options, ordinal: offset + 1 })))
-        shape.indexes.forEach(([name, members, nonUnique]) => indexes.push(...index(table, name, members, nonUnique)))
+    for (const table of BRIDGE_TABLES) {
         tables.push({ table_schema: DATABASE, table_name: table, engine: 'InnoDB', table_collation: 'utf8mb3_general_ci', table_type: 'BASE TABLE' })
     }
     return { columns, indexes, tables, unsatisfiedData: false }

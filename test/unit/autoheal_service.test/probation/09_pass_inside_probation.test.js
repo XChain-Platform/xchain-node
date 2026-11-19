@@ -155,4 +155,27 @@ describe('AutohealService', () => {
         expect(stubs.startContainer.callCount).to.equal(2)
         expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
     })
+
+    it('keeps backoff and escalation when Docker reports healthy inside restart probation', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'rec3')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })
+        await service.runAutoheal({ now: NOW + 11 * 60000 })
+        expect(stubs.startContainer.callCount).to.equal(2)
+
+        stubs.getStatusFromContainer.resolves(inspectStatus('healthy', [
+            recordedProbe(NOW + 12 * 60000, 0)
+        ]))
+        await service.runAutoheal({ now: NOW + 12 * 60000 + 5000 })
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.rec3).to.equal(2)
+        expect(state.unhealthySince).to.not.have.property('rec3')
+
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.startContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+        expect(throttled.escalated).to.have.length(1)
+    })
 })

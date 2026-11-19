@@ -157,6 +157,31 @@ async function readTip(sdk, coins) {
     return tip
 }
 
+// Refuse every plan built from a coin the explorer itself marks stale. A
+// missing marker passes because older explorers and unmeasured coins have no
+// freshness verdict to enforce.
+async function assertExplorerFresh(sdk, coins) {
+    let status
+    try {
+        status = await sdk.explorer.getStatus()
+    } catch (err) {
+        throw new Error('could not verify whether the explorer is current for ' + coins.stakeCoin +
+            ' (' + err.message + '), so this run cannot safely plan from its balances, history, or validator set. ' +
+            'Nothing was sent.')
+    }
+    if (!status || !status.stale || status.stale[coins.stakeCoin] !== true) return status
+
+    const tip = status.last_block && status.last_block[coins.stakeCoin]
+    const age = status.tip_age_seconds && Number(status.tip_age_seconds[coins.stakeCoin])
+    const where = tip === undefined || tip === null ? '' : ' at block ' + tip
+    const old = Number.isFinite(age) ? ' (' + Math.round(age / 60) + ' minutes old)' : ''
+    const err = new Error('the explorer is behind the chain for ' + coins.stakeCoin + where + old +
+        ', so its balances, mint history, and validator set may omit recent transactions. Nothing was sent. ' +
+        'Re-run once the explorer catches up.')
+    err.code = 'COIN_DATA_STALE'
+    throw err
+}
+
 // Memoize readTip so the stake and delegation judgements share one read.
 function tipOnce(sdk, coins) {
     let pending = null
@@ -277,5 +302,6 @@ module.exports = {
     sumAmounts,
     readDelegationsByPubkey,
     readKeyHolders,
-    readTip
+    readTip,
+    assertExplorerFresh
 }

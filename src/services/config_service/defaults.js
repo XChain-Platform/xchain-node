@@ -295,16 +295,41 @@ function configureManagedHubDiscovery(defaultValues, module) {
     }
 }
 
-// Host INDEX_MAP_PARITY_CHECK and TRUST_PROXY reach the xchain-sync server
-// container only, so a recreate keeps them instead of reverting to the image
-// default. Without TRUST_PROXY a sync behind its reverse proxy sees every caller
-// as the proxy's address, and all of them share one rate-limit bucket.
+// Host sync settings reach the xchain-sync server container only. The fold arm
+// keeps its regtest reorg-reset archive-head selection aligned with the indexer.
 function configureSyncPassthrough(defaultValues, module) {
     if (module !== SYNC_MODULE_NAME) return
-    for (const k of ["INDEX_MAP_PARITY_CHECK", "TRUST_PROXY"]) {
+    for (const k of ["INDEX_MAP_PARITY_CHECK", "TRUST_PROXY", "XC_ANCHOR_FOLD_REGTEST_ACTIVATION"]) {
         if (config.SYNC_PASSTHROUGH_ENV[k] !== undefined && config.SYNC_PASSTHROUGH_ENV[k] !== "") {
             defaultValues[k] = config.SYNC_PASSTHROUGH_ENV[k]
         }
+    }
+}
+
+function configureExplorerServiceRoutes(defaultValues, module) {
+    if (module !== EXPLORER_MODULE_NAME) return
+    const networkCodePrefix = { [Network.MAINNET]: "", [Network.TESTNET]: "T", [Network.REGTEST]: "R" }
+    let hasRemoteIndexer = false
+    for (const coinName of Object.values(Coin)) {
+        for (const net of Object.values(Network)) {
+            const tick = CoinTickerSymbol[coinName]
+            defaultValues["UTXO_TRACKER_URL_" + networkCodePrefix[net] + tick] =
+                "http://" + getDockerContainerImageName(XChainService.XCHAIN_UTXO_TRACKER, coinName, net) + ":3001"
+            defaultValues["DECODER_API_URL_" + tick + "_" + net.toUpperCase()] =
+                "http://" + getDockerContainerImageName(XChainService.XCHAIN_DECODER, coinName, net) + ":3002"
+            const indexerVar = "INDEXER_API_URL_" + tick + "_" + net.toUpperCase()
+            const override = config.INDEXER_API_URL_ENV[indexerVar]
+            if (override) hasRemoteIndexer = true
+            defaultValues[indexerVar] = override ||
+                "http://" + getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coinName, net) + ":3004"
+        }
+    }
+    const explicitKey = config.EXPLORER_INDEXER_API_KEY
+    if (explicitKey !== undefined && explicitKey !== "") {
+        defaultValues.EXPLORER_INDEXER_API_KEY = explicitKey
+    } else if (!hasRemoteIndexer && config.INDEXER_API_KEY !== undefined && config.INDEXER_API_KEY !== "") {
+        // Reuse the local key only when every URL targets this node's containers.
+        defaultValues.EXPLORER_INDEXER_API_KEY = config.INDEXER_API_KEY
     }
 }
 
@@ -315,6 +340,10 @@ function configureSharedAfterHubKey(defaultValues, module) {
     configureExplorerHubFeed(defaultValues, module)
     configureSyncPassthrough(defaultValues, module)
     if (module === EXPLORER_MODULE_NAME) {
+        const foldArm = config.EXPLORER_PASSTHROUGH_ENV.XC_ANCHOR_FOLD_REGTEST_ACTIVATION
+        if (foldArm !== undefined && foldArm !== "") {
+            defaultValues.XC_ANCHOR_FOLD_REGTEST_ACTIVATION = foldArm
+        }
         if (config.EXPLORER_VM_QUERY_ENABLED !== undefined && config.EXPLORER_VM_QUERY_ENABLED !== "") {
             defaultValues.EXPLORER_VM_QUERY_ENABLED = config.EXPLORER_VM_QUERY_ENABLED
         }
@@ -346,21 +375,7 @@ function configureSharedAfterHubKey(defaultValues, module) {
             defaultValues[key] = value
         }
     }
-    if (module === EXPLORER_MODULE_NAME) {
-        const networkCodePrefix = { [Network.MAINNET]: "", [Network.TESTNET]: "T", [Network.REGTEST]: "R" }
-        for (const coinName of Object.values(Coin)) {
-            for (const net of Object.values(Network)) {
-                const tick = CoinTickerSymbol[coinName]
-                defaultValues["UTXO_TRACKER_URL_" + networkCodePrefix[net] + tick] =
-                    "http://" + getDockerContainerImageName(XChainService.XCHAIN_UTXO_TRACKER, coinName, net) + ":3001"
-                defaultValues["DECODER_API_URL_" + tick + "_" + net.toUpperCase()] =
-                    "http://" + getDockerContainerImageName(XChainService.XCHAIN_DECODER, coinName, net) + ":3002"
-                const indexerVar = "INDEXER_API_URL_" + tick + "_" + net.toUpperCase()
-                defaultValues[indexerVar] = config.INDEXER_API_URL_ENV[indexerVar]
-                    || "http://" + getDockerContainerImageName(XChainService.XCHAIN_INDEXER, coinName, net) + ":3004"
-            }
-        }
-    }
+    configureExplorerServiceRoutes(defaultValues, module)
     configureManagedHubDiscovery(defaultValues, module)
 }
 

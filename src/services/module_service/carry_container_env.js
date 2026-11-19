@@ -65,13 +65,33 @@ async function readContainerEnv(container, deps = {}) {
  * @returns {Promise<Object<string,*>>}
  */
 async function carryContainerEnv(configuredEnv, options = {}, deps = {}) {
-    if (options.reuseImage !== true) return configuredEnv
+    return (await carryContainerEnvWithProvenance(configuredEnv, options, deps)).env
+}
+
+function requestedDrops(value) {
+    return new Set(String(value || '').split(',').map(name => name.trim()).filter(Boolean))
+}
+
+/**
+ * Merge a reused container's environment and report which names were carried
+ * from it. A requested drop applies only to a value absent from current config.
+ */
+async function carryContainerEnvWithProvenance(configuredEnv, options = {}, deps = {}) {
+    const empty = { env: configuredEnv, carriedKeys: [], droppedKeys: [], unknownDropKeys: [] }
+    if (options.reuseImage !== true) return empty
     const sources = [...new Set([options.overwriteContainerId, options.containerName].filter(Boolean))]
     for (const source of sources) {
         const carriedEnv = await readContainerEnv(source, deps)
-        if (carriedEnv) return { ...carriedEnv, ...configuredEnv }
+        if (!carriedEnv) continue
+        const drops = requestedDrops(deps.dropList)
+        const carriedKeys = Object.keys(carriedEnv).filter(key => !(key in configuredEnv) && !drops.has(key))
+        const droppedKeys = Object.keys(carriedEnv).filter(key => !(key in configuredEnv) && drops.has(key))
+        const recognized = new Set([...Object.keys(carriedEnv), ...Object.keys(configuredEnv)])
+        const unknownDropKeys = [...drops].filter(key => !recognized.has(key))
+        const kept = Object.fromEntries(Object.entries(carriedEnv).filter(([key]) => !droppedKeys.includes(key)))
+        return { env: { ...kept, ...configuredEnv }, carriedKeys, droppedKeys, unknownDropKeys }
     }
-    return configuredEnv
+    return empty
 }
 
-module.exports = { readContainerEnv, carryContainerEnv }
+module.exports = { readContainerEnv, carryContainerEnv, carryContainerEnvWithProvenance }

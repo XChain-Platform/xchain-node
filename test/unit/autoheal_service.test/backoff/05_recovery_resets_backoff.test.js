@@ -30,6 +30,16 @@ function logEntry(agoMs, exitCode) {
     }
 }
 
+function recordedProbe(atMs, exitCode) {
+    const start = new Date(atMs)
+    return {
+        Start: start.toISOString(),
+        End: new Date(atMs + 1000).toISOString(),
+        ExitCode: exitCode,
+        Output: exitCode === 0 ? 'ok' : 'wget: server returned error'
+    }
+}
+
 // docker-inspect shape for a container in a given health state. `runState` is
 // State.Status and defaults to 'running'; pass 'exited' to model what Docker
 // reports for a STOPPED container, whose Health.Status stays frozen at whatever
@@ -104,8 +114,8 @@ describe('AutohealService', () => {
 
         // Container comes back healthy: the earned backoff is not a debt it carries
         // into a later, unrelated wedge.
-        stubs.getStatusFromContainer.resolves(inspectStatus('healthy', [logEntry(30000, 0)]))
-        await service.runAutoheal({ now: NOW + 12 * 60000 })
+        stubs.getStatusFromContainer.resolves(inspectStatus('healthy', [recordedProbe(NOW + 14 * 60000, 0)]))
+        await service.runAutoheal({ now: NOW + 14 * 60000 + 15000 })
         const cleared = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
         expect(cleared.restartCount).to.not.have.property('bo2')
 

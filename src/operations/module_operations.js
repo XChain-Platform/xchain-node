@@ -119,13 +119,13 @@ async function installModuleWithProgress(...args) {
     return result
 }
 
-async function installModules(servicesList, ref = null) {
+async function installModules(servicesList, ref = null, preResolvedTarget = null) {
     let installRef = ref
     if (!installRef) {
         const target = await installTargetService.resolveUpdateTarget()
         if (target.kind === 'branch') installRef = target.ref
     }
-    return sharedServices.installModules(servicesList, installRef)
+    return sharedServices.installModules(servicesList, installRef, preResolvedTarget)
 }
 
 async function updateModules(servicesList, ref = null, opts = {}) {

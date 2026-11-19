@@ -16,8 +16,10 @@ const {
 } = require('./support/helpers')
 const {
     readContainerEnv,
-    carryContainerEnv
+    carryContainerEnv,
+    carryContainerEnvWithProvenance
 } = require('../../../src/services/module_service/carry_container_env')
+const { RECREATE_DROP_ENV } = require('../../../src/config')
 
 function recordRecreate(stubs, liveEnv, events = []) {
     const seen = []
@@ -43,6 +45,17 @@ function recordRecreate(stubs, liveEnv, events = []) {
 }
 
 describe('CarryContainerEnv', function () {
+
+    it('reads the explicit recreate drop list through its declared env view', function () {
+        const name = 'XCHAIN_NODE_RECREATE_DROP_ENV'
+        const saved = process.env[name]
+        process.env[name] = 'ORACLE_MIN_SUBMISSIONS'
+        try {
+            expect(RECREATE_DROP_ENV[name]).to.equal('ORACLE_MIN_SUBMISSIONS')
+        } finally {
+            if (saved === undefined) delete process.env[name]; else process.env[name] = saved
+        }
+    })
 
     it('parses empty and equals-bearing values without exposing or truncating them', async function () {
         const execFileAsync = sinon.stub().resolves({
@@ -96,9 +109,38 @@ describe('CarryContainerEnv', function () {
         expect(merged.AUX_POW).to.equal('1')
         expect(execFileAsync.secondCall.args[1]).to.include('rail-decoder')
     })
+
+    it('reports carried names and drops only requested values absent from current config', async function () {
+        const execFileAsync = sinon.stub().resolves({
+            stdout: dockerEnvInspectOutput({ KEEP: 'old', DROP: 'old', CURRENT: 'old' })
+        })
+        const result = await carryContainerEnvWithProvenance(
+            { CURRENT: 'new' },
+            { reuseImage: true, overwriteContainerId: 'old-id' },
+            { execFileAsync, dropList: 'DROP,CURRENT,TYPO' }
+        )
+        expect(result.env).to.deep.equal({ KEEP: 'old', CURRENT: 'new' })
+        expect(result.carriedKeys).to.deep.equal(['KEEP'])
+        expect(result.droppedKeys).to.deep.equal(['DROP'])
+        expect(result.unknownDropKeys).to.deep.equal(['TYPO'])
+    })
 })
 
 moduleSuite('buildAndUp() recreate env carry', function () {
+
+    it('passes carried hub names to the consensus guard as provenance', async function () {
+        const stubs = makeStubs()
+        recordRecreate(stubs, { ORACLE_MIN_SUBMISSIONS: '1' })
+        const assertNoHubConsensusEnvDrift = sinon.stub().resolves([])
+        const ms = loadModuleService(stubs, undefined, {
+            './hub_consensus_env_guard': { assertNoHubConsensusEnvDrift }
+        })
+
+        await ms.buildAndUp('xchain-hub', null, null, 'old-container-id', false, null, { reuseImage: true })
+
+        expect(assertNoHubConsensusEnvDrift.firstCall.args[0].ORACLE_MIN_SUBMISSIONS).to.equal('1')
+        expect(assertNoHubConsensusEnvDrift.firstCall.args[1].carriedKeys).to.include('ORACLE_MIN_SUBMISSIONS')
+    })
 
     it('carries all shell-only rail values before teardown and keeps them off argv', async function () {
         const stubs = makeStubs()

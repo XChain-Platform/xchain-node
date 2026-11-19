@@ -23,6 +23,8 @@ const INDEXER_DIR = path.join(__dirname, '../../../../xchain-indexer')
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
 const LIST_SHARE = '2026-09-30-list-share-tables.sql'
 const ORACLE_WIDEN = '2026-09-22-oracle-prices-widen-tick.sql'
+const BRIDGE_TABLES = '2026-09-12-bridge-tables.sql'
+const BRIDGE_NAMES = ['bridge_transfers', 'bridge_settlements', 'policy_snapshots', 'xbridges']
 
 function table(name) {
     return { table_schema: DATABASE, table_name: name, engine: 'InnoDB', table_collation: 'utf8mb3_general_ci', table_type: 'BASE TABLE' }
@@ -40,6 +42,10 @@ async function satisfiedWith({ tables = [], columns = [] }) {
     model.tables.push(...tables)
     model.columns.push(...columns)
     return (await readResetLedger(model)).satisfied
+}
+function tableNamesFromInList(sql) {
+    const match = /table_name IN \(([^)]+)\)/.exec(sql)
+    return match ? [...match[1].matchAll(/'([^']+)'/g)].map(m => m[1]).sort() : []
 }
 
 describe('indexer precondition fact parity', () => {
@@ -64,6 +70,34 @@ describe('indexer precondition fact parity', () => {
     it('keeps the list-share migration missing while either table is absent', async () => {
         expect(await satisfiedWith({ tables: [table('list_snapshots')] })).to.not.include(LIST_SHARE)
         expect(await satisfiedWith({ tables: [table('list_share_mirrors')] })).to.not.include(LIST_SHARE)
+    })
+
+    it('treats bridge tables as applied from table presence even with DATETIME created_at columns', async () => {
+        const model = resetSchemaModel()
+        model.columns.push(
+            { ...tickColumn(null), table_name: 'bridge_transfers', column_name: 'created_at', data_type: 'datetime' },
+            { ...tickColumn(null), table_name: 'policy_snapshots', column_name: 'created_at', data_type: 'datetime' })
+        expect((await readResetLedger(model)).satisfied).to.include(BRIDGE_TABLES)
+    })
+
+    it('keeps the bridge migration missing when any required table is absent', async () => {
+        for (const missing of BRIDGE_NAMES) {
+            const model = resetSchemaModel()
+            model.tables = model.tables.filter(row => row.table_name !== missing)
+            expect((await readResetLedger(model)).satisfied, missing).to.not.include(BRIDGE_TABLES)
+        }
+    })
+
+    it('uses the same bridge table list as the indexer baseline', function () {
+        if (!fs.existsSync(INDEXER_DIR)) {
+            if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer is not checked out at ' + INDEXER_DIR)
+            return this.skip()
+        }
+        const { MIGRATION_PRECONDITIONS } = require(path.join(INDEXER_DIR, 'src/db/database/migration_tables.js'))
+        const nodeSql = appliedMigrationsSql('XChain_BTC_Mainnet_Indexer', 'schema_migrations')
+        const nodeFact = nodeSql.split("SELECT '" + BRIDGE_TABLES + "' AS name WHERE ")[1].split(' UNION ')[0]
+        expect(tableNamesFromInList(nodeFact)).to.deep.equal(
+            tableNamesFromInList(MIGRATION_PRECONDITIONS[BRIDGE_TABLES].sql))
     })
 
     it('treats the oracle tick widening as applied at 250 characters or wider, and not below', async () => {

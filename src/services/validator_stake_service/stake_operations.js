@@ -15,9 +15,9 @@
  ********************************************************************/
 
 const { getLogger } = require('../../observability/logger')
-const { sendLockFor, releaseOnIndexWait, holdForSend } = require('./send_lock')
+const { sendLockFor, guardIdentity, releaseOnIndexWait, holdForSend } = require('./send_lock')
 const { sleepRefusal, sleepUnknownRefusal } = require('./address_sleep')
-const { amountUnits, fromUnits } = require('./free_key')
+const { amountUnits, fromUnits, assertExplorerFresh } = require('./free_key')
 
 // A planned MINT amount as the plain decimal the wire carries (at most 8 places, above 0), or null.
 function mintAmountText(amount) {
@@ -181,8 +181,21 @@ async function sendStakeAction(context, progress, kind, params, isLast, inputs) 
     const wait = isLast && opts.wait !== false
     // Hold the command lock while this action is sent; the SDK's indexer wait hands it back.
     holdForSend(sendLock, progress.sent, kind)
-    const r = await session.submit({ action: kind, params }, enc,
-        { waitForIndexer: wait, timeout: timeoutMs, pollInterval: 15000, onProgress: releaseOnIndexWait(sendLock) })
+    const submitOpts = {
+        waitForIndexer: wait, timeout: timeoutMs, pollInterval: 15000,
+        onProgress: releaseOnIndexWait(sendLock)
+    }
+    if (progress.sent.length === 0) submitOpts.strictFreshness = true
+    let r
+    try {
+        r = await session.submit({ action: kind, params }, enc, submitOpts)
+    } catch (err) {
+        if (err && err.code === 'COIN_DATA_STALE' && progress.sent.length === 0) {
+            throw context.fail('the explorer became stale before the first transaction was signed. Nothing was sent. ' +
+                'Re-run once the explorer catches up.')
+        }
+        throw err
+    }
     if (progress.chain && progress.prevTxid && !(r.spentInputs || []).some(i => i.txid === progress.prevTxid)) {
         progress.chainBroken = true
     }
@@ -317,10 +330,13 @@ function createStakeValidator(helpers) {
         const log = deps.log || defaultLog()
         // Before the session opens, so a bad amount refuses ahead of any WIF prompt or chain read.
         const amount = resolveStakeAmount(opts.amount, DEFAULT_STAKE_AMOUNT, fail, STAKE_TICK)
-        const { network, coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
+        const opened = openValidatorSession(opts, deps)
+        const { network, coins, pubkey, sdk, session, address, assertIdentityUnchanged } = opened
         const timing = stakeTiming(coins, network)
-        // Take the lock before reading the plan, so no other broadcast sends between this read and these sends.
-        sendLock.hold()
+        // Every acquisition verifies that init did not replace the identity while the lock was free.
+        sendLock = guardIdentity(sendLock, assertIdentityUnchanged)
+        holdForSend(sendLock, [], 'plan')
+        try { await assertExplorerFresh(sdk, coins) } catch (err) { throw fail(err.message) }
         const state = await readChainState(sdk, address, pubkey, { network, coins, cooldownBlocks: timing.cooldownBlocks })
         const plan = planMints(network, state.tokenBal, amount, state.mintMax, state.mintAddressMax, state.mintUnreadable, state)
 

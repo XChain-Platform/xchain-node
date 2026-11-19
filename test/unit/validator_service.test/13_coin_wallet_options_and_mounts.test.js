@@ -296,6 +296,21 @@ describe('ValidatorService', function () {
             expect(fs.mkdirSync.called).to.be.false
         })
 
+        it('reports the generated signer without creating its mountpoint', function () {
+            const fs = makeFs({ lstatSync: fileLstat([FAKE_SIGNER_FILE, FAKE_SIGNER_ENV]) })
+            const vs = loadValidatorService(fs)
+            expect(vs.getSignerHostDir()).to.equal(FAKE_SIGNER_DIR)
+            expect(fs.mkdirSync.called).to.be.false
+        })
+
+        it('does not report the generated signer when an operator signer wins', function () {
+            process.env.XCHAIN_NODE_HUB_SIGNER_DIR = '/operator/signer'
+            const fs = makeFs({ lstatSync: fileLstat([FAKE_SIGNER_FILE, FAKE_SIGNER_ENV]) })
+            const vs = loadValidatorService(fs)
+            expect(vs.getSignerHostDir()).to.be.null
+            expect(fs.mkdirSync.called).to.be.false
+        })
+
         it('publicWalletInfo never carries a WIF', function () {
             const vs = loadValidatorService(makeFs())
             const info = vs.publicWalletInfo({

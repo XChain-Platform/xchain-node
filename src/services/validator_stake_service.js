@@ -108,6 +108,26 @@ function fail(msg) {
     return e
 }
 
+function identityReader(deps, readerName, valueName, fallback) {
+    if (typeof deps[readerName] === 'function') return deps[readerName]
+    if (deps[valueName] !== undefined) return () => deps[valueName]
+    return fallback
+}
+
+function stakeAddressFor(wallets) {
+    const info = publicWalletInfo(wallets)
+    return info && info.stakeAddress ? String(info.stakeAddress) : null
+}
+
+function identityChanged(kind, before, after) {
+    const shown = value => value || '(missing)'
+    const error = fail('validator identity changed while this command was running: ' + kind + ' changed from ' +
+        shown(before) + ' to ' + shown(after) + '. validator.json or wallets.env was rewritten, possibly by ' +
+        '`validator init`; re-run this command against the current identity.')
+    error.code = 'EVALIDATORCHANGED'
+    return error
+}
+
 // The stake WIF: wallets.env first, then the env var, then a hidden prompt.
 function resolveStakeWif(wallets) {
     if (wallets && wallets.STAKE_WIF_SECRET) return wallets.STAKE_WIF_SECRET
@@ -330,7 +350,9 @@ function openValidatorSession(opts, deps) {
     // injection: `||` treats the two alike and falls through to the real validator
     // directory, which leaves the no-validator path exercisable only on a machine
     // that happens to have none. Same idiom as deps.wallets below.
-    const settings = deps.settings !== undefined ? deps.settings : getValidatorSettings()
+    const readSettingsNow = identityReader(deps, 'readSettings', 'settings', getValidatorSettings)
+    const readWalletsNow = identityReader(deps, 'readWallets', 'wallets', readWallets)
+    const settings = readSettingsNow()
     if (!settings) throw fail('no validator configured. Run: xchain-node validator init')
     const network = settings.network || (settings.P2P_PORT === 10002 ? 'testnet' : (settings.P2P_PORT === 10001 ? 'mainnet' : null))
     if (!network || !COIN_NETWORKS[network]) throw fail('validator network unknown; re-run `validator init --network testnet|mainnet`.')
@@ -343,9 +365,10 @@ function openValidatorSession(opts, deps) {
                    'indexer would refuse the STAKE after the MINT fees were spent. Restore validator.json. Nothing was sent.')
     }
 
-    const wallets = deps.wallets !== undefined ? deps.wallets : readWallets()
+    const wallets = readWalletsNow()
     const wif     = deps.wif || resolveStakeWif(wallets)
     const info    = publicWalletInfo(wallets)
+    const openedStakeAddress = stakeAddressFor(wallets)
 
     const { XChainSDK } = deps.sdk || loadSdk()
     const sdk = deps.makeSdk ? deps.makeSdk(coins.stake) : new XChainSDK({ network: coins.stake })
@@ -354,7 +377,16 @@ function openValidatorSession(opts, deps) {
         throw fail('the stake WIF controls ' + session.address + ', not the ' + info.stakeAddress +
                    ' recorded in ' + WALLETS_FILE + '. Nothing was sent.')
     }
-    return { settings, network, coins, pubkey, sdk, session, address: session.address }
+    function assertIdentityUnchanged() {
+        const current = readSettingsNow()
+        const currentPubkey = String((current && current.pubkey) || '').toLowerCase()
+        if (currentPubkey !== pubkey) throw identityChanged('signing pubkey', pubkey, currentPubkey)
+        const currentStakeAddress = stakeAddressFor(readWalletsNow())
+        if (currentStakeAddress !== openedStakeAddress) {
+            throw identityChanged('stake address', openedStakeAddress, currentStakeAddress)
+        }
+    }
+    return { settings, network, coins, pubkey, sdk, session, address: session.address, assertIdentityUnchanged }
 }
 
 const { createStakeValidator } = require('./validator_stake_service/stake_operations')

@@ -25,6 +25,7 @@ const FAKE_SETTINGS_FILE = path.join(FAKE_VALIDATOR_DIR, 'validator.json')
 // against the container for every path. signing.key must stay outside it.
 const FAKE_CAPS_DIR      = path.join(FAKE_VALIDATOR_DIR, 'hub-caps')
 const FAKE_CAPS_FILE     = path.join(FAKE_CAPS_DIR, 'capabilities.json')
+const FAKE_LEGACY_CAPS   = path.join(FAKE_VALIDATOR_DIR, 'capabilities.json')
 // The shared 0600 sidecar the hub API key lands in. It is NOT under validator/: the key
 // belongs to the host (the hub, the local indexer and the shared services all present it),
 // while validator/ holds this node's identity.
@@ -117,6 +118,35 @@ describe('ValidatorService', function () {
             })
             const vs = loadValidatorService(fs)
             expect(vs.getCapabilityConfigHostPath()).to.be.null
+        })
+    })
+
+    describe('describeCapabilityConfigPath()', function () {
+        it('reports a legacy config without migrating it', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                lstatSync: fileLstat([FAKE_LEGACY_CAPS]),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+            })
+            const vs = loadValidatorService(fs)
+            expect(vs.describeCapabilityConfigPath()).to.deep.equal({ path: FAKE_LEGACY_CAPS, legacy: true })
+            expect(fs.mkdirSync.called).to.be.false
+            expect(fs.renameSync.called).to.be.false
+        })
+
+        it('reports the current config ahead of a legacy copy', function () {
+            const fs = makeFs({
+                existsSync: sinon.stub().callsFake(p => p === FAKE_SETTINGS_FILE || p === FAKE_KEY_FILE),
+                lstatSync: fileLstat([FAKE_CAPS_FILE, FAKE_LEGACY_CAPS]),
+                readFileSync: sinon.stub().returns(JSON.stringify(makeSettings()))
+            })
+            const vs = loadValidatorService(fs)
+            expect(vs.describeCapabilityConfigPath()).to.deep.equal({ path: FAKE_CAPS_FILE, legacy: false })
+        })
+
+        it('returns null without validator settings', function () {
+            const vs = loadValidatorService(makeFs())
+            expect(vs.describeCapabilityConfigPath()).to.be.null
         })
     })
 })

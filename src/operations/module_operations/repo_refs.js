@@ -22,13 +22,14 @@ function configure(dependencies) {
 // staging inside it resolves against ONE decision (release-management spec
 // section 11). Cleared in a finally, or a later branch install in the same
 // process would inherit a stale pin.
-async function withInstallTarget(ref, run, { fallbackToBranch = true } = {}) {
+async function withInstallTarget(ref, run, { fallbackToBranch = true, target: preResolvedTarget = null } = {}) {
     const {
         resolveInstallTarget, setActiveTarget, clearActiveTarget
     } = releaseManifestService
     const { recordInstallTarget } = installTargetService
 
-    const target = await resolveInstallTarget(ref, { defaultBranch: DEFAULT_MODULE_BRANCH, fallbackToBranch })
+    const target = preResolvedTarget ||
+        await resolveInstallTarget(ref, { defaultBranch: DEFAULT_MODULE_BRANCH, fallbackToBranch })
 
     if (target.kind === 'release') {
         console.log(`Installing XChain ${target.tag} (${target.resolvedFrom}); every component is manifest-pinned.`)

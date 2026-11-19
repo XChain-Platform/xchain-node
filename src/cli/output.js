@@ -164,8 +164,8 @@ function registerValidatorUnstake(validator, deps) {
 
 function printValidatorConfiguration(s, deps) {
     const {
-        getCapabilityConfigHostPath, readWallets, publicWalletInfo,
-        getSignerMountDir, COIN_NETWORKS, WALLETS_FILE
+        describeCapabilityConfigPath, readWallets, publicWalletInfo,
+        getSignerHostDir, COIN_NETWORKS, WALLETS_FILE
     } = deps
     console.log('Validator enabled.')
     console.log('  pubkey       : ' + s.pubkey)
@@ -179,10 +179,11 @@ function printValidatorConfiguration(s, deps) {
     // set) until its activation flag day. Said here so an operator whose
     // stake clears its floor does not go looking for how to earn it.
     console.log('  full_node    : not active on this network yet (tier turns on with a flag day; nothing to configure)')
-    // Print the live path: it moved into its own directory (so the hub's
-    // bind mount cannot break `docker cp`), and this is where an operator
-    // coming from an older install finds it after the migration.
-    console.log('  caps config  : ' + (getCapabilityConfigHostPath() || '(missing; re-run validator init)'))
+    const caps = describeCapabilityConfigPath()
+    const capsPath = caps ? caps.path + (caps.legacy
+        ? ' (legacy location; moves on the next validator init or hub install/update)'
+        : '') : '(missing; re-run validator init)'
+    console.log('  caps config  : ' + capsPath)
     // Addresses only. The keys stay in the 0600 file.
     const w = publicWalletInfo(readWallets())
     const coins = COIN_NETWORKS[(w && w.network) || s.network] || { stakeCoin: 'coin', dogeCoin: 'DOGE' }
@@ -192,7 +193,7 @@ function printValidatorConfiguration(s, deps) {
         console.log('  keys file    : ' + WALLETS_FILE + ' (mode 0600; back it up)')
         console.log('  DOGE signer  : ' + (deps.config.XCHAIN_NODE_HUB_SIGNER_DIR
             ? deps.config.XCHAIN_NODE_HUB_SIGNER_DIR + ' (operator-supplied, XCHAIN_NODE_HUB_SIGNER_DIR)'
-            : (getSignerMountDir() || '(missing; re-run validator init)')))
+            : (getSignerHostDir() || '(missing; re-run validator init)')))
     } else {
         console.log('  wallets      : (none; re-run validator init, or run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR)')
     }

@@ -206,7 +206,9 @@ async function checkResetDatabase(context) {
     if (resetUtxoTracker) modulesToStop.push(XChainService.XCHAIN_UTXO_TRACKER)
     if (resetDecoder)     modulesToStop.push(XChainService.XCHAIN_DECODER)
     if (resetIndexer)     modulesToStop.push(XChainService.XCHAIN_INDEXER)
-    if (resetAll)         modulesToStop.push(XChainService.XCHAIN_REGTEST_MINER)
+    if (resetAll || (resetNode && network === Network.REGTEST)) {
+        modulesToStop.push(XChainService.XCHAIN_REGTEST_MINER)
+    }
     return stopResetModules({ ...context, modulesToStop, namedDbTarget })
 }
 

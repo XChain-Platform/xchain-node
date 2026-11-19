@@ -70,7 +70,11 @@ const LIST_VIEWS = {
     // configureSharedAfterHubKey), so a recreate keeps the operator's value.
     // TRUST_PROXY is the one way to give sync per-client rate-limit buckets
     // behind its reverse proxy.
-    SYNC_PASSTHROUGH_ENV: ['sync passthrough', ["INDEX_MAP_PARITY_CHECK", "TRUST_PROXY"]],
+    SYNC_PASSTHROUGH_ENV: ['sync passthrough', [
+        "INDEX_MAP_PARITY_CHECK", "TRUST_PROXY", "XC_ANCHOR_FOLD_REGTEST_ACTIVATION"
+    ]],
+    // Shared explorer settings whose names are read from a passthrough list.
+    EXPLORER_PASSTHROUGH_ENV: ['explorer passthrough', ["XC_ANCHOR_FOLD_REGTEST_ACTIVATION"]],
     // The indexer's regtest genesis bootstrap (ConfigService genesisPassthroughVars).
     INDEXER_GENESIS_ENV: ['indexer genesis', [
         "XCHAIN_GENESIS_BLOCK", "XCHAIN_GENESIS_LEDGER_HASH", "XCHAIN_GENESIS_DUMP_HASH",
@@ -111,6 +115,7 @@ const LIST_VIEWS = {
     SKEW_GUARD_ENV: ['skew guard', ["XCHAIN_NODE_SKIP_SKEW_GUARD"]],
     DB_CREDENTIAL_DRIFT_ENV: ['database credential drift', ["XCHAIN_NODE_ALLOW_DB_CREDENTIAL_DRIFT"]],
     HUB_CONSENSUS_DRIFT_ENV: ['hub consensus drift', ["XCHAIN_NODE_ALLOW_HUB_CONSENSUS_ENV_DRIFT"]],
+    RECREATE_DROP_ENV: ['recreate env removal', ["XCHAIN_NODE_RECREATE_DROP_ENV"]],
     CHECKPOINT_SELF_SYNC_ENV: ['checkpoint self-sync', ["EXPLORER_CHECKPOINT_SELF_SYNC"]],
     SELF_UPDATE_ENV: ['self-update', ["XCHAIN_NODE_UPDATE_TARGET", "XCHAIN_NODE_NO_SELF_UPDATE"]],
     // The service keys the go-live gate falls back to the host for, and the signed

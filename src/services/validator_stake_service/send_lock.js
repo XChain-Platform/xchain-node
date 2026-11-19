@@ -24,6 +24,14 @@ function sendLockFor(opts, deps) {
     return (opts && opts.broadcast && deps && deps.sendLock) ? deps.sendLock : NO_LOCK
 }
 
+function guardIdentity(lock, check) {
+    if (lock === NO_LOCK || typeof check !== 'function') return lock
+    return {
+        hold() { lock.hold(); check() },
+        release() { lock.release() }
+    }
+}
+
 // Hand the lock back when the SDK starts its indexer wait, which follows every
 // broadcast of the action. A wait of up to --timeout must not block other commands.
 function releaseOnIndexWait(lock) {
@@ -36,7 +44,10 @@ function holdForSend(lock, sent, kind) {
     try {
         lock.hold()
     } catch (err) {
-        if (!sent.length) throw err
+        if (!sent.length) {
+            if (err && err.code === 'EVALIDATORCHANGED') err.message += ' Nothing was sent.'
+            throw err
+        }
         const stopped = new Error(err.message + ' Stopped before the ' + kind + '; already broadcast: ' +
             sent.map(s => s.step + ' ' + s.txid).join(', ') + '. Re-run this command once that one finishes.')
         stopped.code = err.code
@@ -44,4 +55,4 @@ function holdForSend(lock, sent, kind) {
     }
 }
 
-module.exports = { NO_LOCK, sendLockFor, releaseOnIndexWait, holdForSend }
+module.exports = { NO_LOCK, sendLockFor, guardIdentity, releaseOnIndexWait, holdForSend }

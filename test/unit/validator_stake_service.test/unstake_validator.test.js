@@ -315,7 +315,7 @@ describe('ValidatorStakeService', function () {
             let err = null
             try { await runUnstake({ broadcast: true }, { existing: STAKED, statusThrow: 'explorer 503' }) } catch (e) { err = e }
             expect(err).to.exist
-            expect(err.message).to.match(/could not read the chain tip/)
+            expect(err.message).to.match(/could not verify whether the explorer is current/)
         })
 
         it('refuses before sending when the explorer reports no usable last block', async function () {

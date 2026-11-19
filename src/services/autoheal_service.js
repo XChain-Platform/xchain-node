@@ -161,7 +161,7 @@ function skipNonRunning(candidate, state, result) {
     return true
 }
 
-function skipNonUnhealthy(candidate, health, state) {
+function skipNonUnhealthy(candidate, health, state, probationMs) {
     const { containerId } = candidate
     if (health && health.Status === 'unhealthy') return null
 
@@ -172,22 +172,11 @@ function skipNonUnhealthy(candidate, health, state) {
         delete state.unhealthySince[containerId]
         changed = true
     }
-    // On THIS branch drop the attempt count only on an OBSERVED `healthy`,
-    // never on a bare `!== unhealthy`, so a container
-    // that DID recover starts its next episode at the base cooldown. Backing
-    // off is a response to a wedge restarts are not clearing; a recovery is
-    // the evidence they cleared it, and `!== 'unhealthy'` is not that
-    // evidence: a restart puts the container into `starting` for the
-    // descriptor's start period plus its retry budget (60s + 3x15s for the
-    // decoder/indexer, and an operator can widen it to minutes via
-    // XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>), so a pass landing in that
-    // window would wipe the counter the restart it had just issued earned.
-    // A wedge no restart clears then stayed at the BASE cooldown forever,
-    // which is the churn the doubling exists to end. Same principle the
-    // not-running guard above states: mid-restart is not recovery. `starting`
-    // is its health-probation form. A container with no healthcheck keeps its
-    // count too, and inertly: it can never reach the restart path below.
-    if (health && health.Status === 'healthy' && state.restartCount[containerId] !== undefined) {
+    // A healthy status clears the attempt count only after its newest passing
+    // probe outlasts restart probation. A starting status, no healthcheck, or a
+    // pass caused by the restart itself is not evidence the wedge cleared.
+    if (health && health.Status === 'healthy' && state.restartCount[containerId] !== undefined &&
+        isRecoveryEstablished(getLastHealthyProbeMs(health), state.restarts[containerId], probationMs)) {
         delete state.restartCount[containerId]
         changed = true
     }
@@ -363,7 +352,7 @@ async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.n
         }
 
         const health = candidate.status && candidate.status.State && candidate.status.State.Health
-        const recoveredStateChanged = skipNonUnhealthy(candidate, health, state)
+        const recoveredStateChanged = skipNonUnhealthy(candidate, health, state, timing.probationMs)
         if (recoveredStateChanged !== null) {
             if (recoveredStateChanged) onsetChanged = true
             continue

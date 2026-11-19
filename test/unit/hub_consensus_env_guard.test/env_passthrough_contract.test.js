@@ -26,6 +26,7 @@ const {
 } = require('../../../src/services/hub_consensus_env_guard')
 
 const ROUND_CADENCE_KEYS = ['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW']
+const CHECKPOINT_CADENCE_KEYS = ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N']
 const ARM_KEYS = HUB_PASSTHROUGH_VARS.filter(name => /^XC_[A-Z_]+_ACTIVATION$/.test(name))
 
 function registerPassthroughListContract() {
@@ -165,6 +166,57 @@ function registerAttestTimingContract() {
     })
 }
 
+function registerCheckpointCadenceContract() {
+    describe('checkpoint cadence overrides', function checkpointCadenceContract() {
+        it('passes both through and guards them on regtest only', () => {
+            for (const key of CHECKPOINT_CADENCE_KEYS) {
+                expect(HUB_PASSTHROUGH_VARS, key).to.include(key)
+                expect(CONSENSUS_ENV_KEYS, key).to.include(key)
+                expect(isConsensusEnvKeyHonoredOn(key, 'regtest'), key).to.equal(true)
+                for (const network of ['mainnet', 'testnet', '']) {
+                    expect(isConsensusEnvKeyHonoredOn(key, network), key + ' on ' + network).to.equal(false)
+                }
+            }
+        })
+
+        it('detects a regtest drop and accepts values carried forward', () => {
+            const live = { HUB_NETWORK: 'regtest', CHECKPOINT_INTERVAL_BLOCKS: '2', ANCHOR_CHECKPOINT_EVERY_N: '3' }
+            const keys = drift => drift.map(d => d.key).sort()
+            expect(keys(findHubConsensusEnvDrift({ HUB_NETWORK: 'regtest' }, live)))
+                .to.deep.equal(CHECKPOINT_CADENCE_KEYS.slice().sort())
+            expect(findHubConsensusEnvDrift({ ...live }, live)).to.deep.equal([])
+            expect(keys(findHubConsensusEnvDrift({}, live)))
+                .to.deep.equal([...CHECKPOINT_CADENCE_KEYS, 'HUB_NETWORK'].sort())
+        })
+
+        it('ignores stale values off regtest and reports regtest defaults', () => {
+            for (const network of ['mainnet', 'testnet', '']) {
+                const live = { CHECKPOINT_INTERVAL_BLOCKS: '2', ANCHOR_CHECKPOINT_EVERY_N: '3' }
+                if (network) live.HUB_NETWORK = network
+                expect(findHubConsensusEnvDrift(network ? { HUB_NETWORK: network } : {}, live)).to.deep.equal([])
+            }
+            expect(describeConsensusEnvSupply({ HUB_NETWORK: 'regtest' }).defaulted)
+                .to.include.members(CHECKPOINT_CADENCE_KEYS)
+        })
+    })
+}
+
+function registerSupplyProvenanceContract() {
+    describe('recreate supply provenance', function supplyProvenanceContract() {
+        it('separates carried settings from values supplied by the invoking shell', () => {
+            const state = describeConsensusEnvSupply(
+                { HUB_NETWORK: 'regtest', ORACLE_MIN_SUBMISSIONS: '1' },
+                'regtest',
+                ['ORACLE_MIN_SUBMISSIONS']
+            )
+            expect(state.supplied).to.include('HUB_NETWORK')
+            expect(state.supplied).to.not.include('ORACLE_MIN_SUBMISSIONS')
+            expect(state.carried).to.deep.equal(['ORACLE_MIN_SUBMISSIONS'])
+            expect(state.defaulted).to.not.include('ORACLE_MIN_SUBMISSIONS')
+        })
+    })
+}
+
 const SNAPSHOT_SEAM_KEYS = ['XDEX_SEED_LOCAL_VALIDATOR', 'XDEX_SNAPSHOT_BLOCK']
 
 function registerSnapshotSeamContract() {
@@ -217,6 +269,8 @@ function registerSnapshotSeamContract() {
 function hubEnvPassthroughContract() {
     registerPassthroughListContract()
     registerNetworkGatedContract()
+    registerCheckpointCadenceContract()
+    registerSupplyProvenanceContract()
     registerAttestTimingContract()
     registerSnapshotSeamContract()
 }

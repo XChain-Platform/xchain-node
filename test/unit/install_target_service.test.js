@@ -164,4 +164,24 @@ describe('InstallTargetService', function () {
             expect(t).to.deep.equal({ kind: 'branch', ref: 'develop', tag: null, inferred: true })
         })
     })
+
+    describe('resolveNoRefInstallTarget()', function () {
+        it('keeps a recorded branch without consulting the release service', async function () {
+            const svc = load(dataDir, moduleDir, sinon.stub())
+            svc.recordInstallTarget({ kind: 'branch', ref: 'develop' })
+            const releaseManifest = { resolveInstallTarget: sinon.stub().rejects(new Error('must not run')) }
+            const target = await svc.resolveNoRefInstallTarget({ releaseManifest, defaultBranch: 'master' })
+            expect(target).to.include({ kind: 'branch', ref: 'develop', resolvedFrom: 'recorded install target' })
+            expect(releaseManifest.resolveInstallTarget.called).to.equal(false)
+        })
+
+        it('resolves a release target once for a fresh node', async function () {
+            const svc = load(dataDir, moduleDir, sinon.stub())
+            const expected = { kind: 'release', ref: 'v1.2.3', tag: 'v1.2.3', manifest: {} }
+            const releaseManifest = { resolveInstallTarget: sinon.stub().resolves(expected) }
+            const target = await svc.resolveNoRefInstallTarget({ releaseManifest, defaultBranch: 'master' })
+            expect(target).to.equal(expected)
+            expect(releaseManifest.resolveInstallTarget.calledOnceWith(null)).to.equal(true)
+        })
+    })
 })

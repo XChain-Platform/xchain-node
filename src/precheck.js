@@ -214,10 +214,10 @@ async function fetchRemoteVersions(checkVersions) {
     return checkVersions
 }
 
-async function installHubAtRef(moduleRef) {
+async function installHubAtRef(moduleRef, installTarget = null) {
     try {
         if (isVerbose()) console.log("Checking/Installing hub module")
-        await installHubModule(moduleRef)
+        await installHubModule(moduleRef, installTarget)
     } catch (err) {
         // Preserve the cause. A bare `catch {}` here would discard the ONLY description
         // of what actually went wrong and replace it with a message that names no
@@ -295,7 +295,8 @@ async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub, hubPushOpti
 //
 // `localOnly` stops after the docker and directory checks, for a reset aimed at a stack this CLI did not install
 // (`reset --db-container`): no bundled DB provisioning, no module scan, no hub install, no hub or explorer push.
-async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false, { localOnly = false, hubPushOptional = false } = {}) {
+async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false,
+    { localOnly = false, hubPushOptional = false, installTarget = null } = {}) {
     await requireDocker()
     await warnIfContainerdStoreOnRoot()
     await warnIfMemoryLimitsUnsupported()
@@ -331,7 +332,7 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     // command (syncHubConfig=false: ps, tail, logs, monitor) must not change any
     // container's run state, or `ps` starts a hub the operator stopped and then
     // prints its stale 'exited' status. Mutating commands still install here.
-    if (syncHubConfig) await installHubAtRef(moduleRef)
+    if (syncHubConfig) await installHubAtRef(moduleRef, installTarget)
 
     await pushConfigToHubAndExplorer(syncHubConfig, repairsHub, hubPushOptional)
 

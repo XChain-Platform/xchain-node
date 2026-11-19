@@ -14,7 +14,7 @@
 const { expect, makeServiceWithConfig } = require('./helpers.test')
 
 // The fold gate is unpinned on regtest, so a deployed venue arms it only
-// through the container env, and the hub and indexer must arm as a unit.
+// through the container env, and every consumer must arm as a unit.
 function anchorFoldPassthrough() {
     const VAR = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION'
 
@@ -52,12 +52,22 @@ function anchorFoldPassthrough() {
         expect(config[VAR]).to.equal('0')
     })
 
+    it('reaches the shared explorer and sync containers', async function () {
+        process.env[VAR] = '0'
+        const cs = makeServiceWithConfig('')
+        const explorer = await cs.getDefaultConfig('xchain-explorer', null, null)
+        const sync = await cs.getDefaultConfig('xchain-sync', null, null)
+        expect(explorer[VAR]).to.equal('0')
+        expect(sync[VAR]).to.equal('0')
+    })
+
     it('is absent from both configs when the host leaves it unset', async function () {
         const cs = makeServiceWithConfig('')
         const indexer = await cs.getDefaultConfig('xchain-indexer', 'dogecoin', 'regtest')
         const hub = await cs.getDefaultConfig('xchain-hub', null, null)
-        expect(indexer).to.not.have.property(VAR)
-        expect(hub).to.not.have.property(VAR)
+        const explorer = await cs.getDefaultConfig('xchain-explorer', null, null)
+        const sync = await cs.getDefaultConfig('xchain-sync', null, null)
+        for (const config of [indexer, hub, explorer, sync]) expect(config).to.not.have.property(VAR)
     })
 }
 

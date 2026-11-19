@@ -56,6 +56,9 @@ function makeDeps() {
         redactSecrets: (s) => s,
         acquireCommandLock: sinon.stub().returns(release),
         preCheck: sinon.stub().resolves(),
+        resolveNoRefInstallTarget: sinon.stub().resolves({
+            kind: 'release', ref: 'v1.2.3', tag: 'v1.2.3', manifest: {}, resolvedFrom: 'test'
+        }),
         refForPreCheck: sinon.stub().returns(null),
         commandRepairsHub: sinon.stub().returns(false),
         maybeReportTelemetry: sinon.stub().resolves(),
@@ -99,6 +102,26 @@ describe('CLI dispatch: commands that hold the lock through their action', funct
             expect(deps.action.calledOnce).to.be.true
         })
     }
+
+    it('hands one no-ref install target to preCheck', async function () {
+        const deps = await run(['install', 'xchain-hub'])
+        expect(deps.resolveNoRefInstallTarget.calledOnce).to.equal(true)
+        expect(deps.preCheck.firstCall.args[4].installTarget)
+            .to.equal(await deps.resolveNoRefInstallTarget.firstCall.returnValue)
+    })
+
+    it('leaves the preCheck argument list at four for a command that is not a no-ref install', async function () {
+        for (const argv of [['reset', 'xchain-decoder'], ['update', 'xchain-hub'], ['install', 'xchain-hub', 'develop']]) {
+            const deps = await run(argv)
+            expect(deps.resolveNoRefInstallTarget.called, argv.join(' ')).to.equal(false)
+            expect(deps.preCheck.firstCall.args, argv.join(' ')).to.have.length(4)
+        }
+    })
+
+    it('keeps a command option set when it adds the no-ref install target', async function () {
+        const deps = await run(['reset', 'hub-checkpoints'])
+        expect(deps.preCheck.firstCall.args[4]).to.deep.equal({ hubPushOptional: true })
+    })
 
     it('clear-reorg-halt keeps the lock through its database check and audited write', async function () {
         const deps = await run(['clear-reorg-halt', 'bitcoin', 'regtest', '--reason', 'known good replica'])

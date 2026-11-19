@@ -105,6 +105,28 @@ function runDeps(sdk, command) {
     }
 }
 
+function changingIdentityDeps(sdk, command, change) {
+    let settingsReads = 0
+    let walletReads = 0
+    return {
+        readSettings: () => ({
+            enabled: true,
+            pubkey: change === 'pubkey' && settingsReads++ > 0 ? 'cd'.repeat(32) : PUBKEY,
+            network: 'testnet',
+            P2P_PORT: 10002
+        }),
+        readWallets: () => ({
+            NETWORK: 'testnet',
+            STAKE_ADDRESS: change === 'address' && walletReads++ > 0 ? 'mReplacementAddress' : ADDRESS,
+            STAKE_WIF_SECRET: 'cFakeWif'
+        }),
+        makeSdk: () => sdk,
+        sdk: {},
+        log: () => {},
+        sendLock: validatorSendLock(command, { acquireCommandLock, config: {} })
+    }
+}
+
 function stake(opts, chain, hooks) {
     const { sdk, sent } = makeSdk(chain, hooks)
     return stakeValidator(opts, runDeps(sdk, 'validator stake')).then(result => ({ result, sent }))
@@ -176,6 +198,24 @@ describe('validator stake --broadcast: send-phase command lock', function () {
         expect(sent.map(s => s.action)).to.deep.equal(['MINT', 'MINT', 'MINT', 'STAKE'])
         expect(during).to.deep.equal(['MINT:false', 'MINT:false', 'MINT:false', 'STAKE:false'])
     })
+
+    it('refuses when init replaced the signing pubkey before the first hold', async function () {
+        const { sdk, sent } = makeSdk({ xchain: 30000 })
+        const err = await stakeValidator({ broadcast: true }, changingIdentityDeps(sdk, 'validator stake', 'pubkey'))
+            .then(() => null, failure => failure)
+        expect(err.code).to.equal('EVALIDATORCHANGED')
+        expect(err.message).to.include('Nothing was sent')
+        expect(sent).to.deep.equal([])
+        expect(lockHolder()).to.equal(null)
+    })
+
+    it('refuses when init replaced the stake wallet before the first hold', async function () {
+        const { sdk, sent } = makeSdk({ xchain: 30000 })
+        const err = await stakeValidator({ broadcast: true }, changingIdentityDeps(sdk, 'validator stake', 'address'))
+            .then(() => null, failure => failure)
+        expect(err.code).to.equal('EVALIDATORCHANGED')
+        expect(sent).to.deep.equal([])
+    })
 })
 
 describe('validator stake --broadcast: send lock across waits, dry runs and early stops', function () {
@@ -198,6 +238,25 @@ describe('validator stake --broadcast: send lock across waits, dry runs and earl
         expect(failure, 'the run must stop at the second mint').to.not.equal(null)
         expect(failure.code).to.equal('ELOCKHELD')
         expect(failure.message).to.include('Stopped before the MINT; already broadcast: MINT mint1')
+    })
+
+    it('rechecks identity after an index wait before sending the next action', async function () {
+        let currentPubkey = PUBKEY
+        const { sdk, sent } = makeSdk({ xchain: 0 }, {
+            duringWait: async action => {
+                if (action === 'MINT') currentPubkey = 'cd'.repeat(32)
+            }
+        })
+        const deps = runDeps(sdk, 'validator stake')
+        delete deps.settings
+        deps.readSettings = () => ({ enabled: true, pubkey: currentPubkey, network: 'testnet', P2P_PORT: 10002 })
+
+        const err = await stakeValidator({ broadcast: true, serialize: true }, deps)
+            .then(() => null, failure => failure)
+
+        expect(err.code).to.equal('EVALIDATORCHANGED')
+        expect(err.message).to.include('already broadcast: MINT mint1')
+        expect(sent.map(row => row.action)).to.deep.equal(['MINT'])
     })
 
     it('a dry run takes no lock, so it plans while a deploy holds it', async function () {
@@ -254,5 +313,14 @@ describe('validator unstake --broadcast: send-phase command lock', function () {
         })
         expect(result.unstaked).to.be.true
         expect(lockHolder()).to.equal(null)
+    })
+
+    it('refuses when init replaced the signing pubkey before the first hold', async function () {
+        const { sdk, sent } = makeSdk({ existing: STAKED })
+        const err = await unstakeValidator({ broadcast: true }, changingIdentityDeps(sdk, 'validator unstake', 'pubkey'))
+            .then(() => null, failure => failure)
+        expect(err.code).to.equal('EVALIDATORCHANGED')
+        expect(err.message).to.include('Nothing was sent')
+        expect(sent).to.deep.equal([])
     })
 })

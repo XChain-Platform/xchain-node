@@ -44,6 +44,7 @@ function operationHelpers() {
     const pubkey = 'ab'.repeat(32)
     const sdk = {
         explorer: {
+            getStatus: sinon.stub().resolves({}),
             getValidators: sinon.stub().resolves({ data: [] })
         }
     }
