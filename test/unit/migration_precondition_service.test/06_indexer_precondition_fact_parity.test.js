@@ -23,6 +23,7 @@ const INDEXER_DIR = path.join(__dirname, '../../../../xchain-indexer')
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
 const LIST_SHARE = '2026-09-30-list-share-tables.sql'
 const ORACLE_WIDEN = '2026-09-22-oracle-prices-widen-tick.sql'
+const OUTBOX_WIDEN = '2026-11-19-pending-hub-pushes-widen-payload.sql'
 const BRIDGE_TABLES = '2026-09-12-bridge-tables.sql'
 const BRIDGE_NAMES = ['bridge_transfers', 'bridge_settlements', 'policy_snapshots', 'xbridges']
 
@@ -37,6 +38,14 @@ function tickColumn(length) {
         character_set_name: 'utf8mb3', collation_name: 'utf8mb3_general_ci', generation_expression: null
     }
 }
+function payloadColumn(dataType, charset) {
+    return {
+        table_schema: DATABASE, table_name: 'pending_hub_pushes', column_name: 'payload', data_type: dataType,
+        is_nullable: 'NO', column_default: null, extra: '', character_maximum_length: null,
+        column_type: dataType, ordinal_position: 4, character_set_name: charset,
+        collation_name: charset + '_general_ci', generation_expression: null
+    }
+}
 async function satisfiedWith({ tables = [], columns = [] }) {
     const model = resetSchemaModel()
     model.tables.push(...tables)
@@ -47,13 +56,17 @@ function tableNamesFromInList(sql) {
     const match = /table_name IN \(([^)]+)\)/.exec(sql)
     return match ? [...match[1].matchAll(/'([^']+)'/g)].map(m => m[1]).sort() : []
 }
+// True when the indexer sibling is checked out; otherwise skips the test, or fails it under XCHAIN_REQUIRE_SIBLINGS.
+function indexerPresent(ctx) {
+    if (fs.existsSync(INDEXER_DIR)) return true
+    if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer is not checked out at ' + INDEXER_DIR)
+    ctx.skip()
+    return false
+}
 
 describe('indexer precondition fact parity', () => {
     it('has a node fact for every indexer baseline predicate and every deploy-precondition file', function () {
-        if (!fs.existsSync(INDEXER_DIR)) {
-            if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer is not checked out at ' + INDEXER_DIR)
-            return this.skip()      // sibling repo not checked out
-        }
+        if (!indexerPresent(this)) return
         const { MIGRATION_PRECONDITIONS } = require(path.join(INDEXER_DIR, 'src/db/database/migration_tables.js'))
         const required = listDeployPreconditionMigrations(migrationsDirOf(INDEXER_DIR))
         const names = new Set([...Object.keys(MIGRATION_PRECONDITIONS), ...required])
@@ -89,10 +102,7 @@ describe('indexer precondition fact parity', () => {
     })
 
     it('uses the same bridge table list as the indexer baseline', function () {
-        if (!fs.existsSync(INDEXER_DIR)) {
-            if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer is not checked out at ' + INDEXER_DIR)
-            return this.skip()
-        }
+        if (!indexerPresent(this)) return
         const { MIGRATION_PRECONDITIONS } = require(path.join(INDEXER_DIR, 'src/db/database/migration_tables.js'))
         const nodeSql = appliedMigrationsSql('XChain_BTC_Mainnet_Indexer', 'schema_migrations')
         const nodeFact = nodeSql.split("SELECT '" + BRIDGE_TABLES + "' AS name WHERE ")[1].split(' UNION ')[0]
@@ -105,5 +115,12 @@ describe('indexer precondition fact parity', () => {
         expect(await satisfiedWith({ columns: [tickColumn(300)] })).to.include(ORACLE_WIDEN)
         expect(await satisfiedWith({ columns: [tickColumn(50)] })).to.not.include(ORACLE_WIDEN)
         expect(await satisfiedWith({ columns: [tickColumn(249)] })).to.not.include(ORACLE_WIDEN)
+    })
+
+    it('matches the indexer payload baseline for capacity and charset', async () => {
+        expect(await satisfiedWith({ columns: [payloadColumn('mediumtext', 'utf8mb4')] })).to.include(OUTBOX_WIDEN)
+        expect(await satisfiedWith({ columns: [payloadColumn('longtext', 'utf8mb4')] })).to.include(OUTBOX_WIDEN)
+        expect(await satisfiedWith({ columns: [payloadColumn('text', 'utf8mb4')] })).to.not.include(OUTBOX_WIDEN)
+        expect(await satisfiedWith({ columns: [payloadColumn('mediumtext', 'utf8mb3')] })).to.not.include(OUTBOX_WIDEN)
     })
 })

@@ -169,6 +169,12 @@ function oraclePricesTickWidthSatisfiedSql(database) {
     return "EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = '" + database + "'" +
         " AND table_name = 'oracle_prices' AND column_name = 'tick' AND character_maximum_length >= 250)"
 }
+// Match the indexer's baseline: either text type with MEDIUMTEXT capacity, and utf8mb4.
+function pendingHubPushPayloadSatisfiedSql(database) {
+    return "EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = '" + database + "'" +
+        " AND table_name = 'pending_hub_pushes' AND column_name = 'payload'" +
+        " AND data_type IN ('mediumtext', 'longtext') AND character_set_name = 'utf8mb4')"
+}
 function pubkeyWidthSatisfiedSql(database) { return columnSql(database, 'pubkeys', 'pubkey', 'varchar', { length: 130, ordinal: 2 }) }
 
 function validatorRewardsDeriveBlockIndexSatisfiedSql(database) {
@@ -285,7 +291,8 @@ function indexerSatisfiedMigrationsSql(database) {
         migrationFactSql('2026-09-10-markets-native-coin-side.sql', marketsNativeCoinSideSatisfiedSql(database)),
         migrationFactSql('2026-09-12-bridge-tables.sql', bridgeTablesSatisfiedSql(database)),
         migrationFactSql('2026-09-22-oracle-prices-widen-tick.sql', oraclePricesTickWidthSatisfiedSql(database)),
-        migrationFactSql('2026-09-30-list-share-tables.sql', listShareTablesSatisfiedSql(database))
+        migrationFactSql('2026-09-30-list-share-tables.sql', listShareTablesSatisfiedSql(database)),
+        migrationFactSql('2026-11-19-pending-hub-pushes-widen-payload.sql', pendingHubPushPayloadSatisfiedSql(database))
     ]
 }
 
