@@ -80,9 +80,10 @@ describe('publish bootstrap servable retention', function () {
 
     it('pins the one-day future tolerance used by the resolver', function () {
         assert.match(pruneBody, /FUTURE_STAMP_TOLERANCE_S=86400/)
-        const resolver = fs.readFileSync(
-            path.join(repoRoot, '../xchain-websites/sync.xchain.io/bootstraps-app/latest.php'), 'utf8'
-        )
-        assert.match(resolver, /> \$now \+ 86400/)
+        // Check the resolver side only where the xchain-websites sibling is checked out (CI venues lack it).
+        const resolverPath = path.join(repoRoot, '../xchain-websites/sync.xchain.io/bootstraps-app/latest.php')
+        if (fs.existsSync(resolverPath)) {
+            assert.match(fs.readFileSync(resolverPath, 'utf8'), /> \$now \+ 86400/)
+        }
     })
 })
