@@ -159,6 +159,14 @@ async function startDockerMonitor(containerIds, follow) {
 
 async function saveContainerLogs(containerId, filePath) {
     return new Promise((resolve, reject) => {
+        let settled = false
+        let exitCode = null
+        let exitSignal = null
+        const settle = (fn, value) => {
+            if (settled) return
+            settled = true
+            fn(value)
+        }
         fs.mkdirSync(path.dirname(filePath), { recursive: true })
         const output = fs.createWriteStream(filePath)
         const child = spawn('docker', ['logs', containerId])
@@ -168,12 +176,25 @@ async function saveContainerLogs(containerId, filePath) {
         // only after the child process exits (both streams closed).
         child.stdout.pipe(output, { end: false })
         child.stderr.pipe(output, { end: false })
-        child.on('close', () => output.end())
-        child.on('error', reject)
+        child.on('close', (code, signal) => {
+            exitCode = code
+            exitSignal = signal
+            output.end()
+        })
+        child.on('error', err => settle(reject, err))
         // Resolve only after the output is fully flushed to disk; otherwise
         // the caller can read a truncated file.
-        output.on('finish', () => resolve(true))
-        output.on('error', reject)
+        output.on('finish', () => {
+            if (exitCode === 0 && !exitSignal) return settle(resolve, true)
+            const err = new Error(exitSignal
+                ? 'docker logs ' + containerId + ' was terminated by signal ' + exitSignal
+                : 'docker logs ' + containerId + ' exited with code ' + exitCode)
+            err.code = exitCode
+            err.signal = exitSignal
+            err.filePath = filePath
+            settle(reject, err)
+        })
+        output.on('error', err => settle(reject, err))
     })
 }
 

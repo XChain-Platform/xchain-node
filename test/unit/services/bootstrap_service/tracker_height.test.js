@@ -47,20 +47,20 @@ describe('tracker_height', function () {
         ['behind', 100, 95, 100]
     ]) {
         it(`chooses safely when the archive height is ${relationship} the tracker height`, function () {
-            expect(trackerHeight.chooseArchiveHeight(tracker, archive)).to.equal(expected)
+            expect(trackerHeight.chooseArchiveHeight(tracker, archive, expected)).to.equal(expected)
         })
     }
 
     it('refuses when only the tracker height before the stop was read', function () {
-        expect(() => trackerHeight.chooseArchiveHeight(100, null)).to.throw(/refusing to record the pre-stop height 100/)
+        expect(() => trackerHeight.chooseArchiveHeight(100, null)).to.throw(/archived store/)
     })
 
     it('uses the archive height when the tracker height is missing', function () {
-        expect(trackerHeight.chooseArchiveHeight(null, 105)).to.equal(105)
+        expect(trackerHeight.chooseArchiveHeight(null, 105, 105)).to.equal(105)
     })
 
     it('returns null when both heights are missing', function () {
-        expect(trackerHeight.chooseArchiveHeight(null, null)).to.equal(null)
+        expect(() => trackerHeight.chooseArchiveHeight(null, null)).to.throw(/archived store/)
     })
 
 })
@@ -75,19 +75,21 @@ describe('tracker_height frozen store', function () {
     it('readFrozenStoreHeight reads the height of the archived directory', async function () {
         fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '4242\n', stderr: '' }))
 
-        const height = await trackerHeight.readFrozenStoreHeight('vol', '/data/.snap')
+        const height = await trackerHeight.readFrozenStoreHeight('vol', '/data/.snap', 'container-id')
 
         expect(height).to.equal(4242)
-        const args = fakes.execFile.firstCall.args[1]
-        expect(args).to.include('vol:/data:ro')
-        expect(args[args.length - 1]).to.equal('/data/.snap/committed_height')
+        const inspectArgs = fakes.execFile.firstCall.args[1]
+        const readArgs = fakes.execFile.secondCall.args[1]
+        expect(inspectArgs).to.include('container-id')
+        expect(readArgs).to.include('vol:/data')
+        expect(readArgs[readArgs.length - 1]).to.equal('/data/.snap/xchain-utxo-tracker')
     })
 
     it('readFrozenStoreHeight returns null on junk output or a failed read', async function () {
         fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '12abc', stderr: '' }))
-        expect(await trackerHeight.readFrozenStoreHeight('vol', '/data')).to.equal(null)
+        expect(await trackerHeight.readFrozenStoreHeight('vol', '/data', 'container-id')).to.equal(null)
         fakes.execFile.callsFake((command, args, options, callback) => callback(new Error('no such file')))
-        expect(await trackerHeight.readFrozenStoreHeight('vol', '/data')).to.equal(null)
+        expect(await trackerHeight.readFrozenStoreHeight('vol', '/data', 'container-id')).to.equal(null)
     })
 
     it('a frozen-store height wins over the live readings and lifts the pre-stop-only refusal', function () {
@@ -117,16 +119,16 @@ describe('tracker_height archive height edge inputs', function () {
     })
 
     it('ignores non-integer readings instead of recording them', function () {
-        expect(trackerHeight.chooseArchiveHeight('100', 105)).to.equal(105)
-        expect(trackerHeight.chooseArchiveHeight(100.5, 105)).to.equal(105)
-        expect(trackerHeight.chooseArchiveHeight(NaN, null)).to.equal(null)
-        expect(trackerHeight.chooseArchiveHeight(null, 105, '99')).to.equal(105)
+        expect(() => trackerHeight.chooseArchiveHeight('100', 105)).to.throw(/archived store/)
+        expect(() => trackerHeight.chooseArchiveHeight(100.5, 105)).to.throw(/archived store/)
+        expect(() => trackerHeight.chooseArchiveHeight(NaN, null)).to.throw(/archived store/)
+        expect(() => trackerHeight.chooseArchiveHeight(null, 105, '99')).to.throw(/archived store/)
     })
 
     it('refuses a pre-stop reading that has no post-restart reading and no frozen height', function () {
         const run = { coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: null }
         expect(() => trackerHeight.refusePreStopOnlyHeight(run)).to.throw(/did not report its committed height after the restart/)
-        expect(() => trackerHeight.chooseArchiveHeight(run.preStopHeight, run.postRestartHeight, run.frozenHeight)).to.throw(/refusing to record the pre-stop height 100/)
+        expect(() => trackerHeight.chooseArchiveHeight(run.preStopHeight, run.postRestartHeight, run.frozenHeight)).to.throw(/archived store/)
     })
 })
 

@@ -71,6 +71,52 @@ moduleSuite('parsePortSpec()', function () {
     })
 })
 
+moduleSuite('assertNoHostPortConflicts()', function () {
+    function loadConflictCheck(getPublishedHostPorts) {
+        return proxyquire('../../../src/services/module_service/docker_args', {
+            '../docker_service': {
+                getPublishedHostPorts,
+                getAllBoundHostPorts: sinon.stub().resolves(new Map())
+            }
+        })
+    }
+
+    it('rejects duplicate requested host ports before querying Docker', async function () {
+        const getPublishedHostPorts = sinon.stub().resolves(new Map())
+        const dockerArgs = loadConflictCheck(getPublishedHostPorts)
+        let threw = null
+        try {
+            await dockerArgs.assertNoHostPortConflicts(
+                ['-p', '18080:8080', '-p', '18080:8081'], 'explorer')
+        } catch (err) { threw = err }
+        expect(threw).to.be.an.instanceOf(Error)
+        expect(threw.message).to.include('host port 18080')
+        expect(threw.message).to.include('18080:8080, 18080:8081')
+        expect(getPublishedHostPorts.called).to.equal(false)
+    })
+
+    it('allows distinct requested host ports and a single binding', async function () {
+        const getPublishedHostPorts = sinon.stub().resolves(new Map())
+        const dockerArgs = loadConflictCheck(getPublishedHostPorts)
+        await dockerArgs.assertNoHostPortConflicts(
+            ['-p', '18080:8080', '-p', '18443:8081'], 'explorer')
+        await dockerArgs.assertNoHostPortConflicts(['-p', '13306:3306'], 'database')
+        expect(getPublishedHostPorts.callCount).to.equal(2)
+    })
+
+    it('keeps reporting conflicts with another container', async function () {
+        const getPublishedHostPorts = sinon.stub().resolves(
+            new Map([['18080', new Set(['other-explorer'])]]))
+        const dockerArgs = loadConflictCheck(getPublishedHostPorts)
+        let threw = null
+        try {
+            await dockerArgs.assertNoHostPortConflicts(['-p', '18080:8080'], 'explorer')
+        } catch (err) { threw = err }
+        expect(threw).to.be.an.instanceOf(Error)
+        expect(threw.message).to.include('already published by: other-explorer')
+    })
+})
+
 moduleSuite('validatePortArgs()', function () {
     const invalid = (pair) => () => validatePortArgs(['-p', pair])
 

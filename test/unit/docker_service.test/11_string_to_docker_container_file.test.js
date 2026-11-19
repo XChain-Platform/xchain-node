@@ -173,7 +173,7 @@ function registerContainerLogSaveSuccess() {
         const promise = ds.saveContainerLogs('abc123', '/logs/test.log')
 
         // Emit close to trigger output.end()
-        child.emit('close')
+        child.emit('close', 0, null)
 
         const result = await promise
         expect(result).to.be.true
@@ -216,6 +216,32 @@ function registerContainerLogSaveFailure() {
         } catch (err) {
             expect(err.message).to.include('spawn error')
         }
+    })
+
+    for (const failure of [
+        { code: 1, signal: null, message: 'exited with code 1' },
+        { code: null, signal: 'SIGTERM', message: 'terminated by signal SIGTERM' }
+    ]) it('flushes partial output and rejects a failed docker logs process', async function () {
+        const stubs = makeStubs()
+        const EventEmitter = require('events')
+        const { Readable } = require('stream')
+        const output = new EventEmitter()
+        output.write = sinon.stub()
+        output.end = sinon.stub().callsFake(() => setImmediate(() => output.emit('finish')))
+        const fsStub = { mkdirSync: sinon.stub(), createWriteStream: sinon.stub().returns(output) }
+        const child = new EventEmitter()
+        child.stdout = new Readable({ read() {} })
+        child.stderr = new Readable({ read() {} })
+        child.stdout.pipe = sinon.stub().returns(output)
+        child.stderr.pipe = sinon.stub().returns(output)
+        stubs.spawn.returns(child)
+        const promise = loadDockerService(stubs, fsStub).saveContainerLogs('abc123', '/logs/test.log')
+        child.emit('close', failure.code, failure.signal)
+        const err = await promise.then(() => null, e => e)
+        expect(err).to.be.an('error')
+        expect(err.message).to.include(failure.message)
+        expect(err.filePath).to.equal('/logs/test.log')
+        expect(output.end.calledOnce).to.be.true
     })
 }
 

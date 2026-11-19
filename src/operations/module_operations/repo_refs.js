@@ -72,7 +72,13 @@ async function runE2ETest(coin, network, testName = null, grep = null, script = 
     const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const logFile = path.join(dataDir, 'e2e-logs', `${coin}-${network}-${timestamp}.log`)
 
-    await saveContainerLogs(containerId, logFile)
+    try {
+        await saveContainerLogs(containerId, logFile)
+    } catch (err) {
+        throw new Error('E2E suite exited with code ' + exitCode + ', but its logs could not be exported. Container ' +
+            containerId + ' was kept and the partial log is at ' + logFile + ': ' + ((err && err.message) || err),
+        { cause: err })
+    }
     await removeContainer(containerId)
 
     return { logFile, exitCode }

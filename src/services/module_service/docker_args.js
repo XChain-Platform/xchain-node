@@ -21,7 +21,9 @@ let { XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SY
 let { getUtxoTrackerVolumeName } = require('../config_service')
 let { getPublishedHostPorts, getAllBoundHostPorts } = require('../docker_service')
 const { healthcheckCommand } = require('./healthcheck_command')
-const { claimFreeHostPorts, parsePortSpec, reservedHostPorts } = require('./host_port_claim')
+const {
+    claimFreeHostPorts, parsePortSpec, requestedHostPorts, reservedHostPorts
+} = require('./host_port_claim')
 const requiredGetUtxoTrackerVolumeName = getUtxoTrackerVolumeName
 const requiredGetPublishedHostPorts = getPublishedHostPorts
 const requiredGetAllBoundHostPorts = getAllBoundHostPorts
@@ -41,8 +43,9 @@ function configureDependencies(dependencies) {
     } = dependencies)
 }
 
-// Fail fast on host-port collisions before `docker run`. On a single-stack
-// host this is a no-op; on a multi-stack host (two NODE_PREFIX stacks, or a
+// Fail fast on host-port collisions before `docker run`, including duplicate
+// bindings in one request. On a single-stack host this is otherwise a no-op; on
+// a multi-stack host (two NODE_PREFIX stacks, or a
 // service container hand-created outside xchain-node) two containers can request
 // the same host port, which `docker run` only surfaces as a cryptic "port is
 // already allocated" AFTER the image build wastes minutes. `selfName` is the
@@ -52,15 +55,8 @@ function configureDependencies(dependencies) {
 // also free for a replacement claim). `claim` lets buildAndUp move a busy
 // on-request port (host_port_claim.js).
 async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
-    const requested = []
-    for (let i = 0; i < portArgs.length; i++) {
-        if (portArgs[i] === '-p') {
-            const spec = parsePortSpec(portArgs[i + 1])
-            if (spec && /^\d+$/.test(spec.hostPort)) requested.push(spec.hostPort)
-        }
-    }
+    const requested = requestedHostPorts(portArgs)
     if (requested.length === 0) return
-
     const published = await getPublishedHostPorts()
     const conflicts = []
     for (const hostPort of requested) {

@@ -340,13 +340,22 @@ describe('commandLock', () => {
 
         it('a reclaim marker abandoned by a dead pid does not deadlock acquisition', () => {
             const lockFile = getLockFilePath()
-            fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
-            fs.writeFileSync(lockFile + '.reclaim', JSON.stringify({ pid: findDeadPid(), nonce: 'crashed' }) + '\n')
+            const reclaimFile = lockFile + '.reclaim'
+            const staleLock = JSON.stringify({ pid: findDeadPid(), nonce: 'stale', command: 'install' }) + '\n'
+            const staleMarker = JSON.stringify({ pid: findDeadPid(), nonce: 'crashed' }) + '\n'
+            fs.writeFileSync(lockFile, staleLock)
+            fs.writeFileSync(reclaimFile, staleMarker)
+            const lockInode = fs.statSync(lockFile).ino
+            const markerInode = fs.statSync(reclaimFile).ino
 
-            const release = acquireCommandLock({ command: 'update' })
-            assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).pid, process.pid)
-            assert.ok(!fs.existsSync(lockFile + '.reclaim'))
-            release()
+            assert.throws(
+                () => acquireCommandLock({ command: 'update' }),
+                err => err.code === 'ELOCKWEDGED' && err.message.includes(reclaimFile)
+            )
+            assert.strictEqual(fs.statSync(lockFile).ino, lockInode)
+            assert.strictEqual(fs.statSync(reclaimFile).ino, markerInode)
+            assert.strictEqual(fs.readFileSync(lockFile, 'utf8'), staleLock)
+            assert.strictEqual(fs.readFileSync(reclaimFile, 'utf8'), staleMarker)
         })
 
         it('treats an EPERM reclaim marker read as held and preserves the marker', () => {

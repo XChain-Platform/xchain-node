@@ -247,7 +247,15 @@ async function resolveLatestReleaseTag() {
         throw githubLookupError('latest-release lookup', error)
     }
 
-    return result.data && result.data.tag_name ? result.data.tag_name : null
+    const tag = result && result.data && typeof result.data === 'object'
+        ? result.data.tag_name : undefined
+    if (typeof tag !== 'string' || !isReleaseRef(tag)) {
+        throw new Error(
+            'GitHub latest-release lookup returned a response without a valid release tag'
+            + ` (tag_name: ${JSON.stringify(tag)})`
+        )
+    }
+    return tag.trim()
 }
 
 /**

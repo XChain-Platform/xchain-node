@@ -53,6 +53,37 @@ function parsePortSpec(pair) {
     }
 }
 
+function duplicateRequestedHostPorts(requested) {
+    const byHostPort = new Map()
+    for (const spec of requested) {
+        const pairs = byHostPort.get(spec.hostPort) || []
+        pairs.push(spec.pair)
+        byHostPort.set(spec.hostPort, pairs)
+    }
+    return [...byHostPort].filter(([, pairs]) => pairs.length > 1)
+}
+
+function requestedHostPorts(portArgs) {
+    const requested = []
+    for (let i = 0; i < portArgs.length; i++) {
+        if (portArgs[i] !== '-p') continue
+        const spec = parsePortSpec(portArgs[i + 1])
+        if (spec && /^\d+$/.test(spec.hostPort)) {
+            requested.push({ hostPort: spec.hostPort, pair: portArgs[i + 1] })
+        }
+    }
+    const duplicates = duplicateRequestedHostPorts(requested)
+    if (duplicates.length === 0) return requested.map(spec => spec.hostPort)
+    const lines = duplicates.map(([hostPort, pairs]) =>
+        `  host port ${hostPort} is requested more than once: ${pairs.join(', ')}`)
+    throw new Error(
+        'Host port conflict: one container cannot publish the same host port more than once:\n' +
+        lines.join('\n') + '\n' +
+        'Give each binding its own host port in config/<coin>-<network> ' +
+        '(for example, EXPLORER_PORT_HTTP and EXPLORER_PORT_HTTPS).'
+    )
+}
+
 // Host ports (from getAllBoundHostPorts' map) that some container other than
 // `selfName` has saved in its port bindings, stopped containers included: a
 // replacement port must not be one of these, or starting that container later
@@ -110,4 +141,7 @@ function claimFreeHostPorts(conflicts, portArgs, requested, published, claim) {
     return conflicts
 }
 
-module.exports = { PORT_STEP, nextFreeHostPort, claimFreeHostPorts, parsePortSpec, reservedHostPorts }
+module.exports = {
+    PORT_STEP, nextFreeHostPort, claimFreeHostPorts, parsePortSpec,
+    requestedHostPorts, reservedHostPorts
+}

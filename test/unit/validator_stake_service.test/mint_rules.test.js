@@ -29,11 +29,11 @@ const MINTED = (amount, extra = {}) =>
     ({ source: ADDRESS, tick: 'XCHAIN', amount, status: 'valid', action_index: 7, ...extra })
 
 // An SDK whose token, tip and source-lane MINT reads answer with the given bodies.
-function fakeSdk({ mints = OPEN, locks = { mint: false }, tip = TIP, getMints } = {}) {
+function fakeSdk({ mints = OPEN, locks = { mint: false }, supply = { current: '0', max: '100000000' }, tip = TIP, getMints } = {}) {
     return {
         explorer: {
             getAddress:     async () => ({ balances: { confirmed: '0.002', pending: '0' } }),
-            getToken:       async () => ({ info: { tick: 'XCHAIN' }, mints, locks }),
+            getToken:       async () => ({ info: { tick: 'XCHAIN' }, mints, locks, supply }),
             getValidators:  async () => ({ data: [] }),
             getDelegations: async () => ({ total: 0, data: [] }),
             getStatus:      async () => (tip === null ? {} : { last_block: { TBTC: tip } }),
@@ -60,12 +60,13 @@ describe('validator stake mint rules', function () {
     })
 
     it('reads an unreported cap, window or lock as unknown, never as an unset 0', function () {
-        const nullMax = readTokenMintRules({ mints: { ...OPEN, max: null }, locks: { mint: false } }, 'XCHAIN')
+        const supply = { current: '0', max: '100000000' }
+        const nullMax = readTokenMintRules({ mints: { ...OPEN, max: null }, locks: { mint: false }, supply }, 'XCHAIN')
         expect(nullMax.unreadable).to.include('mints.max')
-        const noWindow = readTokenMintRules({ mints: { max: '1', address_max: '1' }, locks: { mint: false } }, 'XCHAIN')
+        const noWindow = readTokenMintRules({ mints: { max: '1', address_max: '1' }, locks: { mint: false }, supply }, 'XCHAIN')
         expect(noWindow.unreadable).to.include('mints.start_block').and.to.include('mints.stop_block')
-        expect(readTokenMintRules({ mints: OPEN }, 'XCHAIN').unreadable).to.include('locks.mint')
-        expect(readTokenMintRules({ mints: OPEN, locks: { mint: false } }, 'XCHAIN').unreadable).to.equal(null)
+        expect(readTokenMintRules({ mints: OPEN, supply }, 'XCHAIN').unreadable).to.include('locks.mint')
+        expect(readTokenMintRules({ mints: OPEN, locks: { mint: false }, supply }, 'XCHAIN').unreadable).to.equal(null)
     })
 
     it('refuses a locked mint before any MINT is planned', async function () {
@@ -132,6 +133,27 @@ describe('validator stake mint rules', function () {
         expect(called).to.equal(0)
         expect(plan.reason).to.equal(null)
     })
+
+    it('checks the whole shortfall against the remaining exact supply', async function () {
+        const near = await planFor(fakeSdk({ supply: { current: '99995000', max: '100000000' } }))
+        expect(near.plan.mints).to.deep.equal([])
+        expect(near.plan.reason).to.include('MAX_SUPPLY 100000000').and.to.include('5000 remaining')
+        const exact = await planFor(fakeSdk({ supply: { current: '99975000', max: '100000000' } }))
+        expect(exact.plan.reason).to.equal(null)
+        expect(exact.plan.mints).to.deep.equal([10000, 10000, 5000])
+        const oneUnitOver = await planFor(fakeSdk({ supply: { current: '99975000.00000001', max: '100000000' } }))
+        expect(oneUnitOver.plan.reason).to.include('MAX_SUPPLY')
+    })
+
+    it('blocks missing or activation-dependent supply only when minting is needed', async function () {
+        const missing = await planFor(fakeSdk({ supply: null }))
+        expect(missing.state.mintUnreadable).to.include('supply.current').and.to.include('supply.max')
+        expect(missing.plan.reason).to.include('mint rules are unknown')
+        const zero = await planFor(fakeSdk({ supply: { current: '0', max: '0' } }))
+        expect(zero.plan.reason).to.include('MAX_SUPPLY 0')
+        const state = await readChainState(fakeSdk({ supply: null }), ADDRESS, 'ab'.repeat(32), KEY_CTX)
+        expect(planMints('testnet', 25000, 25000, state.mintMax, state.mintAddressMax, state.mintUnreadable, state).reason).to.equal(null)
+    })
 })
 
 describe('validator stake --broadcast against the mint rules', function () {
@@ -156,5 +178,12 @@ describe('validator stake --broadcast against the mint rules', function () {
         const { result, calls } = await run({ broadcast: true }, { xchain: 0, mintMax: '0.00000000', addressMax: '0' })
         expect(result.staked).to.equal(true)
         expect(calls.mint.map(c => Number(c.params.AMOUNT))).to.deep.equal([25000])
+    })
+
+    it('broadcasts nothing when the stake shortfall exceeds remaining supply', async function () {
+        const { result, calls } = await run({ broadcast: true }, { xchain: 0, supplyCurrent: '99995000' })
+        expect(result.blockers.join(' ')).to.include('MAX_SUPPLY')
+        expect(calls.mint).to.have.length(0)
+        expect(calls.stake).to.have.length(0)
     })
 })

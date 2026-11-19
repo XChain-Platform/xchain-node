@@ -193,6 +193,22 @@ serviceSuite('resolveLatestReleaseTag()', () => {
         expect(stubs.axiosGet.firstCall.args[0]).to.match(/repos\/XChain-Platform\/xchain-node\/releases\/latest$/)
     })
 
+    it('rejects successful responses without a valid release tag', async () => {
+        for (const data of [null, {}, { tag_name: null }, { tag_name: '' },
+            { tag_name: 42 }, { tag_name: 'master' }]) {
+            stubs.axiosGet.resetBehavior()
+            stubs.axiosGet.resolves({ data })
+            await svc.resolveLatestReleaseTag().then(
+                () => { throw new Error('should have rejected') },
+                e => expect(e.message).to.match(/response without a valid release tag/))
+        }
+    })
+
+    it('trims a valid release tag from a successful response', async () => {
+        stubs.axiosGet.resolves({ data: { tag_name: '  v0.9.0  ' } })
+        expect(await svc.resolveLatestReleaseTag()).to.equal('v0.9.0')
+    })
+
     it('returns null (not an error) when no release has been published yet', async () => {
         // Pre-first-train this is the normal state of the world.
         const err = new Error('Not Found'); err.response = { status: 404 }

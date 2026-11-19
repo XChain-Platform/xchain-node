@@ -67,6 +67,7 @@ async function createMariaDbBootstrap() {
     setImmediate(() => {
         dumpProc.stdout.end()
         writeStream.emit('finish')
+        dumpProc.emit('close', 0)
     })
 
     const result = await promise
@@ -161,6 +162,7 @@ describe('BootstrapService', function () {
             setImmediate(() => {
                 dumpProc.stdout.end()
                 writeStream.emit('finish')
+                dumpProc.emit('close', 0)
             })
 
             let err = null
@@ -240,6 +242,7 @@ describe('BootstrapService', function () {
             setImmediate(() => {
                 dumpProc.stdout.end()
                 writeStream.emit('finish')
+                dumpProc.emit('close', 0)
             })
 
             const result = await promise
@@ -284,6 +287,7 @@ describe('BootstrapService', function () {
             setImmediate(() => {
                 dumpProc.stdout.end()
                 writeStream.emit('finish')
+                dumpProc.emit('close', 0)
             })
 
             const result = await promise

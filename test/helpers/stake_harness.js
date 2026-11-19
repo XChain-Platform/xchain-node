@@ -25,6 +25,7 @@ function tokenBody(chain = {}) {
     return {
         mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000,
             start_block: chain.mintStart ?? 0, stop_block: chain.mintStop ?? 0 },
+        supply: { current: chain.supplyCurrent ?? 0, max: chain.supplyMax ?? 100000000 },
         locks: { mint: chain.mintLocked ?? false }
     }
 }

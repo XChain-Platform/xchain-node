@@ -383,6 +383,8 @@ function windowReasons(raised) {
 module.exports = {
     assertBootstrapSourceHealthy,
     BootstrapSourceUnhealthyError,
+    gateSkipped,
+    pendingSyncHaltReason,
     // Exported for tests / reuse
     evaluateContainerState,
     evaluateStatusPayload,

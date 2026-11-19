@@ -22,7 +22,7 @@
  * these rules; consensus stays in the indexer.
  ********************************************************************/
 
-const { readTip } = require('./free_key')
+const { amountUnits, fromUnits, readTip } = require('./free_key')
 
 // The explorer's per-method row cap, and the OFFSET ceiling that bounds a sweep.
 const PAGE_LIMIT = 100
@@ -47,11 +47,15 @@ function readTokenMintRules(token, tick) {
         return { max: null, addressMax: null, unreadable: 'the ' + tick + ' token read returned an unexpected ' +
             'shape (no mints group), so its faucet caps are unknown' }
     }
+    const supply = (token.supply && typeof token.supply === 'object') ? token.supply : null
     const locked = (token.locks && typeof token.locks === 'object') ? token.locks.mint : undefined
     const rules = { max: reported(mints.max), addressMax: reported(mints.address_max),
-        startBlock: reported(mints.start_block), stopBlock: reported(mints.stop_block), locked }
+        startBlock: reported(mints.start_block), stopBlock: reported(mints.stop_block), locked,
+        supplyCurrent: supply ? amountUnits(supply.current) : null,
+        supplyMax: supply ? amountUnits(supply.max) : null }
     const missing = [['max', 'mints.max'], ['addressMax', 'mints.address_max'], ['startBlock', 'mints.start_block'],
-        ['stopBlock', 'mints.stop_block']].filter(([key]) => rules[key] === null).map(([, name]) => name)
+        ['stopBlock', 'mints.stop_block'], ['supplyCurrent', 'supply.current'], ['supplyMax', 'supply.max']]
+        .filter(([key]) => rules[key] === null).map(([, name]) => name)
     if (typeof locked !== 'boolean') missing.push('locks.mint')
     rules.unreadable = missing.length
         ? 'the ' + tick + ' token read did not report ' + missing.join(', ') + ', so its mint rules are unknown'
@@ -119,6 +123,7 @@ async function readSelfMinted(sdk, address, tick) {
 async function readMintState(sdk, address, token, coins, tick) {
     const rules = readTokenMintRules(token, tick)
     const state = { mintMax: rules.max, mintAddressMax: rules.addressMax, mintUnreadable: rules.unreadable,
+        mintSupplyCurrent: rules.supplyCurrent, mintSupplyMax: rules.supplyMax,
         mintClosed: null, mintedSoFar: null, mintedUnknown: null }
     if (rules.unreadable) return state
     try {
@@ -145,4 +150,23 @@ function overAddressCap(minted, short, cap) {
     return cap > 0 && Math.round((minted + short) * UNITS) > Math.round(cap * UNITS)
 }
 
-module.exports = { readTokenMintRules, mintClosedReason, readSelfMinted, readMintState, overAddressCap }
+function supplyHeadroomReason(rules, shortUnits, tick) {
+    if (typeof rules.mintSupplyCurrent !== 'bigint' || typeof rules.mintSupplyMax !== 'bigint') {
+        return 'the ' + tick + ' token supply is unknown; cannot confirm the shortfall fits below MAX_SUPPLY. ' +
+            'Retry, or check the explorer.'
+    }
+    if (rules.mintSupplyMax === 0n) {
+        return 'the ' + tick + ' token declares MAX_SUPPLY 0, whose uncapped meaning depends on protocol ' +
+            'activation this command cannot confirm. Acquire the shortfall elsewhere.'
+    }
+    if (rules.mintSupplyCurrent + shortUnits <= rules.mintSupplyMax) return null
+    const remaining = rules.mintSupplyMax > rules.mintSupplyCurrent
+        ? rules.mintSupplyMax - rules.mintSupplyCurrent : 0n
+    return 'minting the ' + fromUnits(shortUnits) + ' shortfall would take ' + tick + ' supply past MAX_SUPPLY ' +
+        fromUnits(rules.mintSupplyMax) + ' (' + fromUnits(rules.mintSupplyCurrent) + ' already minted, ' +
+        fromUnits(remaining) + ' remaining), so the indexer would reject it after its fee is spent. Acquire the ' +
+        'shortfall elsewhere.'
+}
+
+module.exports = { readTokenMintRules, mintClosedReason, readSelfMinted, readMintState, overAddressCap,
+    supplyHeadroomReason }

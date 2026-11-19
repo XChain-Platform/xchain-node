@@ -197,7 +197,7 @@ describe('CLI dispatch: commands that hand the lock back after preCheck', functi
     beforeEach(snapshotListeners)
     afterEach(restoreListeners)
 
-    for (const name of ['ps', 'logs', 'exec', 'shell']) {
+    for (const name of ['ps', 'logs']) {
         it(`${name} releases the lock once preCheck returns`, async function () {
             const deps = await run([name])
             expect(deps.acquireCommandLock.calledOnceWith({ command: name, waitMs: 15000 })).to.be.true
@@ -205,6 +205,23 @@ describe('CLI dispatch: commands that hand the lock back after preCheck', functi
             expect(deps.release.calledAfter(deps.preCheck)).to.be.true
         })
     }
+
+    for (const name of ['exec', 'shell']) {
+        it(`${name} releases the lock once preCheck returns`, async function () {
+            const exitListeners = process.listeners('exit').length
+            const deps = await run([name])
+            expect(deps.acquireCommandLock.calledOnceWith({ command: name, waitMs: 15000 })).to.be.true
+            expect(deps.release.called).to.be.false
+            expect(process.listeners('exit')).to.have.length(exitListeners + 1)
+        })
+    }
+
+    it('exec and shell retain the bounded wait when the mutating wait is configured', async function () {
+        for (const name of ['exec', 'shell']) {
+            const deps = await run([name], { XCHAIN_NODE_MUTATING_LOCK_WAIT_MS: '30000' })
+            expect(deps.acquireCommandLock.calledOnceWith({ command: name, waitMs: 15000 })).to.be.true
+        }
+    })
 })
 
 describe('CLI dispatch: validator subcommands', function () {

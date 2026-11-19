@@ -61,7 +61,8 @@ describe('stake CLI readTip', function readTipCases() {
 })
 
 describe('stake CLI mint window read', function closedMintWindow() {
-    const token = { info: { tick: 'XCHAIN' }, mints: CLOSED_WINDOW, locks: { mint: false } }
+    const token = { info: { tick: 'XCHAIN' }, mints: CLOSED_WINDOW,
+        supply: { current: '0', max: '100000000' }, locks: { mint: false } }
     const sdkFor = tip => ({
         explorer: {
             getAddress: async () => ({ balances: { confirmed: '0.002', pending: '0' } }),

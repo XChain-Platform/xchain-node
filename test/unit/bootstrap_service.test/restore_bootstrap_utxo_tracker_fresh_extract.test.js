@@ -202,14 +202,10 @@ describe('BootstrapService', function () {
                 expect.fail()
             } catch (err) {
                 expect(err.message).to.include('docker tar restore exited with code 1')
-                // Post-wipe abort (uuid:7edc76f3): the volume was already cleared,
-                // so the error is tagged and the container is NOT restarted. A
-                // restart here boots a fresh tracker with halted=false over an
-                // incomplete store, which then reports itself caught up.
-                expect(err.postWipe).to.be.true
+                expect(err.postWipe).to.not.equal(true)
             }
             expect(stubs.dockerService.stopContainer.called).to.be.true
-            expect(stubs.dockerService.startContainer.called).to.be.false
+            expect(stubs.dockerService.startContainer.calledOnceWithExactly(FAKE_CONTAINER_ID)).to.be.true
         })
     })
 })

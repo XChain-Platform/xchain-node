@@ -32,8 +32,8 @@
  * the marker's owner may unlink, and inside the marker it re-reads the
  * holder and re-checks the file's dev/ino identity first, so a
  * successor's lock is never the file removed. A crash inside the marker
- * leaves it behind; the next contender breaks it only when the pid it
- * records is gone, and then loops rather than reclaiming in that pass.
+ * leaves it behind. Contenders fail closed instead of moving a marker they
+ * do not own, because moving it would briefly admit a second reclaimer.
  *
  * Each acquisition also stamps a random nonce into the payload. Release
  * removes the file only when both the pid and the nonce still match, so
@@ -50,8 +50,8 @@
  * it leaves the temp file behind; it never blocks an acquire, and each
  * successful acquire sweeps every such file whose pid is gone.
  *
- * Ops note: clearing a wedged lock by hand may mean deleting both
- * command.lock and command.lock.reclaim.
+ * Ops note: after confirming no xchain-node process is running, recover a
+ * wedged reclaim by deleting command.lock and command.lock.reclaim together.
  ********************************************************************/
 
 const crypto = require('crypto')
@@ -120,28 +120,6 @@ function adoptCommandLock(release) {
     release()
 }
 
-// Break a reclaim marker left behind by a crash, and ONLY that: a marker whose
-// recorded pid is still alive belongs to a contender currently inside the reclaim
-// section, and removing it would restore the very race the marker prevents.
-//
-// Removing by path after a read is a check-then-act race: between the read and the
-// unlink a contender can replace the file with its own live one, and the unlink
-// then removes that. So the file is first renamed to a private name (atomic, and
-// it moves exactly the file at the path at that instant), and the ownership
-// verdict is taken on the moved file. A live file caught by mistake is linked
-// back at once.
-function breakAbandonedReclaimMarker(reclaimFile) {
-    // Cheap pre-read so a live marker is never touched in the common case.
-    if (isLockHolderActive(readLockHolder(reclaimFile))) return
-    const claimed = claimPath(reclaimFile)
-    if (!claimed) return
-    if (isLockHolderActive(readLockHolder(claimed))) {
-        restoreClaimedPath(claimed, reclaimFile)
-        return
-    }
-    try { fs.unlinkSync(claimed) } catch { /* already gone */ }
-}
-
 // Private, sweepable name for a file moved out of the way (matches the orphan
 // temp pattern, so a crash leaves nothing that sweepOrphanPublishTempFiles skips).
 function claimedPathFor(file) {
@@ -178,9 +156,8 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
         publishLockAtomically(reclaimFile, marker, nonce)
     } catch (err) {
         if (err.code !== 'EEXIST') throw err
-        // Break-then-loop, never break-and-reclaim in the same pass: reclaiming on
-        // the strength of a marker we just removed is the unguarded unlink again.
-        breakAbandonedReclaimMarker(reclaimFile)
+        // Only the marker owner removes it. Moving an apparently abandoned marker
+        // would race a live successor that appeared after the ownership read.
         sleepSync(RECLAIM_POLL_MS)
         return
     }
@@ -192,8 +169,9 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
         const holder = readLockHolder(lockFile)
         if (isLockHolderActive(holder)) return
         if (!sameFile(observed, current)) return
-        // The checks above are about a file that may be replaced before an unlink by
-        // path lands, so move the file away first and judge the moved file itself.
+        // Exclusive marker ownership prevents another reclaimer from replacing
+        // lockFile between these checks and the claim. A mismatch can only arise
+        // if the observed dead pid was recycled, so restore that live successor.
         const claimed = claimPath(lockFile)
         if (!claimed) return
         if (sameFile(observed, statLock(claimed)) && !isLockHolderActive(readLockHolder(claimed))) {
@@ -288,6 +266,18 @@ function tryAcquireOnce(lockFile, payload, pid, nonce) {
             // between the read and the stat, in which case the retry just creates it.
             if (observed) reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce)
         }
+    }
+    const reclaimMarker = statLock(reclaimFile)
+    const reclaimHolder = readLockHolder(reclaimFile)
+    if (sameFile(reclaimMarker, statLock(reclaimFile)) && !isLockHolderActive(reclaimHolder)) {
+        const wedged = new Error(
+            `Could not acquire the xchain-node command lock because a previous ` +
+            `xchain-node run was killed while recovering a stale lock. Confirm no ` +
+            `xchain-node process is running, then delete ${reclaimFile} and ` +
+            `${lockFile}, and retry.`
+        )
+        wedged.code = 'ELOCKWEDGED'
+        throw wedged
     }
     // Every attempt hit EEXIST: another invocation won the post-stale race.
     throw new Error(`Could not acquire the xchain-node command lock at ${lockFile} (lost the race to another invocation).`)

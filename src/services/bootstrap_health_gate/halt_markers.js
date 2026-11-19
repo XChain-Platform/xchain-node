@@ -217,7 +217,9 @@ async function readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState 
         found.syncHalt = await readCount(liveSyncHaltCountSql(name), 'sync_halt marker')
     // A halt whose sync_halt write failed lives only as xchain-sync's sync_state copy,
     // which a restore re-installs as a halt; sync_state is optional for the same reason.
-    // It has no id sequence, so it is read live at each reading, never by watermark.
+    // It has no id sequence, so it is read live at each reading. MariaDB bootstrap
+    // publishing also inspects the captured sync_state bytes. For an indexer publish,
+    // the paired decoder is not in the archive and remains a live-only check here.
     if (hasSyncState > 0) {
         found.pendingSyncHalt = await readCount(pendingSyncHaltCountSql(name), 'sync_state halt_pending marker')
         found.rollbackGuardInvalid = parseRollbackGuardRows(await run(rollbackGuardStateSql(name)),
@@ -252,20 +254,17 @@ async function readLiveMarkers(run, readCount, name) {
     if (hasEvents === 0)
         throw new Error(`${name} reports no events table, so the REORG_HALT marker could not be read`)
 
-    const found = await readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState })
-
-    // The dump window watermark. Both marker tables are append-only and
-    // id-ordered (decoder events: AUTO_INCREMENT, a clear is a NEW row, halt rows
-    // are never deleted; sync_halt: AUTO_INCREMENT, a clear sets cleared_at and
-    // the row stays), which is what makes "did a halt occur at ANY point since
-    // the pre-flight reading" answerable with a MAX(id) taken then and a count
-    // taken now. null means the table did not exist at this reading.
-    found.watermark = {
+    // Read watermarks before live counts. This order is load-bearing for sync_halt:
+    // a clear updates the existing row, so a halt inserted between these reads must
+    // either sit above this watermark or be visible to the later live count.
+    const watermark = {
         events: await readCount(eventsWatermarkSql(name), `events watermark for ${name}`),
         syncHalt: hasSyncHalt > 0
             ? await readCount(syncHaltWatermarkSql(name), `sync_halt watermark for ${name}`)
             : null
     }
+    const found = await readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState })
+    found.watermark = watermark
 
     return { found, hasSyncHalt }
 }

@@ -12,10 +12,8 @@
  *
  **********************************************************************
  * XChain Node - Bootstrap Service
- * The end height a utxo-tracker bootstrap archive records. The store is
- * LevelDB, so the tracker's own status surface is the only thing that can
- * tell; the restore-time node tip guard trusts the recorded height as a
- * bound the archived data never exceeds.
+ * The end height a utxo-tracker bootstrap archive records. The restore-time
+ * node tip guard trusts this as a bound the archived data never exceeds.
  ********************************************************************/
 
 let { execFile }          = require('child_process')
@@ -79,31 +77,53 @@ async function readTrackerHeightAfterRestart(coin, network, containerId, { attem
     return null
 }
 
-// File the tracker leaves in its store directory recording the height its last clean close committed. Plain text, one integer.
-const FROZEN_HEIGHT_MARKER = 'committed_height'
+const TRACKER_STORE_DIR = 'xchain-utxo-tracker'
+const READ_STORE_HEIGHT_SCRIPT = `
+const { ClassicLevel } = require('classic-level')
+;(async () => {
+    const db = new ClassicLevel(process.argv[1], {
+        createIfMissing: false, keyEncoding: 'buffer', valueEncoding: 'buffer'
+    })
+    try {
+        await db.open()
+        const text = (await db.get(Buffer.from('LAST_BLOCK_HEIGHT'))).toString('utf8')
+        if (!/^[0-9a-f]+$/i.test(text)) throw new Error('LAST_BLOCK_HEIGHT is not hexadecimal')
+        const height = parseInt(text, 16)
+        if (!Number.isSafeInteger(height) || height < 0) throw new Error('LAST_BLOCK_HEIGHT is outside the safe integer range')
+        process.stdout.write(String(height))
+    } finally {
+        try { await db.close() } catch {}
+    }
+})().catch(err => { console.error(err.message); process.exitCode = 1 })
+`
 
 // The height of the frozen store itself, read from the directory that was just archived (the hardlink snapshot, or /data on the
 // stopped-tracker fallback), or null. Unlike the live status surface this cannot run ahead of the archived data.
-async function readFrozenStoreHeight(volumeName, sourceDir) {
+async function readFrozenStoreHeight(volumeName, sourceDir, containerId) {
     try {
+        const { stdout: inspectOut } = await execFileAsync('docker', [
+            'inspect', '--format', '{{.Image}}', containerId
+        ], { timeout: 15000 })
+        const imageId = String(inspectOut).trim()
+        if (!imageId) throw new Error('the tracker container image could not be resolved')
+        const storePath = `${sourceDir}/${TRACKER_STORE_DIR}`
         const { stdout } = await execFileAsync('docker', [
-            'run', '--rm', '-v', `${volumeName}:/data:ro`, 'alpine', 'cat', `${sourceDir}/${FROZEN_HEIGHT_MARKER}`
-        ], { timeout: 60000 })
+            'run', '--rm', '-v', `${volumeName}:/data`, '-w', '/XChainUtxoTracker',
+            '--entrypoint', 'node', imageId, '-e', READ_STORE_HEIGHT_SCRIPT, storePath
+        ], { timeout: 300000 })
         const text = String(stdout).trim()
         const value = Number(text)
         if (/^\d+$/.test(text) && Number.isSafeInteger(value)) return value
-        logger.info(`The frozen tracker store reported an unusable height (${redactSecrets(text.slice(0, 40))}); falling back to the status surface.`)
+        logger.info(`The frozen tracker store reported an unusable height (${redactSecrets(text.slice(0, 40))}).`)
         return null
     } catch (err) {
-        logger.info(`Could not read the frozen tracker store height (${redactSecrets(err.message)}); falling back to the status surface.`)
+        logger.info(`Could not read the frozen tracker store height (${redactSecrets(err.message)}).`)
         return null
     }
 }
 
-// Pick the height the archive records: never below the data it holds, since the restore guard treats nodeHeight >= archiveHeight as safe.
-// max() keeps a rollback during the restart from lowering it. A pre-stop reading alone can miss blocks committed while the tracker
-// stopped, so that case throws rather than sign an understated height; with no reading at all the archive honestly carries none.
-// A frozen-store reading is exact for the archived data, so it wins over both live readings.
+// The archived store is the only authoritative height. Live readings remain
+// diagnostic because they can sit on either side of the frozen snapshot.
 function chooseArchiveHeight(preStopHeight, postRestartHeight, frozenHeight = null) {
     if (Number.isInteger(frozenHeight)) {
         logger.info(`Archive height: ${frozenHeight} (read from the frozen store).`)
@@ -111,13 +131,8 @@ function chooseArchiveHeight(preStopHeight, postRestartHeight, frozenHeight = nu
     }
     const pre  = Number.isInteger(preStopHeight) ? preStopHeight : null
     const post = Number.isInteger(postRestartHeight) ? postRestartHeight : null
-    if (post === null && pre !== null) {
-        throw new Error(`the tracker height could not be read after the restart; refusing to record the pre-stop height ${pre}, ` +
-            'which may understate the archived data by the blocks committed while the tracker was stopping')
-    }
-    const chosen = post === null ? pre : pre === null ? post : Math.max(pre, post)
-    logger.info(`Archive height: ${chosen === null ? 'unknown' : chosen} (pre-stop ${pre === null ? 'unknown' : pre}, after restart ${post === null ? 'unknown' : post}).`)
-    return chosen
+    throw new Error(`the archived store's own height could not be read; refusing to sign a height derived from live readings ` +
+        `(pre-stop ${pre === null ? 'unknown' : pre}, after restart ${post === null ? 'unknown' : post})`)
 }
 
 // Throw when only the pre-stop reading exists, naming the run, so the publish stops before any compress or signing.

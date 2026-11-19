@@ -108,6 +108,7 @@ function makeExplorer(chain) {
         getAddress: sinon.stub().resolves({ balances: { confirmed: chain.coin, pending: '0' } }),
         // An open mint: caps set, no window, no lock, and no earlier MINT from the stake address.
         getToken: sinon.stub().resolves({ mints: { max: 10000, address_max: 50000, start_block: 0, stop_block: 0 },
+            supply: { current: 0, max: 100000000 },
             locks: { mint: false } }),
         getMints: sinon.stub().resolves({ total: 0, data: [] }),
         getValidators: sinon.stub().resolves({ data: [] }),

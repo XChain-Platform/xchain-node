@@ -86,7 +86,7 @@ async function dumpWithConfig(overrides) {
     stubs.fs.createWriteStream.returns(writeStream)
     const bs = loadBootstrapService(stubs)
     const promise = bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_DECODER)
-    setImmediate(() => { dumpProc.stdout.end(); writeStream.emit('finish') })
+    setImmediate(() => { dumpProc.stdout.end(); writeStream.emit('finish'); dumpProc.emit('close', 0) })
     await promise
     return stubs
 }

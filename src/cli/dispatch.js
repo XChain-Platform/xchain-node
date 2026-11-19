@@ -42,6 +42,9 @@ function dispatchSettings(config) {
     // `bootstrap-restore-rehearsal` is included: it creates and drops a disposable
     // database on the shared MariaDB, so it holds the lock from preCheck to exit.
     const mutatingCommands = ['install', 'update', 'recreate', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal']
+    // These commands can write persistent container state, but retain the bounded
+    // non-mutating wait before starting. Once started, they hold the lock to exit.
+    const holdToExitCommands = ['exec', 'shell']
     // How long a non-mutating command blocks for a lock-holding mutator before
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.
@@ -50,7 +53,7 @@ function dispatchSettings(config) {
     // keeps the interactive contract below; an unattended caller sets it so a
     // scheduled run waits out a deploy instead of losing its work.
     const MUTATING_LOCK_WAIT_MS = parseInt(config.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS || '0', 10) || 0
-    return { commandsNeedingVersions, readOnlyCommands, mutatingCommands, LOCK_WAIT_MS, MUTATING_LOCK_WAIT_MS }
+    return { commandsNeedingVersions, readOnlyCommands, mutatingCommands, holdToExitCommands, LOCK_WAIT_MS, MUTATING_LOCK_WAIT_MS }
 }
 
 function skipsPreAction(actionCommand) {
@@ -157,14 +160,14 @@ function lockSettingsFor(commandName, settings, config) {
 // and rebuild the hub out from under a lock-holding `update` mid docker
 // build. So acquire the lock around preCheck for every command.
 //
-// A mutating command keeps the lock through its whole action (released on
-// process exit, since actions terminate via process.exit()) and refuses
-// a held lock unless asked to wait. A non-mutating command holds
-// the lock only across preCheck, releasing it right after, so a
-// long-running `monitor`/`tail`/`logs` does not pin the lock for its
-// lifetime; it waits a bounded time for a busy mutator, then errors.
+// A mutating command keeps the lock through its whole action and refuses a held
+// lock unless asked to wait. `exec` and `shell` also hold through their actions
+// because either can write persistent container state, but they retain the
+// bounded wait used by other non-mutating commands. Read-only long-running
+// commands release after preCheck so they do not pin the lock for their lifetime.
 function commandLock(commandName, settings, acquireCommandLock,
     holdThroughAction = settings.mutatingCommands.includes(commandName)) {
+    const holdToExit = holdThroughAction || settings.holdToExitCommands.includes(commandName)
     let release
     try {
         release = acquireCommandLock({
@@ -176,14 +179,14 @@ function commandLock(commandName, settings, acquireCommandLock,
         process.exit(1)
         return null
     }
-    if (holdThroughAction) {
+    if (holdToExit) {
         // Release only on process exit (also covers throws and SIGINT/SIGTERM
         // via the default handlers ending the process).
         process.on('exit', release)
         process.on('SIGINT', () => process.exit(130))
         process.on('SIGTERM', () => process.exit(143))
     }
-    return { holdThroughAction, release }
+    return { holdThroughAction: holdToExit, release }
 }
 
 // A no-ref install decides its release or recorded-branch target once, here, so the hub

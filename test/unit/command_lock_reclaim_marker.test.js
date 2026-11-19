@@ -152,18 +152,43 @@ describe('commandLock reclaim removals are bound to the file they checked', () =
         fs.writeFileSync(lockFile, JSON.stringify({ pid: deadPid, nonce: 'stale-lock' }) + '\n')
         fs.writeFileSync(reclaimFile, JSON.stringify({ pid: deadPid, nonce: 'stale-marker' }) + '\n')
 
+        const realRename = fs.renameSync
+        const realUnlink = fs.unlinkSync
+        const touched = []
+        fs.renameSync = function (from, to, ...rest) {
+            if (from === reclaimFile || to === reclaimFile) touched.push(['rename', from, to])
+            return realRename.call(fs, from, to, ...rest)
+        }
+        fs.unlinkSync = function (file, ...rest) {
+            if (file === reclaimFile) touched.push(['unlink', file])
+            return realUnlink.call(fs, file, ...rest)
+        }
         let acquired = null
-        const fired = withHookBeforeRemoval(reclaimFile,
-            () => replaceWithLiveOwner(reclaimFile, 'live-marker'),
-            () => {
-                try { acquired = acquireCommandLock({ command: 'update' }) } catch (err) { acquired = err }
-            })
+        try { acquireCommandLock({ command: 'update' }) } catch (err) { acquired = err }
+        finally {
+            fs.renameSync = realRename
+            fs.unlinkSync = realUnlink
+        }
 
-        assert.ok(fired, 'the stale marker removal must be attempted')
-        assert.ok(acquired instanceof Error, 'no acquirer may take the lock while a live marker guards reclamation')
-        assert.strictEqual(JSON.parse(fs.readFileSync(reclaimFile, 'utf8')).nonce, 'live-marker')
+        assert.ok(acquired instanceof Error && acquired.code === 'ELOCKWEDGED')
+        assert.deepStrictEqual(touched, [], 'a non-owner must not move or remove the reclaim marker')
+        assert.strictEqual(JSON.parse(fs.readFileSync(reclaimFile, 'utf8')).nonce, 'stale-marker')
         assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).nonce, 'stale-lock',
             'the stale lock stays until the live marker owner finishes')
+    })
+
+    it('acquires after an operator clears an abandoned reclaim marker', () => {
+        const lockFile = getLockFilePath()
+        const reclaimFile = lockFile + '.reclaim'
+        fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), nonce: 'stale' }) + '\n')
+        fs.writeFileSync(reclaimFile, JSON.stringify({ pid: findDeadPid(), nonce: 'crashed' }) + '\n')
+
+        assert.throws(() => acquireCommandLock({ command: 'update' }), err => err.code === 'ELOCKWEDGED')
+        fs.unlinkSync(reclaimFile)
+        const release = acquireCommandLock({ command: 'update' })
+        assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).pid, process.pid)
+        assert.deepStrictEqual(fs.readdirSync(tmpDir), ['command.lock'])
+        release()
     })
 
     it('reclaiming a stale lock never deletes a live lock created after the observation', () => {

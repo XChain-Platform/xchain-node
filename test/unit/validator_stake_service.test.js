@@ -12,11 +12,17 @@
 
 const { expect } = require('chai')
 
-const { planMints, stakeTiming } = require('../../src/services/validator_stake_service')
+const { planMints: rawPlanMints, stakeTiming } = require('../../src/services/validator_stake_service')
 const { mintClosedReason } = require('../../src/services/validator_stake_service/mint_rules')
 // The authoritative source for both stake clocks. Read here too, so a test that
 // asserts the CLI's numbers cannot itself become the place they are frozen.
 const { getCoinConfig } = require('../../src/coins')
+
+const AMPLE_SUPPLY = { mintSupplyCurrent: 0n, mintSupplyMax: 10000000000000000n }
+function planMints(...args) {
+    args[6] = { ...AMPLE_SUPPLY, ...(args[6] || {}) }
+    return rawPlanMints(...args)
+}
 
 describe('ValidatorStakeService', function () {
 

@@ -35,6 +35,7 @@ const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 const { configuredDatabaseName } = require('../../utils/module_database_name')
 let { checkBootstrapSignature, ensureVerifiedInnerArchive } = require('./archive_signing')
 const { BootstrapIntegrityError } = require('./archive_signing')
+const trackerRestore = require('./tracker_restore')
 let { readBootstrapArchiveMeta, compareArchiveIdentity } = require('../bootstrap_archive_meta')
 let { startProgress, getWorkDir } = require('./workspace')
 const { getLogger } = require('../../observability/logger')
@@ -54,6 +55,7 @@ function configureDependencies(dependencies) {
     ;({ checkBootstrapSignature, ensureVerifiedInnerArchive } = dependencies.archiveSigning)
     ;({ readBootstrapArchiveMeta, compareArchiveIdentity } = dependencies.archiveMeta)
     ;({ startProgress, getWorkDir } = dependencies.workspace)
+    trackerRestore.configureDependencies(dependencies)
     logger = dependencies.logger
 }
 
@@ -95,7 +97,23 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     // Stop with the service's budget, not docker's ten-second default; the volume is replaced next, so an unclean stop is reported, not refused.
     await stopModuleContainer(stopContainer, XChainService.XCHAIN_UTXO_TRACKER, coin, network, context.containerId, undefined, getContainerStopSettings)
 
-    await restoreTrackerVolume(context)
+    try {
+        await trackerRestore.restoreTrackerVolume(context)
+        logger.info('Bootstrap restore complete')
+    } catch (err) {
+        if (err.postWipe) {
+            logger.info(
+                `[fatal] ${XChainService.XCHAIN_UTXO_TRACKER} bootstrap restore failed AFTER the LevelDB\n` +
+                `volume was wiped; the store is incomplete and the container has been left STOPPED so it\n` +
+                `cannot report a wiped store as caught up. Re-run the restore with\n` +
+                `XCHAIN_NODE_FORCE_BOOTSTRAP=1, or clear the volume and resync from scratch.`
+            )
+            throw err
+        }
+        logger.info(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container after the archive was refused...`)
+        await startContainer(context.containerId)
+        throw err
+    }
 
     logger.info(`Starting ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
     await startContainer(context.containerId)
@@ -138,58 +156,6 @@ async function prepareTrackerRestore(coin, network, fileName) {
     }
 
     return { containerId, innerArchive, volumeName, workDir }
-}
-
-async function restoreTrackerVolume({ containerId, innerArchive, volumeName, workDir }) {
-    try {
-        logger.info('Clearing LevelDB volume...')
-        await execFileAsync('docker', ['run', '--rm', '-v', `${volumeName}:/data`, 'alpine', 'sh', '-c', 'find /data -mindepth 1 -delete'])
-
-        const stats      = await fs.promises.stat(innerArchive)
-        const totalBytes = stats.size
-        const progress   = startProgress('Restoring LevelDB data...', totalBytes)
-
-        await new Promise((resolve, reject) => {
-            const readStream = fs.createReadStream(innerArchive)
-            const counter    = new PassThrough()
-            const gunzip     = zlib.createGunzip()
-            const tarProc    = spawn('docker', ['run', '--rm', '-i', '-v', `${volumeName}:/data`, 'alpine', 'tar', 'xf', '-', '-C', '/data'], { stdio: ['pipe', 'inherit', 'pipe'] })
-
-            counter.on('data', chunk => progress.update(chunk.length))
-            readStream.pipe(counter).pipe(gunzip).pipe(tarProc.stdin)
-
-            readStream.on('error', err => reject(err))
-            gunzip.on('error',    err => reject(err))
-            tarProc.on('error',   err => reject(err))
-            tarProc.on('close', code => {
-                if (code === 0) resolve()
-                else reject(new Error(`docker tar restore exited with code ${code}`))
-            })
-        })
-        progress.stop('LevelDB data restored')
-
-        fs.rmSync(workDir, { recursive: true })
-        logger.info('Bootstrap restore complete')
-
-    } catch (err) {
-        // Every statement in the try above runs
-        // at or after `find /data -mindepth 1 -delete`, so a failure here leaves
-        // the LevelDB store partially wiped. Restarting the container over it (the
-        // old unconditional `finally`) boots a fresh XChainUtxoTracker with
-        // halted=false, so get_sync_status / GET /status report a normal non-503
-        // status and BootstrapHealthGate has nothing to refuse on: an emptied
-        // store reads as caught up. Mirrors the tracker's own contract in
-        // xchain-utxo-tracker/src/bootstrap/bootstrap_recovery.js `handleRestoreFailure`,
-        // where a post-wipe abort fails loud instead of resuming.
-        err.postWipe = true
-        logger.info(
-            `[fatal] ${XChainService.XCHAIN_UTXO_TRACKER} bootstrap restore failed AFTER the LevelDB\n` +
-            `volume was wiped; the store is incomplete and the container has been left STOPPED so it\n` +
-            `cannot report a wiped store as caught up. Re-run the restore with\n` +
-            `XCHAIN_NODE_FORCE_BOOTSTRAP=1, or clear the volume and resync from scratch.`
-        )
-        throw err
-    }
 }
 
 async function startMariaService(context, module) {

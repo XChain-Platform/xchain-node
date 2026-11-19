@@ -48,7 +48,7 @@ describe('dispatch command lists', function dispatchCommandLists() {
         expect([...registered]).to.include.members(['install', 'update', 'recreate', 'validator'])
     })
 
-    for (const list of ['commandsNeedingVersions', 'readOnlyCommands', 'mutatingCommands']) {
+    for (const list of ['commandsNeedingVersions', 'readOnlyCommands', 'mutatingCommands', 'holdToExitCommands']) {
         it(`${list} names only registered commands`, () => {
             const unregistered = settings[list].filter(name => !registered.has(name))
             expect(unregistered).to.deep.equal([])
@@ -57,7 +57,7 @@ describe('dispatch command lists', function dispatchCommandLists() {
 
     it('does not list a reinstall command, which the CLI does not register', () => {
         expect(registered.has('reinstall')).to.equal(false)
-        for (const list of ['commandsNeedingVersions', 'readOnlyCommands', 'mutatingCommands']) {
+        for (const list of ['commandsNeedingVersions', 'readOnlyCommands', 'mutatingCommands', 'holdToExitCommands']) {
             expect(settings[list], list).to.not.include('reinstall')
         }
     })

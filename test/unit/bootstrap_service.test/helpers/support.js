@@ -43,6 +43,18 @@ function drainPassThrough(pt) {
  */
 function makeAutoSpawn(stubs, { exitCodes = {} } = {}) {
     const calls = []
+    const execFile = stubs.execFile
+    stubs.execFile = sinon.stub().callsFake(async (cmd, args) => {
+        const result = await execFile(cmd, args)
+        const stdout = String(result && result.stdout || '').trim()
+        if (cmd === 'docker' && args[0] === 'inspect' && !stdout) {
+            return { ...(result || {}), stdout: 'sha256:tracker-image\n' }
+        }
+        if (cmd === 'docker' && args.some(arg => String(arg).includes('LAST_BLOCK_HEIGHT')) && !/^\d+$/.test(stdout)) {
+            return { ...(result || {}), stdout: '0\n' }
+        }
+        return result
+    })
     stubs.spawn = sinon.stub().callsFake((cmd, args) => {
         const proc = makeSpawnProc()
         const idx  = calls.length
@@ -169,11 +181,21 @@ function makeBootstrapPolicyStubs() {
     // The watermark is part of the gate's real return shape: the post-dump call needs
     // the pre-flight reading to bound the dump window, and the plumbing that carries
     // it between the two calls is BootstrapService's own.
+    class BootstrapSourceUnhealthyError extends Error {
+        constructor(label, reasons) {
+            super(`Refusing to create a bootstrap from ${label}: ${reasons.join('; ')}`)
+            this.name = 'BootstrapSourceUnhealthyError'
+            this.reasons = reasons
+        }
+    }
     const healthGateStub = {
         assertBootstrapSourceHealthy: sinon.stub().resolves({
             skipped: false, reasons: [],
             watermark: { own: { events: 100, syncHalt: 50 }, upstream: null }
-        })
+        }),
+        BootstrapSourceUnhealthyError,
+        gateSkipped: sinon.stub().returns(false),
+        pendingSyncHaltReason: where => `${where} carries an xchain-sync halt_pending copy in sync_state`
     }
 
     // The reindex -> forced-republish ledger. Stubbed so a create in these
@@ -280,6 +302,7 @@ function stubVerifiedInner(stubs, {
         if (cmd === 'tar' && args[0] === 'tzf')  return Promise.resolve({ stdout: `${innerName}\n${checksumName}\n` })
         if (cmd === 'tar' && args[0] === 'xzOf') return Promise.resolve({ stdout: `${declaredHash}  ${innerName}\n` })
         if (cmd === 'tar' && args[0] === 'xzf')  { extracted = true; return Promise.resolve({ stdout: '' }) }
+        if (cmd === 'docker' && args[0] === 'inspect') return Promise.resolve({ stdout: 'sha256:tracker-image\n' })
         return Promise.resolve({ stdout: '' })
     })
     return { expectedHash, declaredHash }
@@ -337,6 +360,9 @@ function makeBootstrapOverrides(stubs, execFileCb) {
         // The status probe is absent unless a suite sets one, so the tracker height reads null by default.
         './bootstrap_health_gate': {
             assertBootstrapSourceHealthy: stubs.healthGate.assertBootstrapSourceHealthy,
+            BootstrapSourceUnhealthyError: stubs.healthGate.BootstrapSourceUnhealthyError,
+            gateSkipped:                  stubs.healthGate.gateSkipped,
+            pendingSyncHaltReason:        stubs.healthGate.pendingSyncHaltReason,
             probeServiceStatus:           stubs.healthGate.probeServiceStatus,
             MODULE_API_PORT_KEY:          stubs.healthGate.MODULE_API_PORT_KEY
         },

@@ -39,8 +39,7 @@ const { sleep } = require('../utils/helpers')
 const { readKeyHolders, amountUnits, fromUnits } = require('./validator_stake_service/free_key')
 const { readSleepState } = require('./validator_stake_service/address_sleep')
 const { readTokenRow } = require('./validator_stake_service/token_balance_read')
-const { readMintState, overAddressCap } = require('./validator_stake_service/mint_rules')
-
+const { readMintState, overAddressCap, supplyHeadroomReason } = require('./validator_stake_service/mint_rules')
 const STAKE_TICK = 'XCHAIN'
 // One stake that clears every capability floor at once. The highest is the hub's llm attestation
 // provider floor (min_stake_xchain in xchain-hub/src/validators/provider_registry/defaults.js), not the
@@ -250,6 +249,8 @@ function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnrea
     }
     if (mintRules.mintClosed) return { short, mints: [], reason: mintRules.mintClosed }
     if (mintRules.mintedUnknown) return { short, mints: [], reason: mintRules.mintedUnknown }
+    const supplyReason = supplyHeadroomReason(mintRules, shortUnits, STAKE_TICK)
+    if (supplyReason) return { short, mints: [], reason: supplyReason }
     // MAX_MINT 0 is the indexer's "no per-transaction cap", so the whole shortfall goes in one MINT.
     const capUnits = mintMax > 0 ? amountUnits(mintMax) : null
     const perMint = capUnits !== null && capUnits > 0n ? capUnits : shortUnits
@@ -267,7 +268,6 @@ function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnrea
     }
     return { short, mints, reason }
 }
-
 function explorerUrl(coins, pathPart) {
     return (config.EXPLORER_URL || PUBLIC_EXPLORER).replace(/\/$/, '') + '/' + coins.stakeCoin + '/' + pathPart
 }
