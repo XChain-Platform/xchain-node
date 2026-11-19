@@ -100,28 +100,31 @@ function loadService(stubs) {
     })
 }
 
+let stubs, service, stateDir, logStub
+
+function setUpAutoheal() {
+    stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autoheal-test-'))
+    process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR = stateDir
+    stubs = makeStubs()
+    service = loadService(stubs)
+    logStub = sinon.stub(console, 'log')
+}
+
+function tearDownAutoheal() {
+    logStub.restore()
+    delete process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR
+    delete process.env.XCHAIN_NODE_AUTOHEAL_GRACE_MS
+    delete process.env.XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS
+    fs.rmSync(stateDir, { recursive: true, force: true })
+}
+
+function registryRow(module, containerId) {
+    return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
+}
+
 describe('AutohealService', () => {
-    let stubs, service, stateDir, logStub
-
-    beforeEach(() => {
-        stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autoheal-test-'))
-        process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR = stateDir
-        stubs = makeStubs()
-        service = loadService(stubs)
-        logStub = sinon.stub(console, 'log')
-    })
-
-    afterEach(() => {
-        logStub.restore()
-        delete process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR
-        delete process.env.XCHAIN_NODE_AUTOHEAL_GRACE_MS
-        delete process.env.XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS
-        fs.rmSync(stateDir, { recursive: true, force: true })
-    })
-
-    function registryRow(module, containerId) {
-        return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
-    }
+    beforeEach(setUpAutoheal)
+    afterEach(tearDownAutoheal)
 
     // The other side of the same rule: a pass inside Docker's post-restart
     // probation is the restart's own artifact, so it must NOT reset a backoff a

@@ -44,7 +44,7 @@ function recordRecreate(stubs, liveEnv, events = []) {
     return seen
 }
 
-describe('CarryContainerEnv', function () {
+function registerCarryContainerEnvBasics() {
 
     it('reads the explicit recreate drop list through its declared env view', function () {
         const name = 'XCHAIN_NODE_RECREATE_DROP_ENV'
@@ -95,7 +95,9 @@ describe('CarryContainerEnv', function () {
         )).to.equal(current)
         expect(mustNotRun.called).to.equal(false)
     })
+}
 
+function registerCarryContainerEnvFallbacks() {
     it('tries the deterministic name when a stale registry id no longer exists', async function () {
         const execFileAsync = sinon.stub().callsFake(async (cmd, args) => {
             if (args[args.length - 1] === 'stale-id') throw new Error('No such container')
@@ -124,9 +126,14 @@ describe('CarryContainerEnv', function () {
         expect(result.droppedKeys).to.deep.equal(['DROP'])
         expect(result.unknownDropKeys).to.deep.equal(['TYPO'])
     })
+}
+
+describe('CarryContainerEnv', function () {
+    registerCarryContainerEnvBasics()
+    registerCarryContainerEnvFallbacks()
 })
 
-moduleSuite('buildAndUp() recreate env carry', function () {
+function registerBuildAndUpRecreateEnvTests() {
 
     it('passes carried hub names to the consensus guard as provenance', async function () {
         const stubs = makeStubs()
@@ -177,7 +184,9 @@ moduleSuite('buildAndUp() recreate env carry', function () {
         expect(run.args).to.not.include('AUX_POW=1')
         expect(run.args).to.include.members(['--env', 'AUX_POW'])
     })
+}
 
+function registerBuildAndUpFallbackTest() {
     it('falls back to the container name when the registry lost its id', async function () {
         const stubs = makeStubs()
         const seen = recordRecreate(stubs, { AUX_POW: '1' })
@@ -190,4 +199,9 @@ moduleSuite('buildAndUp() recreate env carry', function () {
         expect(envInspect.args[envInspect.args.length - 1])
             .to.equal('xchain-node-bitcoin-mainnet-xchain-encoder')
     })
+}
+
+moduleSuite('buildAndUp() recreate env carry', function () {
+    registerBuildAndUpRecreateEnvTests()
+    registerBuildAndUpFallbackTest()
 })

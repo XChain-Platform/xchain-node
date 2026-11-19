@@ -198,9 +198,57 @@ async function assertOwnerAwake(sdk, address, landBlock, fail) {
     if (refusal) throw fail(refusal + ' Nothing was sent.')
 }
 
+async function planAndUnstake(factoryDeps, opts, deps, sendLock) {
+    const { openValidatorSession, stakeTiming, fail, paren, explorerUrl, STAKE_TICK } = factoryDeps
+    const log = deps.log || defaultLog()
+    const opened = openValidatorSession(opts, deps)
+    const { network, coins, pubkey, sdk, session, address, assertIdentityUnchanged } = opened
+    const timing = stakeTiming(coins, network)
+
+    // Every acquisition verifies that init did not replace the identity while the lock was free.
+    sendLock = guardIdentity(sendLock, assertIdentityUnchanged)
+    holdForSend(sendLock, [], 'plan')
+    const target = await resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, fail, paren, STAKE_TICK })
+    if (target.done) return target.done
+    const active = target.active
+
+    logUnstakePlan(log, pubkey, address, active, timing, STAKE_TICK, paren)
+    if (!opts.broadcast) {
+        log('')
+        log('  Dry run: nothing sent. Re-run with --broadcast to withdraw.')
+        log('')
+        return { unstaked: false, dryRun: true, active }
+    }
+
+    const timeoutMin = Number(opts.timeout)
+    const timeoutMs = (Number.isFinite(timeoutMin) && timeoutMin > 0 ? timeoutMin : 120) * 60 * 1000
+    const enc = {}
+    if (opts.feePerKb) enc.feePerKb = Number(opts.feePerKb)
+
+    log('')
+    log('  Sending UNSTAKE v0...')
+    // Hand the command lock back once the UNSTAKE is broadcast and the SDK starts its indexer wait.
+    let r
+    try {
+        r = await session.submit({ action: 'UNSTAKE', params: { VERSION: 0, SIGNING_PUBKEY: pubkey } }, enc,
+            { waitForIndexer: opts.wait !== false, timeout: timeoutMs, pollInterval: 15000,
+                onProgress: releaseOnIndexWait(sendLock), strictFreshness: true })
+    } catch (err) {
+        if (err && err.code === 'COIN_DATA_STALE') {
+            throw fail('the explorer became stale before the UNSTAKE was signed. Nothing was sent. ' +
+                'Re-run once the explorer catches up.')
+        }
+        throw err
+    }
+    log('    txid ' + r.txid + (opts.wait !== false ? '  (indexed)' : '  (broadcast)'))
+    logUnstakeSuccess(log, active, timing, coins, pubkey, STAKE_TICK, paren, explorerUrl)
+    return { unstaked: true, txid: r.txid }
+}
+
 function createUnstakeValidator({
     openValidatorSession, stakeTiming, fail, paren, explorerUrl, STAKE_TICK
 }) {
+    const factoryDeps = { openValidatorSession, stakeTiming, fail, paren, explorerUrl, STAKE_TICK }
     /**
      * Run the unstake command: withdraw this validator's stake and leave the set.
      *
@@ -216,56 +264,10 @@ function createUnstakeValidator({
     return async function unstakeValidator(opts = {}, deps = {}) {
         const sendLock = sendLockFor(opts, deps)
         try {
-            return await planAndUnstake(opts, deps, sendLock)
+            return await planAndUnstake(factoryDeps, opts, deps, sendLock)
         } finally {
             sendLock.release()
         }
-    }
-
-    async function planAndUnstake(opts, deps, sendLock) {
-        const log = deps.log || defaultLog()
-        const opened = openValidatorSession(opts, deps)
-        const { network, coins, pubkey, sdk, session, address, assertIdentityUnchanged } = opened
-        const timing = stakeTiming(coins, network)
-
-        // Every acquisition verifies that init did not replace the identity while the lock was free.
-        sendLock = guardIdentity(sendLock, assertIdentityUnchanged)
-        holdForSend(sendLock, [], 'plan')
-        const target = await resolveUnstakeTarget({ sdk, coins, pubkey, address, timing, log, fail, paren, STAKE_TICK })
-        if (target.done) return target.done
-        const active = target.active
-
-        logUnstakePlan(log, pubkey, address, active, timing, STAKE_TICK, paren)
-        if (!opts.broadcast) {
-            log('')
-            log('  Dry run: nothing sent. Re-run with --broadcast to withdraw.')
-            log('')
-            return { unstaked: false, dryRun: true, active }
-        }
-
-        const timeoutMin = Number(opts.timeout)
-        const timeoutMs = (Number.isFinite(timeoutMin) && timeoutMin > 0 ? timeoutMin : 120) * 60 * 1000
-        const enc = {}
-        if (opts.feePerKb) enc.feePerKb = Number(opts.feePerKb)
-
-        log('')
-        log('  Sending UNSTAKE v0...')
-        // Hand the command lock back once the UNSTAKE is broadcast and the SDK starts its indexer wait.
-        let r
-        try {
-            r = await session.submit({ action: 'UNSTAKE', params: { VERSION: 0, SIGNING_PUBKEY: pubkey } }, enc,
-                { waitForIndexer: opts.wait !== false, timeout: timeoutMs, pollInterval: 15000,
-                    onProgress: releaseOnIndexWait(sendLock), strictFreshness: true })
-        } catch (err) {
-            if (err && err.code === 'COIN_DATA_STALE') {
-                throw fail('the explorer became stale before the UNSTAKE was signed. Nothing was sent. ' +
-                    'Re-run once the explorer catches up.')
-            }
-            throw err
-        }
-        log('    txid ' + r.txid + (opts.wait !== false ? '  (indexed)' : '  (broadcast)'))
-        logUnstakeSuccess(log, active, timing, coins, pubkey, STAKE_TICK, paren, explorerUrl)
-        return { unstaked: true, txid: r.txid }
     }
 }
 

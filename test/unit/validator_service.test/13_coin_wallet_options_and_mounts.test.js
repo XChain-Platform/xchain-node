@@ -256,17 +256,16 @@ describe('ValidatorService', function () {
     })
 })
 
-describe('ValidatorService', function () {
+function clearCoinWalletMountEnv() {
+    delete process.env.XCHAIN_NODE_STAKE_WIF
+    delete process.env.XCHAIN_NODE_DOGE_WIF
+    delete process.env.HUB_NETWORK
+    delete process.env.DOGE_ENCODER_URL
+    delete process.env.XCHAIN_NODE_HUB_SIGNER_DIR
+}
 
-    describe('coin wallets', function () {
-
-        afterEach(function () {
-            delete process.env.XCHAIN_NODE_STAKE_WIF
-            delete process.env.XCHAIN_NODE_DOGE_WIF
-            delete process.env.HUB_NETWORK
-            delete process.env.DOGE_ENCODER_URL
-            delete process.env.XCHAIN_NODE_HUB_SIGNER_DIR
-        })
+function registerCoinWalletMountTests() {
+        afterEach(clearCoinWalletMountEnv)
 
         // Docker mounts the parent bind first, then the SDK on top of
         // signer/node_modules. A missing mountpoint under a read-only mount is
@@ -320,5 +319,10 @@ describe('ValidatorService', function () {
             expect(JSON.stringify(info)).to.not.include('SECRET')
             expect(info).to.deep.equal({ network: 'testnet', stakeAddress: 'mA', stakePubkeyHex: '02', dogeAddress: 'nB', dogePubkeyHex: '03' })
         })
+}
+
+describe('ValidatorService', function () {
+    describe('coin wallets', function () {
+        registerCoinWalletMountTests()
     })
 })

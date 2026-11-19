@@ -47,14 +47,12 @@ const STAKE_TICK = 'XCHAIN'
 // indexer's STAKING.CAPABILITIES (top 5000); governance can raise it per block, so this is a snapshot.
 const DEFAULT_STAKE_AMOUNT = 25000
 const PUBLIC_EXPLORER = 'https://explorer.xchain.io'
-
 // Approximate target block spacing per chain, used ONLY to gloss a block count
 // as wall-clock time an operator can plan around. Display-only: nothing branches
 // on it, and every block count itself comes from the coin registry. The coin
 // files carry no spacing field, so these mirror the arithmetic their own STAKING
 // comments already state ("~7 days at ~10 min/block").
 const BLOCK_MINUTES = { bitcoin: 10, litecoin: 2.5, dogecoin: 1 }
-
 // A block count as a duration. Empty on regtest, where blocks are mined on
 // demand and any wall-clock figure would be a fabrication, and empty for a chain
 // with no spacing entry rather than a wrong one.
@@ -71,7 +69,6 @@ function roughDuration(blocks, fullName, network) {
 function paren(text) {
     return text ? ' (' + text + ')' : ''
 }
-
 /**
  * The two clocks that govern a stake, read per-chain from the vendored canonical
  * coin registry (src/coins/<COIN>.js STAKING) rather than restated here. Both
@@ -398,7 +395,6 @@ const operationHelpers = {
 }
 const stakeValidator = createStakeValidator(operationHelpers)
 const unstakeValidator = createUnstakeValidator(operationHelpers)
-
 module.exports = {
     stakeValidator, unstakeValidator, planMints, stakeTiming, readChainState
 }

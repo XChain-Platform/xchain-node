@@ -64,7 +64,7 @@ function runUnstake(stale, opts = {}) {
     return unstakeValidator(opts, deps).then(result => ({ ...fixture, result }))
 }
 
-describe('ValidatorStakeService explorer freshness', function () {
+function registerStaleStakePlanTest() {
     it('refuses stale stake plans before dry-run or broadcast reads and sends', async function () {
         for (const opts of [{}, { broadcast: true }]) {
             const { sdk, calls } = makeSdk({
@@ -80,6 +80,10 @@ describe('ValidatorStakeService explorer freshness', function () {
             expect(sdk.explorer.getAddress.called).to.be.false
         }
     })
+}
+
+describe('ValidatorStakeService explorer freshness', function () {
+    registerStaleStakePlanTest()
 
     it('accepts an explicit fresh verdict and an absent freshness map', async function () {
         const fresh = await run({}, { xchain: 30000, coin: '0.001', stale: { TBTC: false } })

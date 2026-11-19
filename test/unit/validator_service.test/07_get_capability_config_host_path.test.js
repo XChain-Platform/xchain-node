@@ -87,8 +87,7 @@ function makeSettings(pubkey = 'a'.repeat(64), opts = {}) {
     }
 }
 
-describe('ValidatorService', function () {
-
+function registerCapabilityConfigHostPathTests() {
     describe('getCapabilityConfigHostPath()', function () {
 
         it('returns null when not initialized', function () {
@@ -120,7 +119,9 @@ describe('ValidatorService', function () {
             expect(vs.getCapabilityConfigHostPath()).to.be.null
         })
     })
+}
 
+function registerCapabilityConfigDescriptionTests() {
     describe('describeCapabilityConfigPath()', function () {
         it('reports a legacy config without migrating it', function () {
             const fs = makeFs({
@@ -149,4 +150,9 @@ describe('ValidatorService', function () {
             expect(vs.describeCapabilityConfigPath()).to.be.null
         })
     })
+}
+
+describe('ValidatorService', function () {
+    registerCapabilityConfigHostPathTests()
+    registerCapabilityConfigDescriptionTests()
 })

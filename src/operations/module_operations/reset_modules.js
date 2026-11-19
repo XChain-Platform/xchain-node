@@ -16,11 +16,9 @@ function configure(dependencies) {
         XChainService.XCHAIN_INDEXER
     ]
 }
-
 // The service names `reset` can act on. `reset` is the only destructive CLI path and the only one that bypasses resolveArgs/filterCommandParameters, so it must validate its own raw args: without this
 // an unrecognised service (a typo, or a non-resettable module like xchain-encoder) leaves every reset flag false, so `targets` is empty, no branch fires, and resetModules returns true - the CLI exits
 // 0 reporting success after resetting nothing. Fail loud instead, matching resolveArgs/rollback and the "fail fast BEFORE any destructive wipe" convention this file already follows.
-
 // `options.dbContainer` (--db-container) is a stack's own MariaDB container; see reset_db_override.js.
 async function resetModules(service, coin, network, force = false, withIndexer = false, options = {}) {
     if (!RESETTABLE_SERVICES.includes(service)) {

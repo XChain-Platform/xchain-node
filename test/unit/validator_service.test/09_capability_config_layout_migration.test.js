@@ -87,10 +87,7 @@ function makeSettings(pubkey = 'a'.repeat(64), opts = {}) {
     }
 }
 
-describe('ValidatorService', function () {
-
-    describe('capability-config layout migration', function () {
-
+function registerBasicLayoutMigrationTests() {
         it('moves a pre-hub-caps capabilities.json into its own directory', function () {
             const fs = makeFs({
                 existsSync: sinon.stub().callsFake(p =>
@@ -142,7 +139,9 @@ describe('ValidatorService', function () {
             expect(vs.ensureCapabilityConfigLayout()).to.be.false
             expect(fs.renameSync.called).to.be.false
         })
+}
 
+function registerLayoutMigrationErrorTests() {
         it('accepts an ENOENT rename only when another process completed the migration', function () {
             let migrated = false
             const missing = p => { const err = new Error('ENOENT: ' + p); err.code = 'ENOENT'; throw err }
@@ -176,5 +175,11 @@ describe('ValidatorService', function () {
             const vs = loadValidatorService(fs)
             expect(() => vs.ensureCapabilityConfigLayout()).to.throw('permission denied')
         })
+}
+
+describe('ValidatorService', function () {
+    describe('capability-config layout migration', function () {
+        registerBasicLayoutMigrationTests()
+        registerLayoutMigrationErrorTests()
     })
 })
