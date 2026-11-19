@@ -232,22 +232,14 @@ async function refreshStakeBeforeSend(context, progress) {
     return blockers.length ? { staked: false, plan, blockers, sent: progress.sent } : null
 }
 
-async function broadcastStake(context) {
-    const { opts, sdk, address, amount, plan, log, waitForBalance, STAKE_TICK } = context
-    // Long waits, deliberately: the indexer sees an action only once its block
-    // is mined, and a testnet block can take twenty minutes. Parsed as a real
-    // number rather than an integer, because parseInt('0.5') is 0, which would
-    // silently fall through to the 120-minute default for every sub-minute
-    // value instead of honouring it.
+function prepareBroadcast(context) {
+    const { opts, plan, STAKE_TICK } = context
+    // Allow long indexer waits while honoring positive fractional minute values.
     const timeoutMin = Number(opts.timeout)
     context.timeoutMs = (Number.isFinite(timeoutMin) && timeoutMin > 0 ? timeoutMin : 120) * 60 * 1000
     context.baseEncoder = {}
     if (opts.feePerKb) context.baseEncoder.feePerKb = Number(opts.feePerKb)
 
-    // Every action is sent back to back and funded from the one before it, so
-    // the whole run lands in a single block (see chainedInputs). --serialize
-    // restores the old one-action-per-block behaviour, which costs a block per
-    // step and is only worth it if chaining ever misbehaves on a venue.
     // Check every MINT amount before the first send: one past 8 places is rejected after its fee is spent.
     const mintTexts = plan.mints.map(mintAmountText)
     const malformed = plan.mints.filter((a, i) => mintTexts[i] === null)
@@ -256,6 +248,12 @@ async function broadcastStake(context) {
             'with at most 8 decimal places, which the indexer rejects. Nothing was sent.')
     }
     const progress = { chain: !opts.serialize, sent: [], prevTxid: null, chainBroken: false }
+    return { mintTexts, progress }
+}
+
+async function broadcastStake(context) {
+    const { opts, sdk, address, amount, plan, log, waitForBalance, STAKE_TICK } = context
+    const { mintTexts, progress } = prepareBroadcast(context)
     for (let i = 0; i < plan.mints.length; i++) {
         log('')
         log('  Sending MINT ' + (i + 1) + '/' + plan.mints.length + ' (' + mintTexts[i] + ' ' + STAKE_TICK + ')...')
@@ -264,14 +262,10 @@ async function broadcastStake(context) {
             { VERSION: 0, TICK: STAKE_TICK, AMOUNT: mintTexts[i] }, opts.serialize === true, inputs)
     }
 
-    // Form the STAKE's own link to the last mint BEFORE deciding whether to
-    // wait: a miss on this final hop breaks the ordering exactly as a miss
-    // between mints does, and must reach the same wait below.
+    // Form the STAKE link before deciding whether its mints need an indexer wait.
     const stakeInputs = progress.chainBroken ? null : await linkInputs(context, progress)
 
-    // A broken chain means in-block order is the miner's choice, and a STAKE
-    // evaluated before its own mints is rejected for insufficient funds. Wait
-    // the mints out instead: once they are indexed, ordering stops mattering.
+    // Wait out broken or serialized mint chains before sending the STAKE.
     if (plan.mints.length && (progress.chainBroken || opts.serialize)) {
         log('')
         log('  Waiting for the mints to be indexed before staking' +

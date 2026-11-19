@@ -38,7 +38,6 @@ function configure(dependencies) {
  */
 async function recreateModules(servicesList) {
     const { buildAndUp } = moduleService
-    const { setDatabaseParameters, setHubDatabaseParameters } = databaseService
     const outcome = { recreated: [], skipped: [] }, failures = []
     let touchedDbModule = false
     let touchedHubModule = false
@@ -46,7 +45,7 @@ async function recreateModules(servicesList) {
         for (const nextNetwork in servicesList[nextCoin]) {
             for (const nextModule of servicesList[nextCoin][nextNetwork]) {
                 if (RECREATE_UNSUPPORTED_MODULES.includes(nextModule)) {
-                    // Still a continue: `recreate all` legitimately sweeps past the node and the database. What changed is that the skip is now recorded, so a run that recreated NOTHING can be reported as the failed request it is instead of exiting 0. The database has no `update` to redirect to either: that verb refuses it for the same reason (no container built from the config map, no in-place image upgrade). Say the real remedy.
+                    // Record unsupported modules while allowing recreate all to continue.
                     const remedy = nextModule === DB_MODULE_NAME
                         ? "; the database container must be removed manually and reinstalled"
                         : "; use `update " + nextModule + "` instead"
@@ -56,7 +55,7 @@ async function recreateModules(servicesList) {
                 }
                 const moduleContainerId = await db.getModuleContainer(nextModule, nextCoin, nextNetwork)
                 if (!moduleContainerId) {
-                    // No registry row is TWO different states and this verb must not conflate them. Registry drift (row lost, container still up) has to keep recreating: dropping it was what made `update node` a silent no-op. An explicitly uninstalled venue must NOT: uninstall removes the container and the row but leaves the image tag, so buildAndUp's reuseImage check passes, `null` reads as "nothing to tear down", and the operator gets back a service they tore down, built from a stale image and re-stamped into the registry that status/precheck/autoheal trust. Discriminate on a POSITIVE docker answer only: 'unknown' is a daemon hiccup, not an absence.
+                    // Distinguish registry drift from an explicitly uninstalled venue.
                     const presence = await probeContainerPresenceByName(
                         getDockerContainerImageName(nextModule, nextCoin, nextNetwork))
                     if (presence === 'gone') {
@@ -69,7 +68,7 @@ async function recreateModules(servicesList) {
                     await buildAndUp(nextModule, nextCoin, nextNetwork, moduleContainerId, false, null,
                         { reuseImage: true, deferStatusPush: true })
                 } catch (err) {
-                    // Visiting the rest of the sweep after one venue fails follows uninstallModules: `recreate all` was already half-applied by the time it threw, and stopping there hid which venues had been touched behind one flat `recreate failed:`. The run still REJECTS below, naming every venue - a failure never becomes a skip.
+                    // Continue the sweep and report all failures together.
                     const why = (err && err.message) ? err.message : String(err)
                     console.error(`recreate: ${nextModule} (${nextCoin} ${nextNetwork}) FAILED: ${why}`)
                     failures.push({ module: nextModule, coin: nextCoin, network: nextNetwork, reason: why })
@@ -85,13 +84,18 @@ async function recreateModules(servicesList) {
             }
         }
     }
-    // Provision AFTER every container is back on the config values, so the drift guard in setDatabaseParameters sees the state we just converged rather than the one that made the recreate necessary.
+    return finalizeRecreation(outcome, failures, touchedDbModule, touchedHubModule)
+}
+
+async function finalizeRecreation(outcome, failures, touchedDbModule, touchedHubModule) {
+    const { setDatabaseParameters, setHubDatabaseParameters } = databaseService
+    // Provision after every container returns to the current config values.
     if (touchedDbModule) await setDatabaseParameters()
-    // Same rule for the SHARED hub account, and it matters most on this verb: the recreated hub starts on the config store's HUB_DB_PASS, so without rotating the live 'xchain_hub'@'%' account to match, `recreate xchain-hub` hands the hub a password MariaDB never received and it crash-loops on ER_ACCESS_DENIED. The `update` path rotates here for the same reason (ModuleService installModule).
+    // Rotate the shared hub account only after its container returns.
     if (touchedHubModule) await setHubDatabaseParameters()
     await statusChanged()
     if (failures.length) {
-        // Rejecting AFTER provisioning is deliberate: the venues that did come back start on the config store's password and would crash-loop on ER_ACCESS_DENIED if the run bailed before rotating their accounts.
+        // Reject after provisioning the venues that did return.
         throw new Error('recreate failed for ' + failures.length + ' module(s): '
             + failures.map(f => `${f.module} (${f.coin} ${f.network}): ${f.reason}`).join('; '))
     }

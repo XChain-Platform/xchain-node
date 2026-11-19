@@ -188,6 +188,12 @@ describe('ValidatorStakeService', function () {
             expect(result.staked).to.equal(false)
             expect(result.blockers.join(' ')).to.include('could not read the validator set')
         })
+    })
+})
+
+describe('ValidatorStakeService', function () {
+
+    describe('stakeValidator()', function () {
 
         it('skips minting when already funded', async function () {
             const { calls } = await run({ broadcast: true }, { xchain: 25000, coin: '0.001' })
