@@ -30,7 +30,7 @@ function tokenBody(chain = {}) {
     }
 }
 
-function makeExplorer(chain) {
+function makeExplorer(chain, calls) {
     const status = { last_block: {
         BTC: chain.tip ?? 200000, TBTC: chain.tip ?? 200000, RBTC: chain.tip ?? 200000 } }
     if (chain.stale !== undefined) status.stale = chain.stale
@@ -51,11 +51,17 @@ function makeExplorer(chain) {
         // rather than "the only row wins".
         getValidators: chain.validatorsThrow
             ? sinon.stub().rejects(new Error(chain.validatorsThrow))
-            : sinon.stub().resolves({ data: [
-                { status: 'valid', signing_pubkey: 'ff'.repeat(32), amount: '25000', action_index: '1', activation_block: '1' },
-                ...(chain.existing ? [chain.existing] : []),
-                ...(chain.stakeRows || [])
-            ] }),
+            : sinon.stub().callsFake(async () => {
+                if (chain.validatorsThrowAfterMint && calls.mint.length) {
+                    throw new Error(chain.validatorsThrowAfterMint)
+                }
+                return { data: [
+                    { status: 'valid', signing_pubkey: 'ff'.repeat(32), amount: '25000', action_index: '1', activation_block: '1' },
+                    ...(chain.existing ? [chain.existing] : []),
+                    ...(chain.existingAfterMint && calls.mint.length ? [chain.existingAfterMint] : []),
+                    ...(chain.stakeRows || [])
+                ] }
+            }),
         // The delegations holding a pubkey, as the explorer's pubkey lane answers them.
         getDelegations: chain.delegationsThrow
             ? sinon.stub().rejects(new Error(chain.delegationsThrow))
@@ -84,7 +90,7 @@ function trackPreviousOutput(session, prevTxidRef) {
 function makeSdk(chain = {}) {
     const calls = { mint: [], stake: [] }
     const sdk = {
-        explorer: makeExplorer(chain),
+        explorer: makeExplorer(chain, calls),
         // The mints credit once they index. Modelled by reporting the post-mint
         // balance after they have been sent, so the fallback path can finish.
         getBalances: async () => {

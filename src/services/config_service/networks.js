@@ -136,7 +136,7 @@ const HUB_PASSTHROUGH_VARS = [
     "XCHAIN_CONFIRMATIONS_BTC", "XCHAIN_CONFIRMATIONS_LTC", "XCHAIN_CONFIRMATIONS_DOGE",
     "HUB_TRUST_PROXY",
     "HUB_NETWORK",
-    "ORACLE_MIN_SUBMISSIONS",
+    "ORACLE_MIN_SUBMISSIONS", "ORACLE_ALLOW_UNVERIFIED_PAIRS",
     "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
     "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS",
     "ORACLE_BATCH_WINDOW_ROUNDS", "ORACLE_BATCH_GRACE_MS",
@@ -188,6 +188,9 @@ const HUB_PASSTHROUGH_VARS = [
 
 // Oracle price-round finalization threshold, default 2 in the hub so a lone external source never becomes a
 // federation-signed price; single-host prod and regtest must set 1 or no round finalizes and every indexer's oracle barrier stalls.
+
+// Regtest-only single-fetcher co-sign escape hatch. The hub ignores it off regtest. It changes what a node
+// accepts, so the consensus env guard protects it from silent removal on regtest.
 
 // Oracle round cadence is CONSENSUS-UNIFORM: every hub in a federation must share it or round numbering and the
 // submission cutoff diverge. Passed through for single-validator regtest/e2e venues; real networks leave it unset.

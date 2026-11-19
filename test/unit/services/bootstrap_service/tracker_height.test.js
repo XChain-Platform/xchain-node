@@ -7,6 +7,7 @@
 
 const { expect } = require('chai')
 const sinon = require('sinon')
+const vm = require('vm')
 const trackerHeight = require('../../../../src/services/bootstrap_service/tracker_height')
 
 const TRACKER_SERVICE = 'xchain-utxo-tracker'
@@ -83,6 +84,18 @@ describe('tracker_height frozen store', function () {
         expect(inspectArgs).to.include('container-id')
         expect(readArgs).to.include('vol:/data')
         expect(readArgs[readArgs.length - 1]).to.equal('/data/.snap/xchain-utxo-tracker')
+    })
+
+    it('passes a syntactically valid height reader to node', async function () {
+        fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '4242\n', stderr: '' }))
+
+        await trackerHeight.readFrozenStoreHeight('vol', '/data/.snap', 'container-id')
+
+        const readArgs = fakes.execFile.secondCall.args[1]
+        const scriptIndex = readArgs.indexOf('-e')
+        expect(scriptIndex).to.be.greaterThan(-1)
+        const script = readArgs[scriptIndex + 1]
+        expect(() => new vm.Script(script, { filename: 'read_store_height.js' })).to.not.throw()
     })
 
     it('readFrozenStoreHeight returns null on junk output or a failed read', async function () {

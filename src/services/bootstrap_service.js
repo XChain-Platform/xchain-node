@@ -67,6 +67,7 @@ const {
 const {
     configureDependencies: configureRestoreArchive,
     assertArchiveIdentity,
+    BootstrapNodeTipRefusedError,
     restoreBootstrap
 } = require('./bootstrap_service/restore_archive')
 const {
@@ -114,7 +115,7 @@ configureMariadbArchive({
 })
 configureRestoreArchive({
     fs, zlib, childProcess, config, state, configService, dockerService,
-    databaseService, archiveSigning, archiveMeta, workspace, logger
+    databaseService, nodeTipGuard, archiveSigning, archiveMeta, workspace, logger
 })
 configureFreshness({ childProcess, config, configService, databaseService, logger })
 configureDownload({ fs, axios, config, workspace, logger, staleAfterDays: BOOTSTRAP_STALE_AFTER_DAYS })
@@ -198,6 +199,7 @@ async function listServedBootstrapCombos() {
 
 module.exports = {
     BootstrapIntegrityError,
+    BootstrapNodeTipRefusedError,
     listServedBootstrapCombos,
     getBootstrapFilesList,
     makeBootstrap,

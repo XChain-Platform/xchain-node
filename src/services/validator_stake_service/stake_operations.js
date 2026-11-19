@@ -205,6 +205,33 @@ async function sendStakeAction(context, progress, kind, params, isLast, inputs) 
     return r
 }
 
+async function refreshStakeBeforeSend(context, progress) {
+    const { sdk, coins, address, pubkey, network, timing, readChainState, planMints,
+        amount, log, explorerUrl, STAKE_TICK } = context
+    holdForSend(context.sendLock, progress.sent, 'STAKE')
+    let state
+    try {
+        await assertExplorerFresh(sdk, coins)
+        state = await readChainState(sdk, address, pubkey, {
+            network, coins, cooldownBlocks: timing.cooldownBlocks
+        })
+    } catch (err) {
+        return { staked: false, sent: progress.sent,
+            blockers: ['could not refresh stake eligibility (' + err.message + '). Nothing more was sent.'] }
+    }
+    if (state.existing || state.delegated) {
+        logKeyHeld(log, state, { coins, pubkey, timing, explorerUrl, STAKE_TICK })
+        log('  Already broadcast: ' + progress.sent.map(s => s.step + ' ' + s.txid).join(', ') + '.')
+        return state.existing
+            ? { staked: false, existing: state.existing, sent: progress.sent }
+            : { staked: false, delegated: state.delegated, sent: progress.sent }
+    }
+    const plan = planMints(network, state.tokenBal, amount, state.mintMax,
+        state.mintAddressMax, state.mintUnreadable, state)
+    const blockers = stakeBlockers(state, plan, coins, address)
+    return blockers.length ? { staked: false, plan, blockers, sent: progress.sent } : null
+}
+
 async function broadcastStake(context) {
     const { opts, sdk, address, amount, plan, log, waitForBalance, STAKE_TICK } = context
     // Long waits, deliberately: the indexer sees an action only once its block
@@ -260,6 +287,8 @@ async function broadcastStake(context) {
             return { staked: false, sent: progress.sent, pendingMints: true }
         }
         progress.prevTxid = null   // fund the STAKE freely; ordering no longer matters
+        const stopped = await refreshStakeBeforeSend(context, progress)
+        if (stopped) return stopped
         return finishStake(context, progress, null)
     }
 
@@ -361,7 +390,8 @@ function createStakeValidator(helpers) {
         }
 
         return broadcastStake({ opts, sdk, session, address, coins, pubkey, amount, plan, log, timing,
-            explorerUrl, chainedInputs, waitForBalance, paren, STAKE_TICK, sendLock, fail })
+            explorerUrl, chainedInputs, waitForBalance, paren, STAKE_TICK, sendLock, fail,
+            readChainState, planMints, network })
     }
 }
 

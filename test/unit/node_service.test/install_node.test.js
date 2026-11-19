@@ -18,8 +18,10 @@ const { sinon, expect, makeNodeServiceStubs, loadNodeService } = require('./supp
 describe("NodeService: installNode()", function () {
 
     it('succeeds when local node version already installed (skips getCryptoNode)', async function () {
+        const buildAndUp = sinon.stub().resolves('c'.repeat(64))
         const stubs = makeNodeServiceStubs({
-            getLocalNodeVersion: sinon.stub().resolves('27.0')
+            getLocalNodeVersion: sinon.stub().resolves('27.0'),
+            buildAndUp
         })
         // Make execFile no-op (buildCryptoNode still calls it)
         stubs.execFile.callsFake((cmd, args, opts, cb) => {
@@ -32,6 +34,9 @@ describe("NodeService: installNode()", function () {
         expect(result).to.be.true
         // gitHubDownloader should NOT have been called; version was local
         expect(stubs.gitHubDownloader.downloadRepoVersion.called).to.be.false
+        for (const call of buildAndUp.getCalls()) {
+            expect(call.args[6]).to.deep.equal({ deferStatusPush: true })
+        }
     })
 
     it('fetches remote version and calls getCryptoNode when not installed (dogecoin)', async function () {

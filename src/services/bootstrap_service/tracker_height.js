@@ -94,7 +94,7 @@ const { ClassicLevel } = require('classic-level')
     } finally {
         try { await db.close() } catch {}
     }
-})().catch(err => { process.stderr.write(err.message + '\n'); process.exitCode = 1 })
+})().catch(err => { process.stderr.write(err.message + '\\n'); process.exitCode = 1 })
 `
 
 // The height of the frozen store itself, read from the directory that was just archived (the hardlink snapshot, or /data on the

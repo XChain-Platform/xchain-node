@@ -233,7 +233,7 @@ async function ensureBootstrapUtxoTracker(coin, network) {
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'node-behind', tip.detail, archive)
             return false
         }
-        await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
+        await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName, { nodeTip: tip })
         logger.info('Bootstrap installed; tracker will continue from the bootstrap height')
         const bytes   = await statBootstrapArchiveBytes(archivePath)
         const archive = retireBootstrapArchive(archivePath, bytes)
@@ -299,7 +299,7 @@ async function ensureBootstrapMariaDb(coin, network, module) {
             recordBootstrapOutcome(module, 'node-behind', tip.detail, archive)
             return false
         }
-        await restoreBootstrap(coin, network, module, fileName)
+        await restoreBootstrap(coin, network, module, fileName, { nodeTip: tip })
         logger.info('Bootstrap installed; the service will continue from the bootstrap height')
         const bytes   = await statBootstrapArchiveBytes(archivePath)
         const archive = retireBootstrapArchive(archivePath, bytes)

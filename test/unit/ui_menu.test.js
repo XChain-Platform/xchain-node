@@ -19,12 +19,13 @@ const assert = require('assert');
 const menu = require('../../src/ui/menu.js');
 const proxyquire = require('proxyquire').noCallThru();
 
-function load({ files = [], restored = true } = {}) {
+function load({ files = [], restored = true, restoreError = null } = {}) {
     const calls = { restore: [] };
     const bootstrapService = {
         getBootstrapFilesList: async () => files,
         restoreBootstrap: async (coin, network, module, file) => {
             calls.restore.push(file);
+            if (restoreError) throw restoreError;
             return restored;
         },
         makeBootstrap: async () => true,
@@ -123,6 +124,16 @@ describe('ui/menu restoreBootstrapInterface non-interactive resolution', functio
         await assert.rejects(
             () => mod.restoreBootstrapInterface('bitcoin', 'regtest', 'xchain-utxo-tracker', { latest: true }),
             /restore failed/);
+    });
+
+    it('surfaces a node-tip refusal without replacing its actionable message', async function () {
+        const refusal = Object.assign(new Error('wait for the node to pass the archive height'), {
+            name: 'BootstrapNodeTipRefusedError',
+        });
+        const { mod } = load({ files: [NEWEST], restoreError: refusal });
+        await assert.rejects(
+            () => mod.restoreBootstrapInterface('bitcoin', 'regtest', 'xchain-utxo-tracker', { latest: true }),
+            /wait for the node to pass the archive height/);
     });
 });
 

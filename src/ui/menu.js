@@ -206,7 +206,7 @@ async function runInstalledModuleAction(actionAnswer, selected, coin, network) {
             // Same contract as "Make Bootstrap" above: an integrity
             // refusal is an expected outcome, so report it and stay in
             // the TUI instead of tearing it down with a stack trace.
-            if (err && err.name === 'BootstrapIntegrityError') console.log(redactSecrets(err.message))
+            if (err && (err.name === 'BootstrapIntegrityError' || err.name === 'BootstrapNodeTipRefusedError')) console.log(redactSecrets(err.message))
             else throw err
         }
     } else if (actionAnswer === ACTION_REINSTALL_REMOTE) {

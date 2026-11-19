@@ -149,7 +149,7 @@ Notes:
                     // the reason and exit non-zero. Leaving it uncaught printed a
                     // stack trace that reads as a tool crash and invites a retry
                     // of a restore that must never succeed.
-                    if (err && err.name === 'BootstrapIntegrityError') {
+                    if (err && (err.name === 'BootstrapIntegrityError' || err.name === 'BootstrapNodeTipRefusedError')) {
                         console.error(redactSecrets(err.message))
                         return process.exit(1)
                     }

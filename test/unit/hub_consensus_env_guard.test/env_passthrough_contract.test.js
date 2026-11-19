@@ -166,6 +166,49 @@ function registerAttestTimingContract() {
     })
 }
 
+function registerUnverifiedPairsContract() {
+    const key = 'ORACLE_ALLOW_UNVERIFIED_PAIRS'
+    describe('unverified pair override', function unverifiedPairsContract() {
+        it('passes the override through and guards it on regtest only', () => {
+            expect(HUB_PASSTHROUGH_VARS).to.include(key)
+            expect(CONSENSUS_ENV_KEYS).to.include(key)
+            expect(() => void HUB_PASSTHROUGH_ENV[key]).not.to.throw()
+            expect(isConsensusEnvKeyHonoredOn(key, 'regtest')).to.equal(true)
+            for (const network of ['mainnet', 'testnet', '']) {
+                expect(isConsensusEnvKeyHonoredOn(key, network)).to.equal(false)
+            }
+        })
+
+        it('flags a regtest drop, accepts a carried value, and ignores off-regtest drops', () => {
+            const live = { HUB_NETWORK: 'regtest', [key]: 'true' }
+            expect(findHubConsensusEnvDrift({ HUB_NETWORK: 'regtest' }, live)).to.deep.equal([{ key }])
+            expect(findHubConsensusEnvDrift({ ...live }, live)).to.deep.equal([])
+            for (const network of ['mainnet', 'testnet']) {
+                expect(findHubConsensusEnvDrift(
+                    { HUB_NETWORK: network }, { HUB_NETWORK: network, [key]: 'true' }
+                )).to.deep.equal([])
+            }
+        })
+
+        it('refuses a regtest deploy through the assert path', async () => {
+            const live = { HUB_NETWORK: 'regtest', [key]: 'true' }
+            let thrown = null
+            try {
+                await assertNoHubConsensusEnvDrift(
+                    { HUB_NETWORK: 'regtest' }, { execFileAsync: inspectStub(live), env: {} }
+                )
+            } catch (err) { thrown = err }
+            expect(isHubConsensusEnvDriftError(thrown)).to.equal(true)
+            expect(thrown.drift).to.deep.equal([{ key }])
+        })
+
+        it('reports the unsupplied override as defaulted on regtest only', () => {
+            expect(describeConsensusEnvSupply({ HUB_NETWORK: 'regtest' }).defaulted).to.include(key)
+            expect(describeConsensusEnvSupply({ HUB_NETWORK: 'mainnet' }).defaulted).not.to.include(key)
+        })
+    })
+}
+
 function registerCheckpointCadenceContract() {
     describe('checkpoint cadence overrides', function checkpointCadenceContract() {
         it('passes both through and guards them on regtest only', () => {
@@ -272,6 +315,7 @@ function hubEnvPassthroughContract() {
     registerCheckpointCadenceContract()
     registerSupplyProvenanceContract()
     registerAttestTimingContract()
+    registerUnverifiedPairsContract()
     registerSnapshotSeamContract()
 }
 

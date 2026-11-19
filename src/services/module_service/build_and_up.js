@@ -284,7 +284,8 @@ function buildContainerRunArgs(context) {
 
 // Cross-chain network membership is part of creating the container, not a
 // post-install nicety: install, update and recreate all funnel through here.
-// The hub's DB grant must exist before statusChanged pushes config over its API.
+// Decoder and indexer callers push config after their database grants, so a failed push
+// cannot skip a grant. Other modules keep the immediate composition update.
 async function recordContainer(context, containerId) {
     const { onlyExecution, module, coin, network, memoryLimitMb } = context
     if (onlyExecution) return containerId
@@ -294,7 +295,7 @@ async function recordContainer(context, containerId) {
     }
     await attachCrossChainNetworks(module, coin, network, containerId)
     if (module === HUB_MODULE_NAME) await setHubDatabaseParameters()
-    await statusChanged()
+    if (!context.deferStatusPush && module !== 'xchain-decoder' && module !== 'xchain-indexer') await statusChanged()
     return containerId
 }
 
@@ -362,12 +363,12 @@ function launchContainer(context) {
  * @param {string|null} [overwriteContainerId]
  * @param {boolean} [onlyExecution]
  * @param {string[]|null} [dockerCmdArgs]
- * @param {{reuseImage?: boolean}} [options]
+ * @param {{reuseImage?: boolean, deferStatusPush?: boolean}} [options]
  * @returns {Promise<string>} the new container id
  */
 async function buildAndUp(module, coin, network, overwriteContainerId = null, onlyExecution = false, dockerCmdArgs = null, options = {}) {
     if (!checkIfModuleExists(module)) throw "module not found"
-    const reuseImage = options.reuseImage === true
+    const reuseImage = options.reuseImage === true, deferStatusPush = options.deferStatusPush === true
     if (!reuseImage && typeof checkBuildKitAvailable === 'function') {
         await checkBuildKitAvailable().catch((err) => { throw "Error creating Docker image: " + err })
     }
@@ -392,7 +393,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     const containerEnvironment = resolveContainerEnvironment(environmentVariables, onlyExecution ? null : module)
     return launchContainer({
         module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs,
-        reuseImage, environmentVariables, dir, containerPrefix,
+        reuseImage, deferStatusPush, environmentVariables, dir, containerPrefix,
         ...dockerOptions, ...memoryOptions, ...sourceMetadata, ...containerEnvironment
     })
 }

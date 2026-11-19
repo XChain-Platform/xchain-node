@@ -66,7 +66,8 @@ async function recreateModules(servicesList) {
                     }
                 }
                 try {
-                    await buildAndUp(nextModule, nextCoin, nextNetwork, moduleContainerId, false, null, { reuseImage: true })
+                    await buildAndUp(nextModule, nextCoin, nextNetwork, moduleContainerId, false, null,
+                        { reuseImage: true, deferStatusPush: true })
                 } catch (err) {
                     // Visiting the rest of the sweep after one venue fails follows uninstallModules: `recreate all` was already half-applied by the time it threw, and stopping there hid which venues had been touched behind one flat `recreate failed:`. The run still REJECTS below, naming every venue - a failure never becomes a skip.
                     const why = (err && err.message) ? err.message : String(err)

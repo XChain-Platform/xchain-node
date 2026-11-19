@@ -236,6 +236,7 @@ describe('BootstrapService', function () {
             setImmediate(finishDownload)
             expect(await promise).to.be.true
             expect(stubs.spawn.called, 'the restore goes ahead').to.equal(true)
+            expect(stubs.nodeTipGuard.assessNodeTipForRestore.calledOnce).to.equal(true)
 
             const logs = captureLogs()
             try { bs.reportBootstrapOutcomes() } finally { logs.restore() }

@@ -185,9 +185,9 @@ async function sampleBootstrapFreshness(module, coin, network, onlyExecution) {
     return { utxoWasFresh, mariaWasFresh }
 }
 
-// Database credentials are rotated after the replacement starts, while the hub
-// grant is also established inside buildAndUp before its status push. Bootstrap
-// restoration then runs only for the confirmed-fresh stores sampled above.
+// Database credentials are rotated after the replacement starts. Callers push
+// status only after the required grants. Bootstrap restoration then runs only
+// for the confirmed-fresh stores sampled above.
 async function finishServiceInstall(context, freshness) {
     const { module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs } = context
     const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)

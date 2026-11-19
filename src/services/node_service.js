@@ -44,15 +44,17 @@ const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
 async function installDependentServices(coin, network, cloneGit, buildAndUp) {
+    const buildWithoutPush = module => buildAndUp(
+        module, coin, network, null, false, null, { deferStatusPush: true })
     logger.info("Downloading xchain-encoder...")
     await cloneGit(XChainService.XCHAIN_ENCODER, true)
     logger.info("Building xchain-encoder container...")
-    await buildAndUp(XChainService.XCHAIN_ENCODER, coin, network)
+    await buildWithoutPush(XChainService.XCHAIN_ENCODER)
 
     logger.info("Downloading xchain-decoder...")
     await cloneGit(XChainService.XCHAIN_DECODER, true)
     logger.info("Building xchain-decoder container...")
-    await buildAndUp(XChainService.XCHAIN_DECODER, coin, network)
+    await buildWithoutPush(XChainService.XCHAIN_DECODER)
 
     logger.info("Downloading xchain-utxo-tracker...")
     await cloneGit(XChainService.XCHAIN_UTXO_TRACKER, true)
@@ -63,20 +65,20 @@ async function installDependentServices(coin, network, cloneGit, buildAndUp) {
         FRESHNESS_EMPTY } = require('./bootstrap_service')
     const utxoWasFresh = (await utxoTrackerVolumeFreshness(coin, network)) === FRESHNESS_EMPTY
         || forceBootstrapRequested()
-    await buildAndUp(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
+    await buildWithoutPush(XChainService.XCHAIN_UTXO_TRACKER)
     if (utxoWasFresh) await ensureBootstrapUtxoTracker(coin, network)
 
     if (network === Network.REGTEST) {
         logger.info("Downloading xchain-regtest-miner...")
         await cloneGit(XChainService.XCHAIN_REGTEST_MINER, true)
         logger.info("Building xchain-regtest-miner...")
-        await buildAndUp(XChainService.XCHAIN_REGTEST_MINER, coin, network)
+        await buildWithoutPush(XChainService.XCHAIN_REGTEST_MINER)
     }
 
     logger.info("Downloading xchain-indexer...")
     await cloneGit(XChainService.XCHAIN_INDEXER, true)
     logger.info("Building xchain-indexer...")
-    await buildAndUp(XChainService.XCHAIN_INDEXER, coin, network)
+    await buildWithoutPush(XChainService.XCHAIN_INDEXER)
 }
 
 async function setInstalledDatabaseParameters() {

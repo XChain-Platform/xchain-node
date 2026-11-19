@@ -5,6 +5,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+const vm = require('vm')
+
 const {
     sinon,
     expect,
@@ -221,6 +223,7 @@ async function validateNestedTrackerStore() {
     expect(validation.args[1]).to.include('/store/.restore-staging/xchain-utxo-tracker')
     expect(validation.calledBefore(wipe)).to.equal(true)
     expect(wipe.calledBefore(promote)).to.equal(true)
+    return validation.args[1]
 }
 
 async function leaveTrackerStoppedAfterPromotionFailure() {
@@ -248,5 +251,12 @@ async function leaveTrackerStoppedAfterPromotionFailure() {
 describe('bootstrap tracker restore validation contract', function () {
     it('restarts the tracker without wiping when staged layout validation fails', rejectInvalidStagedLayout)
     it('validates the nested tracker store before wiping and promoting the staged volume', validateNestedTrackerStore)
+    it('passes a syntactically valid staged-store validator to node', async function () {
+        const args = await validateNestedTrackerStore()
+        const scriptIndex = args.indexOf('-e')
+        expect(scriptIndex).to.be.greaterThan(-1)
+        const script = args[scriptIndex + 1]
+        expect(() => new vm.Script(script, { filename: 'validate_staged_store.js' })).to.not.throw()
+    })
     it('leaves the tracker stopped when promotion fails after the live-volume wipe', leaveTrackerStoppedAfterPromotionFailure)
 })

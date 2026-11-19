@@ -117,10 +117,10 @@ moduleSuite('buildAndUp() hub credential ordering', function () {
             const stubs = hubStubs()
             const setHub = sinon.stub().resolves()
             const ms = withDbStub(stubs, setHub)
-            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            await ms.buildAndUp('xchain-decoder', 'bitcoin', 'mainnet')
             expect(setHub.called).to.be.false
+            expect(stubs.statusChanged.called).to.be.false
         })
-
         it('does not touch the hub account for a one-shot execution container', async function () {
             const stubs = hubStubs()
             const setHub = sinon.stub().resolves()

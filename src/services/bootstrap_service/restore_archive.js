@@ -35,6 +35,7 @@ const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 const { configuredDatabaseName } = require('../../utils/module_database_name')
 let { checkBootstrapSignature, ensureVerifiedInnerArchive } = require('./archive_signing')
 const { BootstrapIntegrityError } = require('./archive_signing')
+let { assessNodeTipForRestore } = require('../bootstrap_node_tip_guard')
 const trackerRestore = require('./tracker_restore')
 let { readBootstrapArchiveMeta, compareArchiveIdentity } = require('../bootstrap_archive_meta')
 let { startProgress, getWorkDir } = require('./workspace')
@@ -54,18 +55,41 @@ function configureDependencies(dependencies) {
     ;({ getDatabaseContainerId, ensureDatabasePool, getExternalDbConfig, executeNativeMariaDbCommand } = databaseService)
     ;({ checkBootstrapSignature, ensureVerifiedInnerArchive } = dependencies.archiveSigning)
     ;({ readBootstrapArchiveMeta, compareArchiveIdentity } = dependencies.archiveMeta)
+    ;({ assessNodeTipForRestore } = dependencies.nodeTipGuard)
     ;({ startProgress, getWorkDir } = dependencies.workspace)
     trackerRestore.configureDependencies(dependencies)
     logger = dependencies.logger
 }
 
-async function restoreBootstrap(coin, network, module, fileName) {
+class BootstrapNodeTipRefusedError extends Error {
+    constructor(assessment) {
+        const ibd = assessment.ibd ? ' in initial block download' : ''
+        const position = Number.isFinite(assessment.nodeHeight) && Number.isFinite(assessment.archiveHeight)
+            ? `The coin node is at ${assessment.nodeHeight}${ibd}, ${assessment.gap} blocks below the archive height ${assessment.archiveHeight}. `
+            : ''
+        super(
+            `Bootstrap restore refused. ${position}` +
+            'Nothing was stopped, wiped, or deleted. Wait for the node to pass the archive height and retry, ' +
+            'or set XCHAIN_NODE_SKIP_NODE_TIP_GUARD=1 to restore anyway.'
+        )
+        this.name = 'BootstrapNodeTipRefusedError'
+        this.assessment = assessment
+    }
+}
+
+async function assertNodeTipAllowsRestore(coin, network, module, archivePath, nodeTip) {
+    const assessment = nodeTip || await assessNodeTipForRestore({ coin, network, module, archivePath })
+    if (assessment.refuse) throw new BootstrapNodeTipRefusedError(assessment)
+    return assessment
+}
+
+async function restoreBootstrap(coin, network, module, fileName, options = {}) {
     switch (module) {
         case XChainService.XCHAIN_UTXO_TRACKER:
-            return restoreBootstrapUtxoTracker(coin, network, fileName)
+            return restoreBootstrapUtxoTracker(coin, network, fileName, options)
         case XChainService.XCHAIN_DECODER:
         case XChainService.XCHAIN_INDEXER:
-            return restoreBootstrapMariaDb(coin, network, module, fileName)
+            return restoreBootstrapMariaDb(coin, network, module, fileName, options)
         default:
             throw new Error(`Unsupported module for bootstrap restore: ${module}`)
     }
@@ -90,8 +114,8 @@ async function assertArchiveIdentity(archivePath, target) {
     }
 }
 
-async function restoreBootstrapUtxoTracker(coin, network, fileName) {
-    const context = await prepareTrackerRestore(coin, network, fileName)
+async function restoreBootstrapUtxoTracker(coin, network, fileName, options) {
+    const context = await prepareTrackerRestore(coin, network, fileName, options)
 
     logger.info(`Stopping ${XChainService.XCHAIN_UTXO_TRACKER} container...`)
     // Stop with the service's budget, not docker's ten-second default; the volume is replaced next, so an unclean stop is reported, not refused.
@@ -121,7 +145,7 @@ async function restoreBootstrapUtxoTracker(coin, network, fileName) {
     return true
 }
 
-async function prepareTrackerRestore(coin, network, fileName) {
+async function prepareTrackerRestore(coin, network, fileName, options) {
     const defaultConfig = await getDefaultConfig(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     const bootstrapDir  = defaultConfig["UTXO_TRACKER_BOOTSTRAP_VOLUME"]
     const archivePath   = path.join(bootstrapDir, fileName)
@@ -137,16 +161,18 @@ async function prepareTrackerRestore(coin, network, fileName) {
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
     await assertArchiveIdentity(archivePath, { module: XChainService.XCHAIN_UTXO_TRACKER, coin, network })
+    // The guard resolves the node container through state, so the pool must be
+    // open before it runs or a missing connection would look like an unknown tip.
+    await ensureDatabasePool()
+    await assertNodeTipAllowsRestore(
+        coin, network, XChainService.XCHAIN_UTXO_TRACKER, archivePath, options.nodeTip
+    )
 
     // Extract and verify the inner archive against the checksum that
     // shipped inside the signature-verified outer archive (resumable, but the
     // reused bytes are always re-bound to the verified archive; see the helper).
     const innerArchive = await ensureVerifiedInnerArchive(archivePath, workDir, 'data.tar.gz', 'data.sha256')
 
-    // Make sure the DB pool is open first; when this routine is invoked outside
-    // the CLI precheck the pool is null, and getModuleContainer would silently
-    // return null, masquerading as a missing container.
-    await ensureDatabasePool()
     const containerId = await db.getModuleContainer(XChainService.XCHAIN_UTXO_TRACKER, coin, network)
     if (!containerId) {
         if (!db.isReady()) {
@@ -164,8 +190,8 @@ async function startMariaService(context, module) {
     await startContainer(context.serviceContainerId)
 }
 
-async function restoreBootstrapMariaDb(coin, network, module, fileName) {
-    const context = await prepareMariaRestore(coin, network, module, fileName)
+async function restoreBootstrapMariaDb(coin, network, module, fileName, options) {
+    const context = await prepareMariaRestore(coin, network, module, fileName, options)
     try {
         await restoreMariaDatabase(context)
     } catch (err) {
@@ -188,7 +214,7 @@ async function restoreBootstrapMariaDb(coin, network, module, fileName) {
     return true
 }
 
-async function prepareMariaRestore(coin, network, module, fileName) {
+async function prepareMariaRestore(coin, network, module, fileName, options) {
     const { askMariadbRootPassword } = databaseService
 
     const defaultConfig = await getDefaultConfig(module, coin, network)
@@ -207,6 +233,9 @@ async function prepareMariaRestore(coin, network, module, fileName) {
     // detached signature checked here.
     await checkBootstrapSignature(archivePath)
     await assertArchiveIdentity(archivePath, { module, coin, network })
+    // This also prepares state for the later strict service-container lookup.
+    await ensureDatabasePool()
+    await assertNodeTipAllowsRestore(coin, network, module, archivePath, options.nodeTip)
 
     // Extract and verify the inner archive against the checksum that
     // shipped inside the signature-verified outer archive (resumable, but the
@@ -230,8 +259,6 @@ async function prepareMariaRestore(coin, network, module, fileName) {
     // which stops the tracker before clearing its volume). Only a confirmed
     // zero-row registry answer means "not installed"; a failed lookup aborts
     // the restore rather than wiping the DB under a running service. Open the
-    // DB pool first so the lookup can resolve the row.
-    await ensureDatabasePool()
     const serviceContainerId = await db.getModuleContainerStrict(module, coin, network)
     if (serviceContainerId) {
         logger.info(`Stopping ${module} container...`)
@@ -316,6 +343,7 @@ async function importMariaDump({ dbContainerId, dbName, externalCfg, innerArchiv
 
 module.exports = {
     assertArchiveIdentity,
+    BootstrapNodeTipRefusedError,
     configureDependencies,
     restoreBootstrap
 }

@@ -34,6 +34,7 @@
  * ORACLE_SUBMISSION_WINDOW), checkpoint cadence pair (CHECKPOINT_INTERVAL_BLOCKS,
  * ANCHOR_CHECKPOINT_EVERY_N), the attestation timing seams
  * (ATTEST_RESPONSE_FORWARD_S_OVERRIDE, ATTEST_BATCH_WINDOW_S_OVERRIDE), the
+ * unverified-pair co-sign hatch (ORACLE_ALLOW_UNVERIFIED_PAIRS), the
  * snapshot seams (XDEX_SEED_LOCAL_VALIDATOR, XDEX_SNAPSHOT_BLOCK) and the
  * XC_*_ACTIVATION gate arms follow the same rule: the hub reads them from the
  * environment on regtest only.
@@ -90,6 +91,13 @@ const CONSENSUS_ENV_GROUPS = [
         why: 'oracle round cadence, CONSENSUS-UNIFORM across a federation and honored on regtest only; a ' +
             'regtest hub that loses its override reverts to the mainnet-length default while its venue ' +
             'peers may still run the shorter one'
+    },
+    {
+        keys: ['ORACLE_ALLOW_UNVERIFIED_PAIRS'],
+        // The hub reads this escape hatch on regtest only and fails closed elsewhere.
+        honoredOn: ['regtest'],
+        why: 'regtest single-fetcher co-sign escape hatch; a hub that loses it resumes withholding co-sign ' +
+            'on pairs it cannot verify, so rounds containing a brand-new pair stop finalizing'
     },
     {
         keys: ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N'],
