@@ -217,21 +217,22 @@ function resolveStartPeriod(module, fallback) {
     return fallback
 }
 
-// LOG_LEVEL / LOG_FORMAT / METRICS_ENABLED / XCHAIN_LOG_PATCH are read by every
-// service's observability shim, and nothing carries them from the deploy host
-// into a container unless they are named here: they appear in no module config
-// store, so the shim stands on its compiled defaults and an operator has no way
-// to raise a single box to debug, switch it to NDJSON, or expose /metrics
-// without editing code.
-//
-// Resolution is narrowest-first: a value already in the per-install module
-// config store wins, so an operator who pinned LOG_LEVEL for one coin keeps it;
-// otherwise the deploy host's own environment supplies it. When neither sets a
-// name nothing is fabricated, keeping the container env as small as it is today
-// and leaving the shim defaults (LOG_LEVEL=info, LOG_FORMAT=text,
-// METRICS_ENABLED=false, XCHAIN_LOG_PATCH=1) in force. Values ride the same
-// bare `--env NAME` path as every other key, so none of them reach argv.
-const OBSERVABILITY_ENV_KEYS = ['LOG_LEVEL', 'LOG_FORMAT', 'METRICS_ENABLED', 'XCHAIN_LOG_PATCH']
+// Forward observability and SQL timing controls from the deploy host as bare `--env NAME` (values stay out of argv).
+// A per-install config-store value wins over the host's; an unset name is never fabricated.
+const OBSERVABILITY_ENV_KEYS = [
+    'LOG_LEVEL',
+    'LOG_FORMAT',
+    'METRICS_ENABLED',
+    'XCHAIN_LOG_PATCH',
+    'SQL_TIMING_ENABLED',
+    'SQL_TIMING_URL',
+    'SQL_TIMING_KEY',
+    'SQL_TIMING_PROJECT',
+    'SQL_TIMING_REQUEST_RATE',
+    'SQL_TIMING_STATEMENT_RATE',
+    'SQL_TIMING_INTERVAL_MS',
+    'SQL_TIMING_MAX_BUFFER'
+]
 
 function resolveObservabilityEnv(environmentVariables, hostEnv = config.OBSERVABILITY_ENV) {
     const overlay = {}
