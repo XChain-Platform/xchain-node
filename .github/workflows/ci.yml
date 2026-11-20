@@ -39,7 +39,10 @@ jobs:
             const path = require("node:path");
             const { createRequire } = require("node:module");
             const sdkRoot = path.dirname(require.resolve("@dankest-llc/xchain-sdk/package.json"));
-            const authEntry = path.join(sdkRoot, "src", "auth.js");
+            // sdk 0.19+ keeps the signing module at src/utils/auth.js; 0.18 had src/auth.js.
+            const authEntry = [path.join(sdkRoot, "src", "utils", "auth.js"), path.join(sdkRoot, "src", "auth.js")]
+              .find(candidate => require("node:fs").existsSync(candidate));
+            if (!authEntry) throw new Error("the SDK signing module was not found under " + sdkRoot);
             const authRequire = createRequire(authEntry);
             const messageEntry = authRequire.resolve("bitcoinjs-message");
             const messageRequire = createRequire(messageEntry);
