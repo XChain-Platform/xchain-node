@@ -213,12 +213,13 @@ function main() {
 
 // The probe form is PIPED IN on stdin (`node - <root> < this-file`), and under `node -`
 // require.main is undefined, not this module. A bare `require.main === module` guard
-// therefore turns the documented probe invocation into a silent no-op that exits 0 with
-// no output, which a runbook reads as an empty tree. The undefined arm is what keeps
-// stdin working; a test require()ing this file has a defined require.main and is excluded.
+// would turn the documented probe invocation into a silent no-op that exits 0 with no
+// output, which a runbook reads as an empty tree. Checking argv for the stdin marker keeps
+// that invocation working without firing when an ESM-based runner (mocha 12) imports a
+// CommonJS test, which also leaves require.main undefined.
 module.exports = {
     blobId, walk, treeHashOf, manifestLines, parseTreeListing, readVersion,
     formatProbeReport, probe, matchHashes, formatMatchReport, parseMatchArgs, main
 };
 
-if (require.main === module || require.main === undefined) process.exit(main());
+if (require.main === module || (require.main === undefined && process.argv[1] === '-')) process.exit(main());

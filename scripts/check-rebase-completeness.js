@@ -167,10 +167,10 @@ module.exports = {
 };
 
 // Guarded so test/unit/check_rebase_completeness.test.js can require the helpers without
-// the CLI firing on import. The undefined arm covers `node -` (stdin), where require.main
-// is undefined rather than this module; it costs nothing here and keeps the three
-// scripts/ entrypoints on one guard that cannot be copied into a stdin-piped tool wrong.
-if (require.main === module || require.main === undefined) {
+// the CLI firing on import. `node -` leaves require.main undefined and names the entry
+// script "-"; checking both matters because ESM-based runners also leave require.main
+// undefined while importing CommonJS tests.
+if (require.main === module || (require.main === undefined && process.argv[1] === '-')) {
     main().catch((e) => {
         // A configuration fault is not a pass. Exit 2 so a runbook can tell "the fleet failed
         // the check" (1) from "the check could not run" (2), because the second one means the

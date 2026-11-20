@@ -17,8 +17,8 @@
     "src/services/status_service/**"
   ],
   "testRunner": "mocha",
-  "testRunnerNodeArgs": [
-    "--import=data:text/javascript,process.mainModule??={}"
+  "plugins": [
+    "./test/mutation/mocha_12_plugin.mjs"
   ],
   "mochaOptions": {
     "spec": [

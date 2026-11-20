@@ -226,6 +226,6 @@ module.exports = { parseCommand, installUnhandledRejectionHandler, installUncaug
 // Running it directly otherwise silently does nothing, because program.parse()
 // lives inside parseCommand() and would never be called.
 if (require.main === module) {
-    loadModule('dotenv').config()
+    loadModule('dotenv').config({ quiet: true })
     parseCommand()
 }

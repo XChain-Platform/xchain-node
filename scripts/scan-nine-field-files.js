@@ -118,8 +118,8 @@ async function main() {
 
 module.exports = { argFrom, paginateScan, measureCorpus, main };
 
-// See the guard note in check-rebase-completeness.js for why the undefined arm is here.
-if (require.main === module || require.main === undefined) {
+// Preserve the stdin entrypoint without firing under an ESM-based test runner.
+if (require.main === module || (require.main === undefined && process.argv[1] === '-')) {
     main().catch((e) => {
         console.error('nine-field FILE scan could not run: ' + ((e && e.message) || e));
         process.exit(2);

@@ -4,6 +4,9 @@
     "src/services/config_service.js"
   ],
   "testRunner": "mocha",
+  "plugins": [
+    "./test/mutation/mocha_12_plugin.mjs"
+  ],
   "mochaOptions": {
     "spec": [
       "test/unit/config_service.test.js",

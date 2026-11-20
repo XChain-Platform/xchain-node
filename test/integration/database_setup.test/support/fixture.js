@@ -44,7 +44,7 @@ function makeMariadbSpawnStub(cmdCapture) {
             cmdCapture.history().push({
                 command: fullCommand, args, options: {}, type: 'spawn', timestamp: Date.now()
             })
-            const response = cmdCapture._matchRoute(fullCommand) // eslint-disable-line no-underscore-dangle
+            const response = cmdCapture._matchRoute(fullCommand)
             process.nextTick(() => {
                 if (response.error) {
                     child.stderr.emit('data', String(response.error.message || response.error))

@@ -115,6 +115,7 @@ class HubConnector {
                 break;
             }
             const expiry = AbortSignal.timeout(attemptMs);
+            const budgetLimited = attemptMs < timeout;
             try {
                 // Authenticate to a key-enforcing hub: write methods (e.g. updateConfig)
                 // are gated by HUB_API_KEY on the hub, so the CLI must present the same key
@@ -140,6 +141,11 @@ class HubConnector {
                         (err.response && err.response.status) || null
                     );
                 }
+            }
+            if(expiry.aborted && budgetLimited && i + 1 < this.urls.length){
+                const nextIdx = (this._lastGoodIdx + i + 1) % this.urls.length;
+                this.recordFailure(this.urls[nextIdx] + ' → wall-clock budget exhausted');
+                break;
             }
         }
         // No endpoint returned a healthy result. Surface a reachable-but-degraded
