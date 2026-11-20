@@ -175,7 +175,11 @@ function pendingHubPushPayloadSatisfiedSql(database) {
         " AND table_name = 'pending_hub_pushes' AND column_name = 'payload'" +
         " AND data_type IN ('mediumtext', 'longtext') AND character_set_name = 'utf8mb4')"
 }
-function pubkeyWidthSatisfiedSql(database) { return columnSql(database, 'pubkeys', 'pubkey', 'varchar', { length: 130, ordinal: 2 }) }
+// Width alone, matching both the indexer's baseline and its startup assertion.
+function pubkeyWidthSatisfiedSql(database) {
+    return `EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = '${database}' AND ` +
+        "table_name = 'pubkeys' AND column_name = 'pubkey' AND character_maximum_length >= 130)"
+}
 
 function validatorRewardsDeriveBlockIndexSatisfiedSql(database) {
     return [

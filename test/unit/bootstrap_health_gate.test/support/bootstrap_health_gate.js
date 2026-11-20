@@ -37,10 +37,10 @@ function healthyInspect({ started = '2026-01-01T00:00:00.000Z' } = {}) {
 // nativeResolves: '' and gets that for every call.
 function nativeHelperStub(nativeResolves) {
     if (nativeResolves !== null) return sinon.stub().resolves(nativeResolves)
-    // The native client joins the clear probe's NULL payload column as ''.
     return sinon.stub().callsFake(async (cfg, sql) =>
         (/information_schema\.TABLES/.test(sql) ? '1\t1\t1' :
-            (/HEX\(data\)|rollback_guard/.test(sql) ? '0\t' : '0')))
+            (/ORDER BY id DESC LIMIT 1001/.test(sql) ? '' :
+                (/rollback_guard/.test(sql) ? '0\t' : '0'))))
 }
 
 function loadGate({ external = false, nativeResolves = null } = {}) {
@@ -93,8 +93,8 @@ function makeRunner({
     status  = { status: 'healthy', lag_blocks: 0, reorg_halted: false, reorg_halt_checked_at: 1756000000000 },
     tables  = '1\t1\t1',
     reorgHaltRows = '0',
-    // The newest marker row's clear probe: '<is a clear>\t<HEX(data)>', NULL when no clear.
     newestClear   = '0\tNULL',
+    reorgHistory  = null,
     syncHaltRows  = '0',
     // Live halt_pending copies in sync_state (xchain-sync's fallback when sync_halt fails).
     pendingSyncHaltRows = '0',
@@ -105,7 +105,7 @@ function makeRunner({
     // Answers for the PAIRED DECODER database an indexer gate probes second. Left
     // null, that database answers exactly as the gated one does; set it to express
     // the scenario the gate exists for and a single-database fake cannot reach:
-    // decoder dirty, indexer clean. Accepts { tables, reorgHaltRows, newestClear, syncHaltRows, pendingSyncHaltRows,
+    // decoder dirty, indexer clean. Accepts { tables, reorgHistory, syncHaltRows, pendingSyncHaltRows,
     // rollbackGuardRows,
     // eventsWatermark, syncHaltWatermark, reorgHaltWindowRows, syncHaltWindowRows,
     // throws }.
@@ -145,9 +145,20 @@ function makeRunner({
         if (/COALESCE\(MAX\(id\),0\) FROM `[^`]+`\.events/.test(sql)) return { stdout: pick('eventsWatermark', eventsWatermark) }
         if (/COALESCE\(MAX\(id\),0\) FROM `[^`]+`\.sync_halt/.test(sql)) return { stdout: pick('syncHaltWatermark', syncHaltWatermark) }
         if (/'REORG_HALT_CLEARED'\) AND id > \d+/.test(sql)) return { stdout: pick('reorgHaltWindowRows', reorgHaltWindowRows) }
-        if (/HEX\(data\)/.test(sql)) return { stdout: pick('newestClear', newestClear) }
+        if (/ORDER BY id DESC LIMIT 1001/.test(sql)) {
+            const direct = pick('reorgHistory', reorgHistory)
+            if (direct !== null) return { stdout: direct }
+            const oldClear = pick('newestClear', newestClear)
+            if (oldClear !== '0\tNULL') {
+                const fields = oldClear.split('\t')
+                if (fields[0] !== '1') return { stdout: oldClear }
+                const data = !fields[1] || fields[1] === 'NULL' ? 'N' : 'V' + fields[1]
+                return { stdout: `1\tREORG_HALT_CLEARED\t${data}` }
+            }
+            const oldRows = pick('reorgHaltRows', reorgHaltRows)
+            return { stdout: /^\d+$/.test(oldRows) && Number(oldRows) > 0 ? '1\tREORG_HALT\tN' : (oldRows === '0' ? '' : oldRows) }
+        }
         if (/sync_halt WHERE id > \d+/.test(sql)) return { stdout: pick('syncHaltWindowRows', syncHaltWindowRows) }
-        if (/REORG_HALT/.test(sql)) return { stdout: pick('reorgHaltRows', reorgHaltRows) }
         if (/sync_halt/.test(sql)) return { stdout: pick('syncHaltRows', syncHaltRows) }
         return { stdout: '' }
     })

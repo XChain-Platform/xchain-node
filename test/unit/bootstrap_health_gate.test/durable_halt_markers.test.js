@@ -167,7 +167,7 @@ describe('BootstrapHealthGate', function () {
             const gate = loadGate()
             const runner = makeRunner({ newestClear: '1\t' + hexOf('{"reason":"oops"}') })
             const err = await refusal(callGate(gate, { runner }))
-            expect(err.message).to.match(/newest REORG_HALT_CLEARED row with no audited reason/)
+            expect(err.message).to.match(/durable REORG_HALT marker/)
         })
 
         it('REFUSES a newest clear row with no payload at all', async function () {
@@ -189,7 +189,31 @@ describe('BootstrapHealthGate', function () {
         it('REFUSES unreadable clear-probe output', async function () {
             const gate = loadGate()
             const err = await refusal(callGate(gate, { runner: makeRunner({ newestClear: '0' }) }))
-            expect(err.message).to.match(/REORG_HALT_CLEARED audit probe[\s\S]*returned unreadable output/)
+            expect(err.message).to.match(/REORG_HALT history probe[\s\S]*returned unreadable output/)
+        })
+
+        it('REFUSES a stale audited clear that names an older halt', async function () {
+            const gate = loadGate()
+            const payload = id => 'V' + hexOf(JSON.stringify({ reason: 'operator verified recovery', cleared_halt_id: id }))
+            const history = [
+                `13\tREORG_HALT_CLEARED\t${payload(10)}`, '12\tREORG_HALT\tN',
+                `11\tREORG_HALT_CLEARED\t${payload(10)}`, '10\tREORG_HALT\tN'
+            ].join('\n')
+            const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHistory: history }) }))
+            expect(err.message).to.match(/durable REORG_HALT marker/)
+            await callGate(gate, { runner: makeRunner({ reorgHistory: `14\tREORG_HALT_CLEARED\t${payload(12)}\n${history}` }) })
+        })
+
+        it('REFUSES null-target and over-bound histories as the decoder does', async function () {
+            const gate = loadGate()
+            const payload = id => 'V' + hexOf(JSON.stringify({ reason: 'operator verified recovery', cleared_halt_id: id }))
+            const nullTarget = `2\tREORG_HALT_CLEARED\t${payload(null)}\n1\tREORG_HALT\tN`
+            expect((await refusal(callGate(gate, { runner: makeRunner({ reorgHistory: nullTarget }) }))).message)
+                .to.match(/durable REORG_HALT marker/)
+            const overBound = Array.from({ length: 1001 }, (_, i) =>
+                `${1001 - i}\tREORG_HALT_CLEARED\t${payload(0)}`).join('\n')
+            expect((await refusal(callGate(gate, { runner: makeRunner({ reorgHistory: overBound }) }))).message)
+                .to.match(/durable REORG_HALT marker/)
         })
     })
 })

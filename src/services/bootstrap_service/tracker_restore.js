@@ -23,7 +23,7 @@ let execFileAsync = promisify(execFile)
 let { startProgress } = require('./workspace')
 
 const STAGING_DIR = '/data/.restore-staging'
-const TRACKER_STORE_DIR = 'xchain-utxo-tracker'
+const VALIDATION_STAGING_DIR = STAGING_DIR.replace(/^\/data/, '/store')
 const VALIDATE_SCRIPT = `
 require('./src/bootstrap/staged_restore')
     .assertStagedLayoutOrThrow(process.argv[1])
@@ -90,7 +90,7 @@ async function validateStagedStore(containerId, volumeName) {
     await execFileAsync('docker', [
         'run', '--rm', '-v', `${volumeName}:/store`, '-w', '/XChainUtxoTracker',
         '--entrypoint', 'node', imageId, '-e', VALIDATE_SCRIPT,
-        `/store/.restore-staging/${TRACKER_STORE_DIR}`
+        VALIDATION_STAGING_DIR
     ], { timeout: 300000 })
 }
 

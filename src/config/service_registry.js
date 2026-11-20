@@ -81,11 +81,12 @@ const LIBRARY_BUNDLES = {
 // docker facet (consumed by ModuleService.buildModuleDockerArgs):
 //   singleton - true clears coin/network before naming/network resolution
 //               (shared containers: hub, explorer, sync)
-//   ports     - [{ host, container, always }]; pushed as `-p host:container`.
+//   ports     - [{ host, container, always, movable }]; pushed as `-p host:container`.
 //               `always:true` pushes unconditionally (hub/explorer, whose
 //               ports are structurally present); otherwise the pair is pushed
 //               only when both env keys exist (preserves the old
 //               `if (X in env && Y in env)` guards).
+//               `movable:true` allows a host-only move on a collision.
 //   volumes   - each entry is one of:
 //                 { hostKey, container }        static env-keyed bind mount
 //                 { hostFn: 'utxoTrackerVolume', container }  dynamic volume name
@@ -116,7 +117,7 @@ const SERVICE_REGISTRY = {
     },
     [XChainService.XCHAIN_ENCODER]: {
         docker: {
-            ports: [{ host: 'ENCODER_PORT', container: 'ENCODER_API_PORT' }]
+            ports: [{ host: 'ENCODER_PORT', container: 'ENCODER_API_PORT', movable: true }]
         },
         hubConfig: {
             fields: { host: 'ENCODER_URL', port: 'ENCODER_API_PORT', server_port: 'ENCODER_PORT' }
@@ -124,7 +125,7 @@ const SERVICE_REGISTRY = {
     },
     [XChainService.XCHAIN_DECODER]: {
         docker: {
-            ports:   [{ host: 'DECODER_PORT', container: 'DECODER_API_PORT' }],
+            ports:   [{ host: 'DECODER_PORT', container: 'DECODER_API_PORT', movable: true }],
             volumes: [{ hostKey: 'DECODER_BOOTSTRAP_VOLUME', container: '/bootstrap/xchain-decoder' }]
         },
         hubConfig: {
@@ -142,7 +143,7 @@ const SERVICE_REGISTRY = {
     },
     [XChainService.XCHAIN_UTXO_TRACKER]: {
         docker: {
-            ports:   [{ host: 'UTXO_TRACKER_PORT', container: 'UTXO_TRACKER_API_PORT' }],
+            ports:   [{ host: 'UTXO_TRACKER_PORT', container: 'UTXO_TRACKER_API_PORT', movable: true }],
             volumes: [
                 { hostFn: 'utxoTrackerVolume', container: '/data/xchain-utxo-tracker' },
                 { hostKey: 'UTXO_TRACKER_BOOTSTRAP_VOLUME', container: '/bootstrap/xchain-utxo-tracker' }
@@ -155,7 +156,7 @@ const SERVICE_REGISTRY = {
     },
     [XChainService.XCHAIN_INDEXER]: {
         docker: {
-            ports: [{ host: 'INDEXER_PORT', container: 'INDEXER_API_PORT' }]
+            ports: [{ host: 'INDEXER_PORT', container: 'INDEXER_API_PORT', movable: true }]
         },
         hubConfig: {
             fields: {
@@ -172,7 +173,7 @@ const SERVICE_REGISTRY = {
     },
     [XChainService.XCHAIN_REGTEST_MINER]: {
         docker: {
-            ports: [{ host: 'REGTEST_MINER_PORT', container: 'REGTEST_MINER_API_PORT' }]
+            ports: [{ host: 'REGTEST_MINER_PORT', container: 'REGTEST_MINER_API_PORT', movable: true }]
         },
         hubConfig: {
             fields: { host: 'REGTEST_MINER_URL', port: 'REGTEST_MINER_API_PORT', server_port: 'REGTEST_MINER_PORT' }

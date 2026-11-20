@@ -75,7 +75,7 @@ async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
             'Host port conflict: cannot publish the following port(s):\n' +
             lines.join('\n') + '\n' +
             'Another stack or container already binds them on this host. Override the colliding ' +
-            'port(s) in config/<coin>-<network> (e.g. EXPLORER_PORT_HTTP/HTTPS, INDEXER_PORT, HUB_PORT, ' +
+            'port(s) in config/<coin>-<network> (e.g. EXPLORER_PORT_HTTP/HTTPS, INDEXER_PORT, HUB_PORT, P2P_PORT, ' +
             'DECODER_PORT, ENCODER_PORT, UTXO_TRACKER_PORT, SYNC_PORT) and re-run, or stop the conflicting container first.'
         )
     }

@@ -16,13 +16,11 @@
  * Every coin/network install defaults its per-service host ports to the same
  * numbers (utxo-tracker 3001, decoder 3002, ...), so the second install on a
  * host (testnet beside mainnet, a second coin) asked for ports the first one
- * already published and stopped on a host port conflict. A port the registry
- * publishes only on request (no `always`) is reached by other containers on the
- * docker network, never through the host, so moving its host side is safe:
+ * already published and stopped on a host port conflict. Only registry ports
+ * explicitly marked `movable` may move their host side:
  * this picks the same port 100 higher until one is free (3001, 3101, 3201 ...),
  * which keeps a second install's ports out of the first install's 30xx band.
- * The hub and explorer ports (`always`) are what the CLI itself dials on
- * 127.0.0.1, so a conflict on one of them still stops the install.
+ * Host-dialed ports, including validator P2P, fail closed on a conflict.
  ********************************************************************/
 
 'use strict'
@@ -112,6 +110,8 @@ function takenHostPorts(published, requested, claim) {
     return taken
 }
 
+function isMovablePort(entry) { return !!entry && entry.movable === true }
+
 // Move each conflicting on-request port of `claim.module` to a free host port:
 // rewrites its `-p` value in `portArgs` and its host key in
 // `claim.environmentVariables`, and drops it from `conflicts`. Returns
@@ -125,7 +125,7 @@ function claimFreeHostPorts(conflicts, portArgs, requested, published, claim) {
     const taken = takenHostPorts(published, requested, claim)
     for (let c = conflicts.length - 1; c >= 0; c--) {
         const { hostPort, holders } = conflicts[c]
-        const entry = ports.find(p => !p.always && String(environmentVariables[p.host]) === hostPort)
+        const entry = ports.find(p => isMovablePort(p) && String(environmentVariables[p.host]) === hostPort)
         if (!entry) continue
         const at = portArgs.indexOf(`${environmentVariables[entry.host]}:${environmentVariables[entry.container]}`)
         if (at < 1 || portArgs[at - 1] !== '-p') continue
@@ -142,6 +142,6 @@ function claimFreeHostPorts(conflicts, portArgs, requested, published, claim) {
 }
 
 module.exports = {
-    PORT_STEP, nextFreeHostPort, claimFreeHostPorts, parsePortSpec,
+    PORT_STEP, nextFreeHostPort, claimFreeHostPorts, isMovablePort, parsePortSpec,
     requestedHostPorts, reservedHostPorts
 }

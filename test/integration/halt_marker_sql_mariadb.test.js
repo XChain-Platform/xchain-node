@@ -82,14 +82,14 @@ const UNAUDITED = '{"reason":"oops"}'
 const HALT = '{"reason":"over-deep rollback"}'
 
 // Hold the connection and gate modules the before hook loads.
-let conn, mariadbExec, parseCountTokens, parseNewestClear, parseRollbackGuardRows
+let conn, mariadbExec, parseCountTokens, parseReorgHaltHistory, liveReorgHaltFromHistory, parseRollbackGuardRows
 
 // Create the scratch database the gate's SQL reads.
 async function createScratchDb() {
     if (!HOST) this.skip()
     const mariadb = require('mariadb')
     mariadbExec = require('../../src/services/database_service/mariadb_exec')
-    ;({ parseCountTokens, parseNewestClear, parseRollbackGuardRows } =
+    ;({ parseCountTokens, parseReorgHaltHistory, liveReorgHaltFromHistory, parseRollbackGuardRows } =
         require('../../src/services/bootstrap_health_gate/halt_markers'))
     conn = await mariadb.createConnection({
         host: CFG.host, port: CFG.port, user: CFG.root_user, password: CFG.root_password
@@ -124,8 +124,8 @@ async function events(rows) {
 
 // The gate's live reorg reading, composed as readLiveMarkers composes it.
 async function liveReorgHalts() {
-    const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, haltMarkers.newestReorgClearSql(DB), '-BN')
-    return (await count(haltMarkers.liveReorgHaltCountSql(DB))) + parseNewestClear(raw, 'test clear probe')
+    const raw = await mariadbExec.executeNativeMariaDbCommand(CFG, haltMarkers.reorgHaltHistorySql(DB), '-BN')
+    return liveReorgHaltFromHistory(parseReorgHaltHistory(raw, 'test history probe'))
 }
 
 async function readsMarkerTables() {

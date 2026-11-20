@@ -31,8 +31,8 @@
  * pinOffRegtest honors them ONLY when HUB_NETWORK is regtest, and pins them to
  * the constants.js values (with a "set but IGNORED" warning) on mainnet,
  * testnet and standalone alike. The round-cadence pair (ORACLE_ROUND_INTERVAL,
- * ORACLE_SUBMISSION_WINDOW), checkpoint cadence pair (CHECKPOINT_INTERVAL_BLOCKS,
- * ANCHOR_CHECKPOINT_EVERY_N), the attestation timing seams
+ * ORACLE_SUBMISSION_WINDOW), checkpoint controls (CHECKPOINT_INTERVAL_BLOCKS,
+ * ANCHOR_CHECKPOINT_EVERY_N, ANCHOR_ELECTION_TOLERANCE_BLOCKS), the attestation timing seams
  * (ATTEST_RESPONSE_FORWARD_S_OVERRIDE, ATTEST_BATCH_WINDOW_S_OVERRIDE), the
  * unverified-pair co-sign hatch (ORACLE_ALLOW_UNVERIFIED_PAIRS), the
  * snapshot seams (XDEX_SEED_LOCAL_VALIDATOR, XDEX_SNAPSHOT_BLOCK) and the
@@ -100,10 +100,10 @@ const CONSENSUS_ENV_GROUPS = [
             'on pairs it cannot verify, so rounds containing a brand-new pair stop finalizing'
     },
     {
-        keys: ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N'],
+        keys: ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N', 'ANCHOR_ELECTION_TOLERANCE_BLOCKS'],
         honoredOn: ['regtest'],
-        why: 'state-checkpoint cadence, fleet-uniform and honored on regtest only; losing an override ' +
-            'reverts to the canonical cadence and makes the hub decline venue peers as off-cadence'
+        why: 'state-checkpoint cadence and election tolerance, fleet-uniform and honored on regtest only; ' +
+            'losing an override makes the hub decline venue peers as off-cadence or not elected/unlocked'
     },
     {
         keys: [
@@ -318,7 +318,7 @@ function logConsensusEnvSupplyState(intended, network, carriedKeys = []) {
             'WARNING: hub consensus-shaped settings NOT supplied by the invoking shell (the hub will use ' +
             `its own built-in default for each): ${defaulted.join(', ')}. If this hub previously ran with ` +
             'different values (a single-source regtest ORACLE_MIN_SUBMISSIONS=1, a shortened ' +
-            'ORACLE_ROUND_INTERVAL/ORACLE_SUBMISSION_WINDOW, a shortened ATTEST_RESPONSE_FORWARD_S_OVERRIDE/' +
+            'ORACLE_ROUND_INTERVAL/ORACLE_SUBMISSION_WINDOW or ANCHOR_ELECTION_TOLERANCE_BLOCKS, a shortened ATTEST_RESPONSE_FORWARD_S_OVERRIDE/' +
             'ATTEST_BATCH_WINDOW_S_OVERRIDE, XDEX_SEED_LOCAL_VALIDATOR, an explicit HUB_NETWORK, or a configured ' +
             'XCHAIN_PRICE_INDEXER_DB_* source), export them in THIS shell before deploying.'
         )

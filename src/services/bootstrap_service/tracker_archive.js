@@ -64,8 +64,8 @@ function configureDependencies(dependencies) {
 
 // Where the pre-compress hardlink snapshot of the tracker volume lives.
 // It has to sit INSIDE the volume, because a hardlink cannot cross a filesystem, and the volume is the only thing mounted into the helper
-// container. It is a sibling of the LevelDB store (LevelUpDb opens /data/<dbName>, never /data itself), so the running tracker never looks at
-// it. Fixed literal with no shell metacharacters: it is interpolated into the snapshot shell script below.
+// container. The volume root is the LevelDB store, and LevelDB ignores the snapshot directory while the tracker runs.
+// Fixed literal with no shell metacharacters: it is interpolated into the snapshot shell script below.
 const TRACKER_SNAPSHOT_DIR = '.xchain-bootstrap-snapshot'
 
 // Freeze the tracker volume without keeping the tracker down for the compress.

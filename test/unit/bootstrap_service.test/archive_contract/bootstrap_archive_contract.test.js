@@ -132,7 +132,8 @@ describe('bootstrap archive frozen height contract', function () {
         const calls = execFile.getCalls().map(call => call.args[1])
         expect(calls[0]).to.include(FAKE_CONTAINER_ID)
         expect(calls[1]).to.include('tracker-volume:/data')
-        expect(calls[1]).to.include('/data/.snapshot/xchain-utxo-tracker')
+        expect(calls[1]).to.include('/data/.snapshot')
+        expect(calls[1]).to.not.include('/data/.snapshot/xchain-utxo-tracker')
     })
 
     it('refuses live heights when the archived store height is unavailable', function () {
@@ -202,7 +203,7 @@ async function rejectInvalidStagedLayout() {
     expect(stubs.dockerService.startContainer.calledOnceWithExactly(FAKE_CONTAINER_ID)).to.equal(true)
 }
 
-async function validateNestedTrackerStore() {
+async function validateStagedTrackerStore() {
     const stubs = makeStubs()
     const archivePath = '/data/bitcoin/mainnet/xchain-utxo-tracker/bootstrap/data.tar.gz'
     stubVerifiedInner(stubs, { archivePath, initiallyPresent: true })
@@ -220,7 +221,11 @@ async function validateNestedTrackerStore() {
     const validation = calls.find(call => (call.args[1] || []).some(arg => String(arg).includes('assertStagedLayoutOrThrow')))
     const wipe = calls.find(call => String((call.args[1] || []).at(-1)).includes("! -name '.restore-staging'"))
     const promote = calls.find(call => String((call.args[1] || []).at(-1)).includes('-exec mv {} /data/'))
-    expect(validation.args[1]).to.include('/store/.restore-staging/xchain-utxo-tracker')
+    const extractArgs = stubs.spawn.firstCall.args[1]
+    const extractTarget = extractArgs[extractArgs.indexOf('-C') + 1]
+    const validationTarget = validation.args[1].at(-1)
+    expect(validationTarget).to.equal(extractTarget.replace(/^\/data/, '/store'))
+    expect(validationTarget).to.not.match(/\/xchain-utxo-tracker$/)
     expect(validation.calledBefore(wipe)).to.equal(true)
     expect(wipe.calledBefore(promote)).to.equal(true)
     return validation.args[1]
@@ -250,9 +255,9 @@ async function leaveTrackerStoppedAfterPromotionFailure() {
 
 describe('bootstrap tracker restore validation contract', function () {
     it('restarts the tracker without wiping when staged layout validation fails', rejectInvalidStagedLayout)
-    it('validates the nested tracker store before wiping and promoting the staged volume', validateNestedTrackerStore)
+    it('validates the nested tracker store before wiping and promoting the staged volume', validateStagedTrackerStore)
     it('passes a syntactically valid staged-store validator to node', async function () {
-        const args = await validateNestedTrackerStore()
+        const args = await validateStagedTrackerStore()
         const scriptIndex = args.indexOf('-e')
         expect(scriptIndex).to.be.greaterThan(-1)
         const script = args[scriptIndex + 1]

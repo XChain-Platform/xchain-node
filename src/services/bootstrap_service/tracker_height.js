@@ -77,7 +77,6 @@ async function readTrackerHeightAfterRestart(coin, network, containerId, { attem
     return null
 }
 
-const TRACKER_STORE_DIR = 'xchain-utxo-tracker'
 const READ_STORE_HEIGHT_SCRIPT = `
 const { ClassicLevel } = require('classic-level')
 ;(async () => {
@@ -97,8 +96,9 @@ const { ClassicLevel } = require('classic-level')
 })().catch(err => { process.stderr.write(err.message + '\\n'); process.exitCode = 1 })
 `
 
-// The height of the frozen store itself, read from the directory that was just archived (the hardlink snapshot, or /data on the
-// stopped-tracker fallback), or null. Unlike the live status surface this cannot run ahead of the archived data.
+// The height of the frozen store itself. The node mounts the tracker volume at
+// the tracker's store path, so the volume root and each snapshot root are stores.
+// Unlike the live status surface this cannot run ahead of the archived data.
 async function readFrozenStoreHeight(volumeName, sourceDir, containerId) {
     try {
         const { stdout: inspectOut } = await execFileAsync('docker', [
@@ -106,10 +106,9 @@ async function readFrozenStoreHeight(volumeName, sourceDir, containerId) {
         ], { timeout: 15000 })
         const imageId = String(inspectOut).trim()
         if (!imageId) throw new Error('the tracker container image could not be resolved')
-        const storePath = `${sourceDir}/${TRACKER_STORE_DIR}`
         const { stdout } = await execFileAsync('docker', [
             'run', '--rm', '-v', `${volumeName}:/data`, '-w', '/XChainUtxoTracker',
-            '--entrypoint', 'node', imageId, '-e', READ_STORE_HEIGHT_SCRIPT, storePath
+            '--entrypoint', 'node', imageId, '-e', READ_STORE_HEIGHT_SCRIPT, sourceDir
         ], { timeout: 300000 })
         const text = String(stdout).trim()
         const value = Number(text)

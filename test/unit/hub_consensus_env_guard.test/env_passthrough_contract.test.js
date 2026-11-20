@@ -26,7 +26,7 @@ const {
 } = require('../../../src/services/hub_consensus_env_guard')
 
 const ROUND_CADENCE_KEYS = ['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW']
-const CHECKPOINT_CADENCE_KEYS = ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N']
+const CHECKPOINT_CADENCE_KEYS = ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N', 'ANCHOR_ELECTION_TOLERANCE_BLOCKS']
 const ARM_KEYS = HUB_PASSTHROUGH_VARS.filter(name => /^XC_[A-Z_]+_ACTIVATION$/.test(name))
 
 function registerPassthroughListContract() {
@@ -223,7 +223,7 @@ function registerCheckpointCadenceContract() {
         })
 
         it('detects a regtest drop and accepts values carried forward', () => {
-            const live = { HUB_NETWORK: 'regtest', CHECKPOINT_INTERVAL_BLOCKS: '2', ANCHOR_CHECKPOINT_EVERY_N: '3' }
+            const live = { HUB_NETWORK: 'regtest', CHECKPOINT_INTERVAL_BLOCKS: '2', ANCHOR_CHECKPOINT_EVERY_N: '3', ANCHOR_ELECTION_TOLERANCE_BLOCKS: '2' }
             const keys = drift => drift.map(d => d.key).sort()
             expect(keys(findHubConsensusEnvDrift({ HUB_NETWORK: 'regtest' }, live)))
                 .to.deep.equal(CHECKPOINT_CADENCE_KEYS.slice().sort())
@@ -234,7 +234,7 @@ function registerCheckpointCadenceContract() {
 
         it('ignores stale values off regtest and reports regtest defaults', () => {
             for (const network of ['mainnet', 'testnet', '']) {
-                const live = { CHECKPOINT_INTERVAL_BLOCKS: '2', ANCHOR_CHECKPOINT_EVERY_N: '3' }
+                const live = { CHECKPOINT_INTERVAL_BLOCKS: '2', ANCHOR_CHECKPOINT_EVERY_N: '3', ANCHOR_ELECTION_TOLERANCE_BLOCKS: '2' }
                 if (network) live.HUB_NETWORK = network
                 expect(findHubConsensusEnvDrift(network ? { HUB_NETWORK: network } : {}, live)).to.deep.equal([])
             }

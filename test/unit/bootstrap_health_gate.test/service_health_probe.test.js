@@ -92,8 +92,7 @@ describe('BootstrapHealthGate', function () {
                 // marker probe with '0' and leaves the marker path unexercised.
                 const sql = args[args.lastIndexOf('-e') + 1] || ''
                 if (/information_schema\.TABLES/.test(sql)) return { stdout: '1\t1\t1' }
-                // The newest-clear probe: no clear row, and the docker client prints NULL.
-                if (/HEX\(data\)/.test(sql)) return { stdout: '0\tNULL\n' }
+                if (/ORDER BY id DESC LIMIT 1001/.test(sql)) return { stdout: '' }
                 if (/rollback_guard/.test(sql)) return { stdout: '0\t' }
                 return { stdout: '0' }
             })

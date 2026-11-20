@@ -129,6 +129,8 @@ async function rehearseBootstrapRestore(coin, network, options) {
     let created = false
     try {
         const source = await databaseCounts(context, sourceName)
+        await runMariaTool(context, 'mariadb', ['-e', `DROP DATABASE IF EXISTS \`${rehearsalDatabase}\``])
+        logger.info(`Cleared any leftover disposable database ${rehearsalDatabase}`)
         await runMariaTool(context, 'mariadb-admin', ['create', rehearsalDatabase])
         created = true
         logger.info(`Restoring ${archive.selected} into ${rehearsalDatabase}...`)
@@ -362,7 +364,6 @@ function registerClearReorgHalt(program, deps) {
         })
 
 }
-
 function registerShell(program, deps) {
     const { filterCommandParameters, shellModule } = deps
     program
@@ -382,7 +383,6 @@ function registerShell(program, deps) {
         })
 
 }
-
 function registerPrimaryCommands(program, deps) {
     registerInstall(program, deps)
     registerUninstall(program, deps)
@@ -397,4 +397,4 @@ function registerToolCommands(program, deps) {
     registerBootstrapRestoreRehearsal(program, deps)
 }
 
-module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch, rehearsalSourceDatabaseName }
+module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch, rehearsalSourceDatabaseName, rehearseBootstrapRestore }

@@ -84,6 +84,17 @@ function registerRefusalTests() {
                 (err) => expect(err.message).to.match(/host port 10000 is already published by: some-other-hub/))
         expect(portArgs).to.deep.equal(['-p', '10000:10000'])
     })
+
+    it('refuses a validator P2P conflict without rewriting its listener port', async function () {
+        const ms = loadWithPublished([['10001', 'other-stack-hub']])
+        const env = { HUB_PORT: 10000, P2P_PORT: 10001 }
+        const portArgs = ['-p', '10000:10000', '-p', '10001:10001']
+        await ms.assertNoHostPortConflicts(portArgs, 'xchain-node-xchain-hub', { module: HUB_MODULE_NAME, environmentVariables: env })
+            .then(() => { throw new Error('expected a host port conflict') },
+                err => expect(err.message).to.match(/host port 10001 is already published by: other-stack-hub/))
+        expect(portArgs).to.deep.equal(['-p', '10000:10000', '-p', '10001:10001'])
+        expect(env.P2P_PORT).to.equal(10001)
+    })
 }
 
 function registerPickTests() {

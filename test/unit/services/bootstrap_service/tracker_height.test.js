@@ -83,7 +83,8 @@ describe('tracker_height frozen store', function () {
         const readArgs = fakes.execFile.secondCall.args[1]
         expect(inspectArgs).to.include('container-id')
         expect(readArgs).to.include('vol:/data')
-        expect(readArgs[readArgs.length - 1]).to.equal('/data/.snap/xchain-utxo-tracker')
+        expect(readArgs[readArgs.length - 1]).to.equal('/data/.snap')
+        expect(readArgs).to.not.include('/data/.snap/xchain-utxo-tracker')
     })
 
     it('passes a syntactically valid height reader to node', async function () {

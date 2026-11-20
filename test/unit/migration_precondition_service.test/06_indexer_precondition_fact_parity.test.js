@@ -23,6 +23,7 @@ const INDEXER_DIR = path.join(__dirname, '../../../../xchain-indexer')
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
 const LIST_SHARE = '2026-09-30-list-share-tables.sql'
 const ORACLE_WIDEN = '2026-09-22-oracle-prices-widen-tick.sql'
+const PUBKEYS_WIDEN = '2026-07-24-pubkeys-widen-uncompressed.sql'
 const OUTBOX_WIDEN = '2026-11-19-pending-hub-pushes-widen-payload.sql'
 const BRIDGE_TABLES = '2026-09-12-bridge-tables.sql'
 const BRIDGE_NAMES = ['bridge_transfers', 'bridge_settlements', 'policy_snapshots', 'xbridges']
@@ -115,6 +116,26 @@ describe('indexer precondition fact parity', () => {
         expect(await satisfiedWith({ columns: [tickColumn(300)] })).to.include(ORACLE_WIDEN)
         expect(await satisfiedWith({ columns: [tickColumn(50)] })).to.not.include(ORACLE_WIDEN)
         expect(await satisfiedWith({ columns: [tickColumn(249)] })).to.not.include(ORACLE_WIDEN)
+    })
+
+    it('matches the indexer pubkey-width baseline without requiring cosmetic column shape', async () => {
+        for (const override of [
+            {}, { character_maximum_length: 200 }, { ordinal_position: 3 },
+            { character_set_name: 'utf8mb4', collation_name: 'utf8mb4_general_ci' }, { is_nullable: 'YES' }
+        ]) {
+            const model = resetSchemaModel()
+            const row = model.columns.find(c => c.table_name === 'pubkeys' && c.column_name === 'pubkey')
+            Object.assign(row, override)
+            expect((await readResetLedger(model)).satisfied, JSON.stringify(override)).to.include(PUBKEYS_WIDEN)
+        }
+        for (const length of [66, 129, null]) {
+            const model = resetSchemaModel()
+            model.columns.find(c => c.table_name === 'pubkeys' && c.column_name === 'pubkey').character_maximum_length = length
+            expect((await readResetLedger(model)).satisfied, String(length)).to.not.include(PUBKEYS_WIDEN)
+        }
+        const missing = resetSchemaModel()
+        missing.columns = missing.columns.filter(c => c.table_name !== 'pubkeys' || c.column_name !== 'pubkey')
+        expect((await readResetLedger(missing)).satisfied).to.not.include(PUBKEYS_WIDEN)
     })
 
     it('matches the indexer payload baseline for capacity and charset', async () => {

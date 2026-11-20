@@ -97,7 +97,7 @@ function readState(stateFile) {
     //   restarts:       { <containerId>: <epoch ms of last autoheal restart> },
     //   unhealthySince: { <containerId>: <epoch ms this unhealthy episode began> },
     //   restartCount:   { <containerId>: <restarts since this container last was healthy> },
-    //   stoppedByAutoheal: { <containerId>: true when a stopped container still needs starting }
+    //   stoppedByAutoheal: { <containerId>: true from before autoheal stops it until its start succeeds }
     // }
     let raw
     try {

@@ -112,7 +112,7 @@ async function handleAutohealStopped(candidate, state, result, dryRun, resumeSto
     result.candidates.push({ module, coin, network, containerId })
     if (!resumeStopped) {
         result.escalated.push({ module, coin, network, containerId, attempts: state.restartCount[containerId] || 0 })
-        logger.warn(`autoheal: ${label} remains stopped after a failed restart; investigate or rerun with --resume-stopped`)
+        logger.warn(`autoheal: ${label} remains stopped after a restart failed or was interrupted; investigate or rerun with --resume-stopped`)
         return { handled: true, changed: false }
     }
     if (dryRun) {
@@ -240,7 +240,7 @@ function establishEpisode(candidate, health, state, now, probationMs, result) {
     return { since: episode.since, changed: episode.onsetReseeded || restartCountCleared }
 }
 
-async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now, wallStart) {
+async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now, wallStart, stateFile) {
     const { module, coin, network, containerId, label } = candidate
     if (now - since < timing.graceMs) {
         result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
@@ -275,6 +275,17 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
         return
     }
 
+    state.stoppedByAutoheal[containerId] = true
+    try {
+        writeState(stateFile, state)
+    } catch (err) {
+        delete state.stoppedByAutoheal[containerId]
+        const reason = `could not record restart intent: ${err}`
+        result.failed.push({ module, coin, network, containerId, reason })
+        logger.error(`autoheal: FAILED to record restart intent for ${label}: ${err}`)
+        return false
+    }
+
     try {
         // With the stop budget `stop` uses, so the restart gives a block-bound drain its time
         await restartModuleContainer(stopContainer, startContainer, module, coin, network, containerId,
@@ -286,13 +297,13 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
         // so advance it by the real time the restart consumed.
         state.restarts[containerId] = now + Math.max(0, Date.now() - wallStart)
         state.restartCount[containerId] = attempts + 1
+        delete state.stoppedByAutoheal[containerId]
         result.restarted.push({ module, coin, network, containerId })
         logger.info(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
     } catch (err) {
-        if (err && err.containerStopped) state.stoppedByAutoheal[containerId] = true
         result.failed.push({ module, coin, network, containerId, reason: String(err) })
         logger.error(`autoheal: FAILED to restart ${label}: ${err}`)
-        return Boolean(err && err.containerStopped)
+        return true
     }
 }
 
@@ -361,7 +372,7 @@ async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.n
         const episode = establishEpisode(candidate, health, state, now, timing.probationMs, result)
         if (!episode) continue
         if (episode.changed) onsetChanged = true
-        if (await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now, wallStart)) {
+        if (await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now, wallStart, stateFile)) {
             onsetChanged = true
         }
     }
