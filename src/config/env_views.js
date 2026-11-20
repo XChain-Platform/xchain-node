@@ -28,6 +28,10 @@
  * stays the one file that reads the environment.
  ********************************************************************/
 
+const {
+    SHARED_REGTEST_GATE_ARMS, HUB_ONLY_REGTEST_GATE_ARMS
+} = require('./regtest_gate_arms')
+
 const ENV_STYLE_NAME = /^[A-Z][A-Z0-9_]*$/
 
 // Views over a list of names: export name -> [label, declared names].
@@ -61,10 +65,8 @@ const LIST_VIEWS = {
         "XCHAIN_PRICE_INDEXER_DB_COIN", "XCHAIN_PRICE_WINDOW_BLOCKS",
         "XCHAIN_PRICE_CONFIRMATION_BUFFER", "XCHAIN_PRICE_BOOTSTRAP_SATS",
         "XCHAIN_PRICE_MIN_BTC_VOLUME", "HUB_ALLOW_UNAUTHENTICATED",
-        "XC_ROLLCALL_REGTEST_ACTIVATION", "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
-        "XC_MIRROR_ADMISSION_ACTIVATION", "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
-        "XC_ANCHOR_STAKE_REGTEST_ACTIVATION", "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
-        "XC_OFFER_LIST_REGTEST_ACTIVATION", "XCHAIN_PRICE_INDEXER_DB_SECRET"
+        ...SHARED_REGTEST_GATE_ARMS, ...HUB_ONLY_REGTEST_GATE_ARMS,
+        "XCHAIN_PRICE_INDEXER_DB_SECRET"
     ]],
     // The host names the xchain-sync server container is handed (defaults.js
     // configureSharedAfterHubKey), so a recreate keeps the operator's value.
@@ -85,11 +87,9 @@ const LIST_VIEWS = {
     // The indexer's ROLLCALL rail (ConfigService rollcallPassthroughVars), the
     // regtest-only names included.
     INDEXER_ROLLCALL_ENV: ['indexer rollcall', [
-        "DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY", "XC_ROLLCALL_REGTEST_ACTIVATION",
-        "XC_ROLLCALL_GATES_REGTEST_ACTIVATION", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
+        "DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY", ...SHARED_REGTEST_GATE_ARMS,
+        "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
         "HUB_PRICE_SYNC_TIMEOUT_MS", "XCHAIN_COINPAY_EXPIRATION_S",
-        "XC_MIRROR_ADMISSION_ACTIVATION", "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
-        "XC_ANCHOR_STAKE_REGTEST_ACTIVATION", "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
         "EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME"
     ]],
     // The hub-sync watermark graces a regtest indexer is handed (hubSyncRegtestGraceVars).

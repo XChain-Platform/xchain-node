@@ -189,12 +189,15 @@ function validatorRewardsDeriveBlockIndexSatisfiedSql(database) {
     ].join(' AND ')
 }
 
+// Column position is not required: an aged table can carry the qualifier at another ordinal and
+// the indexer baselines it. Type, NOT NULL DEFAULT 0 and the five-column key stay exact because
+// they define the reward identity the unique key enforces.
 function validatorRewardsRoundQualifierSatisfiedSql(database) {
     return [
-        columnSql(database, 'validator_rewards', 'round_qualifier', 'bigint', { unsigned: true, default: '0', ordinal: 6 }),
+        columnSql(database, 'validator_rewards', 'round_qualifier', 'bigint', { unsigned: true, default: '0' }),
         exactIndexSql(database, 'validator_rewards', 'reward_unique',
             ['source_id', 'signing_pubkey_id', 'reward_type', 'round_reference', 'round_qualifier'], 0),
-        columnSql(database, 'anchor_reward_reconcile_log', 'round_qualifier', 'bigint', { unsigned: true, default: '0', ordinal: 5 })
+        columnSql(database, 'anchor_reward_reconcile_log', 'round_qualifier', 'bigint', { unsigned: true, default: '0' })
     ].join(' AND ')
 }
 

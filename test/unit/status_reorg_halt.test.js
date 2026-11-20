@@ -307,18 +307,41 @@ describe('ps: decoder REORG_HALT surface', function () {
             reorg_halt_reason: 'verifyReorg: reorg depth exceeds the dispenser safe-depth window'
         })
         expect(r).to.deep.equal({
-            halted: true, at: '2026-09-07T06:29:07Z',
+            state: 'halted', halted: true, unverified: false, flag_present: true,
+            at: '2026-09-07T06:29:07Z',
             reason: 'verifyReorg: reorg depth exceeds the dispenser safe-depth window',
-            cleared_at: null, cleared_reason: null
+            cleared_at: null, cleared_reason: null, checked_at: null,
+            parked: false, parked_at: null
         })
     })
 
     it('reads an older image with no reorg_halted field as not halted, and a cleared halt as not halted', function () {
         expect(reduceDecoderReorgHalt({ status: 'healthy' }).halted).to.equal(false)
         expect(reduceDecoderReorgHalt({ reorg_halted: 'true' }).halted).to.equal(false)
-        const cleared = reduceDecoderReorgHalt({ reorg_halted: false, reorg_halt_cleared_at: '2026-09-08T10:00:00Z', reorg_halt_cleared_reason: 'zero dispensers' })
+        const cleared = reduceDecoderReorgHalt({ reorg_halted: false, reorg_halt_checked_at: '2026-09-08T10:00:00Z', reorg_halt_cleared_at: '2026-09-08T10:00:00Z', reorg_halt_cleared_reason: 'zero dispensers' })
         expect(cleared.halted).to.equal(false)
+        expect(cleared.state).to.equal('clear')
         expect(cleared.cleared_at).to.equal('2026-09-08T10:00:00Z')
+    })
+
+    it('distinguishes an absent or untested halt reading from a confirmed clear', function () {
+        for (const payload of [
+            { status: 'healthy' },
+            { reorg_halted: 'true' },
+            { reorg_halted: false },
+            { reorg_halted: false, reorg_halt_checked_at: null }
+        ]) {
+            expect(reduceDecoderReorgHalt(payload)).to.include({ state: 'unknown', halted: false, unverified: true })
+        }
+        expect(reduceDecoderReorgHalt({ reorg_halted: false, reorg_halt_checked_at: '2026-09-08T10:00:00Z' }))
+            .to.include({ state: 'clear', halted: false, unverified: false })
+    })
+
+    it('treats a parked decoder as halted even when its marker read says false', function () {
+        const r = reduceDecoderReorgHalt({ reorg_halted: false, reorg_halt_checked_at: '2026-09-08T10:00:00Z',
+            reorg_halt_parked: true, reorg_halt_parked_at: '2026-09-08T10:01:00Z' })
+        expect(r).to.include({ state: 'halted', halted: true, unverified: false, parked: true,
+            parked_at: '2026-09-08T10:01:00Z' })
     })
 
     it('returns null for anything that is not a payload', function () {
@@ -333,5 +356,22 @@ describe('ps: decoder REORG_HALT surface', function () {
         expect(note).to.match(/safe-depth window/)
         expect(note).to.match(/full resync/)
         expect(note).to.match(/xchain-node clear-reorg-halt bitcoin mainnet --reason/)
+    })
+
+    it('the unverified note distinguishes an old image from an incomplete probe without suggesting a clear', function () {
+        const old = describeReorgHaltNote('bitcoin', 'mainnet',
+            reduceDecoderReorgHalt({ status: 'healthy' }))
+        expect(old).to.match(/NOT a confirmed halt/).and.to.match(/xchain-node update xchain-decoder bitcoin mainnet/)
+        const untested = describeReorgHaltNote('bitcoin', 'mainnet',
+            reduceDecoderReorgHalt({ reorg_halted: false, reorg_halt_checked_at: null }))
+        expect(untested).to.match(/NOT a confirmed halt/).and.to.match(/xchain-node logs xchain-decoder bitcoin mainnet/)
+        expect(old + untested).to.not.match(/clear-reorg-halt/)
+    })
+
+    it('the parked note says parsing has stopped', function () {
+        const note = describeReorgHaltNote('bitcoin', 'mainnet', { halted: true, parked: true,
+            parked_at: '2026-09-08T10:01:00Z', reason: 'marker write failed' })
+        expect(note).to.match(/parse loop is PARKED/).and.to.match(/nothing is being parsed/)
+        expect(note).to.not.match(/parses forward/)
     })
 })

@@ -299,6 +299,15 @@ async function readResetLedger(model) {
     }
 }
 
+function queryInformationSchema(model, sql, params = []) {
+    const db = createSchemaDatabase(new Set(), model)
+    try {
+        return db.prepare(sqliteSql(sql)).all(...params)
+    } finally {
+        db.close()
+    }
+}
+
 module.exports = {
     DATABASE,
     V0190_MIGRATIONS,
@@ -307,5 +316,6 @@ module.exports = {
     resetLedger,
     resetSchemaModel,
     unsatisfiedSchemaModel,
-    readResetLedger
+    readResetLedger,
+    queryInformationSchema
 }

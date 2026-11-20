@@ -53,6 +53,11 @@ async function readTrackerCommittedHeight(coin, network, containerId, { quiet = 
         if (!port) return null
         const runner = (cmd, args) => execFileAsync(cmd, args, { timeout: 15000 })
         const payload = await probeServiceStatus(containerId, port, runner)
+        if (payload && (payload.halted === true || payload.status === 'halted')) {
+            refuseBootstrapSource(`utxo-tracker ${coin}/${network}`,
+                'the tracker status surface reports a durable halt, so its committed height cannot certify ' +
+                'an archive. No archive was built or signed; resync the tracker from a known-good archive, then rerun the publish.')
+        }
         const candidates = ['committed_height', 'tracker_height']
         for (const key of candidates) {
             const value = Number(payload && payload[key])
@@ -60,6 +65,7 @@ async function readTrackerCommittedHeight(coin, network, containerId, { quiet = 
         }
         return null
     } catch (err) {
+        if (err && err.name === 'BootstrapSourceUnhealthyError') throw err
         if (!quiet) logger.info(`Could not read the tracker height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
         return null
     }
@@ -77,7 +83,7 @@ async function readTrackerHeightAfterRestart(coin, network, containerId, { attem
     return null
 }
 
-const READ_STORE_HEIGHT_SCRIPT = `
+const READ_STORE_STATE_SCRIPT = `
 const { ClassicLevel } = require('classic-level')
 ;(async () => {
     const db = new ClassicLevel(process.argv[1], {
@@ -89,17 +95,24 @@ const { ClassicLevel } = require('classic-level')
         if (!/^[0-9a-f]+$/i.test(text)) throw new Error('LAST_BLOCK_HEIGHT is not hexadecimal')
         const height = parseInt(text, 16)
         if (!Number.isSafeInteger(height) || height < 0) throw new Error('LAST_BLOCK_HEIGHT is outside the safe integer range')
-        process.stdout.write(String(height))
+        let marker
+        try {
+            marker = await db.get(Buffer.from([0x52]))
+        } catch (err) {
+            if (!err || err.code !== 'LEVEL_NOT_FOUND') throw err
+        }
+        const haltMarker = marker === undefined ? null : marker.toString('utf8')
+        process.stdout.write(JSON.stringify({ height, haltMarker }))
     } finally {
         try { await db.close() } catch {}
     }
 })().catch(err => { process.stderr.write(err.message + '\\n'); process.exitCode = 1 })
 `
 
-// The height of the frozen store itself. The node mounts the tracker volume at
+// The height and halt-marker state of the frozen store itself. The node mounts the tracker volume at
 // the tracker's store path, so the volume root and each snapshot root are stores.
 // Unlike the live status surface this cannot run ahead of the archived data.
-async function readFrozenStoreHeight(volumeName, sourceDir, containerId) {
+async function readFrozenStoreState(volumeName, sourceDir, containerId) {
     try {
         const { stdout: inspectOut } = await execFileAsync('docker', [
             'inspect', '--format', '{{.Image}}', containerId
@@ -108,16 +121,60 @@ async function readFrozenStoreHeight(volumeName, sourceDir, containerId) {
         if (!imageId) throw new Error('the tracker container image could not be resolved')
         const { stdout } = await execFileAsync('docker', [
             'run', '--rm', '-v', `${volumeName}:/data`, '-w', '/XChainUtxoTracker',
-            '--entrypoint', 'node', imageId, '-e', READ_STORE_HEIGHT_SCRIPT, sourceDir
+            '--entrypoint', 'node', imageId, '-e', READ_STORE_STATE_SCRIPT, sourceDir
         ], { timeout: 300000 })
         const text = String(stdout).trim()
-        const value = Number(text)
-        if (/^\d+$/.test(text) && Number.isSafeInteger(value)) return value
-        logger.info(`The frozen tracker store reported an unusable height (${redactSecrets(text.slice(0, 40))}).`)
-        return null
+        const parsed = JSON.parse(text)
+        const height = Number.isSafeInteger(parsed && parsed.height) && parsed.height >= 0 ? parsed.height : null
+        const markerField = parsed && Object.prototype.hasOwnProperty.call(parsed, 'haltMarker')
+        const haltMarker = markerField && (parsed.haltMarker === null || typeof parsed.haltMarker === 'string')
+            ? parsed.haltMarker : null
+        const haltChecked = markerField && (parsed.haltMarker === null || typeof parsed.haltMarker === 'string')
+        if (height === null) logger.info('The frozen tracker store reported an unusable height.')
+        return { height, haltMarker, haltChecked }
     } catch (err) {
-        logger.info(`Could not read the frozen tracker store height (${redactSecrets(err.message)}).`)
-        return null
+        logger.info(`Could not verify the frozen tracker store state (${redactSecrets(err.message)}).`)
+        return { height: null, haltMarker: null, haltChecked: false }
+    }
+}
+
+async function readFrozenStoreHeight(volumeName, sourceDir, containerId) {
+    return (await readFrozenStoreState(volumeName, sourceDir, containerId)).height
+}
+
+function refuseBootstrapSource(label, reason) {
+    const ErrorType = bootstrapHealthGate.BootstrapSourceUnhealthyError
+    const error = typeof ErrorType === 'function'
+        ? new ErrorType(label, [reason])
+        : Object.assign(new Error(reason), { name: 'BootstrapSourceUnhealthyError', reasons: [reason] })
+    if (typeof bootstrapHealthGate.gateSkipped === 'function' && bootstrapHealthGate.gateSkipped()) {
+        logger.info(`WARNING: ${error.message}`)
+        return
+    }
+    throw error
+}
+
+function haltMarkerReason(raw) {
+    try {
+        const marker = JSON.parse(raw)
+        return marker && typeof marker.reason === 'string' && marker.reason.trim()
+            ? ` (${marker.reason.trim()})` : ''
+    } catch { return '' }
+}
+
+function refuseHaltedFrozenStore(context) {
+    const state = context && context.frozenStoreState
+    const label = `utxo-tracker ${context.coin}/${context.network}`
+    if (!state || state.haltChecked !== true) {
+        return refuseBootstrapSource(label,
+            'the archived store could not be checked for the utxo-tracker halt marker at key 0x52. ' +
+            'No archive was signed; the previously published archive stays in place, so verify the store and rerun the publish.')
+    }
+    if (state.haltMarker !== null) {
+        return refuseBootstrapSource(label,
+            'the archived store carries the utxo-tracker halt marker at key 0x52' +
+            haltMarkerReason(state.haltMarker) + '. Every restore would boot halted. No archive was signed; ' +
+            'the previously published archive stays in place. Resync the tracker from a known-good archive, then rerun the publish.')
     }
 }
 
@@ -145,9 +202,12 @@ function refusePreStopOnlyHeight({ coin, network, preStopHeight, postRestartHeig
 
 module.exports = {
     configureDependencies,
+    READ_STORE_STATE_SCRIPT,
     readTrackerCommittedHeight,
     readTrackerHeightAfterRestart,
+    readFrozenStoreState,
     readFrozenStoreHeight,
+    refuseHaltedFrozenStore,
     chooseArchiveHeight,
     refusePreStopOnlyHeight
 }

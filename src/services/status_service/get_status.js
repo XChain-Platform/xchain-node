@@ -15,7 +15,7 @@
  * Tracks installed modules and container status
  ********************************************************************/
 
-let path = require('path')
+const path = require('path')
 let { NODE_MODULE_NAME, SEP, XChainService } = require('../../config')
 let {
     db, getInstalledModules, resetInstalledModules, getRemoteModuleVersions,
@@ -163,9 +163,10 @@ async function annotatePublishedHealth(nextModule, containerId, nextCoin, nextCo
     try {
         payload = await probeServiceHealthPayload(nextModule, containerId, nextCoin, nextCoinNetwork)
     } catch { /* advisory: an unreadable surface is not a halt */ }
+    const decoderHalt = nextModule === XChainService.XCHAIN_DECODER ? reduceDecoderReorgHalt(payload) : null
     const findings = [
-        [nextModule === XChainService.XCHAIN_DECODER ? reduceDecoderReorgHalt(payload) : null,
-            "reorg_halt", " REORG_HALT", describeReorgHaltNote, "halted"],
+        [decoderHalt, "reorg_halt", " REORG_HALT", describeReorgHaltNote, "halted"],
+        [decoderHalt, "reorg_halt", " REORG_HALT UNVERIFIED", describeReorgHaltNote, "unverified"],
         [nextModule === XChainService.XCHAIN_INDEXER ? reduceIndexerStall(payload) : null,
             "stall", null, describeIndexerStallNote, "stalled"],
         [nextModule === XChainService.XCHAIN_INDEXER ? reduceTrainActivationPending(payload) : null,

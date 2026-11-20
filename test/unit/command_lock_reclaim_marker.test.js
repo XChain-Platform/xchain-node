@@ -74,6 +74,63 @@ describe('commandLock publishes the reclaim marker atomically', () => {
     })
 })
 
+describe('commandLock requires atomic hard-link publication', () => {
+    registerLockDirectoryHooks()
+
+    it('fails closed and removes its temp file when hard links are unavailable', () => {
+        const lockFile = getLockFilePath()
+        for (const code of ['EPERM', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV']) {
+            const realLink = fs.linkSync
+            const realWrite = fs.writeFileSync
+            const directWrites = []
+            fs.linkSync = () => { const err = new Error(code); err.code = code; throw err }
+            fs.writeFileSync = function (file, ...args) {
+                if (file === lockFile) directWrites.push(file)
+                return realWrite.call(fs, file, ...args)
+            }
+            try {
+                assert.throws(() => acquireCommandLock({ command: 'install' }),
+                    err => err.code === 'ELOCKUNSUPPORTED' && err.cause && err.cause.code === code)
+            } finally {
+                fs.linkSync = realLink
+                fs.writeFileSync = realWrite
+            }
+            assert.deepStrictEqual(directWrites, [], code + ' must not fall back to writing the lock path')
+            assert.deepStrictEqual(fs.readdirSync(tmpDir), [], code + ' must leave no publish temp file')
+        }
+    })
+
+    it('preserves an existing lock when hard-link publication is unavailable', () => {
+        const lockFile = getLockFilePath()
+        const contents = JSON.stringify({ pid: findDeadPid(), nonce: 'stale', command: 'install' }) + '\n'
+        fs.writeFileSync(lockFile, contents)
+        const inode = fs.statSync(lockFile).ino
+        const realLink = fs.linkSync
+        fs.linkSync = () => { const err = new Error('not supported'); err.code = 'ENOTSUP'; throw err }
+        try {
+            assert.throws(() => acquireCommandLock({ command: 'update' }), err => err.code === 'ELOCKUNSUPPORTED')
+        } finally {
+            fs.linkSync = realLink
+        }
+        assert.strictEqual(fs.statSync(lockFile).ino, inode)
+        assert.strictEqual(fs.readFileSync(lockFile, 'utf8'), contents)
+        assert.strictEqual(fs.existsSync(lockFile + '.reclaim'), false)
+    })
+
+    it('propagates unrelated link failures unchanged', () => {
+        const failure = new Error('I/O failure')
+        failure.code = 'EIO'
+        const realLink = fs.linkSync
+        fs.linkSync = () => { throw failure }
+        try {
+            assert.throws(() => acquireCommandLock({ command: 'install' }), err => err === failure)
+        } finally {
+            fs.linkSync = realLink
+        }
+        assert.deepStrictEqual(fs.readdirSync(tmpDir), [])
+    })
+})
+
 describe('commandLock publishes the reclaim marker atomically', () => {
     registerLockDirectoryHooks()
 

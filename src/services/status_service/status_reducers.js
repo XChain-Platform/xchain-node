@@ -18,7 +18,7 @@
 let { XChainService } = require('../../config')
 let childProcess = require('child_process')
 let nodeUtil = require('util')
-let path = require('path')
+const path = require('path')
 let configService = require('../config_service')
 // The peer table names files beside src/services, one directory up from this part.
 let peers = require('../peer_services').bindPeerServices((file) => require(path.join('..', file)))
@@ -57,12 +57,10 @@ async function probeServiceHealthPayload(module, containerId, coin, network) {
     return probeServiceStatus(containerId, port, runner)
 }
 
-// Which route carries each module's readiness verdict. The JSON-RPC health method the
-// probe above reads first does not carry it.
+// Readiness uses a separate route because the JSON-RPC health method omits it.
 const READINESS_ROUTE = { 'xchain-indexer': '/status', 'xchain-decoder': '/live' }
 
-// The readiness fields of an indexer's /status or a decoder's /live, or null when the
-// route is unreadable or the image predates the verdict (an older image reads as ready).
+// An unreadable or older readiness surface returns null.
 async function probeReadinessPayload(module, containerId, coin, network) {
     const route = READINESS_ROUTE[module]
     const { probeReadinessSurface, MODULE_API_PORT_KEY } = peers.bootstrapHealthGate
@@ -108,15 +106,9 @@ function describeNodeCatchingUpNote(coin, network, module, wait) {
         + ". This is expected after a bootstrap restore next to a fresh node; the service continues on its own once the node passes it."
 }
 
-// The stretch a decoder or tracker publishes while its most recent call to the
-// coin node failed (`node_unreachable`, alongside `node_last_ok_at`), or null
-// when the node answered last, the service has not called it yet, or the
-// payload predates the field. Distinct from WAITING FOR NODE on purpose: a
-// waiting service has an answer from its node and is idle by choice, an
-// unreachable one has no answer at all. A decoder on a slow host once sat
-// five and a half days in this state and every surface read healthy, because
-// the docker healthcheck, correctly, does not fail on an outage a restart
-// cannot fix. Strict on shape: an object with a `since` string.
+// A decoder or tracker publishes `node_unreachable` while its coin node does
+// not answer. This differs from an IBD wait, where the node answered and the
+// service is idle by choice. Strict on shape: an object with a `since` string.
 function reduceNodeUnreachable(payload) {
     if (!payload || typeof payload !== 'object') return null
     const gap = payload.node_unreachable
@@ -139,10 +131,8 @@ function describeDuration(seconds) {
     return Math.floor(seconds) + "s"
 }
 
-// The line `ps` prints under the table for a service whose node is not
-// answering: since when, whether it ever answered, and what to look at. Says
-// explicitly that this is not the IBD wait, because from outside the two look
-// the same (a healthy, idle container).
+// Describe when the node last answered and distinguish this from an IBD wait,
+// which otherwise looks like the same healthy, idle container.
 function describeNodeUnreachableNote(coin, network, module, gap) {
     const forHowLong = describeDuration(gap.seconds)
     return coin + "/" + network + " " + module + " cannot reach its coin node"
@@ -153,46 +143,56 @@ function describeNodeUnreachableNote(coin, network, module, gap) {
         + " (a node mid-sync on slow hardware can time out every call for days), and its logs.";
 }
 
-// The REORG_HALT fields of a decoder health payload, or null for anything that
-// is not a payload. Accepts the plain body or the JSON-RPC `result` envelope, as
-// the watchdog does. Strict `=== true` on the flag: an older image without the
-// field reads as not halted rather than as a halt.
+// Reduce a decoder health payload to a halted, unknown, or confirmed-clear state.
+// A parked parse loop is halted even if its marker read reports false.
 function reduceDecoderReorgHalt(body) {
     if (!body || typeof body !== 'object') return null
     const payload = body.result !== undefined ? body.result : body
     if (!payload || typeof payload !== 'object') return null
+    const flagPresent = Object.prototype.hasOwnProperty.call(payload, 'reorg_halted')
+    const parked = payload.reorg_halt_parked === true
+    const state = payload.reorg_halted === true || parked ? 'halted'
+        : payload.reorg_halted === false && payload.reorg_halt_checked_at != null ? 'clear' : 'unknown'
     return {
-        halted:         payload.reorg_halted === true,
+        state,
+        halted:         state === 'halted',
+        unverified:      state === 'unknown',
+        flag_present:    flagPresent,
         at:             payload.reorg_halted_at || null,
         reason:         payload.reorg_halt_reason || null,
         cleared_at:     payload.reorg_halt_cleared_at || null,
-        cleared_reason: payload.reorg_halt_cleared_reason || null
+        cleared_reason: payload.reorg_halt_cleared_reason || null,
+        checked_at:     payload.reorg_halt_checked_at == null ? null : payload.reorg_halt_checked_at,
+        parked,
+        parked_at:      payload.reorg_halt_parked_at || null
     }
 }
 
-// The line `ps` prints under the table for a halted decoder: what it means,
-// since when, why, and both recoveries (the clear names its own preconditions).
+// The line `ps` prints under the table for a halted or unverified decoder.
 function describeReorgHaltNote(coin, network, reorgHalt) {
+    if (reorgHalt.unverified) {
+        const cause = reorgHalt.flag_present
+            ? "The decoder has not completed a REORG_HALT marker probe since it started; check database readability and " +
+                "`xchain-node logs xchain-decoder " + coin + " " + network + "`."
+            : "The decoder image does not publish the halt field; update it with `xchain-node update xchain-decoder " +
+                coin + " " + network + "`."
+        return coin + "/" + network + " xchain-decoder REORG_HALT state is UNVERIFIED: its \"not halted\" state cannot be confirmed. " +
+            "This is NOT a confirmed halt. " + cause
+    }
+    const activity = reorgHalt.parked
+        ? ": its parse loop is PARKED" + (reorgHalt.parked_at ? " since " + reorgHalt.parked_at : "") +
+            " on a REORG_HALT, so nothing is being parsed."
+        : ": it parses forward but will refuse the next reorg and stop."
     return coin + "/" + network + " xchain-decoder carries a durable REORG_HALT marker"
         + (reorgHalt.at ? " since " + reorgHalt.at : "")
-        + ": it parses forward but will refuse the next reorg and stop."
+        + activity
         + (reorgHalt.reason ? " " + reorgHalt.reason : "")
         + " Recovery: a full resync, or once the rolled-back range is re-parsed and the database is verified intact, "
         + "`xchain-node clear-reorg-halt " + coin + " " + network + " --reason \"...\"`."
 }
 
-// The stall the indexer publishes on its health surface (`stallReason`, with
-// `stallClass` beside it on a build that grades its own stalls), or null for
-// anything that is not a payload. `stalled` is what the table shows. It is
-// false for the two stalls the indexer itself calls healthy: a wait for wall
-// clock to reach a future-stamped block, and a hub-mirror barrier still inside
-// its grace window, which a BTC mainnet indexer's price mirror defers on
-// almost every poll while the counter keeps advancing. A host fault (a
-// missing DOGE read, a VM executor down) shows at once, and so does any stall
-// the indexer graded wedged, or one an older image left ungraded. A bridge
-// proof wait shows too: it never wedges, so nothing else would surface it.
-// A train activation halt also reads stalled: its `train_activation_halt`
-// class is a diagnostic hint, not a healthy defer.
+// A pending train activation remains visible while the indexer still advances,
+// so operators can update before the activation boundary.
 function reduceTrainActivationPending(payload) {
     if (!payload || typeof payload !== 'object') return null
     const train = payload.train_activation

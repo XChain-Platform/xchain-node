@@ -16,6 +16,9 @@ const { expect } = require('chai')
 const { HUB_PASSTHROUGH_VARS } = require('../../../src/services/config_service/networks')
 const { HUB_PASSTHROUGH_ENV } = require('../../../src/config')
 const {
+    SHARED_REGTEST_GATE_ARMS, HUB_ONLY_REGTEST_GATE_ARMS
+} = require('../../../src/config/regtest_gate_arms')
+const {
     CONSENSUS_ENV_KEYS,
     isConsensusEnvKeyHonoredOn,
     consensusEnvKeysForNetwork,
@@ -27,7 +30,7 @@ const {
 
 const ROUND_CADENCE_KEYS = ['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW']
 const CHECKPOINT_CADENCE_KEYS = ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N', 'ANCHOR_ELECTION_TOLERANCE_BLOCKS']
-const ARM_KEYS = HUB_PASSTHROUGH_VARS.filter(name => /^XC_[A-Z_]+_ACTIVATION$/.test(name))
+const ARM_KEYS = HUB_PASSTHROUGH_VARS.filter(name => /^XC_[A-Z0-9_]+_(ACTIVATION|TIME)$/.test(name))
 
 function registerPassthroughListContract() {
     describe('the passthrough list', function passthroughListContract() {
@@ -57,6 +60,7 @@ function registerNetworkGatedContract() {
     describe('network-gated consensus keys', function networkGatedContract() {
         it('finds the regtest arm names in the passthrough list', () => {
             expect(ARM_KEYS.length).to.be.greaterThan(0)
+            expect(ARM_KEYS).to.deep.equal([...SHARED_REGTEST_GATE_ARMS, ...HUB_ONLY_REGTEST_GATE_ARMS])
         })
 
         it('guards every passed-through XC_*_ACTIVATION arm on regtest only', () => {
@@ -77,6 +81,19 @@ function registerNetworkGatedContract() {
                 )
                 expect(drift, key).to.deep.equal([{ key }])
             }
+        })
+
+        it('refuses through the assert path when a carried time arm is dropped', async () => {
+            const key = 'XC_LISTS_MARKET_REGTEST_TIME'
+            let thrown = null
+            try {
+                await assertNoHubConsensusEnvDrift(
+                    { HUB_NETWORK: 'regtest' },
+                    { execFileAsync: inspectStub({ HUB_NETWORK: 'regtest', [key]: '1700000000' }), env: {} }
+                )
+            } catch (err) { thrown = err }
+            expect(isHubConsensusEnvDriftError(thrown)).to.equal(true)
+            expect(thrown.drift).to.deep.equal([{ key }])
         })
 
         it('does not flag a dropped gate arm the hub ignores off regtest', () => {

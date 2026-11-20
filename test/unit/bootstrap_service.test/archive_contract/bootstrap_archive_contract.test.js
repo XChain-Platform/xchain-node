@@ -38,7 +38,7 @@ afterEach(function () {
     else process.env.XCHAIN_NODE_REQUIRE_SIGNED_BOOTSTRAP = savedRequireSigned
 })
 
-function configureHeightReader(stdout = '103\n') {
+function configureHeightReader(stdout = '{"height":103,"haltMarker":null}\n') {
     const execFile = sinon.stub().callsFake((command, args, options, callback) => {
         callback(null, { stdout, stderr: '' })
     })
@@ -124,7 +124,7 @@ describe('bootstrap archive producer completion contract', function () {
 
 describe('bootstrap archive frozen height contract', function () {
     it('reads LAST_BLOCK_HEIGHT from the archived tracker store through its image', async function () {
-        const execFile = configureHeightReader('103\n')
+        const execFile = configureHeightReader('{"height":103,"haltMarker":null}\n')
 
         const height = await trackerHeight.readFrozenStoreHeight('tracker-volume', '/data/.snapshot', FAKE_CONTAINER_ID)
 
@@ -174,6 +174,25 @@ describe('bootstrap archive frozen height contract', function () {
         expect(error && error.message).to.include('archived store')
         expect(spawnCalls).to.have.length(1)
         expect(stubs.archiveMeta.writeBootstrapMeta.called).to.equal(false)
+    })
+
+    it('does not wrap or sign when the archived store carries a halt marker', async function () {
+        const stubs = makeStubs()
+        stubs.execFile = sinon.stub().callsFake((cmd, args) => {
+            if (cmd === 'docker' && args[0] === 'inspect') return Promise.resolve({ stdout: 'sha256:tracker-image\n' })
+            if (cmd === 'docker' && args.some(arg => String(arg).includes('LAST_BLOCK_HEIGHT'))) {
+                return Promise.resolve({ stdout: '{"height":103,"haltMarker":"{\\"reason\\":\\"reorg\\"}"}\n' })
+            }
+            return Promise.resolve({ stdout: '1048576\n' })
+        })
+        makeAutoSpawn(stubs)
+        const bs = loadBootstrapService(stubs)
+        let error = null
+        try { await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER) } catch (err) { error = err }
+        expect(error && error.name).to.equal('BootstrapSourceUnhealthyError')
+        expect(error.message).to.include('Every restore would boot halted')
+        expect(stubs.archiveMeta.writeBootstrapMeta.called).to.equal(false)
+        expect(stubs.dockerService.startContainer.called).to.equal(true)
     })
 })
 

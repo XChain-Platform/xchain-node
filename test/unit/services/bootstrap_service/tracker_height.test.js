@@ -19,6 +19,14 @@ function configureTrackerHeight(probeServiceStatus) {
     })
     const getDefaultConfig = sinon.stub().resolves({ [PORT_KEY]: 8080 })
     const logger = { info: sinon.stub() }
+    class BootstrapSourceUnhealthyError extends Error {
+        constructor(label, reasons) {
+            super(`${label}: ${reasons.join('; ')}`)
+            this.name = 'BootstrapSourceUnhealthyError'
+            this.reasons = reasons
+        }
+    }
+    const gateSkipped = sinon.stub().returns(false)
 
     trackerHeight.configureDependencies({
         childProcess: { execFile },
@@ -26,11 +34,13 @@ function configureTrackerHeight(probeServiceStatus) {
         configService: { getDefaultConfig },
         bootstrapHealthGate: {
             probeServiceStatus,
-            MODULE_API_PORT_KEY: { [TRACKER_SERVICE]: PORT_KEY }
+            MODULE_API_PORT_KEY: { [TRACKER_SERVICE]: PORT_KEY },
+            BootstrapSourceUnhealthyError,
+            gateSkipped
         },
         logger
     })
-    return { execFile, getDefaultConfig, logger }
+    return { execFile, getDefaultConfig, logger, gateSkipped, BootstrapSourceUnhealthyError }
 }
 
 describe('tracker_height', function () {
@@ -74,7 +84,9 @@ describe('tracker_height frozen store', function () {
     })
 
     it('readFrozenStoreHeight reads the height of the archived directory', async function () {
-        fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '4242\n', stderr: '' }))
+        fakes.execFile.callsFake((command, args, options, callback) => callback(null, {
+            stdout: '{"height":4242,"haltMarker":null}\n', stderr: ''
+        }))
 
         const height = await trackerHeight.readFrozenStoreHeight('vol', '/data/.snap', 'container-id')
 
@@ -88,7 +100,9 @@ describe('tracker_height frozen store', function () {
     })
 
     it('passes a syntactically valid height reader to node', async function () {
-        fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '4242\n', stderr: '' }))
+        fakes.execFile.callsFake((command, args, options, callback) => callback(null, {
+            stdout: '{"height":4242,"haltMarker":null}\n', stderr: ''
+        }))
 
         await trackerHeight.readFrozenStoreHeight('vol', '/data/.snap', 'container-id')
 
@@ -104,6 +118,40 @@ describe('tracker_height frozen store', function () {
         expect(await trackerHeight.readFrozenStoreHeight('vol', '/data', 'container-id')).to.equal(null)
         fakes.execFile.callsFake((command, args, options, callback) => callback(new Error('no such file')))
         expect(await trackerHeight.readFrozenStoreHeight('vol', '/data', 'container-id')).to.equal(null)
+    })
+
+    it('reports whether the frozen halt marker was checked and present', async function () {
+        fakes.execFile.callsFake((command, args, options, callback) => callback(null, {
+            stdout: '{"height":4242,"haltMarker":"{\\"reason\\":\\"reorg\\"}"}\n', stderr: ''
+        }))
+        expect(await trackerHeight.readFrozenStoreState('vol', '/data', 'container-id')).to.deep.equal({
+            height: 4242, haltMarker: '{"reason":"reorg"}', haltChecked: true
+        })
+        fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: 'junk', stderr: '' }))
+        expect(await trackerHeight.readFrozenStoreState('vol', '/data', 'container-id')).to.deep.equal({
+            height: null, haltMarker: null, haltChecked: false
+        })
+    })
+
+    it('refuses a present or unchecked frozen marker and accepts an absent one', function () {
+        const base = { coin: 'bitcoin', network: 'mainnet' }
+        expect(() => trackerHeight.refuseHaltedFrozenStore({ ...base,
+            frozenStoreState: { height: 10, haltMarker: null, haltChecked: true }
+        })).to.not.throw()
+        expect(() => trackerHeight.refuseHaltedFrozenStore({ ...base,
+            frozenStoreState: { height: 10, haltMarker: '{"reason":"reorg"}', haltChecked: true }
+        })).to.throw(fakes.BootstrapSourceUnhealthyError, /Every restore would boot halted/)
+        expect(() => trackerHeight.refuseHaltedFrozenStore({ ...base,
+            frozenStoreState: { height: null, haltMarker: null, haltChecked: false }
+        })).to.throw(fakes.BootstrapSourceUnhealthyError, /could not be checked/)
+    })
+
+    it('warns and continues when the health gate skip is explicit', function () {
+        fakes.gateSkipped.returns(true)
+        expect(() => trackerHeight.refuseHaltedFrozenStore({ coin: 'bitcoin', network: 'mainnet',
+            frozenStoreState: { height: 10, haltMarker: 'halted', haltChecked: true }
+        })).to.not.throw()
+        expect(fakes.logger.info.firstCall.args[0]).to.match(/^WARNING:/)
     })
 
     it('a frozen-store height wins over the live readings and lifts the pre-stop-only refusal', function () {
@@ -177,5 +225,23 @@ describe('tracker_height live readings', function () {
         expect(height).to.equal(322)
         expect(probeServiceStatus.callCount).to.equal(2)
         expect(fakes.execFile.called).to.equal(false)
+    })
+
+    it('propagates halted tracker payloads instead of accepting their heights', async function () {
+        for (const payload of [
+            { status: 'halted', committed_height: 322 },
+            { halted: true, tracker_height: 323 }
+        ]) {
+            probeServiceStatus.resetHistory()
+            probeServiceStatus.resolves(payload)
+            let error = null
+            try {
+                await trackerHeight.readTrackerHeightAfterRestart(
+                    'bitcoin', 'mainnet', 'container-id', { attempts: 2, delayMs: 0 }
+                )
+            } catch (err) { error = err }
+            expect(error).to.be.instanceOf(fakes.BootstrapSourceUnhealthyError)
+            expect(probeServiceStatus.callCount).to.equal(1)
+        }
     })
 })

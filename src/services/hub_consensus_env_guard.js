@@ -36,8 +36,8 @@
  * (ATTEST_RESPONSE_FORWARD_S_OVERRIDE, ATTEST_BATCH_WINDOW_S_OVERRIDE), the
  * unverified-pair co-sign hatch (ORACLE_ALLOW_UNVERIFIED_PAIRS), the
  * snapshot seams (XDEX_SEED_LOCAL_VALIDATOR, XDEX_SNAPSHOT_BLOCK) and the
- * XC_*_ACTIVATION gate arms follow the same rule: the hub reads them from the
- * environment on regtest only.
+ * XC_*_ACTIVATION and XC_*_TIME gate arms follow the same rule: the hub reads
+ * them from the environment on regtest only.
  *
  * XCHAIN_CONFIRMATIONS_* is deliberately not guarded: a per-hub wait depth the
  * hub clamps up to the per-coin floor off regtest, so a drop can only return a
@@ -58,6 +58,9 @@
  ********************************************************************/
 
 const { HUB_MODULE_NAME, HUB_CONSENSUS_DRIFT_ENV } = require('../config')
+const {
+    SHARED_REGTEST_GATE_ARMS, HUB_ONLY_REGTEST_GATE_ARMS
+} = require('../config/regtest_gate_arms')
 const { getDockerContainerImageName } = require('./config_service')
 const { readContainerEnv } = require('./db_credential_drift')
 const { getLogger } = require('../observability/logger');
@@ -106,16 +109,11 @@ const CONSENSUS_ENV_GROUPS = [
             'losing an override makes the hub decline venue peers as off-cadence or not elected/unlocked'
     },
     {
-        keys: [
-            'XC_ROLLCALL_REGTEST_ACTIVATION', 'XC_ROLLCALL_GATES_REGTEST_ACTIVATION',
-            'XC_MIRROR_ADMISSION_ACTIVATION', 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION',
-            'XC_ANCHOR_STAKE_REGTEST_ACTIVATION', 'XC_ANCHOR_SLASH_REGTEST_ACTIVATION',
-            'XC_OFFER_LIST_REGTEST_ACTIVATION'
-        ],
+        keys: [...SHARED_REGTEST_GATE_ARMS, ...HUB_ONLY_REGTEST_GATE_ARMS],
         // The hub reads each arm from the environment on regtest only; every
         // other network takes the literal activation height.
         honoredOn: ['regtest'],
-        why: 'regtest consensus gate arms, honored on regtest only; a regtest hub that loses one is ' +
+        why: 'regtest consensus activation and time gate arms, honored on regtest only; a regtest hub that loses one is ' +
             'silently de-armed and applies different consensus rules than the hub it replaced, which an ' +
             'armed indexer on the same venue reports as a rules MISMATCH'
     },

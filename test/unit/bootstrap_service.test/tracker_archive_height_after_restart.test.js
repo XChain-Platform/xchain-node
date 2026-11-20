@@ -46,7 +46,7 @@ function trackerStubsWithProbe(heights, { snapshotFails = false, frozenHeight } 
         if (cmd === 'docker' && args[0] === 'inspect') return Promise.resolve({ stdout: 'sha256:tracker-image\n' })
         if (cmd === 'docker' && args.some(arg => String(arg).includes('LAST_BLOCK_HEIGHT'))) {
             if (archivedHeight === null) return Promise.reject(new Error('height unavailable'))
-            return Promise.resolve({ stdout: `${archivedHeight}\n` })
+            return Promise.resolve({ stdout: `{"height":${archivedHeight},"haltMarker":null}\n` })
         }
         return Promise.resolve({ stdout: '104857600\t/data\n' })
     })
@@ -60,6 +60,7 @@ function trackerStubsWithProbe(heights, { snapshotFails = false, frozenHeight } 
         const answer = heights[Math.min(probeLog.length, heights.length - 1)]
         probeLog.push({ restarted: stubs.dockerService.startContainer.called })
         if (answer instanceof Error) throw answer
+        if (answer && typeof answer === 'object') return answer
         return { committed_height: answer }
     })
     return { stubs, probeLog }
@@ -172,6 +173,23 @@ describe('BootstrapService', function () {
             } finally {
                 clock.restore()
             }
+        })
+
+        it('refuses a halted post-restart tracker before compressing or signing', async function () {
+            const halted = { status: 'halted', committed_height: 101, halt_reason: 'unrecoverable reorg' }
+            const { stubs, probeLog } = trackerStubsWithProbe([100, halted])
+            const spawnCalls = makeAutoSpawn(stubs)
+            const bs = loadBootstrapService(stubs)
+
+            let err = null
+            try { await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER) } catch (error) { err = error }
+
+            expect(err && err.name).to.equal('BootstrapSourceUnhealthyError')
+            expect(err.message).to.match(/durable halt/)
+            expect(probeLog.map(p => p.restarted)).to.deep.equal([false, true])
+            expect(spawnCalls, 'no compress or wrap may run').to.have.length(0)
+            expect(stubs.archiveMeta.writeBootstrapMeta.called).to.equal(false)
+            expect(stubs.dockerService.startContainer.callCount).to.equal(1)
         })
     })
 })

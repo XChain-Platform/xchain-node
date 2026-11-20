@@ -16,6 +16,8 @@
 
 'use strict'
 
+const { SHARED_REGTEST_GATE_ARMS } = require('../../config/regtest_gate_arms')
+
 let config, peers, logger, readSecretHostEnv, Coin, Network, CoinTickerSymbol, XChainService
 let HUB_MODULE_NAME, EXPLORER_MODULE_NAME, getDockerContainerImageName
 
@@ -106,15 +108,10 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
             }
         }
         const rollcallPassthroughVars = ["DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY"]
-        if (network === Network.REGTEST) rollcallPassthroughVars.push("XC_ROLLCALL_REGTEST_ACTIVATION",
-                                                                      "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
+        if (network === Network.REGTEST) rollcallPassthroughVars.push(...SHARED_REGTEST_GATE_ARMS,
                                                                       "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
                                                                       "HUB_PRICE_SYNC_TIMEOUT_MS",
                                                                       "XCHAIN_COINPAY_EXPIRATION_S",
-                                                                      "XC_MIRROR_ADMISSION_ACTIVATION",
-                                                                      "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
-                                                                      "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
-                                                                      "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
                                                                       "EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME")
         for (const varName of rollcallPassthroughVars) {
             if (config.INDEXER_ROLLCALL_ENV[varName] !== undefined && config.INDEXER_ROLLCALL_ENV[varName] !== "") {

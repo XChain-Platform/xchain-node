@@ -16,6 +16,10 @@
 
 'use strict'
 
+const {
+    SHARED_REGTEST_GATE_ARMS, HUB_ONLY_REGTEST_GATE_ARMS
+} = require('../../config/regtest_gate_arms')
+
 let stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv
 let HUB_MODULE_NAME, getDockerContainerImageName
 let warnedHubConfigKeys = new Set()
@@ -152,13 +156,8 @@ const HUB_PASSTHROUGH_VARS = [
     "XCHAIN_PRICE_BOOTSTRAP_SATS",
     "XCHAIN_PRICE_MIN_BTC_VOLUME",
     "HUB_ALLOW_UNAUTHENTICATED",
-    "XC_ROLLCALL_REGTEST_ACTIVATION",
-    "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
-    "XC_MIRROR_ADMISSION_ACTIVATION",
-    "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
-    "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
-    "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
-    "XC_OFFER_LIST_REGTEST_ACTIVATION"
+    ...SHARED_REGTEST_GATE_ARMS,
+    ...HUB_ONLY_REGTEST_GATE_ARMS
 ]
 // Hub telemetry secrets come from host env; unset, ip_hash stays null and admin is 401.
 // BTC indexer JSON-RPC URL comes from host env for a hub not co-located with one. Left
@@ -233,8 +232,8 @@ const HUB_PASSTHROUGH_VARS = [
 // mean an armed indexer against an inert hub reports a rules MISMATCH, so both sides take the same variable. Passed through
 // with no network gate (the hub is configured as (module, null, null)); its own gate reaches env for regtest only, so it is inert elsewhere.
 
-// XC_ROLLCALL_GATES, XC_MIRROR_ADMISSION and the ANCHOR fold/stake/slash and offer-list activations ride beside it with the
-// same no-network-gate reasoning: each arms its feature as a unit on regtest, and the hub's own gate module gates it for real.
+// Every shared arm and the hub-only offer-list arm ride beside it with the same
+// no-network-gate reasoning: each gate module accepts its variable on regtest only.
 
 // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
 // accepted from the host env under their redaction-safe `*_SECRET` spelling;

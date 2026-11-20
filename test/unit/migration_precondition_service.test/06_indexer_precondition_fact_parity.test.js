@@ -17,7 +17,7 @@ const { expect } = require('chai')
 const { appliedMigrationsSql } = require('../../../src/db/migrations')
 const { listDeployPreconditionMigrations } = require('../../../src/services/migration_precondition_service')
 const { migrationsDirOf } = require('../../../src/utils/migration_files')
-const { DATABASE, resetSchemaModel, readResetLedger } = require('./helpers/reset_schema_state')
+const { DATABASE, resetSchemaModel, readResetLedger, queryInformationSchema } = require('./helpers/reset_schema_state')
 
 const INDEXER_DIR = path.join(__dirname, '../../../../xchain-indexer')
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
@@ -26,6 +26,7 @@ const ORACLE_WIDEN = '2026-09-22-oracle-prices-widen-tick.sql'
 const PUBKEYS_WIDEN = '2026-07-24-pubkeys-widen-uncompressed.sql'
 const OUTBOX_WIDEN = '2026-11-19-pending-hub-pushes-widen-payload.sql'
 const BRIDGE_TABLES = '2026-09-12-bridge-tables.sql'
+const ROUND_QUALIFIER = '2026-08-24-validator-rewards-round-qualifier.sql'
 const BRIDGE_NAMES = ['bridge_transfers', 'bridge_settlements', 'policy_snapshots', 'xbridges']
 
 function table(name) {
@@ -63,6 +64,44 @@ function indexerPresent(ctx) {
     if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer is not checked out at ' + INDEXER_DIR)
     ctx.skip()
     return false
+}
+function qualifierColumn(model, tableName) {
+    return model.columns.find(row => row.table_name === tableName && row.column_name === 'round_qualifier')
+}
+function rewardUniqueRows(model) {
+    return model.indexes.filter(row => row.index_name === 'reward_unique')
+}
+// Off-position variants the indexer baselines; node must accept every one of them.
+function qualifierOrdinalVariants() {
+    const variants = [resetSchemaModel(), resetSchemaModel(), resetSchemaModel()]
+    qualifierColumn(variants[0], 'validator_rewards').ordinal_position = 7
+    qualifierColumn(variants[1], 'anchor_reward_reconcile_log').ordinal_position = 9
+    qualifierColumn(variants[2], 'validator_rewards').ordinal_position = 17
+    qualifierColumn(variants[2], 'anchor_reward_reconcile_log').ordinal_position = 12
+    return variants
+}
+// Identity-shape drift: a signed, nullable or re-defaulted qualifier, or a reward key with members
+// missing or added, changes which rewards the unique key treats as duplicates.
+function qualifierIdentityDriftVariants() {
+    const drifts = {
+        signed: model => { qualifierColumn(model, 'validator_rewards').column_type = 'bigint' },
+        nullable: model => { qualifierColumn(model, 'validator_rewards').is_nullable = 'YES' },
+        default: model => { qualifierColumn(model, 'anchor_reward_reconcile_log').column_default = '9' },
+        qualifierOnlyKey: model => {
+            const member = rewardUniqueRows(model).find(row => row.column_name === 'round_qualifier')
+            model.indexes = model.indexes.filter(row => row.index_name !== 'reward_unique')
+            model.indexes.push({ ...member, seq_in_index: 1 })
+        },
+        extraKeyMember: model => {
+            const rows = rewardUniqueRows(model)
+            model.indexes.push({ ...rows[rows.length - 1], seq_in_index: rows.length + 1, column_name: 'id' })
+        }
+    }
+    return Object.entries(drifts).map(([name, apply]) => {
+        const model = resetSchemaModel()
+        apply(model)
+        return [name, model]
+    })
 }
 
 describe('indexer precondition fact parity', () => {
@@ -146,5 +185,55 @@ describe('indexer precondition fact parity', () => {
         expect(await satisfiedWith({ columns: [payloadColumn('longtext', 'utf8mb4')] })).to.include(OUTBOX_WIDEN)
         expect(await satisfiedWith({ columns: [payloadColumn('text', 'utf8mb4')] })).to.not.include(OUTBOX_WIDEN)
         expect(await satisfiedWith({ columns: [payloadColumn('mediumtext', 'utf8mb3')] })).to.not.include(OUTBOX_WIDEN)
+    })
+})
+
+describe('indexer precondition fact parity', () => {
+    it('accepts the round-qualifier columns at any column position', async () => {
+        for (const [index, model] of qualifierOrdinalVariants().entries()) {
+            expect((await readResetLedger(model)).satisfied, 'variant ' + index).to.include(ROUND_QUALIFIER)
+        }
+    })
+
+    it('keeps the round-qualifier migration missing when the reward identity shape drifts', async () => {
+        for (const [name, model] of qualifierIdentityDriftVariants()) {
+            expect((await readResetLedger(model)).satisfied, name).to.not.include(ROUND_QUALIFIER)
+        }
+    })
+
+    it('keeps the round-qualifier migration missing when either column or its unique key member is absent', async () => {
+        for (const tableName of ['validator_rewards', 'anchor_reward_reconcile_log']) {
+            const model = resetSchemaModel()
+            model.columns = model.columns.filter(row => row.table_name !== tableName || row.column_name !== 'round_qualifier')
+            expect((await readResetLedger(model)).satisfied, tableName).to.not.include(ROUND_QUALIFIER)
+        }
+        for (const nonUnique of [null, 1]) {
+            const model = resetSchemaModel()
+            model.indexes = nonUnique === null
+                ? model.indexes.filter(row => row.index_name !== 'reward_unique' || row.column_name !== 'round_qualifier')
+                : model.indexes.map(row => row.index_name === 'reward_unique' ? { ...row, non_unique: nonUnique } : row)
+            expect((await readResetLedger(model)).satisfied, String(nonUnique)).to.not.include(ROUND_QUALIFIER)
+        }
+    })
+
+    it('agrees with the indexer round-qualifier predicate on accepted and rejected schema variants', async function () {
+        if (!indexerPresent(this)) return
+        const { MIGRATION_PRECONDITIONS } = require(path.join(INDEXER_DIR, 'src/db/database/migration_tables.js'))
+        const predicate = MIGRATION_PRECONDITIONS[ROUND_QUALIFIER]
+        const variants = [resetSchemaModel(), ...qualifierOrdinalVariants(), resetSchemaModel(), resetSchemaModel()]
+        const missingMember = variants[variants.length - 2]
+        missingMember.indexes = missingMember.indexes.filter(row => row.index_name !== 'reward_unique'
+            || row.column_name !== 'round_qualifier')
+        const nonUniqueKey = variants[variants.length - 1]
+        nonUniqueKey.indexes = nonUniqueKey.indexes.map(row => row.index_name === 'reward_unique'
+            ? { ...row, non_unique: 1 } : row)
+        const outcomes = []
+        for (const [index, model] of variants.entries()) {
+            const nodeSatisfied = (await readResetLedger(model)).satisfied.includes(ROUND_QUALIFIER)
+            const indexerSatisfied = predicate.skipWhen(queryInformationSchema(model, predicate.sql, [DATABASE])) !== null
+            expect(nodeSatisfied, 'variant ' + index).to.equal(indexerSatisfied)
+            outcomes.push(indexerSatisfied)
+        }
+        expect(outcomes).to.deep.equal([true, true, true, true, false, false])
     })
 })

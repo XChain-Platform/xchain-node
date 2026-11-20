@@ -124,7 +124,7 @@ Six env vars override where xchain-node stores its filesystem state. Set them in
 | `XCHAIN_NODE_MODULES_DIR` | Git clones of sibling xchain-* repos |
 | `XCHAIN_NODE_CRYPTO_NODES_DIR` | Downloaded coin-node binaries |
 | `XCHAIN_NODE_CONFIG_DIR` | Generated per-service `.env` files |
-| `XCHAIN_NODE_LOCK_DIR` | Directory for the cross-process command lock (`command.lock` and its reclaim marker) |
+| `XCHAIN_NODE_LOCK_DIR` | Directory for the cross-process command lock (`command.lock` and its reclaim marker); its filesystem must support hard links |
 
 On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/configuration.md).
 

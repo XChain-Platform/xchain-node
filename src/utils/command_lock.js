@@ -19,12 +19,12 @@
  * This module serializes them with a pidfile-style lock in
  * ~/.xchain-node/command.lock (same per-user dir as credentials.json).
  *
- * The lock is acquired with an atomic O_EXCL create. If the file
- * already exists, the recorded pid is probed with signal 0: a live pid
- * refuses the new invocation; a dead pid marks the lock stale, removes
- * it, and retries.
+ * The lock is acquired by hard-linking a complete private file into place.
+ * If the file already exists, the recorded pid is probed with signal 0:
+ * a live pid refuses the new invocation; a dead pid marks the lock stale,
+ * removes it, and retries.
  *
- * Removing a stale lock is itself serialized, behind a second O_EXCL
+ * Removing a stale lock is itself serialized, behind a second atomic
  * marker at command.lock.reclaim. Exclusive create alone does NOT make
  * reclamation mutually exclusive: two invocations can read the same dead
  * holder, and the second then deletes the LIVE lock the first just
@@ -48,7 +48,9 @@
  * Both paths are published through a private temp file
  * (<path>.<pid>.<nonce>.tmp). A crash between writing it and unlinking
  * it leaves the temp file behind; it never blocks an acquire, and each
- * successful acquire sweeps every such file whose pid is gone.
+ * successful acquire sweeps every such file whose pid is gone. A lock
+ * directory without hard-link support is refused because exclusive create
+ * exposes an empty file before its payload is written.
  *
  * Ops note: after confirming no xchain-node process is running, recover a
  * wedged reclaim by deleting command.lock and command.lock.reclaim together.
@@ -147,8 +149,8 @@ function restoreClaimedPath(claimed, file) {
     try { fs.unlinkSync(claimed) } catch { /* already gone */ }
 }
 
-// Serialize one stale-lock reclamation behind the O_EXCL marker. Returns nothing:
-// the caller simply retries its exclusive create, whether this pass removed the
+// Serialize one stale-lock reclamation behind the atomic marker. Returns nothing:
+// the caller simply retries its exclusive publication, whether this pass removed the
 // stale lock, conceded the marker to a contender, or found a live successor.
 function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
     const marker = JSON.stringify({ pid, nonce, startedAt: new Date().toISOString() }) + '\n'
@@ -191,6 +193,8 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
 // sees an empty file, cannot tell it from a crashed creator's, and removes a LIVE one.
 // Write the full payload to a private temp file first, then link() it to the lock
 // path: link fails with EEXIST like O_EXCL, and the path appears already complete.
+// Fail closed when link publication is unavailable; direct exclusive creation
+// would expose the incomplete-file race this function prevents.
 function publishLockAtomically(lockFile, payload, nonce) {
     const tmpFile = `${lockFile}.${process.pid}.${nonce}.tmp`
     fs.writeFileSync(tmpFile, payload, { flag: 'wx', mode: 0o600 })
@@ -198,9 +202,15 @@ function publishLockAtomically(lockFile, payload, nonce) {
         try {
             fs.linkSync(tmpFile, lockFile)
         } catch (err) {
-            // A filesystem without hard links: fall back to the exclusive create.
             if (!['EPERM', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV'].includes(err.code)) throw err
-            fs.writeFileSync(lockFile, payload, { flag: 'wx', mode: 0o600 })
+            const unsupported = new Error(
+                `Cannot publish the xchain-node command lock in ${path.dirname(lockFile)}: ` +
+                `link() failed with ${err.code}. Command locking requires hard-link support; ` +
+                `set XCHAIN_NODE_LOCK_DIR to a local directory that supports hard links.`,
+                { cause: err }
+            )
+            unsupported.code = 'ELOCKUNSUPPORTED'
+            throw unsupported
         }
     } finally {
         try { fs.unlinkSync(tmpFile) } catch { /* already gone */ }
