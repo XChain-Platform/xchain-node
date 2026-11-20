@@ -11,14 +11,14 @@
   "main": "src/index.js",
   "dependencies": {
     "@dankest-llc/xchain-sdk": "^0.18.0",
-    "axios": "^1.20.0",
+    "axios": "^1.21.1",
     "blessed": "^0.1.81",
     "commander": "^14.0.2",
     "dotenv": "^16.4.5",
     "enquirer": "^2.4.1",
-    "follow-redirects": "^1.16.1",
-    "mariadb": "3.5.4",
-    "semver": "^7.6.3"
+    "follow-redirects": "^1.16.3",
+    "mariadb": "3.5.5",
+    "semver": "^7.8.6"
   },
   "scripts": {
     "test": "mocha 'test/unit/**/*.test.js' --timeout 10000 --recursive",
