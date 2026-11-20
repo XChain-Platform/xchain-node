@@ -115,6 +115,7 @@ function configureIndexerBeforeHubKey(defaultValues, module, network) {
                                                                       "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
                                                                       "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
                                                                       "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
+                                                                      "XC_EXECUTE_NATIVE_METERED_GAS_REGTEST_ACTIVATION",
                                                                       "EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME")
         for (const varName of rollcallPassthroughVars) {
             if (config.INDEXER_ROLLCALL_ENV[varName] !== undefined && config.INDEXER_ROLLCALL_ENV[varName] !== "") {
