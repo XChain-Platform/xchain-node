@@ -185,6 +185,16 @@ describe('BootstrapHealthGate', function () {
             const err = await refusal(callGate(gate, { module: XChainService.XCHAIN_INDEXER, runner }))
             expect(err.message).to.match(/paired decoder database \S+ carries a durable REORG_HALT/)
         })
+    })
+})
+
+describe('BootstrapHealthGate', function () {
+
+    installEnvironmentHooks()
+
+    const hexOf = (text) => Buffer.from(text, 'utf8').toString('hex').toUpperCase()
+
+    describe('durable halt markers: the newest clear row', function () {
 
         it('REFUSES unreadable clear-probe output', async function () {
             const gate = loadGate()

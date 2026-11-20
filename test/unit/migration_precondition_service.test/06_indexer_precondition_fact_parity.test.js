@@ -110,6 +110,9 @@ describe('indexer precondition fact parity', () => {
         expect(tableNamesFromInList(nodeFact)).to.deep.equal(
             tableNamesFromInList(MIGRATION_PRECONDITIONS[BRIDGE_TABLES].sql))
     })
+})
+
+describe('indexer precondition fact parity', () => {
 
     it('treats the oracle tick widening as applied at 250 characters or wider, and not below', async () => {
         expect(await satisfiedWith({ columns: [tickColumn(250)] })).to.include(ORACLE_WIDEN)

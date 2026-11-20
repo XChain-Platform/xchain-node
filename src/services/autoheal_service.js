@@ -240,12 +240,12 @@ function establishEpisode(candidate, health, state, now, probationMs, result) {
     return { since: episode.since, changed: episode.onsetReseeded || restartCountCleared }
 }
 
-async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now, wallStart, stateFile) {
+function prepareCandidateRestart(candidate, since, timing, state, result, dryRun, now) {
     const { module, coin, network, containerId, label } = candidate
     if (now - since < timing.graceMs) {
         result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
         logger.info(`autoheal: ${label} is unhealthy but inside the ${timing.graceMs}ms grace window, not restarting yet`)
-        return
+        return null
     }
 
     // Each restart this container has already survived without recovering widens
@@ -263,7 +263,7 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
         result.skipped.push({ module, coin, network, containerId, reason: 'inside restart cooldown' })
         const log = escalated ? logger.warn : logger.info
         log(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
-        return
+        return null
     }
     if (escalated) {
         logger.warn(`autoheal: ${label} is still unhealthy after ${attempts} restart(s) this episode, a restart is not clearing this wedge; investigate`)
@@ -272,9 +272,14 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
     result.candidates.push({ module, coin, network, containerId })
     if (dryRun) {
         logger.info(`autoheal: DRY RUN, would restart ${label} (unhealthy for ${now - since}ms)`)
-        return
+        return null
     }
-
+    return attempts
+}
+async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now, wallStart, stateFile) {
+    const { module, coin, network, containerId, label } = candidate
+    const attempts = prepareCandidateRestart(candidate, since, timing, state, result, dryRun, now)
+    if (attempts === null) return
     state.stoppedByAutoheal[containerId] = true
     try {
         writeState(stateFile, state)

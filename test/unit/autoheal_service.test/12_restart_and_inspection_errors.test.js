@@ -162,6 +162,10 @@ describe('AutohealService', () => {
         expect(h.stubs.stopContainer.called).to.equal(false)
         expect(h.stubs.startContainer.called).to.equal(false)
     })
+})
+
+describe('AutohealService', () => {
+    const h = restartErrorHarness()
 
     it('retries only the start after a failed restart left the container stopped', async () => {
         h.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'left-down')])
