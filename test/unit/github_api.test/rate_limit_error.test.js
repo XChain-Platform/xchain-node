@@ -59,6 +59,24 @@ describe('githubRateLimitError', function () {
         const stamp = Date.parse(/resets (\S+)\)/.exec(e.message)[1])
         expect(stamp).to.be.within(before + 60000, Date.now() + 60000)
     })
+})
+
+describe('githubRateLimitError reset classification', function () {
+    let githubToken, ghToken
+
+    beforeEach(function () {
+        githubToken = process.env.GITHUB_TOKEN
+        ghToken = process.env.GH_TOKEN
+        delete process.env.GITHUB_TOKEN
+        delete process.env.GH_TOKEN
+    })
+
+    afterEach(function () {
+        if (githubToken === undefined) delete process.env.GITHUB_TOKEN
+        else process.env.GITHUB_TOKEN = githubToken
+        if (ghToken === undefined) delete process.env.GH_TOKEN
+        else process.env.GH_TOKEN = ghToken
+    })
 
     it('takes the reset from a retry-after HTTP date', function () {
         const e = githubRateLimitError(failure(403, { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' }))
@@ -92,7 +110,6 @@ describe('githubRateLimitError', function () {
         const e = githubRateLimitError(failure(429, { 'retry-after': 'soon' }))
         expect(e.message).to.include('resets unknown')
     })
-
 })
 
 describe('githubRateLimitError', function () {

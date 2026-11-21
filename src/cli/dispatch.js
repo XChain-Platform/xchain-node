@@ -225,6 +225,16 @@ async function noRefInstallTarget(commandName, actionCommand, resolver) {
 // One line when a newer release exists, on every command that reached
 // this point. `update` is the command it recommends, so it says nothing
 // there. Cached an hour, silent offline, never throws.
+async function reportAfterPreCheck(commandName, thisCommand, actionCommand, maybeReportTelemetry, noticeNewerRelease) {
+    try {
+        const optOut = thisCommand.opts().telemetry === false
+        await maybeReportTelemetry(actionCommand.name(), optOut)
+    } catch { /* telemetry is best-effort */ }
+    if (commandName !== 'update') {
+        await noticeNewerRelease()
+    }
+}
+
 async function beforeAction(thisCommand, actionCommand, settings, deps) {
     const {
         setVerbose, maybeSelfUpdateBeforeUpdate, redactSecrets,
@@ -280,13 +290,7 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
         // done; mutating commands keep it (released on exit) for their action.
         if (!lock.holdThroughAction) lock.release()
     }
-    try {
-        const optOut = thisCommand.opts().telemetry === false
-        await maybeReportTelemetry(actionCommand.name(), optOut)
-    } catch { /* telemetry is best-effort */ }
-    if (commandName !== 'update') {
-        await noticeNewerRelease()
-    }
+    await reportAfterPreCheck(commandName, thisCommand, actionCommand, maybeReportTelemetry, noticeNewerRelease)
 }
 
 function installDispatch(program, deps) {
