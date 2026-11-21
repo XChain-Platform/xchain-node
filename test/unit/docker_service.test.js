@@ -61,6 +61,8 @@ function registerDockerReachabilityChecks() {
         const ds = loadDockerService(stubs)
         const result = await ds.checkDockerInstalledAndReachable()
         expect(result).to.be.true
+        expect(stubs.execFile.firstCall.args[2]).to.deep.equal({ timeout: 10000 })
+        expect(stubs.execFile.secondCall.args[2]).to.deep.equal({ timeout: 30000 })
     })
 
     it('rejects when docker --version fails', async function () {

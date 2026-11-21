@@ -145,10 +145,12 @@ function ignoredShutdownLine(module, raw, derived, budgetSeconds) {
 
 // The operator line for a drain timer at or above its stop budget.
 function overBudgetShutdownLine(module, where, ms, budgetSeconds, source) {
+    const remedy = source === 'the container carries'
+        ? 'Recreate the container (xchain-node recreate) so the node re-derives SHUTDOWN_TIMEOUT_MS from the current budget.'
+        : `Lower SHUTDOWN_TIMEOUT_MS in the module config below ${budgetSeconds * 1000} (or remove it so the node derives it), ` +
+          `or raise ${moduleStopTimeoutEnvName(module)}, then recreate the container (xchain-node recreate).`
     return `WARNING: ${module}${where}: ${source} SHUTDOWN_TIMEOUT_MS=${ms}, at or above its ${budgetSeconds} s stop ` +
-        'budget, so a drain that runs long is killed by docker before the service\'s own timer can end it. Lower ' +
-        `SHUTDOWN_TIMEOUT_MS in the module config below ${budgetSeconds * 1000} (or remove it so the node derives it), ` +
-        `or raise ${moduleStopTimeoutEnvName(module)}, then recreate the container (xchain-node recreate).`
+        `budget, so a drain that runs long is killed by docker before the service's own timer can end it. ${remedy}`
 }
 
 // Why a running service's own drain may not follow its current budget: the

@@ -23,12 +23,19 @@ const { containersFilesDir }     = require('../../config')
 const { getLogger } = require('../../observability/logger');
 const logger = getLogger();
 
-async function getStatusFromContainer(containerId) {
+const DOCKER_INSPECT_TIMEOUT_MS = 30000
+
+async function getStatusFromContainer(containerId, { timeoutMs = DOCKER_INSPECT_TIMEOUT_MS } = {}) {
     return new Promise((resolve, reject) => {
         try {
-            execFile('docker', ['inspect', containerId], (error, stdout) => {
+            execFile('docker', ['inspect', containerId], { timeout: timeoutMs }, (error, stdout) => {
                 if (error) {
-                    reject(error)
+                    if (error.killed) {
+                        const timedOut = new Error(`docker inspect ${containerId} timed out after ${timeoutMs} ms; the Docker daemon is not answering`)
+                        timedOut.killed = true
+                        timedOut.timedOut = true
+                        reject(timedOut)
+                    } else reject(error)
                 } else {
                     resolve(JSON.parse(stdout)[0])
                 }
@@ -216,6 +223,7 @@ async function stringToDockerContainerFile(containerId, dataString, filePath) {
 }
 
 module.exports = {
+    DOCKER_INSPECT_TIMEOUT_MS,
     getStatusFromContainer,
     getDockerNetworkInspect,
     createDockerNetwork,

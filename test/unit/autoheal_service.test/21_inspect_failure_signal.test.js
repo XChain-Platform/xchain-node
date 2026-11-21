@@ -142,4 +142,23 @@ describe(TITLE, () => {
         expect(result.inspectErrors).to.have.length(2)
         expect(ctx.service.autohealExitCode(result)).to.equal(3)
     })
+
+    it('turns a real inspect child deadline into exit 3', async function () {
+        if (process.platform === 'win32') this.skip()
+        const docker = path.join(ctx.stateDir, 'docker')
+        fs.writeFileSync(docker, '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 })
+        const savedPath = process.env.PATH
+        process.env.PATH = `${ctx.stateDir}:${savedPath}`
+        try {
+            const { getStatusFromContainer } = require('../../../src/services/docker_service/networks_and_files')
+            ctx.stubs.getStatusFromContainer = id => getStatusFromContainer(id, { timeoutMs: 100 })
+            ctx.service = loadService(ctx.stubs)
+            const result = await ctx.service.runAutoheal({ now: NOW })
+            expect(result.inspectErrors).to.have.length(2)
+            expect(result.inspectErrors[0].error).to.match(/timed out after 100 ms/)
+            expect(ctx.service.autohealExitCode(result)).to.equal(3)
+        } finally {
+            process.env.PATH = savedPath
+        }
+    })
 })

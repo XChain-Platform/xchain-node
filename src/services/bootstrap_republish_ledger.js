@@ -28,9 +28,9 @@
  * hours old, perfectly fresh, and completely wrong.
  *
  * So the reindex itself is the trigger. `reset` records the combos it wiped
- * here; `bootstrap create` records what it published; a combo whose reindex is
- * NEWER than its last publish is DUE, and the publisher pulls due combos into
- * its plan even when the schedule or the tracker opt-in would have skipped them.
+ * here; the publisher records a successful remote publish; a combo whose
+ * reindex is NEWER than its last publish is DUE, and the publisher pulls due
+ * combos into its plan even when the schedule or tracker opt-in skipped them.
  *
  * The ledger lives in the per-user ~/.xchain-node dir (with credentials.json and
  * command.lock), NOT under XCHAIN_NODE_DATA_DIR:
@@ -279,9 +279,8 @@ function recordReindex(modules, coin, network, { at = new Date(), reason = null 
 }
 
 /**
- * Record that a bootstrap was created (and so is about to be published) for a
- * combo. This is what clears a due marker: the new archive belongs to the
- * post-reindex lineage.
+ * Record that a bootstrap was published for a combo. This clears a due marker
+ * only after the new archive is visible to restore consumers.
  */
 function recordBootstrapPublished(module, coin, network, { at = new Date() } = {}) {
     const key = comboKey(module, coin, network)

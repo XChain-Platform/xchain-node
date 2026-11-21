@@ -36,6 +36,8 @@ function buildProgram(deps) {
         .option('--reason <text>').option('--dry-run').action(deps.action)
     program.command('bootstrap-restore-rehearsal').argument('<chain>').argument('<network>')
         .option('--file <name>').action(deps.action)
+    program.command('bootstrap-republish-clear').argument('<combo>')
+        .requiredOption('--at <time>').action(deps.action)
     const validator = program.command('validator').action(deps.action)
     validator.command('init').option('--force').option('--force-wallets').action(deps.action)
     validator.command('stake').option('--broadcast').action(deps.action)
@@ -165,6 +167,17 @@ describe('CLI dispatch: commands that hold the lock through their action', funct
         const deps = await run(['clear-reorg-halt', 'bitcoin', 'regtest', '--dry-run'])
         expect(deps.acquireCommandLock.calledOnceWith({ command: 'clear-reorg-halt', waitMs: 0 })).to.be.true
         expect(deps.release.called).to.be.false
+    })
+
+    it('bootstrap-republish-clear holds the reset lock without running preCheck', async function () {
+        const deps = await run([
+            'bootstrap-republish-clear', 'xchain-decoder:bitcoin:testnet',
+            '--at', '2026-09-01T01:00:00Z'
+        ])
+        expect(deps.acquireCommandLock.calledOnceWith({ command: 'bootstrap-republish-clear', waitMs: 0 })).to.be.true
+        expect(deps.preCheck.called).to.be.false
+        expect(deps.release.called).to.be.false
+        expect(deps.action.calledOnce).to.be.true
     })
 
     registerRehearsalLockTests()

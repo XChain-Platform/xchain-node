@@ -84,11 +84,13 @@ async function carryContainerEnvWithProvenance(configuredEnv, options = {}, deps
         const carriedEnv = await readContainerEnv(source, deps)
         if (!carriedEnv) continue
         const drops = requestedDrops(deps.dropList)
-        const carriedKeys = Object.keys(carriedEnv).filter(key => !(key in configuredEnv) && !drops.has(key))
+        const neverCarry = new Set(Array.isArray(options.neverCarry) ? options.neverCarry : [])
+        const carriedKeys = Object.keys(carriedEnv).filter(key => !(key in configuredEnv) && !drops.has(key) && !neverCarry.has(key))
         const droppedKeys = Object.keys(carriedEnv).filter(key => !(key in configuredEnv) && drops.has(key))
         const recognized = new Set([...Object.keys(carriedEnv), ...Object.keys(configuredEnv)])
         const unknownDropKeys = [...drops].filter(key => !recognized.has(key))
-        const kept = Object.fromEntries(Object.entries(carriedEnv).filter(([key]) => !droppedKeys.includes(key)))
+        const kept = Object.fromEntries(Object.entries(carriedEnv)
+            .filter(([key]) => !droppedKeys.includes(key) && !neverCarry.has(key)))
         return { env: { ...kept, ...configuredEnv }, carriedKeys, droppedKeys, unknownDropKeys }
     }
     return empty

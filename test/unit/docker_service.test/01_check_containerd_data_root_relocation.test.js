@@ -172,6 +172,7 @@ describe('DockerService', function () {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 expect(cmd).to.equal('docker')
                 expect(args).to.deep.equal(['start', 'abc123'])
+                expect(rest[0]).to.deep.equal({ timeout: 120000 })
                 cb(null, 'abc123\n')
             })
             const ds = loadDockerService(stubs)

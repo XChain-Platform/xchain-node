@@ -126,6 +126,25 @@ function registerCarryContainerEnvFallbacks() {
         expect(result.droppedKeys).to.deep.equal(['DROP'])
         expect(result.unknownDropKeys).to.deep.equal(['TYPO'])
     })
+
+    it('does not carry node-derived names, while current config and drop recognition still win', async function () {
+        const execFileAsync = sinon.stub().resolves({
+            stdout: dockerEnvInspectOutput({ SHUTDOWN_TIMEOUT_MS: '100000', KEEP: 'old' })
+        })
+        const options = { reuseImage: true, overwriteContainerId: 'old-id', neverCarry: ['SHUTDOWN_TIMEOUT_MS'] }
+        const omitted = await carryContainerEnvWithProvenance({}, options, {
+            execFileAsync, dropList: 'SHUTDOWN_TIMEOUT_MS'
+        })
+        expect(omitted.env).to.deep.equal({ KEEP: 'old' })
+        expect(omitted.carriedKeys).to.deep.equal(['KEEP'])
+        expect(omitted.droppedKeys).to.deep.equal(['SHUTDOWN_TIMEOUT_MS'])
+        expect(omitted.unknownDropKeys).to.deep.equal([])
+
+        const configured = await carryContainerEnvWithProvenance(
+            { SHUTDOWN_TIMEOUT_MS: '45000' }, options, { execFileAsync }
+        )
+        expect(configured.env.SHUTDOWN_TIMEOUT_MS).to.equal('45000')
+    })
 }
 
 describe('CarryContainerEnv', function () {
@@ -133,8 +152,40 @@ describe('CarryContainerEnv', function () {
     registerCarryContainerEnvFallbacks()
 })
 
-function registerBuildAndUpRecreateEnvTests() {
+async function recreateWithBudget(module, oldDrain, seconds) {
+    const key = `XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_${module.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
+    const saved = process.env[key]
+    if (seconds === undefined) delete process.env[key]; else process.env[key] = String(seconds)
+    try {
+        const stubs = makeStubs()
+        const seen = recordRecreate(stubs, { SHUTDOWN_TIMEOUT_MS: oldDrain, KEEP: 'old' })
+        const ms = loadModuleService(stubs)
+        await ms.buildAndUp(module, 'bitcoin', 'mainnet', 'old-container-id', false, null, { reuseImage: true })
+        return seen.find(call => call.args[0] === 'run')
+    } finally {
+        if (saved === undefined) delete process.env[key]; else process.env[key] = saved
+    }
+}
 
+function registerBuildAndUpDrainRecreateTest() {
+    it('re-derives the drain from raised and lowered budgets and drops it at the plain default', async function () {
+        const raised = await recreateWithBudget('xchain-decoder', '100000', 300)
+        expect(raised.args).to.include.members(['--stop-timeout', '300'])
+        expect(raised.opts.env.SHUTDOWN_TIMEOUT_MS).to.equal('280000')
+
+        const lowered = await recreateWithBudget('xchain-decoder', '100000', 60)
+        expect(lowered.args).to.include.members(['--stop-timeout', '60'])
+        expect(lowered.opts.env.SHUTDOWN_TIMEOUT_MS).to.equal('40000')
+
+        const defaulted = await recreateWithBudget('xchain-encoder', '70000')
+        expect(defaulted.args).to.include.members(['--stop-timeout', '30'])
+        expect(defaulted.args).to.not.include('SHUTDOWN_TIMEOUT_MS')
+        expect(defaulted.opts.env.SHUTDOWN_TIMEOUT_MS).to.equal(undefined)
+        expect(defaulted.opts.env.KEEP).to.equal('old')
+    })
+}
+
+function registerBuildAndUpRecreateEnvTests() {
     it('passes carried hub names to the consensus guard as provenance', async function () {
         const stubs = makeStubs()
         recordRecreate(stubs, { ORACLE_MIN_SUBMISSIONS: '1' })
@@ -202,6 +253,7 @@ function registerBuildAndUpFallbackTest() {
 }
 
 moduleSuite('buildAndUp() recreate env carry', function () {
+    registerBuildAndUpDrainRecreateTest()
     registerBuildAndUpRecreateEnvTests()
     registerBuildAndUpFallbackTest()
 })

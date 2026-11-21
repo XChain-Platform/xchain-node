@@ -252,6 +252,16 @@ function configureHubBeforeKey(defaultValues, module) {
                 defaultValues[varName] = value
             }
         }
+        const dogeApiUrl = readSecretHostEnv("DOGE_INDEXER_API_URL")
+        if (dogeApiUrl !== undefined && dogeApiUrl !== "") {
+            if (!defaultValues["DOGE_INDEXER_URL"]) {
+                // Keep one URL name because some hub readers prefer API_URL while
+                // checkpointing reads only INDEXER_URL. Co-located composition wins later.
+                defaultValues["DOGE_INDEXER_URL"] = dogeApiUrl
+            } else if (defaultValues["DOGE_INDEXER_URL"] !== dogeApiUrl) {
+                logger.warn("DOGE_INDEXER_URL differs from DOGE_INDEXER_API_URL; the hub uses DOGE_INDEXER_URL")
+            }
+        }
     }
 }
 

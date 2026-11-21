@@ -41,9 +41,13 @@ const GITHUB_DOWNLOAD_TIMEOUT_MS = 60000;
  */
 function githubApiHeaders() {
     const headers = { 'User-Agent': 'GitHubDownloader' };
-    const token = config.GITHUB_TOKEN || config.GH_TOKEN;
+    const token = configuredToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
+}
+
+function configuredToken() {
+    return config.GITHUB_TOKEN || config.GH_TOKEN;
 }
 
 // When the limit lifts, as an ISO time, or 'unknown'. retry-after is the wait
@@ -72,7 +76,8 @@ function rateLimitResetAt(headers) {
  * 403 is told apart by the remaining-quota header (primary limit) or a
  * retry-after header (secondary limit) rather than by the status alone, because
  * a 403 is also what a genuinely forbidden request returns and the two need
- * different advice.
+ * different advice. Primary limits distinguish authenticated from anonymous
+ * callers, while secondary limits tell every caller to wait and retry.
  *
  * @param {Error} error the HTTP client's error
  * @returns {Error|null} an error naming the reset time, or null
@@ -85,7 +90,17 @@ function githubRateLimitError(error) {
         || headers['x-ratelimit-remaining'] === '0'
         || headers['retry-after'] !== undefined;
     if (!limited) return null;
-    return new Error(`GitHub API rate limit exhausted for this IP (resets ${rateLimitResetAt(headers)}); set GITHUB_TOKEN to raise the limit`);
+    const reset = rateLimitResetAt(headers);
+    const remaining = headers['x-ratelimit-remaining'];
+    const secondary = headers['retry-after'] !== undefined
+        || (remaining !== undefined && remaining !== '0');
+    if (secondary) {
+        return new Error(`GitHub API secondary rate limit: GitHub asked this client to back off (resets ${reset}); a token does not lift this limit, so wait and retry`);
+    }
+    if (configuredToken()) {
+        return new Error(`GitHub API rate limit exhausted for the configured GITHUB_TOKEN/GH_TOKEN (resets ${reset}); wait for the reset or use a token with more quota`);
+    }
+    return new Error(`GitHub API rate limit exhausted for this IP (resets ${reset}); set GITHUB_TOKEN to raise the limit`);
 }
 
 module.exports = { githubApiHeaders, githubRateLimitError, GITHUB_API_TIMEOUT_MS, GITHUB_DOWNLOAD_TIMEOUT_MS };

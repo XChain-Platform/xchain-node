@@ -376,7 +376,7 @@ async function buildAndUp(module, coin, network, overwriteContainerId = null, on
     const dir = getModuleDir(module)
     const containerPrefix = getDockerContainerImageName(module, coin, network)
     const carried = await carryContainerEnvWithProvenance(environmentVariables,
-        { reuseImage, overwriteContainerId, containerName: containerPrefix },
+        { reuseImage, overwriteContainerId, containerName: containerPrefix, neverCarry: ['SHUTDOWN_TIMEOUT_MS'] },
         { execFileAsync, dropList: config.RECREATE_DROP_ENV.XCHAIN_NODE_RECREATE_DROP_ENV })
     environmentVariables = carried.env
     if (carried.droppedKeys.length) logger.info(`recreate: not carrying env names: ${carried.droppedKeys.join(', ')}`)

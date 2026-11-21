@@ -20,6 +20,21 @@ function failure(status, headers) {
 }
 
 describe('githubRateLimitError', function () {
+    let githubToken, ghToken
+
+    beforeEach(function () {
+        githubToken = process.env.GITHUB_TOKEN
+        ghToken = process.env.GH_TOKEN
+        delete process.env.GITHUB_TOKEN
+        delete process.env.GH_TOKEN
+    })
+
+    afterEach(function () {
+        if (githubToken === undefined) delete process.env.GITHUB_TOKEN
+        else process.env.GITHUB_TOKEN = githubToken
+        if (ghToken === undefined) delete process.env.GH_TOKEN
+        else process.env.GH_TOKEN = ghToken
+    })
 
     it('maps a primary-limit 403 to the reset time and token advice', function () {
         const e = githubRateLimitError(failure(403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1783529945' }))
@@ -53,7 +68,24 @@ describe('githubRateLimitError', function () {
     it('treats a 403 carrying retry-after as a secondary limit', function () {
         const e = githubRateLimitError(failure(403, { 'retry-after': '30' }))
         expect(e).to.be.instanceOf(Error)
-        expect(e.message).to.include('GITHUB_TOKEN')
+        expect(e.message).to.include('secondary rate limit')
+        expect(e.message).to.not.include('exhausted')
+        expect(e.message).to.not.include('set GITHUB_TOKEN')
+    })
+
+    it('names an authenticated primary quota without exposing the token', function () {
+        process.env.GITHUB_TOKEN = 'secret-value'
+        const e = githubRateLimitError(failure(403, { 'x-ratelimit-remaining': '0' }))
+        expect(e.message).to.include('configured GITHUB_TOKEN')
+        expect(e.message).to.not.include('for this IP')
+        expect(e.message).to.not.include('set GITHUB_TOKEN')
+        expect(e.message).to.not.include('secret-value')
+    })
+
+    it('treats a 429 with remaining quota as secondary', function () {
+        const e = githubRateLimitError(failure(429, { 'x-ratelimit-remaining': '4000' }))
+        expect(e.message).to.include('secondary rate limit')
+        expect(e.message).to.include('resets unknown')
     })
 
     it('reports an unparseable retry-after as an unknown reset', function () {

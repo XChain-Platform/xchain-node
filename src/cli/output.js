@@ -59,10 +59,10 @@ takes it restores pre-reindex state and halts. Nothing forced a republish, and
 no age check catches it, because the stale-lineage archive is hours old and
 simply wrong.
 
-\`reset\` records the combos it wiped, \`bootstrap create\` records what it
-re-derived, and this lists the difference. scripts/publish-bootstraps.sh reads
-it to pull due combos into its plan even when the schedule or the tracker
-opt-in would have skipped them.`)
+\`reset\` records the combos it wiped, and the publisher clears that marker only
+after the remote archive is visible. This command lists the difference so
+scripts/publish-bootstraps.sh can pull due combos into its plan even when the
+schedule or tracker opt-in would have skipped them.`)
         .action(async (options) => {
             const due = listRepublishDue()
             if (options && options.json) {
@@ -75,10 +75,36 @@ opt-in would have skipped them.`)
 
 }
 
+function registerBootstrapRepublishClear(program, deps) {
+    const { parseComboKey, recordBootstrapPublished } = deps
+    program
+        .command('bootstrap-republish-clear <combo>')
+        .description('Record a successfully published bootstrap archive')
+        .requiredOption('--at <ISO-8601>', 'publish attempt start time')
+        .addHelpText('after', `
+The publisher runs this only after its remote rename succeeds. If you create
+and publish an archive by hand, run this command after the upload is visible.`)
+        .action(async (combo, options) => {
+            const parsed = parseComboKey(combo)
+            const at = new Date(options.at)
+            if (!parsed || !Number.isFinite(at.getTime())) {
+                console.error('ERROR: expected <service>:<coin>:<network> and a valid --at ISO-8601 time')
+                return process.exit(1)
+            }
+            const ok = recordBootstrapPublished(parsed.module, parsed.coin, parsed.network, { at })
+            if (!ok) {
+                console.error('ERROR: could not update the bootstrap republish ledger')
+                return process.exit(1)
+            }
+            return process.exit(0)
+        })
+}
+
 function registerStatusCommands(program, deps) {
     registerPs(program, deps)
     registerBootstrapCombos(program, deps)
     registerBootstrapRepublishDue(program, deps)
+    registerBootstrapRepublishClear(program, deps)
 }
 
 function registerValidatorRoot(program) {

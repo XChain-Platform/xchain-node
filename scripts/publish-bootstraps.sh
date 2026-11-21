@@ -49,7 +49,7 @@
 #   - Forces a republish after a reindex. A `reset` rebuilds a store on a NEW
 #     lineage, so every archive already published for that combo describes the
 #     old one and restoring it halts a fresh install. The node records those
-#     combos and `bootstrap create` clears them, so this run asks
+#     combos and a successful remote publish clears them, so this run asks
 #     `xchain-node bootstrap-republish-due` and pulls due combos into the plan
 #     even when the schedule would have dropped them. Trackers are reported and
 #     deferred to a --with-trackers run by default (their create means
@@ -281,8 +281,8 @@ fi
 # catches that, because the wrong archive is hours old and perfectly fresh.
 #
 # The node records those combos (`xchain-node bootstrap-republish-due`) and
-# `bootstrap create` clears them, so a due combo is one whose newest published
-# archive predates its last reindex. Due combos are pulled into the plan even
+# a successful remote publish clears them, so a due combo is one whose newest
+# published archive predates its last reindex. Due combos enter the plan even
 # when the schedule would have dropped them, which is the only thing that turns
 # "the operator remembers to republish" into a forcing function.
 #
@@ -307,6 +307,9 @@ node_lists_republish_due() {
     [[ "$line" =~ ^[[:space:]]*bootstrap-republish-due([[:space:]]|$) ]] && return 0
   done <<< "$help_text"
   return 1
+}
+node_clears_republish_due() {
+  "$XCHAIN_NODE_BIN" --help 2>/dev/null | grep -q 'bootstrap-republish-clear'
 }
 declare -a DUE=()
 if [ "$FORCE_DUE" = 1 ]; then
@@ -423,6 +426,7 @@ for c in "${SELECTED[@]}"; do
   # CLI does not also wait and multiply the budget.
   lock_deadline=$(( $(date +%s) + LOCK_WAIT_MIN * 60 ))
   while : ; do
+    create_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     create_log="$(mktemp "$TMP_DIR/publish-create.XXXXXX")"
     create_rc=0
     XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY="$SIGNING_KEY" \
@@ -520,7 +524,17 @@ for c in "${SELECTED[@]}"; do
 
     if ssh -o BatchMode=yes "$SYNC_HOST" "$mv_cmd"; then
       log "  published $a_base (+sig) to $SYNC_HOST:$dest"
-      SUMMARY+=("$c: PUBLISHED")
+      if node_clears_republish_due; then
+        if "$XCHAIN_NODE_BIN" bootstrap-republish-clear "$c" --at "$create_at"; then
+          SUMMARY+=("$c: PUBLISHED")
+        else
+          log "  WARNING: $c published, but its republish marker could not be cleared; the next run will treat it as due again"
+          SUMMARY+=("$c: PUBLISHED (marker not cleared)")
+        fi
+      else
+        log "  WARNING: this xchain-node has no bootstrap-republish-clear command"
+        SUMMARY+=("$c: PUBLISHED")
+      fi
       # Prune remote under the shared retention policy (see PRUNE_SCRIPT).
       printf '%s\n' "$PRUNE_SCRIPT" | ssh -o BatchMode=yes "$SYNC_HOST" "sh -s -- '$dest' '$KEEP'" || log "  (remote prune warning)"
     else

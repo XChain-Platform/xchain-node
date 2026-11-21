@@ -59,6 +59,7 @@ describe('DockerService', function () {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 expect(cmd).to.equal('docker')
                 expect(args).to.deep.equal(['inspect', 'abc123'])
+                expect(rest[0]).to.deep.equal({ timeout: 30000 })
                 cb(null, JSON.stringify(inspectData))
             })
             const ds = loadDockerService(stubs)
@@ -79,6 +80,18 @@ describe('DockerService', function () {
             } catch (err) {
                 expect(err).to.be.an.instanceOf(Error)
             }
+        })
+
+        it('labels an inspect killed by its deadline as a timeout', async function () {
+            const stubs = makeStubs()
+            stubs.execFile.callsFake((cmd, args, options, cb) => {
+                expect(options).to.deep.equal({ timeout: 25 })
+                cb(Object.assign(new Error('killed'), { killed: true }))
+            })
+            const ds = loadDockerService(stubs)
+            const err = await ds.getStatusFromContainer('slow', { timeoutMs: 25 }).then(() => null, e => e)
+            expect(err.message).to.include('timed out after 25 ms')
+            expect(err.timedOut).to.equal(true)
         })
     })
 })

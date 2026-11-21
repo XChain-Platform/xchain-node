@@ -153,9 +153,8 @@ describe('BootstrapService', function () {
 
 // A reset rebuilds a store on a new lineage, so every archive
 // already published for that combo is wrong while looking perfectly fresh.
-// `reset` marks the combo due; only a successful create clears it, and a
-// create that never reached the archive must leave the marker standing or
-// the forced republish is silently cancelled by the run that failed to do it.
+// `reset` marks the combo due; create leaves it due until the publisher makes
+// the archive visible remotely.
 describe('BootstrapService', function () {
     beforeEach(saveRequireSignedBootstrapSetting)
     afterEach(restoreRequireSignedBootstrapSetting)
@@ -171,9 +170,7 @@ describe('BootstrapService', function () {
             const bs = loadBootstrapService(stubs)
             expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
 
-            expect(stubs.republishLedger.recordBootstrapPublished.calledOnce).to.be.true
-            expect(stubs.republishLedger.recordBootstrapPublished.firstCall.args.slice(0, 3))
-                .to.deep.equal([XChainService.XCHAIN_UTXO_TRACKER, COIN, NETWORK])
+            expect(stubs.republishLedger.recordBootstrapPublished.called).to.be.false
         })
     })
 })

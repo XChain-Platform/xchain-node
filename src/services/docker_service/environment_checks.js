@@ -20,9 +20,12 @@ const fs          = require('fs')
 
 const config = require('../../config');
 
+const DOCKER_VERSION_TIMEOUT_MS = 10000
+const DOCKER_REACHABILITY_TIMEOUT_MS = 30000
+
 async function checkDockerInstalledAndReachable() {
     return new Promise((resolve, reject) => {
-        execFile('docker', ['--version'], (error, stdout) => {
+        execFile('docker', ['--version'], { timeout: DOCKER_VERSION_TIMEOUT_MS }, (error, stdout) => {
             if (error) {
                 reject("Couldn't use the command docker --version")
                 return
@@ -32,7 +35,7 @@ async function checkDockerInstalledAndReachable() {
                 reject("The format returned by docker --version is unknown")
                 return
             }
-            execFile('docker', ['ps', '-a'], (error2) => {
+            execFile('docker', ['ps', '-a'], { timeout: DOCKER_REACHABILITY_TIMEOUT_MS }, (error2) => {
                 if (error2) {
                     reject("Couldn't execute docker ps, is this user in the docker group")
                 } else {

@@ -17,6 +17,9 @@
 
 const { execFile, spawnSync } = require('child_process')
 
+const DOCKER_STOP_MARGIN_MS = 30000
+const DOCKER_START_TIMEOUT_MS = 120000
+
 const {
     checkDockerInstalledAndReachable,
     checkBuildKitAvailable,
@@ -32,7 +35,8 @@ const {
     getAllBoundHostPorts,
     getDockerContainerFileData,
     getDockerContainerFileCat,
-    stringToDockerContainerFile
+    stringToDockerContainerFile,
+    DOCKER_INSPECT_TIMEOUT_MS
 } = require('./docker_service/networks_and_files.js')
 const {
     logContainer,
@@ -89,7 +93,8 @@ async function stopContainer(containerId, timeoutSeconds) {
     const startedAt = Date.now()
     const args = timeoutSeconds === undefined ? ['stop', containerId] : ['stop', '-t', String(timeoutSeconds), containerId]
     await new Promise((resolve, reject) => {
-        execFile('docker', args, (error, stdout) => {
+        const timeout = (timeoutSeconds === undefined ? 10 : timeoutSeconds) * 1000 + DOCKER_STOP_MARGIN_MS
+        execFile('docker', args, { timeout }, (error, stdout) => {
             if (error) {
                 reject(error)
             } else if (stdout.trim() === containerId) {
@@ -107,7 +112,7 @@ async function stopContainer(containerId, timeoutSeconds) {
 async function readStopOutcome(ref, startedAt, timeoutSeconds) {
     const seconds = Math.round((Date.now() - startedAt) / 1000)
     const exitCode = await new Promise((resolve) => {
-        execFile('docker', ['inspect', '--format', '{{.State.ExitCode}}', ref], (error, stdout) => {
+        execFile('docker', ['inspect', '--format', '{{.State.ExitCode}}', ref], { timeout: DOCKER_INSPECT_TIMEOUT_MS }, (error, stdout) => {
             const code = parseInt(String(stdout || '').trim(), 10)
             resolve(error || !Number.isFinite(code) ? null : code)
         })
@@ -144,7 +149,7 @@ async function stopContainerByName(name, timeoutSeconds) {
 
 async function startContainer(containerId) {
     return new Promise((resolve, reject) => {
-        execFile('docker', ['start', containerId], (error, stdout) => {
+        execFile('docker', ['start', containerId], { timeout: DOCKER_START_TIMEOUT_MS }, (error, stdout) => {
             if (error) {
                 reject(error)
             } else if (stdout.trim() === containerId) {
@@ -271,7 +276,7 @@ async function getContainerBindMounts(name) {
 // null when docker cannot answer, so a caller treats that as "unknown".
 async function getContainerStopSettings(name) {
     return new Promise((resolve) => {
-        execFile('docker', ['inspect', '--format', '{{json .Config}}', name], (error, stdout) => {
+        execFile('docker', ['inspect', '--format', '{{json .Config}}', name], { timeout: DOCKER_INSPECT_TIMEOUT_MS }, (error, stdout) => {
             if (error) {
                 resolve(null)
                 return
@@ -305,6 +310,8 @@ async function waitContainer(containerId) {
 }
 
 module.exports = {
+    DOCKER_STOP_MARGIN_MS,
+    DOCKER_START_TIMEOUT_MS,
     checkDockerInstalledAndReachable,
     checkBuildKitAvailable,
     checkContainerdDataRootRelocation,

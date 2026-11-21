@@ -126,7 +126,6 @@ configureEnsureRestored({
 const { XChainService } = config
 const { db } = state
 const { assertBootstrapSourceHealthy } = bootstrapHealthGate
-const { recordBootstrapPublished } = republishLedger
 async function makeBootstrap(coin, network, module) {
     switch (module) {
         case XChainService.XCHAIN_UTXO_TRACKER:
@@ -152,18 +151,6 @@ async function makeBootstrap(coin, network, module) {
     const result = module === XChainService.XCHAIN_UTXO_TRACKER
         ? await makeBootstrapUtxoTracker(coin, network)
         : await makeBootstrapMariaDb(coin, network, module, preflight && preflight.watermark)
-
-    // A fresh archive is a fresh LINEAGE, so it clears any republish this
-    // combo was owed after a reset (see BootstrapRepublishLedger). Recorded on
-    // CREATE rather than after the upload: the create is what re-derives the
-    // archive from the post-reindex store, and an upload that then fails is
-    // already reported as PUBLISH-FAIL and retried by the next scheduled run.
-    // Never fatal - the archive exists either way.
-    try {
-        recordBootstrapPublished(module, coin, network)
-    } catch (err) {
-        logger.info(`Warning: could not clear the bootstrap republish marker for ${module} ${coin}/${network} (${err.message}).`)
-    }
 
     return result
 }

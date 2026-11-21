@@ -37,10 +37,10 @@ const ENV_STYLE_NAME = /^[A-Z][A-Z0-9_]*$/
 // Views over a list of names: export name -> [label, declared names].
 const LIST_VIEWS = {
     // The hub's host passthrough (ConfigService HUB_PASSTHROUGH_VARS), plus the
-    // redaction-safe spelling of its one secret-bearing name, which
-    // src/config/secret_env.js prefers when both are present.
+    // redaction-safe spelling of its one secret-bearing name, plus
+    // DOGE_INDEXER_API_URL as an alias source for DOGE_INDEXER_URL.
     HUB_PASSTHROUGH_ENV: ['hub passthrough', [
-        "HUB_API_KEY", "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL",
+        "HUB_API_KEY", "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL", "DOGE_INDEXER_API_URL",
         "BTC_INDEXER_API_KEY", "LTC_INDEXER_API_KEY", "DOGE_INDEXER_API_KEY",
         "CHECKPOINT_ENABLED", "CHECKPOINT_INTERVAL_BLOCKS", "CHECKPOINT_CONFIRMATIONS",
         "CHECKPOINT_POLL_MS", "CHECKPOINT_ROUND_TIMEOUT_MS", "CHECKPOINT_CHAINS",

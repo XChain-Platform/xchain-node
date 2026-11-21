@@ -41,7 +41,7 @@ function dispatchSettings(config) {
     // the audited clear it writes must not interleave with reset, restore or recreate.
     // `bootstrap-restore-rehearsal` is included: it creates and drops a disposable
     // database on the shared MariaDB, so it holds the lock from preCheck to exit.
-    const mutatingCommands = ['install', 'update', 'recreate', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal']
+    const mutatingCommands = ['install', 'update', 'recreate', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal', 'bootstrap-republish-clear']
     // These commands can write persistent container state, but retain the bounded
     // non-mutating wait before starting. Once started, they hold the lock to exit.
     const holdToExitCommands = ['exec', 'shell']
@@ -79,7 +79,7 @@ function skipsPreAction(actionCommand) {
     // a lock holder exits non-zero, which the publisher would read as "no
     // combo is due" and silently drop the forced republish this whole
     // mechanism exists to guarantee.
-    return commandName === 'bootstrap-republish-due'
+    return commandName === 'bootstrap-republish-due' || commandName === 'bootstrap-republish-clear'
 }
 
 // A reset aimed at a stack this CLI did not install (--db-container) gets only the local docker checks. The bundled
@@ -240,7 +240,12 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
         commandLock(validatorLabel, settings, acquireCommandLock, true)
         return
     }
-    if (skipsPreAction(actionCommand)) return
+    if (skipsPreAction(actionCommand)) {
+        if (commandName === 'bootstrap-republish-clear') {
+            commandLock(commandName, lockSettingsFor(commandName, settings, deps.config), acquireCommandLock)
+        }
+        return
+    }
 
     if (commandName === 'update') {
         try {
