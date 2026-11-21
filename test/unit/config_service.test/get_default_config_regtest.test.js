@@ -20,23 +20,18 @@ const {
     streamFromString, makeServiceWithConfig, makeMemoryConfigService, CONTAINER_ID, coinSidecar,
     coinMain, hubSidecar
 } = require('./helpers.test')
+const fs = require('fs')
+const { SHARED_REGTEST_GATE_ARMS } = require('../../../src/config/regtest_gate_arms')
 
-// The regtest-only passthrough. Every name here is a value a host env var must
-// never carry onto a shared ledger: three are consensus inputs where a per-node
-// value forks settlement, and the fourth only shapes how much a failed barrier
-// attempt costs. This gate is one of TWO independent ones (the indexer refuses
-// the same vars again on its own side), and neither had a test, while the list
-// is edited by whoever needs the next knob.
+// The regtest-only passthrough. Gate arms and operational overrides must reach
+// a regtest indexer, while mainnet and testnet indexers must never inherit them.
 function regtestOnlyPassthrough() {
     const REGTEST_ONLY = [
-        'XC_ROLLCALL_REGTEST_ACTIVATION',
-        'XC_ROLLCALL_GATES_REGTEST_ACTIVATION',
+        ...SHARED_REGTEST_GATE_ARMS,
         'HUB_SYNC_ANCHOR_ATTEST_GRACE_S',
         'HUB_PRICE_SYNC_TIMEOUT_MS',
         'XCHAIN_COINPAY_EXPIRATION_S',
-        'XC_MIRROR_ADMISSION_ACTIVATION',
-        'XC_ANCHOR_FOLD_REGTEST_ACTIVATION',
-        'XC_EXECUTE_NATIVE_METERED_GAS_REGTEST_ACTIVATION'
+        'EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME'
     ]
 
     let saved
@@ -64,6 +59,23 @@ function regtestOnlyPassthrough() {
             for (const k of REGTEST_ONLY) expect(config, k).to.not.have.property(k)
         })
     }
+
+    it('covers every ENV_READERS key in a sibling indexer checkout', function () {
+        const repoRoot = path.resolve(__dirname, '../../..')
+        const indexerDir = process.env.XCHAIN_INDEXER_DIR || path.resolve(repoRoot, '../xchain-indexer')
+        const sharedRows = path.join(indexerDir, 'src/protocol_changes/shared_rows.js')
+        if (!fs.existsSync(sharedRows)) {
+            this.test.title += ' [skipped: no sibling indexer checkout or XCHAIN_INDEXER_DIR]'
+            this.skip()
+        }
+
+        const source = fs.readFileSync(sharedRows, 'utf8')
+        const readers = source.match(/const ENV_READERS = \{([\s\S]*?)\n\};/)
+        expect(readers, 'ENV_READERS declaration').to.not.equal(null)
+        const keys = [...readers[1].matchAll(/^\s*(XC_[A-Z0-9_]+)\s*:/gm)].map((match) => match[1])
+        expect(keys, 'ENV_READERS keys').to.not.be.empty
+        expect(SHARED_REGTEST_GATE_ARMS).to.include.members(keys)
+    })
 
 }
 
