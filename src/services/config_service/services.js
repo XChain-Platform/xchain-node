@@ -16,6 +16,8 @@
 
 'use strict'
 
+const { REGTEST_ACTIVATION_KEY } = require('../../utils/regtest_activations')
+
 let config, peers, logger, readSecretHostEnv, Coin, Network, CoinTickerSymbol, XChainService
 let HUB_MODULE_NAME, EXPLORER_MODULE_NAME, getDockerContainerImageName
 
@@ -36,10 +38,17 @@ function configure(dependencies) {
 
 // The contract-template suites load xchain-contracts from the e2e-test build context (LIBRARY_BUNDLES stages it,
 // the Dockerfile copies it); they skip when the bundle is absent.
-function configureE2e(defaultValues, module, coin) {
+function configureE2e(defaultValues, module, coin, network) {
     if (module === XChainService.XCHAIN_E2E_TEST) {
         defaultValues["COIN"] = coin
         defaultValues["XCHAIN_CONTRACTS_DIR"] = "/XChainE2ETest/xchain-contracts"
+        if (network === Network.REGTEST) {
+            for (const [key, value] of Object.entries(config.hostEnv())) {
+                if (REGTEST_ACTIVATION_KEY.test(key) && value !== undefined && value !== '') {
+                    defaultValues[key] = value
+                }
+            }
+        }
         const { getValidatorSettings } = peers.validatorService
         const validatorSettings = getValidatorSettings()
         if (validatorSettings && validatorSettings.pubkey) {
