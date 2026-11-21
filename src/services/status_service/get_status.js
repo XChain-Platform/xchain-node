@@ -133,6 +133,22 @@ function describeContainerState(containerStatus) {
     return { state, isChurning }
 }
 
+async function annotateReadiness(nextModule, containerId, nextCoin, nextCoinNetwork, payload, moduleStatus, notes, display) {
+    if (nextModule !== XChainService.XCHAIN_INDEXER && nextModule !== XChainService.XCHAIN_DECODER) return
+    let readiness = null
+    try {
+        readiness = typeof (payload && payload.ready) === 'boolean'
+            ? payload : await probeReadinessPayload(nextModule, containerId, nextCoin, nextCoinNetwork)
+    } catch { /* advisory: an unreadable route is not a finding */ }
+    const notReady = reduceNotReady(readiness)
+    if (notReady) {
+        display.state += " NOT READY"
+        display.isChurning = true
+        moduleStatus["not_ready"] = notReady
+        notes.push(describeNotReadyNote(nextCoin, nextCoinNetwork, nextModule, notReady))
+    }
+}
+
 // A decoder carrying a durable REORG_HALT marker keeps parsing
 // and reports a healthy healthcheck (api.js keeps the marker off
 // the healthcheck on purpose: autoheal would restart-loop a
@@ -185,20 +201,8 @@ async function annotatePublishedHealth(nextModule, containerId, nextCoin, nextCo
     // The readiness verdict rides on the indexer's /status and the decoder's /live, which the
     // JSON-RPC health read above does not carry. Advisory, like the rest: an unreadable route or
     // an older image without the fields leaves the row as it was. Distinct word, same amber.
-    if (nextModule === XChainService.XCHAIN_INDEXER || nextModule === XChainService.XCHAIN_DECODER) {
-        let readiness = null
-        try {
-            readiness = typeof (payload && payload.ready) === 'boolean'
-                ? payload : await probeReadinessPayload(nextModule, containerId, nextCoin, nextCoinNetwork)
-        } catch { /* advisory: an unreadable route is not a finding */ }
-        const notReady = reduceNotReady(readiness)
-        if (notReady) {
-            display.state += " NOT READY"
-            display.isChurning = true
-            moduleStatus["not_ready"] = notReady
-            notes.push(describeNotReadyNote(nextCoin, nextCoinNetwork, nextModule, notReady))
-        }
-    }
+    await annotateReadiness(nextModule, containerId, nextCoin, nextCoinNetwork,
+        payload, moduleStatus, notes, display)
     const wait = reduceNodeCatchingUp(payload)
     if (wait) {
         display.state += " WAITING FOR NODE"

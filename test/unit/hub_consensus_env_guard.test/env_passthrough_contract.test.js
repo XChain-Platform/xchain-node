@@ -56,8 +56,7 @@ function registerPassthroughListContract() {
     })
 }
 
-function registerNetworkGatedContract() {
-    describe('network-gated consensus keys', function networkGatedContract() {
+function registerNetworkGateArmTests() {
         it('finds the regtest arm names in the passthrough list', () => {
             expect(ARM_KEYS.length).to.be.greaterThan(0)
             expect(ARM_KEYS).to.deep.equal([...SHARED_REGTEST_GATE_ARMS, ...HUB_ONLY_REGTEST_GATE_ARMS])
@@ -95,7 +94,9 @@ function registerNetworkGatedContract() {
             expect(isHubConsensusEnvDriftError(thrown)).to.equal(true)
             expect(thrown.drift).to.deep.equal([{ key }])
         })
+}
 
+function registerNetworkCadenceTests() {
         it('does not flag a dropped gate arm the hub ignores off regtest', () => {
             for (const network of ['mainnet', 'testnet']) {
                 for (const key of ARM_KEYS) {
@@ -122,6 +123,12 @@ function registerNetworkGatedContract() {
                 expect(findHubConsensusEnvDrift(network ? { HUB_NETWORK: network } : {}, live)).to.deep.equal([])
             }
         })
+}
+
+function registerNetworkGatedContract() {
+    describe('network-gated consensus keys', function networkGatedContract() {
+        registerNetworkGateArmTests()
+        registerNetworkCadenceTests()
     })
 }
 

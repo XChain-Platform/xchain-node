@@ -70,8 +70,7 @@ function loadWithProbe(rows, payloads) {
     return { ss, probe, printed: () => printed }
 }
 
-describe('StatusService: getStatus() STALL and HALTED columns', function () {
-
+function registerStallAndTrackerHaltTests() {
     it('prints STALL plus the reason word for an indexer deferring on a missing DOGE read, and the note names the variable', async function () {
         const { ss, probe, printed } = loadWithProbe(
             [{ module: 'xchain-indexer', coin: 'bitcoin', network: 'testnet', container_id: 'idx' },
@@ -115,7 +114,9 @@ describe('StatusService: getStatus() STALL and HALTED columns', function () {
         expect(printed()).to.match(/list is empty/)
         expect(printed()).to.match(/xchain-node reset xchain-utxo-tracker bitcoin testnet/)
     })
+}
 
+function registerUnreadableAndDecoderHaltTests() {
     it('a tracker whose surface cannot be read stays plain running', async function () {
         const { ss, printed } = loadWithProbe(
             [{ module: 'xchain-utxo-tracker', coin: 'bitcoin', network: 'testnet', container_id: 'utx' }],
@@ -144,4 +145,9 @@ describe('StatusService: getStatus() STALL and HALTED columns', function () {
         expect(printed()).to.match(/xchain-decoder.*running REORG_HALT/)
         expect(printed()).to.match(/parse loop is PARKED/)
     })
+}
+
+describe('StatusService: getStatus() STALL and HALTED columns', function () {
+    registerStallAndTrackerHaltTests()
+    registerUnreadableAndDecoderHaltTests()
 })

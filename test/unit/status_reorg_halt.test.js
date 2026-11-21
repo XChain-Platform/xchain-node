@@ -299,8 +299,7 @@ describe('ps: WAITING FOR NODE surface', function () {
     })
 })
 
-describe('ps: decoder REORG_HALT surface', function () {
-
+function registerReorgHaltReductionTests() {
     it('reduces a halted health payload', function () {
         const r = reduceDecoderReorgHalt({
             status: 'healthy', reorg_halted: true, reorg_halted_at: '2026-09-07T06:29:07Z',
@@ -348,7 +347,9 @@ describe('ps: decoder REORG_HALT surface', function () {
         expect(reduceDecoderReorgHalt(null)).to.equal(null)
         expect(reduceDecoderReorgHalt('garbage')).to.equal(null)
     })
+}
 
+function registerReorgHaltNoteTests() {
     it('the note names the coin, the meaning, the halt reason and both recoveries', function () {
         const note = describeReorgHaltNote('bitcoin', 'mainnet', { halted: true, at: '2026-09-07T06:29:07Z', reason: 'safe-depth window' })
         expect(note).to.match(/^bitcoin\/mainnet xchain-decoder carries a durable REORG_HALT marker since 2026-09-07T06:29:07Z/)
@@ -374,4 +375,9 @@ describe('ps: decoder REORG_HALT surface', function () {
         expect(note).to.match(/parse loop is PARKED/).and.to.match(/nothing is being parsed/)
         expect(note).to.not.match(/parses forward/)
     })
+}
+
+describe('ps: decoder REORG_HALT surface', function () {
+    registerReorgHaltReductionTests()
+    registerReorgHaltNoteTests()
 })

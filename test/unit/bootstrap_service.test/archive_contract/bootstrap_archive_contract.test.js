@@ -122,7 +122,7 @@ describe('bootstrap archive producer completion contract', function () {
     })
 })
 
-describe('bootstrap archive frozen height contract', function () {
+function registerFrozenHeightReadTests() {
     it('reads LAST_BLOCK_HEIGHT from the archived tracker store through its image', async function () {
         const execFile = configureHeightReader('{"height":103,"haltMarker":null}\n')
 
@@ -141,7 +141,9 @@ describe('bootstrap archive frozen height contract', function () {
         expect(() => trackerHeight.chooseArchiveHeight(100, 102, null)).to.throw(/archived store/)
         expect(trackerHeight.chooseArchiveHeight(100, 102, 103)).to.equal(103)
     })
+}
 
+function registerFrozenHeightRefusalTests() {
     it('does not wrap or sign when the archived LevelDB height cannot be read', async function () {
         const stubs = makeStubs()
         stubs.execFile = sinon.stub().callsFake((cmd, args) => {
@@ -194,6 +196,11 @@ describe('bootstrap archive frozen height contract', function () {
         expect(stubs.archiveMeta.writeBootstrapMeta.called).to.equal(false)
         expect(stubs.dockerService.startContainer.called).to.equal(true)
     })
+}
+
+describe('bootstrap archive frozen height contract', function () {
+    registerFrozenHeightReadTests()
+    registerFrozenHeightRefusalTests()
 })
 
 async function rejectInvalidStagedLayout() {

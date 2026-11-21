@@ -76,14 +76,9 @@ describe('tracker_height', function () {
 
 })
 
-describe('tracker_height frozen store', function () {
-    let fakes
-
-    beforeEach(function () {
-        fakes = configureTrackerHeight(sinon.stub())
-    })
-
+function registerFrozenStoreReadTests(getFakes) {
     it('readFrozenStoreHeight reads the height of the archived directory', async function () {
+        const fakes = getFakes()
         fakes.execFile.callsFake((command, args, options, callback) => callback(null, {
             stdout: '{"height":4242,"haltMarker":null}\n', stderr: ''
         }))
@@ -100,6 +95,7 @@ describe('tracker_height frozen store', function () {
     })
 
     it('passes a syntactically valid height reader to node', async function () {
+        const fakes = getFakes()
         fakes.execFile.callsFake((command, args, options, callback) => callback(null, {
             stdout: '{"height":4242,"haltMarker":null}\n', stderr: ''
         }))
@@ -114,6 +110,7 @@ describe('tracker_height frozen store', function () {
     })
 
     it('readFrozenStoreHeight returns null on junk output or a failed read', async function () {
+        const fakes = getFakes()
         fakes.execFile.callsFake((command, args, options, callback) => callback(null, { stdout: '12abc', stderr: '' }))
         expect(await trackerHeight.readFrozenStoreHeight('vol', '/data', 'container-id')).to.equal(null)
         fakes.execFile.callsFake((command, args, options, callback) => callback(new Error('no such file')))
@@ -121,6 +118,7 @@ describe('tracker_height frozen store', function () {
     })
 
     it('reports whether the frozen halt marker was checked and present', async function () {
+        const fakes = getFakes()
         fakes.execFile.callsFake((command, args, options, callback) => callback(null, {
             stdout: '{"height":4242,"haltMarker":"{\\"reason\\":\\"reorg\\"}"}\n', stderr: ''
         }))
@@ -132,8 +130,11 @@ describe('tracker_height frozen store', function () {
             height: null, haltMarker: null, haltChecked: false
         })
     })
+}
 
+function registerFrozenStoreSafetyTests(getFakes) {
     it('refuses a present or unchecked frozen marker and accepts an absent one', function () {
+        const fakes = getFakes()
         const base = { coin: 'bitcoin', network: 'mainnet' }
         expect(() => trackerHeight.refuseHaltedFrozenStore({ ...base,
             frozenStoreState: { height: 10, haltMarker: null, haltChecked: true }
@@ -147,6 +148,7 @@ describe('tracker_height frozen store', function () {
     })
 
     it('warns and continues when the health gate skip is explicit', function () {
+        const fakes = getFakes()
         fakes.gateSkipped.returns(true)
         expect(() => trackerHeight.refuseHaltedFrozenStore({ coin: 'bitcoin', network: 'mainnet',
             frozenStoreState: { height: 10, haltMarker: 'halted', haltChecked: true }
@@ -160,7 +162,17 @@ describe('tracker_height frozen store', function () {
         expect(() => trackerHeight.refusePreStopOnlyHeight({ coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: 99 })).to.not.throw()
         expect(() => trackerHeight.refusePreStopOnlyHeight({ coin: 'bitcoin', network: 'mainnet', preStopHeight: 100, postRestartHeight: null, frozenHeight: null })).to.throw()
     })
+}
 
+describe('tracker_height frozen store', function () {
+    let fakes
+
+    beforeEach(function () {
+        fakes = configureTrackerHeight(sinon.stub())
+    })
+
+    registerFrozenStoreReadTests(() => fakes)
+    registerFrozenStoreSafetyTests(() => fakes)
 })
 
 describe('tracker_height archive height edge inputs', function () {
