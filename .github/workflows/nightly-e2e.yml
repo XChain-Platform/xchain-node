@@ -106,6 +106,10 @@ on:
         description: 'Run the hub as a validator (needed by the onboardValidator suite; changes the price regime)'
         type: boolean
         default: false
+      regtest_activations:
+        description: 'Space-separated XC_*_REGTEST_ACTIVATION=HEIGHT pairs for a dispatched run'
+        type: string
+        default: ''
       ref:
         # The release ceremony's freeze step needs a driven e2e run against the
         # EXACT content a release is being cut from, not against a branch tip
@@ -362,6 +366,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.4"
+
+      - name: Validate and export dispatched regtest activations
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REGTEST_ACTIVATIONS: ${{ github.event.inputs.regtest_activations || '' }}
+        run: node src/utils/regtest_activations.js "$REGTEST_ACTIVATIONS" "$GITHUB_ENV"
 
       - name: Reclaim runner disk (coin daemon + per-service images are large)
         run: |

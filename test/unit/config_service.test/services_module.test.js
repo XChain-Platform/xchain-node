@@ -17,11 +17,12 @@ const services = require('../../../src/services/config_service/services')
 const Network = { MAINNET: 'mainnet', TESTNET: 'testnet', REGTEST: 'regtest' }
 const XChainService = { XCHAIN_INDEXER: 'xchain-indexer', XCHAIN_E2E_TEST: 'xchain-e2e-test' }
 
-function configure(configOverrides = {}, secretValues = {}, validatorSettings = null) {
+function configure(configOverrides = {}, secretValues = {}, validatorSettings = null, hostEnv = {}) {
     const config = {
         INDEXER_GENESIS_ENV: {},
         INDEXER_ROLLCALL_ENV: {},
         HUB_SYNC_GRACE_ENV: {},
+        hostEnv: () => hostEnv,
         ...configOverrides
     }
     services.configure({
@@ -43,7 +44,7 @@ function e2eServiceTests() {
     it('configures the e2e container with public validator identity and hub access', function () {
         configure({ HUB_API_KEY: 'hub-key' }, {}, { pubkey: '02abcdef' })
         const defaults = {}
-        services.configureE2e(defaults, 'xchain-e2e-test', 'bitcoin')
+        services.configureE2e(defaults, 'xchain-e2e-test', 'bitcoin', 'regtest')
         expect(defaults).to.deep.equal({
             COIN: 'bitcoin',
             XCHAIN_CONTRACTS_DIR: '/XChainE2ETest/xchain-contracts',
@@ -55,8 +56,27 @@ function e2eServiceTests() {
     it('does not alter a non-e2e service', function () {
         configure({ HUB_API_KEY: 'hub-key' }, {}, { pubkey: '02abcdef' })
         const defaults = { KEEP: 'value' }
-        services.configureE2e(defaults, 'xchain-indexer', 'bitcoin')
+        services.configureE2e(defaults, 'xchain-indexer', 'bitcoin', 'regtest')
         expect(defaults).to.deep.equal({ KEEP: 'value' })
+    })
+
+    it('passes host regtest activations to the e2e suite only on regtest', function () {
+        const hostEnv = {
+            XC_EXECUTE_NATIVE_METERED_GAS_REGTEST_ACTIVATION: '1',
+            XC_NOT_AN_ACTIVATION: '2'
+        }
+        configure({}, {}, null, hostEnv)
+
+        const regtest = {}
+        services.configureE2e(regtest, 'xchain-e2e-test', 'dogecoin', 'regtest')
+        expect(regtest.XC_EXECUTE_NATIVE_METERED_GAS_REGTEST_ACTIVATION).to.equal('1')
+        expect(regtest).not.to.have.property('XC_NOT_AN_ACTIVATION')
+
+        for (const network of ['mainnet', 'testnet']) {
+            const sharedNetwork = {}
+            services.configureE2e(sharedNetwork, 'xchain-e2e-test', 'dogecoin', network)
+            expect(sharedNetwork).not.to.have.property('XC_EXECUTE_NATIVE_METERED_GAS_REGTEST_ACTIVATION')
+        }
     })
 }
 
