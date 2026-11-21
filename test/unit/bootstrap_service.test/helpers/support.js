@@ -330,7 +330,9 @@ function makeBootstrapOverrides(stubs, execFileCb) {
 
 function loadBootstrapService(stubs) {
     const execFileCb = makeExecFileCallback(stubs)
-    return proxyquire('../../../../src/services/bootstrap_service', makeBootstrapOverrides(stubs, execFileCb))
+    const service = proxyquire('../../../../src/services/bootstrap_service', makeBootstrapOverrides(stubs, execFileCb))
+    service.resetBootstrapOutcomes()
+    return service
 }
 
 

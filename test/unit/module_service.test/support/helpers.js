@@ -45,7 +45,8 @@ function makeStubs() {
             setModuleContainer: sinon.stub().resolves(true),
             getModuleContainer: sinon.stub().resolves('old-container-id'),
             getModuleContainerStrict: sinon.stub().resolves('old-container-id'),
-            deleteModuleContainer: sinon.stub().resolves('removed-id')
+            deleteModuleContainer: sinon.stub().resolves('removed-id'),
+            deleteModuleContainerIfMatches: sinon.stub().resolves(true)
         },
         statusChanged: sinon.stub().resolves(),
         getStatus: sinon.stub().resolves({}),

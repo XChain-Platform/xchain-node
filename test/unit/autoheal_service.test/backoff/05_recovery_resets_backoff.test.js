@@ -115,7 +115,10 @@ describe('AutohealService', () => {
         // Container comes back healthy: the earned backoff is not a debt it carries
         // into a later, unrelated wedge.
         stubs.getStatusFromContainer.resolves(inspectStatus('healthy', [recordedProbe(NOW + 14 * 60000, 0)]))
-        await service.runAutoheal({ now: NOW + 14 * 60000 + 15000 })
+        await service.runAutoheal({
+            now: NOW + 14 * 60000 + 15000,
+            readIndexerStatus: sinon.stub().resolves({ ready: true, stallReason: null, lastBlockCommittedAt: null })
+        })
         const cleared = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
         expect(cleared.restartCount).to.not.have.property('bo2')
 

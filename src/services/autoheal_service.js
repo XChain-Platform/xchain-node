@@ -16,8 +16,8 @@
  * Closes the loop on container healthchecks. buildHealthcheckArgs
  * attaches --health-* probes to every persistent service, and the
  * probes correctly report wedges (e.g. the indexer's /status returns
- * 503 while stalled), but plain `docker run` takes no action on the
- * `unhealthy` state: --restart unless-stopped only fires when the PID
+ * 503 on a wedge or an unreachable database, not on every stall), but
+ * plain `docker run` takes no action on the `unhealthy` state: --restart unless-stopped only fires when the PID
  * exits. An alive-but-stalled service therefore stays wedged forever,
  * visible only in `docker ps`.
  *
@@ -29,11 +29,14 @@
  * restart of a container that never recovers DOUBLES the wait, up to a
  * ceiling. So a wedge a restart does not clear costs one restart per
  * cooldown, then per 2x, 4x, 8x... rather than one per cooldown forever.
- * The counter is dropped only on evidence the container recovered, including
- * a retained passing probe beyond the restart probation window.
+ * The counter is dropped only on evidence the container recovered. For the
+ * indexer, a retained pass beyond probation also needs a post-restart commit
+ * or a ready status; an indexer that reports not ready instead escalates
+ * after one restart, without another restart.
  * There is deliberately no attempt cap: backoff ends churn without leaving a recoverable service down forever.
  * The escalation path instead: once a container has been restarted twice
- * in one episode without recovering, every pass that sees it logs an
+ * in one episode without recovering (once, for the not-ready indexer case
+ * above), every pass that sees it logs an
  * "investigate" line at warn (stderr) and the command exits 2, so a
  * systemd OnFailure= hook or cron mail can act on a wedge that has stopped
  * being transient. A failed restart logs at error and exits 1. An opted-in
@@ -68,6 +71,9 @@ const {
     isRecoveryEstablished
 } = require('./autoheal_service/restart_state.js')
 const { recordInspectFailure, logPassSummary, autohealExitCode } = require('./autoheal_service/pass_signals.js')
+const {
+    classifyIndexerRecovery, defaultReadIndexerStatus, skipNonUnhealthy
+} = require('./autoheal_service/indexer_recovery.js')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -159,28 +165,6 @@ function skipNonRunning(candidate, state, result) {
     if (state.unhealthySince[containerId] === undefined) return false
     delete state.unhealthySince[containerId]
     return true
-}
-
-function skipNonUnhealthy(candidate, health, state, probationMs) {
-    const { containerId } = candidate
-    if (health && health.Status === 'unhealthy') return null
-
-    let changed = false
-    // Episode over (or the healthcheck is gone): forget the onset so the
-    // next wedge starts its own clock instead of inheriting an old one.
-    if (state.unhealthySince[containerId] !== undefined) {
-        delete state.unhealthySince[containerId]
-        changed = true
-    }
-    // A healthy status clears the attempt count only after its newest passing
-    // probe outlasts restart probation. A starting status, no healthcheck, or a
-    // pass caused by the restart itself is not evidence the wedge cleared.
-    if (health && health.Status === 'healthy' && state.restartCount[containerId] !== undefined &&
-        isRecoveryEstablished(getLastHealthyProbeMs(health), state.restarts[containerId], probationMs)) {
-        delete state.restartCount[containerId]
-        changed = true
-    }
-    return changed
 }
 
 function seedEpisodeOnset(health, state, containerId, now, derived) {
@@ -332,7 +316,8 @@ function persistState(stateFile, state, modules) {
 }
 
 // One pass. A vanished container does not abort the sweep; failures and escalation reach the CLI.
-async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.now() } = {}) {
+async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.now(),
+    readIndexerStatus = defaultReadIndexerStatus } = {}) {
     const wallStart = Date.now()
     const timing = autohealTiming()
     const stateFile = getStateFilePath()
@@ -368,7 +353,8 @@ async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.n
         }
 
         const health = candidate.status && candidate.status.State && candidate.status.State.Health
-        const recoveredStateChanged = skipNonUnhealthy(candidate, health, state, timing.probationMs)
+        const recoveredStateChanged = await skipNonUnhealthy(
+            candidate, health, state, timing.probationMs, result, readIndexerStatus)
         if (recoveredStateChanged !== null) {
             if (recoveredStateChanged) onsetChanged = true
             continue
@@ -393,6 +379,7 @@ module.exports = {
     getUnhealthySinceMs,
     getLastHealthyProbeMs,
     isRecoveryEstablished,
+    classifyIndexerRecovery,
     restartBackoffMs,
     DEFAULT_COOLDOWN_MS,
     DEFAULT_COOLDOWN_CEILING_MS,

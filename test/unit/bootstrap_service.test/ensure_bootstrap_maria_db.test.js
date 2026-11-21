@@ -52,6 +52,36 @@ describe('BootstrapService', function () {
 describe('BootstrapService', function () {
     beforeEach(saveRequireSignedBootstrapSetting)
     afterEach(restoreRequireSignedBootstrapSetting)
+    describe('ensureBootstrapMariaDb() decoder pairing', function () {
+        it('skips an indexer archive after its decoder found no archive in this run', async function () {
+            const stubs = makeStubs()
+            stubs.axios.resolves({ status: 404, headers: {}, data: new PassThrough() })
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+            expect(await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_DECODER)).to.be.false
+            stubs.axios.resetHistory()
+            expect(await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_INDEXER)).to.be.false
+            expect(stubs.axios.called).to.be.false
+        })
+
+        it('does not let a decoder outcome for another network block the indexer', async function () {
+            const stubs = makeStubs()
+            stubs.axios.resolves({ status: 404, headers: {}, data: new PassThrough() })
+            stubs.fs.existsSync.returns(true)
+            const bs = loadBootstrapService(stubs)
+            bs.resetBootstrapOutcomes()
+            await bs.ensureBootstrapMariaDb(COIN, 'testnet', XChainService.XCHAIN_DECODER)
+            stubs.axios.resetHistory()
+            await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_INDEXER)
+            expect(stubs.axios.calledOnce).to.be.true
+        })
+    })
+})
+
+describe('BootstrapService', function () {
+    beforeEach(saveRequireSignedBootstrapSetting)
+    afterEach(restoreRequireSignedBootstrapSetting)
     describe('ensureBootstrapMariaDb()', function () {
         afterEach(function () {
             delete process.env.XCHAIN_NODE_NO_BOOTSTRAP
@@ -205,6 +235,10 @@ describe('BootstrapService', function () {
             const summary = logs.lines.join('\n')
             expect(summary).to.match(/xchain-decoder: NOT restored, the coin node is behind the archive: the coin node is at 962304/)
             expect(summary).to.match(/wait for the\nnode to pass the archive height and re-run install with XCHAIN_NODE_FORCE_BOOTSTRAP=1/)
+
+            stubs.axios.resetHistory()
+            expect(await bs.ensureBootstrapMariaDb(COIN, NETWORK, XChainService.XCHAIN_INDEXER)).to.be.false
+            expect(stubs.axios.called, 'the paired indexer archive must not be downloaded').to.equal(false)
         })
     })
 })

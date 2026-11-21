@@ -187,36 +187,51 @@ describe('ui/menu per-module action labels are all handled', function () {
     });
 });
 
+function loadLocked({ scan = async () => 1, holdError = null } = {}) {
+    const events = [];
+    const scopedCommandLock = (label) => ({
+        hold() { events.push('hold ' + label); if (holdError) throw holdError; },
+        release() { events.push('release ' + label); },
+    });
+    const mod = proxyquire('../../src/ui/menu.js', {
+        'enquirer': { Select: class { async run() { return 'Scan already installed modules'; } } },
+        '../state': {
+            db: {}, getRemoteModuleVersions: () => ({}),
+            setStatusUpdated: value => events.push('status-updated ' + value)
+        },
+        '../services/status_service': { getStatus: async () => ({}), statusChanged: async () => events.push('status') },
+        '../services/discovery_service': { scanAndRegisterModules: async () => { events.push('scan'); return scan(); } },
+        '../cli/dispatch': { scopedCommandLock },
+    });
+    return { mod, events };
+}
+
 // Menu actions mutate the stack like the CLI verbs, so each one holds the command
 // lock for its own run and an idle menu holds nothing.
 describe('ui/menu mutating actions hold the command lock', function () {
-    function loadLocked({ scan = async () => 1, holdError = null } = {}) {
-        const events = [];
-        const scopedCommandLock = (label) => ({
-            hold() { events.push('hold ' + label); if (holdError) throw holdError; },
-            release() { events.push('release ' + label); },
-        });
-        const mod = proxyquire('../../src/ui/menu.js', {
-            'enquirer': { Select: class { async run() { return 'Scan already installed modules'; } } },
-            '../services/status_service': { getStatus: async () => ({}), statusChanged: async () => events.push('status') },
-            '../services/discovery_service': { scanAndRegisterModules: async () => { events.push('scan'); return scan(); } },
-            '../cli/dispatch': { scopedCommandLock },
-        });
-        return { mod, events };
-    }
 
     it('holds the lock around the scan and releases it after', async function () {
         const { mod, events } = loadLocked();
         const next = await mod.mainMenu();
         assert.strictEqual(next.menuFunction, mod.mainMenu);
         const label = 'interactive: scanAndRegisterModules';
-        assert.deepStrictEqual(events, ['hold ' + label, 'scan', 'status', 'release ' + label]);
+        assert.deepStrictEqual(events, [
+            'hold ' + label, 'scan', 'status-updated false', 'scan', 'status', 'release ' + label
+        ]);
     });
 
     it('releases the lock when the action throws', async function () {
         const { mod, events } = loadLocked({ scan: async () => { throw new Error('docker gone'); } });
         await mod.mainMenu();
         assert.strictEqual(events[events.length - 1], 'release interactive: scanAndRegisterModules');
+    });
+
+    it('does not run the action when the locked rescan fails', async function () {
+        const { mod, events } = loadLocked({ scan: async () => { throw new Error('docker gone'); } });
+        await mod.mainMenu();
+        assert.deepStrictEqual(events, [
+            'hold interactive: scanAndRegisterModules', 'scan', 'release interactive: scanAndRegisterModules'
+        ]);
     });
 
     it('skips the action and stays in the menu when another command holds the lock', async function () {
@@ -262,6 +277,8 @@ function loadNodeMenu({ localNodeVersion = null, updateModules = async () => ({}
             cloneGit: async (...args) => { calls.clone.push(args); },
             installModule: async (...args) => { calls.install.push(args); },
         },
+        '../services/discovery_service': { scanAndRegisterModules: async () => true },
+        '../state': { db: {}, getRemoteModuleVersions: () => ({}), setStatusUpdated: () => {} },
         '../cli/dispatch': { scopedCommandLock: () => ({ hold() {}, release() {} }) },
     });
     return { mod, calls };

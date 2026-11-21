@@ -23,6 +23,8 @@ function loadMenu(installModule) {
         '../services/version_service': {},
         '../operations/module_operations': {},
         '../services/module_service': { installModule, cloneGit: async () => {} },
+        '../services/discovery_service': { scanAndRegisterModules: async () => true },
+        '../state': { db: {}, getRemoteModuleVersions: () => ({}), setStatusUpdated: () => {} },
         '../cli/dispatch': { scopedCommandLock: () => ({ hold() {}, release() {} }) }
     })
 }

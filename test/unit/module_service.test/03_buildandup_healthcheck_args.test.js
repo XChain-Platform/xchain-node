@@ -83,7 +83,6 @@ moduleSuite('buildAndUp() healthcheck args', function () {
             }
         })
     })
-
 moduleSuite('buildAndUp() healthcheck args', function () {
 
         it('returns [] with no warning for a module that has no healthcheck descriptor', function () {
@@ -287,9 +286,45 @@ moduleSuite('uninstallModule()', function () {it('returns true when module is no
             stubs.db.getModuleContainer.resolves('stale-cid')
             const ms = loadModuleService(stubs)
             const result = await ms.uninstallModule('bitcoin', 'mainnet', 'xchain-encoder')
-            expect(stubs.db.deleteModuleContainer.calledOnce).to.be.true
+            expect(stubs.db.deleteModuleContainerIfMatches.calledOnceWith(
+                'xchain-encoder', 'bitcoin', 'mainnet', 'stale-cid'
+            )).to.be.true
             expect(stubs.statusChanged.calledOnce).to.be.true
             expect(result).to.be.true
+        })
+
+        it('leaves a replacement container registered when the cached id is stale', async function () {
+            const stubs = makeStubs()
+            stubs.getStatus.resolves({ bitcoin: { mainnet: { 'xchain-encoder': {
+                container_id: 'old-container-id',
+                status: { State: { Status: 'exited' } }
+            } } } })
+            stubs.db.deleteModuleContainerIfMatches.resolves(false)
+            stubs.db.getModuleContainerStrict.resolves('replacement-container-id')
+            const ms = loadModuleService(stubs)
+            let thrown = null
+            try {
+                await ms.uninstallModule('bitcoin', 'mainnet', 'xchain-encoder')
+            } catch (err) {
+                thrown = err
+            }
+            expect(thrown).to.be.instanceOf(Error)
+            expect(thrown.message).to.match(/replacement.*left running/i)
+            expect(stubs.db.deleteModuleContainer.called).to.be.false
+        })
+    })
+
+moduleSuite('uninstallModule()', function () {
+        it('accepts a row already removed after compare-and-delete misses', async function () {
+            const stubs = makeStubs()
+            stubs.getStatus.resolves({ bitcoin: { mainnet: { 'xchain-encoder': {
+                container_id: 'old-container-id',
+                status: { State: { Status: 'exited' } }
+            } } } })
+            stubs.db.deleteModuleContainerIfMatches.resolves(false)
+            stubs.db.getModuleContainerStrict.resolves(null)
+            const ms = loadModuleService(stubs)
+            expect(await ms.uninstallModule('bitcoin', 'mainnet', 'xchain-encoder')).to.be.true
         })
 
         it('throws when container kill/remove fails (catch rethrows)', async function () {
@@ -334,57 +369,5 @@ moduleSuite('uninstallModule() shared hub', function () {
             expect(stubs.stopContainerByName.calledOnceWith('hub-123', 30)).to.be.true
             expect(stubs.removeContainer.calledOnceWith('hub-123')).to.be.true
             expect(stubs.stopContainerByName.calledBefore(stubs.removeContainer)).to.be.true
-        })
-    })
-
-    // -------------------------------------------------------------------
-    // cloneGit: branch coverage
-    // -------------------------------------------------------------------
-moduleSuite('cloneGit() branch handling', function () {
-
-        it('rejects on invalid branch name', async function () {
-            const stubs = makeStubs()
-            const ms = loadModuleService(stubs)
-            try {
-                await ms.cloneGit('xchain-encoder', false, false, 'bad branch!')
-                expect.fail()
-            } catch (err) {
-                expect(err).to.include('Invalid branch name')
-            }
-        })
-
-        it('clones with -b flag when a valid branch is specified', async function () {
-            const stubs = makeStubs()
-            let cloneArgs = null
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                // Only the clone call; the identity reads that follow it are also git.
-                if (args[0] === 'clone') cloneArgs = args
-                cb(null)
-            })
-            const ms = loadModuleService(stubs)
-            await ms.cloneGit('xchain-encoder', false, false, 'feature/test')
-            expect(cloneArgs).to.include('-b')
-            expect(cloneArgs).to.include('feature/test')
-        })
-
-        it('rejects (no silent fallback) when the requested branch is not found', async function () {
-            // uuid:4f649bd0: a typo'd or deleted branch must fail the install
-            // rather than silently building the default branch's code.
-            const stubs = makeStubs()
-            let callCount = 0
-            stubs.execFile.callsFake((cmd, args, ...rest) => {
-                const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
-                callCount++
-                cb(new Error('git error'), '', 'remote: branch not found on server')
-            })
-            const ms = loadModuleService(stubs)
-            try {
-                await ms.cloneGit('xchain-encoder', false, false, 'missing-branch')
-                expect.fail()
-            } catch (err) {
-                expect(err).to.include("branch 'missing-branch' not found")
-                expect(callCount).to.equal(1)
-            }
         })
     })

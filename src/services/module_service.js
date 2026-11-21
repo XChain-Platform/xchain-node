@@ -289,12 +289,22 @@ async function uninstallModule(coin, network, module) {
             }
             await removeContainer(moduleStatus["container_id"])
             await statusChanged()
-            const removed = await db.deleteModuleContainer(module, coin, network)
+            const removed = await db.deleteModuleContainerIfMatches(
+                module, coin, network, moduleStatus["container_id"]
+            )
             if (removed) {
                 return removed
-            } else {
-                throw "There was a problem trying to remove a container from the database"
             }
+            const registeredId = await db.getModuleContainerStrict(module, coin, network)
+            if (registeredId === null) return true
+            if (registeredId !== moduleStatus["container_id"]) {
+                throw new Error(
+                    `The registry now points at container ${String(registeredId).slice(0, 12)}, not removed container ` +
+                    `${String(moduleStatus["container_id"]).slice(0, 12)}; the registered container was left running. ` +
+                    `Check status and run uninstall again.`
+                )
+            }
+            throw "There was a problem trying to remove a container from the database"
         } catch (err) {
             // Preserve the original error instead of masking every failure in
             // this multi-step block (kill/remove/statusChanged/registry delete)
@@ -313,9 +323,11 @@ async function uninstallModule(coin, network, module) {
         // container truly isn't present: clean up any orphaned row.
         const staleId = await db.getModuleContainer(module, coin, network)
         if (staleId) {
-            await db.deleteModuleContainer(module, coin, network)
-            await statusChanged()
-            logger.info("Removed stale tracking row for " + module + " (" + coin + "/" + network + ")")
+            const removed = await db.deleteModuleContainerIfMatches(module, coin, network, staleId)
+            if (removed) {
+                await statusChanged()
+                logger.info("Removed stale tracking row for " + module + " (" + coin + "/" + network + ")")
+            }
         }
         return true
     }

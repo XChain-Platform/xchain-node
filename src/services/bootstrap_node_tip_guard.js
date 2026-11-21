@@ -179,9 +179,12 @@ function evaluateNodeTipAgainstArchive({ archiveHeight, chainInfo, serviceWaits,
     // The decoder and tracker wait only while the node reports initial block
     // download; the indexer follows the decoder, so the node's flag is not its concern.
     if (ibd || module === XChainService.XCHAIN_INDEXER) {
+        const waitDetail = module === XChainService.XCHAIN_INDEXER
+            ? `its xchain-decoder waits until the node passes ${archiveHeight}, then the indexer follows it`
+            : `the ${module} waits until the node passes ${archiveHeight} and then continues`
         return {
             verdict: VERDICT.BEHIND_WAIT, archiveHeight, nodeHeight, gap, ibd,
-            detail: `${position}; the ${module} waits until the node passes ${archiveHeight} and then continues, which \`xchain-node ps\` shows as WAITING FOR NODE`
+            detail: `${position}; ${waitDetail}, which \`xchain-node ps\` shows as WAITING FOR NODE`
         }
     }
     return {
