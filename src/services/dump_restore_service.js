@@ -17,6 +17,14 @@ const { confirmDestructiveReset } = require('../operations/module_operations/rep
 const { configuredDatabaseName } = require('../utils/module_database_name')
 const { assertSafeDbIdentifier } = require('../utils/sql_safety')
 const { getLogger } = require('../observability/logger')
+const {
+    dropRestoreDatabaseSql,
+    createRestoreDatabaseSql,
+    grantRestoreDatabaseSql,
+    flushRestorePrivilegesSql,
+    restoreTableCountSql,
+    restoreBlockSummarySql
+} = require('../db/dump_restore')
 
 const DUMP_SUFFIX = '.sql.gz'
 const TAIL_BYTES = 64 * 1024
@@ -178,10 +186,10 @@ function parseNonNegativeInteger(text, label) {
 
 async function verifyRestore(context, deps) {
     const tableCount = parseNonNegativeInteger(await runSql(context,
-        `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${context.databaseName}'`, deps),
+        restoreTableCountSql(context.databaseName), deps),
     'table count')
     const blockResult = String(await runSql(context,
-        `SELECT COUNT(*), MAX(block_index) FROM \`${context.databaseName}\`.blocks`, deps)).trim().split(/\s+/)
+        restoreBlockSummarySql(context.databaseName), deps)).trim().split(/\s+/)
     const blockRows = parseNonNegativeInteger(blockResult[0], 'block row count')
     const maxBlockIndex = blockResult[1] === 'NULL'
         ? 'NULL'
@@ -201,11 +209,11 @@ async function performRestore(context, service, chain, network, deps) {
     // From the first DDL call onward a failure may have left the database
     // absent or partially imported. Keep the service stopped in that case so
     // it cannot resume over an indeterminate store.
-    await runSql(context,
-        `DROP DATABASE IF EXISTS \`${context.databaseName}\`; CREATE DATABASE \`${context.databaseName}\``, deps)
+    await runSql(context, dropRestoreDatabaseSql(context.databaseName), deps)
+    await runSql(context, createRestoreDatabaseSql(context.databaseName), deps)
     await importDump(context, deps)
-    await runSql(context,
-        `GRANT ALL PRIVILEGES ON \`${context.databaseName}\`.* TO '${context.databaseUser}'@'%'; FLUSH PRIVILEGES`, deps)
+    await runSql(context, grantRestoreDatabaseSql(context.databaseName, context.databaseUser), deps)
+    await runSql(context, flushRestorePrivilegesSql(), deps)
     if (stopped) {
         deps.logger.info(`Starting ${service} container...`)
         await deps.startContainer(context.serviceContainerId)

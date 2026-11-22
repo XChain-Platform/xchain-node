@@ -96,7 +96,7 @@ function harness() {
     }
 }
 
-describe('DumpRestoreService', function () {
+describe('DumpRestoreService', function validationTests() {
     it('classifies restore-dump as a lock-holding mutating command', function () {
         expect(dispatchSettings(config).mutatingCommands).to.include('restore-dump')
     })
@@ -142,7 +142,9 @@ describe('DumpRestoreService', function () {
             file: path.join(h.directory, 'unused.sql.gz'), yes: true
         }), /without --allow-mainnet/)
     })
+})
 
+describe('DumpRestoreService', function executionTests() {
     it('uses reset confirmation and refuses a headless run without --yes', async function () {
         const h = harness()
         const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
