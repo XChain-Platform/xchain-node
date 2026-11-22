@@ -207,6 +207,18 @@ describe('moduleOperations', function () {
             expect(result.logFile).to.be.a('string')
         })
 
+        it('keeps the container when its logs cannot be exported', async function () {
+            const stubs = makeStubs()
+            stubs.installModule.resolves('e2e-container-id')
+            stubs.waitContainer.resolves(7)
+            stubs.saveContainerLogs.rejects(new Error('docker logs failed'))
+            const ops = loadOperations(stubs)
+            const err = await ops.runE2ETest('bitcoin', 'mainnet').then(() => null, e => e)
+            expect(err.message).to.include('exited with code 7').and.to.include('e2e-container-id')
+            expect(err.message).to.include('partial log').and.to.include('docker logs failed')
+            expect(stubs.removeContainer.called).to.be.false
+        })
+
         it('builds mocha docker args when testName is provided', async function () {
             const stubs = makeStubs()
             stubs.installModule.resolves('e2e-container-id')

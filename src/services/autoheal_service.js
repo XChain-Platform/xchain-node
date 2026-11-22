@@ -16,8 +16,8 @@
  * Closes the loop on container healthchecks. buildHealthcheckArgs
  * attaches --health-* probes to every persistent service, and the
  * probes correctly report wedges (e.g. the indexer's /status returns
- * 503 while stalled), but plain `docker run` takes no action on the
- * `unhealthy` state: --restart unless-stopped only fires when the PID
+ * 503 on a wedge or an unreachable database, not on every stall), but
+ * plain `docker run` takes no action on the `unhealthy` state: --restart unless-stopped only fires when the PID
  * exits. An alive-but-stalled service therefore stays wedged forever,
  * visible only in `docker ps`.
  *
@@ -29,14 +29,19 @@
  * restart of a container that never recovers DOUBLES the wait, up to a
  * ceiling. So a wedge a restart does not clear costs one restart per
  * cooldown, then per 2x, 4x, 8x... rather than one per cooldown forever.
- * The counter is dropped only on evidence the container recovered, including
- * a retained passing probe beyond the restart probation window.
+ * The counter is dropped only on evidence the container recovered. For the
+ * indexer, a retained pass beyond probation also needs a post-restart commit
+ * or a ready status; an indexer that reports not ready instead escalates
+ * after one restart, without another restart.
  * There is deliberately no attempt cap: backoff ends churn without leaving a recoverable service down forever.
  * The escalation path instead: once a container has been restarted twice
- * in one episode without recovering, every pass that sees it logs an
+ * in one episode without recovering (once, for the not-ready indexer case
+ * above), every pass that sees it logs an
  * "investigate" line at warn (stderr) and the command exits 2, so a
  * systemd OnFailure= hook or cron mail can act on a wedge that has stopped
- * being transient. A failed restart logs at error and exits 1.
+ * being transient. A failed restart logs at error and exits 1. An opted-in
+ * container Docker cannot inspect (daemon down, socket permission, timeout;
+ * not "no such container") logs at error and exits 3.
  *
  * Detection-to-restart latency is the timer interval plus the health
  * retry budget plus the grace window; this is deliberate, restarts
@@ -65,6 +70,10 @@ const {
     getLastHealthyProbeMs,
     isRecoveryEstablished
 } = require('./autoheal_service/restart_state.js')
+const { recordInspectFailure, logPassSummary, autohealExitCode } = require('./autoheal_service/pass_signals.js')
+const {
+    classifyIndexerRecovery, defaultReadIndexerStatus, skipNonUnhealthy
+} = require('./autoheal_service/indexer_recovery.js')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -88,14 +97,13 @@ function autohealCandidate(row) {
 }
 
 async function inspectCandidate(candidate, result) {
-    const { module, coin, network, containerId } = candidate
     try {
-        candidate.status = await getStatusFromContainer(containerId)
+        candidate.status = await getStatusFromContainer(candidate.containerId)
         return true
-    } catch {
-        // Container gone or Docker unreachable for this id; the registry
-        // reconcile on the next precheck cleans it up. Not our job here.
-        result.skipped.push({ module, coin, network, containerId, reason: 'inspect failed' })
+    } catch (err) {
+        // A gone container is reconciled out of the registry by the next precheck;
+        // any other failure is reported so the pass cannot read as clean.
+        recordInspectFailure(candidate, err, result)
         return false
     }
 }
@@ -110,7 +118,7 @@ async function handleAutohealStopped(candidate, state, result, dryRun, resumeSto
     result.candidates.push({ module, coin, network, containerId })
     if (!resumeStopped) {
         result.escalated.push({ module, coin, network, containerId, attempts: state.restartCount[containerId] || 0 })
-        logger.warn(`autoheal: ${label} remains stopped after a failed restart; investigate or rerun with --resume-stopped`)
+        logger.warn(`autoheal: ${label} remains stopped after a restart failed or was interrupted; investigate or rerun with --resume-stopped`)
         return { handled: true, changed: false }
     }
     if (dryRun) {
@@ -157,39 +165,6 @@ function skipNonRunning(candidate, state, result) {
     if (state.unhealthySince[containerId] === undefined) return false
     delete state.unhealthySince[containerId]
     return true
-}
-
-function skipNonUnhealthy(candidate, health, state) {
-    const { containerId } = candidate
-    if (health && health.Status === 'unhealthy') return null
-
-    let changed = false
-    // Episode over (or the healthcheck is gone): forget the onset so the
-    // next wedge starts its own clock instead of inheriting an old one.
-    if (state.unhealthySince[containerId] !== undefined) {
-        delete state.unhealthySince[containerId]
-        changed = true
-    }
-    // On THIS branch drop the attempt count only on an OBSERVED `healthy`,
-    // never on a bare `!== unhealthy`, so a container
-    // that DID recover starts its next episode at the base cooldown. Backing
-    // off is a response to a wedge restarts are not clearing; a recovery is
-    // the evidence they cleared it, and `!== 'unhealthy'` is not that
-    // evidence: a restart puts the container into `starting` for the
-    // descriptor's start period plus its retry budget (60s + 3x15s for the
-    // decoder/indexer, and an operator can widen it to minutes via
-    // XCHAIN_NODE_HEALTH_START_PERIOD_<SERVICE>), so a pass landing in that
-    // window would wipe the counter the restart it had just issued earned.
-    // A wedge no restart clears then stayed at the BASE cooldown forever,
-    // which is the churn the doubling exists to end. Same principle the
-    // not-running guard above states: mid-restart is not recovery. `starting`
-    // is its health-probation form. A container with no healthcheck keeps its
-    // count too, and inertly: it can never reach the restart path below.
-    if (health && health.Status === 'healthy' && state.restartCount[containerId] !== undefined) {
-        delete state.restartCount[containerId]
-        changed = true
-    }
-    return changed
 }
 
 function seedEpisodeOnset(health, state, containerId, now, derived) {
@@ -249,12 +224,12 @@ function establishEpisode(candidate, health, state, now, probationMs, result) {
     return { since: episode.since, changed: episode.onsetReseeded || restartCountCleared }
 }
 
-async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now, wallStart) {
+function prepareCandidateRestart(candidate, since, timing, state, result, dryRun, now) {
     const { module, coin, network, containerId, label } = candidate
     if (now - since < timing.graceMs) {
         result.skipped.push({ module, coin, network, containerId, reason: 'inside grace window' })
         logger.info(`autoheal: ${label} is unhealthy but inside the ${timing.graceMs}ms grace window, not restarting yet`)
-        return
+        return null
     }
 
     // Each restart this container has already survived without recovering widens
@@ -272,7 +247,7 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
         result.skipped.push({ module, coin, network, containerId, reason: 'inside restart cooldown' })
         const log = escalated ? logger.warn : logger.info
         log(`autoheal: ${label} already restarted ${now - lastRestart}ms ago (${attempts} restart(s) this episode, backed-off cooldown ${effectiveCooldownMs}ms), a restart is not clearing this wedge; investigate`)
-        return
+        return null
     }
     if (escalated) {
         logger.warn(`autoheal: ${label} is still unhealthy after ${attempts} restart(s) this episode, a restart is not clearing this wedge; investigate`)
@@ -281,7 +256,23 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
     result.candidates.push({ module, coin, network, containerId })
     if (dryRun) {
         logger.info(`autoheal: DRY RUN, would restart ${label} (unhealthy for ${now - since}ms)`)
-        return
+        return null
+    }
+    return attempts
+}
+async function restartEligibleCandidate(candidate, since, timing, state, result, dryRun, now, wallStart, stateFile) {
+    const { module, coin, network, containerId, label } = candidate
+    const attempts = prepareCandidateRestart(candidate, since, timing, state, result, dryRun, now)
+    if (attempts === null) return
+    state.stoppedByAutoheal[containerId] = true
+    try {
+        writeState(stateFile, state)
+    } catch (err) {
+        delete state.stoppedByAutoheal[containerId]
+        const reason = `could not record restart intent: ${err}`
+        result.failed.push({ module, coin, network, containerId, reason })
+        logger.error(`autoheal: FAILED to record restart intent for ${label}: ${err}`)
+        return false
     }
 
     try {
@@ -295,13 +286,13 @@ async function restartEligibleCandidate(candidate, since, timing, state, result,
         // so advance it by the real time the restart consumed.
         state.restarts[containerId] = now + Math.max(0, Date.now() - wallStart)
         state.restartCount[containerId] = attempts + 1
+        delete state.stoppedByAutoheal[containerId]
         result.restarted.push({ module, coin, network, containerId })
         logger.info(`autoheal: restarted ${label} (unhealthy for ${now - since}ms, restart #${attempts + 1} this episode)`)
     } catch (err) {
-        if (err && err.containerStopped) state.stoppedByAutoheal[containerId] = true
         result.failed.push({ module, coin, network, containerId, reason: String(err) })
         logger.error(`autoheal: FAILED to restart ${label}: ${err}`)
-        return Boolean(err && err.containerStopped)
+        return true
     }
 }
 
@@ -325,12 +316,13 @@ function persistState(stateFile, state, modules) {
 }
 
 // One pass. A vanished container does not abort the sweep; failures and escalation reach the CLI.
-async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.now() } = {}) {
+async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.now(),
+    readIndexerStatus = defaultReadIndexerStatus } = {}) {
     const wallStart = Date.now()
     const timing = autohealTiming()
     const stateFile = getStateFilePath()
     const state = readState(stateFile)
-    const result = { candidates: [], restarted: [], failed: [], skipped: [], escalated: [] }
+    const result = { candidates: [], restarted: [], failed: [], skipped: [], escalated: [], inspectErrors: [] }
     // Set whenever an episode-onset or attempt-count entry is recorded or cleared,
     // so the pass persists it even when nothing was restarted. Without this the
     // onset never survives to the next pass and the grace window can never be
@@ -361,7 +353,8 @@ async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.n
         }
 
         const health = candidate.status && candidate.status.State && candidate.status.State.Health
-        const recoveredStateChanged = skipNonUnhealthy(candidate, health, state)
+        const recoveredStateChanged = await skipNonUnhealthy(
+            candidate, health, state, timing.probationMs, result, readIndexerStatus)
         if (recoveredStateChanged !== null) {
             if (recoveredStateChanged) onsetChanged = true
             continue
@@ -370,21 +363,14 @@ async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.n
         const episode = establishEpisode(candidate, health, state, now, timing.probationMs, result)
         if (!episode) continue
         if (episode.changed) onsetChanged = true
-        if (await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now, wallStart)) {
+        if (await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now, wallStart, stateFile)) {
             onsetChanged = true
         }
     }
 
     if (!dryRun && (onsetChanged || result.restarted.length > 0)) persistState(stateFile, state, modules)
-    if (result.candidates.length === 0) logger.info('autoheal: nothing to do')
+    logPassSummary(result)
     return result
-}
-
-// The CLI exit code for one pass: 1 when a restart failed, 2 when a wedge outlived two restarts, else 0.
-function autohealExitCode(result) {
-    if (result.failed.length > 0) return 1
-    if (result.escalated && result.escalated.length > 0) return 2
-    return 0
 }
 
 module.exports = {
@@ -393,6 +379,7 @@ module.exports = {
     getUnhealthySinceMs,
     getLastHealthyProbeMs,
     isRecoveryEstablished,
+    classifyIndexerRecovery,
     restartBackoffMs,
     DEFAULT_COOLDOWN_MS,
     DEFAULT_COOLDOWN_CEILING_MS,

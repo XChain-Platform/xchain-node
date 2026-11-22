@@ -23,12 +23,19 @@ const { containersFilesDir }     = require('../../config')
 const { getLogger } = require('../../observability/logger');
 const logger = getLogger();
 
-async function getStatusFromContainer(containerId) {
+const DOCKER_INSPECT_TIMEOUT_MS = 30000
+
+async function getStatusFromContainer(containerId, { timeoutMs = DOCKER_INSPECT_TIMEOUT_MS } = {}) {
     return new Promise((resolve, reject) => {
         try {
-            execFile('docker', ['inspect', containerId], (error, stdout) => {
+            execFile('docker', ['inspect', containerId], { timeout: timeoutMs }, (error, stdout) => {
                 if (error) {
-                    reject(error)
+                    if (error.killed) {
+                        const timedOut = new Error(`docker inspect ${containerId} timed out after ${timeoutMs} ms; the Docker daemon is not answering`)
+                        timedOut.killed = true
+                        timedOut.timedOut = true
+                        reject(timedOut)
+                    } else reject(error)
                 } else {
                     resolve(JSON.parse(stdout)[0])
                 }
@@ -92,8 +99,10 @@ async function addContainerToNetwork(containerId, networkName) {
 }
 
 // Map every host port currently published by a RUNNING container to the
-// name(s) of the container(s) holding it. Stopped containers don't bind host
-// ports, so `docker ps` (running only) is the correct scope. It detects
+// name(s) of the container(s) holding it. A stopped container holds no port at
+// this moment, so `docker ps` (running only) is the right scope for deciding
+// whether a requested port is in conflict; getAllBoundHostPorts covers the
+// other question, which port a stopped container will bind again. It detects
 // host-port collisions BEFORE `docker run` on multi-stack hosts, where two
 // NODE_PREFIX stacks, or a hand-created service container, can contend for
 // the same host port and otherwise only surface a cryptic "port is already
@@ -129,6 +138,48 @@ async function getPublishedHostPorts() {
             resolve(portToContainers)
         })
     })
+}
+
+// Host ports in the saved port bindings of one `docker inspect` line, which
+// reads "/name<TAB>{json PortBindings}" ("null" for a container with none).
+function savedHostPorts(line) {
+    const tab = line.indexOf('\t')
+    if (tab === -1) return null
+    let bindings
+    try { bindings = JSON.parse(line.substring(tab + 1)) } catch { return null }
+    const ports = []
+    for (const list of Object.values(bindings || {})) {
+        for (const binding of Array.isArray(list) ? list : []) {
+            if (binding && /^\d+$/.test(String(binding.HostPort))) ports.push(String(binding.HostPort))
+        }
+    }
+    return { name: line.substring(0, tab).replace(/^\//, '').trim(), ports }
+}
+
+// Map every host port saved in the port bindings of ANY container, stopped ones
+// included, to the container name(s) holding it. A stopped container keeps its
+// bindings and takes the same host ports again on `docker start`, which
+// `docker ps` cannot show (an exited container lists no ports). Used only to
+// pick a free replacement port, never to decide whether a request conflicts.
+// Best-effort like getPublishedHostPorts: any docker or parse failure yields an
+// empty map.
+async function getAllBoundHostPorts() {
+    const run = (args) => new Promise((resolve) => {
+        execFile('docker', args, (error, stdout) => resolve(error ? '' : String(stdout || '')))
+    })
+    const portToContainers = new Map()
+    const ids = (await run(['ps', '-a', '-q'])).split('\n').map(s => s.trim()).filter(Boolean)
+    if (ids.length === 0) return portToContainers
+    const inspected = await run(['inspect', '--format', '{{.Name}}\t{{json .HostConfig.PortBindings}}', ...ids])
+    for (const line of inspected.split('\n')) {
+        const held = line.trim() ? savedHostPorts(line) : null
+        if (!held) continue
+        for (const port of held.ports) {
+            if (!portToContainers.has(port)) portToContainers.set(port, new Set())
+            portToContainers.get(port).add(held.name)
+        }
+    }
+    return portToContainers
 }
 
 async function getDockerContainerFileData(containerId, filePath) {
@@ -172,11 +223,13 @@ async function stringToDockerContainerFile(containerId, dataString, filePath) {
 }
 
 module.exports = {
+    DOCKER_INSPECT_TIMEOUT_MS,
     getStatusFromContainer,
     getDockerNetworkInspect,
     createDockerNetwork,
     addContainerToNetwork,
     getPublishedHostPorts,
+    getAllBoundHostPorts,
     getDockerContainerFileData,
     getDockerContainerFileCat,
     stringToDockerContainerFile

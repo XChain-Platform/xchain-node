@@ -1,3 +1,14 @@
+/*********************************************************************
+ *
+ * Copyright © 2025-2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC - https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md.
+ *
+ **********************************************************************/
 'use strict'
 
 // The hub is handed the offer-list arm; a regtest indexer is handed the
@@ -7,7 +18,11 @@ const { expect, makeServiceWithConfig } = require('../config_service.test/helper
 
 const OFFER = 'XC_OFFER_LIST_REGTEST_ACTIVATION'
 const WIRE = 'EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME'
-const VALUES = { [OFFER]: '20', [WIRE]: '1700000000' }
+const CONTRACTS = 'XC_CONTRACTS_REGTEST_ACTIVATION'
+const MARKET_TIME = 'XC_LISTS_MARKET_REGTEST_TIME'
+const VALUES = {
+    [OFFER]: '20', [WIRE]: '1700000000', [CONTRACTS]: '0', [MARKET_TIME]: '1700000000'
+}
 
 describe('regtest gate switch passthrough', function () {
     let saved
@@ -28,9 +43,21 @@ describe('regtest gate switch passthrough', function () {
         expect(hub[OFFER]).to.equal(VALUES[OFFER])
     })
 
+    it('hands shared activation and time arms to the hub', async function () {
+        const hub = await makeServiceWithConfig('').getDefaultConfig('xchain-hub', null, null)
+        expect(hub[CONTRACTS]).to.equal(VALUES[CONTRACTS])
+        expect(hub[MARKET_TIME]).to.equal(VALUES[MARKET_TIME])
+    })
+
     it('hands a regtest indexer the wire-field arm', async function () {
         const indexer = await makeServiceWithConfig('').getDefaultConfig('xchain-indexer', 'dogecoin', 'regtest')
         expect(indexer[WIRE]).to.equal(VALUES[WIRE])
+    })
+
+    it('hands shared activation and time arms to a regtest indexer', async function () {
+        const indexer = await makeServiceWithConfig('').getDefaultConfig('xchain-indexer', 'dogecoin', 'regtest')
+        expect(indexer[CONTRACTS]).to.equal(VALUES[CONTRACTS])
+        expect(indexer[MARKET_TIME]).to.equal(VALUES[MARKET_TIME])
     })
 
     it('never hands a shared-ledger indexer the wire-field arm', async function () {
@@ -38,6 +65,15 @@ describe('regtest gate switch passthrough', function () {
         for (const net of ['mainnet', 'testnet']) {
             const config = await cs.getDefaultConfig('xchain-indexer', 'dogecoin', net)
             expect(config, net).to.not.have.property(WIRE)
+        }
+    })
+
+    it('never hands shared arms to a shared-ledger indexer', async function () {
+        const cs = makeServiceWithConfig('')
+        for (const net of ['mainnet', 'testnet']) {
+            const config = await cs.getDefaultConfig('xchain-indexer', 'dogecoin', net)
+            expect(config, net).to.not.have.property(CONTRACTS)
+            expect(config, net).to.not.have.property(MARKET_TIME)
         }
     })
 })

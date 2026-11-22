@@ -113,6 +113,72 @@ function planLine(out) {
     return line || ''
 }
 
+const PUBLISH_COMBO = 'xchain-decoder:bitcoin:testnet'
+
+function fakePublishingNode({ hasClear = true } = {}) {
+    const help = hasClear ? "printf '%s\\n' '  bootstrap-republish-clear <combo>'" : 'true'
+    const script = [
+        '#!/usr/bin/env bash',
+        'case "$1" in',
+        `  --help) ${help} ;;`,
+        '  bootstrap)',
+        '    out="$XCHAIN_NODE_DATA_DIR/$4/$5/$3/bootstrap"',
+        '    mkdir -p "$out"',
+        "    printf '%s\\n' archive > \"$out/archive.tar.gz\"",
+        '    [ "$ARCHIVE_SIGNED" = 1 ] && printf signature > "$out/archive.tar.gz.sig"',
+        '    ;;',
+        '  bootstrap-republish-clear)',
+        '    printf "%s\\n" "$*" >> "$CLEAR_LOG"',
+        '    exit "$CLEAR_STATUS"',
+        '    ;;',
+        '  *) echo "unexpected: $*" >&2; exit 3 ;;',
+        'esac',
+        ''
+    ].join('\n')
+    fs.writeFileSync(path.join(binDir, 'xchain-node'), script, { mode: 0o755 })
+}
+
+function fakeTransport() {
+    const ssh = [
+        '#!/usr/bin/env bash',
+        'case "$*" in',
+        '  *"mkdir -p"*) [ "$TRANSPORT_MODE" = mkdir-fail ] && exit 1 ;;',
+        '  *"mv -f"*) [ "$TRANSPORT_MODE" = rename-fail ] && exit 1 ;;',
+        'esac',
+        'exit 0',
+        ''
+    ].join('\n')
+    fs.writeFileSync(path.join(binDir, 'ssh'), ssh, { mode: 0o755 })
+    fs.writeFileSync(path.join(binDir, 'scp'), '#!/usr/bin/env bash\n[ "$TRANSPORT_MODE" = scp-fail ] && exit 1\nexit 0\n', { mode: 0o755 })
+}
+
+function runPublish(extraArgs = [], overrides = {}) {
+    const clearLog = path.join(workDir, 'clear.log')
+    fs.writeFileSync(path.join(workDir, 'signing-key'), 'test key')
+    const result = spawnSync(SCRIPT, [PUBLISH_COMBO, '--no-forced-due', ...extraArgs], {
+        encoding: 'utf8',
+        env: {
+            ...process.env,
+            PATH: `${binDir}:${process.env.PATH}`,
+            STAGE_DIR: path.join(workDir, 'stage'),
+            TMP_DIR: path.join(workDir, 'tmp'),
+            LOCK_FILE: path.join(workDir, 'publish.lock'),
+            ROLL_HOLD_FILE: path.join(workDir, 'roll-hold'),
+            SIGNING_KEY: path.join(workDir, 'signing-key'),
+            SYNC_HOST: 'target',
+            SYNC_DIR: '/archive-root',
+            CLEAR_LOG: clearLog,
+            CLEAR_STATUS: '0',
+            ARCHIVE_SIGNED: '1',
+            TRANSPORT_MODE: 'ok',
+            ...overrides
+        },
+        timeout: 10000
+    })
+    const calls = fs.existsSync(clearLog) ? fs.readFileSync(clearLog, 'utf8').trim().split('\n') : []
+    return { ...result, calls }
+}
+
 describe('publish-bootstraps.sh: forced republish after a reindex', function () {
     this.timeout(10000)
     before(requireMapfile)
@@ -144,6 +210,54 @@ describe('publish-bootstraps.sh: forced republish after a reindex', function () 
         const out = runPlan(['--all', '--trackers-only', '--dry-run', '--allow-unsigned'])
         expect(out).to.include('FORCED (reindexed since last publish; overrides --trackers-only): xchain-decoder:bitcoin:testnet')
         expect(planLine(out)).to.include('xchain-decoder:bitcoin:testnet')
+    })
+})
+
+describe('publish-bootstraps.sh: republish marker clear', function () {
+    this.timeout(15000)
+    before(requireMapfile)
+    beforeEach(function () { createWorkDir(); fakeTransport() })
+    afterEach(removeWorkDir)
+
+    it('clears once only after a successful remote rename', function () {
+        fakePublishingNode()
+        const before = Date.now() - 1000
+        const result = runPublish()
+        expect(result.status, result.stderr).to.equal(0)
+        expect(result.calls).to.have.length(1)
+        expect(result.calls[0]).to.match(/^bootstrap-republish-clear xchain-decoder:bitcoin:testnet --at /)
+        expect(Date.parse(result.calls[0].split(' ').at(-1))).to.be.within(before, Date.now())
+    })
+
+    for (const [label, args, env] of [
+        ['remote mkdir failure', [], { TRANSPORT_MODE: 'mkdir-fail' }],
+        ['scp failure', [], { TRANSPORT_MODE: 'scp-fail' }],
+        ['rename failure', [], { TRANSPORT_MODE: 'rename-fail' }],
+        ['unsigned archive', [], { ARCHIVE_SIGNED: '0' }],
+        ['local-only create', ['--no-publish'], {}]
+    ]) {
+        it(`does not clear after ${label}`, function () {
+            fakePublishingNode()
+            const result = runPublish(args, env)
+            expect(result.calls).to.deep.equal([])
+            expect(`${result.stdout}${result.stderr}`).to.not.include('PUBLISHED (marker not cleared)')
+        })
+    }
+
+    it('keeps an older CLI compatible without calling clear', function () {
+        fakePublishingNode({ hasClear: false })
+        const result = runPublish()
+        expect(result.status, result.stderr).to.equal(0)
+        expect(result.calls).to.deep.equal([])
+        expect(result.stdout).to.include('has no bootstrap-republish-clear command')
+    })
+
+    it('reports a clear failure but leaves a successful publish green', function () {
+        fakePublishingNode()
+        const result = runPublish([], { CLEAR_STATUS: '1' })
+        expect(result.status, result.stderr).to.equal(0)
+        expect(result.calls).to.have.length(1)
+        expect(result.stdout).to.include('PUBLISHED (marker not cleared)')
     })
 })
 

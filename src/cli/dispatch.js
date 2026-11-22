@@ -15,12 +15,15 @@
  * Commander setup and command definitions
  ********************************************************************/
 
+const { resolveArgs } = require('../services/config_service')
+const { resolveNoRefInstallTarget: defaultResolveNoRefInstallTarget } = require('../services/install_target_service')
+
 // How long a release update re-taking the lock its self-update step handed back waits
 // at least, so a mutator that slipped into that gap delays the update instead of refusing it.
 const SELF_UPDATE_HANDOFF_WAIT_MS = 30000
 
 function dispatchSettings(config) {
-    const commandsNeedingVersions = ['install', 'update', 'reinstall']
+    const commandsNeedingVersions = ['install', 'update']
     // Read-only commands only display state and never change which services
     // are installed/running, so they don't need to push local config to the
     // hub/explorer. Skipping the push keeps them fast and avoids the lengthy
@@ -38,7 +41,10 @@ function dispatchSettings(config) {
     // the audited clear it writes must not interleave with reset, restore or recreate.
     // `bootstrap-restore-rehearsal` is included: it creates and drops a disposable
     // database on the shared MariaDB, so it holds the lock from preCheck to exit.
-    const mutatingCommands = ['install', 'update', 'recreate', 'reinstall', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal']
+    const mutatingCommands = ['install', 'update', 'recreate', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal', 'bootstrap-republish-clear']
+    // These commands can write persistent container state, but retain the bounded
+    // non-mutating wait before starting. Once started, they hold the lock to exit.
+    const holdToExitCommands = ['exec', 'shell']
     // How long a non-mutating command blocks for a lock-holding mutator before
     // giving up (bounded so a read-only command pauses, then errors clearly,
     // rather than corrupting the stack by provisioning concurrently). Tunable.
@@ -47,7 +53,7 @@ function dispatchSettings(config) {
     // keeps the interactive contract below; an unattended caller sets it so a
     // scheduled run waits out a deploy instead of losing its work.
     const MUTATING_LOCK_WAIT_MS = parseInt(config.XCHAIN_NODE_MUTATING_LOCK_WAIT_MS || '0', 10) || 0
-    return { commandsNeedingVersions, readOnlyCommands, mutatingCommands, LOCK_WAIT_MS, MUTATING_LOCK_WAIT_MS }
+    return { commandsNeedingVersions, readOnlyCommands, mutatingCommands, holdToExitCommands, LOCK_WAIT_MS, MUTATING_LOCK_WAIT_MS }
 }
 
 function skipsPreAction(actionCommand) {
@@ -73,7 +79,7 @@ function skipsPreAction(actionCommand) {
     // a lock holder exits non-zero, which the publisher would read as "no
     // combo is due" and silently drop the forced republish this whole
     // mechanism exists to guarantee.
-    return commandName === 'bootstrap-republish-due'
+    return commandName === 'bootstrap-republish-due' || commandName === 'bootstrap-republish-clear'
 }
 
 // A reset aimed at a stack this CLI did not install (--db-container) gets only the local docker checks. The bundled
@@ -81,7 +87,30 @@ function skipsPreAction(actionCommand) {
 // push would carry its DB hosts over the other stack's entries on a shared hub and explorer.
 function preCheckOptionsFor(commandName, actionCommand) {
     const opts = typeof actionCommand.opts === 'function' ? actionCommand.opts() : null
-    return commandName === 'reset' && opts && opts.dbContainer ? [{ localOnly: true }] : []
+    if (commandName === 'reset' && opts && opts.dbContainer) return [{ localOnly: true }]
+    // autoheal only watches decoder and indexer containers; a hub that answers but refuses the push must not block it.
+    if (commandName === 'autoheal') return [{ hubPushOptional: true }]
+    if (updatesAPipelineService(commandName, actionCommand)) return [{ hubPushOptional: true }]
+    // reset hub-checkpoints is the repair for a federation that cannot commit, so that hub's refusal must not block it.
+    if (commandName === 'reset' && (actionCommand.args || [])[0] === 'hub-checkpoints') return [{ hubPushOptional: true }]
+    return []
+}
+
+// An `update` of the decoder or indexer gets the same allowance as autoheal.
+// Those are the containers whose fault leaves an answering hub unable to commit
+// a push: an indexer stalled far behind its tip fails the hub's stake-weight
+// read closed and empties its validator set. Refusing the update would block the
+// one redeploy that clears that stall. Targeting goes through resolveArgs, the
+// classifier the action itself uses; `all` and every other service still abort.
+const PUSH_OPTIONAL_UPDATE_SERVICES = ['xchain-decoder', 'xchain-indexer']
+function updatesAPipelineService(commandName, actionCommand) {
+    if (commandName !== 'update') return false
+    try {
+        const resolved = resolveArgs((actionCommand && actionCommand.args) || [], { expectBranch: true, defaultBranch: null })
+        return PUSH_OPTIONAL_UPDATE_SERVICES.includes(resolved.service)
+    } catch {
+        return false
+    }
 }
 
 // Name the lock for a validator subcommand that must serialize, or null for one
@@ -131,14 +160,14 @@ function lockSettingsFor(commandName, settings, config) {
 // and rebuild the hub out from under a lock-holding `update` mid docker
 // build. So acquire the lock around preCheck for every command.
 //
-// A mutating command keeps the lock through its whole action (released on
-// process exit, since actions terminate via process.exit()) and refuses
-// a held lock unless asked to wait. A non-mutating command holds
-// the lock only across preCheck, releasing it right after, so a
-// long-running `monitor`/`tail`/`logs` does not pin the lock for its
-// lifetime; it waits a bounded time for a busy mutator, then errors.
+// A mutating command keeps the lock through its whole action and refuses a held
+// lock unless asked to wait. `exec` and `shell` also hold through their actions
+// because either can write persistent container state, but they retain the
+// bounded wait used by other non-mutating commands. Read-only long-running
+// commands release after preCheck so they do not pin the lock for their lifetime.
 function commandLock(commandName, settings, acquireCommandLock,
     holdThroughAction = settings.mutatingCommands.includes(commandName)) {
+    const holdToExit = holdThroughAction || settings.holdToExitCommands.includes(commandName)
     let release
     try {
         release = acquireCommandLock({
@@ -150,14 +179,26 @@ function commandLock(commandName, settings, acquireCommandLock,
         process.exit(1)
         return null
     }
-    if (holdThroughAction) {
+    if (holdToExit) {
         // Release only on process exit (also covers throws and SIGINT/SIGTERM
         // via the default handlers ending the process).
         process.on('exit', release)
         process.on('SIGINT', () => process.exit(130))
         process.on('SIGTERM', () => process.exit(143))
     }
-    return { holdThroughAction, release }
+    return { holdThroughAction: holdToExit, release }
+}
+
+// A no-ref install decides its release or recorded-branch target once, here, so the hub
+// preCheck provisions and the modules the action installs are staged from the same ref.
+async function noRefInstallTarget(commandName, actionCommand, resolver) {
+    if (commandName !== 'install') return null
+    let resolved = null
+    try { resolved = resolveArgs(actionCommand.args || [], { expectBranch: true, defaultBranch: null }) }
+    catch { return null }
+    if (resolved.branch) return null
+    const resolveTarget = resolver || defaultResolveNoRefInstallTarget
+    return resolveTarget()
 }
 
 // The CLI moves itself BEFORE anything else runs for a release update:
@@ -184,11 +225,21 @@ function commandLock(commandName, settings, acquireCommandLock,
 // One line when a newer release exists, on every command that reached
 // this point. `update` is the command it recommends, so it says nothing
 // there. Cached an hour, silent offline, never throws.
+async function reportAfterPreCheck(commandName, thisCommand, actionCommand, maybeReportTelemetry, noticeNewerRelease) {
+    try {
+        const optOut = thisCommand.opts().telemetry === false
+        await maybeReportTelemetry(actionCommand.name(), optOut)
+    } catch { /* telemetry is best-effort */ }
+    if (commandName !== 'update') {
+        await noticeNewerRelease()
+    }
+}
+
 async function beforeAction(thisCommand, actionCommand, settings, deps) {
     const {
         setVerbose, maybeSelfUpdateBeforeUpdate, redactSecrets,
         acquireCommandLock, preCheck, refForPreCheck, commandRepairsHub,
-        maybeReportTelemetry, noticeNewerRelease
+        maybeReportTelemetry, noticeNewerRelease, resolveNoRefInstallTarget
     } = deps
     setVerbose(thisCommand.opts().verbose ?? false)
     if (thisCommand.opts().verbose) console.log("Checking xchain-node structure")
@@ -199,7 +250,12 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
         commandLock(validatorLabel, settings, acquireCommandLock, true)
         return
     }
-    if (skipsPreAction(actionCommand)) return
+    if (skipsPreAction(actionCommand)) {
+        if (commandName === 'bootstrap-republish-clear') {
+            commandLock(commandName, lockSettingsFor(commandName, settings, deps.config), acquireCommandLock)
+        }
+        return
+    }
 
     if (commandName === 'update') {
         try {
@@ -213,25 +269,28 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
     const lock = commandLock(commandName, lockSettingsFor(commandName, settings, deps.config), acquireCommandLock)
     if (!lock) return
     try {
+        let installTarget = null
+        try { installTarget = await noRefInstallTarget(commandName, actionCommand, resolveNoRefInstallTarget) }
+        catch (err) {
+            console.error('install failed: ' + redactSecrets(err && err.message ? err.message : err))
+            return process.exit(1)
+        }
+        if (installTarget) actionCommand.resolvedInstallTarget = installTarget
+        const preCheckArgs = preCheckOptionsFor(commandName, actionCommand)
+        if (installTarget) preCheckArgs[0] = { ...preCheckArgs[0], installTarget }
         await preCheck(
             settings.commandsNeedingVersions.includes(commandName),
             !settings.readOnlyCommands.includes(commandName),
             refForPreCheck(commandName, actionCommand),
             commandRepairsHub(commandName, actionCommand),
-            ...preCheckOptionsFor(commandName, actionCommand)
+            ...preCheckArgs
         )
     } finally {
         // Non-mutating commands hand the lock back as soon as provisioning is
         // done; mutating commands keep it (released on exit) for their action.
         if (!lock.holdThroughAction) lock.release()
     }
-    try {
-        const optOut = thisCommand.opts().telemetry === false
-        await maybeReportTelemetry(actionCommand.name(), optOut)
-    } catch { /* telemetry is best-effort */ }
-    if (commandName !== 'update') {
-        await noticeNewerRelease()
-    }
+    await reportAfterPreCheck(commandName, thisCommand, actionCommand, maybeReportTelemetry, noticeNewerRelease)
 }
 
 function installDispatch(program, deps) {

@@ -193,6 +193,22 @@ serviceSuite('resolveLatestReleaseTag()', () => {
         expect(stubs.axiosGet.firstCall.args[0]).to.match(/repos\/XChain-Platform\/xchain-node\/releases\/latest$/)
     })
 
+    it('rejects successful responses without a valid release tag', async () => {
+        for (const data of [null, {}, { tag_name: null }, { tag_name: '' },
+            { tag_name: 42 }, { tag_name: 'master' }]) {
+            stubs.axiosGet.resetBehavior()
+            stubs.axiosGet.resolves({ data })
+            await svc.resolveLatestReleaseTag().then(
+                () => { throw new Error('should have rejected') },
+                e => expect(e.message).to.match(/response without a valid release tag/))
+        }
+    })
+
+    it('trims a valid release tag from a successful response', async () => {
+        stubs.axiosGet.resolves({ data: { tag_name: '  v0.9.0  ' } })
+        expect(await svc.resolveLatestReleaseTag()).to.equal('v0.9.0')
+    })
+
     it('returns null (not an error) when no release has been published yet', async () => {
         // Pre-first-train this is the normal state of the world.
         const err = new Error('Not Found'); err.response = { status: 404 }
@@ -207,6 +223,65 @@ serviceSuite('resolveLatestReleaseTag()', () => {
         stubs.axiosGet.rejects(err)
         await svc.resolveLatestReleaseTag().then(
             () => { throw new Error('should have rejected') },
-            e => expect(e.message).to.equal('boom'))
+            e => {
+                expect(e.message).to.match(/GitHub latest-release lookup failed: boom/)
+                expect(e.cause).to.equal(err)
+                expect(e.response).to.equal(err.response)
+            })
+    })
+
+    it('keeps rate-limit failures specific instead of wrapping them as lookup failures', async () => {
+        const err = new Error('forbidden')
+        err.response = { status: 403, headers: { 'x-ratelimit-remaining': '0' } }
+        stubs.axiosGet.rejects(err)
+        await svc.resolveLatestReleaseTag().then(
+            () => { throw new Error('should have rejected') },
+            e => {
+                expect(e.message).to.match(/rate limit exhausted/i)
+                expect(e.message).to.not.match(/latest-release lookup failed/)
+            })
+    })
+})
+
+serviceSuite('fetchManifestAtTag()', () => {
+    async function rejectionFor(error) {
+        stubs.axiosGet.rejects(error)
+        return svc.fetchManifestAtTag('v9.9.9').then(
+            () => { throw new Error('should have rejected') },
+            rejected => rejected)
+    }
+
+    it('adds the tag and GitHub context to an HTTP failure', async () => {
+        const err = new Error('Request failed with status code 502')
+        err.response = { status: 502 }
+        const rejected = await rejectionFor(err)
+        expect(rejected.message).to.match(/GitHub release manifest lookup for v9\.9\.9 failed/)
+        expect(rejected.message).to.include(err.message)
+        expect(rejected.cause).to.equal(err)
+        expect(rejected.response).to.equal(err.response)
+    })
+
+    it('adds the tag and GitHub context to a network failure', async () => {
+        const err = new Error('getaddrinfo ENOTFOUND')
+        err.code = 'ENOTFOUND'
+        const rejected = await rejectionFor(err)
+        expect(rejected.message).to.match(/GitHub release manifest lookup for v9\.9\.9 failed/)
+        expect(rejected.message).to.include('getaddrinfo ENOTFOUND')
+        expect(rejected.cause).to.equal(err)
+        expect(rejected.code).to.equal('ENOTFOUND')
+    })
+
+    it('keeps rate-limit and not-found failures on their existing paths', async () => {
+        const rateLimit = new Error('forbidden')
+        rateLimit.response = { status: 403, headers: { 'x-ratelimit-remaining': '0' } }
+        const limited = await rejectionFor(rateLimit)
+        expect(limited.message).to.match(/rate limit exhausted/i)
+        expect(limited.message).to.not.match(/release manifest lookup/)
+
+        const missing = new Error('Not Found')
+        missing.response = { status: 404 }
+        const notFound = await rejectionFor(missing)
+        expect(notFound.message).to.match(/No release manifest found for v9\.9\.9/)
+        expect(notFound.message).to.not.match(/release manifest lookup/)
     })
 })

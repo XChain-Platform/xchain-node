@@ -21,6 +21,10 @@ function configure({ persistedHubPass, generated = 'a'.repeat(48) } = {}) {
     const sidecars = {
         hubSidecarPath: sinon.stub().returns('/config/hub.local'),
         readSidecarValue: sinon.stub().resolves(persistedHubPass),
+        adoptOrMintSidecarValues: sinon.stub().callsFake((file, keys) => ({
+            values: Object.fromEntries(keys.map(key => [key, generated])),
+            generated: Object.fromEntries(keys.map(key => [key, generated]))
+        })),
         upsertSidecarValues: sinon.stub()
     }
     const crypto = {
@@ -36,6 +40,7 @@ describe('config_service/database credential generation', function () {
 
         expect(await databaseModule.getOrCreateHubDbPass()).to.equal('persisted-pass')
         expect(crypto.randomBytes.called).to.equal(false)
+        expect(sidecars.adoptOrMintSidecarValues.called).to.equal(false)
         expect(sidecars.upsertSidecarValues.called).to.equal(false)
     })
 
@@ -43,9 +48,9 @@ describe('config_service/database credential generation', function () {
         const { sidecars } = configure({ generated: 'b'.repeat(48) })
 
         expect(await databaseModule.getOrCreateHubDbPass()).to.equal('b'.repeat(48))
-        expect(sidecars.upsertSidecarValues.calledOnceWithExactly(
-            '/config/hub.local', { HUB_DB_PASS: 'b'.repeat(48) }
-        )).to.equal(true)
+        expect(sidecars.adoptOrMintSidecarValues.calledOnce).to.equal(true)
+        expect(sidecars.adoptOrMintSidecarValues.firstCall.args.slice(0, 2))
+            .to.deep.equal(['/config/hub.local', ['HUB_DB_PASS']])
     })
 
     it('generates only missing module credentials and persists them together', function () {
@@ -55,9 +60,9 @@ describe('config_service/database credential generation', function () {
         databaseModule.generateDatabaseCredentials(config, '/config/bitcoin-mainnet.local')
 
         expect(config).to.deep.equal({ DECODER_DB_PASS: 'operator-pass', INDEXER_DB_PASS: 'a'.repeat(48) })
-        expect(sidecars.upsertSidecarValues.calledOnceWithExactly(
-            '/config/bitcoin-mainnet.local', { INDEXER_DB_PASS: 'a'.repeat(48) }
-        )).to.equal(true)
+        expect(sidecars.adoptOrMintSidecarValues.calledOnce).to.equal(true)
+        expect(sidecars.adoptOrMintSidecarValues.firstCall.args.slice(0, 2))
+            .to.deep.equal(['/config/bitcoin-mainnet.local', ['INDEXER_DB_PASS']])
     })
 })
 

@@ -35,6 +35,7 @@ const ExplorerConnector                        = require('./explorer_connector.j
 // Destructured where they are used, so each call reads the export at that moment.
 const dockerService                            = require('./docker_service')
 const releaseManifestService                   = require('./release_manifest_service')
+const installTargetService                     = require('./install_target_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 const {
@@ -127,8 +128,8 @@ async function attachSharedContainer(moduleLabel, containerId, installedCoinsAnd
 // status, so every check that reads docker state calls it installed; only a
 // request to its API tells the truth. Callers use this to decide whether the
 // config push below is worth attempting at all, so it must stay cheap: the
-// push itself already spends ten attempts three seconds apart on a hub that is
-// down, which is the delay this is meant to avoid paying twice.
+// push itself can spend its full three-minute retry budget on a hub that is down,
+// which is the delay this is meant to avoid paying twice.
 async function isHubAnswering() {
     const defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
     const hubConnector  = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
@@ -213,7 +214,7 @@ async function useInstalledHub(hubConnector) {
 // regtest` deployed the hub from master, and since the hub is the config oracle
 // every other service then read its answers. A frozen-ref release e2e would have
 // been a master hub grading a release stack.
-async function installHubModule(branch = null) {
+async function installHubModule(branch = null, preResolvedTarget = null) {
     const defaultConfig = await getDefaultConfig(HUB_MODULE_NAME, null, null)
     if (isVerbose()) logger.info("Checking if xchain-hub module is running")
     const hubConnector = new HubConnector("127.0.0.1", defaultConfig["HUB_PORT"])
@@ -241,8 +242,10 @@ async function installHubModule(branch = null) {
         resolveComponentRef, getActiveTarget, isReleaseRef, resolveInstallTarget, setActiveTarget, clearActiveTarget
     } = releaseManifestService
     let ownsTarget = false
-    if (!getActiveTarget() && (!branch || isReleaseRef(branch))) {
-        const target = await resolveInstallTarget(branch, { defaultBranch: DEFAULT_MODULE_BRANCH })
+    if (!getActiveTarget() && (preResolvedTarget || !branch || isReleaseRef(branch))) {
+        const target = preResolvedTarget || (branch
+            ? await resolveInstallTarget(branch, { defaultBranch: DEFAULT_MODULE_BRANCH })
+            : await installTargetService.resolveNoRefInstallTarget())
         if (target.kind === 'release') {
             logger.info(`Staging the hub from release ${target.tag} (${target.resolvedFrom}); manifest-pinned.`)
             setActiveTarget(target)
@@ -295,7 +298,9 @@ async function installHubFromResolvedRef(branch, defaultConfig, hubConnector) {
         await sleep(2000)
     }
 
-    throw "Couldn't install hub module"
+    const failures = Array.isArray(hubConnector.lastFailures) ? hubConnector.lastFailures : []
+    throw "Couldn't install hub module" +
+        (failures.length ? " (last error: " + redactSecrets(failures.join('; ')) + ")" : "")
 }
 
 module.exports = {

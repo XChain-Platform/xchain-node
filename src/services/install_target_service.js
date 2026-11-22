@@ -31,9 +31,10 @@
 const fs   = require('fs')
 const path = require('path')
 
-const { dataDir, moduleDir } = require('../config')
+const { dataDir, moduleDir, DEFAULT_MODULE_BRANCH } = require('../config')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
+const releaseManifestService = require('./release_manifest_service')
 
 const TARGET_FILE = 'install-target.json'
 
@@ -132,11 +133,26 @@ async function resolveUpdateTarget(deps = {}) {
     return inferInstallTarget(deps)
 }
 
+// Decide the default install target once. A tracking node stays on its recorded
+// branch; a release node and a fresh node resolve the latest release.
+async function resolveNoRefInstallTarget(deps = {}) {
+    const current = await resolveUpdateTarget(deps)
+    if (current.kind === 'branch') {
+        return { kind: 'branch', ref: current.ref, tag: null, manifest: null,
+            resolvedFrom: 'recorded install target' }
+    }
+    const manifest = deps.releaseManifest || releaseManifestService
+    return manifest.resolveInstallTarget(null, {
+        defaultBranch: deps.defaultBranch || DEFAULT_MODULE_BRANCH
+    })
+}
+
 module.exports = {
     TARGET_FILE,
     targetFilePath,
     recordInstallTarget,
     readInstallTarget,
     inferInstallTarget,
-    resolveUpdateTarget
+    resolveUpdateTarget,
+    resolveNoRefInstallTarget
 }

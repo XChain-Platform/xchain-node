@@ -102,6 +102,16 @@ serviceSuite('resolveInstallTarget()', () => {
         expect(t.ref).to.equal('master')
         expect(t.resolvedFrom).to.equal('no published release')
     })
+
+    it('rejects a malformed successful release lookup instead of using the default branch', async () => {
+        stubs.axiosGet.resolves({ data: {} })
+        await svc.resolveInstallTarget(null, { defaultBranch: 'master' }).then(
+            () => { throw new Error('should have rejected') },
+            e => {
+                expect(e.message).to.match(/Could not resolve the latest xchain-node release/)
+                expect(e.message).to.match(/Nothing was changed/)
+            })
+    })
 })
 
 serviceSuite('resolveInstallTarget()', () => {
@@ -120,6 +130,22 @@ serviceSuite('resolveInstallTarget()', () => {
                 expect(e.message).to.match(/Could not resolve the latest xchain-node release/)
                 expect(e.message).to.match(/Nothing was changed/)
             })
+        expect(recordInstallTarget.called).to.equal(false)
+        expect(run.called).to.equal(false)
+    })
+
+    it('does not record or run a malformed successful release lookup', async () => {
+        const recordInstallTarget = sinon.stub()
+        const run = sinon.stub()
+        repoRefs.configure({
+            DEFAULT_MODULE_BRANCH: 'master',
+            installTargetService: { recordInstallTarget },
+            releaseManifestService: svc
+        })
+        stubs.axiosGet.resolves({ data: {} })
+        await repoRefs.withInstallTarget(null, run).then(
+            () => { throw new Error('should have rejected') },
+            e => expect(e.message).to.match(/Could not resolve the latest xchain-node release/))
         expect(recordInstallTarget.called).to.equal(false)
         expect(run.called).to.equal(false)
     })

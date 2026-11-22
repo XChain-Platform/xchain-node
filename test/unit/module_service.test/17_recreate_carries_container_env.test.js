@@ -16,8 +16,10 @@ const {
 } = require('./support/helpers')
 const {
     readContainerEnv,
-    carryContainerEnv
+    carryContainerEnv,
+    carryContainerEnvWithProvenance
 } = require('../../../src/services/module_service/carry_container_env')
+const { RECREATE_DROP_ENV } = require('../../../src/config')
 
 function recordRecreate(stubs, liveEnv, events = []) {
     const seen = []
@@ -42,7 +44,18 @@ function recordRecreate(stubs, liveEnv, events = []) {
     return seen
 }
 
-describe('CarryContainerEnv', function () {
+function registerCarryContainerEnvBasics() {
+
+    it('reads the explicit recreate drop list through its declared env view', function () {
+        const name = 'XCHAIN_NODE_RECREATE_DROP_ENV'
+        const saved = process.env[name]
+        process.env[name] = 'ORACLE_MIN_SUBMISSIONS'
+        try {
+            expect(RECREATE_DROP_ENV[name]).to.equal('ORACLE_MIN_SUBMISSIONS')
+        } finally {
+            if (saved === undefined) delete process.env[name]; else process.env[name] = saved
+        }
+    })
 
     it('parses empty and equals-bearing values without exposing or truncating them', async function () {
         const execFileAsync = sinon.stub().resolves({
@@ -82,7 +95,9 @@ describe('CarryContainerEnv', function () {
         )).to.equal(current)
         expect(mustNotRun.called).to.equal(false)
     })
+}
 
+function registerCarryContainerEnvFallbacks() {
     it('tries the deterministic name when a stale registry id no longer exists', async function () {
         const execFileAsync = sinon.stub().callsFake(async (cmd, args) => {
             if (args[args.length - 1] === 'stale-id') throw new Error('No such container')
@@ -96,9 +111,94 @@ describe('CarryContainerEnv', function () {
         expect(merged.AUX_POW).to.equal('1')
         expect(execFileAsync.secondCall.args[1]).to.include('rail-decoder')
     })
+
+    it('reports carried names and drops only requested values absent from current config', async function () {
+        const execFileAsync = sinon.stub().resolves({
+            stdout: dockerEnvInspectOutput({ KEEP: 'old', DROP: 'old', CURRENT: 'old' })
+        })
+        const result = await carryContainerEnvWithProvenance(
+            { CURRENT: 'new' },
+            { reuseImage: true, overwriteContainerId: 'old-id' },
+            { execFileAsync, dropList: 'DROP,CURRENT,TYPO' }
+        )
+        expect(result.env).to.deep.equal({ KEEP: 'old', CURRENT: 'new' })
+        expect(result.carriedKeys).to.deep.equal(['KEEP'])
+        expect(result.droppedKeys).to.deep.equal(['DROP'])
+        expect(result.unknownDropKeys).to.deep.equal(['TYPO'])
+    })
+
+    it('does not carry node-derived names, while current config and drop recognition still win', async function () {
+        const execFileAsync = sinon.stub().resolves({
+            stdout: dockerEnvInspectOutput({ SHUTDOWN_TIMEOUT_MS: '100000', KEEP: 'old' })
+        })
+        const options = { reuseImage: true, overwriteContainerId: 'old-id', neverCarry: ['SHUTDOWN_TIMEOUT_MS'] }
+        const omitted = await carryContainerEnvWithProvenance({}, options, {
+            execFileAsync, dropList: 'SHUTDOWN_TIMEOUT_MS'
+        })
+        expect(omitted.env).to.deep.equal({ KEEP: 'old' })
+        expect(omitted.carriedKeys).to.deep.equal(['KEEP'])
+        expect(omitted.droppedKeys).to.deep.equal(['SHUTDOWN_TIMEOUT_MS'])
+        expect(omitted.unknownDropKeys).to.deep.equal([])
+
+        const configured = await carryContainerEnvWithProvenance(
+            { SHUTDOWN_TIMEOUT_MS: '45000' }, options, { execFileAsync }
+        )
+        expect(configured.env.SHUTDOWN_TIMEOUT_MS).to.equal('45000')
+    })
+}
+
+describe('CarryContainerEnv', function () {
+    registerCarryContainerEnvBasics()
+    registerCarryContainerEnvFallbacks()
 })
 
-moduleSuite('buildAndUp() recreate env carry', function () {
+async function recreateWithBudget(module, oldDrain, seconds) {
+    const key = `XCHAIN_NODE_MODULE_STOP_TIMEOUT_SECONDS_${module.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
+    const saved = process.env[key]
+    if (seconds === undefined) delete process.env[key]; else process.env[key] = String(seconds)
+    try {
+        const stubs = makeStubs()
+        const seen = recordRecreate(stubs, { SHUTDOWN_TIMEOUT_MS: oldDrain, KEEP: 'old' })
+        const ms = loadModuleService(stubs)
+        await ms.buildAndUp(module, 'bitcoin', 'mainnet', 'old-container-id', false, null, { reuseImage: true })
+        return seen.find(call => call.args[0] === 'run')
+    } finally {
+        if (saved === undefined) delete process.env[key]; else process.env[key] = saved
+    }
+}
+
+function registerBuildAndUpDrainRecreateTest() {
+    it('re-derives the drain from raised and lowered budgets and drops it at the plain default', async function () {
+        const raised = await recreateWithBudget('xchain-decoder', '100000', 300)
+        expect(raised.args).to.include.members(['--stop-timeout', '300'])
+        expect(raised.opts.env.SHUTDOWN_TIMEOUT_MS).to.equal('280000')
+
+        const lowered = await recreateWithBudget('xchain-decoder', '100000', 60)
+        expect(lowered.args).to.include.members(['--stop-timeout', '60'])
+        expect(lowered.opts.env.SHUTDOWN_TIMEOUT_MS).to.equal('40000')
+
+        const defaulted = await recreateWithBudget('xchain-encoder', '70000')
+        expect(defaulted.args).to.include.members(['--stop-timeout', '30'])
+        expect(defaulted.args).to.not.include('SHUTDOWN_TIMEOUT_MS')
+        expect(defaulted.opts.env.SHUTDOWN_TIMEOUT_MS).to.equal(undefined)
+        expect(defaulted.opts.env.KEEP).to.equal('old')
+    })
+}
+
+function registerBuildAndUpRecreateEnvTests() {
+    it('passes carried hub names to the consensus guard as provenance', async function () {
+        const stubs = makeStubs()
+        recordRecreate(stubs, { ORACLE_MIN_SUBMISSIONS: '1' })
+        const assertNoHubConsensusEnvDrift = sinon.stub().resolves([])
+        const ms = loadModuleService(stubs, undefined, {
+            './hub_consensus_env_guard': { assertNoHubConsensusEnvDrift }
+        })
+
+        await ms.buildAndUp('xchain-hub', null, null, 'old-container-id', false, null, { reuseImage: true })
+
+        expect(assertNoHubConsensusEnvDrift.firstCall.args[0].ORACLE_MIN_SUBMISSIONS).to.equal('1')
+        expect(assertNoHubConsensusEnvDrift.firstCall.args[1].carriedKeys).to.include('ORACLE_MIN_SUBMISSIONS')
+    })
 
     it('carries all shell-only rail values before teardown and keeps them off argv', async function () {
         const stubs = makeStubs()
@@ -135,7 +235,9 @@ moduleSuite('buildAndUp() recreate env carry', function () {
         expect(run.args).to.not.include('AUX_POW=1')
         expect(run.args).to.include.members(['--env', 'AUX_POW'])
     })
+}
 
+function registerBuildAndUpFallbackTest() {
     it('falls back to the container name when the registry lost its id', async function () {
         const stubs = makeStubs()
         const seen = recordRecreate(stubs, { AUX_POW: '1' })
@@ -148,4 +250,10 @@ moduleSuite('buildAndUp() recreate env carry', function () {
         expect(envInspect.args[envInspect.args.length - 1])
             .to.equal('xchain-node-bitcoin-mainnet-xchain-encoder')
     })
+}
+
+moduleSuite('buildAndUp() recreate env carry', function () {
+    registerBuildAndUpDrainRecreateTest()
+    registerBuildAndUpRecreateEnvTests()
+    registerBuildAndUpFallbackTest()
 })

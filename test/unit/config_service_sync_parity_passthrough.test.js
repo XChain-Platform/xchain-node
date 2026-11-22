@@ -98,3 +98,48 @@ describe('hub publish switches passthrough', () => {
         }
     })
 })
+
+// Behind its reverse proxy, sync keys rate limits on the proxy's address unless
+// TRUST_PROXY reaches the container, so every client shares one bucket.
+describe('sync TRUST_PROXY passthrough', () => {
+    async function withTrustProxy(value, fn) {
+        const previous = process.env.TRUST_PROXY
+        if (value === undefined) delete process.env.TRUST_PROXY
+        else process.env.TRUST_PROXY = value
+        try {
+            await fn()
+        } finally {
+            if (previous === undefined) delete process.env.TRUST_PROXY
+            else process.env.TRUST_PROXY = previous
+        }
+    }
+
+    it('the view answers the host value', () => {
+        expect(viewsFor({ TRUST_PROXY: 'true' }).SYNC_PASSTHROUGH_ENV.TRUST_PROXY).to.equal('true')
+    })
+
+    it('puts the host value in the sync container config', async () => {
+        await withTrustProxy('true', async () => {
+            const config = await containerConfig(SYNC_MODULE_NAME)
+            expect(config).to.have.property('TRUST_PROXY', 'true')
+        })
+    })
+
+    it('does not put the host value in other shared container configs', async () => {
+        await withTrustProxy('true', async () => {
+            for (const module of [HUB_MODULE_NAME, EXPLORER_MODULE_NAME, DB_MODULE_NAME]) {
+                const config = await containerConfig(module)
+                expect(config).to.not.have.property('TRUST_PROXY')
+            }
+        })
+    })
+
+    it('omits the value from the sync container config when unset or empty', async () => {
+        for (const value of [undefined, '']) {
+            await withTrustProxy(value, async () => {
+                const config = await containerConfig(SYNC_MODULE_NAME)
+                expect(config).to.not.have.property('TRUST_PROXY')
+            })
+        }
+    })
+})

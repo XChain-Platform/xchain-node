@@ -117,10 +117,10 @@ moduleSuite('buildAndUp() hub credential ordering', function () {
             const stubs = hubStubs()
             const setHub = sinon.stub().resolves()
             const ms = withDbStub(stubs, setHub)
-            await ms.buildAndUp('xchain-encoder', 'bitcoin', 'mainnet')
+            await ms.buildAndUp('xchain-decoder', 'bitcoin', 'mainnet')
             expect(setHub.called).to.be.false
+            expect(stubs.statusChanged.called).to.be.false
         })
-
         it('does not touch the hub account for a one-shot execution container', async function () {
             const stubs = hubStubs()
             const setHub = sinon.stub().resolves()
@@ -348,7 +348,7 @@ moduleSuite('buildAndUp() healthcheck args', function () {
         it('warns and returns [] when the descriptor portKey is missing from the env', function () {
             const stubs = makeStubs()
             const ms = loadModuleService(stubs)
-            const logSpy = sinon.spy(console, 'log')
+            const logSpy = sinon.spy(console, 'warn')
             try {
                 // DECODER_API_PORT deliberately absent from the env
                 const args = ms.buildHealthcheckArgs('xchain-decoder', {})
@@ -364,14 +364,14 @@ moduleSuite('buildAndUp() healthcheck args', function () {
         it('does not warn and returns health args when the portKey is present', function () {
             const stubs = makeStubs()
             const ms = loadModuleService(stubs)
-            const logSpy = sinon.spy(console, 'log')
+            const spies = [sinon.spy(console, 'warn'), sinon.spy(console, 'log')]
             try {
                 const args = ms.buildHealthcheckArgs('xchain-decoder', { DECODER_API_PORT: '3002' })
                 expect(args).to.include('--health-cmd')
-                const warned = logSpy.getCalls().map(c => c.args.join(' ')).join('\n')
+                const warned = spies.flatMap(s => s.getCalls()).map(c => c.args.join(' ')).join('\n')
                 expect(warned).to.not.match(/WARNING: no healthcheck/)
             } finally {
-                logSpy.restore()
+                spies.forEach(s => s.restore())
             }
         })
 

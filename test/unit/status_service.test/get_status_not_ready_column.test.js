@@ -70,7 +70,21 @@ function load(rows, health, surfaces) {
 const IDX = { module: 'xchain-indexer', coin: 'bitcoin', network: 'mainnet', container_id: 'idx' }
 const DEC = { module: 'xchain-decoder', coin: 'bitcoin', network: 'mainnet', container_id: 'dec' }
 
+async function pendingActivationRow() {
+    const health = { idx: { status: 'healthy', stallReason: null, stallClass: 'none',
+        train_activation: { status: 'pending', required_rule_set: '3.0.0', required_at_height: 900 } } }
+    const { ss, printed } = load([IDX], health, {})
+    const result = await ss.getStatus('bitcoin', 'mainnet', false)
+    expect(result.bitcoin.mainnet['xchain-indexer'].train_activation_pending).to.include({
+        pending: true, required_rule_set: '3.0.0', required_at_height: 900
+    })
+    expect(printed()).to.match(/xchain-indexer.*running UPGRADE PENDING/)
+    expect(printed()).to.match(/xchain-node update xchain-indexer bitcoin mainnet/)
+}
+
 describe('StatusService: getStatus() NOT READY column', function () {
+
+    it('prints UPGRADE PENDING for a pending train activation', pendingActivationRow)
 
     it('prints NOT READY and lists the reasons for an indexer whose /status says ready false', async function () {
         const { ss, routes, printed } = load([IDX], { idx: { status: 'healthy', stallReason: null } },

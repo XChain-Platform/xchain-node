@@ -1,3 +1,14 @@
+/*********************************************************************
+ *
+ * Copyright © 2025-2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC - https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md.
+ *
+ **********************************************************************/
 'use strict'
 
 let NODE_MODULE_NAME, db, fs, getContainerBindMounts, getDockerContainerImageName, readline, startContainer, DEFAULT_MODULE_BRANCH, XChainService, dataDir, installModule, installTargetService, path, releaseManifestService, removeContainer, saveContainerLogs, waitContainer
@@ -11,13 +22,14 @@ function configure(dependencies) {
 // staging inside it resolves against ONE decision (release-management spec
 // section 11). Cleared in a finally, or a later branch install in the same
 // process would inherit a stale pin.
-async function withInstallTarget(ref, run, { fallbackToBranch = true } = {}) {
+async function withInstallTarget(ref, run, { fallbackToBranch = true, target: preResolvedTarget = null } = {}) {
     const {
         resolveInstallTarget, setActiveTarget, clearActiveTarget
     } = releaseManifestService
     const { recordInstallTarget } = installTargetService
 
-    const target = await resolveInstallTarget(ref, { defaultBranch: DEFAULT_MODULE_BRANCH, fallbackToBranch })
+    const target = preResolvedTarget ||
+        await resolveInstallTarget(ref, { defaultBranch: DEFAULT_MODULE_BRANCH, fallbackToBranch })
 
     if (target.kind === 'release') {
         console.log(`Installing XChain ${target.tag} (${target.resolvedFrom}); every component is manifest-pinned.`)
@@ -60,7 +72,13 @@ async function runE2ETest(coin, network, testName = null, grep = null, script = 
     const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const logFile = path.join(dataDir, 'e2e-logs', `${coin}-${network}-${timestamp}.log`)
 
-    await saveContainerLogs(containerId, logFile)
+    try {
+        await saveContainerLogs(containerId, logFile)
+    } catch (err) {
+        throw new Error('E2E suite exited with code ' + exitCode + ', but its logs could not be exported. Container ' +
+            containerId + ' was kept and the partial log is at ' + logFile + ': ' + ((err && err.message) || err),
+        { cause: err })
+    }
     await removeContainer(containerId)
 
     return { logFile, exitCode }

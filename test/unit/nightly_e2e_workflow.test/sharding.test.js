@@ -22,7 +22,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const yaml = require('js-yaml')
-const lookupFiles = require('mocha/lib/cli/lookup-files')
+const { lookupFiles } = require('mocha/lib/cli/lookup-files')
 
 const { buildPlan, listActionFiles } = require('../../../scripts/e2e_shard_plan')
 const { merge, countSummary } = require('../../../scripts/e2e_shard_merge')

@@ -48,8 +48,8 @@ function configureDependencies(dependencies) {
 // rescanning, too costly to leave as one warning mid-log. Reset per run.
 const bootstrapOutcomes = []
 
-function recordBootstrapOutcome(module, status, detail, archive) {
-    bootstrapOutcomes.push({ module, status, detail, archive: archive || null })
+function recordBootstrapOutcome(module, status, detail, archive, coin = null, network = null) {
+    bootstrapOutcomes.push({ module, coin, network, status, detail, archive: archive || null })
 }
 
 function resetBootstrapOutcomes() {
@@ -70,6 +70,7 @@ function reportBootstrapOutcomes() {
         const line = o.status === 'restored' ? 'restored'
             : o.status === 'restored-node-behind' ? `restored, WAITING FOR NODE: ${o.detail}`
             : o.status === 'node-behind' ? `NOT restored, the coin node is behind the archive: ${o.detail}`
+            : o.status === 'decoder-not-restored' ? `NOT restored, its xchain-decoder was not restored (${o.detail}); syncing from scratch`
             : o.status === 'none-published' ? 'none published, syncing from scratch'
             : o.status === 'disabled' ? 'disabled by XCHAIN_NODE_NO_BOOTSTRAP'
             : o.status === 'wiped-left-down' ? `NOT restored, DATA WIPED, container left stopped: ${o.detail}`
@@ -127,12 +128,21 @@ async function verifyRefusedArchive(archivePath, target) {
 
 // A restore that went ahead with the node still below the archive is reported
 // as such, so the summary identifies the service's wait state.
-function recordRestoredOutcome(module, tip, archive) {
+function recordRestoredOutcome(module, tip, archive, coin, network) {
     if (tip && tip.verdict === 'behind-wait') {
-        recordBootstrapOutcome(module, 'restored-node-behind', tip.detail, archive)
+        recordBootstrapOutcome(module, 'restored-node-behind', tip.detail, archive, coin, network)
     } else {
-        recordBootstrapOutcome(module, 'restored', null, archive)
+        recordBootstrapOutcome(module, 'restored', null, archive, coin, network)
     }
+}
+
+function decoderNonRestoreFor(coin, network) {
+    for (let i = bootstrapOutcomes.length - 1; i >= 0; i--) {
+        const outcome = bootstrapOutcomes[i]
+        if (outcome.module !== XChainService.XCHAIN_DECODER || outcome.coin !== coin || outcome.network !== network) continue
+        return ['restored', 'restored-node-behind'].includes(outcome.status) ? null : outcome
+    }
+    return null
 }
 
 // Bytes -> a short "N.N GiB" string for the archive-disposition log lines.
@@ -233,11 +243,11 @@ async function ensureBootstrapUtxoTracker(coin, network) {
             recordBootstrapOutcome(XChainService.XCHAIN_UTXO_TRACKER, 'node-behind', tip.detail, archive)
             return false
         }
-        await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName)
+        await restoreBootstrap(coin, network, XChainService.XCHAIN_UTXO_TRACKER, fileName, { nodeTip: tip })
         logger.info('Bootstrap installed; tracker will continue from the bootstrap height')
         const bytes   = await statBootstrapArchiveBytes(archivePath)
         const archive = retireBootstrapArchive(archivePath, bytes)
-        recordRestoredOutcome(XChainService.XCHAIN_UTXO_TRACKER, tip, archive)
+        recordRestoredOutcome(XChainService.XCHAIN_UTXO_TRACKER, tip, archive, coin, network)
         return true
     } catch (err) {
         const reason  = redactSecrets(err.message)
@@ -263,12 +273,25 @@ async function ensureBootstrapUtxoTracker(coin, network) {
 // restore it. Best-effort, mirroring ensureBootstrapUtxoTracker: any failure
 // (none published, download/restore error) logs a warning and returns so the
 // install proceeds with a normal sync from scratch.
-async function ensureBootstrapMariaDb(coin, network, module) {
+function shouldSkipMariaDbBootstrap(coin, network, module) {
     if (config.XCHAIN_NODE_NO_BOOTSTRAP) {
         logger.info('Bootstrap auto-restore disabled (XCHAIN_NODE_NO_BOOTSTRAP): syncing from scratch')
         recordBootstrapOutcome(module, 'disabled')
-        return false
+        return true
     }
+    if (module === XChainService.XCHAIN_INDEXER) {
+        const decoderOutcome = decoderNonRestoreFor(coin, network)
+        if (decoderOutcome) {
+            logger.info(`Skipping the ${module} bootstrap because its xchain-decoder was not restored (${decoderOutcome.status})`)
+            recordBootstrapOutcome(module, 'decoder-not-restored', decoderOutcome.status, null, coin, network)
+            return true
+        }
+    }
+    return false
+}
+
+async function ensureBootstrapMariaDb(coin, network, module) {
+    if (shouldSkipMariaDbBootstrap(coin, network, module)) return false
     // Tracked outside the try so the catch block can still report on (and keep)
     // whatever was downloaded before the failure, rather than only on a clean
     // success.
@@ -283,7 +306,7 @@ async function ensureBootstrapMariaDb(coin, network, module) {
         const fileName = await downloadBootstrap(coin, network, module, bootstrapDir)
         if (!fileName) {
             logger.info('No bootstrap available; the service will sync from scratch')
-            recordBootstrapOutcome(module, 'none-published')
+            recordBootstrapOutcome(module, 'none-published', null, null, coin, network)
             return false
         }
         archivePath = path.join(bootstrapDir, fileName)
@@ -296,14 +319,14 @@ async function ensureBootstrapMariaDb(coin, network, module) {
             logger.info(`REFUSING the ${module} bootstrap restore: ${tip.detail}.`)
             const bytes   = await statBootstrapArchiveBytes(archivePath)
             const archive = retireBootstrapArchive(archivePath, bytes, 'restore refused, node behind; a re-run downloads a fresh copy anyway')
-            recordBootstrapOutcome(module, 'node-behind', tip.detail, archive)
+            recordBootstrapOutcome(module, 'node-behind', tip.detail, archive, coin, network)
             return false
         }
-        await restoreBootstrap(coin, network, module, fileName)
+        await restoreBootstrap(coin, network, module, fileName, { nodeTip: tip })
         logger.info('Bootstrap installed; the service will continue from the bootstrap height')
         const bytes   = await statBootstrapArchiveBytes(archivePath)
         const archive = retireBootstrapArchive(archivePath, bytes)
-        recordRestoredOutcome(module, tip, archive)
+        recordRestoredOutcome(module, tip, archive, coin, network)
         return true
     } catch (err) {
         const reason  = redactSecrets(err.message)
@@ -315,11 +338,11 @@ async function ensureBootstrapMariaDb(coin, network, module) {
                 `WARNING: bootstrap auto-restore failed (${reason}) AFTER the ${module} database was dropped: ` +
                 `the database is incomplete and its container was left stopped, not syncing.`
             )
-            recordBootstrapOutcome(module, 'wiped-left-down', reason, archive)
+            recordBootstrapOutcome(module, 'wiped-left-down', reason, archive, coin, network)
             return false
         }
         logger.info(`WARNING: bootstrap auto-restore failed (${reason}): the service will sync from scratch`)
-        recordBootstrapOutcome(module, 'failed', reason, archive)
+        recordBootstrapOutcome(module, 'failed', reason, archive, coin, network)
         return false
     }
 }

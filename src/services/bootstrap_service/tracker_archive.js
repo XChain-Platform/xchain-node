@@ -23,6 +23,7 @@ let zlib                  = require('zlib')
 let { execFile, spawn }   = require('child_process')
 const { promisify }       = require('util')
 const { PassThrough }     = require('stream')
+const { waitForProducerOutput } = require('./producer_completion')
 let execFileAsync         = promisify(execFile)
 
 let { XChainService, SEP } = require('../../config')
@@ -38,7 +39,10 @@ const { redactSecrets } = require('../../utils/helpers')
 let { maybeSignBootstrap } = require('./archive_signing')
 let { startProgress, buildDateTimeString, getWorkDir, assertBootstrapCapacity, ensureDir, ensureDirWritable } = require('./workspace')
 const trackerHeight = require('./tracker_height')
-const { readTrackerCommittedHeight, readTrackerHeightAfterRestart, readFrozenStoreHeight, chooseArchiveHeight, refusePreStopOnlyHeight } = trackerHeight
+const {
+    readTrackerCommittedHeight, readTrackerHeightAfterRestart, readFrozenStoreState, readFrozenStoreHeight,
+    refuseHaltedFrozenStore, chooseArchiveHeight, refusePreStopOnlyHeight
+} = trackerHeight
 const { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 
@@ -63,8 +67,8 @@ function configureDependencies(dependencies) {
 
 // Where the pre-compress hardlink snapshot of the tracker volume lives.
 // It has to sit INSIDE the volume, because a hardlink cannot cross a filesystem, and the volume is the only thing mounted into the helper
-// container. It is a sibling of the LevelDB store (LevelUpDb opens /data/<dbName>, never /data itself), so the running tracker never looks at
-// it. Fixed literal with no shell metacharacters: it is interpolated into the snapshot shell script below.
+// container. The volume root is the LevelDB store, and LevelDB ignores the snapshot directory while the tracker runs.
+// Fixed literal with no shell metacharacters: it is interpolated into the snapshot shell script below.
 const TRACKER_SNAPSHOT_DIR = '.xchain-bootstrap-snapshot'
 
 // Freeze the tracker volume without keeping the tracker down for the compress.
@@ -140,40 +144,20 @@ async function removeTrackerSnapshot(volumeName) {
 // the result is still a genuine gzip file that every existing consumer reads unchanged (`tar tzf` / `tar xzf`, the tracker's own single-layer restore),
 // only without the CPU.
 function writeStoredGzipTar(finalOutput, workDir, members) {
-    return new Promise((resolve, reject) => {
-        const tarProc     = spawn('tar', ['cf', '-', '-C', workDir, ...members])
-        const storeStream = zlib.createGzip({ level: 0 })
-        const writeStream = fs.createWriteStream(finalOutput)
-
-        let tarExit  = null
-        let written  = false
-        let settled  = false
-
-        // The half-written file sits in the directory the publish rsyncs from, so it has to go: a truncated archive that survives here is one the
-        // next node restores from.
-        const discardPartial = () => {
-            try { writeStream.destroy() } catch { /* already torn down */ }
-            try { fs.rmSync(finalOutput, { force: true }) } catch { /* nothing to remove */ }
-        }
-
-        // Both conditions are required: tar can die mid-stream, which ends the pipe and fires 'finish' on a TRUNCATED archive. Resolving on 'finish'
-        // alone would publish that truncated file as a good bootstrap.
-        const settle = () => {
-            if (settled || tarExit === null || !written) return
-            settled = true
-            if (tarExit !== 0) { discardPartial(); reject(new Error(`tar exited with code ${tarExit}`)) }
-            else resolve()
-        }
-        const fail = err => { if (!settled) { settled = true; discardPartial(); reject(err) } }
-
-        tarProc.stdout.pipe(storeStream).pipe(writeStream)
-        tarProc.stderr.on('data', () => {})
-        tarProc.on('error', fail)
-        storeStream.on('error', fail)
-        writeStream.on('error', fail)
-        writeStream.on('finish', () => { written = true; settle() })
-        tarProc.on('close', code => { tarExit = code; settle() })
+    const tarProc     = spawn('tar', ['cf', '-', '-C', workDir, ...members])
+    const storeStream = zlib.createGzip({ level: 0 })
+    const writeStream = fs.createWriteStream(finalOutput)
+    const completed   = waitForProducerOutput({
+        producer: tarProc,
+        writeStream,
+        streams: [storeStream],
+        failureName: 'tar',
+        discardPartial: () => fs.rmSync(finalOutput, { force: true })
     })
+
+    tarProc.stderr.on('data', () => {})
+    tarProc.stdout.pipe(storeStream).pipe(writeStream)
+    return completed
 }
 
 async function makeBootstrapUtxoTracker(coin, network) {
@@ -191,7 +175,11 @@ async function makeBootstrapUtxoTracker(coin, network) {
         const snapshotTaken = await takeTrackerSnapshot(context, endMaintenanceWindow)
         await compressTrackerArchive(context, snapshotTaken)
         // The archived store's own height, read before the fallback restart (snapshot path: the snapshot is still pinned until the finally).
-        context.frozenHeight = await readFrozenStoreHeight(context.volumeName, snapshotTaken ? `/data/${TRACKER_SNAPSHOT_DIR}` : '/data')
+        context.frozenStoreState = await readFrozenStoreState(
+            context.volumeName, snapshotTaken ? `/data/${TRACKER_SNAPSHOT_DIR}` : '/data', context.containerId
+        )
+        context.frozenHeight = context.frozenStoreState.height
+        refuseHaltedFrozenStore(context)
         // Fallback path: the store is archived, so bring the tracker back before the wrap and sign, and read its height there.
         if (!snapshotTaken) await restartTrackerAndReadHeight(context, endMaintenanceWindow)
         context.archiveHeight = chooseArchiveHeight(context.preStopHeight, context.postRestartHeight, context.frozenHeight)
@@ -224,6 +212,7 @@ async function prepareTrackerArchive(coin, network) {
     context.preStopHeight = await readTrackerCommittedHeight(coin, network, context.containerId)
     context.postRestartHeight = null
     context.frozenHeight = null
+    context.frozenStoreState = null
 
     // Staging and output dirs are prepared before the stop for the same reason as the capacity check: a read-only mount or a missing parent should not be
     // discovered with the tracker already dark.
@@ -320,38 +309,32 @@ async function restartTrackerAndReadHeight(context, endMaintenanceWindow) {
 }
 
 async function compressTrackerArchive(context, snapshotTaken) {
-        const tarSource = snapshotTaken ? `/data/${TRACKER_SNAPSHOT_DIR}` : '/data'
+    const tarSource = snapshotTaken ? `/data/${TRACKER_SNAPSHOT_DIR}` : '/data'
+    const progress = startProgress('Compressing LevelDB data...', context.totalBytes)
+    // Hashed inline off the gzip output rather than by re-reading the
+    // finished file: at tracker scale that second full read was another
+    // pass over 162.5 GB to learn something the write already knew.
+    const innerHash = crypto.createHash('sha256')
+    const tarProc     = spawn('docker', ['run', '--rm', '-v', `${context.volumeName}:/data`, 'alpine', 'tar', 'cf', '-', '-C', tarSource, '.'])
+    const counter     = new PassThrough()
+    const gzipStream  = zlib.createGzip()
+    const writeStream = fs.createWriteStream(context.innerArchive)
+    const completed   = waitForProducerOutput({
+        producer: tarProc, writeStream, streams: [counter, gzipStream], failureName: 'docker tar'
+    })
 
-        const progress = startProgress('Compressing LevelDB data...', context.totalBytes)
-        // Hashed inline off the gzip output rather than by re-reading the
-        // finished file: at tracker scale that second full read was another
-        // pass over 162.5 GB to learn something the write already knew.
-        const innerHash = crypto.createHash('sha256')
-        await new Promise((resolve, reject) => {
-            const tarProc     = spawn('docker', ['run', '--rm', '-v', `${context.volumeName}:/data`, 'alpine', 'tar', 'cf', '-', '-C', tarSource, '.'])
-            const counter     = new PassThrough()
-            const gzipStream  = zlib.createGzip()
-            const writeStream = fs.createWriteStream(context.innerArchive)
+    counter.on('data', chunk => progress.update(chunk.length))
+    gzipStream.on('data', chunk => innerHash.update(chunk))
+    tarProc.stderr.on('data', () => {})
+    tarProc.stdout.pipe(counter).pipe(gzipStream).pipe(writeStream)
+    await completed
 
-            counter.on('data', chunk => progress.update(chunk.length))
-            gzipStream.on('data', chunk => innerHash.update(chunk))
+    const innerStats = await fs.promises.stat(context.innerArchive)
+    progress.stop(`LevelDB compressed: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB`)
 
-            tarProc.stdout.pipe(counter).pipe(gzipStream).pipe(writeStream)
-
-            tarProc.stderr.on('data', () => {})
-            tarProc.on('error', err => reject(err))
-            writeStream.on('error', err => reject(err))
-            writeStream.on('finish', resolve)
-            tarProc.on('close', code => {
-                if (code !== 0) reject(new Error(`docker tar exited with code ${code}`))
-            })
-        })
-        const innerStats = await fs.promises.stat(context.innerArchive)
-        progress.stop(`LevelDB compressed: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB`)
-
-        const checksum = innerHash.digest('hex')
-        await fs.promises.writeFile(context.checksumFile, `${checksum}  data.tar.gz\n`)
-        logger.info(`Checksum: ${checksum}`)
+    const checksum = innerHash.digest('hex')
+    await fs.promises.writeFile(context.checksumFile, `${checksum}  data.tar.gz\n`)
+    logger.info(`Checksum: ${checksum}`)
 }
 
 async function finalizeTrackerArchive(coin, network, context) {
@@ -394,6 +377,7 @@ module.exports = {
     readTrackerCommittedHeight,
     // Exported for tests
     chooseArchiveHeight,
+    readFrozenStoreState,
     readFrozenStoreHeight,
     readTrackerHeightAfterRestart
 }

@@ -46,8 +46,8 @@
  * the fix publishes `node_catching_up` on its status surface (null when not
  * waiting), so its presence is the capability. When the surface cannot be
  * read (the container is still coming up) the module's package.json version
- * decides, 0.16.0 being the first release that carries the wait. The indexer
- * follows the decoder, not the node, so it always passes.
+ * decides. Platform-stream releases from 0.16.0 through 0.x carry the wait;
+ * legacy 1.x releases predate it. The indexer always passes.
  *
  * Escape hatch: XCHAIN_NODE_SKIP_NODE_TIP_GUARD=1 (loudly warned), matching
  * the other XCHAIN_NODE_SKIP_* gates.
@@ -63,6 +63,7 @@ const { XChainService, NODE_MODULE_NAME } = require('../config')
 const gate = require('./bootstrap_health_gate');
 const archiveMeta = require('./bootstrap_archive_meta');
 const config = require('../config');
+const { sleep } = require('../utils/helpers')
 const configService = require('./config_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -79,6 +80,8 @@ const NODE_CLI_ARGS = {
 // First release whose decoder and utxo-tracker wait out a node in initial
 // block download instead of reconciling a reorg that never happened.
 const CATCH_UP_WAIT_SINCE = [0, 16, 0]
+// Major 1 is the older legacy stream until a platform 1.0.0 release exists.
+const PLATFORM_STREAM_BEFORE = [1, 0, 0]
 
 // The service status surface is asked a few times: `install` starts the
 // container and restores right after, so the API may still be coming up.
@@ -149,7 +152,7 @@ function serviceWaitsOutCatchUp(module, { statusPayload = null, version = null }
     if (statusPayload && typeof statusPayload === 'object') {
         return Object.prototype.hasOwnProperty.call(statusPayload, 'node_catching_up')
     }
-    return versionAtLeast(version, CATCH_UP_WAIT_SINCE)
+    return versionAtLeast(version, CATCH_UP_WAIT_SINCE) && !versionAtLeast(version, PLATFORM_STREAM_BEFORE)
 }
 
 // Pure comparison; everything above feeds it.
@@ -176,19 +179,18 @@ function evaluateNodeTipAgainstArchive({ archiveHeight, chainInfo, serviceWaits,
     // The decoder and tracker wait only while the node reports initial block
     // download; the indexer follows the decoder, so the node's flag is not its concern.
     if (ibd || module === XChainService.XCHAIN_INDEXER) {
+        const waitDetail = module === XChainService.XCHAIN_INDEXER
+            ? `its xchain-decoder waits until the node passes ${archiveHeight}, then the indexer follows it`
+            : `the ${module} waits until the node passes ${archiveHeight} and then continues`
         return {
             verdict: VERDICT.BEHIND_WAIT, archiveHeight, nodeHeight, gap, ibd,
-            detail: `${position}; the ${module} waits until the node passes ${archiveHeight} and then continues, which \`xchain-node ps\` shows as WAITING FOR NODE`
+            detail: `${position}; ${waitDetail}, which \`xchain-node ps\` shows as WAITING FOR NODE`
         }
     }
     return {
         verdict: VERDICT.BEHIND_REFUSE, archiveHeight, nodeHeight, gap, ibd,
         detail: `${position}, and the node is not in initial block download, so the ${module} would read its lower tip as a rollback rather than wait; ${later}`
     }
-}
-
-async function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 // The service's own status payload, or null when it cannot be read within the
@@ -342,7 +344,7 @@ function createMovedPortClaim(baseClaimFreeHostPorts, deps = {}) {
         const ports = claim.registry?.[claim.module]?.docker?.ports || []
         const originalConflicts = conflicts.slice()
         const movable = conflicts.filter(({ hostPort }) => ports.some((entry) =>
-            !entry.always && !explicitKeys.has(entry.host) &&
+            hostPortClaim.isMovablePort(entry) && !explicitKeys.has(entry.host) &&
             String(claim.environmentVariables[entry.host]) === hostPort))
         const candidates = new Set(movable)
         const before = new Map(ports.map(entry => [entry.host, claim.environmentVariables[entry.host]]))
@@ -383,6 +385,7 @@ module.exports = {
     VERDICT,
     NODE_CLI_ARGS,
     CATCH_UP_WAIT_SINCE,
+    PLATFORM_STREAM_BEFORE,
     readCoinNodeChainInfo,
     serviceWaitsOutCatchUp,
     evaluateNodeTipAgainstArchive,

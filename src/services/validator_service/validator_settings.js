@@ -68,7 +68,8 @@ let fs = require('fs')
 let config = require('../../config')
 let {
     SETTINGS_FILE, KEY_FILE, CAPS_CONTAINER_PATH, SIGNER_CONTAINER_PATH,
-    COIN_NETWORKS, PUBLIC_ENCODER_BASE, VALIDATOR_DIR, CAPS_FILE, isRegularFile, CAPS_DIR
+    COIN_NETWORKS, PUBLIC_ENCODER_BASE, VALIDATOR_DIR, CAPS_FILE, LEGACY_CAPS_FILE,
+    isRegularFile, CAPS_DIR
 } = require('./validator_paths')
 let { isInitialized, ensureCapabilityConfigLayout, assertCapsDirIsolated } = require('./capability_layout')
 let { readWallets, publicWalletInfo } = require('./wallets')
@@ -100,7 +101,10 @@ function getValidatorEnv() {
 
     // The hub refuses to boot in validator mode without HUB_NETWORK. Host env
     // wins (the passthrough list already copied it); the recorded network
-    // fills the gap so a fresh install needs no .env edit for it.
+    // fills the gap so a fresh install needs no .env edit for it. The hub's
+    // indexer URLs are composed from the same recorded network first, and a
+    // value outside the known networks is still declared here so the hub
+    // refuses it loudly rather than deploying on a derived one.
     if (!config.HUB_NETWORK && s.network) env.HUB_NETWORK = s.network
 
     // DOGE publisher wiring, from the wallet init made. Every value here is
@@ -147,6 +151,15 @@ function getCapabilityConfigHostPath() {
     return isRegularFile(CAPS_FILE) ? CAPS_FILE : null
 }
 
+// Describe the capability config without migrating it. Status commands do not
+// hold the validator command lock, so they must not change the on-disk layout.
+function describeCapabilityConfigPath() {
+    if (!getValidatorSettings()) return null
+    if (isRegularFile(CAPS_FILE)) return { path: CAPS_FILE, legacy: false }
+    if (isRegularFile(LEGACY_CAPS_FILE)) return { path: LEGACY_CAPS_FILE, legacy: true }
+    return null
+}
+
 // Host DIRECTORY to bind-mount into the hub container (or null when this node
 // is not a validator / has no capability config yet). A directory, not the
 // file: a single-file bind mount breaks `docker cp` against the container for
@@ -161,10 +174,14 @@ function configureDependencies(dependencies) {
     ;({
         fs, config, SETTINGS_FILE, KEY_FILE, CAPS_CONTAINER_PATH,
         SIGNER_CONTAINER_PATH, COIN_NETWORKS, PUBLIC_ENCODER_BASE, VALIDATOR_DIR,
-        CAPS_FILE, isRegularFile, CAPS_DIR, isInitialized,
+        CAPS_FILE, LEGACY_CAPS_FILE, isRegularFile, CAPS_DIR, isInitialized,
         ensureCapabilityConfigLayout, assertCapsDirIsolated, readWallets,
         publicWalletInfo, getSignerMountDir
     } = dependencies)
 }
 
-module.exports = { getValidatorSettings, getValidatorEnv, validatorModeReport, getCapabilityConfigHostPath, getCapabilityConfigMountDir, configureDependencies }
+module.exports = {
+    getValidatorSettings, getValidatorEnv, validatorModeReport,
+    getCapabilityConfigHostPath, describeCapabilityConfigPath,
+    getCapabilityConfigMountDir, configureDependencies
+}

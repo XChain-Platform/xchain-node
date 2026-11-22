@@ -70,14 +70,13 @@ function loadWithProbe(rows, payloads) {
     return { ss, probe, printed: () => printed }
 }
 
-describe('StatusService: getStatus() STALL and HALTED columns', function () {
-
+function registerStallAndTrackerHaltTests() {
     it('prints STALL plus the reason word for an indexer deferring on a missing DOGE read, and the note names the variable', async function () {
         const { ss, probe, printed } = loadWithProbe(
             [{ module: 'xchain-indexer', coin: 'bitcoin', network: 'testnet', container_id: 'idx' },
              { module: 'xchain-decoder', coin: 'bitcoin', network: 'testnet', container_id: 'dec' }],
             { idx: { status: 'unhealthy', stallReason: 'rollcall_proof_unavailable', stallClass: 'wedged', lastBlockCommittedAt: 1757869440000 },
-              dec: { status: 'healthy', reorg_halted: false } })
+              dec: { status: 'healthy', reorg_halted: false, reorg_halt_checked_at: '2026-09-08T10:00:00Z' } })
         const result = await ss.getStatus('bitcoin', 'testnet', false)
 
         expect(probe.calledTwice).to.equal(true)
@@ -115,7 +114,9 @@ describe('StatusService: getStatus() STALL and HALTED columns', function () {
         expect(printed()).to.match(/list is empty/)
         expect(printed()).to.match(/xchain-node reset xchain-utxo-tracker bitcoin testnet/)
     })
+}
 
+function registerUnreadableAndDecoderHaltTests() {
     it('a tracker whose surface cannot be read stays plain running', async function () {
         const { ss, printed } = loadWithProbe(
             [{ module: 'xchain-utxo-tracker', coin: 'bitcoin', network: 'testnet', container_id: 'utx' }],
@@ -124,4 +125,29 @@ describe('StatusService: getStatus() STALL and HALTED columns', function () {
         expect(result.bitcoin.testnet['xchain-utxo-tracker'].halt).to.equal(undefined)
         expect(printed()).to.not.match(/HALTED/)
     })
+
+    it('prints REORG_HALT UNVERIFIED when the decoder has not completed a marker probe', async function () {
+        const { ss, printed } = loadWithProbe(
+            [{ module: 'xchain-decoder', coin: 'bitcoin', network: 'mainnet', container_id: 'dec' }],
+            { dec: { status: 'healthy', reorg_halted: false, reorg_halt_checked_at: null } })
+        const result = await ss.getStatus('bitcoin', 'mainnet', false)
+        expect(result.bitcoin.mainnet['xchain-decoder'].reorg_halt).to.include({ unverified: true })
+        expect(printed()).to.match(/xchain-decoder.*running REORG_HALT UNVERIFIED/)
+        expect(printed()).to.match(/NOT a confirmed halt/)
+    })
+
+    it('prints REORG_HALT when the decoder parse loop is parked', async function () {
+        const { ss, printed } = loadWithProbe(
+            [{ module: 'xchain-decoder', coin: 'bitcoin', network: 'mainnet', container_id: 'dec' }],
+            { dec: { status: 'healthy', reorg_halted: false, reorg_halt_checked_at: '2026-09-08T10:00:00Z',
+                reorg_halt_parked: true, reorg_halt_parked_at: '2026-09-08T10:01:00Z' } })
+        await ss.getStatus('bitcoin', 'mainnet', false)
+        expect(printed()).to.match(/xchain-decoder.*running REORG_HALT/)
+        expect(printed()).to.match(/parse loop is PARKED/)
+    })
+}
+
+describe('StatusService: getStatus() STALL and HALTED columns', function () {
+    registerStallAndTrackerHaltTests()
+    registerUnreadableAndDecoderHaltTests()
 })

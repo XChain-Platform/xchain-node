@@ -27,7 +27,8 @@
 #   - Refuses an unhealthy source. `bootstrap create` runs a source health gate:
 #     a service that is stopped, crash-looping, reporting unhealthy,
 #     materially behind its tip, or carrying a durable halt marker (a live
-#     decoder REORG_HALT row that no newer REORG_HALT_CLEARED supersedes, an
+#     decoder REORG_HALT row that no newer audited REORG_HALT_CLEARED supersedes,
+#     where a clear without a reason of at least 8 characters lifts nothing, an
 #     uncleared sync_halt) is NOT snapshotted. Such a combo is
 #     summarised as SOURCE-UNHEALTHY and the run exits non-zero, leaving the last
 #     good archive in place as the newest. This exists because the weekly cron
@@ -43,12 +44,12 @@
 #     repo on the small root fs and WILL fill it mid-create otherwise.
 #   - Transfers each archive + its .sig to the sync host (scp, origin->sync).
 #   - Prunes old archives locally and on the sync host, keeping the newest $KEEP
-#     by filename plus the newest $KEEP that are SIGNED (see PRUNE_SCRIPT), so a
-#     prune can never evict the archive the sync host advertises as latest.
+#     by filename plus the newest $KEEP that are servable (signed, safe-named,
+#     and not future-stamped; see PRUNE_SCRIPT).
 #   - Forces a republish after a reindex. A `reset` rebuilds a store on a NEW
 #     lineage, so every archive already published for that combo describes the
 #     old one and restoring it halts a fresh install. The node records those
-#     combos and `bootstrap create` clears them, so this run asks
+#     combos and a successful remote publish clears them, so this run asks
 #     `xchain-node bootstrap-republish-due` and pulls due combos into the plan
 #     even when the schedule would have dropped them. Trackers are reported and
 #     deferred to a --with-trackers run by default (their create means
@@ -149,22 +150,17 @@ die() { log "FATAL: $*"; exit 1; }
 # local stage, so the two sides cannot drift the way the producer and the server
 # already did.
 #
-# Serving resolves "latest" as the newest archive that HAS a paired .sig,
-# ordered by the UTC timestamp in the FILENAME (sync host latest.php). A prune
-# keyed on mtime that lets unsigned archives occupy retention slots therefore
-# deletes the exact file the server advertises: with KEEP=2, two unsigned
-# strays (an --allow-unsigned run, an operator drop) fill both slots and the
-# newest SIGNED archive goes, leaving consumers a 404 and a forced full resync
-# while a perfectly good archive existed a moment earlier. mtime is the wrong
-# key besides, because a backfilled or re-uploaded archive carries upload time,
-# not its name's timestamp.
+# Serving resolves "latest" as the newest regular, safe-named archive with a
+# paired .sig whose filename stamp is no more than one day in the future. A
+# retention slot must use the same rules or an ineligible signed file can evict
+# the only archive the resolver can serve. Filename order remains the key
+# because a backfilled archive carries upload time, not its name's timestamp.
 #
-# So retain the union of the newest KEEP by filename and the newest KEEP that
-# are signed. The union is never smaller than the by-name set alone, so this
-# deletes no more than a name-keyed prune, it cannot evict the serve target, and
-# it still bounds a directory at 2*KEEP archives. That bias matters because
-# deletions here fan out to the public web tier by a downstream rsync
-# --delete-after.
+# Retain the union of the newest KEEP by filename and the newest KEEP that are
+# servable. The union is never smaller than the by-name set alone, so this
+# deletes no more than a name-keyed prune and still bounds a directory at
+# 2*KEEP archives. The local-stage check uses the producer's clock; only the
+# published copy is resolved for downloads.
 #
 # Never candidates: latest.tgz / latest.tar.gz (the hand-placed manual-publish
 # aliases, which the server lets win on their own route) and *.part uploads in
@@ -180,11 +176,45 @@ cd "$dir" || exit 0
 all=$(ls -1 ./*.tar.gz 2>/dev/null | sed 's#^\./##' | grep -v '^latest\.tar\.gz$' | LC_ALL=C sort -r)
 [ -n "$all" ] || exit 0
 
-signed=$(printf '%s\n' "$all" | while IFS= read -r f; do
-           [ -f "$f.sig" ] && printf '%s\n' "$f"
-         done)
+FUTURE_STAMP_TOLERANCE_S=86400
+now=$(date -u +%s 2>/dev/null)
+case "$now" in ''|*[!0-9]*) now='' ;; esac
+
+safe_archive_name() {
+  case "$1" in
+    latest.tar.gz|*[!A-Za-z0-9._-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+servable=$(printf '%s\n' "$all" | while IFS= read -r f; do
+             [ -f "$f" ] || continue
+             safe_archive_name "$f" || continue
+             [ -f "$f.sig" ] && printf '%s\n' "$f"
+           done | awk -v now="$now" -v tol="$FUTURE_STAMP_TOLERANCE_S" '
+function leap(y) { return y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) }
+function month_days(y, m) {
+  if (m == 2) return leap(y) ? 29 : 28
+  return (m == 4 || m == 6 || m == 9 || m == 11) ? 30 : 31
+}
+function epoch(y, mo, d, h, mi, s, days, i) {
+  days = 0
+  if (y >= 1970) for (i = 1970; i < y; i++) days += leap(i) ? 366 : 365
+  else for (i = y; i < 1970; i++) days -= leap(i) ? 366 : 365
+  for (i = 1; i < mo; i++) days += month_days(y, i)
+  return (days + d - 1) * 86400 + h * 3600 + mi * 60 + s
+}
+{
+  if (now !~ /^[0-9]+$/) { print; next }
+  if (!match($0, /[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9]/)) { print; next }
+  stamp = substr($0, RSTART, RLENGTH)
+  y = substr(stamp, 1, 4) + 0; mo = substr(stamp, 5, 2) + 0; d = substr(stamp, 7, 2) + 0
+  h = substr(stamp, 10, 2) + 0; mi = substr(stamp, 12, 2) + 0; s = substr(stamp, 14, 2) + 0
+  if (y < 1 || mo < 1 || mo > 12 || d < 1 || d > month_days(y, mo) || h > 23 || mi > 59 || s > 59) { print; next }
+  if (epoch(y, mo, d, h, mi, s) <= now + tol) print
+}')
 retain=$({ printf '%s\n' "$all" | head -n "$keep"
-           [ -n "$signed" ] && printf '%s\n' "$signed" | head -n "$keep"
+           [ -n "$servable" ] && printf '%s\n' "$servable" | head -n "$keep"
          } | sed '/^$/d' | LC_ALL=C sort -u)
 
 # With candidates present, an empty retention set can only mean the selection
@@ -197,13 +227,11 @@ printf '%s\n' "$all" | while IFS= read -r f; do
   rm -f -- "$f" "$f.sig" "$f.sha256"
 done
 
-left=$(printf '%s\n' "$retain" | while IFS= read -r f; do
-         [ -n "$f" ] && [ -f "$f.sig" ] && printf '%s\n' "$f"
-       done | wc -l | tr -d ' ')
+left=$(printf '%s\n' "$servable" | head -n "$keep" | sed '/^$/d' | wc -l | tr -d ' ')
 if [ "$left" -gt 0 ]; then
-  echo "  prune: $left signed archive(s) retained in $dir"
+  echo "  prune: $left servable archive(s) retained in $dir"
 else
-  echo "  PRUNE WARNING: no signed archive remains in $dir; the latest endpoint 404s there"
+  echo "  PRUNE WARNING: no servable archive remains in $dir; the latest endpoint 404s there"
 fi
 PRUNE_EOF
 )
@@ -253,8 +281,8 @@ fi
 # catches that, because the wrong archive is hours old and perfectly fresh.
 #
 # The node records those combos (`xchain-node bootstrap-republish-due`) and
-# `bootstrap create` clears them, so a due combo is one whose newest published
-# archive predates its last reindex. Due combos are pulled into the plan even
+# a successful remote publish clears them, so a due combo is one whose newest
+# published archive predates its last reindex. Due combos enter the plan even
 # when the schedule would have dropped them, which is the only thing that turns
 # "the operator remembers to republish" into a forcing function.
 #
@@ -263,16 +291,39 @@ fi
 # tracker is reported loudly on every run instead and republished by the weekly
 # --with-trackers run; --force-due-trackers overrides that for an operator who
 # wants the downtime now. --no-forced-due disables the whole mechanism.
-declare -a DUE=()
-detect_due() {
-  local svc_pattern
-  svc_pattern="$(IFS='|'; echo "${ALL_SERVICES[*]}")"
-  "$XCHAIN_NODE_BIN" bootstrap-republish-due 2>/dev/null \
-    | grep -E "^($svc_pattern):$COMBO_FIELD:$COMBO_FIELD$" \
-    | sort -u
+#
+# The listing is captured with its exit status BEFORE it is filtered. A ledger
+# that exists but cannot be read makes the command fail, and that must stop the
+# run: read as empty output it would mean "nothing due" and publish the stale
+# lineage. Its stderr stays visible so the message naming the ledger reaches
+# the log. The one failure tolerated is an older pinned CLI that has no such
+# subcommand at all (its --help does not list it): it has no ledger either, so
+# the run goes on with nothing due, as it always has on those boxes.
+node_lists_republish_due() {
+  local help_text
+  help_text="$("$XCHAIN_NODE_BIN" --help 2>/dev/null)" || true
+  local line
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*bootstrap-republish-due([[:space:]]|$) ]] && return 0
+  done <<< "$help_text"
+  return 1
 }
+node_clears_republish_due() {
+  "$XCHAIN_NODE_BIN" --help 2>/dev/null | grep -q 'bootstrap-republish-clear'
+}
+declare -a DUE=()
 if [ "$FORCE_DUE" = 1 ]; then
-  mapfile -t DUE < <(detect_due)
+  if ! due_raw="$("$XCHAIN_NODE_BIN" bootstrap-republish-due)"; then
+    if node_lists_republish_due; then
+      die "bootstrap-republish-due failed (the republish ledger could not be read), so which combos are due is unknown; refusing to publish a possibly stale lineage. Repair the ledger or rerun with --no-forced-due."
+    fi
+    log "WARNING: this xchain-node has no bootstrap-republish-due command, so no combo is forced in as due."
+    due_raw=""
+  fi
+  svc_pattern="$(IFS='|'; echo "${ALL_SERVICES[*]}")"
+  mapfile -t DUE < <(printf '%s\n' "$due_raw" \
+    | grep -E "^($svc_pattern):$COMBO_FIELD:$COMBO_FIELD$" \
+    | sort -u)
   if [ "${#DUE[@]}" -gt 0 ]; then
     log "reindexed since their last publish (${#DUE[@]}): ${DUE[*]}"
   fi
@@ -375,6 +426,7 @@ for c in "${SELECTED[@]}"; do
   # CLI does not also wait and multiply the budget.
   lock_deadline=$(( $(date +%s) + LOCK_WAIT_MIN * 60 ))
   while : ; do
+    create_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     create_log="$(mktemp "$TMP_DIR/publish-create.XXXXXX")"
     create_rc=0
     XCHAIN_NODE_BOOTSTRAP_SIGNING_KEY="$SIGNING_KEY" \
@@ -472,7 +524,17 @@ for c in "${SELECTED[@]}"; do
 
     if ssh -o BatchMode=yes "$SYNC_HOST" "$mv_cmd"; then
       log "  published $a_base (+sig) to $SYNC_HOST:$dest"
-      SUMMARY+=("$c: PUBLISHED")
+      if node_clears_republish_due; then
+        if "$XCHAIN_NODE_BIN" bootstrap-republish-clear "$c" --at "$create_at"; then
+          SUMMARY+=("$c: PUBLISHED")
+        else
+          log "  WARNING: $c published, but its republish marker could not be cleared; the next run will treat it as due again"
+          SUMMARY+=("$c: PUBLISHED (marker not cleared)")
+        fi
+      else
+        log "  WARNING: this xchain-node has no bootstrap-republish-clear command"
+        SUMMARY+=("$c: PUBLISHED")
+      fi
       # Prune remote under the shared retention policy (see PRUNE_SCRIPT).
       printf '%s\n' "$PRUNE_SCRIPT" | ssh -o BatchMode=yes "$SYNC_HOST" "sh -s -- '$dest' '$KEEP'" || log "  (remote prune warning)"
     else

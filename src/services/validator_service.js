@@ -91,7 +91,7 @@ const { loadSdk, makeCoinWallet, promptSecret, resolveImportedWif, readWallets, 
 
 const signer = require('./validator_service/signer.js')
 signer.configureDependencies({ fs, path, config, SIGNER_DIR, SIGNER_FILE, SIGNER_ENV_FILE, COIN_NETWORKS, PUBLIC_ENCODER_BASE, isRegularFile, SIGNER_MODULES_DIR })
-const { writeSignerDir, getSignerMountDir, getActiveSignerFile, signerModuleExportsBroadcast } = signer
+const { writeSignerDir, getSignerMountDir, getSignerHostDir, getActiveSignerFile, signerModuleExportsBroadcast } = signer
 
 const capabilityLayout = require('./validator_service/capability_layout.js')
 capabilityLayout.configureDependencies({ fs, crypto, NETWORK_BY_P2P_PORT, COIN_NETWORKS, SIGNER_CONTAINER_DIR, KEY_FILE, SETTINGS_FILE, CAPS_DIR, CAPS_FILE, LEGACY_CAPS_FILE, isRegularFile, VALIDATOR_DIR, CAPS_BASENAME, getLogger, logger })
@@ -102,8 +102,8 @@ init.configureDependencies({ fs, crypto, ensureHubApiKey, readHubApiKey, COIN_NE
 const { initValidator } = init
 
 const settings = require('./validator_service/validator_settings.js')
-settings.configureDependencies({ fs, config, SETTINGS_FILE, KEY_FILE, CAPS_CONTAINER_PATH, SIGNER_CONTAINER_PATH, COIN_NETWORKS, PUBLIC_ENCODER_BASE, VALIDATOR_DIR, CAPS_FILE, isRegularFile, CAPS_DIR, isInitialized, ensureCapabilityConfigLayout, assertCapsDirIsolated, readWallets, publicWalletInfo, getSignerMountDir })
-const { getValidatorSettings, getValidatorEnv, validatorModeReport, getCapabilityConfigHostPath, getCapabilityConfigMountDir } = settings
+settings.configureDependencies({ fs, config, SETTINGS_FILE, KEY_FILE, CAPS_CONTAINER_PATH, SIGNER_CONTAINER_PATH, COIN_NETWORKS, PUBLIC_ENCODER_BASE, VALIDATOR_DIR, CAPS_FILE, LEGACY_CAPS_FILE, isRegularFile, CAPS_DIR, isInitialized, ensureCapabilityConfigLayout, assertCapsDirIsolated, readWallets, publicWalletInfo, getSignerMountDir })
+const { getValidatorSettings, getValidatorEnv, validatorModeReport, getCapabilityConfigHostPath, describeCapabilityConfigPath, getCapabilityConfigMountDir } = settings
 
 const drift = require('./validator_service/capability_drift.js')
 drift.configureDependencies({ fs, config, SETTINGS_FILE, CAPS_FILE, COIN_NETWORKS, validatorModeReport, loadSdk })
@@ -132,6 +132,7 @@ module.exports = {
     resolvedCapabilitySet,
     DRIFT_CAPABILITIES,
     getCapabilityConfigHostPath,
+    describeCapabilityConfigPath,
     getCapabilityConfigMountDir,
     ensureCapabilityConfigLayout,
     isInitialized,
@@ -140,6 +141,7 @@ module.exports = {
     readWallets,
     publicWalletInfo,
     getSignerMountDir,
+    getSignerHostDir,
     promptSecret,
     loadSdk,
     COIN_NETWORKS,

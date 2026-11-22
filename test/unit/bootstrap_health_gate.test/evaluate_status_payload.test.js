@@ -66,6 +66,24 @@ describe('BootstrapHealthGate', function () {
 
     describe('evaluateStatusPayload()', function () {
 
+        it('refuses an indexer whose decoder halt probe has not completed', function () {
+            const gate = loadGate()
+            const reason = 'decoder_reorg_halt_unverified: no REORG_HALT probe has completed a read since start'
+            const base = { status: 'healthy', lag: 0, decoderReorgHalted: false }
+            for (const payload of [{ ...base, stallClass: 'upstream_halted', stallReason: reason },
+                { ...base, stallReason: reason }, { ...base, stallClass: 'upstream_halted' }]) {
+                const reasons = gate.evaluateStatusPayload(payload)
+                expect(reasons).to.have.lengthOf(1)
+                expect(reasons[0]).to.match(/without a completed marker probe/)
+            }
+            expect(gate.evaluateStatusPayload({ ...base, stallClass: 'barrier_defer',
+                stallReason: 'price_sync_barrier: see decoder_reorg_halt_unverified' })).to.deep.equal([])
+            const confirmed = gate.evaluateStatusPayload({ ...base, decoderReorgHalted: true,
+                stallClass: 'upstream_halted', stallReason: 'decoder_reorg_halt: marker present' })
+            expect(confirmed).to.have.lengthOf(1)
+            expect(confirmed[0]).to.match(/durable REORG_HALT/)
+        })
+
         it('REFUSES an indexer reporting its block counter wedged', function () {
             const gate = loadGate()
             const reasons = gate.evaluateStatusPayload(
@@ -103,6 +121,21 @@ describe('BootstrapHealthGate', function () {
     })
 })
 
+describe('BootstrapHealthGate bridge proof wait', function () {
+
+    installEnvironmentHooks()
+
+    it('bounds a bridge proof wait only through the ordinary lag check', function () {
+        const gate = loadGate()
+        const wait = { status: 'healthy', stallClass: 'bridge_proof_wait',
+            stallReason: 'bridge_proof_barrier' }
+        expect(gate.evaluateStatusPayload({ ...wait, lag: 50 }, { maxLag: 100 })).to.deep.equal([])
+        const reasons = gate.evaluateStatusPayload({ ...wait, lag: 101 }, { maxLag: 100 })
+        expect(reasons).to.have.lengthOf(1)
+        expect(reasons[0]).to.include('101 blocks behind')
+    })
+})
+
 describe('BootstrapHealthGate', function () {
 
     installEnvironmentHooks()
@@ -118,6 +151,18 @@ describe('BootstrapHealthGate', function () {
             expect(reasons).to.have.lengthOf(1)
             expect(reasons[0]).to.match(/train-activation halt/)
             expect(reasons[0]).to.match(/rs-2/)
+        })
+
+        it('describes a train-activation halt whose gate could not name a rule set', function () {
+            const gate = loadGate()
+            const reasons = gate.evaluateStatusPayload(trainPayload({
+                status: 'halt', required_rule_set: null, required_at_height: null,
+                reason: 'activation gate failed to evaluate'
+            }))
+            expect(reasons).to.have.lengthOf(1)
+            expect(reasons[0]).to.match(/train-activation halt/)
+            expect(reasons[0]).to.match(/could not determine the required rule set/)
+            expect(reasons[0]).to.not.match(/build does not implement/)
         })
 
         it('passes a pending, unevaluated, absent or malformed train_activation', function () {
@@ -178,6 +223,35 @@ describe('BootstrapHealthGate', function () {
             expect(reasons[0]).to.match(/negative lag \(-100\)/)
             expect(reasons[0]).to.not.match(/blocks behind/)
             expect(gate.evaluateStatusPayload({ status: 'healthy', lag_blocks: -1 }).join(' ')).to.match(/negative lag_blocks/)
+        })
+
+    })
+})
+
+describe('BootstrapHealthGate', function () {
+
+    installEnvironmentHooks()
+
+    describe('evaluateStatusPayload()', function () {
+
+        it('REFUSES an indexer whose barrier hold is past its ceiling', function () {
+            const gate = loadGate()
+            const base = { status: 'healthy', lag: 3, degraded: true, stallReason: 'price_sync_barrier' }
+            for (const stallClass of ['barrier_defer', 'price_landing_wait']) {
+                const reasons = gate.evaluateStatusPayload({ ...base, stallClass, barrierCeilingExceeded: true })
+                expect(reasons, stallClass).to.have.lengthOf(1)
+                expect(reasons[0]).to.include('past its hold ceiling')
+                expect(reasons[0]).to.include('price_sync_barrier')
+            }
+            for (const value of [false, 'true', 1])
+                expect(gate.evaluateStatusPayload({ ...base, stallClass: 'barrier_defer',
+                    barrierCeilingExceeded: value }), String(value)).to.deep.equal([])
+            expect(gate.evaluateStatusPayload({ ...base, stallClass: 'barrier_defer' })).to.deep.equal([])
+            for (const stallClass of ['rollcall_proof_stuck', 'capability_proof_stuck']) {
+                const reasons = gate.evaluateStatusPayload({ ...base, stallClass, barrierCeilingExceeded: true })
+                expect(reasons, stallClass).to.have.lengthOf(1)
+                expect(reasons[0]).to.include(stallClass)
+            }
         })
 
     })

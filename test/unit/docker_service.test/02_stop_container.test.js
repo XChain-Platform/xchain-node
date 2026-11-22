@@ -57,6 +57,7 @@ describe('DockerService', function () {
                 const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
                 expect(cmd).to.equal('docker')
                 expect(args).to.deep.equal(['stop', 'abc123'])
+                expect(rest[0]).to.deep.equal({ timeout: 40000 })
                 cb(null, 'abc123\n')
             })
             const ds = loadDockerService(stubs)
@@ -86,9 +87,11 @@ describe('DockerService', function () {
 // at the budget; the container's exit code is what tells them apart.
 function stopThenInspect(stubs, { stopErr = null, stopOut = 'xchain-node-bitcoin-mainnet-node\n', exitCode = '0', inspectErr = null } = {}) {
     const calls = []
+    calls.options = []
     stubs.execFile.callsFake((cmd, args, ...rest) => {
         const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
         calls.push(args)
+        calls.options.push(rest[0])
         if (args[0] === 'stop') return cb(stopErr, stopOut)
         if (args[0] === 'inspect') return cb(inspectErr, exitCode + '\n')
         cb(new Error('unexpected ' + args.join(' ')))
@@ -107,6 +110,8 @@ describe('DockerService', function () {
             const outcome = await ds.stopContainerByName('xchain-node-bitcoin-mainnet-node', 600)
             expect(calls[0]).to.deep.equal(['stop', '-t', '600', 'xchain-node-bitcoin-mainnet-node'])
             expect(calls[1].slice(0, 2)).to.deep.equal(['inspect', '--format'])
+            expect(calls.options[0]).to.be.a('function')
+            expect(calls.options[1]).to.deep.equal({ timeout: 30000 })
             expect(outcome.stopped).to.be.true
             expect(outcome.killed).to.be.false
             expect(outcome.seconds).to.be.a('number')
@@ -165,6 +170,7 @@ describe('DockerService', function () {
             const outcome = await ds.stopContainer(ID, 120)
             expect(calls[0]).to.deep.equal(['stop', '-t', '120', ID])
             expect(calls[1].slice(0, 2)).to.deep.equal(['inspect', '--format'])
+            expect(calls.options).to.deep.equal([{ timeout: 150000 }, { timeout: 30000 }])
             expect(outcome).to.include({ stopped: true, killed: true, exitCode: 137 })
         })
 

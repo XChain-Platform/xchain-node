@@ -16,8 +16,10 @@ const sinon = require('sinon')
 const { stakeValidator, unstakeValidator } = require('../../../src/services/validator_stake_service')
 const { readValidatorSet } = require('../../../src/services/validator_stake_service/validator_set_read')
 const { COIN_NETWORKS } = require('../../../src/services/validator_service')
+const { readTokenMintRules } = require('../../../src/services/validator_stake_service/mint_rules')
+const { tokenBody } = require('../../helpers/stake_harness')
 
-const PUBKEY  = 'ab'.repeat(32)
+const PUBKEY = 'ab'.repeat(32)
 const ADDRESS = 'mStakeAddress'
 const TIP     = 150400
 
@@ -54,7 +56,8 @@ function makeSdk(getValidators) {
     const sdk = {
         explorer: {
             getAddress: sinon.stub().resolves({ balances: { confirmed: '0.001', pending: '0' } }),
-            getToken:   sinon.stub().resolves({ mints: { max: 10000, address_max: 50000 } }),
+            getToken:   sinon.stub().resolves(tokenBody()),
+            getMints:   sinon.stub().resolves({ total: 0, data: [] }),
             getValidators,
             getStatus:  sinon.stub().resolves({ last_block: Object.fromEntries(
                 Object.values(COIN_NETWORKS).map(c => [c.stakeCoin, TIP])) }),
@@ -83,6 +86,12 @@ function deps(sdk, logged) {
 describe('ValidatorStakeService', function () {
 
     describe('validator set paging', function () {
+
+        it('serves a token body whose mint rules read as known, so a shortfall case tests paging', async function () {
+            const { sdk } = makeSdk(pagedValidators(busySet()))
+            const rules = readTokenMintRules(await sdk.explorer.getToken('XCHAIN'), 'XCHAIN')
+            expect(rules.unreadable).to.equal(null)
+        })
 
         it('stake finds a stake that sits past the first page and sends nothing', async function () {
             const { sdk, calls } = makeSdk(pagedValidators(busySet()))

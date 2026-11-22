@@ -271,6 +271,8 @@ describe('StopBudgetService', function () {
         await sbs.stopModuleContainer(stop, 'xchain-decoder', 'bitcoin', 'mainnet', 'abc123', {}, read)
         expect(read.calledBefore(stop)).to.be.true
         expect(overLine()).to.match(/xchain-decoder \(bitcoin mainnet\): the container carries SHUTDOWN_TIMEOUT_MS=150000, at or above its 120 s stop budget/)
+        expect(overLine()).to.include('Recreate the container (xchain-node recreate) so the node re-derives SHUTDOWN_TIMEOUT_MS')
+        expect(overLine()).to.not.include('module config')
         warnStub.resetHistory()
         const explorer = sinon.stub().resolves({ stopTimeout: 30, shutdownTimeoutMs: '45000' })
         await sbs.stopModuleContainer(cleanStop(), 'xchain-explorer', 'bitcoin', 'mainnet', 'abc123', {}, explorer)

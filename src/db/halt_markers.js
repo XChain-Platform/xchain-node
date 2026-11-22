@@ -18,11 +18,7 @@
  * these are the statements that ask whether one did. Three tables, one question,
  * so they share a file.
  *
- * WHY EVERY COUNT IS ASKED AS A COUNT. The caller turns an unparseable answer
- * into a refusal, and that only works if each statement returns a fixed number
- * of plain integers. A read shaped any other way arrives as "we could not tell"
- * dressed up as "no halt markers", which is the collapse this gate exists to
- * prevent.
+ * The caller strictly parses every result and refuses unreadable output.
  *
  ********************************************************************/
 
@@ -42,27 +38,12 @@ function markerTablesSql(name) {
 }
 
 /**
- * LIVE reorg halts only. A REORG_HALT row older than the newest
- * REORG_HALT_CLEARED row is superseded by that clear, which `xchain-node
- * clear-reorg-halt` writes with an audited reason. The halt row itself is never
- * deleted, so a plain count would refuse a cleared database forever. Whether the
- * newest clear really lifts the halt is newestReorgClearSql's question.
+ * The bounded history needed to apply the decoder's exact clear-binding rule.
+ * The prefix distinguishes SQL NULL from empty bytes without parsing JSON in SQL.
  */
-function liveReorgHaltCountSql(name) {
-    return `SELECT COUNT(*) FROM \`${name}\`.events WHERE code='REORG_HALT' ` +
-        `AND id > COALESCE((SELECT MAX(id) FROM \`${name}\`.events WHERE code='REORG_HALT_CLEARED'), 0);`
-}
-
-/**
- * Whether the newest REORG_HALT/REORG_HALT_CLEARED row is a clear, and that row's bytes.
- * Always one row of two fields: a 0-or-1 count, then HEX(data) (NULL or empty when there is
- * no such clear). The decoder reads a clear without an audited reason as a live halt, so the
- * caller judges the payload with the decoder's own rule in JavaScript, never a SQL re-creation.
- */
-function newestReorgClearSql(name) {
-    const events = `\`${name}\`.events`
-    return `SELECT COUNT(*), MAX(HEX(data)) FROM ${events} WHERE code='REORG_HALT_CLEARED' ` +
-        `AND id = (SELECT MAX(id) FROM ${events} WHERE code IN ('REORG_HALT','REORG_HALT_CLEARED'));`
+function reorgHaltHistorySql(name) {
+    return `SELECT id, code, IF(data IS NULL, 'N', CONCAT('V', HEX(data))) FROM \`${name}\`.events ` +
+        `WHERE code IN ('REORG_HALT','REORG_HALT_CLEARED') ORDER BY id DESC LIMIT 1001;`
 }
 
 /** Live sync halts: a cleared row keeps its cleared_at, so NULL is what "still halted" means. */
@@ -82,11 +63,13 @@ function pendingSyncHaltCountSql(name) {
 
 /**
  * Saved rollback guards, encoded for the caller to judge with xchain-sync's
- * loadRollbackGuardState rule. LEFT avoids treating '_' as a wildcard.
+ * loadRollbackGuardState rule. LEFT avoids treating '_' as a wildcard. Every token ends in
+ * ';' so a GROUP_CONCAT cut by group_concat_max_len, at any byte, loses a terminator or a
+ * token and is refused by the parser instead of reading as a shorter valid value.
  */
 function rollbackGuardStateSql(name) {
     return `SELECT COUNT(*), COALESCE(GROUP_CONCAT(` +
-        `IF(state_value IS NULL, 'N', CONCAT('V', HEX(state_value))) ` +
+        `IF(state_value IS NULL, 'N;', CONCAT('V', HEX(state_value), ';')) ` +
         `ORDER BY state_key SEPARATOR ','), '') FROM \`${name}\`.sync_state ` +
         `WHERE LEFT(state_key, 15) = 'rollback_guard:';`
 }
@@ -129,8 +112,7 @@ function syncHaltsSinceSql(name, priorSyncHalt) {
 
 module.exports = {
     markerTablesSql,
-    liveReorgHaltCountSql,
-    newestReorgClearSql,
+    reorgHaltHistorySql,
     liveSyncHaltCountSql,
     pendingSyncHaltCountSql,
     rollbackGuardStateSql,

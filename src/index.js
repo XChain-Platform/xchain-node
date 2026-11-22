@@ -33,7 +33,10 @@ if (nodeMajor < MIN_NODE_MAJOR) {
     process.exit(1)
 }
 
-require('dotenv').config()
+require('dotenv').config({ quiet: true })
+
+const { verifyConsensusPinsAtBoot } = require('./operations/consensus_pin_boot')
+verifyConsensusPinsAtBoot()
 
 const { parseCommand } = require('./cli')
 

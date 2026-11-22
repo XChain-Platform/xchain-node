@@ -24,6 +24,40 @@ const util = require('node:util');
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
+function rpcErrorExcerpt(data) {
+    if (!data || typeof data !== 'object' || data.error === undefined) return '';
+    const error = data.error;
+    let text;
+    if (typeof error === 'string') {
+        text = error;
+    } else if (error && typeof error === 'object' && error.message) {
+        const code = error.code !== undefined ? String(error.code) + ' ' : '';
+        text = code + String(error.message);
+    } else {
+        try { text = JSON.stringify(error); } catch { text = String(error); }
+    }
+    return text ? ': ' + text.slice(0, 200) : '';
+}
+
+function missingResultFailure(url, response) {
+    const status = response.status ? 'HTTP ' + response.status + ' ' : '';
+    const nonJson = typeof response.data === 'string' && response.data ? ' (non-JSON body)' : '';
+    return url + ' → ' + status + 'with no JSON-RPC result' + rpcErrorExcerpt(response.data) + nonJson;
+}
+
+// Why one endpoint attempt failed. The HTTP STATUS leads when there is one:
+// axios reports every 4xx as code ERR_BAD_REQUEST, so a 401 from a key-enforcing
+// hub recorded as "ERR_BAD_REQUEST" is true and useless, since it reads as a
+// malformed request rather than a missing HUB_API_KEY. A request cut off by its
+// own deadline reaches here as a bare cancellation, so it is named for what it was.
+function transportFailure(url, err, expired, ms) {
+    if (expired && !err.response) {
+        return url + ' → timeout: no complete response within ' + ms + 'ms';
+    }
+    const status = err.response && err.response.status;
+    return url + ' → ' + (status ? 'HTTP ' + status + ' ' : '') + (err.code || err.message);
+}
+
 class HubConnector {
 
     // Accept an array of endpoint URLs or a single host+port for backward compatibility
@@ -38,14 +72,30 @@ class HubConnector {
         // (which would cost the full timeout per call before falling back).
         this._lastGoodIdx = 0;
         // Per-endpoint failure detail from the most recent callRpc(). Populated with
-        // "url → code|message" strings for each unreachable endpoint so callers
+        // "url → code|message" strings for each failed endpoint so callers
         // can report exactly what was tried and why, instead of a bare null.
         this.lastFailures = [];
+        // Kept parallel with lastFailures so callers can act on an HTTP status
+        // without parsing operator-facing text. null means no HTTP response.
+        this.lastFailureStatuses = [];
+    }
+
+    recordFailure(message, status = null) {
+        this.lastFailures.push(message);
+        this.lastFailureStatuses.push(status);
     }
 
     // Internal: call a JSON-RPC method, trying each endpoint starting from the
     // last one that succeeded and wrapping around through the rest.
-    async callRpc(data, timeout = 5000){
+    //
+    // `timeout` is a total deadline for each endpoint's whole exchange, body
+    // included. axios applies its own `timeout` as a wall-clock cap only until the
+    // response headers arrive and as a socket idle timer after that, so a hub
+    // that sends headers and then trickles bytes would never be cut off by it;
+    // the abort signal is what bounds the exchange. `budgetMs` bounds the whole
+    // call across every endpoint, so the time spent cannot grow with the number
+    // of endpoints.
+    async callRpc(data, timeout = 5000, budgetMs = Infinity){
         // A reachable-but-unhealthy hub responds with a non-2xx status (e.g. the
         // 503 "degraded" health body returned when its DB pool is down) that
         // still carries a valid JSON-RPC body. Axios throws on any non-2xx, so
@@ -54,9 +104,18 @@ class HubConnector {
         // the remaining endpoints in case one is fully healthy.
         let degraded = null;
         this.lastFailures = [];
+        this.lastFailureStatuses = [];
+        const budgetEnd = Date.now() + budgetMs;
         for(let i = 0; i < this.urls.length; i++){
             let idx = (this._lastGoodIdx + i) % this.urls.length;
             let url = this.urls[idx];
+            const attemptMs = Math.min(timeout, budgetEnd - Date.now());
+            if(attemptMs <= 0){
+                this.recordFailure(url + ' → wall-clock budget exhausted');
+                break;
+            }
+            const expiry = AbortSignal.timeout(attemptMs);
+            const budgetLimited = attemptMs < timeout;
             try {
                 // Authenticate to a key-enforcing hub: write methods (e.g. updateConfig)
                 // are gated by HUB_API_KEY on the hub, so the CLI must present the same key
@@ -64,28 +123,29 @@ class HubConnector {
                 // it unconditionally is safe; an unset key leaves the header off (keyless).
                 let headers = {};
                 if(config.HUB_API_KEY) headers['x-api-key'] = config.HUB_API_KEY;
-                let response = await axios.post(url, data, { timeout, headers });
+                let response = await axios.post(url, data, { timeout: attemptMs, headers, signal: expiry });
                 if(response.data && response.data.result !== undefined){
                     this._lastGoodIdx = idx;
                     return response.data.result;
                 }
+                this.recordFailure(missingResultFailure(url, response), response.status || null);
             } catch(err){
                 if(err.response && err.response.data && err.response.data.result !== undefined){
                     degraded = err.response.data.result;
                 } else {
-                    // Unreachable, or answered with a status carrying no JSON-RPC
-                    // result. Record why so the caller can report which endpoints
-                    // failed instead of an undiagnosable null.
-                    //
-                    // The HTTP STATUS leads when there is one. axios reports every
-                    // 4xx as code ERR_BAD_REQUEST, so a 401 from a key-enforcing hub
-                    // recorded as "ERR_BAD_REQUEST" - true, and useless: it reads as
-                    // a malformed request rather than a missing HUB_API_KEY, which
-                    // is the one thing an operator needs to be told here.
-                    const status = err.response && err.response.status;
-                    this.lastFailures.push(url + ' → ' +
-                        (status ? 'HTTP ' + status + ' ' : '') + (err.code || err.message));
+                    // Unreachable, cut off by its deadline, or answered with a status
+                    // carrying no JSON-RPC result. Record why so the caller can
+                    // report which endpoints failed instead of an undiagnosable null.
+                    this.recordFailure(
+                        transportFailure(url, err, expiry.aborted, attemptMs),
+                        (err.response && err.response.status) || null
+                    );
                 }
+            }
+            if(expiry.aborted && budgetLimited && i + 1 < this.urls.length){
+                const nextIdx = (this._lastGoodIdx + i + 1) % this.urls.length;
+                this.recordFailure(this.urls[nextIdx] + ' → wall-clock budget exhausted');
+                break;
             }
         }
         // No endpoint returned a healthy result. Surface a reachable-but-degraded
@@ -106,13 +166,14 @@ class HubConnector {
         return result !== null;
     }
 
-    async updateConfig(newConfigJson){
+    // `budgetMs` caps the whole call across every endpoint (see callRpc).
+    async updateConfig(newConfigJson, { budgetMs } = {}){
         let result = await this.callRpc({
             jsonrpc: '2.0',
             method: 'updateconfig',
             params: { config: newConfigJson },
             id: 1
-        }, 60000);  // config pushes on multi-coin nodes can exceed a 10s ceiling (prod-validated)
+        }, 60000, budgetMs);  // config pushes on multi-coin nodes can exceed a 10s ceiling (prod-validated)
         // The hub reports a refused push (e.g. PBFT "Not the leader for seq N")
         // as a normal JSON-RPC result of the form {error}, not as a transport
         // failure. Treat it as a failed push and record the text so the retry
@@ -120,7 +181,7 @@ class HubConnector {
         if(result && typeof result === 'object' && result.error){
             const e = result.error;
             const text = typeof e === 'string' ? e : (e && e.message) || JSON.stringify(e);
-            this.lastFailures.push('hub refused config push → ' + text);
+            this.recordFailure('hub refused config push → ' + text);
             return false;
         }
         return result !== null;

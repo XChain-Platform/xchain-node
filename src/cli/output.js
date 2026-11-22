@@ -59,10 +59,10 @@ takes it restores pre-reindex state and halts. Nothing forced a republish, and
 no age check catches it, because the stale-lineage archive is hours old and
 simply wrong.
 
-\`reset\` records the combos it wiped, \`bootstrap create\` records what it
-re-derived, and this lists the difference. scripts/publish-bootstraps.sh reads
-it to pull due combos into its plan even when the schedule or the tracker
-opt-in would have skipped them.`)
+\`reset\` records the combos it wiped, and the publisher clears that marker only
+after the remote archive is visible. This command lists the difference so
+scripts/publish-bootstraps.sh can pull due combos into its plan even when the
+schedule or tracker opt-in would have skipped them.`)
         .action(async (options) => {
             const due = listRepublishDue()
             if (options && options.json) {
@@ -75,10 +75,36 @@ opt-in would have skipped them.`)
 
 }
 
+function registerBootstrapRepublishClear(program, deps) {
+    const { parseComboKey, recordBootstrapPublished } = deps
+    program
+        .command('bootstrap-republish-clear <combo>')
+        .description('Record a successfully published bootstrap archive')
+        .requiredOption('--at <ISO-8601>', 'publish attempt start time')
+        .addHelpText('after', `
+The publisher runs this only after its remote rename succeeds. If you create
+and publish an archive by hand, run this command after the upload is visible.`)
+        .action(async (combo, options) => {
+            const parsed = parseComboKey(combo)
+            const at = new Date(options.at)
+            if (!parsed || !Number.isFinite(at.getTime())) {
+                console.error('ERROR: expected <service>:<coin>:<network> and a valid --at ISO-8601 time')
+                return process.exit(1)
+            }
+            const ok = recordBootstrapPublished(parsed.module, parsed.coin, parsed.network, { at })
+            if (!ok) {
+                console.error('ERROR: could not update the bootstrap republish ledger')
+                return process.exit(1)
+            }
+            return process.exit(0)
+        })
+}
+
 function registerStatusCommands(program, deps) {
     registerPs(program, deps)
     registerBootstrapCombos(program, deps)
     registerBootstrapRepublishDue(program, deps)
+    registerBootstrapRepublishClear(program, deps)
 }
 
 function registerValidatorRoot(program) {
@@ -164,8 +190,8 @@ function registerValidatorUnstake(validator, deps) {
 
 function printValidatorConfiguration(s, deps) {
     const {
-        getCapabilityConfigHostPath, readWallets, publicWalletInfo,
-        getSignerMountDir, COIN_NETWORKS, WALLETS_FILE
+        describeCapabilityConfigPath, readWallets, publicWalletInfo,
+        getSignerHostDir, COIN_NETWORKS, WALLETS_FILE
     } = deps
     console.log('Validator enabled.')
     console.log('  pubkey       : ' + s.pubkey)
@@ -179,10 +205,11 @@ function printValidatorConfiguration(s, deps) {
     // set) until its activation flag day. Said here so an operator whose
     // stake clears its floor does not go looking for how to earn it.
     console.log('  full_node    : not active on this network yet (tier turns on with a flag day; nothing to configure)')
-    // Print the live path: it moved into its own directory (so the hub's
-    // bind mount cannot break `docker cp`), and this is where an operator
-    // coming from an older install finds it after the migration.
-    console.log('  caps config  : ' + (getCapabilityConfigHostPath() || '(missing; re-run validator init)'))
+    const caps = describeCapabilityConfigPath()
+    const capsPath = caps ? caps.path + (caps.legacy
+        ? ' (legacy location; moves on the next validator init or hub install/update)'
+        : '') : '(missing; re-run validator init)'
+    console.log('  caps config  : ' + capsPath)
     // Addresses only. The keys stay in the 0600 file.
     const w = publicWalletInfo(readWallets())
     const coins = COIN_NETWORKS[(w && w.network) || s.network] || { stakeCoin: 'coin', dogeCoin: 'DOGE' }
@@ -192,7 +219,7 @@ function printValidatorConfiguration(s, deps) {
         console.log('  keys file    : ' + WALLETS_FILE + ' (mode 0600; back it up)')
         console.log('  DOGE signer  : ' + (deps.config.XCHAIN_NODE_HUB_SIGNER_DIR
             ? deps.config.XCHAIN_NODE_HUB_SIGNER_DIR + ' (operator-supplied, XCHAIN_NODE_HUB_SIGNER_DIR)'
-            : (getSignerMountDir() || '(missing; re-run validator init)')))
+            : (getSignerHostDir() || '(missing; re-run validator init)')))
     } else {
         console.log('  wallets      : (none; re-run validator init, or run your own signer via XCHAIN_NODE_HUB_SIGNER_DIR)')
     }

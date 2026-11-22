@@ -68,7 +68,7 @@ function evaluateContainerState(raw, { now = Date.now() } = {}) {
 //   decoder  health: status, lag_blocks/blockLag, reorg_halted, reorg_halt_checked_at,
 //                    reorg_halt_parked
 //   indexer  health: status, lag, decoderReorgHalted, stallClass (values: see stallReasons),
-//                    train_activation.status
+//                    barrierCeilingExceeded, train_activation.status
 //   tracker  health: status, lag, halted, halt_reason, block_fetch_desync,
 //                    node_height_stale (synced is sent but not read here)
 //   any      /status: status ('ok'|'healthy'|'halted'|'degraded'|'stalled'|'unhealthy')
@@ -112,7 +112,7 @@ function statusFlagReasons(payload) {
     // either and the lag leg below already refuses it. Do not restate this as "one
     // field implies the other": that claim was false for the /status fallback for as
     // long as it stood here. The indexer's decoderReorgHalted has no companion
-    // timestamp yet; extend this to it when the indexer publishes one.
+    // timestamp yet, so its never-probed state is refused below through stallClass/stallReason.
     if (Object.prototype.hasOwnProperty.call(payload, 'reorg_halted')
         && (payload.reorg_halt_checked_at === null || payload.reorg_halt_checked_at === undefined))
         reasons.push('the decoder has never completed a REORG_HALT marker probe (reorg_halt_checked_at is ' +
@@ -120,6 +120,14 @@ function statusFlagReasons(payload) {
     reasons.push(...reorgParkReasons(payload))
     if (payload.decoderReorgHalted === true)
         reasons.push('the upstream decoder carries a durable REORG_HALT marker, so this database is frozen behind it')
+    const stallWord = typeof payload.stallReason === 'string'
+        ? payload.stallReason.trim().split(/[\s:]/)[0]
+        : null
+    if (payload.decoderReorgHalted !== true
+        && (payload.stallClass === 'upstream_halted' || stallWord === 'decoder_reorg_halt_unverified'))
+        reasons.push('the indexer is holding its pass behind the decoder REORG_HALT gate without a completed marker probe, ' +
+            'so its decoder halt boolean is an untested default rather than a reading' +
+            (payload.stallReason ? `: ${payload.stallReason}` : ''))
     reasons.push(...stallReasons(payload))
     if (payload.block_fetch_desync)
         reasons.push(`the service reports a block-fetch desync (${formatBlockFetchDesync(payload.block_fetch_desync)})`)
@@ -134,12 +142,15 @@ function stallReasons(payload) {
     const reasons = []
     // The indexer's own single-field verdict on its block counter: 'none' |
     // 'future_block_wait' | 'bridge_proof_wait' | 'train_activation_halt' | 'operator_action_hold' |
-    // 'price_landing_wait' | 'barrier_defer' | 'wedged', plus the published refinements 'upstream_halted' (only beside
-    // decoderReorgHalted: true, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck' |
+    // 'price_landing_wait' | 'barrier_defer' | 'wedged', plus the published refinements 'upstream_halted' (whenever
+    // the pass is held behind the decoder REORG_HALT gate, refused above) | 'rollcall_proof_wait' | 'rollcall_proof_stuck' |
     // 'capability_proof_wait' | 'capability_proof_stuck'. The set is defined in xchain-indexer
-    // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). 'wedged' and the
-    // two '_proof_stuck' classes are refusals by themselves; 'train_activation_halt' never is because the
-    // train_activation.status === 'halt' leg below already refuses it. 'wedged' needs its own
+    // src/XChainIndexer/stall_health.js (stallClassOf, publishedStallClass). 'wedged',
+    // 'operator_action_hold' and the two '_proof_stuck' classes are refusals by themselves;
+    // 'price_landing_wait' and 'barrier_defer' are refused only after
+    // barrierCeilingExceeded becomes true, when their bounded wait has expired.
+    // 'train_activation_halt' never is because the train_activation.status === 'halt' leg below
+    // already refuses it. 'wedged' needs its own
     // leg: the indexer reports status "healthy"
     // whenever its process is up and its DB circuit is closed, so a freshly-wedged
     // indexer whose lag is still inside the ceiling passes every other check here.
@@ -148,6 +159,8 @@ function stallReasons(payload) {
     // refuse forever; stallClassOf resolves that wait to 'future_block_wait' before
     // it can ever reach 'wedged'. Strict equality, so an older image publishing no
     // stallClass keeps today's behavior exactly.
+    // bridge_proof_wait remains eligible because it represents correctly deferred data;
+    // the separate lag check below refuses it after the ordinary block-lag ceiling.
     if (payload.stallClass === 'wedged')
         reasons.push('the service reports its block counter WEDGED (stallClass "wedged": no commit for longer ' +
             'than its stall grace window)' + (payload.stallReason ? `: ${payload.stallReason}` : ''))
@@ -158,15 +171,24 @@ function stallReasons(payload) {
     if (payload.stallClass === 'rollcall_proof_stuck' || payload.stallClass === 'capability_proof_stuck')
         reasons.push(`the service reports its block counter held on a proof past its hold ceiling (stallClass ` +
             `"${payload.stallClass}")` + (payload.stallReason ? `: ${payload.stallReason}` : ''))
+    const alreadyRefused = ['wedged', 'operator_action_hold', 'rollcall_proof_stuck',
+        'capability_proof_stuck'].includes(payload.stallClass)
+    if (payload.barrierCeilingExceeded === true && !alreadyRefused)
+        reasons.push('the service reports its block held behind a barrier past its hold ceiling ' +
+            '(barrierCeilingExceeded is true; the block is not advancing)' +
+            (payload.stallReason ? `: ${payload.stallReason}` : ''))
     // Refuse only 'halt': the indexer stays "healthy" and never wedges after a restart while
     // halted, and 'pending'/'unevaluated' are still correct data. Strict, so older images pass.
     const train = payload.train_activation
-    if (train && typeof train === 'object' && train.status === 'halt')
-        reasons.push('the service has stopped on a train-activation halt (its build does not implement the rule set ' +
-            'the release manifest requires, so its data is frozen at the activation boundary)' +
+    if (train && typeof train === 'object' && train.status === 'halt') {
+        const haltDetail = train.required_rule_set
+            ? 'its build does not implement the rule set the release manifest requires, so its data is frozen at the activation boundary'
+            : 'the activation gate could not determine the required rule set, so its data is frozen at the current block'
+        reasons.push('the service has stopped on a train-activation halt (' + haltDetail + ')' +
             (train.required_rule_set ? `: requires ${train.required_rule_set}` : '') +
             (train.required_at_height != null ? ` from height ${train.required_at_height}` : '') +
             (train.reason ? ` (${train.reason})` : ''))
+    }
     return reasons
 }
 

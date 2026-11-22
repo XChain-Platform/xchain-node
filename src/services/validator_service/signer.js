@@ -103,7 +103,7 @@ const SIGNER_TEMPLATE = `/******************************************************
  ********************************************************************/
 
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 
 const { XChainSDK } = require('@dankest-llc/xchain-sdk');
 
@@ -243,6 +243,13 @@ function getSignerMountDir() {
     return SIGNER_DIR
 }
 
+// Host directory reported by read-only commands. Mount callers use
+// getSignerMountDir(), which also creates the SDK mountpoint when needed.
+function getSignerHostDir() {
+    if (config.XCHAIN_NODE_HUB_SIGNER_DIR) return null
+    return signerDirExists() ? SIGNER_DIR : null
+}
+
 // The signer.js file actually in force: an operator-supplied module wins
 // (same precedence as getSignerMountDir), or the generated module after
 // init writes it. Null when neither is configured. Used for the roll-call
@@ -288,4 +295,8 @@ function configureDependencies(dependencies) {
     } = dependencies)
 }
 
-module.exports = { SIGNER_TEMPLATE, writeSignerDir, signerDirExists, ensureSignerModulesMountpoint, getSignerMountDir, getActiveSignerFile, stripJsComments, signerModuleExportsBroadcast, configureDependencies }
+module.exports = {
+    SIGNER_TEMPLATE, writeSignerDir, signerDirExists, ensureSignerModulesMountpoint,
+    getSignerMountDir, getSignerHostDir, getActiveSignerFile, stripJsComments,
+    signerModuleExportsBroadcast, configureDependencies
+}

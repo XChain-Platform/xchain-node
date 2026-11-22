@@ -23,7 +23,6 @@ let { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = requir
 let { addContainerToNetwork } = require('../docker_service')
 let { assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError } = require('../db_credential_drift')
 let statusService = require('../status_service')
-let { statusChanged } = statusService
 let { getLogger } = require('../../observability/logger')
 let logger = getLogger()
 let { getDatabaseContainerId } = require('./container_access')
@@ -32,7 +31,7 @@ let { addUserPasswordToDatabase } = require('./user_provisioning')
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
     if (dependencies.execFile === nativeExecFile) return
-    ;({ execFile, HUB_MODULE_NAME, XChainService, EXTERNAL_DB, db, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, addContainerToNetwork, assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError, statusService, statusChanged, getLogger, logger } = dependencies)
+    ;({ execFile, HUB_MODULE_NAME, XChainService, EXTERNAL_DB, db, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, addContainerToNetwork, assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError, statusService, getLogger, logger } = dependencies)
 }
 
 async function provisionDatabaseAccount(nextCoin, nextNetwork, dbContainerId) {
@@ -43,8 +42,6 @@ async function provisionDatabaseAccount(nextCoin, nextNetwork, dbContainerId) {
                 if (!EXTERNAL_DB) {
                     await addContainerToNetwork(dbContainerId, getDockerNetwork(nextCoin, nextNetwork))
                 }
-                await statusChanged()
-
                 // Refuse before the FIRST ALTER USER when a running container was built
                 // from another install's config store and this rotation would lock it
                 // out. Placed ahead of every write, so a refusal leaves the stack in the

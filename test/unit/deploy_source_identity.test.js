@@ -111,6 +111,7 @@ function makeProxies(execFile, gitAsync, fs, moduleDirExists) {
             killContainer: sinon.stub().resolves(true),
             removeContainer: sinon.stub().resolves(true),
             forceRemoveContainerByName: sinon.stub().resolves(true),
+            probeContainerPresenceByName: sinon.stub().resolves('gone'),
             getPublishedHostPorts: sinon.stub().resolves(new Map())
         },
         './database_service': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },

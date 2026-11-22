@@ -19,12 +19,12 @@
  * This module serializes them with a pidfile-style lock in
  * ~/.xchain-node/command.lock (same per-user dir as credentials.json).
  *
- * The lock is acquired with an atomic O_EXCL create. If the file
- * already exists, the recorded pid is probed with signal 0: a live pid
- * refuses the new invocation; a dead pid marks the lock stale, removes
- * it, and retries.
+ * The lock is acquired by hard-linking a complete private file into place.
+ * If the file already exists, the recorded pid is probed with signal 0:
+ * a live pid refuses the new invocation; a dead pid marks the lock stale,
+ * removes it, and retries.
  *
- * Removing a stale lock is itself serialized, behind a second O_EXCL
+ * Removing a stale lock is itself serialized, behind a second atomic
  * marker at command.lock.reclaim. Exclusive create alone does NOT make
  * reclamation mutually exclusive: two invocations can read the same dead
  * holder, and the second then deletes the LIVE lock the first just
@@ -32,8 +32,8 @@
  * the marker's owner may unlink, and inside the marker it re-reads the
  * holder and re-checks the file's dev/ino identity first, so a
  * successor's lock is never the file removed. A crash inside the marker
- * leaves it behind; the next contender breaks it only when the pid it
- * records is gone, and then loops rather than reclaiming in that pass.
+ * leaves it behind. Contenders fail closed instead of moving a marker they
+ * do not own, because moving it would briefly admit a second reclaimer.
  *
  * Each acquisition also stamps a random nonce into the payload. Release
  * removes the file only when both the pid and the nonce still match, so
@@ -45,8 +45,15 @@
  * slipped into the gap delays the update; it refuses only if that mutator
  * still holds the lock when the wait runs out.
  *
- * Ops note: clearing a wedged lock by hand may mean deleting both
- * command.lock and command.lock.reclaim.
+ * Both paths are published through a private temp file
+ * (<path>.<pid>.<nonce>.tmp). A crash between writing it and unlinking
+ * it leaves the temp file behind; it never blocks an acquire, and each
+ * successful acquire sweeps every such file whose pid is gone. A lock
+ * directory without hard-link support is refused because exclusive create
+ * exposes an empty file before its payload is written.
+ *
+ * Ops note: after confirming no xchain-node process is running, recover a
+ * wedged reclaim by deleting command.lock and command.lock.reclaim together.
  ********************************************************************/
 
 const crypto = require('crypto')
@@ -115,17 +122,35 @@ function adoptCommandLock(release) {
     release()
 }
 
-// Break a reclaim marker left behind by a crash, and ONLY that: a marker whose
-// recorded pid is still alive belongs to a contender currently inside the reclaim
-// section, and removing it would restore the very race the marker prevents.
-function breakAbandonedReclaimMarker(reclaimFile) {
-    const owner = readLockHolder(reclaimFile)
-    if (isLockHolderActive(owner)) return
-    try { fs.unlinkSync(reclaimFile) } catch { /* already gone */ }
+// Private, sweepable name for a file moved out of the way (matches the orphan
+// temp pattern, so a crash leaves nothing that sweepOrphanPublishTempFiles skips).
+function claimedPathFor(file) {
+    return `${file}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`
 }
 
-// Serialize one stale-lock reclamation behind the O_EXCL marker. Returns nothing:
-// the caller simply retries its exclusive create, whether this pass removed the
+// Atomically move whatever sits at `file` to a private name. Returns that name,
+// or null when the path was already gone.
+function claimPath(file) {
+    const claimed = claimedPathFor(file)
+    try {
+        fs.renameSync(file, claimed)
+    } catch (err) {
+        if (err.code === 'ENOENT') return null
+        throw err
+    }
+    return claimed
+}
+
+// Put a claimed file that turned out to be live back under its name. link() keeps
+// the inode and refuses to overwrite a file published since, which is then left
+// alone.
+function restoreClaimedPath(claimed, file) {
+    try { fs.linkSync(claimed, file) } catch { /* a newer file owns the name */ }
+    try { fs.unlinkSync(claimed) } catch { /* already gone */ }
+}
+
+// Serialize one stale-lock reclamation behind the atomic marker. Returns nothing:
+// the caller simply retries its exclusive publication, whether this pass removed the
 // stale lock, conceded the marker to a contender, or found a live successor.
 function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
     const marker = JSON.stringify({ pid, nonce, startedAt: new Date().toISOString() }) + '\n'
@@ -133,9 +158,8 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
         publishLockAtomically(reclaimFile, marker, nonce)
     } catch (err) {
         if (err.code !== 'EEXIST') throw err
-        // Break-then-loop, never break-and-reclaim in the same pass: reclaiming on
-        // the strength of a marker we just removed is the unguarded unlink again.
-        breakAbandonedReclaimMarker(reclaimFile)
+        // Only the marker owner removes it. Moving an apparently abandoned marker
+        // would race a live successor that appeared after the ownership read.
         sleepSync(RECLAIM_POLL_MS)
         return
     }
@@ -147,8 +171,17 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
         const holder = readLockHolder(lockFile)
         if (isLockHolderActive(holder)) return
         if (!sameFile(observed, current)) return
-        try { fs.unlinkSync(lockFile) } catch (unlinkErr) {
-            if (unlinkErr.code !== 'ENOENT') throw unlinkErr
+        // Exclusive marker ownership prevents another reclaimer from replacing
+        // lockFile between these checks and the claim. A mismatch can only arise
+        // if the observed dead pid was recycled, so restore that live successor.
+        const claimed = claimPath(lockFile)
+        if (!claimed) return
+        if (sameFile(observed, statLock(claimed)) && !isLockHolderActive(readLockHolder(claimed))) {
+            try { fs.unlinkSync(claimed) } catch (unlinkErr) {
+                if (unlinkErr.code !== 'ENOENT') throw unlinkErr
+            }
+        } else {
+            restoreClaimedPath(claimed, lockFile)
         }
     } finally {
         unlinkIfOwned(reclaimFile, pid, nonce)
@@ -160,6 +193,8 @@ function reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce) {
 // sees an empty file, cannot tell it from a crashed creator's, and removes a LIVE one.
 // Write the full payload to a private temp file first, then link() it to the lock
 // path: link fails with EEXIST like O_EXCL, and the path appears already complete.
+// Fail closed when link publication is unavailable; direct exclusive creation
+// would expose the incomplete-file race this function prevents.
 function publishLockAtomically(lockFile, payload, nonce) {
     const tmpFile = `${lockFile}.${process.pid}.${nonce}.tmp`
     fs.writeFileSync(tmpFile, payload, { flag: 'wx', mode: 0o600 })
@@ -167,12 +202,40 @@ function publishLockAtomically(lockFile, payload, nonce) {
         try {
             fs.linkSync(tmpFile, lockFile)
         } catch (err) {
-            // A filesystem without hard links: fall back to the exclusive create.
             if (!['EPERM', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV'].includes(err.code)) throw err
-            fs.writeFileSync(lockFile, payload, { flag: 'wx', mode: 0o600 })
+            const unsupported = new Error(
+                `Cannot publish the xchain-node command lock in ${path.dirname(lockFile)}: ` +
+                `link() failed with ${err.code}. Command locking requires hard-link support; ` +
+                `set XCHAIN_NODE_LOCK_DIR to a local directory that supports hard links.`,
+                { cause: err }
+            )
+            unsupported.code = 'ELOCKUNSUPPORTED'
+            throw unsupported
         }
     } finally {
         try { fs.unlinkSync(tmpFile) } catch { /* already gone */ }
+    }
+}
+
+// Remove publish temp files orphaned by a crash between their write and their
+// unlink. Only names publishLockAtomically produces for this lock or its reclaim
+// marker match, and only when the pid in the name is gone: a live pid may be a
+// contender mid-publish, whose temp file must survive until its own unlink. A
+// recycled live pid only defers the sweep. Best effort: housekeeping must never
+// fail an acquire that already succeeded.
+function sweepOrphanPublishTempFiles(lockFile) {
+    const dir  = path.dirname(lockFile)
+    const base = path.basename(lockFile)
+    let names
+    try { names = fs.readdirSync(dir) } catch { return }
+    for (const name of names) {
+        if (!name.startsWith(base + '.')) continue
+        const rest = name.slice(base.length + 1)
+        const m = /^(?:reclaim\.)?([1-9]\d*)\.[0-9a-f]+\.tmp$/.exec(rest)
+        if (!m) continue
+        const pid = Number(m[1])
+        if (pid === process.pid || isPidAlive(pid)) continue
+        try { fs.unlinkSync(path.join(dir, name)) } catch { /* already gone */ }
     }
 }
 
@@ -214,6 +277,18 @@ function tryAcquireOnce(lockFile, payload, pid, nonce) {
             if (observed) reclaimStaleLock(lockFile, reclaimFile, observed, pid, nonce)
         }
     }
+    const reclaimMarker = statLock(reclaimFile)
+    const reclaimHolder = readLockHolder(reclaimFile)
+    if (sameFile(reclaimMarker, statLock(reclaimFile)) && !isLockHolderActive(reclaimHolder)) {
+        const wedged = new Error(
+            `Could not acquire the xchain-node command lock because a previous ` +
+            `xchain-node run was killed while recovering a stale lock. Confirm no ` +
+            `xchain-node process is running, then delete ${reclaimFile} and ` +
+            `${lockFile}, and retry.`
+        )
+        wedged.code = 'ELOCKWEDGED'
+        throw wedged
+    }
     // Every attempt hit EEXIST: another invocation won the post-stale race.
     throw new Error(`Could not acquire the xchain-node command lock at ${lockFile} (lost the race to another invocation).`)
 }
@@ -237,8 +312,9 @@ function acquireCommandLock({ pid = process.pid, command = '', waitMs = 0, pollM
     const deadline = Date.now() + Math.max(0, waitMs)
     for (;;) {
         const payload = JSON.stringify({ pid, nonce, command, startedAt: new Date().toISOString() }) + '\n'
+        let release
         try {
-            return tryAcquireOnce(lockFile, payload, pid, nonce)
+            release = tryAcquireOnce(lockFile, payload, pid, nonce)
         } catch (err) {
             // Only a live-held lock is retryable; anything else is fatal.
             if (err.code === 'ELOCKHELD' && Date.now() < deadline) {
@@ -247,6 +323,9 @@ function acquireCommandLock({ pid = process.pid, command = '', waitMs = 0, pollM
             }
             throw err
         }
+        // Swept only once the lock is held, so concurrent acquirers never race the sweep.
+        try { sweepOrphanPublishTempFiles(lockFile) } catch { /* best effort */ }
+        return release
     }
 }
 

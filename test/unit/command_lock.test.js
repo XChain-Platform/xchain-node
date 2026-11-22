@@ -1,4 +1,15 @@
 /*********************************************************************
+ *
+ * Copyright © 2025-2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC - https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md.
+ *
+ **********************************************************************/
+/*********************************************************************
  * Unit tests for src/utils/command_lock.js: pidfile-style lock that
  * stops two concurrent xchain-node mutating commands from interleaving.
  ********************************************************************/
@@ -297,22 +308,18 @@ describe('commandLock', () => {
 describe('commandLock', () => {
     beforeEach(prepareCommandLock)
     afterEach(cleanCommandLock)
-
     describe('stale reclamation is serialized', () => {
-
         it('leaves no reclaim marker behind after a successful steal', () => {
             fs.writeFileSync(getLockFilePath(), JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
             const release = acquireCommandLock({ command: 'update' })
             assert.deepStrictEqual(fs.readdirSync(tmpDir), ['command.lock'])
             release()
         })
-
         it('a reclaim marker held by a LIVE pid stops the steal instead of racing it', () => {
             const lockFile = getLockFilePath()
             fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
             const before = fs.statSync(lockFile).ino
             fs.writeFileSync(lockFile + '.reclaim', JSON.stringify({ pid: process.pid, nonce: 'other' }) + '\n')
-
             assert.throws(() => acquireCommandLock({ command: 'reset' }), /lost the race/)
             // The stale lock is untouched: only the marker's owner may remove it.
             assert.strictEqual(fs.statSync(lockFile).ino, before)
@@ -324,20 +331,33 @@ describe('commandLock', () => {
 describe('commandLock', () => {
     beforeEach(prepareCommandLock)
     afterEach(cleanCommandLock)
-
     describe('stale reclamation is serialized', () => {
-
         it('a reclaim marker abandoned by a dead pid does not deadlock acquisition', () => {
             const lockFile = getLockFilePath()
-            fs.writeFileSync(lockFile, JSON.stringify({ pid: findDeadPid(), command: 'install' }) + '\n')
-            fs.writeFileSync(lockFile + '.reclaim', JSON.stringify({ pid: findDeadPid(), nonce: 'crashed' }) + '\n')
-
-            const release = acquireCommandLock({ command: 'update' })
-            assert.strictEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')).pid, process.pid)
-            assert.ok(!fs.existsSync(lockFile + '.reclaim'))
-            release()
+            const reclaimFile = lockFile + '.reclaim'
+            const staleLock = JSON.stringify({ pid: findDeadPid(), nonce: 'stale', command: 'install' }) + '\n'
+            const staleMarker = JSON.stringify({ pid: findDeadPid(), nonce: 'crashed' }) + '\n'
+            fs.writeFileSync(lockFile, staleLock)
+            fs.writeFileSync(reclaimFile, staleMarker)
+            const lockInode = fs.statSync(lockFile).ino
+            const markerInode = fs.statSync(reclaimFile).ino
+            assert.throws(
+                () => acquireCommandLock({ command: 'update' }),
+                err => err.code === 'ELOCKWEDGED' && err.message.includes(reclaimFile)
+            )
+            assert.strictEqual(fs.statSync(lockFile).ino, lockInode)
+            assert.strictEqual(fs.statSync(reclaimFile).ino, markerInode)
+            assert.strictEqual(fs.readFileSync(lockFile, 'utf8'), staleLock)
+            assert.strictEqual(fs.readFileSync(reclaimFile, 'utf8'), staleMarker)
         })
+    })
+})
 
+describe('commandLock', () => {
+    beforeEach(prepareCommandLock)
+    afterEach(cleanCommandLock)
+
+    describe('stale reclamation is serialized', () => {
         it('treats an EPERM reclaim marker read as held and preserves the marker', () => {
             const lockFile = getLockFilePath()
             const reclaimFile = lockFile + '.reclaim'

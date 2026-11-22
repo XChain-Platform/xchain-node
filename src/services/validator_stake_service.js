@@ -35,25 +35,23 @@ const {
 } = require('./validator_service')
 const { getCoinConfigByFullName } = require('../coins')
 const config = require('../config');
+const { sleep } = require('../utils/helpers')
 const { readKeyHolders, amountUnits, fromUnits } = require('./validator_stake_service/free_key')
 const { readSleepState } = require('./validator_stake_service/address_sleep')
 const { readTokenRow } = require('./validator_stake_service/token_balance_read')
-const { readMintState, overAddressCap } = require('./validator_stake_service/mint_rules')
-
+const { readMintState, overAddressCap, supplyHeadroomReason } = require('./validator_stake_service/mint_rules')
 const STAKE_TICK = 'XCHAIN'
 // One stake that clears every capability floor at once. The highest is the hub's llm attestation
 // provider floor (min_stake_xchain in xchain-hub/src/validators/provider_registry/defaults.js), not the
 // indexer's STAKING.CAPABILITIES (top 5000); governance can raise it per block, so this is a snapshot.
 const DEFAULT_STAKE_AMOUNT = 25000
 const PUBLIC_EXPLORER = 'https://explorer.xchain.io'
-
 // Approximate target block spacing per chain, used ONLY to gloss a block count
 // as wall-clock time an operator can plan around. Display-only: nothing branches
 // on it, and every block count itself comes from the coin registry. The coin
 // files carry no spacing field, so these mirror the arithmetic their own STAKING
 // comments already state ("~7 days at ~10 min/block").
 const BLOCK_MINUTES = { bitcoin: 10, litecoin: 2.5, dogecoin: 1 }
-
 // A block count as a duration. Empty on regtest, where blocks are mined on
 // demand and any wall-clock figure would be a fabrication, and empty for a chain
 // with no spacing entry rather than a wrong one.
@@ -70,7 +68,6 @@ function roughDuration(blocks, fullName, network) {
 function paren(text) {
     return text ? ' (' + text + ')' : ''
 }
-
 /**
  * The two clocks that govern a stake, read per-chain from the vendored canonical
  * coin registry (src/coins/<COIN>.js STAKING) rather than restated here. Both
@@ -105,6 +102,26 @@ function fail(msg) {
     const e = new Error(msg)
     e.validatorStake = true
     return e
+}
+
+function identityReader(deps, readerName, valueName, fallback) {
+    if (typeof deps[readerName] === 'function') return deps[readerName]
+    if (deps[valueName] !== undefined) return () => deps[valueName]
+    return fallback
+}
+
+function stakeAddressFor(wallets) {
+    const info = publicWalletInfo(wallets)
+    return info && info.stakeAddress ? String(info.stakeAddress) : null
+}
+
+function identityChanged(kind, before, after) {
+    const shown = value => value || '(missing)'
+    const error = fail('validator identity changed while this command was running: ' + kind + ' changed from ' +
+        shown(before) + ' to ' + shown(after) + '. validator.json or wallets.env was rewritten, possibly by ' +
+        '`validator init`; re-run this command against the current identity.')
+    error.code = 'EVALIDATORCHANGED'
+    return error
 }
 
 // The stake WIF: wallets.env first, then the env var, then a hidden prompt.
@@ -232,6 +249,8 @@ function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnrea
     }
     if (mintRules.mintClosed) return { short, mints: [], reason: mintRules.mintClosed }
     if (mintRules.mintedUnknown) return { short, mints: [], reason: mintRules.mintedUnknown }
+    const supplyReason = supplyHeadroomReason(mintRules, shortUnits, STAKE_TICK)
+    if (supplyReason) return { short, mints: [], reason: supplyReason }
     // MAX_MINT 0 is the indexer's "no per-transaction cap", so the whole shortfall goes in one MINT.
     const capUnits = mintMax > 0 ? amountUnits(mintMax) : null
     const perMint = capUnits !== null && capUnits > 0n ? capUnits : shortUnits
@@ -249,12 +268,9 @@ function planMints(network, tokenBal, amount, mintMax, mintAddressMax, mintUnrea
     }
     return { short, mints, reason }
 }
-
 function explorerUrl(coins, pathPart) {
     return (config.EXPLORER_URL || PUBLIC_EXPLORER).replace(/\/$/, '') + '/' + coins.stakeCoin + '/' + pathPart
 }
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 function requireEncoder(sdk) {
     return typeof sdk.requireEncoder === 'function' ? sdk.requireEncoder() : sdk['_requireEncoder']()
@@ -331,7 +347,9 @@ function openValidatorSession(opts, deps) {
     // injection: `||` treats the two alike and falls through to the real validator
     // directory, which leaves the no-validator path exercisable only on a machine
     // that happens to have none. Same idiom as deps.wallets below.
-    const settings = deps.settings !== undefined ? deps.settings : getValidatorSettings()
+    const readSettingsNow = identityReader(deps, 'readSettings', 'settings', getValidatorSettings)
+    const readWalletsNow = identityReader(deps, 'readWallets', 'wallets', readWallets)
+    const settings = readSettingsNow()
     if (!settings) throw fail('no validator configured. Run: xchain-node validator init')
     const network = settings.network || (settings.P2P_PORT === 10002 ? 'testnet' : (settings.P2P_PORT === 10001 ? 'mainnet' : null))
     if (!network || !COIN_NETWORKS[network]) throw fail('validator network unknown; re-run `validator init --network testnet|mainnet`.')
@@ -344,9 +362,10 @@ function openValidatorSession(opts, deps) {
                    'indexer would refuse the STAKE after the MINT fees were spent. Restore validator.json. Nothing was sent.')
     }
 
-    const wallets = deps.wallets !== undefined ? deps.wallets : readWallets()
+    const wallets = readWalletsNow()
     const wif     = deps.wif || resolveStakeWif(wallets)
     const info    = publicWalletInfo(wallets)
+    const openedStakeAddress = stakeAddressFor(wallets)
 
     const { XChainSDK } = deps.sdk || loadSdk()
     const sdk = deps.makeSdk ? deps.makeSdk(coins.stake) : new XChainSDK({ network: coins.stake })
@@ -355,7 +374,16 @@ function openValidatorSession(opts, deps) {
         throw fail('the stake WIF controls ' + session.address + ', not the ' + info.stakeAddress +
                    ' recorded in ' + WALLETS_FILE + '. Nothing was sent.')
     }
-    return { settings, network, coins, pubkey, sdk, session, address: session.address }
+    function assertIdentityUnchanged() {
+        const current = readSettingsNow()
+        const currentPubkey = String((current && current.pubkey) || '').toLowerCase()
+        if (currentPubkey !== pubkey) throw identityChanged('signing pubkey', pubkey, currentPubkey)
+        const currentStakeAddress = stakeAddressFor(readWalletsNow())
+        if (currentStakeAddress !== openedStakeAddress) {
+            throw identityChanged('stake address', openedStakeAddress, currentStakeAddress)
+        }
+    }
+    return { settings, network, coins, pubkey, sdk, session, address: session.address, assertIdentityUnchanged }
 }
 
 const { createStakeValidator } = require('./validator_stake_service/stake_operations')
@@ -367,7 +395,6 @@ const operationHelpers = {
 }
 const stakeValidator = createStakeValidator(operationHelpers)
 const unstakeValidator = createUnstakeValidator(operationHelpers)
-
 module.exports = {
     stakeValidator, unstakeValidator, planMints, stakeTiming, readChainState
 }

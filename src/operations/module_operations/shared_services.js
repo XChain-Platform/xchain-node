@@ -1,3 +1,14 @@
+/*********************************************************************
+ *
+ * Copyright © 2025-2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC - https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md.
+ *
+ **********************************************************************/
 'use strict'
 
 let bootstrapService, buildDatabaseModule, config, createDockerNetwork, explorerService, getDockerNetwork, hubService, installModule, withInstallTarget
@@ -19,7 +30,7 @@ function configure(dependencies) {
  *
  * @returns {Promise<{installed: Array, skipped: Array}>}
  */
-async function installModules(servicesList, ref = null) {
+async function installModules(servicesList, ref = null, preResolvedTarget = null) {
     return withInstallTarget(ref, async (target) => {
         // A release install passes no branch: resolveComponentRef inside
         // installModule supplies the pinned ref per component. A branch install
@@ -67,7 +78,7 @@ async function installModules(servicesList, ref = null) {
         // installed and answers nothing; the first one to be bitten was the e2e
         // gate, whose suite starts the moment install returns.
         return outcome
-    })
+    }, { target: preResolvedTarget })
 }
 
 // Make the coins this run installed usable before the command returns.

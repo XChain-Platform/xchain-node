@@ -142,6 +142,22 @@ describe('preCheck(): remote version check degrades gracefully @regression', fun
         expect(log.args.some(a => String(a[0]).includes('rate-limited'))).to.be.true
     })
 
+    it('the degraded-check warning is one line, without the error stack', async function () {
+        const failure = new Error('GitHub API rate limit exhausted (resets unknown); set GITHUB_TOKEN to raise the limit')
+        failure.stack = failure.message + '\n    at fakeFrame (/somewhere/file.js:1:1)'
+        const { precheck } = loadPrecheck({ checkAllRemoteVersions: sinon.stub().rejects(failure) })
+        const log = sinon.stub(console, 'log')
+        try {
+            await precheck.preCheck(true, false)
+        } finally {
+            log.restore()
+        }
+        const warning = log.args.map(a => String(a[0])).find(l => l.includes('continuing without version check'))
+        expect(warning).to.include('set GITHUB_TOKEN')
+        expect(warning).to.not.include('\n')
+        expect(warning).to.not.include('fakeFrame')
+    })
+
     it('a successful version check keeps checkVersions=true for getStatus', async function () {
         const { precheck, stubs } = loadPrecheck({})
         await precheck.preCheck(true, false)

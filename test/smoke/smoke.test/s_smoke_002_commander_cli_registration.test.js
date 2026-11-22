@@ -44,7 +44,7 @@ const expectedArgs = {
     'exec':        { required: 4, optional: 0 },
     'shell':       { required: 3, optional: 0 },
     'e2etest':     { required: 1, optional: 1 },
-    'reset':       { required: 3, optional: 0 },
+    'reset':       { required: 1, optional: 2 },
     'rollback':    { required: 4, optional: 0 },
     'bootstrap':   { required: 4, optional: 0 }
 }

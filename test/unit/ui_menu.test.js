@@ -1,3 +1,14 @@
+/*********************************************************************
+ *
+ * Copyright © 2025-2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC - https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md.
+ *
+ **********************************************************************/
 // Unit coverage for the ui component
 // (src/ui/menu.js). The interactive menu functions are the operator entry
 // points; they must load without side effects and expose the expected
@@ -8,12 +19,13 @@ const assert = require('assert');
 const menu = require('../../src/ui/menu.js');
 const proxyquire = require('proxyquire').noCallThru();
 
-function load({ files = [], restored = true } = {}) {
+function load({ files = [], restored = true, restoreError = null } = {}) {
     const calls = { restore: [] };
     const bootstrapService = {
         getBootstrapFilesList: async () => files,
         restoreBootstrap: async (coin, network, module, file) => {
             calls.restore.push(file);
+            if (restoreError) throw restoreError;
             return restored;
         },
         makeBootstrap: async () => true,
@@ -113,6 +125,16 @@ describe('ui/menu restoreBootstrapInterface non-interactive resolution', functio
             () => mod.restoreBootstrapInterface('bitcoin', 'regtest', 'xchain-utxo-tracker', { latest: true }),
             /restore failed/);
     });
+
+    it('surfaces a node-tip refusal without replacing its actionable message', async function () {
+        const refusal = Object.assign(new Error('wait for the node to pass the archive height'), {
+            name: 'BootstrapNodeTipRefusedError',
+        });
+        const { mod } = load({ files: [NEWEST], restoreError: refusal });
+        await assert.rejects(
+            () => mod.restoreBootstrapInterface('bitcoin', 'regtest', 'xchain-utxo-tracker', { latest: true }),
+            /wait for the node to pass the archive height/);
+    });
 });
 
 // Every per-module action the menu OFFERS must have a handler branch that reads
@@ -165,36 +187,51 @@ describe('ui/menu per-module action labels are all handled', function () {
     });
 });
 
+function loadLocked({ scan = async () => 1, holdError = null } = {}) {
+    const events = [];
+    const scopedCommandLock = (label) => ({
+        hold() { events.push('hold ' + label); if (holdError) throw holdError; },
+        release() { events.push('release ' + label); },
+    });
+    const mod = proxyquire('../../src/ui/menu.js', {
+        'enquirer': { Select: class { async run() { return 'Scan already installed modules'; } } },
+        '../state': {
+            db: {}, getRemoteModuleVersions: () => ({}),
+            setStatusUpdated: value => events.push('status-updated ' + value)
+        },
+        '../services/status_service': { getStatus: async () => ({}), statusChanged: async () => events.push('status') },
+        '../services/discovery_service': { scanAndRegisterModules: async () => { events.push('scan'); return scan(); } },
+        '../cli/dispatch': { scopedCommandLock },
+    });
+    return { mod, events };
+}
+
 // Menu actions mutate the stack like the CLI verbs, so each one holds the command
 // lock for its own run and an idle menu holds nothing.
 describe('ui/menu mutating actions hold the command lock', function () {
-    function loadLocked({ scan = async () => 1, holdError = null } = {}) {
-        const events = [];
-        const scopedCommandLock = (label) => ({
-            hold() { events.push('hold ' + label); if (holdError) throw holdError; },
-            release() { events.push('release ' + label); },
-        });
-        const mod = proxyquire('../../src/ui/menu.js', {
-            'enquirer': { Select: class { async run() { return 'Scan already installed modules'; } } },
-            '../services/status_service': { getStatus: async () => ({}), statusChanged: async () => events.push('status') },
-            '../services/discovery_service': { scanAndRegisterModules: async () => { events.push('scan'); return scan(); } },
-            '../cli/dispatch': { scopedCommandLock },
-        });
-        return { mod, events };
-    }
 
     it('holds the lock around the scan and releases it after', async function () {
         const { mod, events } = loadLocked();
         const next = await mod.mainMenu();
         assert.strictEqual(next.menuFunction, mod.mainMenu);
         const label = 'interactive: scanAndRegisterModules';
-        assert.deepStrictEqual(events, ['hold ' + label, 'scan', 'status', 'release ' + label]);
+        assert.deepStrictEqual(events, [
+            'hold ' + label, 'scan', 'status-updated false', 'scan', 'status', 'release ' + label
+        ]);
     });
 
     it('releases the lock when the action throws', async function () {
         const { mod, events } = loadLocked({ scan: async () => { throw new Error('docker gone'); } });
         await mod.mainMenu();
         assert.strictEqual(events[events.length - 1], 'release interactive: scanAndRegisterModules');
+    });
+
+    it('does not run the action when the locked rescan fails', async function () {
+        const { mod, events } = loadLocked({ scan: async () => { throw new Error('docker gone'); } });
+        await mod.mainMenu();
+        assert.deepStrictEqual(events, [
+            'hold interactive: scanAndRegisterModules', 'scan', 'release interactive: scanAndRegisterModules'
+        ]);
     });
 
     it('skips the action and stays in the menu when another command holds the lock', async function () {
@@ -240,6 +277,8 @@ function loadNodeMenu({ localNodeVersion = null, updateModules = async () => ({}
             cloneGit: async (...args) => { calls.clone.push(args); },
             installModule: async (...args) => { calls.install.push(args); },
         },
+        '../services/discovery_service': { scanAndRegisterModules: async () => true },
+        '../state': { db: {}, getRemoteModuleVersions: () => ({}), setStatusUpdated: () => {} },
         '../cli/dispatch': { scopedCommandLock: () => ({ hold() {}, release() {} }) },
     });
     return { mod, calls };

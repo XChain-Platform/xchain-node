@@ -28,9 +28,9 @@
  * hours old, perfectly fresh, and completely wrong.
  *
  * So the reindex itself is the trigger. `reset` records the combos it wiped
- * here; `bootstrap create` records what it published; a combo whose reindex is
- * NEWER than its last publish is DUE, and the publisher pulls due combos into
- * its plan even when the schedule or the tracker opt-in would have skipped them.
+ * here; the publisher records a successful remote publish; a combo whose
+ * reindex is NEWER than its last publish is DUE, and the publisher pulls due
+ * combos into its plan even when the schedule or tracker opt-in skipped them.
  *
  * The ledger lives in the per-user ~/.xchain-node dir (with credentials.json and
  * command.lock), NOT under XCHAIN_NODE_DATA_DIR:
@@ -42,10 +42,12 @@
  *     even be on the path the publisher reads.
  *
  * Every write is best-effort and non-fatal: a reset that already wiped a store
- * must not abort because a bookkeeping file could not be written. Every read is
- * fail-soft on I/O but STRICT on content - a combo key is re-validated against
- * the known service/coin/network sets before it is returned, because the
- * publisher feeds these strings into its shell plan.
+ * must not abort because a bookkeeping file could not be written. A read treats
+ * only an ABSENT ledger as empty: one that is present but unreadable or
+ * unparseable is reported as an error, never as "nothing due". Every read is
+ * also STRICT on content - a combo key is re-validated against the known
+ * service/coin/network sets before it is returned, because the publisher feeds
+ * these strings into its shell plan.
  ********************************************************************/
 
 const fs   = require('fs')
@@ -54,6 +56,8 @@ const path = require('path')
 
 const { XChainService, Coin, Network } = require('../config')
 const config = require('../config');
+const { getLogger } = require('../observability/logger')
+const logger = getLogger()
 
 const LEDGER_DIR_NAME  = '.xchain-node'
 const LEDGER_FILE_NAME = 'bootstrap-reindex.json'
@@ -106,22 +110,58 @@ function emptyLedger() {
     return { version: LEDGER_VERSION, combos: {} }
 }
 
+// Nothing occupies the ledger path at all. A dangling symlink also reads as
+// ENOENT, but it is a damaged ledger rather than a box that never reindexed, so
+// the path itself is checked with lstat before ENOENT is taken as "absent".
+function isLedgerAbsent(target, err) {
+    if (!err || err.code !== 'ENOENT') return false
+    try {
+        fs.lstatSync(target)
+        return false
+    } catch (lstatErr) {
+        return Boolean(lstatErr && lstatErr.code === 'ENOENT')
+    }
+}
+
+function unreadableLedgerError(target, cause) {
+    const err = new Error(`the bootstrap republish ledger ${target} exists but could not be read (${cause}), `
+        + 'so which combos are due for a republish is unknown. Repair or move the file aside; '
+        + 'a later reset moves an unparseable ledger aside itself.')
+    err.code = 'ELEDGERUNREADABLE'
+    return err
+}
+
+// Read the ledger for a caller that only looks at it. An absent file is an empty
+// ledger (the normal case on a box that never reindexed). A file that is present
+// but unreadable, unparseable or of the wrong shape THROWS: reporting it as empty
+// would read as "nothing due" and silently cancel the forced republish that the
+// ledger exists to drive. Resets never come through here; they write through
+// readReindexLedgerForUpdate, which moves a damaged file aside instead.
 function readReindexLedger() {
+    const target = getReindexLedgerPath()
     let raw
     try {
-        raw = fs.readFileSync(getReindexLedgerPath(), 'utf8')
-    } catch {
-        return emptyLedger()   // absent (the normal case on a box that never reindexed)
+        raw = fs.readFileSync(target, 'utf8')
+    } catch (err) {
+        if (isLedgerAbsent(target, err)) return emptyLedger()
+        throw unreadableLedgerError(target, (err && err.code) || String(err))
     }
     let parsed
     try {
         parsed = JSON.parse(raw)
     } catch {
-        return emptyLedger()   // corrupt: start clean rather than throw inside a reset
+        throw unreadableLedgerError(target, 'unparseable JSON')
     }
-    if (!parsed || typeof parsed !== 'object' || !parsed.combos || typeof parsed.combos !== 'object') {
-        return emptyLedger()
-    }
+    if (!isLedgerShape(parsed)) throw unreadableLedgerError(target, 'not a ledger object')
+    return normalizeLedger(parsed)
+}
+
+function isLedgerShape(parsed) {
+    return Boolean(parsed && typeof parsed === 'object' && parsed.combos
+        && typeof parsed.combos === 'object' && !Array.isArray(parsed.combos))
+}
+
+function normalizeLedger(parsed) {
     const combos = {}
     for (const [key, entry] of Object.entries(parsed.combos)) {
         if (!parseComboKey(key)) continue
@@ -133,6 +173,41 @@ function readReindexLedger() {
         }
     }
     return { version: LEDGER_VERSION, combos }
+}
+
+// Read the ledger for a write that will rename a new file over it. Returns the
+// ledger, or null when the write must not happen. The read-only path above can
+// treat damage as empty, but a write cannot: renaming over a file it could not
+// read or parse would erase every other combo's due marker without a word.
+//
+//   absent      -> empty ledger, no warning (a box that never reindexed)
+//   unreadable  -> null: the bytes cannot be kept, so nothing is replaced
+//   unparseable -> moved aside to a .corrupt-<time> sibling, warned, then empty
+function readReindexLedgerForUpdate() {
+    const target = getReindexLedgerPath()
+    let raw
+    try {
+        raw = fs.readFileSync(target, 'utf8')
+    } catch (err) {
+        if (err && err.code === 'ENOENT') return emptyLedger()
+        logger.warn(`WARNING: the bootstrap republish ledger ${target} could not be read `
+            + `(${(err && err.code) || err}), so it was left untouched and this reindex was not recorded.`)
+        return null
+    }
+    let parsed = null
+    try { parsed = JSON.parse(raw) } catch { parsed = null }
+    if (isLedgerShape(parsed)) return normalizeLedger(parsed)
+    const aside = `${target}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`
+    try {
+        fs.renameSync(target, aside)
+    } catch (err) {
+        logger.warn(`WARNING: the bootstrap republish ledger ${target} could not be parsed or moved aside `
+            + `(${(err && err.code) || err}), so it was left untouched and this reindex was not recorded.`)
+        return null
+    }
+    logger.warn(`WARNING: the bootstrap republish ledger ${target} could not be parsed, so it was moved to `
+        + `${aside} and a new one started. Any republish-due combos it held are listed in that copy.`)
+    return emptyLedger()
 }
 
 // Atomic replace (write a sibling temp file, then rename) so a crash or a
@@ -185,7 +260,8 @@ function reindexAffectedModules({ node = false, utxoTracker = false, decoder = f
  */
 function recordReindex(modules, coin, network, { at = new Date(), reason = null } = {}) {
     const when   = at instanceof Date ? at.toISOString() : String(at)
-    const ledger = readReindexLedger()
+    const ledger = readReindexLedgerForUpdate()
+    if (!ledger) return []
     const marked = []
     for (const module of modules || []) {
         const key = comboKey(module, coin, network)
@@ -203,14 +279,22 @@ function recordReindex(modules, coin, network, { at = new Date(), reason = null 
 }
 
 /**
- * Record that a bootstrap was created (and so is about to be published) for a
- * combo. This is what clears a due marker: the new archive belongs to the
- * post-reindex lineage.
+ * Record that a bootstrap was published for a combo. This clears a due marker
+ * only after the new archive is visible to restore consumers.
  */
 function recordBootstrapPublished(module, coin, network, { at = new Date() } = {}) {
     const key = comboKey(module, coin, network)
     if (!parseComboKey(key)) return false
-    const ledger = readReindexLedger()
+    // A damaged ledger is left exactly as it is: rewriting it from an empty read
+    // would erase every other combo's due marker, and reporting success would
+    // tell the caller this combo's marker was cleared when nothing was read.
+    let ledger
+    try {
+        ledger = readReindexLedger()
+    } catch (err) {
+        logger.warn(`WARNING: ${err.message} The publish of ${key} was not recorded.`)
+        return false
+    }
     const prev   = ledger.combos[key]
     if (!prev) return true   // never reindexed: nothing to clear, and no reason to grow the file
     ledger.combos[key] = {

@@ -129,6 +129,8 @@ async function rehearseBootstrapRestore(coin, network, options) {
     let created = false
     try {
         const source = await databaseCounts(context, sourceName)
+        await runMariaTool(context, 'mariadb', ['-e', `DROP DATABASE IF EXISTS \`${rehearsalDatabase}\``])
+        logger.info(`Cleared any leftover disposable database ${rehearsalDatabase}`)
         await runMariaTool(context, 'mariadb-admin', ['create', rehearsalDatabase])
         created = true
         logger.info(`Restoring ${archive.selected} into ${rehearsalDatabase}...`)
@@ -180,7 +182,7 @@ function registerInstall(program, deps) {
         .argument('[service]', '(node, xchain-encoder, xchain-decoder, xchain-utxo-tracker, xchain-indexer, xchain-explorer, all)')
         .argument('[chain]',   '(bitcoin, litecoin, dogecoin, all)')
         .argument('[network]', '(mainnet, testnet, regtest, all)')
-        .action(async (branch, service, chain, network) => {
+        .action(async (branch, service, chain, network, options, actionCommand) => {
             // Honor the global `--no-bootstrap` flag (defined on the root program above):
             // commander assigns a flag matching a global option to the global, so reading
             // the install command's own opts would always see the default. Skips the
@@ -191,7 +193,7 @@ function registerInstall(program, deps) {
             // make the documented default install a branch install forever.
             const resolved = resolveArgs([branch, service, chain, network], { expectBranch: true, defaultBranch: null })
             const serviceList = filterCommandParameters(null, resolved.service, resolved.chain, resolved.network)
-            const installed = await installModules(serviceList, resolved.branch)
+            const installed = await installModules(serviceList, resolved.branch, actionCommand.resolvedInstallTarget || null)
             // A coin installed by THIS run is unknown to the hub and explorer until
             // something tells them, and the thing that does runs in preCheck, ahead
             // of this action. Without it the command returns a stack whose explorer
@@ -362,7 +364,6 @@ function registerClearReorgHalt(program, deps) {
         })
 
 }
-
 function registerShell(program, deps) {
     const { filterCommandParameters, shellModule } = deps
     program
@@ -382,7 +383,6 @@ function registerShell(program, deps) {
         })
 
 }
-
 function registerPrimaryCommands(program, deps) {
     registerInstall(program, deps)
     registerUninstall(program, deps)
@@ -397,4 +397,4 @@ function registerToolCommands(program, deps) {
     registerBootstrapRestoreRehearsal(program, deps)
 }
 
-module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch, rehearsalSourceDatabaseName }
+module.exports = { registerPrimaryCommands, registerToolCommands, showRowCount, countsMatch, rehearsalSourceDatabaseName, rehearseBootstrapRestore }

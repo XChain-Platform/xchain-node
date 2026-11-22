@@ -35,8 +35,10 @@ const { siblingCheckout, skipOrFail } = require('../helpers/sibling_checkout.js'
 
 const coins = require('../../src/coins');
 const { CONSENSUS_CONFIG_PIN } = require('../../src/coins/consensus_pin.js');
+const { verifyConsensusPinsAtBoot } = require('../../src/operations/consensus_pin_boot.js');
 
 const LOCAL_COINS_DIR = path.join(__dirname, '../../src/coins');
+const CLI_PATH  = path.join(__dirname, '../../src/index.js');
 const HUB_DIR   = process.env.XCHAIN_HUB_DIR || path.join(__dirname, '../../../xchain-hub');
 const CANON_DIR = path.join(HUB_DIR, 'src', 'coins');
 const CANON_VERDICT = siblingCheckout(__dirname, CANON_DIR);
@@ -60,6 +62,30 @@ describe('coin-registry conformance (vendored copy) @regression', function(){
         }
         it('verifyConsensusPin passes for every network on the vendored bundle', function(){
             for(const net of coins.NETWORKS) coins.verifyConsensusPin(net);
+        });
+    });
+
+    describe('entrypoint consensus pin guard', function(){
+        it('runs before command parsing', function(){
+            const source = fs.readFileSync(CLI_PATH, 'utf8');
+            const verifyAt = source.indexOf('verifyConsensusPinsAtBoot()');
+            const parseAt = source.indexOf('parseCommand()');
+            assert.ok(verifyAt > -1, 'entrypoint does not invoke the consensus pin guard');
+            assert.ok(parseAt > verifyAt, 'command parsing starts before consensus pins are verified');
+        });
+
+        it('checks every network and propagates the first mismatch', function(){
+            const calls = [];
+            const mismatch = new Error('pin mismatch');
+            const fakeCoins = {
+                NETWORKS: ['mainnet', 'testnet', 'regtest'],
+                verifyConsensusPin(network){
+                    calls.push(network);
+                    if(network === 'testnet') throw mismatch;
+                }
+            };
+            assert.throws(() => verifyConsensusPinsAtBoot(fakeCoins), err => err === mismatch);
+            assert.deepStrictEqual(calls, ['mainnet', 'testnet']);
         });
     });
 

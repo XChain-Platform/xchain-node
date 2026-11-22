@@ -28,15 +28,19 @@
  * stays the one file that reads the environment.
  ********************************************************************/
 
+const {
+    SHARED_REGTEST_GATE_ARMS, HUB_ONLY_REGTEST_GATE_ARMS
+} = require('./regtest_gate_arms')
+
 const ENV_STYLE_NAME = /^[A-Z][A-Z0-9_]*$/
 
 // Views over a list of names: export name -> [label, declared names].
 const LIST_VIEWS = {
-    // The hub's host passthrough (ConfigService hubPassthroughVars), plus the
-    // redaction-safe spelling of its one secret-bearing name, which
-    // src/config/secret_env.js prefers when both are present.
+    // The hub's host passthrough (ConfigService HUB_PASSTHROUGH_VARS), plus the
+    // redaction-safe spelling of its one secret-bearing name, plus
+    // DOGE_INDEXER_API_URL as an alias source for DOGE_INDEXER_URL.
     HUB_PASSTHROUGH_ENV: ['hub passthrough', [
-        "HUB_API_KEY", "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL",
+        "HUB_API_KEY", "BTC_INDEXER_URL", "LTC_INDEXER_URL", "DOGE_INDEXER_URL", "DOGE_INDEXER_API_URL",
         "BTC_INDEXER_API_KEY", "LTC_INDEXER_API_KEY", "DOGE_INDEXER_API_KEY",
         "CHECKPOINT_ENABLED", "CHECKPOINT_INTERVAL_BLOCKS", "CHECKPOINT_CONFIRMATIONS",
         "CHECKPOINT_POLL_MS", "CHECKPOINT_ROUND_TIMEOUT_MS", "CHECKPOINT_CHAINS",
@@ -47,8 +51,10 @@ const LIST_VIEWS = {
         "DOGE_PUBKEY_HEX", "DOGE_LOW_BALANCE_THRESHOLD", "XDEX_SEED_LOCAL_VALIDATOR",
         "XDEX_SNAPSHOT_BLOCK",
         "XCHAIN_CONFIRMATIONS_BTC", "XCHAIN_CONFIRMATIONS_LTC", "XCHAIN_CONFIRMATIONS_DOGE",
-        "HUB_TRUST_PROXY", "HUB_NETWORK", "ORACLE_MIN_SUBMISSIONS",
-        "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW", "ORACLE_BATCH_WINDOW_ROUNDS",
+        "HUB_TRUST_PROXY", "HUB_NETWORK", "ORACLE_MIN_SUBMISSIONS", "ORACLE_ALLOW_UNVERIFIED_PAIRS",
+        "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
+        "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS",
+        "ORACLE_BATCH_WINDOW_ROUNDS",
         "ORACLE_BATCH_GRACE_MS", "ORACLE_BATCH_SIGN_TIMEOUT_MS",
         "ORACLE_BATCH_BUFFER_MAX_ROUNDS", "ORACLE_BATCH_LANDING_RESERVE_MS",
         "ATTEST_RESPONSE_FORWARD_S_OVERRIDE", "ATTEST_BATCH_WINDOW_S_OVERRIDE",
@@ -59,14 +65,18 @@ const LIST_VIEWS = {
         "XCHAIN_PRICE_INDEXER_DB_COIN", "XCHAIN_PRICE_WINDOW_BLOCKS",
         "XCHAIN_PRICE_CONFIRMATION_BUFFER", "XCHAIN_PRICE_BOOTSTRAP_SATS",
         "XCHAIN_PRICE_MIN_BTC_VOLUME", "HUB_ALLOW_UNAUTHENTICATED",
-        "XC_ROLLCALL_REGTEST_ACTIVATION", "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
-        "XC_MIRROR_ADMISSION_ACTIVATION", "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
-        "XC_ANCHOR_STAKE_REGTEST_ACTIVATION", "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
-        "XC_OFFER_LIST_REGTEST_ACTIVATION", "XCHAIN_PRICE_INDEXER_DB_SECRET"
+        ...SHARED_REGTEST_GATE_ARMS, ...HUB_ONLY_REGTEST_GATE_ARMS,
+        "XCHAIN_PRICE_INDEXER_DB_SECRET"
     ]],
     // The host names the xchain-sync server container is handed (defaults.js
     // configureSharedAfterHubKey), so a recreate keeps the operator's value.
-    SYNC_PASSTHROUGH_ENV: ['sync passthrough', ["INDEX_MAP_PARITY_CHECK"]],
+    // TRUST_PROXY is the one way to give sync per-client rate-limit buckets
+    // behind its reverse proxy.
+    SYNC_PASSTHROUGH_ENV: ['sync passthrough', [
+        "INDEX_MAP_PARITY_CHECK", "TRUST_PROXY", "XC_ANCHOR_FOLD_REGTEST_ACTIVATION"
+    ]],
+    // Shared explorer settings whose names are read from a passthrough list.
+    EXPLORER_PASSTHROUGH_ENV: ['explorer passthrough', ["XC_ANCHOR_FOLD_REGTEST_ACTIVATION"]],
     // The indexer's regtest genesis bootstrap (ConfigService genesisPassthroughVars).
     INDEXER_GENESIS_ENV: ['indexer genesis', [
         "XCHAIN_GENESIS_BLOCK", "XCHAIN_GENESIS_LEDGER_HASH", "XCHAIN_GENESIS_DUMP_HASH",
@@ -77,11 +87,9 @@ const LIST_VIEWS = {
     // The indexer's ROLLCALL rail (ConfigService rollcallPassthroughVars), the
     // regtest-only names included.
     INDEXER_ROLLCALL_ENV: ['indexer rollcall', [
-        "DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY", "XC_ROLLCALL_REGTEST_ACTIVATION",
-        "XC_ROLLCALL_GATES_REGTEST_ACTIVATION", "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
+        "DOGE_INDEXER_API_URL", "DOGE_INDEXER_API_KEY", ...SHARED_REGTEST_GATE_ARMS,
+        "HUB_SYNC_ANCHOR_ATTEST_GRACE_S",
         "HUB_PRICE_SYNC_TIMEOUT_MS", "XCHAIN_COINPAY_EXPIRATION_S",
-        "XC_MIRROR_ADMISSION_ACTIVATION", "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
-        "XC_ANCHOR_STAKE_REGTEST_ACTIVATION", "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
         "EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME"
     ]],
     // The hub-sync watermark graces a regtest indexer is handed (hubSyncRegtestGraceVars).
@@ -107,6 +115,7 @@ const LIST_VIEWS = {
     SKEW_GUARD_ENV: ['skew guard', ["XCHAIN_NODE_SKIP_SKEW_GUARD"]],
     DB_CREDENTIAL_DRIFT_ENV: ['database credential drift', ["XCHAIN_NODE_ALLOW_DB_CREDENTIAL_DRIFT"]],
     HUB_CONSENSUS_DRIFT_ENV: ['hub consensus drift', ["XCHAIN_NODE_ALLOW_HUB_CONSENSUS_ENV_DRIFT"]],
+    RECREATE_DROP_ENV: ['recreate env removal', ["XCHAIN_NODE_RECREATE_DROP_ENV"]],
     CHECKPOINT_SELF_SYNC_ENV: ['checkpoint self-sync', ["EXPLORER_CHECKPOINT_SELF_SYNC"]],
     SELF_UPDATE_ENV: ['self-update', ["XCHAIN_NODE_UPDATE_TARGET", "XCHAIN_NODE_NO_SELF_UPDATE"]],
     // The service keys the go-live gate falls back to the host for, and the signed

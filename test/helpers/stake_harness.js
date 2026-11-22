@@ -19,17 +19,29 @@ const { stakeValidator } = require('../../src/services/validator_stake_service')
 const PUBKEY  = 'ab'.repeat(32)
 const ADDRESS = 'mStakeAddress'
 
-function makeExplorer(chain) {
+// The token body the explorer serves: the full mints and locks groups, which
+// readTokenMintRules requires before it reads the mint rules as known.
+function tokenBody(chain = {}) {
+    return {
+        mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000,
+            start_block: chain.mintStart ?? 0, stop_block: chain.mintStop ?? 0 },
+        supply: { current: chain.supplyCurrent ?? 0, max: chain.supplyMax ?? 100000000 },
+        locks: { mint: chain.mintLocked ?? false }
+    }
+}
+
+function makeExplorer(chain, calls) {
+    const status = { last_block: {
+        BTC: chain.tip ?? 200000, TBTC: chain.tip ?? 200000, RBTC: chain.tip ?? 200000 } }
+    if (chain.stale !== undefined) status.stale = chain.stale
+    if (chain.tipAgeSeconds !== undefined) status.tip_age_seconds = chain.tipAgeSeconds
     return {
         getAddress: sinon.stub().resolves({ balances: { confirmed: chain.coin ?? '0.001', pending: '0' } }),
         getToken:   chain.tokenMissing
             ? sinon.stub().rejects(Object.assign(
                 new Error('Explorer returned HTTP 404 for /RBTC/api/token/XCHAIN'),
                 { code: 'EXPLORER_HTTP_404', details: { status: 404 } }))
-            : sinon.stub().resolves({
-                mints: { max: chain.mintMax ?? 10000, address_max: chain.addressMax ?? 50000,
-                    start_block: chain.mintStart ?? 0, stop_block: chain.mintStop ?? 0 },
-                locks: { mint: chain.mintLocked ?? false } }),
+            : sinon.stub().resolves(tokenBody(chain)),
         // The MINT rows the explorer's source lane holds for the stake address; none by default.
         getMints: chain.mintsThrow
             ? sinon.stub().rejects(new Error(chain.mintsThrow))
@@ -39,19 +51,24 @@ function makeExplorer(chain) {
         // rather than "the only row wins".
         getValidators: chain.validatorsThrow
             ? sinon.stub().rejects(new Error(chain.validatorsThrow))
-            : sinon.stub().resolves({ data: [
-                { status: 'valid', signing_pubkey: 'ff'.repeat(32), amount: '25000', action_index: '1', activation_block: '1' },
-                ...(chain.existing ? [chain.existing] : []),
-                ...(chain.stakeRows || [])
-            ] }),
+            : sinon.stub().callsFake(async () => {
+                if (chain.validatorsThrowAfterMint && calls.mint.length) {
+                    throw new Error(chain.validatorsThrowAfterMint)
+                }
+                return { data: [
+                    { status: 'valid', signing_pubkey: 'ff'.repeat(32), amount: '25000', action_index: '1', activation_block: '1' },
+                    ...(chain.existing ? [chain.existing] : []),
+                    ...(chain.existingAfterMint && calls.mint.length ? [chain.existingAfterMint] : []),
+                    ...(chain.stakeRows || [])
+                ] }
+            }),
         // The delegations holding a pubkey, as the explorer's pubkey lane answers them.
         getDelegations: chain.delegationsThrow
             ? sinon.stub().rejects(new Error(chain.delegationsThrow))
             : sinon.stub().resolves(chain.delegationsBody || {
                 total: (chain.delegations || []).length, data: chain.delegations || [] }),
         // The explorer's indexed tip, keyed by route code (BTC/TBTC/RBTC) as the real /status is.
-        getStatus: sinon.stub().resolves({ last_block: {
-            BTC: chain.tip ?? 200000, TBTC: chain.tip ?? 200000, RBTC: chain.tip ?? 200000 } }),
+        getStatus: sinon.stub().resolves(status),
         // The SLEEP rows the explorer's address lane holds for the stake address; none by default.
         getSleeps: chain.sleepsThrow
             ? sinon.stub().rejects(new Error(chain.sleepsThrow))
@@ -73,7 +90,7 @@ function trackPreviousOutput(session, prevTxidRef) {
 function makeSdk(chain = {}) {
     const calls = { mint: [], stake: [] }
     const sdk = {
-        explorer: makeExplorer(chain),
+        explorer: makeExplorer(chain, calls),
         // The mints credit once they index. Modelled by reporting the post-mint
         // balance after they have been sent, so the fallback path can finish.
         getBalances: async () => {
@@ -89,6 +106,9 @@ function makeSdk(chain = {}) {
         session: () => ({
             address: ADDRESS,
             submit: async (actionData, enc, opts) => {
+                if (chain.submitStale && opts.strictFreshness) {
+                    throw Object.assign(new Error('stale before signing'), { code: 'COIN_DATA_STALE' })
+                }
                 const rec = { params: actionData.params, enc, opts }
                 if (actionData.action === 'MINT') calls.mint.push(rec)
                 if (actionData.action === 'STAKE') calls.stake.push(rec)
@@ -128,4 +148,4 @@ function run(opts, chain, settingsExtra = {}) {
     return stakeValidator(opts, deps).then(result => ({ result, calls, logged }))
 }
 
-module.exports = { PUBKEY, ADDRESS, makeSdk, run }
+module.exports = { PUBKEY, ADDRESS, makeSdk, run, tokenBody }

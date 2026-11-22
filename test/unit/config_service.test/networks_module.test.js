@@ -40,6 +40,7 @@ function configure(overrides = {}) {
         config,
         peers: {
             validatorService: {
+                getValidatorSettings: () => null,
                 getValidatorEnv: () => ({}),
                 validatorModeReport: () => ({ mode: 'absent', dir: '/config/validator' })
             }
@@ -99,6 +100,34 @@ function networkResolutionTests() {
 }
 
 function hubConfigurationTests() {
+    it('aliases a host DOGE API URL into the one hub URL name', function () {
+        const value = 'remote-value'
+        configure({ dependencies: { readSecretHostEnv: name => name === 'DOGE_INDEXER_API_URL' ? value : undefined } })
+        const defaults = {}
+        networks.configureHubBeforeKey(defaults, 'xchain-hub')
+        expect(defaults.DOGE_INDEXER_URL).to.equal(value)
+        expect(defaults).to.not.have.property('DOGE_INDEXER_API_URL')
+    })
+
+    it('keeps DOGE_INDEXER_URL and warns when the alias conflicts', function () {
+        const values = { DOGE_INDEXER_URL: 'preferred-value', DOGE_INDEXER_API_URL: 'ignored-value' }
+        const { logger } = configure({ dependencies: { readSecretHostEnv: name => values[name] } })
+        const defaults = {}
+        networks.configureHubBeforeKey(defaults, 'xchain-hub')
+        expect(defaults.DOGE_INDEXER_URL).to.equal('preferred-value')
+        expect(logger.warn.calledOnce).to.equal(true)
+    })
+
+    it('lets a co-located DOGE indexer replace the host alias', async function () {
+        configure({ dependencies: { readSecretHostEnv: name => name === 'DOGE_INDEXER_API_URL' ? 'remote-value' : undefined } })
+        const defaults = {}
+        networks.configureHubBeforeKey(defaults, 'xchain-hub')
+        await networks.composeColocatedIndexerUrls(defaults, 'testnet', [
+            { coin: 'dogecoin', network: 'testnet', module: 'xchain-indexer' }
+        ])
+        expect(defaults.DOGE_INDEXER_URL).to.equal('http://xchain-indexer-dogecoin-testnet:3004')
+    })
+
     it('declares a keyless non-mainnet hub and consumes HUB_NETWORK after access checks', function () {
         const { logger } = configure()
         const defaults = { HUB_NETWORK: 'REGTEST' }

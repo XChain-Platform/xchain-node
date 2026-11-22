@@ -170,7 +170,13 @@ function ensureCapabilityConfigLayout() {
     if (!legacyIsFile) return false
 
     if (!fs.existsSync(CAPS_DIR)) fs.mkdirSync(CAPS_DIR, { recursive: true })
-    fs.renameSync(LEGACY_CAPS_FILE, CAPS_FILE)
+    try {
+        fs.renameSync(LEGACY_CAPS_FILE, CAPS_FILE)
+    } catch (err) {
+        // Another process may have won the one-time migration after our check.
+        if (err && err.code === 'ENOENT' && isRegularFile(CAPS_FILE)) return false
+        throw err
+    }
     logger.info('Moved validator capability config to ' + CAPS_FILE
         + ' (its own directory, so the hub mount cannot break `docker cp`).')
     return true

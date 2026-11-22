@@ -33,10 +33,10 @@ const {
 } = require('./config_service')
 const { statusChanged, getStatus } = require('./status_service')
 const {
-    stopContainerByName, removeContainer, getPublishedHostPorts, forceRemoveContainerByName,
+    stopContainerByName, removeContainer, getPublishedHostPorts, getAllBoundHostPorts, forceRemoveContainerByName,
     addContainerToNetwork, checkBuildKitAvailable, probeContainerPresenceByName
 } = require('./docker_service')
-const { stopModuleContainer, stopTimeoutArgs } = require('./stop_budget_service')
+const { stopModuleContainer, stopUnrecordedContainer, stopTimeoutArgs } = require('./stop_budget_service')
 const { setDatabaseParameters, setHubDatabaseParameters }  = require('./database_service')
 const { redactSecrets, sleep } = require('../utils/helpers')
 const config = require('../config');
@@ -66,9 +66,9 @@ const { configureDependencies: configureBuildAndUp, buildAndUp } = require('./mo
 
 configureGitCheckout({ execFile, execFileAsync, fs, path, modulesUrls, redactSecrets, logger })
 configureCloneAndRefs({ execFileAsync, fs, modulesUrls, DEFAULT_MODULE_BRANCH, getModuleDir, getModuleTmpDir, moduleDirExists, removeModuleTmpDir, createModuleTmpDir, redactSecrets, releaseManifestService, CLONE_STAGING_SUFFIX, CLONE_PREVIOUS_SUFFIX, runGitClone, assertCheckoutCommit, verifyDeploySource, reportDeployedSource, logger })
-configureDockerArgs({ fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD, getUtxoTrackerVolumeName, getPublishedHostPorts, config, validatorService, logger })
+configureDockerArgs({ fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD, getUtxoTrackerVolumeName, getPublishedHostPorts, getAllBoundHostPorts, config, validatorService, logger })
 configureContainerNetworks({ execFile, XChainService, Coin, Network, getDockerNetwork, getStatus, addContainerToNetwork, redactSecrets, sleep, memoryLimitService, logger })
-configureBuildAndUp({ execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort, stopContainerByName, removeContainer, forceRemoveContainerByName, checkBuildKitAvailable, stopModuleContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config, goLiveGate, memoryLimitService, hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk, cloneGit, resolveBundledLibRef, assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs, attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings, logger })
+configureBuildAndUp({ execFile, execFileAsync, fs, path, HUB_MODULE_NAME, LIBRARY_BUNDLES, db, getModuleDir, checkIfModuleExists, getDockerContainerImageName, getDockerNetwork, getDefaultConfig, validatePort, stopContainerByName, removeContainer, forceRemoveContainerByName, probeContainerPresenceByName, checkBuildKitAvailable, stopModuleContainer, stopUnrecordedContainer, stopTimeoutArgs, statusChanged, setHubDatabaseParameters, redactSecrets, config, goLiveGate, memoryLimitService, hubConsensusEnvGuard, rollcallWiring, readCheckoutIdentityFromDisk, cloneGit, resolveBundledLibRef, assertNoHostPortConflicts, resolveObservabilityEnv, buildHealthcheckArgs, buildModuleDockerArgs, attachCrossChainNetworks, verifyContainerMemoryLimit, logDockerCreateWarnings, logger })
 
 for (const part of ['git_checkout', 'clone_and_refs', 'docker_args', 'container_networks', 'build_and_up']) {
     delete require.cache[require.resolve('./module_service/' + part + '.js')]
@@ -185,9 +185,9 @@ async function sampleBootstrapFreshness(module, coin, network, onlyExecution) {
     return { utxoWasFresh, mariaWasFresh }
 }
 
-// Database credentials are rotated after the replacement starts, while the hub
-// grant is also established inside buildAndUp before its status push. Bootstrap
-// restoration then runs only for the confirmed-fresh stores sampled above.
+// Database credentials are rotated after the replacement starts. Callers push
+// status only after the required grants. Bootstrap restoration then runs only
+// for the confirmed-fresh stores sampled above.
 async function finishServiceInstall(context, freshness) {
     const { module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs } = context
     const containerId = await buildAndUp(module, coin, network, overwriteContainerId, onlyExecution, dockerCmdArgs)
@@ -289,12 +289,22 @@ async function uninstallModule(coin, network, module) {
             }
             await removeContainer(moduleStatus["container_id"])
             await statusChanged()
-            const removed = await db.deleteModuleContainer(module, coin, network)
+            const removed = await db.deleteModuleContainerIfMatches(
+                module, coin, network, moduleStatus["container_id"]
+            )
             if (removed) {
                 return removed
-            } else {
-                throw "There was a problem trying to remove a container from the database"
             }
+            const registeredId = await db.getModuleContainerStrict(module, coin, network)
+            if (registeredId === null) return true
+            if (registeredId !== moduleStatus["container_id"]) {
+                throw new Error(
+                    `The registry now points at container ${String(registeredId).slice(0, 12)}, not removed container ` +
+                    `${String(moduleStatus["container_id"]).slice(0, 12)}; the registered container was left running. ` +
+                    `Check status and run uninstall again.`
+                )
+            }
+            throw "There was a problem trying to remove a container from the database"
         } catch (err) {
             // Preserve the original error instead of masking every failure in
             // this multi-step block (kill/remove/statusChanged/registry delete)
@@ -313,9 +323,11 @@ async function uninstallModule(coin, network, module) {
         // container truly isn't present: clean up any orphaned row.
         const staleId = await db.getModuleContainer(module, coin, network)
         if (staleId) {
-            await db.deleteModuleContainer(module, coin, network)
-            await statusChanged()
-            logger.info("Removed stale tracking row for " + module + " (" + coin + "/" + network + ")")
+            const removed = await db.deleteModuleContainerIfMatches(module, coin, network, staleId)
+            if (removed) {
+                await statusChanged()
+                logger.info("Removed stale tracking row for " + module + " (" + coin + "/" + network + ")")
+            }
         }
         return true
     }

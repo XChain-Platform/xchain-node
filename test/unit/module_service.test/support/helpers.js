@@ -45,7 +45,8 @@ function makeStubs() {
             setModuleContainer: sinon.stub().resolves(true),
             getModuleContainer: sinon.stub().resolves('old-container-id'),
             getModuleContainerStrict: sinon.stub().resolves('old-container-id'),
-            deleteModuleContainer: sinon.stub().resolves('removed-id')
+            deleteModuleContainer: sinon.stub().resolves('removed-id'),
+            deleteModuleContainerIfMatches: sinon.stub().resolves(true)
         },
         statusChanged: sinon.stub().resolves(),
         getStatus: sinon.stub().resolves({}),
@@ -57,6 +58,9 @@ function makeStubs() {
         // No published host ports by default → buildAndUp's pre-flight conflict
         // check is a no-op. Conflict tests override this with a populated Map.
         getPublishedHostPorts: sinon.stub().resolves(new Map()),
+        // Ports saved in any container's bindings, stopped ones included; only
+        // read when a claim has to move a port.
+        getAllBoundHostPorts: sinon.stub().resolves(new Map()),
         probeContainerPresenceByName: sinon.stub().resolves('gone'),
         // buildx present by default → buildAndUp's BuildKit probe passes. The
         // legacy-builder tests override this with a rejection.
@@ -140,6 +144,7 @@ function makeBaseProxies(stubs, configServiceStub) {
             forceRemoveContainerByName: stubs.forceRemoveContainerByName,
             getStatusFromContainer: stubs.getStatusFromContainer,
             getPublishedHostPorts: stubs.getPublishedHostPorts,
+            getAllBoundHostPorts: stubs.getAllBoundHostPorts,
             checkBuildKitAvailable: stubs.checkBuildKitAvailable,
             probeContainerPresenceByName: stubs.probeContainerPresenceByName
         },
@@ -306,6 +311,7 @@ function moduleSuite(title, tests) {
 function registerVenueHooks() {
     const RealDockerService = require('../../../../src/services/docker_service')
     const realGetPublishedHostPorts = RealDockerService.getPublishedHostPorts
+    const realGetAllBoundHostPorts = RealDockerService.getAllBoundHostPorts
     const RealHubConsensusEnvGuard = require('../../../../src/services/hub_consensus_env_guard')
     const realAssertNoHubConsensusEnvDrift = RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift
     const RealDbCredentialDrift = require('../../../../src/services/db_credential_drift')
@@ -315,6 +321,9 @@ function registerVenueHooks() {
     before(function () {
         RealDockerService.getPublishedHostPorts = async function () {
             throw new Error('unit test reached the real host-port probe: stub DockerService.getPublishedHostPorts')
+        }
+        RealDockerService.getAllBoundHostPorts = async function () {
+            throw new Error('unit test reached the real bound-port probe: stub DockerService.getAllBoundHostPorts')
         }
         RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift = async function () {
             throw new Error('unit test reached the real hub consensus-env guard: stub HubConsensusEnvGuard.assertNoHubConsensusEnvDrift')
@@ -329,6 +338,7 @@ function registerVenueHooks() {
 
     after(function () {
         RealDockerService.getPublishedHostPorts = realGetPublishedHostPorts
+        RealDockerService.getAllBoundHostPorts = realGetAllBoundHostPorts
         RealHubConsensusEnvGuard.assertNoHubConsensusEnvDrift = realAssertNoHubConsensusEnvDrift
         RealDbCredentialDrift.assertNoDbCredentialDrift = realAssertNoDbCredentialDrift
         RealDbCredentialDrift.assertNoHubDbCredentialDrift = realAssertNoHubDbCredentialDrift

@@ -115,6 +115,8 @@ function makeStubs(overrides = {}) {
         hasExternalDbConfig: sinon.stub().returns(false),
         loadExternalDbConfig: sinon.stub().returns(null),
         saveExternalDbConfig: sinon.stub(),
+        markExternalDbMode: sinon.stub(),
+        isKnownExternalDbHost: sinon.stub().returns(false),
         loadDbRootPassword: sinon.stub().returns(null),
         saveDbRootPassword: sinon.stub(),
         getOsUserDbName: sinon.stub().returns('xchain_node_testuser'),
@@ -241,6 +243,8 @@ function makeOperationalStubs(stubs) {
             hasExternalDbConfig: stubs.hasExternalDbConfig,
             loadExternalDbConfig: stubs.loadExternalDbConfig,
             saveExternalDbConfig: stubs.saveExternalDbConfig,
+            markExternalDbMode: stubs.markExternalDbMode,
+            isKnownExternalDbHost: stubs.isKnownExternalDbHost,
             loadDbRootPassword: stubs.loadDbRootPassword,
             saveDbRootPassword: stubs.saveDbRootPassword
         }

@@ -31,8 +31,10 @@
  *   - missing, not running, restarting, or crash-looping
  *   - reporting an unhealthy/halted status on its own health surface
  *   - carrying a durable halt marker in its database: a live decoder REORG_HALT
- *     row (events.code = 'REORG_HALT' with no newer REORG_HALT_CLEARED row
- *     superseding it) or an uncleared xchain-sync divergence halt
+ *     row (events.code = 'REORG_HALT' with no newer AUDITED REORG_HALT_CLEARED row
+ *     superseding it; a clear whose payload lacks a reason of at least 8 characters
+ *     lifts nothing, see isAuditedClear in xchain-decoder/src/db/reorg_halt.js)
+ *     or an uncleared xchain-sync divergence halt
  *     (sync_halt with cleared_at IS NULL). For an indexer source both its own
  *     database and the PAIRED DECODER's are read: REORG_HALT is written only in the
  *     decoder's (an indexer's own events table carries REORG and TRAIN_ACTIVATION_HALT
@@ -312,8 +314,8 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
         reasons.push(...windowReasons(markers.raisedInWindow))
         if (markers.upstream) reasons.push(...windowReasons(markers.upstream.raisedInWindow))
         if (markers.reorgHalt > 0)
-            reasons.push("the database carries a durable REORG_HALT marker (events.code='REORG_HALT', or a newest " +
-                'REORG_HALT_CLEARED row with no audited reason, which lifts nothing): ' +
+            reasons.push("the database carries a durable REORG_HALT marker (a live halt, an unaudited or stale clear, " +
+                'or a halt history beyond the safe scan bound): ' +
                 'this decoder aborted mid-rollback and will halt at its next reorg. Restoring this archive ' +
                 'reproduces that fault on every consumer. Recovery is a full resync from a known-good snapshot, ' +
                 'or, once the rolled-back range is re-parsed and the database is verified intact, ' +
@@ -333,7 +335,7 @@ async function haltMarkerReasons(coin, network, module, dbDeps, since) {
         // indexer frozen behind a halted decoder is exactly as unfit to publish.
         if (markers.upstream && markers.upstream.reorgHalt > 0)
             reasons.push(`the paired decoder database ${markers.upstream.dbName} carries a durable REORG_HALT ` +
-                "marker (events.code='REORG_HALT', or a newest REORG_HALT_CLEARED row with no audited reason), " +
+                'marker (a live halt, an unaudited or stale clear, or an over-bound history), ' +
                 'so this indexer is frozen behind a decoder that aborted ' +
                 'mid-rollback. Its own health surface reports lag 0 only because that lag is measured against ' +
                 'the frozen decoder height. Recovery happens on the decoder: once its rolled-back range is ' +
@@ -381,6 +383,8 @@ function windowReasons(raised) {
 module.exports = {
     assertBootstrapSourceHealthy,
     BootstrapSourceUnhealthyError,
+    gateSkipped,
+    pendingSyncHaltReason,
     // Exported for tests / reuse
     evaluateContainerState,
     evaluateStatusPayload,

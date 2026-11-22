@@ -32,14 +32,21 @@ function restoreRequireSignedBootstrapSetting() {
 }
 
 // Wire a tracker status probe that answers `heights` in order, noting whether the tracker had been restarted at each call.
-function trackerStubsWithProbe(heights, { snapshotFails = false } = {}) {
+function trackerStubsWithProbe(heights, { snapshotFails = false, frozenHeight } = {}) {
     const stubs = makeStubs()
+    const lastHeight = [...heights].reverse().find(value => Number.isInteger(value))
+    const archivedHeight = frozenHeight === undefined ? lastHeight : frozenHeight
     stubs.fs.existsSync.returns(false)
     stubs.db.getModuleContainer.resolves(FAKE_CONTAINER_ID)
     stubs.fs.promises.stat.resolves({ size: 1024 * 1024 })
     stubs.execFile = sinon.stub().callsFake((cmd, args) => {
         if (snapshotFails && cmd === 'docker' && Array.isArray(args) && args.includes('sh')) {
             return Promise.reject(new Error('cp: cannot create hard link'))
+        }
+        if (cmd === 'docker' && args[0] === 'inspect') return Promise.resolve({ stdout: 'sha256:tracker-image\n' })
+        if (cmd === 'docker' && args.some(arg => String(arg).includes('LAST_BLOCK_HEIGHT'))) {
+            if (archivedHeight === null) return Promise.reject(new Error('height unavailable'))
+            return Promise.resolve({ stdout: `{"height":${archivedHeight},"haltMarker":null}\n` })
         }
         return Promise.resolve({ stdout: '104857600\t/data\n' })
     })
@@ -53,6 +60,7 @@ function trackerStubsWithProbe(heights, { snapshotFails = false } = {}) {
         const answer = heights[Math.min(probeLog.length, heights.length - 1)]
         probeLog.push({ restarted: stubs.dockerService.startContainer.called })
         if (answer instanceof Error) throw answer
+        if (answer && typeof answer === 'object') return answer
         return { committed_height: answer }
     })
     return { stubs, probeLog }
@@ -107,13 +115,12 @@ describe('BootstrapService', function () {
     afterEach(restoreRequireSignedBootstrapSetting)
     describe('makeBootstrapUtxoTracker(): archive height comes from the archived store', function () {
         it('records the frozen store height, read after the compress and before the fallback restart', async function () {
-            const { stubs, probeLog } = trackerStubsWithProbe([100, 104], { snapshotFails: true })
+            const { stubs, probeLog } = trackerStubsWithProbe([100, 104], { snapshotFails: true, frozenHeight: 103 })
             const base = stubs.execFile
             let startsAtFrozenRead = null
             stubs.execFile = sinon.stub().callsFake((cmd, args) => {
-                if (Array.isArray(args) && args[args.length - 1] === '/data/committed_height') {
+                if (Array.isArray(args) && args.some(arg => String(arg).includes('LAST_BLOCK_HEIGHT'))) {
                     startsAtFrozenRead = stubs.dockerService.startContainer.callCount
-                    return Promise.resolve({ stdout: '103\n' })
                 }
                 return base(cmd, args)
             })
@@ -128,12 +135,12 @@ describe('BootstrapService', function () {
         })
 
         it('keeps the pre-stop height when a rollback leaves the post-restart reading lower', async function () {
-            const { stubs } = trackerStubsWithProbe([100, 98])
+            const { stubs } = trackerStubsWithProbe([100, 98], { frozenHeight: 103 })
             makeAutoSpawn(stubs)
 
             const bs = loadBootstrapService(stubs)
             expect(await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER)).to.be.true
-            expect(recordedHeight(stubs)).to.equal(100)
+            expect(recordedHeight(stubs)).to.equal(103)
         })
     })
 })
@@ -166,6 +173,23 @@ describe('BootstrapService', function () {
             } finally {
                 clock.restore()
             }
+        })
+
+        it('refuses a halted post-restart tracker before compressing or signing', async function () {
+            const halted = { status: 'halted', committed_height: 101, halt_reason: 'unrecoverable reorg' }
+            const { stubs, probeLog } = trackerStubsWithProbe([100, halted])
+            const spawnCalls = makeAutoSpawn(stubs)
+            const bs = loadBootstrapService(stubs)
+
+            let err = null
+            try { await bs.makeBootstrap(COIN, NETWORK, XChainService.XCHAIN_UTXO_TRACKER) } catch (error) { err = error }
+
+            expect(err && err.name).to.equal('BootstrapSourceUnhealthyError')
+            expect(err.message).to.match(/durable halt/)
+            expect(probeLog.map(p => p.restarted)).to.deep.equal([false, true])
+            expect(spawnCalls, 'no compress or wrap may run').to.have.length(0)
+            expect(stubs.archiveMeta.writeBootstrapMeta.called).to.equal(false)
+            expect(stubs.dockerService.startContainer.callCount).to.equal(1)
         })
     })
 })
@@ -218,11 +242,11 @@ describe('BootstrapService', function () {
 
         it('chooseArchiveHeight never records below either reading and refuses when the post-read fails', function () {
             loadBootstrapService(makeStubs())
-            expect(trackerArchive.chooseArchiveHeight(null, null)).to.equal(null)
-            expect(() => trackerArchive.chooseArchiveHeight(100, null)).to.throw(/refusing to record the pre-stop height 100/)
-            expect(trackerArchive.chooseArchiveHeight(null, 101)).to.equal(101)
-            expect(trackerArchive.chooseArchiveHeight(100, 101)).to.equal(101)
-            expect(trackerArchive.chooseArchiveHeight(100, 98)).to.equal(100)
+            expect(() => trackerArchive.chooseArchiveHeight(null, null)).to.throw(/archived store/)
+            expect(() => trackerArchive.chooseArchiveHeight(100, null)).to.throw(/archived store/)
+            expect(trackerArchive.chooseArchiveHeight(null, 101, 101)).to.equal(101)
+            expect(trackerArchive.chooseArchiveHeight(100, 101, 101)).to.equal(101)
+            expect(trackerArchive.chooseArchiveHeight(100, 98, 103)).to.equal(103)
         })
 
         it('readTrackerHeightAfterRestart retries a tracker that is still coming up', async function () {

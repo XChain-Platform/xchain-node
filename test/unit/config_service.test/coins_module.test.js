@@ -17,6 +17,7 @@ const coinsModule = require('../../../src/services/config_service/coins')
 const XChainService = {
     XCHAIN_ENCODER: 'xchain-encoder',
     XCHAIN_DECODER: 'xchain-decoder',
+    XCHAIN_INDEXER: 'xchain-indexer',
     XCHAIN_UTXO_TRACKER: 'xchain-utxo-tracker',
     XCHAIN_REGTEST_MINER: 'xchain-regtest-miner'
 }
@@ -29,6 +30,7 @@ function configure(config = {}) {
             ENCODER_RATE_LIMIT_RPM: undefined,
             FEE_DESTINATION_ENV: {},
             FEE_DESTINATION: undefined,
+            INDEXER_HEALTH_STALL_GRACE_MS: undefined,
             LEVELDB_CACHE_BYTES: undefined,
             LEVELDB_WRITE_BUFFER_BYTES: undefined,
             ...config
@@ -105,6 +107,34 @@ describe('config_service/coins module tuning', function () {
         expect(tracker.LEVELDB_CACHE_BYTES).to.equal('1024')
         expect(tracker).not.to.have.property('LEVELDB_WRITE_BUFFER_BYTES')
         expect(encoder).not.to.have.property('LEVELDB_CACHE_BYTES')
+    })
+})
+
+describe('config_service/coins indexer stall grace', function () {
+    it('gives only the testnet indexer the 10-minute default', function () {
+        configure()
+        const got = {}
+        for (const network of ['mainnet', 'testnet', 'regtest']) {
+            const indexer = {}
+            const decoder = {}
+            coinsModule.applyCoinDefaults(indexer, XChainService.XCHAIN_INDEXER, 'bitcoin', network)
+            coinsModule.applyCoinDefaults(decoder, XChainService.XCHAIN_DECODER, 'bitcoin', network)
+            got[network] = indexer.INDEXER_HEALTH_STALL_GRACE_MS
+            expect(decoder).not.to.have.property('INDEXER_HEALTH_STALL_GRACE_MS')
+        }
+        expect(got).to.deep.equal({ mainnet: undefined, testnet: '600000', regtest: undefined })
+    })
+
+    it('lets a set host value win on any network and ignores a blank one', function () {
+        configure({ INDEXER_HEALTH_STALL_GRACE_MS: '300000' })
+        const mainnet = {}
+        coinsModule.applyCoinDefaults(mainnet, XChainService.XCHAIN_INDEXER, 'bitcoin', 'mainnet')
+        expect(mainnet.INDEXER_HEALTH_STALL_GRACE_MS).to.equal('300000')
+
+        configure({ INDEXER_HEALTH_STALL_GRACE_MS: '' })
+        const testnet = {}
+        coinsModule.applyCoinDefaults(testnet, XChainService.XCHAIN_INDEXER, 'bitcoin', 'testnet')
+        expect(testnet.INDEXER_HEALTH_STALL_GRACE_MS).to.equal(coinsModule.TESTNET_INDEXER_STALL_GRACE_MS)
     })
 })
 

@@ -16,6 +16,10 @@
 
 'use strict'
 
+const {
+    SHARED_REGTEST_GATE_ARMS, HUB_ONLY_REGTEST_GATE_ARMS
+} = require('../../config/regtest_gate_arms')
+
 let stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv
 let HUB_MODULE_NAME, getDockerContainerImageName
 let warnedHubConfigKeys = new Set()
@@ -61,13 +65,23 @@ function getCommandCoinsAndNetworks() {
     }
 }
 
-// The network a standalone hub should declare: the one every stack of this deployment
-// runs on. Ambiguous (several networks, or none named) leaves it unset, because one
-// hub declaring the wrong network mis-gates the ingest rules it is being set for.
+// The network `validator init` recorded, when it names a real network. The hub declares
+// it (getValidatorEnv), so the indexer URLs composed for the hub must follow it.
+function recordedValidatorNetwork() {
+    const settings = peers.validatorService.getValidatorSettings()
+    const network = String((settings && settings.network) || "").toLowerCase()
+    return Object.values(Network).includes(network) ? network : null
+}
+
+// The network a standalone hub should declare: the host env's, else a validator's recorded
+// one, else the one every stack of this deployment runs on. Ambiguous (several networks, or
+// none named) leaves it unset, because a wrong declared network mis-gates the hub's ingest rules.
 async function resolveDeploymentHubNetwork() {
     const registeredStacks = await getRegisteredCoinStacks()
     const registered = new Set(registeredStacks.map(r => r.network))
+    const recorded = configuredHubNetwork ? null : recordedValidatorNetwork()
     const networks = configuredHubNetwork ? new Set([configuredHubNetwork])
+        : recorded ? new Set([recorded])
         : registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
     if (networks.size === 1) {
         const network = [...networks][0]
@@ -126,7 +140,7 @@ const HUB_PASSTHROUGH_VARS = [
     "XCHAIN_CONFIRMATIONS_BTC", "XCHAIN_CONFIRMATIONS_LTC", "XCHAIN_CONFIRMATIONS_DOGE",
     "HUB_TRUST_PROXY",
     "HUB_NETWORK",
-    "ORACLE_MIN_SUBMISSIONS",
+    "ORACLE_MIN_SUBMISSIONS", "ORACLE_ALLOW_UNVERIFIED_PAIRS",
     "ORACLE_ROUND_INTERVAL", "ORACLE_SUBMISSION_WINDOW",
     "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS",
     "ORACLE_BATCH_WINDOW_ROUNDS", "ORACLE_BATCH_GRACE_MS",
@@ -141,156 +155,86 @@ const HUB_PASSTHROUGH_VARS = [
     "XCHAIN_PRICE_WINDOW_BLOCKS", "XCHAIN_PRICE_CONFIRMATION_BUFFER",
     "XCHAIN_PRICE_BOOTSTRAP_SATS",
     "XCHAIN_PRICE_MIN_BTC_VOLUME",
-    "HUB_API_KEY", "HUB_ALLOW_UNAUTHENTICATED",
-    "XC_ROLLCALL_REGTEST_ACTIVATION",
-    "XC_ROLLCALL_GATES_REGTEST_ACTIVATION",
-    "XC_MIRROR_ADMISSION_ACTIVATION",
-    "XC_ANCHOR_FOLD_REGTEST_ACTIVATION",
-    "XC_ANCHOR_STAKE_REGTEST_ACTIVATION",
-    "XC_ANCHOR_SLASH_REGTEST_ACTIVATION",
-    "XC_OFFER_LIST_REGTEST_ACTIVATION"
+    "HUB_ALLOW_UNAUTHENTICATED",
+    ...SHARED_REGTEST_GATE_ARMS,
+    ...HUB_ONLY_REGTEST_GATE_ARMS
 ]
-const HUB_ADMISSION_TIMING_VARS = new Set([
-    "ATTESTATION_ROUND_TIMEOUT_MS", "ADMISSION_WATERMARK_SAMPLE_MS"
-])
-
 // Hub telemetry secrets come from host env; unset, ip_hash stays null and admin is 401.
 // BTC indexer JSON-RPC URL comes from host env for a hub not co-located with one. Left
 // empty, it is composed from the co-located indexer, else the hub uses its configs table.
-// State-checkpoint and ANCHOR config also enters the shared hub through host env.
-// Per-coin <COIN>_INDEXER_URLs feed getblockhashes (checkpoint state reads);
-// DOGE_* configures the on-chain ANCHOR/price publisher signer pipeline;
-// XDEX_* are the shared single-validator/regtest seams. Only set values are
-// injected, so unset host env leaves the hub's own defaults untouched.
+
+// State-checkpoint and ANCHOR config enters the shared hub through host env: per-coin <COIN>_INDEXER_URLs feed
+// getblockhashes, DOGE_* configures the ANCHOR/price publisher signer, XDEX_* are single-validator/regtest seams.
+// Only set values are injected, so unset host env leaves the hub's own defaults untouched.
+
 // HUB_API_KEY gates the hub's consensus-affecting write methods. From host env (.env) so
 // it survives `update`; unset leaves the hub keyless.
+
 // ANCHOR_CHUNK_RETRY_MS must outlast the utxo-tracker mempool poll (60s on mainnet) or
 // back-to-back same-wallet anchor broadcasts exhaust their retries on a stale UTXO view.
+
 // Anchor every Nth checkpoint_seq on-chain (off-multiples stay in the free off-chain
 // mirror); decouples DOGE spend from checkpoint cadence.
-// Per-coin confirmation depth the hub waits for before proposing a source leg
-// (coins/index.js resolveConfirmations). A regtest venue pins these to 1 so a bridge
-// lock finalizes on the next block; off regtest the hub clamps a lower value UP to the
-// per-coin default, so this can only raise the depth on a real network.
+
+// Per-coin confirmation depth the hub waits for before proposing a source leg (coins/index.js resolveConfirmations):
+// a regtest venue pins 1; off regtest the hub clamps a lower value UP to the per-coin default.
+
 // Reverse-proxy trust for the hub express API (rate-limiter IP keying). Default
 // loopback suits Apache on the same host; a proxy in front of the container sets this.
-// Deployment network for the hub's consensus gates (notably
-// STAKE_WEIGHTED_QUORUM, whose activation height is per-network).
-// REQUIRED by the hub in validator mode (it fails loud on a
-// blank/invalid value; no silent default here either) and must
-// match the INDEXER_NETWORK of the chains this hub federates.
-// Oracle price-round finalization threshold. Defaults to 2 in the hub
-// (a 2-hub diversity floor so a lone external source never becomes a
-// federation-signed price). Single-host prod / regtest deployments must
-// set ORACLE_MIN_SUBMISSIONS=1 explicitly or no round ever finalizes,
-// which stalls every indexer's oracle price-sync barrier. Passed through
-// here so the host env survives a hub container regenerate.
-// Oracle round cadence. CONSENSUS-UNIFORM: every hub in a federation must
-// share these or round numbering and the submission cutoff diverge. Passed
-// through for single-validator regtest/e2e venues, where short rounds keep
-// a live drill from waiting 10 minutes per finalization; real networks
-// leave them unset and take the hub defaults.
-// PRICE batch-publisher knobs (window length, finalization grace,
-// co-sign timeout, buffer cap). Deliberately NOT consensus-grouped in
-// HubConsensusEnvGuard: batch validation is range-agnostic, so two hubs
-// running different window sizes just elect different leaders and may
-// double-publish overlapping windows, which is idempotent at ingest and
-// is the same posture today's publisher failover already has. They
-// change what a leader PROPOSES, never what any node ACCEPTS. Passed
-// through so the host env survives a hub container regenerate.
-// Same family: the time budgeted between a window closing and its batch
-// being readable on chain (assembly, co-signing, broadcast, one DOGE
-// confirmation). The publisher subtracts it from the fee-price staleness
-// bound to derive the window ceiling, so a venue whose
-// landing latency differs from the fleet's tunes it here rather than
-// being clamped to a window that does not suit it.
-// ATTEST response mirror regtest-only overrides (the attest response mirror design). Both are
-// honoured by the receiving hub module ONLY when HUB_NETWORK=regtest (a warn-
-// and-ignore off regtest, the same posture resolveWatermarkGrace takes on the
-// indexer side), so passing them through here unconditionally mirrors the
-// ORACLE_BATCH_* family above: they cannot arm anything off regtest by any path
-// in this file, the real gate lives at the point of consumption.
-//
-// ATTEST_RESPONSE_FORWARD_S_OVERRIDE lets a regtest venue's leader pick a short
-// effective_time margin instead of the real 120s ATTEST_RESPONSE_FORWARD_S, so a
-// response can bind within the same short block cadence a regtest drill runs at
-// (xchain-hub/src/attestation/attest_response_timing.js).
-// ATTEST_BATCH_WINDOW_S_OVERRIDE is the same seam for the batch cadence:
-// AttestationBatchPublisher (row 20, not yet built) will read it on the same
-// regtest-only pattern as the forward override above, so the passthrough is
-// wired ahead of that publisher rather than after it.
-// Per-IP request/min cap on the hub's express API (default 100). Too low
-// for legitimate multi-indexer re-bootstrap: every indexer on a box shares
-// one source IP, so a fleet bootstrapping HubDbSync tables (oracle_prices,
-// price_snapshots, cross_chain_calls, capability_snapshots, state_checkpoints)
-// collectively blows 100/min and gets 429'd, so the heartbeat gate then stays
-// closed and the chain stalls. Raise for prod fleets. Passed through so the
-// host env survives a hub container regenerate.
-// The hub exempts loopback and private-range callers from
-// that cap by default, which covers the case above: the indexers reach the hub
-// container over the bridge network this compose file creates, so a managed
-// node no longer needs the limit raised to rebuild price history from the chain.
-// HUB_RATE_LIMIT_EXEMPT_LOCAL=false turns the exemption off and restores the
-// old behavior for an operator who wants the cap enforced on every caller;
-// passed through for the same container-regenerate reason.
-// XCHAIN derived-price source. XCHAIN is listed on no exchange, so
-// a validator computes XCHAIN/USD from realized fills in its OWN BTC indexer
-// database instead of fetching it. Every native-coin fee decision on LTC and
-// DOGE needs that pair, and without it those chains cannot price a fee at all.
-//
-// Read-only access; unset means the hub simply abstains from the pair and
-// submits the 36 API pairs exactly as before, which is a supported state.
-// Passed through here so the values survive a hub container regenerate - a
-// config file alone never reaches the container.
-// Consensus-uniform derivation parameters (window length, confirmation
-// buffer, bootstrap price). Overrides exist for regtest and e2e only: a hub
-// running different values computes a different XCHAIN/BTC leg and lands
-// outside the co-sign deviation band, so on a real network leave them unset
-// and move them only by a coordinated flag-day.
-// D2 supersession threshold override. The shipped constant keeps
-// supersession disabled (bootstrap carry-forward only); regtest/e2e drills
-// set '0' so any realized volume supersedes, which is what lets a live
-// proof distinguish a derived print from the carry-forward it would
-// otherwise silently match.
-// Hub API authentication. Without these two passed through, VALIDATOR MODE
-// IS UNREACHABLE: the hub refuses to boot in validator mode unless one of
-// them is set ("HUB_API_KEY is not set in validator mode. Write methods
-// would be UNAUTHENTICATED"), and without this passthrough neither reaches
-// the container at all.
-//
-// That failure also WEDGES the installer, so it is worth more than a
-// one-line fix: once P2P_VALIDATOR_ADDR is baked into the container env the
-// hub crash-loops, and `update xchain-hub` then fails because its own
-// precheck tries to restart the container that cannot start. Recovery is
-// `docker rm -f` the container and update again.
-//
-// HUB_ALLOW_UNAUTHENTICATED=true is the documented keyless escape hatch and
-// suits a single-host regtest venue that already ran open; a real network
-// sets HUB_API_KEY instead.
-// The regtest ROLLCALL arming opt-in. The hub carries a byte-twin of
-// the indexer's rollcall_activation.js, and ROLLCALL_ACTIVATION is one of
-// consensus_rules_digest.js's SHARED_GATES, so an indexer armed against an
-// inert container hub reports a rules MISMATCH on the venue. Both sides take
-// the same variable, so a venue arms as a unit.
-//
-// Passed through with no network gate, unlike the indexer's copy above: the
-// hub is a shared service and getDefaultConfig is called for it as
-// (module, null, null), so there is no network here to gate on. That is safe
-// because the real gate is in the hub's own rollcall_activation.js, which can
-// reach the environment for regtest and for nothing else - mainnet and testnet
-// are literal there and unreachable from env by any path in the file. On a
-// mainnet or testnet hub this variable is therefore inert, not dangerous.
-// XC_ROLLCALL_GATES_REGTEST_ACTIVATION rides beside it with the same
-// no-network-gate reasoning: it arms ROLLCALL v1 and the rules-aware
-// attestation set separately from the rail, so a venue can drive v0 as its
-// control, and the hub's own rollcall_gates_activation.js gates it for real.
-// XC_MIRROR_ADMISSION_ACTIVATION follows the same no-network-gate shape
-// (D84 precedent): it arms the admission-map mirror and its consumer and
-// barrier gates together, so a venue arms as a unit; the hub's own
-// mirror-admission gate module gates it for real.
-// XC_ANCHOR_FOLD_REGTEST_ACTIVATION rides beside it: the hub and the regtest indexer arm the fold together,
-// and the stake and slash arms ride the same way.
-// XC_OFFER_LIST_REGTEST_ACTIVATION arms the offer-list gate on the hub; the hub's own gate module gates it for real.
+
+// Deployment network for the hub's consensus gates (STAKE_WEIGHTED_QUORUM activates per network). REQUIRED in
+// validator mode (the hub fails loud on a blank or invalid value) and must match the INDEXER_NETWORK it federates.
+
+// Oracle price-round finalization threshold, default 2 in the hub so a lone external source never becomes a
+// federation-signed price; single-host prod and regtest must set 1 or no round finalizes and every indexer's oracle barrier stalls.
+
+// Regtest-only single-fetcher co-sign escape hatch. The hub ignores it off regtest. It changes what a node
+// accepts, so the consensus env guard protects it from silent removal on regtest.
+
+// Oracle round cadence is CONSENSUS-UNIFORM: every hub in a federation must share it or round numbering and the
+// submission cutoff diverge. Passed through for single-validator regtest/e2e venues; real networks leave it unset.
+
+// PRICE batch-publisher knobs (window length, grace, co-sign timeout, buffer cap) are deliberately NOT in
+// CONSENSUS_ENV_GROUPS (hub_consensus_env_guard.js): they change what a leader PROPOSES, never what a node ACCEPTS,
+// and overlapping windows from differing hubs are idempotent at ingest. Passed through to survive a hub regenerate.
+
+// Same family: the time between a window closing and its batch being readable on chain. The publisher subtracts it
+// from the fee-price staleness bound to get the window ceiling, so a venue with other landing latency tunes it here.
+
+// ATTEST response mirror regtest-only overrides are honoured by the hub ONLY when HUB_NETWORK=regtest (warn and ignore
+// otherwise), so passing them through arms nothing elsewhere. Unlike the ORACLE_BATCH_* family they change what a node
+// ACCEPTS, so CONSENSUS_ENV_GROUPS (hub_consensus_env_guard.js) guards them on regtest against a recreate dropping them.
+
+// ATTEST_RESPONSE_FORWARD_S_OVERRIDE shortens the real 120s effective_time margin (attest_response_timing.js) and
+// ATTEST_BATCH_WINDOW_S_OVERRIDE the batch cadence (resolveAttestBatchWindowS, batch_publisher.js); both are regtest only.
+
+// Per-IP request/min cap on the hub API (default 100): indexers on one box share a source IP, so a fleet re-bootstrapping
+// the mirror tables can exceed it and stall the heartbeat gate behind 429s. Raise for prod fleets; passed through to survive a regenerate.
+
+// Loopback and private-range callers are exempt by default (managed-node indexers reach the hub over the compose
+// bridge); HUB_RATE_LIMIT_EXEMPT_LOCAL=false restores the cap on every caller.
+
+// XCHAIN derived-price source: XCHAIN is on no exchange, so a validator computes XCHAIN/USD from realized fills in its OWN
+// BTC indexer database (read-only), which LTC and DOGE native-fee decisions need. Unset, the hub abstains from the pair and
+// submits the 36 API pairs. Passed through because a config file alone never reaches the container.
+
+// Consensus-uniform derivation parameters (window, confirmation buffer, bootstrap price): overrides are for regtest and
+// e2e only, since differing values yield a different XCHAIN/BTC leg outside the co-sign band; on a real network move them by flag-day.
+
+// D2 supersession threshold override: the shipped constant keeps supersession off (bootstrap carry-forward only); regtest/e2e
+// set '0' so any realized volume supersedes, letting a live proof tell a derived print from the carry-forward.
+
+// Hub API authentication: validator mode refuses to boot unless HUB_API_KEY or HUB_ALLOW_UNAUTHENTICATED reaches the
+// container, and a baked P2P_VALIDATOR_ADDR then crash-loops the hub and wedges `update xchain-hub` (recover with
+// `docker rm -f` and update again). HUB_ALLOW_UNAUTHENTICATED=true is the keyless hatch for single-host regtest.
+
+// The regtest ROLLCALL opt-in: the hub's byte-twin of rollcall_activation.js and the consensus_rules_digest.js SHARED_GATES
+// mean an armed indexer against an inert hub reports a rules MISMATCH, so both sides take the same variable. Passed through
+// with no network gate (the hub is configured as (module, null, null)); its own gate reaches env for regtest only, so it is inert elsewhere.
+
+// Every shared arm and the hub-only offer-list arm ride beside it with the same
+// no-network-gate reasoning: each gate module accepts its variable on regtest only.
+
 // Secret-bearing names in this list (XCHAIN_PRICE_INDEXER_DB_PASS) are also
 // accepted from the host env under their redaction-safe `*_SECRET` spelling;
 // everything else resolves to a plain process.env read.
@@ -303,36 +247,33 @@ function configureHubBeforeKey(defaultValues, module) {
         defaultValues["TELEMETRY_ADMIN_KEY"]      = config.TELEMETRY_ADMIN_KEY
         defaultValues["BTC_INDEXER_API_URL"]      = config.BTC_INDEXER_API_URL
         for (const varName of HUB_PASSTHROUGH_VARS) {
-            const value = HUB_ADMISSION_TIMING_VARS.has(varName)
-                ? config.childProcessEnv()[varName]
-                : readSecretHostEnv(varName)
+            const value = readSecretHostEnv(varName)
             if (value !== undefined && value !== "") {
                 defaultValues[varName] = value
+            }
+        }
+        const dogeApiUrl = readSecretHostEnv("DOGE_INDEXER_API_URL")
+        if (dogeApiUrl !== undefined && dogeApiUrl !== "") {
+            if (!defaultValues["DOGE_INDEXER_URL"]) {
+                // Keep one URL name because some hub readers prefer API_URL while
+                // checkpointing reads only INDEXER_URL. Co-located composition wins later.
+                defaultValues["DOGE_INDEXER_URL"] = dogeApiUrl
+            } else if (defaultValues["DOGE_INDEXER_URL"] !== dogeApiUrl) {
+                logger.warn("DOGE_INDEXER_URL differs from DOGE_INDEXER_API_URL; the hub uses DOGE_INDEXER_URL")
             }
         }
     }
 }
 
-// The hub now REFUSES to boot when HUB_API_KEY is unset unless
-// keyless operation is declared with HUB_ALLOW_UNAUTHENTICATED. A managed
-// deploy with no key in the host env is a legitimate posture (single-host
-// regtest, a hub reachable only on a private network), so make the
-// declaration here rather than letting the container crash-loop: the point
-// of the hub-side change is that keyless is a stated choice, and the
-// deployer is what states it. An operator who wants the refusal instead
-// sets HUB_ALLOW_UNAUTHENTICATED=false in the host env, which the
-// passthrough above preserves. `xchain-node go-live` still refuses a
-// keyless mainnet hub outright (GoLiveGate).
-// MAINNET is the exception: there the review's "invert the defaults, fail
-// closed" applies with real funds behind it, so we do NOT declare keyless
-// on the operator's behalf and the hub's own refusal stands. (A mainnet
-// VALIDATOR hub is already covered: the hub has refused keyless validator
-// boots since before this change, so no running one can be keyless and
-// undeclared. This only reaches a mainnet config-only hub.)
-// `validator init` leaves a generated key in the shared hub sidecar so the
-// onboarding path produces a hub that BOOTS. Read it here (host env still wins),
-// before the keyless declaration below: a node that has a credential must deploy
-// authenticated rather than be handed the escape hatch it no longer needs.
+// A hub refuses to boot with HUB_API_KEY unset unless keyless is declared (HUB_ALLOW_UNAUTHENTICATED), so declare it for a
+// legitimate keyless posture (single-host regtest, private network) rather than crash-loop; the host env set to false keeps
+// the refusal, and `xchain-node go-live` still refuses a keyless mainnet hub (GoLiveGate).
+
+// MAINNET never gets the declaration (real funds, so fail closed); that only reaches a config-only hub, since validator
+// hubs already refuse keyless boots.
+
+// `validator init` leaves a generated key in the shared hub sidecar; read it here (host env wins) before the keyless
+// declaration, so a node holding a credential deploys authenticated.
 function configureHubAccess(defaultValues) {
     const hubNetworkIsMainnet = String(defaultValues["HUB_NETWORK"] || "").toLowerCase() === Network.MAINNET
     if (!defaultValues["HUB_API_KEY"] && defaultValues["HUB_ALLOW_UNAUTHENTICATED"] === undefined
@@ -347,18 +288,14 @@ function configureHubAccess(defaultValues) {
     if (configuredHubNetwork) delete defaultValues["HUB_NETWORK"]
 }
 
-// Operator signer for the on-chain DOGE publishers: when the host sets
-// XCHAIN_NODE_HUB_SIGNER_DIR, ModuleService mounts that directory
-// read-only at /XChainHub/operator-signer and the hub loads
-// <dir>/signer.js via HUB_SIGNER_MODULE (see xchain-hub
-// examples/doge-signer.example.js for the module contract).
-// Validator mode: when `xchain-node validator init` has been run, inject the
-// P2P / signing-key / capability-config env so the hub starts as a full
-// validator. Returns {} (no change) for a standalone node, so the standalone
-// install path is unaffected.
-// State the resolved mode and the directory it came from: an empty validator
-// env means standalone, disabled, or a configDir carrying no validator/, and
-// a deploy cannot tell those apart. A statement, never a refusal.
+// Operator signer for the on-chain DOGE publishers: with XCHAIN_NODE_HUB_SIGNER_DIR set, ModuleService mounts it read-only at
+// /XChainHub/operator-signer and the hub loads <dir>/signer.js via HUB_SIGNER_MODULE (see xchain-hub examples/doge-signer.example.js).
+
+// Validator mode: after `xchain-node validator init`, inject the P2P / signing-key / capability-config env so the hub
+// starts as a full validator; returns {} for a standalone node.
+
+// State the resolved mode and its directory: an empty validator env means standalone, disabled, or a configDir with no
+// validator/, and a deploy cannot tell them apart. A statement, never a refusal.
 function configureHubValidator(defaultValues) {
     if (config.XCHAIN_NODE_HUB_SIGNER_DIR) {
         defaultValues["HUB_SIGNER_MODULE"] = "/XChainHub/operator-signer/signer.js"
@@ -396,5 +333,5 @@ module.exports = {
     composeColocatedIndexerUrls,
     configureHubBeforeKey,
     configureHubAccess,
-    configureHubValidator
+    configureHubValidator, HUB_PASSTHROUGH_VARS
 }

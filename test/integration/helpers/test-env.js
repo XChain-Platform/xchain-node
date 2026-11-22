@@ -88,6 +88,13 @@ class InMemoryStore {
         this.modules.delete(key)
         return value
     }
+
+    async deleteModuleContainerIfMatches(module, coin, network, containerId) {
+        const key = this._key(module, coin, network)
+        if (this.modules.get(key) !== containerId) return false
+        this.modules.delete(key)
+        return true
+    }
 }
 
 /**
@@ -149,7 +156,8 @@ class TestEnv {
         const methodNames = [
             'createDatabase', 'close', 'isReady', 'assertReady', 'getModuleCount',
             'getAllModuleContainers', 'setModuleContainer',
-            'getModuleContainer', 'getModuleContainerStrict', 'deleteModuleContainer'
+            'getModuleContainer', 'getModuleContainerStrict', 'deleteModuleContainer',
+            'deleteModuleContainerIfMatches'
         ]
 
         this._origDbMethods = {}

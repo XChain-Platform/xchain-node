@@ -17,10 +17,18 @@
 const sinon = require('sinon')
 const assert = require('node:assert/strict')
 const { expect } = require('chai')
+const http = require('http')
 
 const { updateHubOrExplorer } = require('../../src/services/hub_service/update_hub_or_explorer')
 
-function deps({ updateConfig, clock }) {
+function deps({ updateConfig, clock, HubConnector, hubPort = 10000 }) {
+    const StubHubConnector = class {
+        constructor() {
+            this.lastFailures = []
+            this.lastFailureStatuses = []
+            this.updateConfig = updateConfig
+        }
+    }
     return {
         HUB_MODULE_NAME: 'xchain-hub',
         EXPLORER_MODULE_NAME: 'xchain-explorer',
@@ -31,11 +39,11 @@ function deps({ updateConfig, clock }) {
         isStatusUpdated: () => true,
         sleep: sinon.stub().resolves(),
         redactSecrets: v => String(v && v.message ? v.message : v),
-        getDefaultConfig: sinon.stub().resolves({ HUB_PORT: 10000, EXPLORER_PORT: 10001 }),
+        getDefaultConfig: sinon.stub().resolves({ HUB_PORT: hubPort, EXPLORER_PORT: 10001 }),
         getStatus: sinon.stub().resolves(),
         getExternalDbConfig: sinon.stub().resolves(null),
         readContainerEnv: sinon.stub().resolves(null),
-        HubConnector: class { constructor() { this.updateConfig = updateConfig } },
+        HubConnector: HubConnector || StubHubConnector,
         ExplorerConnector: class {},
         dockerService: {},
         buildHubModuleConfig: sinon.stub().returns(null),
@@ -73,5 +81,164 @@ describe('hub config push wall-clock cap', function () {
         const updateConfig = sinon.spy(async () => { clock.t += 60000; return updateConfig.callCount >= 3 })
         expect(await updateHubOrExplorer('xchain-hub', deps({ updateConfig, clock }))).to.be.true
         expect(updateConfig.callCount).to.equal(3)
+    })
+
+})
+
+describe('hub config push failure reporting', function () {
+    it('reports a later HTTP failure instead of the first connection failure', async function () {
+        let calls = 0
+        const updateConfig = sinon.spy(async function () {
+            calls++
+            this.lastFailures = [calls === 1 ? 'ECONNREFUSED' : 'HTTP 401 ERR_BAD_REQUEST']
+            return null
+        })
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', deps({ updateConfig })),
+            err => String(err).includes('last error: HTTP 401 ERR_BAD_REQUEST') &&
+                !String(err).includes('ECONNREFUSED')
+        )
+    })
+
+    it('replaces a thrown error with a later connector refusal', async function () {
+        let calls = 0
+        const updateConfig = sinon.spy(async function () {
+            calls++
+            if (calls === 1) throw new Error('connect ECONNREFUSED')
+            this.lastFailures = ['hub refused config push: Not the leader for seq 7']
+            return false
+        })
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', deps({ updateConfig })),
+            err => String(err).includes('Not the leader for seq 7') &&
+                !String(err).includes('ECONNREFUSED')
+        )
+    })
+
+    it('clears a stale cause when the final failures have no recorded cause', async function () {
+        let calls = 0
+        const updateConfig = sinon.spy(async function () {
+            calls++
+            this.lastFailures = calls === 1 ? ['ECONNREFUSED'] : []
+            return null
+        })
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', deps({ updateConfig })),
+            err => !String(err).includes('ECONNREFUSED')
+        )
+    })
+})
+
+describe('hub config push permanent refusals', function () {
+    it('stops immediately on a 401 and names the API key remedy', async function () {
+        const updateConfig = sinon.spy(async function () {
+            this.lastFailures = ['HTTP 401 ERR_BAD_REQUEST']
+            this.lastFailureStatuses = [401]
+            return false
+        })
+        const dependencies = deps({ updateConfig })
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', dependencies),
+            err => String(err).includes('HTTP 401') && String(err).includes('HUB_API_KEY') &&
+                !String(err).includes('docker logs')
+        )
+        expect(updateConfig.callCount).to.equal(1)
+        expect(dependencies.sleep.callCount).to.equal(0)
+    })
+
+    it('stops immediately on a 413 and names the request limit', async function () {
+        const updateConfig = sinon.spy(async function () {
+            this.lastFailures = ['HTTP 413 ERR_BAD_REQUEST']
+            this.lastFailureStatuses = [413]
+            return false
+        })
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', deps({ updateConfig })),
+            err => String(err).includes('100 KB') && !String(err).includes('HUB_API_KEY')
+        )
+        expect(updateConfig.callCount).to.equal(1)
+    })
+
+    it('keeps retrying when any endpoint has a transient failure', async function () {
+        const updateConfig = sinon.spy(async function () {
+            this.lastFailures = ['HTTP 401', 'ECONNREFUSED']
+            this.lastFailureStatuses = [401, null]
+            return false
+        })
+
+        await assert.rejects(updateHubOrExplorer('xchain-hub', deps({ updateConfig })))
+        expect(updateConfig.callCount).to.equal(60)
+    })
+})
+
+describe('hub config push retry controls', function () {
+    for (const status of [429, 503]) {
+        it('keeps retrying HTTP ' + status, async function () {
+            const updateConfig = sinon.spy(async function () {
+                this.lastFailures = ['HTTP ' + status]
+                this.lastFailureStatuses = [status]
+                return false
+            })
+
+            await assert.rejects(updateHubOrExplorer('xchain-hub', deps({ updateConfig })))
+            expect(updateConfig.callCount).to.equal(60)
+        })
+    }
+
+    it('stops when a permanent refusal follows transient failures', async function () {
+        const updateConfig = sinon.spy(async function () {
+            const permanent = updateConfig.callCount === 3
+            this.lastFailures = [permanent ? 'HTTP 401' : 'ECONNREFUSED']
+            this.lastFailureStatuses = [permanent ? 401 : null]
+            return false
+        })
+
+        await assert.rejects(updateHubOrExplorer('xchain-hub', deps({ updateConfig })), /HUB_API_KEY/)
+        expect(updateConfig.callCount).to.equal(3)
+    })
+
+    it('still retries a leader refusal and can succeed later', async function () {
+        const updateConfig = sinon.spy(async function () {
+            this.lastFailures = ['hub refused config push: Not the leader']
+            this.lastFailureStatuses = [null]
+            return updateConfig.callCount === 2
+        })
+
+        expect(await updateHubOrExplorer('xchain-hub', deps({ updateConfig }))).to.equal(true)
+        expect(updateConfig.callCount).to.equal(2)
+    })
+})
+
+describe('hub config push with a real connector', function () {
+    let server
+
+    afterEach(async function () {
+        if (server) await new Promise(resolve => server.close(resolve))
+        server = null
+    })
+
+    it('sends one request to a hub that answers 401', async function () {
+        let requests = 0
+        server = http.createServer((req, res) => {
+            requests++
+            res.writeHead(401, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'Unauthorized' } }))
+        })
+        await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+        const HubConnector = require('../../src/services/hub_connector')
+
+        await assert.rejects(
+            updateHubOrExplorer('xchain-hub', deps({
+                HubConnector,
+                hubPort: server.address().port
+            })),
+            /HUB_API_KEY/
+        )
+        expect(requests).to.equal(1)
     })
 })

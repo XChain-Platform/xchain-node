@@ -209,7 +209,7 @@ describe('BootstrapService', function () {
             // The metadata member leads the wrapper (see BootstrapArchiveMeta).
             expect(wrap.args.slice(-3)).to.deep.equal(['bootstrap.json', 'data.tar.gz', 'data.sha256'])
             expect(stubs.archiveMeta.writeBootstrapMeta.calledOnce).to.equal(true)
-            expect(stubs.archiveMeta.writeBootstrapMeta.firstCall.args[1]).to.include({ module: XChainService.XCHAIN_UTXO_TRACKER, height: null })
+            expect(stubs.archiveMeta.writeBootstrapMeta.firstCall.args[1]).to.include({ module: XChainService.XCHAIN_UTXO_TRACKER, height: 0 })
 
             // Inner payload keeps real compression; the outer wrap does not.
             expect(gzipOptions).to.have.length(2)

@@ -145,10 +145,12 @@ function ignoredShutdownLine(module, raw, derived, budgetSeconds) {
 
 // The operator line for a drain timer at or above its stop budget.
 function overBudgetShutdownLine(module, where, ms, budgetSeconds, source) {
+    const remedy = source === 'the container carries'
+        ? 'Recreate the container (xchain-node recreate) so the node re-derives SHUTDOWN_TIMEOUT_MS from the current budget.'
+        : `Lower SHUTDOWN_TIMEOUT_MS in the module config below ${budgetSeconds * 1000} (or remove it so the node derives it), ` +
+          `or raise ${moduleStopTimeoutEnvName(module)}, then recreate the container (xchain-node recreate).`
     return `WARNING: ${module}${where}: ${source} SHUTDOWN_TIMEOUT_MS=${ms}, at or above its ${budgetSeconds} s stop ` +
-        'budget, so a drain that runs long is killed by docker before the service\'s own timer can end it. Lower ' +
-        `SHUTDOWN_TIMEOUT_MS in the module config below ${budgetSeconds * 1000} (or remove it so the node derives it), ` +
-        `or raise ${moduleStopTimeoutEnvName(module)}, then recreate the container (xchain-node recreate).`
+        `budget, so a drain that runs long is killed by docker before the service's own timer can end it. ${remedy}`
 }
 
 // Why a running service's own drain may not follow its current budget: the
@@ -261,6 +263,21 @@ async function stopModuleContainer(stopContainerByName, module, coin, network, c
     return { ...outcome, budget }
 }
 
+// A container the registry never recorded may hold a service's name and still be
+// running, and the name-keyed `docker rm -f` that follows is SIGKILL. Anything but a
+// docker-confirmed absence gets the budgeted stop first; a Created carcass stops at
+// once. Never throws, and says so when it could not stop: the force-remove that
+// follows is what clears the name.
+async function stopUnrecordedContainer(probePresence, stopContainerByName, module, coin, network, name) {
+    try {
+        if (await probePresence(name) === 'gone') return null
+        return await stopModuleContainer(stopContainerByName, module, coin, network, name)
+    } catch (err) {
+        logger.warn(`WARNING: could not give ${name} its budgeted stop before the force-remove (${err && err.message ? err.message : err}).`)
+        return null
+    }
+}
+
 // Restart a service container as the budgeted stop above, then a start. A bare `docker restart`
 // honours only a stamped --stop-timeout (docker's ten seconds without one) and never reads the exit code.
 async function restartModuleContainer(stopContainerById, startContainerById, module, coin, network, containerRef,
@@ -292,5 +309,6 @@ module.exports = {
     stoppedUnclean,
     describeModuleStopOutcome,
     stopModuleContainer,
+    stopUnrecordedContainer,
     restartModuleContainer
 }

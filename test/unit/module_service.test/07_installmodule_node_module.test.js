@@ -283,7 +283,8 @@ moduleSuite('uninstallModule(): deleteModuleContainer returns false', function (
                     }
                 }
             })
-            stubs.db.deleteModuleContainer.resolves(null) // falsy → triggers throw
+            stubs.db.deleteModuleContainerIfMatches.resolves(false)
+            stubs.db.getModuleContainerStrict.resolves('enc-789')
             const ms = loadModuleService(stubs)
             try {
                 await ms.uninstallModule('bitcoin', 'mainnet', 'xchain-encoder')

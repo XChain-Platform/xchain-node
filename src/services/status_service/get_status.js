@@ -15,7 +15,7 @@
  * Tracks installed modules and container status
  ********************************************************************/
 
-let path = require('path')
+const path = require('path')
 let { NODE_MODULE_NAME, SEP, XChainService } = require('../../config')
 let {
     db, getInstalledModules, resetInstalledModules, getRemoteModuleVersions,
@@ -35,11 +35,12 @@ let {
     reduceNodeUnreachable, describeNodeUnreachableNote,
     reduceDecoderReorgHalt, describeReorgHaltNote,
     reduceIndexerStall, describeIndexerStallNote,
+    reduceTrainActivationPending, describeTrainActivationPendingNote,
     reduceTrackerHalt, describeTrackerHaltNote
 } = require('./status_reducers')
 
 function configureDependencies(dependencies) {
-    ;({ NODE_MODULE_NAME, SEP, XChainService, db, getInstalledModules, resetInstalledModules, getRemoteModuleVersions, isStatusUpdated, setStatusUpdated, getLastStatus, setLastStatus, getLastPrintedStatus, setLastPrintedStatus, getStatusFromContainer, getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion, peers, getLogger, logger, checkRemoteNodeVersionAdvisory, loadInstalledModules, isContainerGoneError, probeServiceHealthPayload, probeReadinessPayload, reduceNotReady, describeNotReadyNote, reduceNodeCatchingUp, describeNodeCatchingUpNote, reduceNodeUnreachable, describeNodeUnreachableNote, reduceDecoderReorgHalt, describeReorgHaltNote, reduceIndexerStall, describeIndexerStallNote, reduceTrackerHalt, describeTrackerHaltNote } = dependencies)
+    ;({ NODE_MODULE_NAME, SEP, XChainService, db, getInstalledModules, resetInstalledModules, getRemoteModuleVersions, isStatusUpdated, setStatusUpdated, getLastStatus, setLastStatus, getLastPrintedStatus, setLastPrintedStatus, getStatusFromContainer, getLocalNodeVersion, getContainerNodeVersion, getLocalModuleVersion, getContainerModuleVersion, peers, getLogger, logger, checkRemoteNodeVersionAdvisory, loadInstalledModules, isContainerGoneError, probeServiceHealthPayload, probeReadinessPayload, reduceNotReady, describeNotReadyNote, reduceNodeCatchingUp, describeNodeCatchingUpNote, reduceNodeUnreachable, describeNodeUnreachableNote, reduceDecoderReorgHalt, describeReorgHaltNote, reduceIndexerStall, describeIndexerStallNote, reduceTrainActivationPending, describeTrainActivationPendingNote, reduceTrackerHalt, describeTrackerHaltNote } = dependencies)
 }
 
 async function recordVersions(moduleStatus, nextModule, nextCoin, nextCoinNetwork, containerId, remoteModuleVersions) {
@@ -132,6 +133,22 @@ function describeContainerState(containerStatus) {
     return { state, isChurning }
 }
 
+async function annotateReadiness(nextModule, containerId, nextCoin, nextCoinNetwork, payload, moduleStatus, notes, display) {
+    if (nextModule !== XChainService.XCHAIN_INDEXER && nextModule !== XChainService.XCHAIN_DECODER) return
+    let readiness = null
+    try {
+        readiness = typeof (payload && payload.ready) === 'boolean'
+            ? payload : await probeReadinessPayload(nextModule, containerId, nextCoin, nextCoinNetwork)
+    } catch { /* advisory: an unreadable route is not a finding */ }
+    const notReady = reduceNotReady(readiness)
+    if (notReady) {
+        display.state += " NOT READY"
+        display.isChurning = true
+        moduleStatus["not_ready"] = notReady
+        notes.push(describeNotReadyNote(nextCoin, nextCoinNetwork, nextModule, notReady))
+    }
+}
+
 // A decoder carrying a durable REORG_HALT marker keeps parsing
 // and reports a healthy healthcheck (api.js keeps the marker off
 // the healthcheck on purpose: autoheal would restart-loop a
@@ -162,16 +179,19 @@ async function annotatePublishedHealth(nextModule, containerId, nextCoin, nextCo
     try {
         payload = await probeServiceHealthPayload(nextModule, containerId, nextCoin, nextCoinNetwork)
     } catch { /* advisory: an unreadable surface is not a halt */ }
+    const decoderHalt = nextModule === XChainService.XCHAIN_DECODER ? reduceDecoderReorgHalt(payload) : null
     const findings = [
-        [nextModule === XChainService.XCHAIN_DECODER ? reduceDecoderReorgHalt(payload) : null,
-            "reorg_halt", " REORG_HALT", describeReorgHaltNote],
+        [decoderHalt, "reorg_halt", " REORG_HALT", describeReorgHaltNote, "halted"],
+        [decoderHalt, "reorg_halt", " REORG_HALT UNVERIFIED", describeReorgHaltNote, "unverified"],
         [nextModule === XChainService.XCHAIN_INDEXER ? reduceIndexerStall(payload) : null,
-            "stall", null, describeIndexerStallNote],
+            "stall", null, describeIndexerStallNote, "stalled"],
+        [nextModule === XChainService.XCHAIN_INDEXER ? reduceTrainActivationPending(payload) : null,
+            "train_activation_pending", " UPGRADE PENDING", describeTrainActivationPendingNote, "pending"],
         [nextModule === XChainService.XCHAIN_UTXO_TRACKER ? reduceTrackerHalt(payload) : null,
-            "halt", " HALTED", describeTrackerHaltNote]
+            "halt", " HALTED", describeTrackerHaltNote, "halted"]
     ]
-    for (const [finding, key, suffix, describe] of findings) {
-        if (finding && (finding.halted || finding.stalled)) {
+    for (const [finding, key, suffix, describe, activeKey] of findings) {
+        if (finding && finding[activeKey]) {
             display.state += suffix || " STALL " + finding.word
             display.isChurning = true
             moduleStatus[key] = finding
@@ -181,20 +201,8 @@ async function annotatePublishedHealth(nextModule, containerId, nextCoin, nextCo
     // The readiness verdict rides on the indexer's /status and the decoder's /live, which the
     // JSON-RPC health read above does not carry. Advisory, like the rest: an unreadable route or
     // an older image without the fields leaves the row as it was. Distinct word, same amber.
-    if (nextModule === XChainService.XCHAIN_INDEXER || nextModule === XChainService.XCHAIN_DECODER) {
-        let readiness = null
-        try {
-            readiness = typeof (payload && payload.ready) === 'boolean'
-                ? payload : await probeReadinessPayload(nextModule, containerId, nextCoin, nextCoinNetwork)
-        } catch { /* advisory: an unreadable route is not a finding */ }
-        const notReady = reduceNotReady(readiness)
-        if (notReady) {
-            display.state += " NOT READY"
-            display.isChurning = true
-            moduleStatus["not_ready"] = notReady
-            notes.push(describeNotReadyNote(nextCoin, nextCoinNetwork, nextModule, notReady))
-        }
-    }
+    await annotateReadiness(nextModule, containerId, nextCoin, nextCoinNetwork,
+        payload, moduleStatus, notes, display)
     const wait = reduceNodeCatchingUp(payload)
     if (wait) {
         display.state += " WAITING FOR NODE"

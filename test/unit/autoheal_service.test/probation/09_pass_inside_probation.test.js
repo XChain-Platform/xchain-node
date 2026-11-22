@@ -100,28 +100,31 @@ function loadService(stubs) {
     })
 }
 
+let stubs, service, stateDir, logStub
+
+function setUpAutoheal() {
+    stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autoheal-test-'))
+    process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR = stateDir
+    stubs = makeStubs()
+    service = loadService(stubs)
+    logStub = sinon.stub(console, 'log')
+}
+
+function tearDownAutoheal() {
+    logStub.restore()
+    delete process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR
+    delete process.env.XCHAIN_NODE_AUTOHEAL_GRACE_MS
+    delete process.env.XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS
+    fs.rmSync(stateDir, { recursive: true, force: true })
+}
+
+function registryRow(module, containerId) {
+    return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
+}
+
 describe('AutohealService', () => {
-    let stubs, service, stateDir, logStub
-
-    beforeEach(() => {
-        stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autoheal-test-'))
-        process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR = stateDir
-        stubs = makeStubs()
-        service = loadService(stubs)
-        logStub = sinon.stub(console, 'log')
-    })
-
-    afterEach(() => {
-        logStub.restore()
-        delete process.env.XCHAIN_NODE_AUTOHEAL_STATE_DIR
-        delete process.env.XCHAIN_NODE_AUTOHEAL_GRACE_MS
-        delete process.env.XCHAIN_NODE_AUTOHEAL_COOLDOWN_MS
-        fs.rmSync(stateDir, { recursive: true, force: true })
-    })
-
-    function registryRow(module, containerId) {
-        return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
-    }
+    beforeEach(setUpAutoheal)
+    afterEach(tearDownAutoheal)
 
     // The other side of the same rule: a pass inside Docker's post-restart
     // probation is the restart's own artifact, so it must NOT reset a backoff a
@@ -154,5 +157,28 @@ describe('AutohealService', () => {
         const throttled = await service.runAutoheal({ now: NOW + 25 * 60000 })
         expect(stubs.startContainer.callCount).to.equal(2)
         expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+    })
+
+    it('keeps backoff and escalation when Docker reports healthy inside restart probation', async () => {
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'rec3')])
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+
+        await service.runAutoheal({ now: NOW })
+        await service.runAutoheal({ now: NOW + 11 * 60000 })
+        expect(stubs.startContainer.callCount).to.equal(2)
+
+        stubs.getStatusFromContainer.resolves(inspectStatus('healthy', [
+            recordedProbe(NOW + 12 * 60000, 0)
+        ]))
+        await service.runAutoheal({ now: NOW + 12 * 60000 + 5000 })
+        const state = JSON.parse(fs.readFileSync(path.join(stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(state.restartCount.rec3).to.equal(2)
+        expect(state.unhealthySince).to.not.have.property('rec3')
+
+        stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        const throttled = await service.runAutoheal({ now: NOW + 22 * 60000 })
+        expect(stubs.startContainer.callCount).to.equal(2)
+        expect(throttled.skipped[0].reason).to.equal('inside restart cooldown')
+        expect(throttled.escalated).to.have.length(1)
     })
 })

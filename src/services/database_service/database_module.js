@@ -42,7 +42,7 @@ let {
 } = require('../credentials_service')
 
 let { XCHAIN_NODE_DB_HOST, XCHAIN_NODE_DB_DEFAULT_PORT, getDatabaseContainerId, checkIfDatabaseModuleExists, checkIfDatabaseIsReady, waitForFirstBoot } = require('./container_access')
-let { getExternalDbConfig, pingMariaDb } = require('./external_db')
+let { getExternalDbConfig, verifyExternalDatabase, assertBundledModeAllowed } = require('./external_db')
 let { askMariadbRootPassword, executeNativeMariaDbCommand, executeDockerMariaDbCommand } = require('./mariadb_exec')
 let { dbDatadirState, confirmPersistedDatadirRootPassword } = require('./persisted_datadir')
 
@@ -50,21 +50,6 @@ const nativeExecFile = execFile
 function configureDependencies(dependencies) {
     if (dependencies.execFile === nativeExecFile) return
     ;({ execFile, promisify, execFileAsync, mariadb, DB_MODULE_NAME, EXTERNAL_DB, DEPENDENCY_HEALTH_START_PERIOD, assertSafeDbIdentifier, escapeSqlStringLiteral, PING_SQL, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, validatePort, getStatusFromContainer, addContainerToNetwork, forceRemoveContainerByName, probeContainerPresenceByName, statusChanged, config, peers, getLogger, logger, XCHAIN_NODE_DB, getOsUserDbName, generatePassword, hasCredentials, loadCredentials, saveCredentials } = dependencies)
-}
-
-// External (host-native) MariaDB mode: xchain-node doesn't own the DB
-// engine; the operator runs MariaDB themselves. We just need to confirm the
-// configured external host is reachable and credentials work, then skip
-// everything else. All downstream callers (precheck, ModuleService,
-// moduleOperations, NodeService) are happy with this no-op return.
-async function verifyExternalDatabase() {
-    const cfg = await getExternalDbConfig()
-    try {
-        await pingMariaDb(cfg)
-    } catch (err) {
-        throw new Error("Cannot reach external MariaDB at " + cfg.host + ":" + cfg.port + ": " + (err.message || err))
-    }
-    return true
 }
 
 // Cap json-file log growth so a long-running node cannot fill the host
@@ -289,10 +274,15 @@ async function reuseDatabaseModule(existingId, coin, network) {
     }
 }
 
+// External mode only verifies the configured host (see verifyExternalDatabase).
+// A host recorded as external-DB never reaches createDatabaseModule without the flag.
 async function buildDatabaseModule(coin, network) {
     if (EXTERNAL_DB) return verifyExternalDatabase()
     const existingId = await checkIfDatabaseModuleExists(coin, network)
-    if (!existingId) return createDatabaseModule(coin, network)
+    if (!existingId) {
+        assertBundledModeAllowed()
+        return createDatabaseModule(coin, network)
+    }
     return reuseDatabaseModule(existingId, coin, network)
 }
 

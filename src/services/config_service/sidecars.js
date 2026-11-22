@@ -18,12 +18,14 @@
 
 let crypto, fs, path, readline, configDir, preferredSecretEnvName
 let foldSecretEnvAliases, deprecatedSecretEnvNames, logger
+const sidecarLock = require('./sidecar_lock')
+const { withSidecarLock } = sidecarLock
 
 function configure(dependencies) {
     ({ crypto, fs, path, readline, configDir, preferredSecretEnvName,
         foldSecretEnvAliases, deprecatedSecretEnvNames, logger } = dependencies)
+    sidecarLock.configure({ crypto, fs, path })
 }
-
 
 // Replace a file via a flushed temp file and rename (as credentials.json), so a crash
 // never leaves a torn sidecar whose missing keys the next load re-mints; symlinks survive.
@@ -48,7 +50,30 @@ function writeFileAtomic(filePath, data, mode) {
 // node RPC user/password, so it is forced to 0600 the same way credentials.json is: without
 // an explicit mode the file lands at the process umask (commonly 0644), leaving the RPC
 // credentials readable by any local user on the host.
-function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
+function persistSidecarCreds(localFilePath, creds, options) {
+    return withSidecarLock(localFilePath, () => writeSidecarUnlocked(localFilePath, creds, options))
+}
+
+// Read every KEY=VALUE in a sidecar, or {} when it does not exist.
+function readSidecarEntriesSync(localFilePath) {
+    const entries = {}
+    if (!fs.existsSync(localFilePath)) return entries
+    for (const rawLine of fs.readFileSync(localFilePath, "utf8").split(/\r?\n/)) {
+        const line = stripBom(rawLine)
+        const eqIndex = line.indexOf("=")
+        if (eqIndex > 0) entries[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
+    }
+    return entries
+}
+
+// A key's value as the loader would resolve it: the redaction-safe alias wins when non-empty.
+function resolvedSidecarValue(entries, key) {
+    const alias = preferredSecretEnvName(key)
+    if (alias && entries[alias]) return entries[alias]
+    return entries[key]
+}
+
+function writeSidecarUnlocked(localFilePath, creds, { overwrite = false } = {}) {
     const body = Object.keys(creds).map(k => `${k}=${creds[k]}`).join("\n") + "\n"
     if (overwrite || !fs.existsSync(localFilePath)) {
         const dir = path.dirname(localFilePath)
@@ -67,13 +92,11 @@ function persistSidecarCreds(localFilePath, creds, { overwrite = false } = {}) {
 // 0600. Used by the DB-password rotation to set DECODER_DB_PASS/INDEXER_DB_PASS (or
 // HUB_DB_PASS) without clobbering the NODE_USER/NODE_PASSWORD already in the sidecar.
 function upsertSidecarValues(localFilePath, values) {
-    const merged = {}
-    if (fs.existsSync(localFilePath)) {
-        for (const line of fs.readFileSync(localFilePath, "utf8").split(/\r?\n/)) {
-            const eqIndex = line.indexOf("=")
-            if (eqIndex > 0) merged[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
-        }
-    }
+    return withSidecarLock(localFilePath, () => upsertSidecarUnlocked(localFilePath, values))
+}
+
+function upsertSidecarUnlocked(localFilePath, values) {
+    const merged = readSidecarEntriesSync(localFilePath)
     for (const k in values) {
         // Respect the naming this sidecar already uses. A file the operator
         // renamed to the redaction-safe `*_SECRET` form must not sprout the legacy
@@ -85,9 +108,21 @@ function upsertSidecarValues(localFilePath, values) {
         const alias = preferredSecretEnvName(k)
         merged[alias && !(k in merged) ? alias : k] = values[k]
     }
-    persistSidecarCreds(localFilePath, merged, { overwrite: true })
+    writeSidecarUnlocked(localFilePath, merged, { overwrite: true })
 }
 
+function adoptOrMintSidecarValues(localFilePath, keys, mint, isMissing = value => !value) {
+    return withSidecarLock(localFilePath, () => {
+        const onDisk = readSidecarEntriesSync(localFilePath)
+        const values = {}, generated = {}
+        for (const key of keys) {
+            values[key] = resolvedSidecarValue(onDisk, key)
+            if (isMissing(values[key])) generated[key] = values[key] = mint(key)
+        }
+        if (Object.keys(generated).length) upsertSidecarUnlocked(localFilePath, generated)
+        return { values, generated }
+    })
+}
 // Read a single KEY=VALUE from a sidecar file, or undefined if the file or key is absent.
 // Uses the same createReadStream + readline path as the main config reader above.
 //
@@ -101,7 +136,8 @@ async function readSidecarValue(localFilePath, key) {
     let aliasValue  = undefined
     const stream = fs.createReadStream(localFilePath)
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
-    for await (const line of rl) {
+    for await (const rawLine of rl) {
+        const line = stripBom(rawLine)
         const eqIndex = line.indexOf("=")
         if (eqIndex <= 0) continue
         const lineKey = line.substring(0, eqIndex)
@@ -229,20 +265,48 @@ function coinConfigPaths(coin, network) {
     return { configFilePath, localFilePath: configFilePath + ".local" }
 }
 
+// Older appenders glued NODE_USER= / NODE_PASSWORD= onto the end of the previous
+// value with no newline. A marker counts only when it is not the tail of another
+// key or word: a marker preceded by "_" or whitespace is part of some other name
+// or free text (FOO_NODE_USER=, "x NODE_PASSWORD=") and stays in the value.
+// Either glue order peels; each credential runs to the next marker.
 function peelGluedCredentials(value) {
-    const credentials = {}
-    let cleanValue = value
+    const marks = []
     for (const credKey of ["NODE_PASSWORD", "NODE_USER"]) {
-        const at = cleanValue.indexOf(credKey + "=")
-        if (at >= 0) {
-            credentials[credKey] = cleanValue.substring(at + credKey.length + 1)
-            cleanValue = cleanValue.substring(0, at)
+        const needle = credKey + "="
+        let from = 0
+        for (;;) {
+            const at = value.indexOf(needle, from)
+            if (at < 0) break
+            from = at + needle.length
+            if (at > 0 && /[_\s]/.test(value[at - 1])) continue
+            marks.push({ credKey, at })
+            break
         }
     }
-    return { cleanValue, credentials }
+    if (!marks.length) return { cleanValue: value, credentials: {} }
+    marks.sort((x, y) => x.at - y.at)
+    const credentials = {}
+    marks.forEach((m, i) => {
+        const end = i + 1 < marks.length ? marks[i + 1].at : value.length
+        credentials[m.credKey] = value.substring(m.at + m.credKey.length + 1, end)
+    })
+    return { cleanValue: value.substring(0, marks[0].at), credentials }
 }
 
-function readMainConfigLine(defaultConfig, line) {
+// A UTF-8 BOM (U+FEFF) saved at the head of a file by some editors survives readline and
+// would glue itself to the first key, so that key no longer matches its name.
+function stripBom(line) {
+    return line.charCodeAt(0) === 0xFEFF ? line.slice(1) : line
+}
+
+function isCommentLine(line) {
+    return line.trimStart().startsWith("#")
+}
+
+function readMainConfigLine(defaultConfig, rawLine) {
+    const line = stripBom(rawLine)
+    if (isCommentLine(line)) return false
     const eqIndex = line.indexOf("=")
     if (eqIndex <= 0) return false
     const key = line.substring(0, eqIndex)
@@ -261,7 +325,8 @@ function normalizeMainConfig(defaultConfig, configFilePath) {
     foldSecretEnvAliases(defaultConfig)
 }
 
-function readSidecarConfigLine(sidecarConfig, line) {
+function readSidecarConfigLine(sidecarConfig, rawLine) {
+    const line = stripBom(rawLine)
     const eqIndex = line.indexOf("=")
     if (eqIndex > 0) sidecarConfig[line.substring(0, eqIndex)] = line.substring(eqIndex + 1)
 }
@@ -273,18 +338,21 @@ function mergeSidecarConfig(defaultConfig, sidecarConfig, localFilePath) {
 
 function migrateMainCredentials(defaultConfig, configFilePath, localFilePath) {
     const creds = {}
-    if ("NODE_USER" in defaultConfig) creds["NODE_USER"] = defaultConfig["NODE_USER"]
-    if ("NODE_PASSWORD" in defaultConfig) creds["NODE_PASSWORD"] = defaultConfig["NODE_PASSWORD"]
-    upsertSidecarValues(localFilePath, creds)
+    // A blank value is absent, as foldSecretEnvAliases treats it: copying it would
+    // ship an empty RPC credential now and have the next load mint a second one.
+    if (defaultConfig["NODE_USER"]) creds["NODE_USER"] = defaultConfig["NODE_USER"]
+    if (defaultConfig["NODE_PASSWORD"]) creds["NODE_PASSWORD"] = defaultConfig["NODE_PASSWORD"]
+    if (Object.keys(creds).length) upsertSidecarValues(localFilePath, creds)
     const lines = String(fs.readFileSync(configFilePath, "utf8")).split(/\r?\n/)
     if (lines[lines.length - 1] === "") lines.pop()
-    const remaining = lines.flatMap((line) => {
+    const remaining = lines.flatMap((rawLine) => {
+        const line = stripBom(rawLine)
         const eqIndex = line.indexOf("=")
-        if (eqIndex <= 0) return [line]
+        if (eqIndex <= 0 || isCommentLine(line)) return [line]
         const key = line.substring(0, eqIndex)
         if (["NODE_USER", "NODE_PASSWORD", "NODE_SECRET"].includes(key)) return []
         const peeled = peelGluedCredentials(line.substring(eqIndex + 1))
-        return [`${key}=${peeled.cleanValue}`]
+        return peeled.cleanValue === line.substring(eqIndex + 1) ? [line] : [`${key}=${peeled.cleanValue}`]
     })
     // Keep the main config's own permissions across the replace (it is not a 0600 file).
     let mode = 0o644
@@ -292,12 +360,26 @@ function migrateMainCredentials(defaultConfig, configFilePath, localFilePath) {
     writeFileAtomic(configFilePath, remaining.length ? remaining.join("\n") + "\n" : "", mode)
 }
 
+// Mint under the sidecar lock after re-reading it: another loader may have minted and
+// persisted since this one read the file, and its value is the one every later load
+// will see, so adopt it instead of keeping a private credential that never lands.
 function generateRpcCredentials(defaultConfig, localFilePath) {
+    if (defaultConfig["NODE_USER"] && defaultConfig["NODE_PASSWORD"]) return
+    withSidecarLock(localFilePath, () => mintRpcCredentialsUnlocked(defaultConfig, localFilePath))
+}
+
+function mintRpcCredentialsUnlocked(defaultConfig, localFilePath) {
+    const onDisk = readSidecarEntriesSync(localFilePath)
+    for (const key of ["NODE_USER", "NODE_PASSWORD"]) {
+        const persisted = resolvedSidecarValue(onDisk, key)
+        if (!defaultConfig[key] && persisted) defaultConfig[key] = persisted
+    }
     const generated = {}
-    if (!("NODE_USER" in defaultConfig)) {
+    // Blank counts as missing (same rule as the alias fold), so a blank credential is never used.
+    if (!defaultConfig["NODE_USER"]) {
         generated["NODE_USER"] = defaultConfig["NODE_USER"] = crypto.randomBytes(12).toString('hex')
     }
-    if (!("NODE_PASSWORD" in defaultConfig)) {
+    if (!defaultConfig["NODE_PASSWORD"]) {
         // Absent under NODE_PASSWORD means absent under NODE_SECRET too, since the
         // fold above already collapsed either spelling onto this key. Nothing on
         // disk to preserve, so the new credential goes straight to its
@@ -306,11 +388,12 @@ function generateRpcCredentials(defaultConfig, localFilePath) {
         defaultConfig["NODE_PASSWORD"] = value
         generated[preferredSecretEnvName("NODE_PASSWORD")] = value
     }
-    if (Object.keys(generated).length) persistSidecarCreds(localFilePath, generated)
+    // Upsert, not append: a blank NODE_SECRET/NODE_USER line already on disk is replaced in place.
+    if (Object.keys(generated).length) upsertSidecarUnlocked(localFilePath, generated)
 }
 
 module.exports = {
-    configure, persistSidecarCreds, upsertSidecarValues, readSidecarValue,
+    configure, persistSidecarCreds, upsertSidecarValues, adoptOrMintSidecarValues, readSidecarValue,
     warnDeprecatedSecretNames, hubSidecarPath, ensureHubApiKey, readHubApiKey,
     applyHubApiKeyFromSidecar, coinConfigPaths, readMainConfigLine, normalizeMainConfig,
     readSidecarConfigLine, mergeSidecarConfig, migrateMainCredentials, generateRpcCredentials

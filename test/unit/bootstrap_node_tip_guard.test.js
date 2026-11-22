@@ -98,10 +98,18 @@ describe('BootstrapNodeTipGuard', function () {
         it('falls back to the version when the payload is unreadable: 0.16.0 is the first that waits', function () {
             expect(guard.serviceWaitsOutCatchUp(DECODER, { statusPayload: null, version: '0.16.0' })).to.equal(true)
             expect(guard.serviceWaitsOutCatchUp(DECODER, { statusPayload: null, version: 'v0.17.2' })).to.equal(true)
-            expect(guard.serviceWaitsOutCatchUp(DECODER, { statusPayload: null, version: '1.0.0' })).to.equal(true)
+            expect(guard.serviceWaitsOutCatchUp(DECODER, { statusPayload: null, version: '1.0.0' })).to.equal(false)
             expect(guard.serviceWaitsOutCatchUp(TRACKER, { statusPayload: null, version: '0.15.5' })).to.equal(false)
             expect(guard.serviceWaitsOutCatchUp(TRACKER, { statusPayload: null, version: 'garbage' })).to.equal(false)
             expect(guard.serviceWaitsOutCatchUp(TRACKER, { statusPayload: null, version: null })).to.equal(false)
+        })
+
+        it('does not treat legacy major-one module releases as carrying the wait', function () {
+            for (const version of ['1.0.0', '1.0.5', '1.0.12', '1.11.17', 'v1.2.3']) {
+                expect(guard.serviceWaitsOutCatchUp(DECODER, { version }), version).to.equal(false)
+            }
+            expect(guard.serviceWaitsOutCatchUp(DECODER, { version: '0.27.2' })).to.equal(true)
+            expect(guard.serviceWaitsOutCatchUp(TRACKER, { version: '0.99.0' })).to.equal(true)
         })
     })
 })
@@ -186,6 +194,11 @@ describe('BootstrapNodeTipGuard', function () {
                 probeServiceCapability: async () => null, getLocalModuleVersion: async () => '0.16.0'
             })
             expect(fixed.verdict).to.equal('behind-wait')
+            const legacy = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: TRACKER, archivePath: '/x' }, {
+                readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
+                probeServiceCapability: async () => null, getLocalModuleVersion: async () => '1.0.12'
+            })
+            expect(legacy.verdict).to.equal('behind-refuse')
             const unknownVersion = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: DECODER, archivePath: '/x' }, {
                 readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
                 probeServiceCapability: async () => null, getLocalModuleVersion: async () => { throw new Error('no package.json') }

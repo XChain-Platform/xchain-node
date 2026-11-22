@@ -13,40 +13,14 @@
  **********************************************************************
  * XChain Node - Hub Consensus Env Guard
  *
- * ConfigService's hubPassthroughVars only inject a value when the INVOKING
- * SHELL happens to export it; a var it does not export is simply left out of
- * the container env, and the hub falls back to its own built-in default with
- * no message anywhere. For most of the ~30 hub passthrough vars that is fine
- * (they are genuinely optional). A handful are not: HUB_NETWORK,
- * ORACLE_MIN_SUBMISSIONS, ORACLE_ROUND_INTERVAL, ORACLE_SUBMISSION_WINDOW,
- * XCHAIN_PRICE_INDEXER_DB_* and (on regtest, see below) the four XCHAIN/BTC
- * derivation overrides are CONSENSUS-SHAPED (they change what the hub's
- * oracle finalizes, or whether it finalizes at all), so a `recreate` run from
- * a shell that lacks one of them silently deploys a hub with different
- * consensus behavior than the one that was just torn down. That is the same
- * silent-drop class this row's predecessor closed for docker cp and the
- * install/update/recreate exit codes: an absence that produces no output.
+ * Protects consensus-shaped hub settings from silent changes. Install and
+ * update write the composed host config, so the guard refuses when that env
+ * changes or drops a value the running container carries. Recreate carries
+ * old values by default; XCHAIN_NODE_RECREATE_DROP_ENV can omit named carried
+ * values, and this guard then requires the normal drift override for a
+ * consensus-shaped removal.
  *
- * The fix does not gate on "is this var unset" alone: unset is the CORRECT,
- * documented state for a first install on a real network (see the comments
- * in ConfigService), so refusing on bare absence would break every normal
- * mainnet onboarding. What must never happen silently is a RUNNING hub
- * losing a value it already had. So the guard compares the env this deploy
- * is about to write against the env the CURRENTLY RUNNING container already
- * carries (the same "read the live container, not the config file" pattern
- * DbCredentialDrift.js uses for HUB_DB_PASS/DECODER_DB_PASS/INDEXER_DB_PASS):
- *
- *   - no running container (fresh install): nothing to protect. WARN so the
- *     operator can catch a first-time mistake, but proceed - taking the
- *     hub's own default is a legitimate choice here.
- *   - running container agrees, or never carried the var: proceed silently.
- *   - running container carries a value this deploy would change or drop:
- *     REFUSE. A value already trusted by a live hub (or by its DB/oracle
- *     federation peers, for the round-cadence and network vars) must not
- *     change because of which shell happened to invoke `recreate`.
- *
- * Values are never logged, only compared, for the same reason as
- * DbCredentialDrift: XCHAIN_PRICE_INDEXER_DB_PASS is a credential.
+ * Values are never logged, only compared: XCHAIN_PRICE_INDEXER_DB_PASS is a credential.
  *
  * NETWORK-GATED KEYS
  * ------------------
@@ -56,37 +30,47 @@
  * _MIN_BTC_VOLUME) are the case that forced this: XchainPriceSource's
  * pinOffRegtest honors them ONLY when HUB_NETWORK is regtest, and pins them to
  * the constants.js values (with a "set but IGNORED" warning) on mainnet,
- * testnet and standalone alike.
+ * testnet and standalone alike. The round-cadence pair (ORACLE_ROUND_INTERVAL,
+ * ORACLE_SUBMISSION_WINDOW), checkpoint controls (CHECKPOINT_INTERVAL_BLOCKS,
+ * ANCHOR_CHECKPOINT_EVERY_N, ANCHOR_ELECTION_TOLERANCE_BLOCKS), the attestation timing seams
+ * (ATTEST_RESPONSE_FORWARD_S_OVERRIDE, ATTEST_BATCH_WINDOW_S_OVERRIDE), the
+ * unverified-pair co-sign hatch (ORACLE_ALLOW_UNVERIFIED_PAIRS), the
+ * snapshot seams (XDEX_SEED_LOCAL_VALIDATOR, XDEX_SNAPSHOT_BLOCK) and the
+ * XC_*_ACTIVATION and XC_*_TIME gate arms follow the same rule: the hub reads
+ * them from the environment on regtest only.
  *
- * Adding them to the flat key list unconditionally would have been the wrong
- * fix, and worse than leaving them out. This guard counts a DROP as drift, so
- * a mainnet hub whose container still carries a stale, already-ignored
- * XCHAIN_PRICE_BOOTSTRAP_SATS would have had every future recreate REFUSED
- * until the operator either re-exported a variable the hub throws away or set
- * the override - a refusal protecting a value that cannot change anything.
+ * XCHAIN_CONFIRMATIONS_* is deliberately not guarded: a per-hub wait depth the
+ * hub clamps up to the per-coin floor off regtest, so a drop can only return a
+ * raised depth to that floor.
  *
- * So the honored set is DERIVED from the network rather than fixed: a group
- * may carry `honoredOn`, and its keys enter the comparison only when the
- * deploy's effective network is in that list. The effective network is read
- * from HUB_NETWORK alone (this deploy's, else the running container's), never
- * from the coin/network the node command is operating on, because HUB_NETWORK
- * is exactly what the hub's own gate reads: falling back to the node's network
- * would make the guard protect keys a standalone hub (HUB_NETWORK unset) is
- * already ignoring, which is the same wrong refusal in a different disguise.
+ * Listing them unconditionally would be worse than leaving them out: this guard
+ * counts a DROP as drift, so a mainnet hub whose container still carries a
+ * stale, already-ignored XCHAIN_PRICE_BOOTSTRAP_SATS would have every future
+ * recreate REFUSED over a value that cannot change anything.
+ *
+ * So the honored set is DERIVED from the network: a group may carry
+ * `honoredOn`, and its keys enter the comparison only when the deploy's
+ * effective network is in that list. The effective network is read from
+ * HUB_NETWORK alone (this deploy's, else the running container's), never from
+ * the coin/network the node command operates on, because HUB_NETWORK is what
+ * the hub's own gate reads; the node's network would make the guard protect
+ * keys a standalone hub (HUB_NETWORK unset) already ignores.
  ********************************************************************/
 
 const { HUB_MODULE_NAME, HUB_CONSENSUS_DRIFT_ENV } = require('../config')
+const {
+    SHARED_REGTEST_GATE_ARMS, HUB_ONLY_REGTEST_GATE_ARMS
+} = require('../config/regtest_gate_arms')
 const { getDockerContainerImageName } = require('./config_service')
 const { readContainerEnv } = require('./db_credential_drift')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
-// Escape hatch, named and shaped like DbCredentialDrift's, for an operator who
-// is deliberately changing one of these values on a live hub (a real,
-// intentional oracle re-tune) rather than losing it by accident.
+// Escape hatch, shaped like DbCredentialDrift's, for an operator deliberately
+// changing one of these values on a live hub rather than losing it by accident.
 const DRIFT_OVERRIDE_ENV = 'XCHAIN_NODE_ALLOW_HUB_CONSENSUS_ENV_DRIFT'
 
-// Tags the refusal so callers can distinguish it from an unrelated docker failure.
+// Tags the refusal, distinguishing it from an unrelated docker failure.
 const DRIFT_ERROR_CODE = 'HUB_CONSENSUS_ENV_DRIFT'
 
 // Grouped for the warning/error text; CONSENSUS_ENV_KEYS (below) is the flat
@@ -104,8 +88,53 @@ const CONSENSUS_ENV_GROUPS = [
     },
     {
         keys: ['ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW'],
-        why: 'oracle round cadence, CONSENSUS-UNIFORM across a federation; a hub that loses its override ' +
-            'reverts to the mainnet-length default while its federation peers may still run the shorter one'
+        // Honored only on regtest (oracle/round_cadence.js warns and ignores the
+        // env value everywhere else), so guarded only on regtest.
+        honoredOn: ['regtest'],
+        why: 'oracle round cadence, CONSENSUS-UNIFORM across a federation and honored on regtest only; a ' +
+            'regtest hub that loses its override reverts to the mainnet-length default while its venue ' +
+            'peers may still run the shorter one'
+    },
+    {
+        keys: ['ORACLE_ALLOW_UNVERIFIED_PAIRS'],
+        // The hub reads this escape hatch on regtest only and fails closed elsewhere.
+        honoredOn: ['regtest'],
+        why: 'regtest single-fetcher co-sign escape hatch; a hub that loses it resumes withholding co-sign ' +
+            'on pairs it cannot verify, so rounds containing a brand-new pair stop finalizing'
+    },
+    {
+        keys: ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N', 'ANCHOR_ELECTION_TOLERANCE_BLOCKS'],
+        honoredOn: ['regtest'],
+        why: 'state-checkpoint cadence and election tolerance, fleet-uniform and honored on regtest only; ' +
+            'losing an override makes the hub decline venue peers as off-cadence or not elected/unlocked'
+    },
+    {
+        keys: [...SHARED_REGTEST_GATE_ARMS, ...HUB_ONLY_REGTEST_GATE_ARMS],
+        // The hub reads each arm from the environment on regtest only; every
+        // other network takes the literal activation height.
+        honoredOn: ['regtest'],
+        why: 'regtest consensus activation and time gate arms, honored on regtest only; a regtest hub that loses one is ' +
+            'silently de-armed and applies different consensus rules than the hub it replaced, which an ' +
+            'armed indexer on the same venue reports as a rules MISMATCH'
+    },
+    {
+        keys: ['ATTEST_RESPONSE_FORWARD_S_OVERRIDE', 'ATTEST_BATCH_WINDOW_S_OVERRIDE'],
+        // The hub reads both from the environment on regtest only and pins the
+        // frozen 120s margin and 3600s window everywhere else.
+        honoredOn: ['regtest'],
+        why: 'attestation response forward margin and batch window, frozen protocol constants every ' +
+            'follower recomputes to bound a leader proposal, honored on regtest only; a regtest hub that ' +
+            'loses its override reverts to the protocol value and its peers refuse its attestation rounds ' +
+            'and batches, so the venue stops finalizing attestations'
+    },
+    {
+        keys: ['XDEX_SEED_LOCAL_VALIDATOR', 'XDEX_SNAPSHOT_BLOCK'],
+        // The hub gates both on a strict regtest network and fails closed elsewhere.
+        honoredOn: ['regtest'],
+        why: 'the regtest snapshot seams, honored on regtest only: XDEX_SNAPSHOT_BLOCK fixes the snapshot-block ' +
+            'anchor that feeds the signed checkpoint and XDEX_SEED_LOCAL_VALIDATOR seeds this hub\'s own ' +
+            'validator so a venue with no BTC can finalize at all; a regtest hub that loses either stops ' +
+            'matching the venue it was deployed into and may never finalize again'
     },
     {
         keys: [
@@ -200,19 +229,23 @@ function consensusEnvKeysForNetwork(network) {
  *
  * @param {Object<string,string>} intended The env this deploy is about to write.
  * @param {string} [network] Effective network; defaults to this deploy's own HUB_NETWORK.
- * @returns {{supplied: string[], defaulted: string[]}}
+ * @param {string[]} [carriedKeys] Names copied from the running container.
+ * @returns {{supplied: string[], carried: string[], defaulted: string[]}}
  */
-function describeConsensusEnvSupply(intended, network) {
+function describeConsensusEnvSupply(intended, network, carriedKeys = []) {
     const src = intended || {}
     const scope = consensusEnvKeysForNetwork(network === undefined ? resolveHubNetwork(src, null) : network)
     const supplied = []
+    const carried = []
     const defaulted = []
+    const carriedSet = new Set(carriedKeys)
     for (const key of scope) {
         const v = src[key]
         if (v === undefined || v === null || v === '') defaulted.push(key)
+        else if (carriedSet.has(key)) carried.push(key)
         else supplied.push(key)
     }
-    return { supplied, defaulted }
+    return { supplied, carried, defaulted }
 }
 
 /**
@@ -276,19 +309,25 @@ function formatHubConsensusEnvDriftError(drift) {
  * @param {Object<string,string>} intended The env this deploy is about to write.
  * @param {string} [network] Effective network; defaults to this deploy's own HUB_NETWORK.
  */
-function logConsensusEnvSupplyState(intended, network) {
-    const { supplied, defaulted } = describeConsensusEnvSupply(intended, network)
+function logConsensusEnvSupplyState(intended, network, carriedKeys = []) {
+    const { supplied, carried, defaulted } = describeConsensusEnvSupply(intended, network, carriedKeys)
     if (defaulted.length > 0) {
         logger.warn(
             'WARNING: hub consensus-shaped settings NOT supplied by the invoking shell (the hub will use ' +
             `its own built-in default for each): ${defaulted.join(', ')}. If this hub previously ran with ` +
             'different values (a single-source regtest ORACLE_MIN_SUBMISSIONS=1, a shortened ' +
-            'ORACLE_ROUND_INTERVAL/ORACLE_SUBMISSION_WINDOW, an explicit HUB_NETWORK, or a configured ' +
+            'ORACLE_ROUND_INTERVAL/ORACLE_SUBMISSION_WINDOW or ANCHOR_ELECTION_TOLERANCE_BLOCKS, a shortened ATTEST_RESPONSE_FORWARD_S_OVERRIDE/' +
+            'ATTEST_BATCH_WINDOW_S_OVERRIDE, XDEX_SEED_LOCAL_VALIDATOR, an explicit HUB_NETWORK, or a configured ' +
             'XCHAIN_PRICE_INDEXER_DB_* source), export them in THIS shell before deploying.'
         )
     }
     if (supplied.length > 0) {
         logger.info(`hub consensus-shaped settings supplied from the host env: ${supplied.join(', ')}`)
+    }
+    if (carried.length > 0) {
+        logger.warn('WARNING: hub consensus-shaped settings carried from the running container and NOT supplied ' +
+            `by the invoking shell: ${carried.join(', ')}. To remove one during recreate, name it in ` +
+            'XCHAIN_NODE_RECREATE_DROP_ENV and set XCHAIN_NODE_ALLOW_HUB_CONSENSUS_ENV_DRIFT=1.')
     }
 }
 
@@ -312,7 +351,7 @@ async function assertNoHubConsensusEnvDrift(environmentVariables, deps = {}) {
     // HUB_NETWORK still resolves regtest from the running container, and its
     // regtest-only derivation overrides belong in the report. readContainerEnv
     // returns null rather than throwing, so this still logs on a fresh install.
-    logConsensusEnvSupplyState(environmentVariables, resolveHubNetwork(environmentVariables, liveEnv))
+    logConsensusEnvSupplyState(environmentVariables, resolveHubNetwork(environmentVariables, liveEnv), deps.carriedKeys)
 
     if (!liveEnv) return [] // no running hub container: fresh install, nothing to drift against
 

@@ -4,8 +4,8 @@
 # XChain Platform Node
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.27.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-4%2C638%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.28.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-5%2C083%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -124,7 +124,7 @@ Six env vars override where xchain-node stores its filesystem state. Set them in
 | `XCHAIN_NODE_MODULES_DIR` | Git clones of sibling xchain-* repos |
 | `XCHAIN_NODE_CRYPTO_NODES_DIR` | Downloaded coin-node binaries |
 | `XCHAIN_NODE_CONFIG_DIR` | Generated per-service `.env` files |
-| `XCHAIN_NODE_LOCK_DIR` | Directory for the cross-process command lock (`command.lock` and its reclaim marker) |
+| `XCHAIN_NODE_LOCK_DIR` | Directory for the cross-process command lock (`command.lock` and its reclaim marker); its filesystem must support hard links |
 
 On boxes with a small `/` partition and a large data volume (e.g., OVH RISE-3 with `/misc`), point `DATA_DIR` and `TMP_DIR` at the large volume before installing. Full docs in [CONFIGURATION.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/node/configuration.md).
 
@@ -154,7 +154,7 @@ When xchain-node manages its own MariaDB container, these optional env vars over
 
 Every persistent service container carries a Docker healthcheck, but Docker itself takes no action on the `unhealthy` state (`--restart unless-stopped` only fires when the process exits). An alive-but-stalled service would otherwise stay wedged until an operator notices it in `docker ps`. `xchain-node autoheal` closes that loop: it restarts containers that have been continuously unhealthy past a grace window, for services opted in via `autoheal: true` in the healthcheck table (currently the decoder and indexer; the utxo-tracker is deliberately excluded because it halts on purpose rather than exiting, and a restart would just re-halt it; the encoder is deliberately excluded because its health probe reports utxo-tracker readiness (unreachable, halted, lagging or mempool not ready), which restarting the encoder cannot clear).
 
-The command is one-shot and never prompts or daemonizes. Unattended remediation requires wiring it to a cron entry or systemd timer, e.g. `*/5 * * * * xchain_node autoheal`. Detection-to-restart latency is the timer interval plus the health retry budget plus the grace window. Use `--dry-run` to see restart candidates without acting. Exit codes: `1` when a restart was attempted and failed, `2` when a container has been restarted twice this episode without recovering (a wedge restarts are not clearing; investigate), and `0` otherwise. The escalation also logs a warning on stderr, so a systemd `OnFailure=` hook trips on it and cron mails it even when stdout is discarded. It repeats on every pass until the container recovers.
+The command is one-shot and never prompts or daemonizes. Unattended remediation requires wiring it to a cron entry or systemd timer, e.g. `*/5 * * * * xchain_node autoheal`. Detection-to-restart latency is the timer interval plus the health retry budget plus the grace window. Use `--dry-run` to see restart candidates without acting. Exit codes: `1` when a restart was attempted and failed, `2` when a container has survived two generic restarts without recovering, or when an indexer passes its healthcheck after one restart but reports neither a post-restart commit nor readiness, `3` when an opted-in container could not be inspected for a reason other than being gone (Docker daemon down, socket permission, timeout), and `0` otherwise. The indexer progress case escalates without another restart. Escalation also logs a warning on stderr, so a systemd failure hook or cron mail can act even when stdout is discarded. It repeats on every pass until the container recovers.
 
 | Variable | Default | What it controls |
 |---|---|---|
@@ -174,11 +174,11 @@ Turn it off with any of: `--no-telemetry` on any command (sticks for future runs
 
 | Command | Description |
 |---|---|
-| `npm test` | Unit tests (3,562 tests) |
-| `npm run test:integration` | Integration tests (152 tests) |
+| `npm test` | Unit tests (3,993 tests) |
+| `npm run test:integration` | Integration tests (154 tests) |
 | `npm run test:smoke` | Smoke tests (159 tests) |
 | `npm run test:boundary` | Boundary condition tests (61 tests) |
-| `npm run test:security` | Security tests (202 tests) |
+| `npm run test:security` | Security tests (214 tests) |
 | `npm run test:e2e` | End-to-end tests (58 tests) |
 | `npm run test:fuzz` | Fuzz tests (264 tests) |
 | `npm run test:chaos` | Chaos engineering tests (121 tests) |
@@ -186,7 +186,7 @@ Turn it off with any of: `--no-telemetry` on any command (sticks for future runs
 | `npm run test:regression:p0` | Regression P0: critical gate (33 tests) |
 | `npm run test:regression:p0p1` | Regression P0+P1: standard gate (52 tests) |
 | `npm run test:mutation` | Mutation testing (Stryker Mutator) |
-| `npm run test:all` | All tests (~4,375 tests; excludes security/boundary) |
+| `npm run test:all` | All tests (~4,808 tests; excludes security/boundary) |
 | `npm run benchmark` | Performance benchmarks (5 scenarios) |
 | `npm run benchmark:quick` | Quick benchmarks |
 

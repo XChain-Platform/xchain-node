@@ -46,6 +46,13 @@ function publishedClasses({ stallClassOf, publishedStallClass }) {
 
 describe('BootstrapHealthGate: the published stall class set', function () {
 
+    it('names operator_action_hold among the classes that refuse by themselves', function () {
+        const source = fs.readFileSync(GATE_SOURCE, 'utf8')
+        const refusalSentence = source.match(/publishedStallClass\)\.[\s\S]*?refusals by themselves;/)
+        expect(refusalSentence, 'the refusal summary sentence was not found').to.not.equal(null)
+        expect(refusalSentence[0]).to.include("'operator_action_hold'")
+    })
+
     it('lists every class the indexer can publish in the stallReasons comment', function () {
         if (!fs.existsSync(INDEXER_DIR)) {
             if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer is not checked out at ' + INDEXER_DIR)

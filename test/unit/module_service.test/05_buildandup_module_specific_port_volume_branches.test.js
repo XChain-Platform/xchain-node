@@ -96,7 +96,7 @@ moduleSuite('buildAndUp(): module-specific port/volume branches', function () {i
                 './docker_service': {
                     killContainer: stubs.killContainer, stopContainerByName: stubs.stopContainerByName,
                     removeContainer: stubs.removeContainer, forceRemoveContainerByName: stubs.forceRemoveContainerByName,
-                    getStatusFromContainer: stubs.getStatusFromContainer, getPublishedHostPorts: stubs.getPublishedHostPorts
+                    getStatusFromContainer: stubs.getStatusFromContainer, getPublishedHostPorts: stubs.getPublishedHostPorts, probeContainerPresenceByName: stubs.probeContainerPresenceByName
                 },
                 './database_service': { setDatabaseParameters: sinon.stub().resolves(), setHubDatabaseParameters: sinon.stub().resolves() },
                 './validator_service': {

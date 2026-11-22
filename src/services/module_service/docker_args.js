@@ -19,11 +19,14 @@ let fs = require('fs')
 let path = require('path')
 let { XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD } = require('../../config')
 let { getUtxoTrackerVolumeName } = require('../config_service')
-let { getPublishedHostPorts } = require('../docker_service')
+let { getPublishedHostPorts, getAllBoundHostPorts } = require('../docker_service')
 const { healthcheckCommand } = require('./healthcheck_command')
-const { claimFreeHostPorts } = require('./host_port_claim')
+const {
+    claimFreeHostPorts, parsePortSpec, requestedHostPorts, reservedHostPorts
+} = require('./host_port_claim')
 const requiredGetUtxoTrackerVolumeName = getUtxoTrackerVolumeName
 const requiredGetPublishedHostPorts = getPublishedHostPorts
+const requiredGetAllBoundHostPorts = getAllBoundHostPorts
 let config = require('../../config');
 let validatorService = require('../validator_service')
 const { getLogger } = require('../../observability/logger');
@@ -34,44 +37,26 @@ function configureDependencies(dependencies) {
         fs, path, XChainService, SERVICE_REGISTRY, HUB_MODULE_NAME,
         EXPLORER_MODULE_NAME, SYNC_MODULE_NAME, DEPENDENCY_HEALTH_START_PERIOD,
         getUtxoTrackerVolumeName = requiredGetUtxoTrackerVolumeName,
-        getPublishedHostPorts = requiredGetPublishedHostPorts, config, validatorService,
+        getPublishedHostPorts = requiredGetPublishedHostPorts,
+        getAllBoundHostPorts = requiredGetAllBoundHostPorts, config, validatorService,
         logger
     } = dependencies)
 }
 
-// Split a `-p` value on its last colon into [IP:]HOST:CONTAINER fields (ip is
-// '' when absent); null for a non-string or colon-less value.
-function parsePortSpec(pair) {
-    if (typeof pair !== 'string') return null
-    const colonIdx = pair.lastIndexOf(':')
-    if (colonIdx === -1) return null
-    const beforeContainer = pair.substring(0, colonIdx)
-    const hostIdx = beforeContainer.lastIndexOf(':')
-    return {
-        ip: hostIdx === -1 ? '' : beforeContainer.substring(0, hostIdx),
-        hostPort: beforeContainer.substring(hostIdx + 1),
-        containerPort: pair.substring(colonIdx + 1)
-    }
-}
-
-// Fail fast on host-port collisions before `docker run`. On a single-stack
-// host this is a no-op; on a multi-stack host (two NODE_PREFIX stacks, or a
+// Fail fast on host-port collisions before `docker run`, including duplicate
+// bindings in one request. On a single-stack host this is otherwise a no-op; on
+// a multi-stack host (two NODE_PREFIX stacks, or a
 // service container hand-created outside xchain-node) two containers can request
 // the same host port, which `docker run` only surfaces as a cryptic "port is
 // already allocated" AFTER the image build wastes minutes. `selfName` is the
 // container we're (re)creating (excluded so re-installs/updates of the same
-// service don't flag themselves; the old container is already killed+removed
-// before this runs, but the name-exclusion is belt-and-suspenders). `claim` lets buildAndUp move a busy on-request port (host_port_claim.js).
+// service don't flag themselves; the old container is still running when this
+// check runs and is removed by name right before `docker run`, so its ports are
+// also free for a replacement claim). `claim` lets buildAndUp move a busy
+// on-request port (host_port_claim.js).
 async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
-    const requested = []
-    for (let i = 0; i < portArgs.length; i++) {
-        if (portArgs[i] === '-p') {
-            const spec = parsePortSpec(portArgs[i + 1])
-            if (spec && /^\d+$/.test(spec.hostPort)) requested.push(spec.hostPort)
-        }
-    }
+    const requested = requestedHostPorts(portArgs)
     if (requested.length === 0) return
-
     const published = await getPublishedHostPorts()
     const conflicts = []
     for (const hostPort of requested) {
@@ -80,13 +65,17 @@ async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
         const others = [...holders].filter(n => n !== selfName)
         if (others.length > 0) conflicts.push({ hostPort, holders: others })
     }
-    if (claimFreeHostPorts(conflicts, portArgs, requested, published, claim && { ...claim, registry: SERVICE_REGISTRY, logger }).length > 0) {
+    const claimContext = claim && {
+        ...claim, selfName, registry: SERVICE_REGISTRY, logger,
+        reserved: conflicts.length > 0 ? reservedHostPorts(await getAllBoundHostPorts(), selfName) : new Set()
+    }
+    if (claimFreeHostPorts(conflicts, portArgs, requested, published, claimContext).length > 0) {
         const lines = conflicts.map(c => `  host port ${c.hostPort} is already published by: ${c.holders.join(', ')}`)
         throw new Error(
             'Host port conflict: cannot publish the following port(s):\n' +
             lines.join('\n') + '\n' +
             'Another stack or container already binds them on this host. Override the colliding ' +
-            'port(s) in config/<coin>-<network> (e.g. EXPLORER_PORT_HTTP/HTTPS, INDEXER_PORT, HUB_PORT, ' +
+            'port(s) in config/<coin>-<network> (e.g. EXPLORER_PORT_HTTP/HTTPS, INDEXER_PORT, HUB_PORT, P2P_PORT, ' +
             'DECODER_PORT, ENCODER_PORT, UTXO_TRACKER_PORT, SYNC_PORT) and re-run, or stop the conflicting container first.'
         )
     }
@@ -98,6 +87,7 @@ async function assertNoHostPortConflicts(portArgs, selfName, claim = null) {
 //   probe     - 'http_get' uses wget GET on `path` (default /status); 'jsonrpc_ping'
 //               uses wget POST with a JSON-RPC ping payload; absent means no
 //               healthcheck added
+//   authEnv   - name of a container env var the probe sends as x-api-key when it is set
 //   path      - http_get only: route to probe. Defaults to /status. Set it for
 //               services whose /status is expensive: sync's /status runs a
 //               SELECT COUNT(*) census over every replicated table, which on a
@@ -152,7 +142,9 @@ const SERVICE_HEALTHCHECK = {
     // tracker was still inside the 60s window it declares one line below.
     // Deliberately no autoheal: that same probe 503s on tracker state, a
     // deliberate tracker halt included, which restarting the encoder cannot clear.
-    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
+    // /status sits behind the encoder's API-key gate whenever API_KEY is set in the
+    // container, so the probe sends that key (authEnv) or a keyed encoder reads unhealthy.
+    [XChainService.XCHAIN_ENCODER]:       { portKey: 'ENCODER_API_PORT',       probe: 'http_get',     authEnv: 'API_KEY', interval: '15s', timeout: '5s', retries: 3, startPeriod: DEPENDENCY_HEALTH_START_PERIOD },
     [XChainService.XCHAIN_UTXO_TRACKER]:  { portKey: 'UTXO_TRACKER_API_PORT',  probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s' },
     [XChainService.XCHAIN_INDEXER]:       { portKey: 'INDEXER_API_PORT',        probe: 'http_get',     interval: '15s', timeout: '5s', retries: 3, startPeriod: '60s', autoheal: true },
     // The miner's API is JSON-RPC only (no GET /status route); an http_get probe 500s
@@ -220,7 +212,7 @@ function resolveStartPeriod(module, fallback) {
     if (/^\d+$/.test(value)) return value + 's'
     // Malformed override: say so rather than silently standing on the default,
     // mirroring the loud-drift guard in buildHealthcheckArgs below.
-    logger.info("WARNING: ignoring " + key + "=" + value
+    logger.warn("WARNING: ignoring " + key + "=" + value
         + ": expected bare seconds (900) or a duration with an ms/s/m/h unit (900s)")
     return fallback
 }
@@ -263,7 +255,7 @@ function buildHealthcheckArgs(module, environmentVariables) {
         // the key, the container would otherwise be created with NO healthcheck and no
         // trace of why: make that drift loud at install/update time. Empty-array return
         // is preserved so callers stay safe.
-        logger.info("WARNING: no healthcheck for " + module + ": env " + hc.portKey + " is unset")
+        logger.warn("WARNING: no healthcheck for " + module + ": env " + hc.portKey + " is unset")
         return []
     }
 
@@ -284,7 +276,7 @@ function buildHealthcheckArgs(module, environmentVariables) {
         url = `http://localhost:${port}${hc.path || '/status'}`
     }
     return [
-        '--health-cmd',      healthcheckCommand({ url, postData, timeoutSeconds: parseInt(hc.timeout, 10) }),
+        '--health-cmd',      healthcheckCommand({ url, postData, timeoutSeconds: parseInt(hc.timeout, 10), authEnv: hc.authEnv }),
         '--health-interval', hc.interval,
         '--health-timeout',  hc.timeout,
         '--health-retries',  String(hc.retries),

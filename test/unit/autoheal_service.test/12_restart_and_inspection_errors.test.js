@@ -57,7 +57,7 @@ function makeStubs() {
     }
 }
 
-function loadService(stubs) {
+function loadService(stubs, restartState = require('../../../src/services/autoheal_service/restart_state.js')) {
     return proxyquire('../../../src/services/autoheal_service', {
         '../state': { db: stubs.db },
         './docker_service': {
@@ -66,6 +66,7 @@ function loadService(stubs) {
             startContainer: stubs.startContainer,
             getContainerStopSettings: sinon.stub().resolves(null)
         },
+        './autoheal_service/restart_state.js': restartState,
         // Real descriptor table: asserts the actual opt-in flags too.
         './module_service': { SERVICE_HEALTHCHECK: require('../../../src/services/module_service').SERVICE_HEALTHCHECK }
     })
@@ -122,6 +123,44 @@ describe('AutohealService', () => {
 
         expect(result.skipped[0].reason).to.equal('inspect failed')
         expect(result.failed).to.have.length(0)
+    })
+})
+
+describe('AutohealService', () => {
+    const h = restartErrorHarness()
+
+    it('persists restart intent before stopping and clears it after a successful start', async () => {
+        h.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'intent')])
+        h.stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        let markerDuringStop = null
+        h.stubs.stopContainer.callsFake(async () => {
+            const state = JSON.parse(fs.readFileSync(path.join(h.stateDir, 'autoheal-state.json'), 'utf8'))
+            markerDuringStop = state.stoppedByAutoheal.intent
+            return { stopped: true, seconds: 1, killed: false, exitCode: 0 }
+        })
+
+        const result = await h.service.runAutoheal({ now: NOW })
+
+        expect(result.restarted).to.have.length(1)
+        expect(markerDuringStop).to.equal(true)
+        const finalState = JSON.parse(fs.readFileSync(path.join(h.stateDir, 'autoheal-state.json'), 'utf8'))
+        expect(finalState.stoppedByAutoheal).to.not.have.property('intent')
+    })
+
+    it('does not stop a container when restart intent cannot be persisted', async () => {
+        h.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'intent-fails')])
+        h.stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
+        const real = require('../../../src/services/autoheal_service/restart_state.js')
+        const writeState = sinon.stub()
+        writeState.onFirstCall().throws(new Error('ENOSPC'))
+        writeState.callsFake(real.writeState)
+        h.service = loadService(h.stubs, { ...real, writeState })
+
+        const result = await h.service.runAutoheal({ now: NOW })
+
+        expect(result.failed[0].reason).to.match(/could not record restart intent.*ENOSPC/)
+        expect(h.stubs.stopContainer.called).to.equal(false)
+        expect(h.stubs.startContainer.called).to.equal(false)
     })
 })
 

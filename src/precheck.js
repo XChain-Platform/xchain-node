@@ -124,6 +124,8 @@ async function installDatabaseContainer() {
     try {
         await buildDatabaseModule("", "")
     } catch (err) {
+        // The lost-mode refusal already says what to do; wrapping it would hide that.
+        if (err && err.code === 'EXTERNAL_DB_MODE_LOST') throw err
         console.log(redactSecrets(err))
         throw new Error("There was an error installing the mariadb container")
     }
@@ -205,17 +207,17 @@ async function fetchRemoteVersions(checkVersions) {
             // GitHub API 403 rate limits (or transient network failures) must
             // not abort the whole command: version info is advisory. Degrade
             // to a status listing without remote-version columns.
-            console.log("Warning: couldn't fetch remote versions (GitHub unreachable or rate-limited); continuing without version check: " + redactSecrets(err))
+            console.log("Warning: couldn't fetch remote versions (GitHub unreachable or rate-limited); continuing without version check: " + redactSecrets(err && err.message ? err.message : err))
             checkVersions = false
         }
     }
     return checkVersions
 }
 
-async function installHubAtRef(moduleRef) {
+async function installHubAtRef(moduleRef, installTarget = null) {
     try {
         if (isVerbose()) console.log("Checking/Installing hub module")
-        await installHubModule(moduleRef)
+        await installHubModule(moduleRef, installTarget)
     } catch (err) {
         // Preserve the cause. A bare `catch {}` here would discard the ONLY description
         // of what actually went wrong and replace it with a message that names no
@@ -226,7 +228,7 @@ async function installHubAtRef(moduleRef) {
     }
 }
 
-async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
+async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub, hubPushOptional = false) {
     // Only push local config to the hub/explorer for state-changing commands.
     // Read-only commands (ps, tail, logs, …) pass syncHubConfig=false to skip
     // this step. The updateconfig round-trip can be slow on multi-coin nodes and
@@ -238,8 +240,8 @@ async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
     // operator sees, and the command still fails.
     //
     // A hub that is crash-looping (a rebuild that left it holding the wrong
-    // database password is the usual way in) answers nothing, so the push spends
-    // ten attempts on connection refusals and then aborts the command. It aborted
+    // database password is the usual way in) answers nothing, so the push exhausts
+    // its retry budget on connection refusals and then aborts the command. It aborted
     // EVERY command, including the ones that rebuild the hub and end the crash
     // loop, which left deleting the container by hand as the only way out. So a
     // command that can repair the hub is let through on a warning while the hub
@@ -263,6 +265,16 @@ async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
             if (firstErr) console.log(redactSecrets(firstErr))
             return true
         }
+        if (firstErr && hubPushOptional) {
+            // A command whose action never talks to the hub (autoheal watches the decoder
+            // and indexer containers) must not be blocked by a hub that answers HTTP but
+            // cannot commit the push. That hub is usually unhealthy because of the very
+            // indexer fault such a command exists to heal.
+            console.log("Warning: the xchain-hub refused its config push, so it was skipped. " +
+                "This command does not need the hub config, so it continues.")
+            console.log(redactSecrets(firstErr))
+            return true
+        }
         if (firstErr) {
             console.log(redactSecrets(firstErr))
             throw new Error("There was an error trying to update the hub module" +
@@ -283,7 +295,8 @@ async function pushConfigToHubAndExplorer(syncHubConfig, repairsHub) {
 //
 // `localOnly` stops after the docker and directory checks, for a reset aimed at a stack this CLI did not install
 // (`reset --db-container`): no bundled DB provisioning, no module scan, no hub install, no hub or explorer push.
-async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false, { localOnly = false } = {}) {
+async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef = null, repairsHub = false,
+    { localOnly = false, hubPushOptional = false, installTarget = null } = {}) {
     await requireDocker()
     await warnIfContainerdStoreOnRoot()
     await warnIfMemoryLimitsUnsupported()
@@ -319,9 +332,9 @@ async function preCheck(checkVersions = false, syncHubConfig = true, moduleRef =
     // command (syncHubConfig=false: ps, tail, logs, monitor) must not change any
     // container's run state, or `ps` starts a hub the operator stopped and then
     // prints its stale 'exited' status. Mutating commands still install here.
-    if (syncHubConfig) await installHubAtRef(moduleRef)
+    if (syncHubConfig) await installHubAtRef(moduleRef, installTarget)
 
-    await pushConfigToHubAndExplorer(syncHubConfig, repairsHub)
+    await pushConfigToHubAndExplorer(syncHubConfig, repairsHub, hubPushOptional)
 
     return true
 }

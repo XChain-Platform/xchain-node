@@ -87,10 +87,7 @@ function makeSettings(pubkey = 'a'.repeat(64), opts = {}) {
     }
 }
 
-describe('ValidatorService', function () {
-
-    describe('capability-config layout migration', function () {
-
+function registerBasicLayoutMigrationTests() {
         it('moves a pre-hub-caps capabilities.json into its own directory', function () {
             const fs = makeFs({
                 existsSync: sinon.stub().callsFake(p =>
@@ -142,5 +139,47 @@ describe('ValidatorService', function () {
             expect(vs.ensureCapabilityConfigLayout()).to.be.false
             expect(fs.renameSync.called).to.be.false
         })
+}
+
+function registerLayoutMigrationErrorTests() {
+        it('accepts an ENOENT rename only when another process completed the migration', function () {
+            let migrated = false
+            const missing = p => { const err = new Error('ENOENT: ' + p); err.code = 'ENOENT'; throw err }
+            const fs = makeFs({
+                lstatSync: sinon.stub().callsFake(p => {
+                    if (p === FAKE_LEGACY_CAPS && !migrated) return { isFile: () => true }
+                    if (p === FAKE_CAPS_FILE && migrated) return { isFile: () => true }
+                    return missing(p)
+                }),
+                renameSync: sinon.stub().callsFake(() => {
+                    migrated = true
+                    const err = new Error('lost migration race')
+                    err.code = 'ENOENT'
+                    throw err
+                })
+            })
+            const vs = loadValidatorService(fs)
+            expect(vs.ensureCapabilityConfigLayout()).to.be.false
+        })
+
+        it('rethrows ENOENT when the destination is still absent', function () {
+            const err = Object.assign(new Error('legacy file disappeared'), { code: 'ENOENT' })
+            const fs = makeFs({ lstatSync: fileLstat([FAKE_LEGACY_CAPS]), renameSync: sinon.stub().throws(err) })
+            const vs = loadValidatorService(fs)
+            expect(() => vs.ensureCapabilityConfigLayout()).to.throw('legacy file disappeared')
+        })
+
+        it('rethrows migration errors other than ENOENT', function () {
+            const err = Object.assign(new Error('permission denied'), { code: 'EACCES' })
+            const fs = makeFs({ lstatSync: fileLstat([FAKE_LEGACY_CAPS]), renameSync: sinon.stub().throws(err) })
+            const vs = loadValidatorService(fs)
+            expect(() => vs.ensureCapabilityConfigLayout()).to.throw('permission denied')
+        })
+}
+
+describe('ValidatorService', function () {
+    describe('capability-config layout migration', function () {
+        registerBasicLayoutMigrationTests()
+        registerLayoutMigrationErrorTests()
     })
 })

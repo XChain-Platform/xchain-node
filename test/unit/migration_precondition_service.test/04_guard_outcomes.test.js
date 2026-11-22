@@ -90,8 +90,9 @@ function registerMissingMigrationOutcomes({ expect, XChainService, assertRequire
         expect(err, 'the deploy must be refused').to.not.equal(null)
         expect(err.message).to.not.contain('docker exec')
         expect(err.message).to.contain('DO NOT run')
-        // The whole blast radius is named, not just the file that is needed.
-        expect(err.message).to.contain('3 file(s)')
+        // The whole possible blast radius is named, not just the file that is needed.
+        expect(err.message).to.contain('can consider up to 3 pending manual migration file(s)')
+        expect(err.message).to.contain('may baseline a listed file without executing it')
         expect(err.message).to.contain('2026-08-10-action-data-utf8mb4.sql')
         expect(err.message).to.contain('2026-06-13-dispensers-expiration-bigint.sql')
         expect(err.message).to.contain('(the one you need)')

@@ -28,7 +28,10 @@ function loadDockerService(execFile) {
 }
 
 function answering(error, stdout) {
-    return sinon.stub().callsFake((cmd, args, cb) => cb(error, stdout))
+    return sinon.stub().callsFake((cmd, args, ...rest) => {
+        const cb = typeof rest[0] === 'function' ? rest[0] : rest[1]
+        cb(error, stdout)
+    })
 }
 
 describe('DockerService', function () {
@@ -38,6 +41,7 @@ describe('DockerService', function () {
             const execFile = answering(null, JSON.stringify(config) + '\n')
             const settings = await loadDockerService(execFile).getContainerStopSettings('abc123')
             expect(execFile.firstCall.args[1]).to.deep.equal(['inspect', '--format', '{{json .Config}}', 'abc123'])
+            expect(execFile.firstCall.args[2]).to.deep.equal({ timeout: 30000 })
             expect(settings).to.deep.equal({ stopTimeout: 300, shutdownTimeoutMs: '280000' })
         })
 

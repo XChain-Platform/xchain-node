@@ -137,7 +137,7 @@ async function gatherPayload(event, installId) {
 // Map a CLI command name to a telemetry event class.
 function eventForCommand(commandName) {
     if (commandName === 'install') return 'install'
-    if (commandName === 'update' || commandName === 'reinstall') return 'update'
+    if (commandName === 'update') return 'update'
     if (commandName === 'start') return 'start'
     return 'heartbeat'
 }

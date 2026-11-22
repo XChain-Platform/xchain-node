@@ -39,7 +39,7 @@ describe('moduleOperations', function () {
             const args = stubs.buildAndUp.firstCall.args
             expect(args.slice(0, 3)).to.deep.equal(['xchain-indexer', 'dogecoin', 'regtest'])
             expect(args[3]).to.equal('container-id-123')  // overwriteContainerId
-            expect(args[6]).to.deep.equal({ reuseImage: true })
+            expect(args[6]).to.deep.equal({ reuseImage: true, deferStatusPush: true })
         })
 
         it('never re-clones or rebuilds through installModule', async function () {

@@ -149,6 +149,19 @@ serviceSuite('the provenance gate', () => {
         expect(stubs.axiosGet.callCount).to.equal(2)
     })
 
+    it('fetchReleaseAsset reports a 429 on the asset hop with the token advice', async () => {
+        assetHopRejects({ status: 429, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1783529945' } })
+        await svc.fetchReleaseAsset('v0.9.0', 'SHA256SUMS').then(
+            () => { throw new Error('should have rejected') },
+            e => expect(e.message).to.match(/rate limit exhausted.*GITHUB_TOKEN/))
+    })
+
+    it('fetchReleaseAsset escapes the tag in the release lookup URL', async () => {
+        stubs.axiosGet.resolves({ data: { assets: [] } })
+        await svc.fetchReleaseAsset('v1.0.0+build/x?y#z', 'SHA256SUMS')
+        expect(stubs.axiosGet.firstCall.args[0]).to.match(/\/releases\/tags\/v1\.0\.0%2Bbuild%2Fx%3Fy%23z$/)
+    })
+
     it('fetchReleaseAsset rethrows any other asset-hop failure unchanged', async () => {
         const original = assetHopRejects({ status: 403, headers: { 'x-ratelimit-remaining': '42' } })
         await svc.fetchReleaseAsset('v0.9.0', 'SHA256SUMS').then(

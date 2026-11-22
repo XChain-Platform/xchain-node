@@ -1,3 +1,4 @@
+/* Copyright © 2025-2026 Dankest, LLC; SPDX-License-Identifier: AGPL-3.0-or-later */
 'use strict'
 
 let askMariadbRootPassword, confirmDestructiveReset, failureReason, isNoSuchContainerError, isNoSuchVolumeError, resolveNodeDataPath, restartResetModules, restartStoppedModules, Coin, CoinTickerSymbol, EXTERNAL_DB, HUB_MODULE_NAME, Network, NODE_MODULE_NAME, XChainService, clearHubPriceIngestWatermark, config, dataDir, db, execFileAsync, fs, getContainerBindMounts, getDatabaseContainerId, getDockerContainerImageName, getUtxoTrackerVolumeName, manualHubCrossChainPurgeStatements, nodeService, path, pingExternalDatabase, purgeHubCrossChainRows, readline, resolveNamedDatabaseTarget, recordReindex, reindexAffectedModules, resetDatabases, restartContainer, sleep, startContainer, statusChanged, stopContainer, stopModuleContainer, getContainerStopSettings
@@ -15,11 +16,9 @@ function configure(dependencies) {
         XChainService.XCHAIN_INDEXER
     ]
 }
-
 // The service names `reset` can act on. `reset` is the only destructive CLI path and the only one that bypasses resolveArgs/filterCommandParameters, so it must validate its own raw args: without this
 // an unrecognised service (a typo, or a non-resettable module like xchain-encoder) leaves every reset flag false, so `targets` is empty, no branch fires, and resetModules returns true - the CLI exits
 // 0 reporting success after resetting nothing. Fail loud instead, matching resolveArgs/rollback and the "fail fast BEFORE any destructive wipe" convention this file already follows.
-
 // `options.dbContainer` (--db-container) is a stack's own MariaDB container; see reset_db_override.js.
 async function resetModules(service, coin, network, force = false, withIndexer = false, options = {}) {
     if (!RESETTABLE_SERVICES.includes(service)) {
@@ -205,7 +204,9 @@ async function checkResetDatabase(context) {
     if (resetUtxoTracker) modulesToStop.push(XChainService.XCHAIN_UTXO_TRACKER)
     if (resetDecoder)     modulesToStop.push(XChainService.XCHAIN_DECODER)
     if (resetIndexer)     modulesToStop.push(XChainService.XCHAIN_INDEXER)
-    if (resetAll)         modulesToStop.push(XChainService.XCHAIN_REGTEST_MINER)
+    if (resetAll || (resetNode && network === Network.REGTEST)) {
+        modulesToStop.push(XChainService.XCHAIN_REGTEST_MINER)
+    }
     return stopResetModules({ ...context, modulesToStop, namedDbTarget })
 }
 
@@ -396,5 +397,4 @@ function recordResetReindex(context) {
     }
     return restartResetModules(context)
 }
-
 module.exports = { configure, resetModules }

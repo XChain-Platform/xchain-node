@@ -36,6 +36,8 @@ function buildProgram(deps) {
         .option('--reason <text>').option('--dry-run').action(deps.action)
     program.command('bootstrap-restore-rehearsal').argument('<chain>').argument('<network>')
         .option('--file <name>').action(deps.action)
+    program.command('bootstrap-republish-clear').argument('<combo>')
+        .requiredOption('--at <time>').action(deps.action)
     const validator = program.command('validator').action(deps.action)
     validator.command('init').option('--force').option('--force-wallets').action(deps.action)
     validator.command('stake').option('--broadcast').action(deps.action)
@@ -56,6 +58,9 @@ function makeDeps() {
         redactSecrets: (s) => s,
         acquireCommandLock: sinon.stub().returns(release),
         preCheck: sinon.stub().resolves(),
+        resolveNoRefInstallTarget: sinon.stub().resolves({
+            kind: 'release', ref: 'v1.2.3', tag: 'v1.2.3', manifest: {}, resolvedFrom: 'test'
+        }),
         refForPreCheck: sinon.stub().returns(null),
         commandRepairsHub: sinon.stub().returns(false),
         maybeReportTelemetry: sinon.stub().resolves(),
@@ -87,6 +92,37 @@ async function run(argv, config = {}) {
     return deps
 }
 
+function registerRehearsalLockTests() {
+    it('bootstrap-restore-rehearsal keeps the lock from preCheck through its disposable database', async function () {
+        const deps = await run(['bootstrap-restore-rehearsal', 'bitcoin', 'mainnet'])
+        expect(deps.acquireCommandLock.calledOnceWith({ command: 'bootstrap-restore-rehearsal', waitMs: 0 })).to.be.true
+        expect(deps.preCheck.calledOnce).to.be.true
+        expect(deps.release.called).to.be.false
+        expect(deps.action.calledOnce).to.be.true
+    })
+
+    it('bootstrap-restore-rehearsal waits the mutating wait during preCheck, not the read-only one', async function () {
+        const deps = await run(['bootstrap-restore-rehearsal', 'bitcoin', 'mainnet'], { XCHAIN_NODE_MUTATING_LOCK_WAIT_MS: '30000' })
+        expect(deps.acquireCommandLock.calledOnceWith({ command: 'bootstrap-restore-rehearsal', waitMs: 30000 })).to.be.true
+    })
+
+    // Exercise the shipped action because a second acquire there would refuse its own held lock.
+    it('bootstrap-restore-rehearsal action takes no second lock of its own', async function () {
+        const exitStub = sinon.stub(process, 'exit')
+        const deps = makeDeps()
+        const program = new Command()
+        program.exitOverride()
+        program.option('--verbose').option('--no-telemetry')
+        installDispatch(program, deps)
+        registerToolCommands(program, deps)
+        // Use regtest to make the rehearsal refuse before it touches any database.
+        await program.parseAsync(['bootstrap-restore-rehearsal', 'bitcoin', 'regtest'], { from: 'user' })
+        expect(deps.acquireCommandLock.calledOnceWith({ command: 'bootstrap-restore-rehearsal', waitMs: 0 })).to.be.true
+        expect(deps.release.called).to.be.false
+        expect(exitStub.calledOnceWith(1)).to.be.true
+    })
+}
+
 describe('CLI dispatch: commands that hold the lock through their action', function () {
     beforeEach(snapshotListeners)
     afterEach(restoreListeners)
@@ -99,6 +135,26 @@ describe('CLI dispatch: commands that hold the lock through their action', funct
             expect(deps.action.calledOnce).to.be.true
         })
     }
+
+    it('hands one no-ref install target to preCheck', async function () {
+        const deps = await run(['install', 'xchain-hub'])
+        expect(deps.resolveNoRefInstallTarget.calledOnce).to.equal(true)
+        expect(deps.preCheck.firstCall.args[4].installTarget)
+            .to.equal(await deps.resolveNoRefInstallTarget.firstCall.returnValue)
+    })
+
+    it('leaves the preCheck argument list at four for a command that is not a no-ref install', async function () {
+        for (const argv of [['reset', 'xchain-decoder'], ['update', 'xchain-hub'], ['install', 'xchain-hub', 'develop']]) {
+            const deps = await run(argv)
+            expect(deps.resolveNoRefInstallTarget.called, argv.join(' ')).to.equal(false)
+            expect(deps.preCheck.firstCall.args, argv.join(' ')).to.have.length(4)
+        }
+    })
+
+    it('keeps a command option set when it adds the no-ref install target', async function () {
+        const deps = await run(['reset', 'hub-checkpoints'])
+        expect(deps.preCheck.firstCall.args[4]).to.deep.equal({ hubPushOptional: true })
+    })
 
     it('clear-reorg-halt keeps the lock through its database check and audited write', async function () {
         const deps = await run(['clear-reorg-halt', 'bitcoin', 'regtest', '--reason', 'known good replica'])
@@ -113,34 +169,18 @@ describe('CLI dispatch: commands that hold the lock through their action', funct
         expect(deps.release.called).to.be.false
     })
 
-    it('bootstrap-restore-rehearsal keeps the lock from preCheck through its disposable database', async function () {
-        const deps = await run(['bootstrap-restore-rehearsal', 'bitcoin', 'mainnet'])
-        expect(deps.acquireCommandLock.calledOnceWith({ command: 'bootstrap-restore-rehearsal', waitMs: 0 })).to.be.true
-        expect(deps.preCheck.calledOnce).to.be.true
+    it('bootstrap-republish-clear holds the reset lock without running preCheck', async function () {
+        const deps = await run([
+            'bootstrap-republish-clear', 'xchain-decoder:bitcoin:testnet',
+            '--at', '2026-09-01T01:00:00Z'
+        ])
+        expect(deps.acquireCommandLock.calledOnceWith({ command: 'bootstrap-republish-clear', waitMs: 0 })).to.be.true
+        expect(deps.preCheck.called).to.be.false
         expect(deps.release.called).to.be.false
         expect(deps.action.calledOnce).to.be.true
     })
 
-    it('bootstrap-restore-rehearsal waits the mutating wait during preCheck, not the read-only one', async function () {
-        const deps = await run(['bootstrap-restore-rehearsal', 'bitcoin', 'mainnet'], { XCHAIN_NODE_MUTATING_LOCK_WAIT_MS: '30000' })
-        expect(deps.acquireCommandLock.calledOnceWith({ command: 'bootstrap-restore-rehearsal', waitMs: 30000 })).to.be.true
-    })
-
-    // The shipped action, not a stub: a second acquire there would refuse its own held lock.
-    it('bootstrap-restore-rehearsal action takes no second lock of its own', async function () {
-        const exitStub = sinon.stub(process, 'exit')
-        const deps = makeDeps()
-        const program = new Command()
-        program.exitOverride()
-        program.option('--verbose').option('--no-telemetry')
-        installDispatch(program, deps)
-        registerToolCommands(program, deps)
-        // regtest makes the rehearsal refuse before it touches any database.
-        await program.parseAsync(['bootstrap-restore-rehearsal', 'bitcoin', 'regtest'], { from: 'user' })
-        expect(deps.acquireCommandLock.calledOnceWith({ command: 'bootstrap-restore-rehearsal', waitMs: 0 })).to.be.true
-        expect(deps.release.called).to.be.false
-        expect(exitStub.calledOnceWith(1)).to.be.true
-    })
+    registerRehearsalLockTests()
 })
 
 describe('CLI dispatch: the release update a self-update re-executes', function () {
@@ -170,7 +210,7 @@ describe('CLI dispatch: commands that hand the lock back after preCheck', functi
     beforeEach(snapshotListeners)
     afterEach(restoreListeners)
 
-    for (const name of ['ps', 'logs', 'exec', 'shell']) {
+    for (const name of ['ps', 'logs']) {
         it(`${name} releases the lock once preCheck returns`, async function () {
             const deps = await run([name])
             expect(deps.acquireCommandLock.calledOnceWith({ command: name, waitMs: 15000 })).to.be.true
@@ -178,6 +218,23 @@ describe('CLI dispatch: commands that hand the lock back after preCheck', functi
             expect(deps.release.calledAfter(deps.preCheck)).to.be.true
         })
     }
+
+    for (const name of ['exec', 'shell']) {
+        it(`${name} releases the lock once preCheck returns`, async function () {
+            const exitListeners = process.listeners('exit').length
+            const deps = await run([name])
+            expect(deps.acquireCommandLock.calledOnceWith({ command: name, waitMs: 15000 })).to.be.true
+            expect(deps.release.called).to.be.false
+            expect(process.listeners('exit')).to.have.length(exitListeners + 1)
+        })
+    }
+
+    it('exec and shell retain the bounded wait when the mutating wait is configured', async function () {
+        for (const name of ['exec', 'shell']) {
+            const deps = await run([name], { XCHAIN_NODE_MUTATING_LOCK_WAIT_MS: '30000' })
+            expect(deps.acquireCommandLock.calledOnceWith({ command: name, waitMs: 15000 })).to.be.true
+        }
+    })
 })
 
 describe('CLI dispatch: validator subcommands', function () {

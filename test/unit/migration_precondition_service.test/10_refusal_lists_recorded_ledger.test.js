@@ -92,7 +92,9 @@ describe('migration precondition guard: refusal lists against the recorded ledge
             const subtracted = deps.pendingManualMigrations.firstCall.args[1]
             expect(subtracted.has(RECORDED)).to.equal(true)
             expect(subtracted.has(SATISFIED)).to.equal(false)
-            expect(err.message).to.contain('which is 2 file(s)')
+            expect(err.message).to.contain('can consider up to 2 pending manual migration file(s)')
+            expect(err.message).to.contain('may baseline a listed file without executing it')
+            expect(err.message).to.not.contain('apply EVERY pending manual migration')
             expect(err.message).to.contain(SATISFIED + '  (the live schema already matches it; no ledger row records it)')
             expect(err.message).to.contain(REQUIRED + '  (the one you need)')
         })

@@ -155,13 +155,13 @@ describe('BootstrapHealthGate', function () {
         it('REFUSES a REORG_HALT count that is a partial number', async function () {
             const gate = loadGate()
             const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHaltRows: '0garbage' }) }))
-            expect(err.message).to.match(/REORG_HALT marker probe returned unreadable output/)
+            expect(err.message).to.match(/REORG_HALT history probe.*returned unreadable output/)
         })
 
         it('REFUSES a negative REORG_HALT count', async function () {
             const gate = loadGate()
             const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHaltRows: '-1' }) }))
-            expect(err.message).to.match(/REORG_HALT marker probe returned unreadable output/)
+            expect(err.message).to.match(/REORG_HALT history probe.*returned unreadable output/)
         })
 
         it('REFUSES a sync_halt count that is a partial number', async function () {
@@ -180,8 +180,8 @@ describe('BootstrapHealthGate', function () {
 
         it('REFUSES when the REORG_HALT count itself is unreadable', async function () {
             const gate = loadGate()
-            const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHaltRows: '' }) }))
-            expect(err.message).to.match(/REORG_HALT marker probe returned unreadable output/)
+            const err = await refusal(callGate(gate, { runner: makeRunner({ reorgHistory: 'garbage' }) }))
+            expect(err.message).to.match(/REORG_HALT history probe.*returned unreadable output/)
         })
 
         it('REFUSES when the sync_halt count itself is unreadable', async function () {

@@ -14,8 +14,8 @@
  *
  * XChain Node - Bootstrap source health gate halt marker probe
  *
- * Reads the durable halt markers (a live decoder REORG_HALT row, one no newer
- * audited REORG_HALT_CLEARED row supersedes, an uncleared sync_halt row, and an
+ * Reads the durable halt markers (the decoder's bounded REORG_HALT history,
+ * an uncleared sync_halt row, and an
  * xchain-sync halt_pending copy and invalid rollback_guard state in sync_state) and the
  * dump-window watermarks straight out of the database
  * about to be dumped, and for an indexer source out of its paired decoder
@@ -29,7 +29,7 @@ const { getDefaultConfig, getModuleDatabaseName } = require('../config_service')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 const { configuredDatabaseName } = require('../../utils/module_database_name')
 const {
-    markerTablesSql, liveReorgHaltCountSql, newestReorgClearSql, liveSyncHaltCountSql, pendingSyncHaltCountSql,
+    markerTablesSql, reorgHaltHistorySql, liveSyncHaltCountSql, pendingSyncHaltCountSql,
     rollbackGuardStateSql,
     eventsWatermarkSql, syncHaltWatermarkSql, reorgHaltsSinceSql, syncHaltsSinceSql
 } = require('../../db/halt_markers')
@@ -65,28 +65,56 @@ function isAuditedClear(payload) {
     return typeof payload.reason === 'string' && payload.reason.trim().length >= 8
 }
 
-// Read newestReorgClearSql's one row into 1 when the newest marker row is a clear that
-// lifts nothing, else 0, judging the bytes exactly as the decoder's readReorgHaltState
-// does (JSON.parse, a parse failure is no payload). Any other output shape throws.
-function parseNewestClear(raw, what) {
-    const text   = String(raw == null ? '' : raw).replace(/\r?\n$/, '')
-    const fields = text.split('\t')
-    // The native client joins a NULL as '', the docker client prints NULL.
-    const hex    = (fields[1] === 'NULL') ? '' : fields[1]
-    const bad = fields.length !== 2
-        || !/^[01]$/.test(fields[0])
-        || !/^(?:[0-9A-F]{2})*$/.test(hex || '')
-        || (fields[0] === '0' && hex !== '')
-    if (bad)
-        throw new Error(`the ${what} returned unreadable output: ${JSON.stringify(text.slice(0, 80))}`)
-    if (fields[0] === '0') return 0
+const HALT_SCAN_LIMIT = 1000
+
+function parseHaltPayload(encoded) {
+    if (encoded === 'N') return null
     let payload = null
     try {
-        payload = JSON.parse(Buffer.from(hex, 'hex').toString('utf8'))
+        payload = JSON.parse(Buffer.from(encoded.slice(1), 'hex').toString('utf8'))
     } catch (_) {
         payload = null
     }
-    return isAuditedClear(payload) ? 0 : 1
+    return payload
+}
+
+function parseReorgHaltHistory(raw, what) {
+    const text = String(raw == null ? '' : raw).replace(/\r?\n$/, '')
+    if (text === '') return []
+    const rows = text.split(/\r?\n/).map(line => line.split('\t'))
+    let prior = Infinity
+    const bad = rows.length > HALT_SCAN_LIMIT + 1 || rows.some(fields => {
+        const id = Number(fields[0])
+        const invalid = fields.length !== 3 || !/^\d+$/.test(fields[0] || '') ||
+            !Number.isSafeInteger(id) || id >= prior ||
+            !/^(?:REORG_HALT|REORG_HALT_CLEARED)$/.test(fields[1] || '') ||
+            !/^(?:N|V(?:[0-9A-F]{2})*)$/.test(fields[2] || '')
+        prior = id
+        return invalid
+    })
+    if (bad) throw new Error(`the ${what} returned unreadable output: ${JSON.stringify(text.slice(0, 80))}`)
+    return rows.map(fields => ({ id: Number(fields[0]), code: fields[1], payload: parseHaltPayload(fields[2]) }))
+}
+
+function liveReorgHaltFromHistory(rows) {
+    if (rows.length > HALT_SCAN_LIMIT) return 1
+    let state = { halted: false, id: null }
+    for (const row of [...rows].reverse()) {
+        if (row.code === 'REORG_HALT') {
+            state = { halted: true, id: row.id }
+        } else if (!isAuditedClear(row.payload)) {
+            state = { halted: true, id: row.id }
+        } else if (!state.halted) {
+            state = { halted: false, id: null }
+        } else {
+            const hasTarget = Object.prototype.hasOwnProperty.call(row.payload, 'cleared_halt_id')
+            const target = Number(row.payload.cleared_halt_id)
+            if (!hasTarget || (Number.isSafeInteger(target) && target === state.id)) {
+                state = { halted: false, id: null }
+            }
+        }
+    }
+    return state.halted ? 1 : 0
 }
 
 // Same validity rule as xchain-sync ClientSync.loadRollbackGuardState.
@@ -107,12 +135,12 @@ function parseRollbackGuardRows(raw, what) {
     const encoded = fields[1] === 'NULL' ? '' : (fields[1] || '')
     const tokens = encoded === '' ? [] : encoded.split(',')
     const bad = fields.length !== 2 || !Number.isSafeInteger(count) || count < 0 ||
-        tokens.length !== count || tokens.some(token => !/^(?:N|V(?:[0-9A-F]{2})*)$/.test(token))
+        tokens.length !== count || tokens.some(token => !/^(?:N;|V(?:[0-9A-F]{2})*;)$/.test(token))
     if (bad)
         throw new Error(`the ${what} returned unreadable output: ${JSON.stringify(text.slice(0, 80))}`)
     return tokens.reduce((invalid, token) => {
-        if (token === 'N') return invalid
-        const value = Buffer.from(token.slice(1), 'hex').toString('utf8')
+        if (token === 'N;') return invalid
+        const value = Buffer.from(token.slice(1, -1), 'hex').toString('utf8')
         return invalid + (isValidRollbackGuardState(value) ? 0 : 1)
     }, 0)
 }
@@ -201,23 +229,18 @@ async function probeDatabase(run, readCount, name, since) {
 // Count the live halt rows in each optional marker table of `name`, for readLiveMarkers.
 async function readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState }) {
     const found = { reorgHalt: 0, syncHalt: 0, pendingSyncHalt: 0, rollbackGuardInvalid: 0 }
-    // LIVE halts only: a REORG_HALT row older than the newest REORG_HALT_CLEARED
-    // row was cleared by an operator through `xchain-node clear-reorg-halt`
-    // (audited in the decoder's events table) and no longer disqualifies the
-    // database. The halt row itself is never deleted, so a plain count would
-    // refuse a cleared database forever.
-    found.reorgHalt = await readCount(liveReorgHaltCountSql(name), 'REORG_HALT marker')
-    // A newest clear row without an audited reason lifts nothing: the decoder reads it as
-    // a live halt, so it counts as one here too.
-    found.reorgHalt += parseNewestClear(await run(newestReorgClearSql(name)),
-        `REORG_HALT_CLEARED audit probe for ${name}`)
+    const history = parseReorgHaltHistory(await run(reorgHaltHistorySql(name)),
+        `REORG_HALT history probe for ${name}`)
+    found.reorgHalt = liveReorgHaltFromHistory(history)
     // sync_halt IS optional: xchain-sync provisions it only where it runs, so an
     // absent table here is a genuine "no such marker", not an unread database.
     if (hasSyncHalt > 0)
         found.syncHalt = await readCount(liveSyncHaltCountSql(name), 'sync_halt marker')
     // A halt whose sync_halt write failed lives only as xchain-sync's sync_state copy,
     // which a restore re-installs as a halt; sync_state is optional for the same reason.
-    // It has no id sequence, so it is read live at each reading, never by watermark.
+    // It has no id sequence, so it is read live at each reading. MariaDB bootstrap
+    // publishing also inspects the captured sync_state bytes. For an indexer publish,
+    // the paired decoder is not in the archive and remains a live-only check here.
     if (hasSyncState > 0) {
         found.pendingSyncHalt = await readCount(pendingSyncHaltCountSql(name), 'sync_state halt_pending marker')
         found.rollbackGuardInvalid = parseRollbackGuardRows(await run(rollbackGuardStateSql(name)),
@@ -252,20 +275,17 @@ async function readLiveMarkers(run, readCount, name) {
     if (hasEvents === 0)
         throw new Error(`${name} reports no events table, so the REORG_HALT marker could not be read`)
 
-    const found = await readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState })
-
-    // The dump window watermark. Both marker tables are append-only and
-    // id-ordered (decoder events: AUTO_INCREMENT, a clear is a NEW row, halt rows
-    // are never deleted; sync_halt: AUTO_INCREMENT, a clear sets cleared_at and
-    // the row stays), which is what makes "did a halt occur at ANY point since
-    // the pre-flight reading" answerable with a MAX(id) taken then and a count
-    // taken now. null means the table did not exist at this reading.
-    found.watermark = {
+    // Read watermarks before live counts. This order is load-bearing for sync_halt:
+    // a clear updates the existing row, so a halt inserted between these reads must
+    // either sit above this watermark or be visible to the later live count.
+    const watermark = {
         events: await readCount(eventsWatermarkSql(name), `events watermark for ${name}`),
         syncHalt: hasSyncHalt > 0
             ? await readCount(syncHaltWatermarkSql(name), `sync_halt watermark for ${name}`)
             : null
     }
+    const found = await readHaltCounts(run, readCount, name, { hasSyncHalt, hasSyncState })
+    found.watermark = watermark
 
     return { found, hasSyncHalt }
 }
@@ -323,9 +343,9 @@ async function readHaltMarkers(coin, network, module, deps, since) {
     // the REORG_HALT count above is a guaranteed zero for an indexer and this backstop had
     // no reach there at all: the indexer writes only REORG and TRAIN_ACTIVATION_HALT
     // rows into its own events table and reads the halt marker out of the DECODER's connection, while
-    // the marker row is written solely into the decoder database. Nothing else in the
-    // gate covers the gap either - the indexer's decoderReorgHalted mirror defaults
-    // false and keeps its last value on any probe fault, and its published lag is
+    // the marker row is written solely into the decoder database. The status gate refuses
+    // current images' null mirror through stallClass/stallReason, but older images expose
+    // neither signal and the published boolean collapses null to false. Their lag is
     // measured against the halted decoder's own frozen height, so it reads 0. Probe
     // the paired decoder database as well, fail-closed: probeDatabase throws on an
     // absent database, an absent events table and an unreadable count alike, and every
@@ -356,7 +376,8 @@ function pendingSyncHaltReason(where) {
 module.exports = {
     pendingSyncHaltReason,
     parseCountTokens,
-    parseNewestClear,
+    parseReorgHaltHistory,
+    liveReorgHaltFromHistory,
     parseRollbackGuardRows,
     isValidRollbackGuardState,
     isAuditedClear,

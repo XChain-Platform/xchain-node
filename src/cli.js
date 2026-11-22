@@ -43,15 +43,16 @@ const { getStatus }            = require('./services/status_service')
 const { scanAndRegisterModules } = require('./services/discovery_service')
 const { maybeReportTelemetry } = require('./services/telemetry_service')
 const { makeBootstrap, listServedBootstrapCombos } = require('./services/bootstrap_service')
-const { listRepublishDue } = require('./services/bootstrap_republish_ledger')
-const { initValidator, getValidatorSettings, isInitialized, getCapabilityConfigHostPath,
-        readWallets, publicWalletInfo, getSignerMountDir, COIN_NETWORKS, WALLETS_FILE,
+const { listRepublishDue, parseComboKey, recordBootstrapPublished } = require('./services/bootstrap_republish_ledger')
+const { initValidator, getValidatorSettings, isInitialized, describeCapabilityConfigPath,
+        readWallets, publicWalletInfo, getSignerHostDir, COIN_NETWORKS, WALLETS_FILE,
         getRollcallStatus, capabilityDriftReport, capabilityDriftExitCode,
         formatCapabilityDrift } = require('./services/validator_service')
 const { stakeValidator, unstakeValidator } = require('./services/validator_stake_service')
 const { restoreBootstrapInterface, startInterface } = require('./ui/menu')
 const { acquireCommandLock } = require('./utils/command_lock')
 const { noticeNewerRelease } = require('./services/self_update_service')
+const { resolveNoRefInstallTarget } = require('./services/install_target_service')
 const { runParseCommand } = require('./cli/parse_command')
 const { dispatchSettings } = require('./cli/dispatch')
 const { installUnhandledRejectionHandler, installUncaughtExceptionHandler } = require('./cli/errors')
@@ -197,13 +198,14 @@ async function parseCommand() {
         restartModules, stopModules, startModules, execModules, clearDecoderReorgHalt,
         shellModule, runE2ETest, resetModules, getStatus, scanAndRegisterModules,
         maybeReportTelemetry, makeBootstrap, listServedBootstrapCombos, listRepublishDue,
-        initValidator, getValidatorSettings, isInitialized, getCapabilityConfigHostPath,
-        readWallets, publicWalletInfo, getSignerMountDir, COIN_NETWORKS, WALLETS_FILE,
+        parseComboKey, recordBootstrapPublished,
+        initValidator, getValidatorSettings, isInitialized, describeCapabilityConfigPath,
+        readWallets, publicWalletInfo, getSignerHostDir, COIN_NETWORKS, WALLETS_FILE,
         getRollcallStatus, capabilityDriftReport, capabilityDriftExitCode,
         formatCapabilityDrift, stakeValidator, unstakeValidator,
         restoreBootstrapInterface, startInterface, acquireCommandLock,
         noticeNewerRelease, refForPreCheck, commandRepairsHub,
-        maybeSelfUpdateBeforeUpdate, loadModule, config
+        maybeSelfUpdateBeforeUpdate, resolveNoRefInstallTarget, loadModule, config
     })
 }
 
@@ -225,6 +227,6 @@ module.exports = { parseCommand, installUnhandledRejectionHandler, installUncaug
 // Running it directly otherwise silently does nothing, because program.parse()
 // lives inside parseCommand() and would never be called.
 if (require.main === module) {
-    loadModule('dotenv').config()
+    loadModule('dotenv').config({ quiet: true })
     parseCommand()
 }

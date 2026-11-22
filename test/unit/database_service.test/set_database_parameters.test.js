@@ -30,6 +30,7 @@ describe('DatabaseService', function () {
             const result = await ds.setDatabaseParameters()
             expect(result).to.be.true
             expect(stubs.addContainerToNetwork.called).to.be.true
+            expect(stubs.statusChanged.called).to.be.false
         })
 
         it('throws and logs when coin network processing fails', async function () {

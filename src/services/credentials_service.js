@@ -201,6 +201,33 @@ function saveExternalDbConfig(cfg) {
     writeCredentialsAtomic(filePath, existing)
 }
 
+// --- External-DB mode marker ---
+// A secret-free `externalDbMode: true` key records that this host has run in
+// external-DB mode, so a later run that lost XCHAIN_NODE_EXTERNAL_DB (a shell
+// that did not read the .env) can be told apart from a genuinely fresh host,
+// including a host whose settings come from environment variables and so never
+// save an `externalDb` block.
+
+function markExternalDbMode() {
+    const raw = readCredentialsRaw()
+    if (raw && raw.externalDbMode === true) return
+    const dir = getCredentialsDir()
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+    }
+    const filePath = getCredentialsPath()
+    const existing = readCredentialsForUpdate(filePath)
+    existing.externalDbMode = true
+    writeCredentialsAtomic(filePath, existing)
+}
+
+// True when the marker is set or any `externalDb` block is saved, a partial one included.
+function isKnownExternalDbHost() {
+    const raw = readCredentialsRaw()
+    return !!(raw && (raw.externalDbMode === true
+        || (raw.externalDb && typeof raw.externalDb === 'object')))
+}
+
 module.exports = {
     XCHAIN_NODE_DB,
     getCredentialsDir,
@@ -214,6 +241,8 @@ module.exports = {
     hasExternalDbConfig,
     loadExternalDbConfig,
     saveExternalDbConfig,
+    markExternalDbMode,
+    isKnownExternalDbHost,
     loadDbRootPassword,
     saveDbRootPassword
 }

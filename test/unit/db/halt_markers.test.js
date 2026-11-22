@@ -11,8 +11,7 @@ const haltMarkers = require('../../../src/db/halt_markers')
 
 const expectedExports = [
     'markerTablesSql',
-    'liveReorgHaltCountSql',
-    'newestReorgClearSql',
+    'reorgHaltHistorySql',
     'liveSyncHaltCountSql',
     'pendingSyncHaltCountSql',
     'rollbackGuardStateSql',
@@ -39,24 +38,20 @@ describe('halt marker exports and live SQL builders', () => {
     })
 
     it('builds the live reorg halt query', () => {
-        const sql = haltMarkers.liveReorgHaltCountSql('xchain_btc')
-
-        expect(sql).to.include('`xchain_btc`.events')
-        expect(sql).to.include("code='REORG_HALT'")
-        expect(sql).to.include("code='REORG_HALT_CLEARED'")
-        expect(sql).to.match(/;$/)
-    })
-
-    // The decoder reads a newest clear row with no audited reason as a live halt, so the
-    // gate fetches that row's bytes and judges them in JavaScript; test/integration runs it on MariaDB.
-    it('reads the newest marker row as a clear flag and its payload bytes', () => {
-        const sql = haltMarkers.newestReorgClearSql('xchain_btc')
+        const sql = haltMarkers.reorgHaltHistorySql('xchain_btc')
 
         expect(sql).to.include('`xchain_btc`.events')
         expect(sql).to.include("code IN ('REORG_HALT','REORG_HALT_CLEARED')")
-        expect(sql).to.include("code='REORG_HALT_CLEARED'")
-        expect(sql).to.include('SELECT COUNT(*), MAX(HEX(data))')
+        expect(sql).to.include('ORDER BY id DESC LIMIT 1001')
+        expect(sql).to.match(/;$/)
+    })
+
+    it('reads the newest marker row as a clear flag and its payload bytes', () => {
+        const sql = haltMarkers.reorgHaltHistorySql('xchain_btc')
+
+        expect(sql).to.include("IF(data IS NULL, 'N', CONCAT('V', HEX(data)))")
         expect(sql).to.not.include('JSON_')
+        expect(sql).to.not.include('GROUP_CONCAT')
         expect(sql).to.match(/;$/)
     })
 
@@ -76,8 +71,8 @@ describe('halt marker exports and live SQL builders', () => {
 
         expect(sql).to.include('`xchain_btc`.sync_state')
         expect(sql).to.include("LEFT(state_key, 15) = 'rollback_guard:'")
-        expect(sql).to.include("CONCAT('V', HEX(state_value))")
-        expect(sql).to.include("state_value IS NULL, 'N'")
+        expect(sql).to.include("CONCAT('V', HEX(state_value), ';')")
+        expect(sql).to.include("state_value IS NULL, 'N;'")
         expect(sql).to.not.include('LIKE')
         expect(sql).to.match(/;$/)
     })
@@ -87,8 +82,8 @@ describe('halt marker exports and live SQL builders', () => {
 
         expect(sql).to.include('`xchain_btc`.sync_state')
         expect(sql).to.include("LEFT(state_key, 15) = 'rollback_guard:'")
-        expect(sql).to.include("CONCAT('V', HEX(state_value))")
-        expect(sql).to.include("state_value IS NULL, 'N'")
+        expect(sql).to.include("CONCAT('V', HEX(state_value), ';')")
+        expect(sql).to.include("state_value IS NULL, 'N;'")
         expect(sql).to.not.include('LIKE')
         expect(sql).to.match(/;$/)
     })

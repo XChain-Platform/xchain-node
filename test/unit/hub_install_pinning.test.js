@@ -46,7 +46,10 @@ function load(stubs) {
         './hub_connector.js': class { async ping() { return false } },
         // The real manifest service, so setActiveTarget/resolveComponentRef are
         // the code under test; only the network lookup is stubbed.
-        './release_manifest_service': manifest
+        './release_manifest_service': manifest,
+        './install_target_service': {
+            resolveNoRefInstallTarget: () => manifest.resolveInstallTarget(null, { defaultBranch: 'master' })
+        }
     })
 }
 
@@ -101,6 +104,17 @@ describe('installHubModule() stages the hub from the release manifest', function
         await runInstall(svc, 'develop')
         expect(resolveInstallTarget.called).to.equal(false)
         expect(cloneGit.firstCall.args.slice(3)).to.deep.equal(['develop', null])
+    })
+
+    it('uses a pre-resolved target without another release lookup', async function () {
+        const svc = load({ cloneGit })
+        const target = {
+            kind: 'release', ref: 'v0.15.1', tag: 'v0.15.1', resolvedFrom: 'pre-resolved',
+            manifest: { platform_version: '0.15.1', components: { 'xchain-hub': { tag: 'v0.15.0', commit: PIN_SHA } } }
+        }
+        await svc.installHubModule(null, target).catch(err => { if (err.message !== 'stop-after-clone') throw err })
+        expect(resolveInstallTarget.called).to.equal(false)
+        expect(cloneGit.firstCall.args.slice(3)).to.deep.equal(['v0.15.0', PIN_SHA])
     })
 })
 

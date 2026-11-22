@@ -146,11 +146,40 @@ function fromUnits(units) {
 }
 
 // The explorer's indexed tip for the stake chain; throws when it is unreadable.
+// The explorer reports an unavailable tip as an explicit null, which Number()
+// would turn into block 0, so only a number or a non-empty string is read.
 async function readTip(sdk, coins) {
     const status = await sdk.explorer.getStatus()
-    const tip = Number(status && status.last_block && status.last_block[coins.stakeCoin])
+    const raw = status && status.last_block ? status.last_block[coins.stakeCoin] : undefined
+    const readable = typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== '')
+    const tip = readable ? Number(raw) : NaN
     if (!Number.isInteger(tip) || tip < 0) throw new Error('the explorer reported no last block for ' + coins.stakeCoin)
     return tip
+}
+
+// Refuse every plan built from a coin the explorer itself marks stale. A
+// missing marker passes because older explorers and unmeasured coins have no
+// freshness verdict to enforce.
+async function assertExplorerFresh(sdk, coins) {
+    let status
+    try {
+        status = await sdk.explorer.getStatus()
+    } catch (err) {
+        throw new Error('could not verify whether the explorer is current for ' + coins.stakeCoin +
+            ' (' + err.message + '), so this run cannot safely plan from its balances, history, or validator set. ' +
+            'Nothing was sent.')
+    }
+    if (!status || !status.stale || status.stale[coins.stakeCoin] !== true) return status
+
+    const tip = status.last_block && status.last_block[coins.stakeCoin]
+    const age = status.tip_age_seconds && Number(status.tip_age_seconds[coins.stakeCoin])
+    const where = tip === undefined || tip === null ? '' : ' at block ' + tip
+    const old = Number.isFinite(age) ? ' (' + Math.round(age / 60) + ' minutes old)' : ''
+    const err = new Error('the explorer is behind the chain for ' + coins.stakeCoin + where + old +
+        ', so its balances, mint history, and validator set may omit recent transactions. Nothing was sent. ' +
+        'Re-run once the explorer catches up.')
+    err.code = 'COIN_DATA_STALE'
+    throw err
 }
 
 // Memoize readTip so the stake and delegation judgements share one read.
@@ -241,11 +270,21 @@ async function readKeyHolders(sdk, pubkey, { network, coins, cooldownBlocks }) {
     try {
         const rows = await readDelegationsByPubkey(sdk, pubkey)
         let landBlock = null
+        let tipError = null
         if (rows.some(r => r && r.status === 'valid' && !isUndeactivated(r))) {
-            try { landBlock = (await tip()) + 1 } catch { landBlock = null }
+            try { landBlock = (await tip()) + 1 } catch (e) { tipError = e.message }
         }
         const holding = delegationRowsHoldingKey(rows, landBlock)
-        if (holding.length) out.delegated = holding
+        if (tipError === null) {
+            if (holding.length) out.delegated = holding
+        } else {
+            // Without the tip a revoked row cannot be told from a live one, so only a row with no
+            // deactivation block is known to hold the key; otherwise the answer is unknown, not "revoke it".
+            const certain = holding.filter(isUndeactivated)
+            if (certain.length) out.delegated = certain
+            else out.delegationUnknown = 'a revoked delegation is on file but the chain tip could not be read (' +
+                tipError + '), so it is not known whether it still holds the key'
+        }
     } catch (e) {
         out.delegationUnknown = e.message
     }
@@ -263,5 +302,6 @@ module.exports = {
     sumAmounts,
     readDelegationsByPubkey,
     readKeyHolders,
-    readTip
+    readTip,
+    assertExplorerFresh
 }

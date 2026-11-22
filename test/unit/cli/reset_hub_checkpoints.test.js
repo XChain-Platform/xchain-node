@@ -50,11 +50,11 @@ function makeHarness({ failHub = null } = {}) {
         if (args[0] === 'ps') return { stdout: containers.map(value => JSON.stringify(value)).join('\n') }
         if (args[0] === 'inspect') return { stdout: JSON.stringify(environments[args[5]]) }
         if (args[0] === 'exec') {
-            const [script, database, table] = [args[4], args[6], args[7]]
+            const [script, database, table] = [args[6], args[8], args[9]]
             databaseCalls.push({ script, database, table })
             if (script.includes('mariadb-show')) return { stdout: `| ${table} |\n` }
-            if (database === 'RailA_Hub' || database === 'RailB_Hub') events.push('recreate:' + args[1])
-            else events.push('purge:' + args[1])
+            if (database === 'RailA_Hub' || database === 'RailB_Hub') events.push('recreate:' + args[3])
+            else events.push('purge:' + args[3])
             return { stdout: '' }
         }
         throw new Error('unexpected docker call: ' + args.join(' '))
@@ -78,7 +78,8 @@ function makeHarness({ failHub = null } = {}) {
         startContainer,
         stopModuleContainer: (...args) => args[0](args[4]),
         getContainerStopSettings: sinon.stub().resolves(null),
-        statusChanged
+        statusChanged,
+        rootPassword: async () => 'root-pw'
     }
     return { events, databaseCalls, dependencies, statusChanged }
 }

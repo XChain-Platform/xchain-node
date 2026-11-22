@@ -15,9 +15,9 @@
  ********************************************************************/
 
 const { getLogger } = require('../../observability/logger')
-const { sendLockFor, releaseOnIndexWait, holdForSend } = require('./send_lock')
+const { sendLockFor, guardIdentity, releaseOnIndexWait, holdForSend } = require('./send_lock')
 const { sleepRefusal, sleepUnknownRefusal } = require('./address_sleep')
-const { amountUnits, fromUnits } = require('./free_key')
+const { amountUnits, fromUnits, assertExplorerFresh } = require('./free_key')
 
 // A planned MINT amount as the plain decimal the wire carries (at most 8 places, above 0), or null.
 function mintAmountText(amount) {
@@ -181,8 +181,21 @@ async function sendStakeAction(context, progress, kind, params, isLast, inputs) 
     const wait = isLast && opts.wait !== false
     // Hold the command lock while this action is sent; the SDK's indexer wait hands it back.
     holdForSend(sendLock, progress.sent, kind)
-    const r = await session.submit({ action: kind, params }, enc,
-        { waitForIndexer: wait, timeout: timeoutMs, pollInterval: 15000, onProgress: releaseOnIndexWait(sendLock) })
+    const submitOpts = {
+        waitForIndexer: wait, timeout: timeoutMs, pollInterval: 15000,
+        onProgress: releaseOnIndexWait(sendLock)
+    }
+    if (progress.sent.length === 0) submitOpts.strictFreshness = true
+    let r
+    try {
+        r = await session.submit({ action: kind, params }, enc, submitOpts)
+    } catch (err) {
+        if (err && err.code === 'COIN_DATA_STALE' && progress.sent.length === 0) {
+            throw context.fail('the explorer became stale before the first transaction was signed. Nothing was sent. ' +
+                'Re-run once the explorer catches up.')
+        }
+        throw err
+    }
     if (progress.chain && progress.prevTxid && !(r.spentInputs || []).some(i => i.txid === progress.prevTxid)) {
         progress.chainBroken = true
     }
@@ -192,22 +205,41 @@ async function sendStakeAction(context, progress, kind, params, isLast, inputs) 
     return r
 }
 
-async function broadcastStake(context) {
-    const { opts, sdk, address, amount, plan, log, waitForBalance, STAKE_TICK } = context
-    // Long waits, deliberately: the indexer sees an action only once its block
-    // is mined, and a testnet block can take twenty minutes. Parsed as a real
-    // number rather than an integer, because parseInt('0.5') is 0, which would
-    // silently fall through to the 120-minute default for every sub-minute
-    // value instead of honouring it.
+async function refreshStakeBeforeSend(context, progress) {
+    const { sdk, coins, address, pubkey, network, timing, readChainState, planMints,
+        amount, log, explorerUrl, STAKE_TICK } = context
+    holdForSend(context.sendLock, progress.sent, 'STAKE')
+    let state
+    try {
+        await assertExplorerFresh(sdk, coins)
+        state = await readChainState(sdk, address, pubkey, {
+            network, coins, cooldownBlocks: timing.cooldownBlocks
+        })
+    } catch (err) {
+        return { staked: false, sent: progress.sent,
+            blockers: ['could not refresh stake eligibility (' + err.message + '). Nothing more was sent.'] }
+    }
+    if (state.existing || state.delegated) {
+        logKeyHeld(log, state, { coins, pubkey, timing, explorerUrl, STAKE_TICK })
+        log('  Already broadcast: ' + progress.sent.map(s => s.step + ' ' + s.txid).join(', ') + '.')
+        return state.existing
+            ? { staked: false, existing: state.existing, sent: progress.sent }
+            : { staked: false, delegated: state.delegated, sent: progress.sent }
+    }
+    const plan = planMints(network, state.tokenBal, amount, state.mintMax,
+        state.mintAddressMax, state.mintUnreadable, state)
+    const blockers = stakeBlockers(state, plan, coins, address)
+    return blockers.length ? { staked: false, plan, blockers, sent: progress.sent } : null
+}
+
+function prepareBroadcast(context) {
+    const { opts, plan, STAKE_TICK } = context
+    // Allow long indexer waits while honoring positive fractional minute values.
     const timeoutMin = Number(opts.timeout)
     context.timeoutMs = (Number.isFinite(timeoutMin) && timeoutMin > 0 ? timeoutMin : 120) * 60 * 1000
     context.baseEncoder = {}
     if (opts.feePerKb) context.baseEncoder.feePerKb = Number(opts.feePerKb)
 
-    // Every action is sent back to back and funded from the one before it, so
-    // the whole run lands in a single block (see chainedInputs). --serialize
-    // restores the old one-action-per-block behaviour, which costs a block per
-    // step and is only worth it if chaining ever misbehaves on a venue.
     // Check every MINT amount before the first send: one past 8 places is rejected after its fee is spent.
     const mintTexts = plan.mints.map(mintAmountText)
     const malformed = plan.mints.filter((a, i) => mintTexts[i] === null)
@@ -216,6 +248,12 @@ async function broadcastStake(context) {
             'with at most 8 decimal places, which the indexer rejects. Nothing was sent.')
     }
     const progress = { chain: !opts.serialize, sent: [], prevTxid: null, chainBroken: false }
+    return { mintTexts, progress }
+}
+
+async function broadcastStake(context) {
+    const { opts, sdk, address, amount, plan, log, waitForBalance, STAKE_TICK } = context
+    const { mintTexts, progress } = prepareBroadcast(context)
     for (let i = 0; i < plan.mints.length; i++) {
         log('')
         log('  Sending MINT ' + (i + 1) + '/' + plan.mints.length + ' (' + mintTexts[i] + ' ' + STAKE_TICK + ')...')
@@ -224,14 +262,10 @@ async function broadcastStake(context) {
             { VERSION: 0, TICK: STAKE_TICK, AMOUNT: mintTexts[i] }, opts.serialize === true, inputs)
     }
 
-    // Form the STAKE's own link to the last mint BEFORE deciding whether to
-    // wait: a miss on this final hop breaks the ordering exactly as a miss
-    // between mints does, and must reach the same wait below.
+    // Form the STAKE link before deciding whether its mints need an indexer wait.
     const stakeInputs = progress.chainBroken ? null : await linkInputs(context, progress)
 
-    // A broken chain means in-block order is the miner's choice, and a STAKE
-    // evaluated before its own mints is rejected for insufficient funds. Wait
-    // the mints out instead: once they are indexed, ordering stops mattering.
+    // Wait out broken or serialized mint chains before sending the STAKE.
     if (plan.mints.length && (progress.chainBroken || opts.serialize)) {
         log('')
         log('  Waiting for the mints to be indexed before staking' +
@@ -247,6 +281,8 @@ async function broadcastStake(context) {
             return { staked: false, sent: progress.sent, pendingMints: true }
         }
         progress.prevTxid = null   // fund the STAKE freely; ordering no longer matters
+        const stopped = await refreshStakeBeforeSend(context, progress)
+        if (stopped) return stopped
         return finishStake(context, progress, null)
     }
 
@@ -317,10 +353,13 @@ function createStakeValidator(helpers) {
         const log = deps.log || defaultLog()
         // Before the session opens, so a bad amount refuses ahead of any WIF prompt or chain read.
         const amount = resolveStakeAmount(opts.amount, DEFAULT_STAKE_AMOUNT, fail, STAKE_TICK)
-        const { network, coins, pubkey, sdk, session, address } = openValidatorSession(opts, deps)
+        const opened = openValidatorSession(opts, deps)
+        const { network, coins, pubkey, sdk, session, address, assertIdentityUnchanged } = opened
         const timing = stakeTiming(coins, network)
-        // Take the lock before reading the plan, so no other broadcast sends between this read and these sends.
-        sendLock.hold()
+        // Every acquisition verifies that init did not replace the identity while the lock was free.
+        sendLock = guardIdentity(sendLock, assertIdentityUnchanged)
+        holdForSend(sendLock, [], 'plan')
+        try { await assertExplorerFresh(sdk, coins) } catch (err) { throw fail(err.message) }
         const state = await readChainState(sdk, address, pubkey, { network, coins, cooldownBlocks: timing.cooldownBlocks })
         const plan = planMints(network, state.tokenBal, amount, state.mintMax, state.mintAddressMax, state.mintUnreadable, state)
 
@@ -345,7 +384,8 @@ function createStakeValidator(helpers) {
         }
 
         return broadcastStake({ opts, sdk, session, address, coins, pubkey, amount, plan, log, timing,
-            explorerUrl, chainedInputs, waitForBalance, paren, STAKE_TICK, sendLock, fail })
+            explorerUrl, chainedInputs, waitForBalance, paren, STAKE_TICK, sendLock, fail,
+            readChainState, planMints, network })
     }
 }
 

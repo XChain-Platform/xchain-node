@@ -122,6 +122,11 @@ function proxyDatabaseService(capture, options) {
             getStatus: async () => ({}),
             getInstalledCoinsAndNetworks: async () => options.installedCoins || {}
         },
+        // Bundled-mode fixtures cannot inherit an operator's persisted external-DB marker.
+        './credentials_service': {
+            isKnownExternalDbHost: () => false,
+            '@noCallThru': false
+        },
         './docker_service': {
             getStatusFromContainer: async () => ({
                 State: { Status: 'running' },

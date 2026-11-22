@@ -163,6 +163,38 @@ describe('ValidatorStakeService', function () {
             expect(calls.stake).to.have.length(1)
         })
 
+        it('refreshes stake eligibility after waiting for mints', async function () {
+            const existing = {
+                status: 'valid', signing_pubkey: PUBKEY, source: ADDRESS, amount: '25000',
+                action_index: '44', activation_block: '150313'
+            }
+            const { calls, result } = await run(
+                { broadcast: true, serialize: true, balancePollMs: 5 },
+                { xchain: 0, coin: '0.001', existingAfterMint: existing }
+            )
+            expect(calls.mint).to.have.length(3)
+            expect(calls.stake).to.have.length(0)
+            expect(result.staked).to.equal(false)
+            expect(result.existing).to.equal(existing)
+        })
+
+        it('refuses when the eligibility refresh fails after minting', async function () {
+            const { calls, result } = await run(
+                { broadcast: true, serialize: true, balancePollMs: 5 },
+                { xchain: 0, coin: '0.001', validatorsThrowAfterMint: 'explorer unavailable' }
+            )
+            expect(calls.mint).to.have.length(3)
+            expect(calls.stake).to.have.length(0)
+            expect(result.staked).to.equal(false)
+            expect(result.blockers.join(' ')).to.include('could not read the validator set')
+        })
+    })
+})
+
+describe('ValidatorStakeService', function () {
+
+    describe('stakeValidator()', function () {
+
         it('skips minting when already funded', async function () {
             const { calls } = await run({ broadcast: true }, { xchain: 25000, coin: '0.001' })
             expect(calls.mint).to.have.length(0)

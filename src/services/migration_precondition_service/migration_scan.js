@@ -55,9 +55,9 @@ function migrationDeclaresDeployPrecondition(raw) {
  * Prologue-anchored like migrationDeclaresDeployPrecondition, so a token in body prose
  * or a data literal cannot answer for the file.
  *
- * Twin of Database.prototype.migrationMode in xchain-indexer src/db/database/migration_scan.js
- * and xchain-decoder src/db/migration_statements.js, duplicated for the reason given
- * above. Keep the scan, the tag regex and the default in step.
+ * Keep aligned with xchain-indexer/src/db/database/migration_scan.js,
+ * xchain-decoder/src/db/migration_statements.js, and
+ * xchain-hub/src/db/schema/sql_migration_files.js.
  */
 function migrationMode(raw) {
     const prologue = []
@@ -66,8 +66,8 @@ function migrationMode(raw) {
         if (trimmed === '' || trimmed.startsWith('--')) { prologue.push(line); continue }
         break
     }
-    const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im)
-    return m ? m[1].toLowerCase() : 'manual'
+    const modes = prologue.flatMap(line => { const header = /^\s*--\s*xchain:migration\b(.*)$/i.exec(line); return header ? [...header[1].matchAll(/\bmode\s*=\s*([A-Za-z]+)\b/gi)].map(token => token[1].toLowerCase()) : [] })
+    return modes.length > 0 && modes.every(mode => mode === 'auto') ? 'auto' : 'manual'
 }
 
 const LEDGER_RENAMES_FILE = 'src/db/database/migration_registry.js'
@@ -129,10 +129,9 @@ function rekeyApplied(applied, renames) {
 
 /**
  * Every gated (not mode=auto) migration in `dir` that the ledger has not recorded,
- * sorted. This is the blast radius of an UNSCOPED migrate run against that
- * database: the runner applies every pending manual file, not just the one an
- * operator names. The refusal names that whole set, so the consequence is on
- * screen rather than left for the operator to discover.
+ * sorted. This is an upper bound on the blast radius of an UNSCOPED migrate run:
+ * the runner considers every pending manual file, but a migration precondition can
+ * baseline one without executing it. The refusal names that whole inventory.
  */
 function pendingManualMigrations(dir, applied) {
     return migrationFiles(dir).filter(([f, file]) => {
@@ -365,8 +364,8 @@ function refusalMessage(module, coin, network, dbName, missing, remedy = {}) {
             (remedy.supportsPerFile === false
                 ? 'That container did not return a valid --status --json response, so --file support is not verified'
                 : 'Whether that container\'s build honours --file could not be read, and an unverified capability is not one: it may ignore --file') +
-            ' and apply EVERY pending manual migration on ' + dbName + ', which is ' +
-            wouldApply.length + ' file(s)' + source + ':\n' +
+            ' and can consider up to ' + wouldApply.length + ' pending manual migration file(s) on ' + dbName +
+            source + '. A migration precondition may baseline a listed file without executing it:\n' +
             wouldApply.map(f => '    ' + f + wouldApplyNote(f, carried, remedy)).join('\n') + '\n' +
             '  Apply ' + (plural ? 'the needed files' : 'the needed file') + ' with a build that supports ' +
             '--file, or apply the statement by hand with the writer quiesced, then re-run the update.' +

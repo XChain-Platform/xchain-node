@@ -31,6 +31,11 @@ function configureCapture(capture) {
     }
     capture.when(/docker (kill|stop)/).respondsWith(extractId)
     capture.when(/docker rm/).respondsWith(extractId)
+    // The name-keyed presence probe before a (re)create: the name is free unless a
+    // test sets capture.nameHeld, in which case docker reports a container id.
+    capture.when(/docker inspect --type container/).respondsWith(() => capture.nameHeld
+        ? { stdout: 'a'.repeat(64) + '\n' }
+        : { stderr: 'Error: No such object: x', error: new Error('No such object: x') })
     // `git clone` is mocked out (no real network/process runs), but
     // buildAndUp's LIBRARY_BUNDLES staging (ea43475) does a REAL
     // fs.cpSync from the cloned module's directory into the parent

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-22
+
+### Added
+- Added federation-wide hub checkpoint and capability-row rebuilds for coordinated recovery.
+
+### Changed
+- Gave testnet indexers a ten-minute health stall grace while preserving operator overrides.
+- Passed TRUST_PROXY through to the sync container and the new regtest activation variables through to regtest indexers.
+
+### Fixed
+- Allowed targeted indexer and decoder repairs to continue when a hub refuses its configuration push.
+- Hardened bootstrap archive checks, sidecar credential migration, command locks and republish ledgers.
+
+### Security
+- Updated bitcoinjs-lib and vulnerable dependencies, including axios, follow-redirects, semver, hono, qs, serialize-javascript and minimatch.
+
+### Changed
+- The testnet indexer now waits 10 minutes before its health check reports a stall, and `INDEXER_HEALTH_STALL_GRACE_MS` on the host overrides it on any network.
+
 ## [0.27.0] - 2026-11-01
 
 ### Added

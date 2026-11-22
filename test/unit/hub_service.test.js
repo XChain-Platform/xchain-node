@@ -176,8 +176,8 @@ describe('HubService.updateHubOrExplorer config delivery', function () {
     })
 })
 
-// A hub that is crash-looping answers nothing, so the config push spends ten
-// attempts on connection refusals and then aborts whatever command asked for it.
+// A hub that is crash-looping answers nothing, so the config push exhausts its
+// retry budget on connection refusals and then aborts whatever command asked for it.
 // `skipConfigPush` lets a caller that has already established the hub is down
 // keep the half that still works: the shared containers are attached to their
 // coin networks (a docker operation, which does not need the hub serving) while

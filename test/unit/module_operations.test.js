@@ -62,6 +62,15 @@ describe('moduleOperations', function () {
             expect(stubs.installModule.callCount).to.equal(3)
             expect(stubs.createDockerNetwork.callCount).to.equal(3)
         })
+
+        it('reuses a pre-resolved install target without resolving again', async function () {
+            const stubs = makeStubs()
+            const ops = loadOperations(stubs)
+            const target = { kind: 'release', ref: 'v1.2.3', tag: 'v1.2.3', manifest: {}, resolvedFrom: 'pre-resolved' }
+            await ops.installModules({ bitcoin: { mainnet: ['xchain-encoder'] } }, null, target)
+            expect(resolveInstallTargetStub.called).to.equal(false)
+            expect(recordInstallTargetStub.calledOnceWith(target)).to.equal(true)
+        })
     })
 })
 

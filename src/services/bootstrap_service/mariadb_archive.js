@@ -22,6 +22,8 @@ let zlib                  = require('zlib')
 let { execFile, spawn }   = require('child_process')
 const { promisify }       = require('util')
 const { PassThrough }     = require('stream')
+const { waitForProducerOutput } = require('./producer_completion')
+const { createDumpSyncStateInspector } = require('./dump_sync_state_inspector')
 let execFileAsync         = promisify(execFile)
 
 let { XChainService, SEP, EXTERNAL_DB } = require('../../config')
@@ -30,7 +32,12 @@ const { tipHeightSql } = require('../../db/blocks')
 let { getDefaultConfig, getModuleDatabaseName } = require('../config_service')
 let { getDatabaseContainerId, getExternalDbConfig, executeNativeMariaDbCommand } = require('../database_service')
 let databaseService = require('../database_service')
-let { assertBootstrapSourceHealthy } = require('../bootstrap_health_gate')
+let {
+    assertBootstrapSourceHealthy,
+    BootstrapSourceUnhealthyError,
+    gateSkipped,
+    pendingSyncHaltReason
+} = require('../bootstrap_health_gate')
 let { buildBootstrapMeta, writeBootstrapMeta } = require('../bootstrap_archive_meta')
 const { dockerMariadbArgs, mariadbEnv } = require('../../utils/docker_mariadb')
 const { configuredDatabaseName } = require('../../utils/module_database_name')
@@ -49,7 +56,12 @@ function configureDependencies(dependencies) {
     ;({ getDefaultConfig, getModuleDatabaseName } = dependencies.configService)
     databaseService = dependencies.databaseService
     ;({ getDatabaseContainerId, getExternalDbConfig, executeNativeMariaDbCommand } = databaseService)
-    ;({ assertBootstrapSourceHealthy } = dependencies.bootstrapHealthGate)
+    ;({
+        assertBootstrapSourceHealthy,
+        BootstrapSourceUnhealthyError,
+        gateSkipped,
+        pendingSyncHaltReason
+    } = dependencies.bootstrapHealthGate)
     ;({ buildBootstrapMeta, writeBootstrapMeta } = dependencies.archiveMeta)
     ;({ maybeSignBootstrap, computeSha256 } = dependencies.archiveSigning)
     ;({ startProgress, buildDateTimeString, getWorkDir, ensureDir, ensureDirWritable } = dependencies.workspace)
@@ -66,8 +78,9 @@ async function makeBootstrapMariaDb(coin, network, module, preflightWatermark = 
     ensureDir(context.workDir)
     await ensureDirWritable(context.outputDir)
 
-    await dumpMariaDatabase(context, totalBytes)
+    const dumpVerdict = await dumpMariaDatabase(context, totalBytes)
     await assertMariaSourceStayedHealthy(coin, network, module, preflightWatermark, context)
+    assertCapturedDumpHealthy(coin, network, module, context, dumpVerdict)
     await finalizeMariaArchive(coin, network, module, context)
     return true
 }
@@ -127,31 +140,32 @@ async function estimateMariaDatabase({ dbContainerId, dbName, externalCfg, rootP
 
 async function dumpMariaDatabase({ dbContainerId, dbName, externalCfg, innerArchive, rootPassword }, totalBytes) {
     const progress = startProgress(`Dumping ${dbName}...`, totalBytes)
-    await new Promise((resolve, reject) => {
-        const dumpProc    = EXTERNAL_DB
-            ? spawn('mariadb-dump',
-                ['-h', externalCfg.host, '-P', String(externalCfg.port), '-u', externalCfg.root_user,
-                 '--single-transaction', '--routines', '--triggers', dbName],
-                { env: mariadbEnv(externalCfg.root_password) })
-            : spawn('docker', dockerMariadbArgs(dbContainerId, ['mariadb-dump', '-u', 'root', '--single-transaction', '--routines', '--triggers', dbName], { interactive: true }), { env: mariadbEnv(rootPassword) })
-        const counter     = new PassThrough()
-        const gzipStream  = zlib.createGzip()
-        const writeStream = fs.createWriteStream(innerArchive)
-
-        counter.on('data', chunk => progress.update(chunk.length))
-
-        dumpProc.stdout.pipe(counter).pipe(gzipStream).pipe(writeStream)
-
-        dumpProc.stderr.on('data', () => {})
-        dumpProc.on('error', err => reject(err))
-        writeStream.on('error', err => reject(err))
-        writeStream.on('finish', resolve)
-        dumpProc.on('close', code => {
-            if (code !== 0) reject(new Error(`mariadb-dump exited with code ${code}`))
-        })
+    const dumpProc    = EXTERNAL_DB
+        ? spawn('mariadb-dump',
+            ['-h', externalCfg.host, '-P', String(externalCfg.port), '-u', externalCfg.root_user,
+             '--single-transaction', '--routines', '--triggers', dbName],
+            { env: mariadbEnv(externalCfg.root_password) })
+        : spawn('docker', dockerMariadbArgs(dbContainerId, ['mariadb-dump', '-u', 'root', '--single-transaction', '--routines', '--triggers', dbName], { interactive: true }), { env: mariadbEnv(rootPassword) })
+    const counter     = new PassThrough()
+    const gzipStream  = zlib.createGzip()
+    const writeStream = fs.createWriteStream(innerArchive)
+    const inspector   = createDumpSyncStateInspector()
+    const completed   = waitForProducerOutput({
+        producer: dumpProc, writeStream, streams: [counter, gzipStream], failureName: 'mariadb-dump'
     })
+    const inspected = new Promise((resolve, reject) => {
+        inspector.on('finish', resolve)
+        inspector.on('error', reject)
+    })
+
+    counter.on('data', chunk => progress.update(chunk.length))
+    dumpProc.stderr.on('data', () => {})
+    dumpProc.stdout.pipe(counter).pipe(gzipStream).pipe(writeStream)
+    counter.pipe(inspector)
+    await Promise.all([completed, inspected])
     const innerStats = await fs.promises.stat(innerArchive)
     progress.stop(`${dbName} dumped: ${(innerStats.size / 1024 / 1024).toFixed(1)} MB compressed`)
+    return inspector.getVerdict()
 }
 
 async function assertMariaSourceStayedHealthy(coin, network, module, preflightWatermark, { dbName, workDir }) {
@@ -170,7 +184,8 @@ async function assertMariaSourceStayedHealthy(coin, network, module, preflightWa
     // snapshot while both readings look clean. `since` is the pre-flight gate's
     // marker-table watermark, and the marker tables are append-only and id-ordered,
     // so the gate can ask what was RAISED anywhere in the dump window rather than
-    // only the current live state.
+    // only the current live state. sync_state has no append-only evidence, so its
+    // halt_pending and rollback_guard rows are checked in the captured bytes.
     //
     // Still deliberately conservative rather than exact: a halt raised after the
     // snapshot point, which the archive therefore does not carry, also refuses.
@@ -187,6 +202,23 @@ async function assertMariaSourceStayedHealthy(coin, network, module, preflightWa
         try { fs.rmSync(workDir, { recursive: true }) } catch { /* the refusal is what matters */ }
         throw err
     }
+}
+
+function assertCapturedDumpHealthy(coin, network, module, { dbName, workDir }, verdict) {
+    if (gateSkipped()) return
+    const reasons = []
+    if (verdict.pendingHalt > 0)
+        reasons.push(pendingSyncHaltReason('the captured dump'))
+    if (verdict.rollbackGuardInvalid > 0)
+        reasons.push('the captured dump carries an invalid xchain-sync rollback_guard row in sync_state. ' +
+            'xchain-sync halts on this row at startup; clear the halt through xchain-sync, then re-run the publish.')
+    for (const detail of verdict.unreadable)
+        reasons.push(`could not read sync_state from the captured dump: ${detail}`)
+    if (reasons.length === 0) return
+
+    logger.info(`The captured ${dbName} dump contains unsafe or unreadable sync_state rows; discarding it.`)
+    try { fs.rmSync(workDir, { recursive: true }) } catch { /* the refusal is what matters */ }
+    throw new BootstrapSourceUnhealthyError(`${coin}/${network} ${module}`, reasons)
 }
 
 async function finalizeMariaArchive(coin, network, module, context) {

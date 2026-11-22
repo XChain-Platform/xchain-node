@@ -21,7 +21,7 @@ const {
     NODE_MODULE_NAME, DB_MODULE_NAME, HUB_MODULE_NAME, EXPLORER_MODULE_NAME, SYNC_MODULE_NAME,
     XChainService, Coin, Network, SEP
 } = require('../config')
-const { db, getRemoteModuleVersions }   = require('../state')
+const { db, getRemoteModuleVersions, setStatusUpdated } = require('../state')
 const { getStatus, statusChanged }       = require('../services/status_service')
 const { redactSecrets }                  = require('../utils/helpers')
 const { cloneGit, installModule } = require('../services/module_service')
@@ -51,6 +51,13 @@ async function withMutatingLock(label, fn) {
         return undefined
     }
     try {
+        try {
+            await scanAndRegisterModules({ silent: true })
+            setStatusUpdated(false)
+        } catch (err) {
+            console.log(redactSecrets(err && err.message ? err.message : err))
+            return undefined
+        }
         return await fn()
     } finally {
         lock.release()
@@ -206,7 +213,7 @@ async function runInstalledModuleAction(actionAnswer, selected, coin, network) {
             // Same contract as "Make Bootstrap" above: an integrity
             // refusal is an expected outcome, so report it and stay in
             // the TUI instead of tearing it down with a stack trace.
-            if (err && err.name === 'BootstrapIntegrityError') console.log(redactSecrets(err.message))
+            if (err && (err.name === 'BootstrapIntegrityError' || err.name === 'BootstrapNodeTipRefusedError')) console.log(redactSecrets(err.message))
             else throw err
         }
     } else if (actionAnswer === ACTION_REINSTALL_REMOTE) {

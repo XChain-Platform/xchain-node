@@ -297,6 +297,49 @@ function sharedServiceConfig6() {
     })
 }
 
+function sharedServiceConfig7() {
+    const KEY = 'EXPLORER_INDEXER_API_KEY'
+    const LOCAL = 'INDEXER_API_KEY'
+    const URL = 'INDEXER_API_URL_BTC_MAINNET'
+    let saved
+
+    beforeEach(function () {
+        saved = { key: process.env[KEY], local: process.env[LOCAL], url: process.env[URL] }
+        delete process.env[KEY]
+        delete process.env[LOCAL]
+        delete process.env[URL]
+    })
+
+    afterEach(function () {
+        for (const [name, value] of [[KEY, saved.key], [LOCAL, saved.local], [URL, saved.url]]) {
+            if (value === undefined) delete process.env[name]; else process.env[name] = value
+        }
+    })
+
+    it('passes an explicit explorer indexer key through', async function () {
+        process.env[KEY] = 'explorer-key'
+        process.env[LOCAL] = 'local-key'
+        const config = await makeServiceWithConfig('').getDefaultConfig(EXPLORER_MODULE_NAME, null, null)
+        expect(config[KEY]).to.equal('explorer-key')
+    })
+
+    it('reuses the managed indexer key only for container-local indexers', async function () {
+        process.env[LOCAL] = 'local-key'
+        const cs = makeServiceWithConfig('')
+        expect((await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null))[KEY]).to.equal('local-key')
+        process.env[URL] = 'http://192.0.2.1:3004'
+        expect(await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)).to.not.have.property(KEY)
+    })
+
+    it('omits the explorer key when no key is configured and from other modules', async function () {
+        const cs = makeServiceWithConfig('')
+        expect(await cs.getDefaultConfig(EXPLORER_MODULE_NAME, null, null)).to.not.have.property(KEY)
+        process.env[KEY] = 'explorer-key'
+        const sync = await cs.getDefaultConfig(SYNC_MODULE_NAME, null, null)
+        expect(sync).to.not.have.property(KEY)
+    })
+}
+
 describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('without coin/network (shared service config)', sharedServiceConfig1)
@@ -330,5 +373,11 @@ describe('ConfigService', function () {
 describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('without coin/network (shared service config)', sharedServiceConfig6)
+    })
+})
+
+describe('ConfigService', function () {
+    describe('getDefaultConfig()', function () {
+        describe('without coin/network (shared service config)', sharedServiceConfig7)
     })
 })

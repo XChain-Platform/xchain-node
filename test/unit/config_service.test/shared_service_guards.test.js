@@ -157,7 +157,7 @@ function oracleBatchPassthrough() {
 
 // The hub-side regtest-only override seams. The gate that keeps
 // them inert off regtest lives at the point of consumption (attest_response_timing.js,
-// and the not-yet-built AttestationBatchPublisher on the same pattern), so this
+// which the hub's batch_publisher.js also uses to resolve the batch window), so this
 // suite only pins that the passthrough itself reaches the container config.
 function attestOverridePassthrough() {
     const ATTEST_OVERRIDE_VARS = [
@@ -198,6 +198,30 @@ function attestOverridePassthrough() {
         for (const k of ATTEST_OVERRIDE_VARS) expect(config[k]).to.be.undefined
     })
 
+}
+
+function unverifiedPairsPassthrough() {
+    const key = 'ORACLE_ALLOW_UNVERIFIED_PAIRS'
+    let saved
+    beforeEach(function () {
+        saved = process.env[key]
+        delete process.env[key]
+    })
+    afterEach(function () {
+        if (saved === undefined) delete process.env[key]
+        else process.env[key] = saved
+    })
+
+    it('injects the override from host env into the hub config', async function () {
+        process.env[key] = 'true'
+        const config = await makeServiceWithConfig('').getDefaultConfig(HUB_MODULE_NAME, null, null)
+        expect(config[key]).to.equal('true')
+    })
+
+    it('leaves the override unset when host env is absent', async function () {
+        const config = await makeServiceWithConfig('').getDefaultConfig(HUB_MODULE_NAME, null, null)
+        expect(config).to.not.have.property(key)
+    })
 }
 
 // The per-coin confirmation depth the hub's cross-chain engines gate a source
@@ -254,6 +278,14 @@ describe('ConfigService', function () {
     describe('getDefaultConfig()', function () {
         describe('without coin/network (shared service config)', function () {
             describe('hub keyless declaration', hubKeylessDeclaration)
+        })
+    })
+})
+
+describe('ConfigService', function () {
+    describe('getDefaultConfig()', function () {
+        describe('without coin/network (shared service config)', function () {
+            describe('unverified pair override passthrough', unverifiedPairsPassthrough)
         })
     })
 })
