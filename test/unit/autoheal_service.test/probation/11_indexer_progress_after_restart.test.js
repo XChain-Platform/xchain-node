@@ -96,6 +96,49 @@ async function restartThenProbe(ctx, module, payload, id = 'progress1') {
     return { id, result, state, readIndexerStatus }
 }
 
+function seedRestartHistory(ctx, id) {
+    const stateFile = path.join(ctx.stateDir, 'autoheal-state.json')
+    fs.writeFileSync(stateFile, JSON.stringify({
+        restarts: { [id]: NOW },
+        unhealthySince: { [id]: NOW - 10 * 60000 },
+        restartCount: { [id]: 3 },
+        stoppedByAutoheal: {}
+    }))
+    return stateFile
+}
+
+async function verifyReseededHistory(ctx, id, stateFile, readIndexerStatus) {
+    const reseedAt = NOW + 22 * 60000
+    ctx.stubs.getStatusFromContainer.resolves(inspectStatus('unhealthy', [
+        probe(NOW + 18 * 60000, 0), probe(NOW + 21 * 60000, 1), probe(reseedAt, 1)
+    ]))
+    await ctx.service.runAutoheal({ now: reseedAt, readIndexerStatus })
+    const retained = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
+    expect(retained.restartCount[id]).to.equal(3)
+    expect(readIndexerStatus.calledOnce).to.equal(true)
+}
+
+async function verifyCooldownEscalation(ctx, id, readIndexerStatus) {
+    const cooldownAt = NOW + 32 * 60000
+    ctx.stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(cooldownAt))
+    const result = await ctx.service.runAutoheal({ now: cooldownAt, readIndexerStatus })
+    expect(result.skipped.some(entry => entry.reason === 'inside restart cooldown')).to.equal(true)
+    expect(result.escalated).to.deep.equal([{
+        module: 'xchain-indexer', coin: 'bitcoin', network: 'regtest', containerId: id, attempts: 3
+    }])
+    expect(ctx.stubs.startContainer.called).to.equal(false)
+    expect(ctx.service.autohealExitCode(result)).to.equal(2)
+}
+
+async function keepsReseededHistory(ctx) {
+    const id = 'relapsed1'
+    const stateFile = seedRestartHistory(ctx, id)
+    ctx.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', id)])
+    const readIndexerStatus = sinon.stub().resolves(null)
+    await verifyReseededHistory(ctx, id, stateFile, readIndexerStatus)
+    await verifyCooldownEscalation(ctx, id, readIndexerStatus)
+}
+
 describe('Autoheal indexer progress after a restart', () => {
     const ctx = useAutoheal()
 
@@ -135,36 +178,8 @@ describe('Autoheal indexer progress after a restart', () => {
         expect(ctx.service.autohealExitCode(h.result)).to.equal(0)
     })
 
-    it('keeps reseeded indexer history without progress and preserves cooldown escalation', async () => {
-        const id = 'relapsed1'
-        const stateFile = path.join(ctx.stateDir, 'autoheal-state.json')
-        fs.writeFileSync(stateFile, JSON.stringify({
-            restarts: { [id]: NOW },
-            unhealthySince: { [id]: NOW - 10 * 60000 },
-            restartCount: { [id]: 3 },
-            stoppedByAutoheal: {}
-        }))
-        ctx.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', id)])
-        const reseedAt = NOW + 22 * 60000
-        ctx.stubs.getStatusFromContainer.resolves(inspectStatus('unhealthy', [
-            probe(NOW + 18 * 60000, 0), probe(NOW + 21 * 60000, 1), probe(reseedAt, 1)
-        ]))
-        const readIndexerStatus = sinon.stub().resolves(null)
-        await ctx.service.runAutoheal({ now: reseedAt, readIndexerStatus })
-        const retained = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
-        expect(retained.restartCount[id]).to.equal(3)
-        expect(readIndexerStatus.calledOnce).to.equal(true)
-
-        const cooldownAt = NOW + 32 * 60000
-        ctx.stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(cooldownAt))
-        const result = await ctx.service.runAutoheal({ now: cooldownAt, readIndexerStatus })
-        expect(result.skipped.some(entry => entry.reason === 'inside restart cooldown')).to.equal(true)
-        expect(result.escalated).to.deep.equal([{
-            module: 'xchain-indexer', coin: 'bitcoin', network: 'regtest', containerId: id, attempts: 3
-        }])
-        expect(ctx.stubs.startContainer.called).to.equal(false)
-        expect(ctx.service.autohealExitCode(result)).to.equal(2)
-    })
+    it('keeps reseeded indexer history without progress and preserves cooldown escalation',
+        async function keepsReseededIndexerHistory() { await keepsReseededHistory(ctx) })
 })
 
 describe('Autoheal indexer status reads', () => {
