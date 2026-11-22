@@ -364,6 +364,33 @@ function registerClearReorgHalt(program, deps) {
         })
 
 }
+
+function registerRestoreDump(program, deps) {
+    const { restoreDump, redactSecrets } = deps
+    program
+        .command('restore-dump')
+        .description('Restore an xchain-backup.sh .sql.gz dump into one service database')
+        .argument('<service>', '(xchain-decoder, xchain-indexer)')
+        .argument('<chain>', '(bitcoin, litecoin, dogecoin)')
+        .argument('<network>', '(mainnet, testnet, regtest)')
+        .requiredOption('--file <path>', 'path to the xchain-backup.sh .sql.gz dump')
+        .option('--yes', 'confirm replacing the service database without prompting')
+        .option('--allow-mainnet', 'allow a mainnet database restore')
+        .action(async (service, chain, network, options) => {
+            try {
+                await restoreDump(service, chain, network, {
+                    file: options.file,
+                    yes: options.yes === true,
+                    allowMainnet: options.allowMainnet === true
+                })
+                return process.exit(0)
+            } catch (err) {
+                console.error('restore-dump failed: ' + redactSecrets(err && err.message ? err.message : err))
+                return process.exit(1)
+            }
+        })
+}
+
 function registerShell(program, deps) {
     const { filterCommandParameters, shellModule } = deps
     program
@@ -393,6 +420,7 @@ function registerPrimaryCommands(program, deps) {
 function registerToolCommands(program, deps) {
     registerExec(program, deps)
     registerClearReorgHalt(program, deps)
+    registerRestoreDump(program, deps)
     registerShell(program, deps)
     registerBootstrapRestoreRehearsal(program, deps)
 }

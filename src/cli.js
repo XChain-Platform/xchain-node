@@ -43,6 +43,7 @@ const { getStatus }            = require('./services/status_service')
 const { scanAndRegisterModules } = require('./services/discovery_service')
 const { maybeReportTelemetry } = require('./services/telemetry_service')
 const { makeBootstrap, listServedBootstrapCombos } = require('./services/bootstrap_service')
+const { restoreDump } = require('./services/dump_restore_service')
 const { listRepublishDue, parseComboKey, recordBootstrapPublished } = require('./services/bootstrap_republish_ledger')
 const { initValidator, getValidatorSettings, isInitialized, describeCapabilityConfigPath,
         readWallets, publicWalletInfo, getSignerHostDir, COIN_NETWORKS, WALLETS_FILE,
@@ -197,7 +198,7 @@ async function parseCommand() {
         updateModules, recreateModules, uninstallModules, logModules, monitorModules,
         restartModules, stopModules, startModules, execModules, clearDecoderReorgHalt,
         shellModule, runE2ETest, resetModules, getStatus, scanAndRegisterModules,
-        maybeReportTelemetry, makeBootstrap, listServedBootstrapCombos, listRepublishDue,
+        maybeReportTelemetry, makeBootstrap, restoreDump, listServedBootstrapCombos, listRepublishDue,
         parseComboKey, recordBootstrapPublished,
         initValidator, getValidatorSettings, isInitialized, describeCapabilityConfigPath,
         readWallets, publicWalletInfo, getSignerHostDir, COIN_NETWORKS, WALLETS_FILE,
