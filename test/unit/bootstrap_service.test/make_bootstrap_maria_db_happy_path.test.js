@@ -214,9 +214,12 @@ describe('BootstrapService', function () {
 
             // First execFile (size estimate) fails → catch at line 271; others succeed
             let execCallCount = 0
-            stubs.execFile = sinon.stub().callsFake(() => {
+            stubs.execFile = sinon.stub().callsFake((cmd, args) => {
                 execCallCount++
                 if (execCallCount === 1) return Promise.reject(new Error('size estimate failed'))
+                if (cmd === 'docker' && args.some(arg => /MAX\(block_index\)/.test(String(arg)))) {
+                    return Promise.resolve({ stdout: '0\n' })
+                }
                 return Promise.resolve({ stdout: '' })
             })
 

@@ -72,7 +72,7 @@ const {
 } = require('./autoheal_service/restart_state.js')
 const { recordInspectFailure, logPassSummary, autohealExitCode } = require('./autoheal_service/pass_signals.js')
 const {
-    classifyIndexerRecovery, defaultReadIndexerStatus, skipNonUnhealthy
+    classifyIndexerRecovery, defaultReadIndexerStatus, indexerRecoveryVerdict, skipNonUnhealthy
 } = require('./autoheal_service/indexer_recovery.js')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
@@ -193,7 +193,8 @@ function seedEpisodeOnset(health, state, containerId, now, derived) {
     return { since, lastHealthy, onsetReseeded }
 }
 
-function clearRecoveredRestartCount(state, containerId, episode, probationMs) {
+async function clearRecoveredRestartCount(candidate, state, episode, probationMs, readIndexerStatus) {
+    const { containerId, label } = candidate
     // The attempt count means "restarts since this container was last
     // healthy", so a reseeded onset and a surviving count are two halves of
     // one rule pulled apart: the `!== unhealthy` branch above never sees a
@@ -207,11 +208,16 @@ function clearRecoveredRestartCount(state, containerId, episode, probationMs) {
     // Absence of a pass still changes nothing, here as there.
     if (!episode.onsetReseeded || state.restartCount[containerId] === undefined ||
         !isRecoveryEstablished(episode.lastHealthy, state.restarts[containerId], probationMs)) return false
+    const { recovery } = await indexerRecoveryVerdict(candidate, state, readIndexerStatus)
+    if (recovery !== 'recovered' && recovery !== 'fallback') {
+        logger.info(`autoheal: ${label} passed a probe between passes, but its progress does not confirm recovery; keeping restart history`)
+        return false
+    }
     delete state.restartCount[containerId]
     return true
 }
 
-function establishEpisode(candidate, health, state, now, probationMs, result) {
+async function establishEpisode(candidate, health, state, now, probationMs, result, readIndexerStatus) {
     const { module, coin, network, containerId } = candidate
     const derived = getUnhealthySinceMs(health)
     if (derived === null) {
@@ -220,7 +226,8 @@ function establishEpisode(candidate, health, state, now, probationMs, result) {
     }
 
     const episode = seedEpisodeOnset(health, state, containerId, now, derived)
-    const restartCountCleared = clearRecoveredRestartCount(state, containerId, episode, probationMs)
+    const restartCountCleared = await clearRecoveredRestartCount(
+        candidate, state, episode, probationMs, readIndexerStatus)
     return { since: episode.since, changed: episode.onsetReseeded || restartCountCleared }
 }
 
@@ -360,7 +367,8 @@ async function runAutoheal({ dryRun = false, resumeStopped = false, now = Date.n
             continue
         }
 
-        const episode = establishEpisode(candidate, health, state, now, timing.probationMs, result)
+        const episode = await establishEpisode(
+            candidate, health, state, now, timing.probationMs, result, readIndexerStatus)
         if (!episode) continue
         if (episode.changed) onsetChanged = true
         if (await restartEligibleCandidate(candidate, episode.since, timing, state, result, dryRun, now, wallStart, stateFile)) {

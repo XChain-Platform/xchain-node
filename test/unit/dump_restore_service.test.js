@@ -47,15 +47,15 @@ function fakeChild(onInput) {
     return child
 }
 
-function harness() {
+function harness(overrides = {}) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-dump-restore-'))
     const events = []
     const spawns = []
     const logs = []
     const clearHubPriceIngestWatermark = sinon.stub()
     const recordReindex = sinon.stub()
-    const spawn = sinon.stub().callsFake((file, args) => {
-        spawns.push({ file, args })
+    const spawn = sinon.stub().callsFake((file, args, options) => {
+        spawns.push({ file, args, options })
         return fakeChild((input, child) => {
             if (args.includes(DATABASE)) {
                 events.push('stream')
@@ -89,6 +89,7 @@ function harness() {
         clearHubPriceIngestWatermark,
         recordReindex
     }
+    Object.assign(deps, overrides)
     return {
         directory, deps, events, spawns, logs,
         restoreDump: createDumpRestore(deps),
@@ -170,5 +171,42 @@ describe('DumpRestoreService', function executionTests() {
         expect(h.spawns.every(call => call.args.join(' ').includes('$MYSQL_ROOT_PASSWORD'))).to.equal(true)
         expect(h.clearHubPriceIngestWatermark.called).to.equal(false)
         expect(h.recordReindex.called).to.equal(false)
+    })
+
+    it('restores through the external MariaDB client without using a stale container', async function () {
+        const externalConfig = Object.create(config, { EXTERNAL_DB: { value: true } })
+        const getExternalDbConfig = sinon.stub().resolves({
+            host: '10.0.0.5', port: 3307, root_user: 'root', root_password: 'ext-secret'
+        })
+        const h = harness({
+            config: externalConfig,
+            getExternalDbConfig,
+            mariadbEnv: password => ({ MYSQL_PWD: password })
+        })
+        const file = makeFile(h.directory, `${DATABASE}.external.sql.gz`)
+        const verification = await h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true })
+
+        expect(verification).to.deep.equal({ tableCount: 17, blockRows: 325, maxBlockIndex: 882001 })
+        expect(h.deps.getDatabaseContainerId.called).to.equal(false)
+        expect(h.spawns.every(call => call.file === 'mariadb')).to.equal(true)
+        expect(h.spawns.every(call => call.args.includes('-h') && call.args.includes('10.0.0.5'))).to.equal(true)
+        expect(h.spawns.every(call => call.args.includes('-P') && call.args.includes('3307'))).to.equal(true)
+        expect(h.spawns.every(call => call.options.env.MYSQL_PWD === 'ext-secret')).to.equal(true)
+        expect(JSON.stringify(h.spawns.map(call => call.args))).to.not.include('ext-secret')
+        expect(h.events).to.deep.equal(['stop', 'drop-create', 'stream', 'grant', 'restart', 'verify'])
+    })
+
+    it('touches nothing when external database configuration cannot be read', async function () {
+        const externalConfig = Object.create(config, { EXTERNAL_DB: { value: true } })
+        const h = harness({
+            config: externalConfig,
+            getExternalDbConfig: sinon.stub().rejects(new Error('external configuration unavailable'))
+        })
+        const file = makeFile(h.directory, `${DATABASE}.external.sql.gz`)
+        await expectRefusal(h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true }),
+            /external configuration unavailable/)
+        expect(h.deps.getDatabaseContainerId.called).to.equal(false)
+        expect(h.deps.stopModuleContainer.called).to.equal(false)
+        expect(h.deps.spawn.called).to.equal(false)
     })
 })

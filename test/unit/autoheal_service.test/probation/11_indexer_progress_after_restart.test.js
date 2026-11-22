@@ -43,6 +43,11 @@ function unhealthyPastGrace() {
     return inspectStatus('unhealthy', [11, 10, 5, 1].map((m, i) => probe(NOW - m * 60000, i === 0 ? 0 : 1)))
 }
 
+function unhealthyRingBuffer(at) {
+    return inspectStatus('unhealthy', [60000, 45000, 30000, 15000, 0]
+        .map(offset => probe(at - offset, 1)))
+}
+
 function registryRow(module, containerId) {
     return { module, coin: 'bitcoin', network: 'regtest', container_id: containerId }
 }
@@ -128,6 +133,37 @@ describe('Autoheal indexer progress after a restart', () => {
         expect(h.result.escalated).to.deep.equal([])
         expect(h.state.restartCount[h.id]).to.equal(1)
         expect(ctx.service.autohealExitCode(h.result)).to.equal(0)
+    })
+
+    it('keeps reseeded indexer history without progress and preserves cooldown escalation', async () => {
+        const id = 'relapsed1'
+        const stateFile = path.join(ctx.stateDir, 'autoheal-state.json')
+        fs.writeFileSync(stateFile, JSON.stringify({
+            restarts: { [id]: NOW },
+            unhealthySince: { [id]: NOW - 10 * 60000 },
+            restartCount: { [id]: 3 },
+            stoppedByAutoheal: {}
+        }))
+        ctx.stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', id)])
+        const reseedAt = NOW + 22 * 60000
+        ctx.stubs.getStatusFromContainer.resolves(inspectStatus('unhealthy', [
+            probe(NOW + 18 * 60000, 0), probe(NOW + 21 * 60000, 1), probe(reseedAt, 1)
+        ]))
+        const readIndexerStatus = sinon.stub().resolves(null)
+        await ctx.service.runAutoheal({ now: reseedAt, readIndexerStatus })
+        const retained = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
+        expect(retained.restartCount[id]).to.equal(3)
+        expect(readIndexerStatus.calledOnce).to.equal(true)
+
+        const cooldownAt = NOW + 32 * 60000
+        ctx.stubs.getStatusFromContainer.resolves(unhealthyRingBuffer(cooldownAt))
+        const result = await ctx.service.runAutoheal({ now: cooldownAt, readIndexerStatus })
+        expect(result.skipped.some(entry => entry.reason === 'inside restart cooldown')).to.equal(true)
+        expect(result.escalated).to.deep.equal([{
+            module: 'xchain-indexer', coin: 'bitcoin', network: 'regtest', containerId: id, attempts: 3
+        }])
+        expect(ctx.stubs.startContainer.called).to.equal(false)
+        expect(ctx.service.autohealExitCode(result)).to.equal(2)
     })
 })
 

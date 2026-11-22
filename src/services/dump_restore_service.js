@@ -10,12 +10,13 @@ const { pipeline } = require('stream/promises')
 const config = require('../config')
 const { db } = require('../state')
 const { getDefaultConfig, getModuleDatabaseName } = require('./config_service')
-const { getDatabaseContainerId } = require('./database_service')
+const { getDatabaseContainerId, getExternalDbConfig } = require('./database_service')
 const { stopContainer, startContainer, getContainerStopSettings } = require('./docker_service')
 const { stopModuleContainer } = require('./stop_budget_service')
 const { confirmDestructiveReset } = require('../operations/module_operations/repo_refs')
 const { configuredDatabaseName } = require('../utils/module_database_name')
 const { assertSafeDbIdentifier } = require('../utils/sql_safety')
+const { mariadbEnv } = require('../utils/docker_mariadb')
 const { getLogger } = require('../observability/logger')
 const {
     dropRestoreDatabaseSql,
@@ -33,9 +34,9 @@ const SUPPORTED_SERVICES = [config.XChainService.XCHAIN_DECODER, config.XChainSe
 function defaultDependencies() {
     return {
         fs, path, zlib, spawn, pipeline, Writable, config, db,
-        getDefaultConfig, getModuleDatabaseName, getDatabaseContainerId,
+        getDefaultConfig, getModuleDatabaseName, getDatabaseContainerId, getExternalDbConfig,
         stopContainer, startContainer, getContainerStopSettings, stopModuleContainer,
-        confirmDestructiveReset, configuredDatabaseName, assertSafeDbIdentifier,
+        confirmDestructiveReset, configuredDatabaseName, assertSafeDbIdentifier, mariadbEnv,
         logger: getLogger()
     }
 }
@@ -120,10 +121,16 @@ async function preflight(service, chain, network, options, deps) {
         : 'INDEXER_DB_USER'
     const databaseUser = cfg[userKey]
     deps.assertSafeDbIdentifier(databaseUser, 'database user')
-    const databaseContainerId = await deps.getDatabaseContainerId()
-    if (!databaseContainerId) throw new Error('restore-dump: MariaDB container not found')
+    let databaseContainerId = null
+    let external = null
+    if (deps.config.EXTERNAL_DB) {
+        external = await deps.getExternalDbConfig()
+    } else {
+        databaseContainerId = await deps.getDatabaseContainerId()
+        if (!databaseContainerId) throw new Error('restore-dump: MariaDB container not found')
+    }
     const serviceContainerId = await deps.db.getModuleContainerStrict(service, chain, network)
-    return { databaseContainerId, databaseName, databaseUser, filePath, serviceContainerId }
+    return { databaseContainerId, databaseName, databaseUser, external, filePath, serviceContainerId }
 }
 
 function containerMariaArgs(containerId, databaseName = null, batch = false) {
@@ -135,11 +142,28 @@ function containerMariaArgs(containerId, databaseName = null, batch = false) {
     return args
 }
 
+function mariaCommand(context, databaseName, batch, deps) {
+    if (!context.external) {
+        return { file: 'docker', args: containerMariaArgs(context.databaseContainerId, databaseName, batch) }
+    }
+    const external = context.external
+    return {
+        file: 'mariadb',
+        args: [
+            '-h', external.host, '-P', String(external.port), '-u', external.root_user,
+            ...(batch ? ['-B', '-N'] : []),
+            ...(databaseName ? [databaseName] : [])
+        ],
+        env: deps.mariadbEnv(external.root_password)
+    }
+}
+
 function runSql(context, sql, deps) {
     return new Promise((resolve, reject) => {
-        const child = deps.spawn('docker', containerMariaArgs(context.databaseContainerId, null, true), {
-            stdio: ['pipe', 'pipe', 'pipe']
-        })
+        const command = mariaCommand(context, null, true, deps)
+        const options = { stdio: ['pipe', 'pipe', 'pipe'] }
+        if (command.env) options.env = command.env
+        const child = deps.spawn(command.file, command.args, options)
         let stdout = ''
         let stderr = ''
         child.stdout.on('data', chunk => { stdout += chunk })
@@ -156,9 +180,10 @@ function runSql(context, sql, deps) {
 }
 
 async function importDump(context, deps) {
-    const child = deps.spawn('docker', containerMariaArgs(
-        context.databaseContainerId, context.databaseName
-    ), { stdio: ['pipe', 'ignore', 'pipe'] })
+    const command = mariaCommand(context, context.databaseName, false, deps)
+    const options = { stdio: ['pipe', 'ignore', 'pipe'] }
+    if (command.env) options.env = command.env
+    const child = deps.spawn(command.file, command.args, options)
     child.stderr.on('data', () => {})
     const closed = new Promise((resolve, reject) => {
         child.once('error', reject)

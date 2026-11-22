@@ -57,6 +57,13 @@ async function defaultReadIndexerStatus(candidate) {
     return probeReadinessSurface(candidate.containerId, port, '/status', runner)
 }
 
+async function indexerRecoveryVerdict(candidate, state, readIndexerStatus) {
+    if (candidate.module !== 'xchain-indexer') return { recovery: 'recovered', payload: null }
+    const payload = await readIndexerStatus(candidate)
+    const recovery = classifyIndexerRecovery(payload, state.restarts[candidate.containerId])
+    return { recovery, payload }
+}
+
 async function skipNonUnhealthy(candidate, health, state, probationMs, result, readIndexerStatus) {
     const { module, coin, network, containerId, label } = candidate
     if (health && health.Status === 'unhealthy') return null
@@ -67,11 +74,7 @@ async function skipNonUnhealthy(candidate, health, state, probationMs, result, r
     }
     if (!health || health.Status !== 'healthy' || state.restartCount[containerId] === undefined ||
         !isRecoveryEstablished(getLastHealthyProbeMs(health), state.restarts[containerId], probationMs)) return changed
-    let recovery = 'recovered', payload = null
-    if (module === 'xchain-indexer') {
-        payload = await readIndexerStatus(candidate)
-        recovery = classifyIndexerRecovery(payload, state.restarts[containerId])
-    }
+    const { recovery, payload } = await indexerRecoveryVerdict(candidate, state, readIndexerStatus)
     if (recovery === 'recovered' || recovery === 'fallback') {
         delete state.restartCount[containerId]
         return true
@@ -89,4 +92,4 @@ async function skipNonUnhealthy(candidate, health, state, probationMs, result, r
     return changed
 }
 
-module.exports = { classifyIndexerRecovery, defaultReadIndexerStatus, skipNonUnhealthy }
+module.exports = { classifyIndexerRecovery, defaultReadIndexerStatus, indexerRecoveryVerdict, skipNonUnhealthy }

@@ -233,6 +233,11 @@ async function finalizeMariaArchive(coin, network, module, context) {
     // sit at or above the dump's own tip. Metadata leads the wrapper so the
     // restore reads it without a pass over the archive.
     const archiveHeight = await readMariaDbTipHeight(dbName, { dbContainerId, rootPassword, externalCfg })
+    if (!Number.isInteger(archiveHeight) || archiveHeight < 0) {
+        logger.info(`Could not establish the ${dbName} tip height; refusing to package or sign this bootstrap.`)
+        try { fs.rmSync(workDir, { recursive: true }) } catch { /* the refusal is what matters */ }
+        throw new Error(`Cannot publish ${coin}/${network} ${module}: the ${dbName} tip height could not be read or its blocks table is empty. No archive was packaged or signed; check the database and retry.`)
+    }
     const metaMember = await writeBootstrapMeta(workDir, buildBootstrapMeta({ module, coin, network, height: archiveHeight }))
 
     logger.info(`Wrapping into ${archiveName}...`)
@@ -264,7 +269,7 @@ async function readMariaDbTipHeight(dbName, { dbContainerId, rootPassword, exter
         const height = parseInt(String(out).trim(), 10)
         return Number.isInteger(height) && height >= 0 ? height : null
     } catch (err) {
-        logger.info(`Could not read the ${dbName} tip height for the archive metadata (${redactSecrets(err.message)}); the archive will carry no height.`)
+        logger.info(`Could not read the ${dbName} tip height for the archive metadata (${redactSecrets(err.message)}); publishing will refuse to sign without a height.`)
         return null
     }
 }
