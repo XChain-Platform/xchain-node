@@ -41,7 +41,7 @@ function dispatchSettings(config) {
     // the audited clear it writes must not interleave with reset, restore or recreate.
     // `bootstrap-restore-rehearsal` is included: it creates and drops a disposable
     // database on the shared MariaDB, so it holds the lock from preCheck to exit.
-    const mutatingCommands = ['install', 'update', 'recreate', 'uninstall', 'reset', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal', 'bootstrap-republish-clear']
+    const mutatingCommands = ['install', 'update', 'recreate', 'uninstall', 'reset', 'restore-dump', 'bootstrap', 'sync', 'start', 'stop', 'restart', 'rollback', 'autoheal', 'e2etest', 'clear-reorg-halt', 'bootstrap-restore-rehearsal', 'bootstrap-republish-clear']
     // These commands can write persistent container state, but retain the bounded
     // non-mutating wait before starting. Once started, they hold the lock to exit.
     const holdToExitCommands = ['exec', 'shell']
