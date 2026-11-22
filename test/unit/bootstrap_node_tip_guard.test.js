@@ -184,26 +184,58 @@ describe('BootstrapNodeTipGuard', function () {
         })
 
         it('falls back to the module version when the service cannot be probed', async function () {
+            const container = async () => 'service-cid'
             const old = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: DECODER, archivePath: '/x' }, {
                 readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
-                probeServiceCapability: async () => null, getLocalModuleVersion: async () => '0.15.5'
+                probeServiceCapability: async () => null, getModuleContainer: container,
+                getContainerModuleVersion: async () => '0.15.5'
             })
             expect(old.verdict).to.equal('behind-refuse')
             const fixed = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: DECODER, archivePath: '/x' }, {
                 readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
-                probeServiceCapability: async () => null, getLocalModuleVersion: async () => '0.16.0'
+                probeServiceCapability: async () => null, getModuleContainer: container,
+                getContainerModuleVersion: async () => '0.16.0'
             })
             expect(fixed.verdict).to.equal('behind-wait')
             const legacy = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: TRACKER, archivePath: '/x' }, {
                 readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
-                probeServiceCapability: async () => null, getLocalModuleVersion: async () => '1.0.12'
+                probeServiceCapability: async () => null, getModuleContainer: container,
+                getContainerModuleVersion: async () => '1.0.12'
             })
             expect(legacy.verdict).to.equal('behind-refuse')
             const unknownVersion = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: DECODER, archivePath: '/x' }, {
                 readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
-                probeServiceCapability: async () => null, getLocalModuleVersion: async () => { throw new Error('no package.json') }
+                probeServiceCapability: async () => null, getModuleContainer: container,
+                getContainerModuleVersion: async () => { throw new Error('no package.json') }
             })
             expect(unknownVersion.verdict, 'an unreadable version cannot vouch for the wait').to.equal('behind-refuse')
+        })
+
+        it('uses the target container version and never the newer checkout version', async function () {
+            const localVersion = sinon.stub().resolves('0.28.0')
+            const containerVersion = sinon.stub().resolves('0.15.0')
+            const r = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: DECODER, archivePath: '/x' }, {
+                readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
+                probeServiceCapability: async () => null,
+                getModuleContainer: async () => 'service-cid',
+                getContainerModuleVersion: containerVersion,
+                getLocalModuleVersion: localVersion
+            })
+            expect(r).to.include({ verdict: 'behind-refuse', refuse: true })
+            expect(containerVersion.calledOnceWithExactly(DECODER, 'bitcoin', 'mainnet', 'service-cid')).to.equal(true)
+            expect(localVersion.called).to.equal(false)
+        })
+
+        it('refuses when no target container is registered for the fallback', async function () {
+            const version = sinon.stub().resolves('0.28.0')
+            const r = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: DECODER, archivePath: '/x' }, {
+                readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
+                probeServiceCapability: async () => null,
+                getModuleContainer: async () => null,
+                getContainerModuleVersion: version
+            })
+            expect(r).to.include({ verdict: 'behind-refuse', refuse: true })
+            expect(version.called).to.equal(false)
         })
     })
 })
@@ -221,7 +253,7 @@ describe('BootstrapNodeTipGuard', function () {
             const version = sinon.stub().resolves('0.1.0')
             const r = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: INDEXER, archivePath: '/x' }, {
                 readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: behindNode,
-                probeServiceCapability: probe, getLocalModuleVersion: version
+                probeServiceCapability: probe, getContainerModuleVersion: version
             })
             expect(r.verdict).to.equal('behind-wait')
             expect(probe.called).to.equal(false)

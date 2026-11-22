@@ -44,10 +44,9 @@
  *
  * Whether the service waits is read from the service itself: an image with
  * the fix publishes `node_catching_up` on its status surface (null when not
- * waiting), so its presence is the capability. When the surface cannot be
- * read (the container is still coming up) the module's package.json version
- * decides. Platform-stream releases from 0.16.0 through 0.x carry the wait;
- * legacy 1.x releases predate it. The indexer always passes.
+ * waiting), so its presence is the capability. When the surface cannot be read,
+ * the target container's package.json version decides. Platform-stream releases from 0.16.0
+ * through 0.x carry the wait; legacy 1.x releases predate it. The indexer always passes.
  *
  * Escape hatch: XCHAIN_NODE_SKIP_NODE_TIP_GUARD=1 (loudly warned), matching
  * the other XCHAIN_NODE_SKIP_* gates.
@@ -65,6 +64,7 @@ const archiveMeta = require('./bootstrap_archive_meta');
 const config = require('../config');
 const { sleep } = require('../utils/helpers')
 const configService = require('./config_service')
+const state = require('../state'), versionService = require('./version_service')
 const { getLogger } = require('../observability/logger');
 const logger = getLogger();
 
@@ -111,7 +111,7 @@ function defaultRunner(cmd, args) {
 async function readCoinNodeChainInfo(coin, network, { runner = defaultRunner, getModuleContainer } = {}) {
     const cliArgs = NODE_CLI_ARGS[coin]
     if (!cliArgs) throw new Error(`no node CLI known for coin ${coin}`)
-    const lookup = getModuleContainer || require('../state').db.getModuleContainer.bind(require('../state').db)
+    const lookup = getModuleContainer || state.db.getModuleContainer.bind(state.db)
     const containerId = await lookup(NODE_MODULE_NAME, coin, network)
     if (!containerId) throw new Error(`no ${coin}/${network} node container is registered`)
     const { stdout } = await runner('docker', ['exec', containerId, ...cliArgs, 'getblockchaininfo'])
@@ -199,8 +199,8 @@ async function probeServiceCapability(module, coin, network, { runner = defaultR
     const probe = probeServiceStatus || gate.probeServiceStatus
     const portKey = gate.MODULE_API_PORT_KEY[module]
     if (!portKey) return null
-    const cfg = getDefaultConfig || require('./config_service').getDefaultConfig
-    const lookup = getModuleContainer || require('../state').db.getModuleContainer.bind(require('../state').db)
+    const cfg = getDefaultConfig || configService.getDefaultConfig
+    const lookup = getModuleContainer || state.db.getModuleContainer.bind(state.db)
     let containerId
     let port
     try {
@@ -252,12 +252,14 @@ async function readServiceWaits({ coin, network, module }, archiveHeight, chainI
     let version = null
     if (!payload) {
         try {
-            version = await (deps.getLocalModuleVersion || require('./version_service').getLocalModuleVersion)(module)
+            const lookup = deps.getModuleContainer || state.db.getModuleContainer.bind(state.db)
+            const containerId = await lookup(module, coin, network)
+            const readVersion = deps.getContainerModuleVersion || versionService.getContainerModuleVersion
+            if (containerId) version = await readVersion(module, coin, network, containerId)
         } catch { /* unknown version reads as "does not wait" */ }
     }
     return serviceWaitsOutCatchUp(module, { statusPayload: payload, version })
 }
-
 // The whole assessment for one restore, never throwing: reads the archive
 // height, asks the node, asks the service, compares, prints the verdict
 // (all but a refusal, which the caller prints once the archive is verified).
