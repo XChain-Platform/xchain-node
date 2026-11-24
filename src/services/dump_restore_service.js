@@ -292,5 +292,6 @@ module.exports = {
     dumpDatabasePart,
     inspectGzip,
     restoreDump,
+    validateTarget,
     containerMariaArgs
 }

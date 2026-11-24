@@ -15,7 +15,9 @@
  * Commander setup and command definitions
  ********************************************************************/
 
+const config = require('../config')
 const { resolveArgs } = require('../services/config_service')
+const { validateTarget } = require('../services/dump_restore_service')
 const { resolveNoRefInstallTarget: defaultResolveNoRefInstallTarget } = require('../services/install_target_service')
 
 // How long a release update re-taking the lock its self-update step handed back waits
@@ -235,6 +237,25 @@ async function reportAfterPreCheck(commandName, thisCommand, actionCommand, mayb
     }
 }
 
+// True when the restore-dump arguments were refused (message printed, exit requested).
+function refuseBadRestoreDumpArgs(actionCommand, deps, redactSecrets) {
+    const validate = deps.validateRestoreDumpArgs || defaultValidateRestoreDumpArgs
+    const [service, chain, network] = actionCommand.args || []
+    const options = typeof actionCommand.opts === 'function' ? actionCommand.opts() : {}
+    try {
+        validate(service, chain, network, { allowMainnet: options.allowMainnet === true })
+        return false
+    } catch (err) {
+        console.error('restore-dump failed: ' + redactSecrets(err && err.message ? err.message : err))
+        process.exit(1)
+        return true
+    }
+}
+
+function defaultValidateRestoreDumpArgs(service, chain, network, options) {
+    return validateTarget(service, chain, network, options, { config })
+}
+
 async function beforeAction(thisCommand, actionCommand, settings, deps) {
     const {
         setVerbose, maybeSelfUpdateBeforeUpdate, redactSecrets,
@@ -250,6 +271,9 @@ async function beforeAction(thisCommand, actionCommand, settings, deps) {
         commandLock(validatorLabel, settings, acquireCommandLock, true)
         return
     }
+    // Refuse a malformed restore-dump before it takes the lock or provisions anything: a bad service, chain
+    // or network is decided from the arguments alone, so it must not pay for the preCheck hub config push.
+    if (commandName === 'restore-dump' && refuseBadRestoreDumpArgs(actionCommand, deps, redactSecrets)) return
     if (skipsPreAction(actionCommand)) {
         if (commandName === 'bootstrap-republish-clear') {
             commandLock(commandName, lockSettingsFor(commandName, settings, deps.config), acquireCommandLock)
