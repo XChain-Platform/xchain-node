@@ -70,6 +70,7 @@ function makeHarness({ failHub = null } = {}) {
     })
     const statusChanged = sinon.stub().resolves()
     const dependencies = {
+        NODE_PREFIX: 'rail-a',
         HUB_MODULE_NAME: HUB,
         INDEXER_MODULE_NAME: INDEXER,
         EXTERNAL_DB: false,
@@ -121,9 +122,11 @@ describe('CLI reset hub-checkpoints', function () {
         expect(lastRecreate).to.be.lessThan(firstPurge)
         expect(lastPurge).to.be.lessThan(firstStart)
 
-        expect(harness.events.filter(event => event.startsWith('recreate:'))).to.have.length(6)
-        expect(harness.events.filter(event => event.startsWith('purge:'))).to.have.length(4)
-        expect(harness.events.filter(event => event.startsWith('start:'))).to.have.length(6)
+        expect(harness.events.filter(event => event.startsWith('recreate:'))).to.have.length(3)
+        expect(harness.events.filter(event => event.startsWith('purge:'))).to.have.length(2)
+        expect(harness.events.filter(event => event.startsWith('start:'))).to.have.length(3)
+        // The caller's own stack only: rail-b is another stack and stays untouched.
+        expect(harness.events.filter(event => event.includes('rail-b'))).to.have.length(0)
         expect(harness.statusChanged.calledOnce).to.equal(true)
 
         const mutations = harness.databaseCalls.filter(call => call.script.includes('mariadb-dump'))
@@ -134,15 +137,13 @@ describe('CLI reset hub-checkpoints', function () {
     })
 
     it('refuses before any database mutation or mirror stop when one hub will not stop', async function () {
-        const harness = makeHarness({ failHub: 'rail-b-xchain-hub-id' })
+        const harness = makeHarness({ failHub: 'rail-a-xchain-hub-id' })
         const exit = await driveReset(harness)
 
         sinon.assert.calledOnceWithExactly(exit, 1)
         expect(harness.databaseCalls.some(call => call.script.includes('mariadb-dump'))).to.equal(false)
         expect(harness.events).to.deep.equal([
-            'stop:rail-a-xchain-hub-id',
-            'stop:rail-b-xchain-hub-id',
-            'start:rail-a-xchain-hub-id'
+            'stop:rail-a-xchain-hub-id'
         ])
         expect(harness.statusChanged.called).to.equal(false)
     })

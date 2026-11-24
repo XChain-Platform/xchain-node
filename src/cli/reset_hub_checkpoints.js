@@ -45,6 +45,7 @@ const hubCheckpointDefaults = {
     // credentials); a rail database container need not carry MYSQL_ROOT_PASSWORD.
     rootPassword: () => askMariadbRootPassword(),
     EXTERNAL_DB: config.EXTERNAL_DB,
+    NODE_PREFIX: config.NODE_PREFIX,
     HUB_MODULE_NAME: config.HUB_MODULE_NAME,
     INDEXER_MODULE_NAME: config.XChainService.XCHAIN_INDEXER
 }
@@ -71,8 +72,11 @@ function parseContainerList(result) {
 }
 function railStacks(containers, deps) {
     const suffix = '-' + deps.HUB_MODULE_NAME
-    const stacks = containers.filter(container => dockerName(container).endsWith(suffix)).map((hub) => {
-        const prefix = dockerName(hub).slice(0, -suffix.length)
+    // Default-deny: only the caller's own <NODE_PREFIX>-xchain-hub is a target. Other stacks on a
+    // shared host (other prefixes) keep their hubs, indexers, explorers and tables untouched.
+    const ownHub = deps.NODE_PREFIX + suffix
+    const stacks = containers.filter(container => dockerName(container) === ownHub).map((hub) => {
+        const prefix = deps.NODE_PREFIX
         const database = containers.find(container => dockerName(container) === prefix + '-database')
         if (!database) throw new Error(`reset hub-checkpoints: no database container found for ${dockerName(hub)}`)
         const escaped = escapeRegExp(prefix)
@@ -86,7 +90,7 @@ function railStacks(containers, deps) {
         const peers = containers.filter(container => peer.test(dockerName(container)))
         return { hub, peers, database, mirrors }
     })
-    if (!stacks.length) throw new Error('reset hub-checkpoints: no rail hub containers were found')
+    if (!stacks.length) throw new Error(`reset hub-checkpoints: no rail hub container named ${ownHub} was found`)
     return stacks
 }
 async function containerEnvironment(container, deps) {

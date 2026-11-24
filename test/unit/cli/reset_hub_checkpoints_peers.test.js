@@ -44,7 +44,7 @@ function harness() {
         return { stdout: '' }
     })
     const dependencies = {
-        HUB_MODULE_NAME: 'xchain-hub', INDEXER_MODULE_NAME: 'xchain-indexer', EXTERNAL_DB: false, execFileAsync,
+        NODE_PREFIX: 'rail', HUB_MODULE_NAME: 'xchain-hub', INDEXER_MODULE_NAME: 'xchain-indexer', EXTERNAL_DB: false, execFileAsync,
         stopContainer: async (id) => { events.push('stop:' + id); return true },
         startContainer: async (id) => { events.push('start:' + id); return true },
         stopModuleContainer: (...args) => args[0](args[4]),
