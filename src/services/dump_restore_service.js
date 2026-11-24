@@ -209,12 +209,15 @@ async function importDump(context, deps) {
     const options = { stdio: ['pipe', 'ignore', 'pipe'] }
     if (command.env) options.env = command.env
     const child = deps.spawn(command.file, command.args, options)
-    child.stderr.on('data', () => {})
+    // Keep MariaDB's own error (bounded) so the operator sees which statement failed.
+    let stderr = ''
+    child.stderr.on('data', chunk => { if (stderr.length < 4096) stderr += chunk })
     const closed = new Promise((resolve, reject) => {
         child.once('error', reject)
         child.once('close', code => code === 0
             ? resolve()
-            : reject(new Error(`restore-dump: MariaDB import failed with exit ${code}`)))
+            : reject(new Error(`restore-dump: MariaDB import failed with exit ${code}` +
+                (stderr.trim() ? `: ${stderr.trim().slice(0, 2048)}` : ''))))
     })
     await Promise.all([
         deps.pipeline(

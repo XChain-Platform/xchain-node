@@ -297,6 +297,21 @@ async function namesTheStoppedServiceWhenDropFails() {
     expect(h.deps.startContainer.called).to.equal(false)
 }
 
+async function namesTheImportErrorAndTheStoppedState() {
+    const spawn = sinon.stub().callsFake((file, args) => fakeChild((input, child) => {
+        if (args.includes(DATABASE)) {
+            child.stderr.write("ERROR 1146 (42S02) at line 61: Table 'x' doesn't exist\n")
+            child.exitCode = 1
+        }
+    }))
+    const h = harness({ spawn })
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    await expectRefusal(h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true }),
+        new RegExp(`exit 1: ERROR 1146 .*doesn't exist; ${SERVICE} \\(bitcoin testnet\\) was left stopped because ${DATABASE} may be missing or partially imported; restore a sound dump before starting it`))
+    expect(h.deps.stopModuleContainer.calledOnce).to.equal(true)
+    expect(h.deps.startContainer.called).to.equal(false)
+}
+
 async function namesTheStateWhenTheRestartFails() {
     const h = harness({ startContainer: sinon.stub().rejects(new Error('docker start failed')) })
     const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
@@ -317,6 +332,7 @@ async function proceedsOnTheFallbackRootWithoutContainerEnv() {
 
 describe('DumpRestoreService', function executionTests() {
     it('names the stopped service and the uncertain database when DROP fails after the stop', namesTheStoppedServiceWhenDropFails)
+    it('reports the MariaDB import error and that the service stays stopped', namesTheImportErrorAndTheStoppedState)
     it('names the restored database and the down service when the restart fails', namesTheStateWhenTheRestartFails)
     it('proceeds when root resolves from the fallback credential, not the container env', proceedsOnTheFallbackRootWithoutContainerEnv)
     it('refuses before stopping anything when MariaDB denies root', refusesBeforeStoppingWhenRootIsDenied)
