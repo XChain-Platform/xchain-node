@@ -248,27 +248,56 @@ async function verifyRestore(context, deps) {
     return { tableCount, blockRows, maxBlockIndex }
 }
 
+// Names the state a failed restore leaves behind, so the operator reads
+// from the error alone whether the service is down and whether the
+// database can still be trusted.
+function describeLeftState(phase, context, service, chain, network) {
+    const target = `${service} (${chain} ${network})`
+    const database = context.databaseName
+    switch (phase) {
+    case 'stopping':
+        return `${target} may be stopped; ${database} was not changed`
+    case 'replacing':
+        return context.serviceContainerId
+            ? `${target} was left stopped because ${database} may be missing or partially imported; ` +
+                `restore a sound dump before starting it`
+            : `${database} may be missing or partially imported`
+    case 'starting':
+        return `${database} was restored but ${target} did not start`
+    default:
+        return `${database} was restored` + (context.serviceContainerId ? ` and ${target} was restarted` : '') +
+            ', but the restored contents could not be verified'
+    }
+}
+
 async function performRestore(context, service, chain, network, deps) {
-    let stopped = false
-    if (context.serviceContainerId) {
-        deps.logger.info(`Stopping ${service} container...`)
-        await deps.stopModuleContainer(deps.stopContainer, service, chain, network,
-            context.serviceContainerId, undefined, deps.getContainerStopSettings)
-        stopped = true
+    let phase = 'stopping'
+    try {
+        if (context.serviceContainerId) {
+            deps.logger.info(`Stopping ${service} container...`)
+            await deps.stopModuleContainer(deps.stopContainer, service, chain, network,
+                context.serviceContainerId, undefined, deps.getContainerStopSettings)
+        }
+        // From the first DDL call onward a failure may have left the database
+        // absent or partially imported. Keep the service stopped in that case
+        // so it cannot resume over an indeterminate store.
+        phase = 'replacing'
+        await runSql(context, dropRestoreDatabaseSql(context.databaseName), deps)
+        await runSql(context, createRestoreDatabaseSql(context.databaseName), deps)
+        await importDump(context, deps)
+        await runSql(context, grantRestoreDatabaseSql(context.databaseName, context.databaseUser), deps)
+        await runSql(context, flushRestorePrivilegesSql(), deps)
+        if (context.serviceContainerId) {
+            phase = 'starting'
+            deps.logger.info(`Starting ${service} container...`)
+            await deps.startContainer(context.serviceContainerId)
+        }
+        phase = 'verifying'
+        return await verifyRestore(context, deps)
+    } catch (err) {
+        const reason = String(err && err.message ? err.message : err).replace(/^restore-dump: /, '')
+        throw new Error(`restore-dump: ${reason}; ${describeLeftState(phase, context, service, chain, network)}`)
     }
-    // From the first DDL call onward a failure may have left the database
-    // absent or partially imported. Keep the service stopped in that case so
-    // it cannot resume over an indeterminate store.
-    await runSql(context, dropRestoreDatabaseSql(context.databaseName), deps)
-    await runSql(context, createRestoreDatabaseSql(context.databaseName), deps)
-    await importDump(context, deps)
-    await runSql(context, grantRestoreDatabaseSql(context.databaseName, context.databaseUser), deps)
-    await runSql(context, flushRestorePrivilegesSql(), deps)
-    if (stopped) {
-        deps.logger.info(`Starting ${service} container...`)
-        await deps.startContainer(context.serviceContainerId)
-    }
-    return verifyRestore(context, deps)
 }
 
 function createDumpRestore(overrides = {}) {

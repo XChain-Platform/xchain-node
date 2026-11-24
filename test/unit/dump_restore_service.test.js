@@ -280,7 +280,45 @@ async function probesRootBeforeTheUnchangedRestoreOrder() {
     expect(h.events).to.deep.equal(['stop', 'drop-create', 'stream', 'grant', 'restart', 'verify'])
 }
 
+// A root login that passes the probe but fails at DROP: the service is
+// already stopped, so the error must say so instead of only quoting SQL.
+async function namesTheStoppedServiceWhenDropFails() {
+    const spawn = sinon.stub().callsFake(() => fakeChild((input, child) => {
+        if (/DROP DATABASE/.test(input)) {
+            child.stderr.write(`${ROOT_DENIED}\n`)
+            child.exitCode = 1
+        }
+    }))
+    const h = harness({ spawn })
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    await expectRefusal(h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true }),
+        new RegExp(`Access denied.*${SERVICE} \\(bitcoin testnet\\) was left stopped because ${DATABASE} may be missing`))
+    expect(h.deps.stopModuleContainer.calledOnce).to.equal(true)
+    expect(h.deps.startContainer.called).to.equal(false)
+}
+
+async function namesTheStateWhenTheRestartFails() {
+    const h = harness({ startContainer: sinon.stub().rejects(new Error('docker start failed')) })
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    await expectRefusal(h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true }),
+        new RegExp(`docker start failed; ${DATABASE} was restored but ${SERVICE} \\(bitcoin testnet\\) did not start`))
+}
+
+async function proceedsOnTheFallbackRootWithoutContainerEnv() {
+    // The container carries no MYSQL_ROOT_PASSWORD; the shared resolver
+    // returns the stored credential and the probe accepts it.
+    const h = harness({ askMariadbRootPassword: sinon.stub().resolves('stored-root') })
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    const verification = await h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true })
+    expect(verification.tableCount).to.equal(17)
+    expect(h.spawns.every(call => call.options.env.MYSQL_PWD === 'stored-root')).to.equal(true)
+    expect(h.events).to.deep.equal(['stop', 'drop-create', 'stream', 'grant', 'restart', 'verify'])
+}
+
 describe('DumpRestoreService', function executionTests() {
+    it('names the stopped service and the uncertain database when DROP fails after the stop', namesTheStoppedServiceWhenDropFails)
+    it('names the restored database and the down service when the restart fails', namesTheStateWhenTheRestartFails)
+    it('proceeds when root resolves from the fallback credential, not the container env', proceedsOnTheFallbackRootWithoutContainerEnv)
     it('refuses before stopping anything when MariaDB denies root', refusesBeforeStoppingWhenRootIsDenied)
     it('refuses before stopping anything when no root password resolves', refusesBeforeStoppingWhenNoRootPassword)
     it('probes root before the unchanged stop, replace, import, restart order', probesRootBeforeTheUnchangedRestoreOrder)
