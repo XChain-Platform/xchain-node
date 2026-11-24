@@ -41,6 +41,21 @@ describe('moduleOperations', function () {
             }
         })
 
+        it('the default non-interactive refusal keeps the reset wording', async function () {
+            const { confirmDestructiveReset } = require('../../../src/operations/module_operations/repo_refs')
+            const saved = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+            Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
+            try {
+                let thrown = null
+                try { await confirmDestructiveReset('bitcoin', 'testnet', ['x']) } catch (err) { thrown = err }
+                expect(thrown).to.not.be.null
+                expect(thrown.message).to.match(/^reset: refusing to run a destructive reset/)
+            } finally {
+                if (saved) Object.defineProperty(process.stdin, 'isTTY', saved)
+                else delete process.stdin.isTTY
+            }
+        })
+
         it('refuses to reset on a non-interactive terminal without --yes/force', async function () {
             const stubs = makeStubs()
             stubs.execFile.callsFake((cmd, args, cb) => cb(null, '', ''))
