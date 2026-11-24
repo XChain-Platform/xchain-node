@@ -10,13 +10,13 @@ const { pipeline } = require('stream/promises')
 const config = require('../config')
 const { db } = require('../state')
 const { getDefaultConfig, getModuleDatabaseName } = require('./config_service')
-const { getDatabaseContainerId, getExternalDbConfig } = require('./database_service')
+const { getDatabaseContainerId, getExternalDbConfig, askMariadbRootPassword } = require('./database_service')
 const { stopContainer, startContainer, getContainerStopSettings } = require('./docker_service')
 const { stopModuleContainer } = require('./stop_budget_service')
 const { confirmDestructiveReset } = require('../operations/module_operations/repo_refs')
 const { configuredDatabaseName } = require('../utils/module_database_name')
 const { assertSafeDbIdentifier } = require('../utils/sql_safety')
-const { mariadbEnv } = require('../utils/docker_mariadb')
+const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
 const { getLogger } = require('../observability/logger')
 const {
     dropRestoreDatabaseSql,
@@ -35,6 +35,7 @@ function defaultDependencies() {
     return {
         fs, path, zlib, spawn, pipeline, Writable, config, db,
         getDefaultConfig, getModuleDatabaseName, getDatabaseContainerId, getExternalDbConfig,
+        askMariadbRootPassword, dockerMariadbArgs,
         stopContainer, startContainer, getContainerStopSettings, stopModuleContainer,
         confirmDestructiveReset, configuredDatabaseName, assertSafeDbIdentifier, mariadbEnv,
         logger: getLogger()
@@ -123,28 +124,52 @@ async function preflight(service, chain, network, options, deps) {
     deps.assertSafeDbIdentifier(databaseUser, 'database user')
     let databaseContainerId = null
     let external = null
+    let rootPassword = null
     if (deps.config.EXTERNAL_DB) {
         external = await deps.getExternalDbConfig()
     } else {
         databaseContainerId = await deps.getDatabaseContainerId()
         if (!databaseContainerId) throw new Error('restore-dump: MariaDB container not found')
+        // Root comes from the CLI's shared resolver (env override, the
+        // container's own env, then the stored credential, each verified),
+        // not from the container env alone: a database container need not
+        // carry MYSQL_ROOT_PASSWORD.
+        rootPassword = await deps.askMariadbRootPassword(chain, network)
+        if (!rootPassword) throw new Error('restore-dump: no MariaDB root password is available; nothing was stopped or changed')
     }
     const serviceContainerId = await deps.db.getModuleContainerStrict(service, chain, network)
-    return { databaseContainerId, databaseName, databaseUser, external, filePath, serviceContainerId }
+    const context = { databaseContainerId, databaseName, databaseUser, external, filePath, rootPassword, serviceContainerId }
+    await probeRootAccess(context, deps)
+    return context
 }
 
-function containerMariaArgs(containerId, databaseName = null, batch = false) {
-    const script = 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mariadb -u root' +
-        (batch ? ' -B -N' : '') +
-        (databaseName ? ' "$1"' : '')
-    const args = ['exec', '-i', containerId, 'sh', '-c', script]
-    if (databaseName) args.push('xchain-restore', databaseName)
-    return args
+// A restore that cannot authenticate must refuse before the service is
+// stopped: once performRestore has stopped it, any SQL failure leaves it
+// stopped by design, even when the failure changed nothing.
+async function probeRootAccess(context, deps) {
+    try {
+        await runSql(context, 'SELECT 1', deps)
+    } catch (err) {
+        throw new Error('restore-dump: MariaDB root access check failed; nothing was stopped or changed ' +
+            `(${err.message.replace(/^restore-dump: /, '')})`)
+    }
+}
+
+function containerMariaArgs(containerId, databaseName = null, batch = false, deps = defaultDependencies()) {
+    return deps.dockerMariadbArgs(containerId, [
+        'mariadb', '-u', 'root',
+        ...(batch ? ['-B', '-N'] : []),
+        ...(databaseName ? [databaseName] : [])
+    ], { interactive: true })
 }
 
 function mariaCommand(context, databaseName, batch, deps) {
     if (!context.external) {
-        return { file: 'docker', args: containerMariaArgs(context.databaseContainerId, databaseName, batch) }
+        return {
+            file: 'docker',
+            args: containerMariaArgs(context.databaseContainerId, databaseName, batch, deps),
+            env: deps.mariadbEnv(context.rootPassword)
+        }
     }
     const external = context.external
     return {
@@ -253,7 +278,7 @@ function createDumpRestore(overrides = {}) {
         if (!options.yes) {
             const confirmed = await deps.confirmDestructiveReset(chain, network, [
                 `${service} database (${context.databaseName}) replaced from ${context.filePath}`
-            ])
+            ], { command: 'restore-dump', action: 'destructive restore' })
             if (!confirmed) throw new Error('restore-dump: restore was not confirmed; no data was touched')
         }
         return performRestore(context, service, chain, network, deps)

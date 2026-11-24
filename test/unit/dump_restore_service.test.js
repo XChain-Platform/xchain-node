@@ -42,7 +42,7 @@ function fakeChild(onInput) {
         onInput(Buffer.concat(chunks).toString(), child)
         child.stdout.end()
         child.stderr.end()
-        setImmediate(() => child.emit('close', 0))
+        setImmediate(() => child.emit('close', child.exitCode || 0))
     })
     return child
 }
@@ -77,6 +77,7 @@ function harness(overrides = {}) {
         }),
         getModuleDatabaseName: sinon.stub().returns(DATABASE),
         getDatabaseContainerId: sinon.stub().resolves('database-container'),
+        askMariadbRootPassword: sinon.stub().resolves('root-secret'),
         stopModuleContainer: sinon.stub().callsFake(async () => { events.push('stop') }),
         stopContainer: sinon.stub(),
         startContainer: sinon.stub().callsFake(async () => { events.push('restart') }),
@@ -156,6 +157,28 @@ async function refusesHeadlessRunWithoutYes() {
     expect(h.events).to.deep.equal([])
 }
 
+async function namesTheRestoreWhenHeadlessWithoutYes() {
+    const { confirmDestructiveReset } = require('../../src/operations/module_operations/repo_refs')
+    const h = harness({ confirmDestructiveReset })
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    const saved = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
+    try {
+        let thrown = null
+        try {
+            await h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file })
+        } catch (err) { thrown = err }
+        expect(thrown).to.not.equal(null)
+        expect(thrown.message).to.match(/restore-dump/)
+        expect(thrown.message).to.match(/without --yes/)
+        expect(thrown.message).to.not.match(/reset/)
+        expect(h.events).to.deep.equal([])
+    } finally {
+        if (saved) Object.defineProperty(process.stdin, 'isTTY', saved)
+        else delete process.stdin.isTTY
+    }
+}
+
 async function restoresWithoutLeakingSecret() {
     const h = harness()
     const file = makeFile(h.directory, `${DATABASE}.20261122T120000Z.sql.gz`)
@@ -164,10 +187,13 @@ async function restoresWithoutLeakingSecret() {
     expect(verification).to.deep.equal({ tableCount: 17, blockRows: 325, maxBlockIndex: 882001 })
     expect(h.events).to.deep.equal(['stop', 'drop-create', 'stream', 'grant', 'restart', 'verify'])
     expect(h.logs).to.include(`Verified ${DATABASE}: tables=17, blocks=325, max_block_index=882001`)
-    const exposed = JSON.stringify(h.spawns) + h.logs.join('\n')
+    // The root password travels only in the child's MYSQL_PWD env, never argv or logs.
+    const exposed = JSON.stringify(h.spawns.map(call => call.args)) + h.logs.join('\n')
     expect(exposed).not.to.include('root-secret')
     expect(h.spawns.every(call => !call.args.includes('-p'))).to.equal(true)
-    expect(h.spawns.every(call => call.args.join(' ').includes('$MYSQL_ROOT_PASSWORD'))).to.equal(true)
+    expect(h.spawns.every(call => call.file === 'docker' && call.args.includes('MYSQL_PWD'))).to.equal(true)
+    expect(h.spawns.every(call => call.options.env.MYSQL_PWD === 'root-secret')).to.equal(true)
+    expect(h.deps.askMariadbRootPassword.calledWith('bitcoin', 'testnet')).to.equal(true)
     expect(h.clearHubPriceIngestWatermark.called).to.equal(false)
     expect(h.recordReindex.called).to.equal(false)
 }
@@ -209,8 +235,57 @@ async function refusesUnreadableExternalConfiguration() {
     expect(h.deps.spawn.called).to.equal(false)
 }
 
+const ROOT_DENIED = "ERROR 1045 (28000) Access denied for user 'root'@'localhost' (using password: NO)"
+
+// A database whose root login fails: every client spawn exits 1 with the
+// server's access-denied text, and every SQL text it was fed is recorded.
+function deniedRootHarness() {
+    const sql = []
+    const spawn = sinon.stub().callsFake(() => fakeChild((input, child) => {
+        sql.push(input)
+        child.stderr.write(`${ROOT_DENIED}\n`)
+        child.exitCode = 1
+    }))
+    const h = harness({ spawn })
+    return { ...h, sql }
+}
+
+async function refusesBeforeStoppingWhenRootIsDenied() {
+    const h = deniedRootHarness()
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    await expectRefusal(h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true }),
+        /root access check failed; nothing was stopped or changed.*Access denied/)
+    expect(h.deps.stopModuleContainer.called).to.equal(false)
+    expect(h.deps.startContainer.called).to.equal(false)
+    expect(h.deps.confirmDestructiveReset.called).to.equal(false)
+    expect(h.sql.some(text => /DROP|CREATE|GRANT/i.test(text))).to.equal(false)
+    expect(h.events).to.deep.equal([])
+}
+
+async function refusesBeforeStoppingWhenNoRootPassword() {
+    const h = harness({ askMariadbRootPassword: sinon.stub().resolves(null) })
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    await expectRefusal(h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true }),
+        /no MariaDB root password is available/)
+    expect(h.deps.stopModuleContainer.called).to.equal(false)
+    expect(h.deps.spawn.called).to.equal(false)
+}
+
+async function probesRootBeforeTheUnchangedRestoreOrder() {
+    const h = harness()
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    await h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true })
+    expect(h.spawns.length).to.be.greaterThan(1)
+    expect(h.deps.spawn.firstCall.calledBefore(h.deps.stopModuleContainer.firstCall)).to.equal(true)
+    expect(h.events).to.deep.equal(['stop', 'drop-create', 'stream', 'grant', 'restart', 'verify'])
+}
+
 describe('DumpRestoreService', function executionTests() {
+    it('refuses before stopping anything when MariaDB denies root', refusesBeforeStoppingWhenRootIsDenied)
+    it('refuses before stopping anything when no root password resolves', refusesBeforeStoppingWhenNoRootPassword)
+    it('probes root before the unchanged stop, replace, import, restart order', probesRootBeforeTheUnchangedRestoreOrder)
     it('uses reset confirmation and refuses a headless run without --yes', refusesHeadlessRunWithoutYes)
+    it('names restore-dump, not a reset, when the real confirmation refuses a headless run', namesTheRestoreWhenHeadlessWithoutYes)
     it('stops, replaces, imports, grants, verifies, and restarts without leaking a secret', restoresWithoutLeakingSecret)
     it('restores through the external MariaDB client without using a stale container', restoresThroughExternalClient)
     it('touches nothing when external database configuration cannot be read', refusesUnreadableExternalConfiguration)
