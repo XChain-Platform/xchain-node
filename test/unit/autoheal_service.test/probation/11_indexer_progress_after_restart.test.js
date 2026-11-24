@@ -139,6 +139,33 @@ async function keepsReseededHistory(ctx) {
     await verifyCooldownEscalation(ctx, id, readIndexerStatus)
 }
 
+// The indexer's readiness window counts no-commit time from boot, so for the
+// first ten minutes after a restart ready:true is a verdict not yet reached,
+// not evidence of recovery. The count must survive it so the later not-ready
+// status still escalates after the one restart.
+async function keepsUnjudgedReadyThenEscalates(ctx) {
+    const h = await restartThenProbe(ctx, 'xchain-indexer', {
+        ready: true, notReadyReasons: [], stallReason: null, lastBlockCommittedAt: null, chainLag: 4,
+    }, 'unjudged1')
+    expect(h.result.escalated).to.deep.equal([])
+    expect(h.state.restartCount[h.id]).to.equal(1)
+    expect(ctx.service.autohealExitCode(h.result)).to.equal(0)
+
+    ctx.stubs.getStatusFromContainer.resolves(inspectStatus('healthy', [probe(NOW + 10 * 60000, 0)]))
+    const later = await ctx.service.runAutoheal({
+        now: NOW + 11 * 60000,
+        readIndexerStatus: sinon.stub().resolves({
+            ready: false, notReadyReasons: ['behind_tip_no_commit'], stallReason: null,
+            lastBlockCommittedAt: null, chainLag: 13,
+        })
+    })
+    expect(later.escalated).to.deep.equal([{
+        module: 'xchain-indexer', coin: 'bitcoin', network: 'regtest', containerId: h.id, attempts: 1,
+    }])
+    expect(ctx.stubs.startContainer.callCount, 'escalation must not restart again').to.equal(1)
+    expect(ctx.service.autohealExitCode(later)).to.equal(2)
+}
+
 describe('Autoheal indexer progress after a restart', () => {
     const ctx = useAutoheal()
 
@@ -164,8 +191,9 @@ describe('Autoheal indexer progress after a restart', () => {
         expect(h.state.restartCount).to.not.have.property(h.id)
     })
 
-    it('clears the count for a ready indexer and for an older payload', async () => {
-        const ready = await restartThenProbe(ctx, 'xchain-indexer', { ready: true, lastBlockCommittedAt: null }, 'ready1')
+    it('clears the count for a ready indexer that committed after its restart and for an older payload', async () => {
+        const ready = await restartThenProbe(ctx, 'xchain-indexer',
+            { ready: true, stallReason: null, lastBlockCommittedAt: NOW + 4 * 60000, chainLag: 0 }, 'ready1')
         expect(ready.state.restartCount).to.not.have.property(ready.id)
         const fallback = await restartThenProbe(ctx, 'xchain-indexer', { isSynced: true }, 'fallback1')
         expect(fallback.state.restartCount).to.not.have.property(fallback.id)
@@ -177,6 +205,9 @@ describe('Autoheal indexer progress after a restart', () => {
         expect(h.state.restartCount[h.id]).to.equal(1)
         expect(ctx.service.autohealExitCode(h.result)).to.equal(0)
     })
+
+    it('keeps the count on a ready status with no post-restart commit, then escalates once it reads not ready',
+        async function keepsUnjudgedReady() { await keepsUnjudgedReadyThenEscalates(ctx) })
 
     it('keeps reseeded indexer history without progress and preserves cooldown escalation',
         async function keepsReseededIndexerHistory() { await keepsReseededHistory(ctx) })
@@ -206,7 +237,11 @@ describe('Autoheal indexer status reads', () => {
         expect(classify(null, NOW)).to.equal('unknown')
         expect(classify({ isSynced: true }, NOW)).to.equal('fallback')
         expect(classify({ ready: false, lastBlockCommittedAt: null }, NOW)).to.equal('stuck')
-        expect(classify({ ready: true, stallReason: null }, NOW)).to.equal('recovered')
+        expect(classify({ ready: true, stallReason: null }, NOW)).to.equal('pending')
+        expect(classify({ ready: true, stallReason: null, lastBlockCommittedAt: null, chainLag: 4 }, NOW)).to.equal('pending')
+        expect(classify({ ready: true, stallReason: null, lastBlockCommittedAt: null, chainLag: 0 }, NOW)).to.equal('pending')
+        expect(classify({ ready: true, stallReason: null, lastBlockCommittedAt: NOW - 1 }, NOW)).to.equal('pending')
+        expect(classify({ ready: true, stallReason: null, lastBlockCommittedAt: NOW + 1 }, NOW)).to.equal('recovered')
         expect(classify({ ready: true, stallReason: 'sync_barrier' }, NOW)).to.equal('unknown')
         expect(classify({ ready: false, lastBlockCommittedAt: NOW + 1 }, NOW)).to.equal('recovered')
         expect(classify({ ready: false, lastBlockCommittedAt: new Date(NOW - 1).toISOString() }, NOW)).to.equal('stuck')
