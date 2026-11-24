@@ -26,6 +26,7 @@ const {
     restoreTableCountSql,
     restoreBlockSummarySql
 } = require('../db/dump_restore')
+const { PING_SQL } = require('../db/connectivity')
 
 const DUMP_SUFFIX = '.sql.gz'
 const TAIL_BYTES = 64 * 1024
@@ -148,7 +149,7 @@ async function preflight(service, chain, network, options, deps) {
 // stopped by design, even when the failure changed nothing.
 async function probeRootAccess(context, deps) {
     try {
-        await runSql(context, 'SELECT 1', deps)
+        await runSql(context, PING_SQL, deps)
     } catch (err) {
         throw new Error('restore-dump: MariaDB root access check failed; nothing was stopped or changed ' +
             `(${err.message.replace(/^restore-dump: /, '')})`)

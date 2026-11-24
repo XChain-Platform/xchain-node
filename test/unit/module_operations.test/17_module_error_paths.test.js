@@ -12,18 +12,8 @@
 
 const { sinon, expect, makeStubs, loadOperations, registerLifecycleHooks, requireFromUnit } = require('./helpers/harness')
 
-describe('moduleOperations', function () {
-    let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
-    registerLifecycleHooks(stubs => {
-        ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
-    })
-
-
-    // -------------------------------------------------------------------
-    // resetModules(): destructive-reset confirmation guard
-    // -------------------------------------------------------------------
-
-        describe('resetModules(): confirmation guard', function () {
+function registerResetConfirmationGuardTests() {
+    describe('resetModules(): confirmation guard', function () {
 
         it('force=true skips the confirmation prompt entirely', async function () {
             const stubs = makeStubs()
@@ -79,6 +69,20 @@ describe('moduleOperations', function () {
             }
         })
     })
+}
+
+describe('moduleOperations', function () {
+    let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
+    registerLifecycleHooks(stubs => {
+        ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
+    })
+
+
+    // -------------------------------------------------------------------
+    // resetModules(): destructive-reset confirmation guard
+    // -------------------------------------------------------------------
+
+    registerResetConfirmationGuardTests()
 })
 
 describe('moduleOperations', function () {
