@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-22
+
+### Added
+- Added restore-dump to restore an xchain-backup dump into one decoder or indexer database.
+
 ## [0.28.0] - 2026-11-22
 
 ### Added
