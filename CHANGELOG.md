@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-11-25
+
+### Fixed
+- Scoped reset hub-checkpoints to the caller's own stack on a shared host.
+- Refused bad restore-dump arguments early and kept the database error and state when a restore fails.
+- Kept the autoheal indexer restart count until a commit after the restart.
+- Read the capability version from the target container.
+
 ## [0.28.1] - 2026-11-22
 
 ### Added
