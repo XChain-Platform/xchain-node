@@ -12,18 +12,8 @@
 
 const { sinon, expect, makeStubs, loadOperations, registerLifecycleHooks, requireFromUnit } = require('./helpers/harness')
 
-describe('moduleOperations', function () {
-    let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
-    registerLifecycleHooks(stubs => {
-        ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
-    })
-
-
-    // -------------------------------------------------------------------
-    // resetModules(): destructive-reset confirmation guard
-    // -------------------------------------------------------------------
-
-        describe('resetModules(): confirmation guard', function () {
+function registerResetConfirmationGuardTests() {
+    describe('resetModules(): confirmation guard', function () {
 
         it('force=true skips the confirmation prompt entirely', async function () {
             const stubs = makeStubs()
@@ -37,6 +27,21 @@ describe('moduleOperations', function () {
                 expect(stubs.stopContainer.called).to.be.true
             } finally {
                 if (isTTYDescriptor) Object.defineProperty(process.stdin, 'isTTY', isTTYDescriptor)
+                else delete process.stdin.isTTY
+            }
+        })
+
+        it('the default non-interactive refusal keeps the reset wording', async function () {
+            const { confirmDestructiveReset } = require('../../../src/operations/module_operations/repo_refs')
+            const saved = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+            Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
+            try {
+                let thrown = null
+                try { await confirmDestructiveReset('bitcoin', 'testnet', ['x']) } catch (err) { thrown = err }
+                expect(thrown).to.not.be.null
+                expect(thrown.message).to.match(/^reset: refusing to run a destructive reset/)
+            } finally {
+                if (saved) Object.defineProperty(process.stdin, 'isTTY', saved)
                 else delete process.stdin.isTTY
             }
         })
@@ -64,6 +69,20 @@ describe('moduleOperations', function () {
             }
         })
     })
+}
+
+describe('moduleOperations', function () {
+    let resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub
+    registerLifecycleHooks(stubs => {
+        ({ resolveInstallTargetStub, recordInstallTargetStub, resolveUpdateTargetStub } = stubs)
+    })
+
+
+    // -------------------------------------------------------------------
+    // resetModules(): destructive-reset confirmation guard
+    // -------------------------------------------------------------------
+
+    registerResetConfirmationGuardTests()
 })
 
 describe('moduleOperations', function () {

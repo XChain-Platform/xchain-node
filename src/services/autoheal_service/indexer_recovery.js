@@ -15,10 +15,14 @@
  *
  * The indexer's /status stays 200 after a restart until a block commits, so a
  * passing probe alone is not proof a wedge cleared. Once a restarted indexer
- * passes beyond probation, its status body decides: a post-restart commit or a
- * ready status clears the restart count, an explicit not-ready status escalates
- * without another restart, and an unreadable body keeps the count for the next
- * pass. Every other module keeps the probe-only rule.
+ * passes beyond probation, its status body decides: only a post-restart commit
+ * clears the restart count, an explicit not-ready status escalates without
+ * another restart, and an unreadable body keeps the count for the next pass.
+ * A ready status with no post-restart commit also keeps the count: the indexer
+ * times its no-commit window from boot, so ready:true soon after a restart
+ * means nothing has been judged yet, and clearing on it would forget the
+ * restart before the not-ready verdict could escalate it. Every other module
+ * keeps the probe-only rule.
  ********************************************************************/
 
 'use strict'
@@ -45,7 +49,7 @@ function classifyIndexerRecovery(payload, lastRestartMs) {
     if (committedAt !== null && committedAt > lastRestartMs) return 'recovered'
     if (typeof payload.ready !== 'boolean') return 'fallback'
     if (payload.ready === false) return 'stuck'
-    return payload.stallReason ? 'unknown' : 'recovered'
+    return payload.stallReason ? 'unknown' : 'pending'
 }
 
 async function defaultReadIndexerStatus(candidate) {
@@ -55,6 +59,13 @@ async function defaultReadIndexerStatus(candidate) {
     if (!port) return null
     const runner = (cmd, args) => execFileAsync(cmd, args, { timeout: 15000 })
     return probeReadinessSurface(candidate.containerId, port, '/status', runner)
+}
+
+async function indexerRecoveryVerdict(candidate, state, readIndexerStatus) {
+    if (candidate.module !== 'xchain-indexer') return { recovery: 'recovered', payload: null }
+    const payload = await readIndexerStatus(candidate)
+    const recovery = classifyIndexerRecovery(payload, state.restarts[candidate.containerId])
+    return { recovery, payload }
 }
 
 async function skipNonUnhealthy(candidate, health, state, probationMs, result, readIndexerStatus) {
@@ -67,16 +78,14 @@ async function skipNonUnhealthy(candidate, health, state, probationMs, result, r
     }
     if (!health || health.Status !== 'healthy' || state.restartCount[containerId] === undefined ||
         !isRecoveryEstablished(getLastHealthyProbeMs(health), state.restarts[containerId], probationMs)) return changed
-    let recovery = 'recovered', payload = null
-    if (module === 'xchain-indexer') {
-        payload = await readIndexerStatus(candidate)
-        recovery = classifyIndexerRecovery(payload, state.restarts[containerId])
-    }
+    const { recovery, payload } = await indexerRecoveryVerdict(candidate, state, readIndexerStatus)
     if (recovery === 'recovered' || recovery === 'fallback') {
         delete state.restartCount[containerId]
         return true
     }
-    if (recovery === 'stuck') {
+    if (recovery === 'pending') {
+        logger.info(`autoheal: ${label} reads ready after restart but has committed no block since; keeping restart history until it does`)
+    } else if (recovery === 'stuck') {
         const attempts = state.restartCount[containerId]
         result.escalated.push({ module, coin, network, containerId, attempts })
         const reasons = Array.isArray(payload.notReadyReasons) ? payload.notReadyReasons.join(', ') : ''
@@ -89,4 +98,4 @@ async function skipNonUnhealthy(candidate, health, state, probationMs, result, r
     return changed
 }
 
-module.exports = { classifyIndexerRecovery, defaultReadIndexerStatus, skipNonUnhealthy }
+module.exports = { classifyIndexerRecovery, defaultReadIndexerStatus, indexerRecoveryVerdict, skipNonUnhealthy }

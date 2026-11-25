@@ -99,6 +99,7 @@ function makeStubs(overrides = {}) {
         getInstalledCoinsAndNetworks: sinon.stub().resolves({ bitcoin: ['mainnet'] }),
         getDbRootPassword: sinon.stub().returns('rootpass'),
         setDbRootPassword: sinon.stub(),
+        setStatusUpdated: sinon.stub(),
         statusChanged: sinon.stub().resolves(),
         getStatusFromContainer: sinon.stub().resolves({ State: { Status: 'running' } }),
         forceRemoveContainerByName: sinon.stub().resolves(true),
@@ -193,7 +194,8 @@ function makeCoreStubs(stubs, defaultConstants, configService) {
         '../state': {
             db: stubs.db,
             getDbRootPassword: stubs.getDbRootPassword,
-            setDbRootPassword: stubs.setDbRootPassword
+            setDbRootPassword: stubs.setDbRootPassword,
+            setStatusUpdated: stubs.setStatusUpdated
         },
         // sleep is stubbed to keep the suite fast; redactSecrets is passed through
         // real so what the assertions see is the text an operator would see.

@@ -85,11 +85,13 @@ async function runE2ETest(coin, network, testName = null, grep = null, script = 
 }
 
 // Prompts the operator to type "yes" before a destructive reset proceeds. Reused instead of duplicated so every call site aborts the exact same way on a non-affirmative answer. Not called at all when
-// the caller passes force=true (CI/scripted resets).
-async function confirmDestructiveReset(coin, network, targets) {
+// the caller passes force=true (CI/scripted resets). A caller that is not a reset names itself through
+// refusal so a headless refusal says which command it stopped (default: the reset wording).
+async function confirmDestructiveReset(coin, network, targets, refusal = {}) {
     if (!process.stdin.isTTY) {
+        const { command = 'reset', action = 'destructive reset' } = refusal
         throw new Error(
-            'reset: refusing to run a destructive reset on a non-interactive terminal without --yes. ' +
+            `${command}: refusing to run a ${action} on a non-interactive terminal without --yes. ` +
             'Re-run with --yes to confirm.'
         )
     }

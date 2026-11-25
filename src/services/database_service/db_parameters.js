@@ -18,7 +18,7 @@
 
 let { execFile } = require('child_process')
 let { HUB_MODULE_NAME, XChainService, EXTERNAL_DB } = require('../../config')
-let { db } = require('../../state')
+let { db, setStatusUpdated } = require('../../state')
 let { getDefaultConfig, getDockerContainerImageName, getDockerNetwork } = require('../config_service')
 let { addContainerToNetwork } = require('../docker_service')
 let { assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError } = require('../db_credential_drift')
@@ -31,7 +31,7 @@ let { addUserPasswordToDatabase } = require('./user_provisioning')
 const nativeExecFile = execFile
 function configureDependencies(dependencies) {
     if (dependencies.execFile === nativeExecFile) return
-    ;({ execFile, HUB_MODULE_NAME, XChainService, EXTERNAL_DB, db, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, addContainerToNetwork, assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError, statusService, getLogger, logger } = dependencies)
+    ;({ execFile, HUB_MODULE_NAME, XChainService, EXTERNAL_DB, db, setStatusUpdated, getDefaultConfig, getDockerContainerImageName, getDockerNetwork, addContainerToNetwork, assertNoDbCredentialDrift, assertNoHubDbCredentialDrift, isDbCredentialDriftError, statusService, getLogger, logger } = dependencies)
 }
 
 async function provisionDatabaseAccount(nextCoin, nextNetwork, dbContainerId) {
@@ -92,7 +92,7 @@ async function provisionDatabaseAccounts(installedCoinsAndNetworks, dbContainerI
 }
 
 async function setDatabaseParameters() {
-    // Both callers (NodeService.installNode, ModuleService update) run this straight
+    // Install, targeted service updates, and recreate run this straight
     // after a decoder/indexer buildAndUp, and it is the ONLY step that writes the
     // freshly-minted per-install password into MariaDB. If the module set comes back
     // empty the loop body never executes and a successful return would let the caller's
@@ -102,6 +102,9 @@ async function setDatabaseParameters() {
     db.assertReady("setting decoder/indexer database parameters")
 
     const { getInstalledCoinsAndNetworks } = statusService
+    // A targeted build can register a decoder or indexer without pushing config
+    // yet. Provisioning must read that new registry row instead of a warm cache.
+    setStatusUpdated(false)
     const installedCoinsAndNetworks = await getInstalledCoinsAndNetworks()
     const dbContainerId = EXTERNAL_DB ? null : await getDatabaseContainerId()
 

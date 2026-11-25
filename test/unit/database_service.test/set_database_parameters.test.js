@@ -29,6 +29,8 @@ describe('DatabaseService', function () {
             const ds = loadDatabaseService(stubs)
             const result = await ds.setDatabaseParameters()
             expect(result).to.be.true
+            expect(stubs.setStatusUpdated.calledOnceWithExactly(false)).to.be.true
+            expect(stubs.setStatusUpdated.calledBefore(stubs.getInstalledCoinsAndNetworks)).to.be.true
             expect(stubs.addContainerToNetwork.called).to.be.true
             expect(stubs.statusChanged.called).to.be.false
         })

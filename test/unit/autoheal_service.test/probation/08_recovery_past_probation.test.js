@@ -128,7 +128,7 @@ describe('AutohealService', () => {
     // inherits the old one's doubled cooldown sits at the ceiling, six hours of
     // suppression after the probes have proved the wedge cleared.
     it('drops the earned backoff when retained probes show a recovery past the restart probation', async () => {
-        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-indexer', 'rec1')])
+        stubs.db.getAllModuleContainers.resolves([registryRow('xchain-decoder', 'rec1')])
         stubs.getStatusFromContainer.resolves(unhealthyPastGrace())
 
         await service.runAutoheal({ now: NOW })                      // restart #1

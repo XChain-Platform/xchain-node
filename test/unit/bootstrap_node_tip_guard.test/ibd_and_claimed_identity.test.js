@@ -67,7 +67,7 @@ describe('BootstrapNodeTipGuard', function () {
             const version = sinon.stub().resolves('0.16.0')
             const r = await guard.assessNodeTipForRestore({ coin: 'bitcoin', network: 'mainnet', module: DECODER, archivePath: '/x' }, {
                 readBootstrapArchiveMeta: archive, readCoinNodeChainInfo: async () => settledBehind,
-                probeServiceCapability: probe, getLocalModuleVersion: version
+                probeServiceCapability: probe, getContainerModuleVersion: version
             })
             expect(r.verdict).to.equal('behind-refuse')
             expect(r.refuse).to.equal(true)

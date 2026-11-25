@@ -10,12 +10,13 @@ const { pipeline } = require('stream/promises')
 const config = require('../config')
 const { db } = require('../state')
 const { getDefaultConfig, getModuleDatabaseName } = require('./config_service')
-const { getDatabaseContainerId } = require('./database_service')
+const { getDatabaseContainerId, getExternalDbConfig, askMariadbRootPassword } = require('./database_service')
 const { stopContainer, startContainer, getContainerStopSettings } = require('./docker_service')
 const { stopModuleContainer } = require('./stop_budget_service')
 const { confirmDestructiveReset } = require('../operations/module_operations/repo_refs')
 const { configuredDatabaseName } = require('../utils/module_database_name')
 const { assertSafeDbIdentifier } = require('../utils/sql_safety')
+const { dockerMariadbArgs, mariadbEnv } = require('../utils/docker_mariadb')
 const { getLogger } = require('../observability/logger')
 const {
     dropRestoreDatabaseSql,
@@ -25,6 +26,7 @@ const {
     restoreTableCountSql,
     restoreBlockSummarySql
 } = require('../db/dump_restore')
+const { PING_SQL } = require('../db/connectivity')
 
 const DUMP_SUFFIX = '.sql.gz'
 const TAIL_BYTES = 64 * 1024
@@ -33,9 +35,10 @@ const SUPPORTED_SERVICES = [config.XChainService.XCHAIN_DECODER, config.XChainSe
 function defaultDependencies() {
     return {
         fs, path, zlib, spawn, pipeline, Writable, config, db,
-        getDefaultConfig, getModuleDatabaseName, getDatabaseContainerId,
+        getDefaultConfig, getModuleDatabaseName, getDatabaseContainerId, getExternalDbConfig,
+        askMariadbRootPassword, dockerMariadbArgs,
         stopContainer, startContainer, getContainerStopSettings, stopModuleContainer,
-        confirmDestructiveReset, configuredDatabaseName, assertSafeDbIdentifier,
+        confirmDestructiveReset, configuredDatabaseName, assertSafeDbIdentifier, mariadbEnv,
         logger: getLogger()
     }
 }
@@ -120,26 +123,73 @@ async function preflight(service, chain, network, options, deps) {
         : 'INDEXER_DB_USER'
     const databaseUser = cfg[userKey]
     deps.assertSafeDbIdentifier(databaseUser, 'database user')
-    const databaseContainerId = await deps.getDatabaseContainerId()
-    if (!databaseContainerId) throw new Error('restore-dump: MariaDB container not found')
+    let databaseContainerId = null
+    let external = null
+    let rootPassword = null
+    if (deps.config.EXTERNAL_DB) {
+        external = await deps.getExternalDbConfig()
+    } else {
+        databaseContainerId = await deps.getDatabaseContainerId()
+        if (!databaseContainerId) throw new Error('restore-dump: MariaDB container not found')
+        // Root comes from the CLI's shared resolver (env override, the
+        // container's own env, then the stored credential, each verified),
+        // not from the container env alone: a database container need not
+        // carry MYSQL_ROOT_PASSWORD.
+        rootPassword = await deps.askMariadbRootPassword(chain, network)
+        if (!rootPassword) throw new Error('restore-dump: no MariaDB root password is available; nothing was stopped or changed')
+    }
     const serviceContainerId = await deps.db.getModuleContainerStrict(service, chain, network)
-    return { databaseContainerId, databaseName, databaseUser, filePath, serviceContainerId }
+    const context = { databaseContainerId, databaseName, databaseUser, external, filePath, rootPassword, serviceContainerId }
+    await probeRootAccess(context, deps)
+    return context
 }
 
-function containerMariaArgs(containerId, databaseName = null, batch = false) {
-    const script = 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mariadb -u root' +
-        (batch ? ' -B -N' : '') +
-        (databaseName ? ' "$1"' : '')
-    const args = ['exec', '-i', containerId, 'sh', '-c', script]
-    if (databaseName) args.push('xchain-restore', databaseName)
-    return args
+// A restore that cannot authenticate must refuse before the service is
+// stopped: once performRestore has stopped it, any SQL failure leaves it
+// stopped by design, even when the failure changed nothing.
+async function probeRootAccess(context, deps) {
+    try {
+        await runSql(context, PING_SQL, deps)
+    } catch (err) {
+        throw new Error('restore-dump: MariaDB root access check failed; nothing was stopped or changed ' +
+            `(${err.message.replace(/^restore-dump: /, '')})`)
+    }
+}
+
+function containerMariaArgs(containerId, databaseName = null, batch = false, deps = defaultDependencies()) {
+    return deps.dockerMariadbArgs(containerId, [
+        'mariadb', '-u', 'root',
+        ...(batch ? ['-B', '-N'] : []),
+        ...(databaseName ? [databaseName] : [])
+    ], { interactive: true })
+}
+
+function mariaCommand(context, databaseName, batch, deps) {
+    if (!context.external) {
+        return {
+            file: 'docker',
+            args: containerMariaArgs(context.databaseContainerId, databaseName, batch, deps),
+            env: deps.mariadbEnv(context.rootPassword)
+        }
+    }
+    const external = context.external
+    return {
+        file: 'mariadb',
+        args: [
+            '-h', external.host, '-P', String(external.port), '-u', external.root_user,
+            ...(batch ? ['-B', '-N'] : []),
+            ...(databaseName ? [databaseName] : [])
+        ],
+        env: deps.mariadbEnv(external.root_password)
+    }
 }
 
 function runSql(context, sql, deps) {
     return new Promise((resolve, reject) => {
-        const child = deps.spawn('docker', containerMariaArgs(context.databaseContainerId, null, true), {
-            stdio: ['pipe', 'pipe', 'pipe']
-        })
+        const command = mariaCommand(context, null, true, deps)
+        const options = { stdio: ['pipe', 'pipe', 'pipe'] }
+        if (command.env) options.env = command.env
+        const child = deps.spawn(command.file, command.args, options)
         let stdout = ''
         let stderr = ''
         child.stdout.on('data', chunk => { stdout += chunk })
@@ -156,15 +206,19 @@ function runSql(context, sql, deps) {
 }
 
 async function importDump(context, deps) {
-    const child = deps.spawn('docker', containerMariaArgs(
-        context.databaseContainerId, context.databaseName
-    ), { stdio: ['pipe', 'ignore', 'pipe'] })
-    child.stderr.on('data', () => {})
+    const command = mariaCommand(context, context.databaseName, false, deps)
+    const options = { stdio: ['pipe', 'ignore', 'pipe'] }
+    if (command.env) options.env = command.env
+    const child = deps.spawn(command.file, command.args, options)
+    // Keep MariaDB's own error (bounded) so the operator sees which statement failed.
+    let stderr = ''
+    child.stderr.on('data', chunk => { if (stderr.length < 4096) stderr += chunk })
     const closed = new Promise((resolve, reject) => {
         child.once('error', reject)
         child.once('close', code => code === 0
             ? resolve()
-            : reject(new Error(`restore-dump: MariaDB import failed with exit ${code}`)))
+            : reject(new Error(`restore-dump: MariaDB import failed with exit ${code}` +
+                (stderr.trim() ? `: ${stderr.trim().slice(0, 2048)}` : ''))))
     })
     await Promise.all([
         deps.pipeline(
@@ -198,27 +252,56 @@ async function verifyRestore(context, deps) {
     return { tableCount, blockRows, maxBlockIndex }
 }
 
+// Names the state a failed restore leaves behind, so the operator reads
+// from the error alone whether the service is down and whether the
+// database can still be trusted.
+function describeLeftState(phase, context, service, chain, network) {
+    const target = `${service} (${chain} ${network})`
+    const database = context.databaseName
+    switch (phase) {
+    case 'stopping':
+        return `${target} may be stopped; ${database} was not changed`
+    case 'replacing':
+        return context.serviceContainerId
+            ? `${target} was left stopped because ${database} may be missing or partially imported; ` +
+                `restore a sound dump before starting it`
+            : `${database} may be missing or partially imported`
+    case 'starting':
+        return `${database} was restored but ${target} did not start`
+    default:
+        return `${database} was restored` + (context.serviceContainerId ? ` and ${target} was restarted` : '') +
+            ', but the restored contents could not be verified'
+    }
+}
+
 async function performRestore(context, service, chain, network, deps) {
-    let stopped = false
-    if (context.serviceContainerId) {
-        deps.logger.info(`Stopping ${service} container...`)
-        await deps.stopModuleContainer(deps.stopContainer, service, chain, network,
-            context.serviceContainerId, undefined, deps.getContainerStopSettings)
-        stopped = true
+    let phase = 'stopping'
+    try {
+        if (context.serviceContainerId) {
+            deps.logger.info(`Stopping ${service} container...`)
+            await deps.stopModuleContainer(deps.stopContainer, service, chain, network,
+                context.serviceContainerId, undefined, deps.getContainerStopSettings)
+        }
+        // From the first DDL call onward a failure may have left the database
+        // absent or partially imported. Keep the service stopped in that case
+        // so it cannot resume over an indeterminate store.
+        phase = 'replacing'
+        await runSql(context, dropRestoreDatabaseSql(context.databaseName), deps)
+        await runSql(context, createRestoreDatabaseSql(context.databaseName), deps)
+        await importDump(context, deps)
+        await runSql(context, grantRestoreDatabaseSql(context.databaseName, context.databaseUser), deps)
+        await runSql(context, flushRestorePrivilegesSql(), deps)
+        if (context.serviceContainerId) {
+            phase = 'starting'
+            deps.logger.info(`Starting ${service} container...`)
+            await deps.startContainer(context.serviceContainerId)
+        }
+        phase = 'verifying'
+        return await verifyRestore(context, deps)
+    } catch (err) {
+        const reason = String(err && err.message ? err.message : err).replace(/^restore-dump: /, '')
+        throw new Error(`restore-dump: ${reason}; ${describeLeftState(phase, context, service, chain, network)}`)
     }
-    // From the first DDL call onward a failure may have left the database
-    // absent or partially imported. Keep the service stopped in that case so
-    // it cannot resume over an indeterminate store.
-    await runSql(context, dropRestoreDatabaseSql(context.databaseName), deps)
-    await runSql(context, createRestoreDatabaseSql(context.databaseName), deps)
-    await importDump(context, deps)
-    await runSql(context, grantRestoreDatabaseSql(context.databaseName, context.databaseUser), deps)
-    await runSql(context, flushRestorePrivilegesSql(), deps)
-    if (stopped) {
-        deps.logger.info(`Starting ${service} container...`)
-        await deps.startContainer(context.serviceContainerId)
-    }
-    return verifyRestore(context, deps)
 }
 
 function createDumpRestore(overrides = {}) {
@@ -228,7 +311,7 @@ function createDumpRestore(overrides = {}) {
         if (!options.yes) {
             const confirmed = await deps.confirmDestructiveReset(chain, network, [
                 `${service} database (${context.databaseName}) replaced from ${context.filePath}`
-            ])
+            ], { command: 'restore-dump', action: 'destructive restore' })
             if (!confirmed) throw new Error('restore-dump: restore was not confirmed; no data was touched')
         }
         return performRestore(context, service, chain, network, deps)
@@ -242,5 +325,6 @@ module.exports = {
     dumpDatabasePart,
     inspectGzip,
     restoreDump,
+    validateTarget,
     containerMariaArgs
 }
