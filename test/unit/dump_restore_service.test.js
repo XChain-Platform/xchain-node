@@ -312,6 +312,39 @@ async function namesTheImportErrorAndTheStoppedState() {
     expect(h.deps.startContainer.called).to.equal(false)
 }
 
+async function importEpipeDoesNotMaskTheMariadbError() {
+    // MariaDB exits on its first bad statement while the dump is still
+    // streaming: the stdin write fails with EPIPE before the process closes.
+    let importStdin = null
+    const spawn = sinon.stub().callsFake((file, args) => {
+        if (!args.includes(DATABASE)) return fakeChild(() => {})
+        const child = new EventEmitter()
+        child.stdin = new PassThrough()
+        child.stdout = new PassThrough()
+        child.stderr = new PassThrough()
+        importStdin = child.stdin
+        setTimeout(() => {
+            child.stderr.write("ERROR 1146 (42S02) at line 2: Table 'x' doesn't exist\n")
+            setTimeout(() => child.emit('close', 1), 20)
+        }, 10)
+        return child
+    })
+    const realPipeline = require('stream/promises').pipeline
+    const pipeline = (...streams) => streams[streams.length - 1] === importStdin
+        ? new Promise((resolve, reject) => setImmediate(() => reject(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))))
+        : realPipeline(...streams)
+    const h = harness({ spawn, pipeline })
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    let failure = null
+    try { await h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true }) } catch (err) { failure = err }
+    expect(failure).to.be.instanceOf(Error)
+    expect(failure.message).to.match(/exit 1: ERROR 1146 /)
+    expect(failure.message).to.not.match(/EPIPE/)
+    expect(failure.message).to.match(new RegExp(`${SERVICE} \\(bitcoin testnet\\) was left stopped`))
+    expect(h.deps.stopModuleContainer.calledOnce).to.equal(true)
+    expect(h.deps.startContainer.called).to.equal(false)
+}
+
 async function namesTheStateWhenTheRestartFails() {
     const h = harness({ startContainer: sinon.stub().rejects(new Error('docker start failed')) })
     const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
@@ -396,6 +429,7 @@ describe('DumpRestoreService', function executionTests() {
     it('accepts the target database qualified names and row text that looks like SQL', acceptsOwnQualifiedNamesAndRowText)
     it('names the stopped service and the uncertain database when DROP fails after the stop', namesTheStoppedServiceWhenDropFails)
     it('reports the MariaDB import error and that the service stays stopped', namesTheImportErrorAndTheStoppedState)
+    it('keeps the MariaDB error when the stdin pipe fails with EPIPE first', importEpipeDoesNotMaskTheMariadbError)
     it('names the restored database and the down service when the restart fails', namesTheStateWhenTheRestartFails)
     it('proceeds when root resolves from the fallback credential, not the container env', proceedsOnTheFallbackRootWithoutContainerEnv)
     it('refuses before stopping anything when MariaDB denies root', refusesBeforeStoppingWhenRootIsDenied)

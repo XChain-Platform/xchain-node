@@ -246,6 +246,9 @@ function runSql(context, sql, deps) {
     })
 }
 
+// How long a failed stdin pipe waits for the child to close and report its own error.
+const IMPORT_CLOSE_GRACE_MS = 5000
+
 async function importDump(context, deps) {
     const command = mariaCommand(context, context.databaseName, false, deps)
     const options = { stdio: ['pipe', 'ignore', 'pipe'] }
@@ -261,14 +264,29 @@ async function importDump(context, deps) {
             : reject(new Error(`restore-dump: MariaDB import failed with exit ${code}` +
                 (stderr.trim() ? `: ${stderr.trim().slice(0, 2048)}` : ''))))
     })
-    await Promise.all([
-        deps.pipeline(
+    // When MariaDB exits early on a bad statement, the stdin write fails with
+    // EPIPE before the process closes, so the pipeline rejects first. The
+    // captured MariaDB error is the useful one: prefer the close outcome.
+    closed.catch(() => {})
+    let pipeError = null
+    try {
+        await deps.pipeline(
             deps.fs.createReadStream(context.filePath),
             deps.zlib.createGunzip(),
             child.stdin
-        ),
-        closed
+        )
+    } catch (err) {
+        pipeError = err
+    }
+    if (!pipeError) return closed
+    let timer = null
+    const settled = await Promise.race([
+        closed.then(() => null, err => err),
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), IMPORT_CLOSE_GRACE_MS) })
     ])
+    clearTimeout(timer)
+    if (settled instanceof Error) throw settled
+    throw pipeError
 }
 
 function parseNonNegativeInteger(text, label) {
