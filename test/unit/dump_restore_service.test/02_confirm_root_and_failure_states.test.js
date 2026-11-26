@@ -2,7 +2,7 @@
 'use strict'
 // Confirmation, the root probe, and what each failed step reports.
 
-const { expect, sinon, EventEmitter, PassThrough, config, SERVICE, DATABASE, makeFile, expectRefusal, fakeChild, harness } = require('./helpers')
+const { expect, sinon, EventEmitter, PassThrough, config, SERVICE, DATABASE, makeFile, expectRefusal, fakeChild, harness } = require('./helpers/index.js')
 
 async function refusesHeadlessRunWithoutYes() {
     const h = harness()

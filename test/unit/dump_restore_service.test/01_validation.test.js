@@ -2,7 +2,7 @@
 'use strict'
 // Argument and file checks restore-dump makes before it touches anything.
 
-const { expect, path, config, dispatchSettings, SERVICE, DATABASE, COMPLETE_DUMP, makeFile, expectRefusal, harness } = require('./helpers')
+const { expect, path, config, dispatchSettings, SERVICE, DATABASE, COMPLETE_DUMP, makeFile, expectRefusal, harness } = require('./helpers/index.js')
 
 describe('DumpRestoreService', function validationTests() {
     it('classifies restore-dump as a lock-holding mutating command', function () {

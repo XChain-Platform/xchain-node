@@ -2,7 +2,7 @@
 'use strict'
 // Dumps must stay inside the database they name and carry a schema.
 
-const { expect, sinon, config, SERVICE, DATABASE, COMPLETE_DUMP, makeFile, expectRefusal, fakeChild, harness } = require('./helpers')
+const { expect, sinon, config, SERVICE, DATABASE, COMPLETE_DUMP, makeFile, expectRefusal, fakeChild, harness } = require('./helpers/index.js')
 
 async function importStaysInsideTheNamedDatabase() {
     const h = harness()

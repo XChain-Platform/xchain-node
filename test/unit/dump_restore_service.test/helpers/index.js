@@ -10,9 +10,9 @@ const path = require('path')
 const zlib = require('zlib')
 const { EventEmitter } = require('events')
 const { PassThrough } = require('stream')
-const config = require('../../../src/config')
-const { createDumpRestore } = require('../../../src/services/dump_restore_service')
-const { dispatchSettings } = require('../../../src/cli/dispatch')
+const config = require('../../../../src/config')
+const { createDumpRestore } = require('../../../../src/services/dump_restore_service')
+const { dispatchSettings } = require('../../../../src/cli/dispatch')
 
 const SERVICE = config.XChainService.XCHAIN_INDEXER
 const DATABASE = 'XChain_BTC_Testnet_Indexer'
