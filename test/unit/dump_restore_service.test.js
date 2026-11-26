@@ -330,7 +330,70 @@ async function proceedsOnTheFallbackRootWithoutContainerEnv() {
     expect(h.events).to.deep.equal(['stop', 'drop-create', 'stream', 'grant', 'restart', 'verify'])
 }
 
+async function importStaysInsideTheNamedDatabase() {
+    const h = harness()
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`)
+    await h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true })
+    const imports = h.spawns.filter(call => call.args.includes(DATABASE))
+    expect(imports).to.have.length(1)
+    const args = imports[0].args
+    expect(args).to.include('--one-database')
+    expect(args.indexOf('--one-database')).to.be.lessThan(args.indexOf(DATABASE))
+    expect(h.spawns.filter(call => call !== imports[0])
+        .every(call => !call.args.includes('--one-database'))).to.equal(true)
+}
+
+async function externalImportStaysInsideTheNamedDatabase() {
+    const externalConfig = Object.create(config, { EXTERNAL_DB: { value: true } })
+    const h = harness({
+        config: externalConfig,
+        getExternalDbConfig: sinon.stub().resolves({
+            host: '10.0.0.5', port: 3307, root_user: 'root', root_password: 'ext-secret'
+        }),
+        mariadbEnv: password => ({ MYSQL_PWD: password })
+    })
+    const file = makeFile(h.directory, `${DATABASE}.external.sql.gz`)
+    await h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true })
+    const args = h.spawns.find(call => call.args.includes(DATABASE)).args
+    expect(args.indexOf('--one-database')).to.be.greaterThan(-1)
+    expect(args.indexOf('--one-database')).to.be.lessThan(args.indexOf(DATABASE))
+}
+
+const FOREIGN_BODIES = {
+    'USE': 'USE XChain_BTC_Regtest_Decoder;\nCREATE TABLE canary (a INT);\nUSE ' + DATABASE + ';\n',
+    'CREATE DATABASE': 'CREATE DATABASE other;\n',
+    'DROP DATABASE': 'drop database if exists other;\n',
+    'a schema-qualified name': 'CREATE TABLE `other_db`.`canary` (a INT);\n'
+}
+
+async function refusesADumpThatWritesOutsideItsDatabase() {
+    for (const [label, body] of Object.entries(FOREIGN_BODIES)) {
+        const h = harness()
+        const contents = COMPLETE_DUMP.replace('-- Dump completed', body + '-- Dump completed')
+        const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`, contents)
+        await expectRefusal(h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true }),
+            /dump writes outside XChain_BTC_Testnet_Indexer/)
+        expect(h.deps.stopModuleContainer.called, label).to.equal(false)
+        expect(h.events, label).to.deep.equal([])
+    }
+}
+
+async function acceptsOwnQualifiedNamesAndRowText() {
+    const h = harness()
+    const contents = 'CREATE TABLE `blocks` (block_index BIGINT);\n' +
+        `CREATE VIEW v AS SELECT * FROM \`${DATABASE}\`.\`blocks\`;\n` +
+        "INSERT INTO `blocks` VALUES ('USE other; `x`.`y`');\n" +
+        '-- Dump completed on 2026-11-22 12:00:00\n'
+    const file = makeFile(h.directory, `${DATABASE}.stamp.sql.gz`, contents)
+    const verification = await h.restoreDump(SERVICE, 'bitcoin', 'testnet', { file, yes: true })
+    expect(verification.tableCount).to.equal(17)
+}
+
 describe('DumpRestoreService', function executionTests() {
+    it('passes --one-database before the database name on the container import', importStaysInsideTheNamedDatabase)
+    it('passes --one-database before the database name on the external import', externalImportStaysInsideTheNamedDatabase)
+    it('refuses a dump with USE, CREATE or DROP DATABASE, or a foreign qualified name, before stopping anything', refusesADumpThatWritesOutsideItsDatabase)
+    it('accepts the target database qualified names and row text that looks like SQL', acceptsOwnQualifiedNamesAndRowText)
     it('names the stopped service and the uncertain database when DROP fails after the stop', namesTheStoppedServiceWhenDropFails)
     it('reports the MariaDB import error and that the service stays stopped', namesTheImportErrorAndTheStoppedState)
     it('names the restored database and the down service when the restart fails', namesTheStateWhenTheRestartFails)

@@ -71,12 +71,50 @@ function dumpDatabasePart(filePath, deps) {
     return stem.slice(0, stampSeparator)
 }
 
-async function inspectGzip(filePath, deps) {
+// A restore writes only the database it names. The import runs as root, so a
+// statement that switches database or names another schema would write there
+// and still end in a clean verify. Statements are one per line in a
+// mariadb-dump (newlines inside data are escaped), and row data (INSERT and
+// REPLACE) is skipped so stored text cannot trip the scan.
+const DATABASE_SWITCH = /^\s*(?:USE\b|(?:CREATE|DROP|ALTER)\s+(?:OR\s+REPLACE\s+)?(?:DATABASE|SCHEMA)\b)/i
+const ROW_DATA = /^\s*(?:INSERT|REPLACE)\b/i
+const QUALIFIED_NAME = /`([^`]+)`\s*\.\s*`/g
+
+function foreignStatement(line, databaseName) {
+    if (ROW_DATA.test(line)) return null
+    if (DATABASE_SWITCH.test(line)) return line.trim().slice(0, 80)
+    if (!databaseName) return null
+    QUALIFIED_NAME.lastIndex = 0
+    let match
+    while ((match = QUALIFIED_NAME.exec(line)) !== null) {
+        if (match[1] !== databaseName) return line.trim().slice(0, 80)
+    }
+    return null
+}
+
+async function inspectGzip(filePath, deps, databaseName = null) {
     let tail = Buffer.alloc(0)
+    let pending = ''
+    let foreign = null
+    const scan = text => {
+        if (foreign) return
+        const lines = (pending + text).split('\n')
+        pending = lines.pop()
+        for (const line of lines) {
+            foreign = foreignStatement(line, databaseName)
+            if (foreign) return
+        }
+        if (pending.length > 1024 * 1024) pending = ''
+    }
     const sink = new deps.Writable({
         write(chunk, encoding, callback) {
             tail = Buffer.concat([tail, chunk])
             if (tail.length > TAIL_BYTES) tail = tail.subarray(tail.length - TAIL_BYTES)
+            scan(chunk.toString('latin1'))
+            callback()
+        },
+        final(callback) {
+            scan('\n')
             callback()
         }
     })
@@ -88,6 +126,9 @@ async function inspectGzip(filePath, deps) {
         )
     } catch (err) {
         throw new Error(`restore-dump: gzip integrity check failed (${err.message})`)
+    }
+    if (foreign) {
+        throw new Error(`restore-dump: dump writes outside ${databaseName || 'its own database'}: ${foreign}`)
     }
     if (!/(?:^|\n)-- Dump completed(?: on .*)?\s*$/.test(tail.toString('utf8'))) {
         throw new Error("restore-dump: decompressed dump has no final '-- Dump completed' line")
@@ -116,7 +157,7 @@ async function preflight(service, chain, network, options, deps) {
     if (namedDatabase !== databaseName) {
         throw new Error(`restore-dump: file names database ${namedDatabase}, expected ${databaseName}`)
     }
-    await inspectGzip(filePath, deps)
+    await inspectGzip(filePath, deps, databaseName)
 
     const userKey = service === deps.config.XChainService.XCHAIN_DECODER
         ? 'DECODER_DB_USER'
@@ -160,7 +201,7 @@ function containerMariaArgs(containerId, databaseName = null, batch = false, dep
     return deps.dockerMariadbArgs(containerId, [
         'mariadb', '-u', 'root',
         ...(batch ? ['-B', '-N'] : []),
-        ...(databaseName ? [databaseName] : [])
+        ...(databaseName ? ['--one-database', databaseName] : [])
     ], { interactive: true })
 }
 
@@ -178,7 +219,7 @@ function mariaCommand(context, databaseName, batch, deps) {
         args: [
             '-h', external.host, '-P', String(external.port), '-u', external.root_user,
             ...(batch ? ['-B', '-N'] : []),
-            ...(databaseName ? [databaseName] : [])
+            ...(databaseName ? ['--one-database', databaseName] : [])
         ],
         env: deps.mariadbEnv(external.root_password)
     }
