@@ -16,7 +16,8 @@
 # and rsyncs the gzipped dumps to the backup box, then prunes old copies.
 #
 # Credential safety: the MariaDB root password never leaves the DB container.
-# Each docker-exec sources the container's own MYSQL_ROOT_PASSWORD, so the
+# Each docker-exec sources the container's own MYSQL_ROOT_PASSWORD (or
+# MARIADB_ROOT_PASSWORD), so the
 # secret never reaches the host shell, argv, or any file this script writes.
 #
 # This is a DR backup, distinct from `xchain-node bootstrap create` (which
@@ -40,8 +41,8 @@ mkdir -p "$STAGE_DIR"
 # (no password exists in host argv or env in either mode).
 if docker inspect --type container --format '{{.State.Running}}' "$DB_CONTAINER" 2>/dev/null | grep -q true; then
   DB_MODE="container"
-  db_query() { docker exec "$DB_CONTAINER" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -u root -N -e "'"$1"'"'; }
-  db_dump()  { docker exec "$DB_CONTAINER" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb-dump -u root --single-transaction --routines --triggers '"$1"; }
+  db_query() { docker exec "$DB_CONTAINER" sh -c 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}" mariadb -u root -N -e "'"$1"'"'; }
+  db_dump()  { docker exec "$DB_CONTAINER" sh -c 'MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-${MARIADB_ROOT_PASSWORD:-}}" mariadb-dump -u root --single-transaction --routines --triggers '"$1"; }
 elif sudo -n mariadb -N -e 'SELECT 1' >/dev/null 2>&1; then
   DB_MODE="native"
   db_query() { sudo -n mariadb -N -e "$1"; }
@@ -53,7 +54,14 @@ fi
 echo "db mode: $DB_MODE"
 
 # Discover XChain_* DBs.
-mapfile -t DBS < <(db_query "SHOW DATABASES LIKE 'XChain\\_%'")
+# Run the listing outside a process substitution so a failed login aborts the
+# backup instead of reading as an empty install.
+if ! DB_LIST="$(db_query "SHOW DATABASES LIKE 'XChain\\_%'")"; then
+  echo "backup FAILED: could not list XChain_* databases in $DB_MODE mode (root login or query failed)" >&2
+  exit 1
+fi
+DBS=()
+[ -z "$DB_LIST" ] || mapfile -t DBS <<< "$DB_LIST"
 
 [ "${#DBS[@]}" -gt 0 ] || { echo "no XChain_* databases on $(hostname)"; exit 0; }
 
