@@ -422,7 +422,42 @@ async function acceptsOwnQualifiedNamesAndRowText() {
     expect(verification.tableCount).to.equal(17)
 }
 
+// A gzip that passes the name and trailer checks but carries no schema. A
+// restore of it would drop the live database and leave an empty one behind,
+// so it must be refused before anything is stopped, dropped or imported.
+const SCHEMA_LESS_BODIES = {
+    'a bare trailer': '-- Dump completed\n',
+    'comments and row data only': '-- MariaDB dump\nINSERT INTO `blocks` VALUES (1);\n' +
+        "INSERT INTO `t` VALUES ('CREATE TABLE x (a INT)');\n-- CREATE TABLE y (a INT)\n-- Dump completed\n"
+}
+
+async function refusesASchemaLessDumpBeforeStoppingAnything() {
+    const decoder = config.XChainService.XCHAIN_DECODER
+    const decoderDatabase = 'XChain_DOGE_Regtest_Decoder'
+    for (const [label, body] of Object.entries(SCHEMA_LESS_BODIES)) {
+        const sql = []
+        const spawn = sinon.stub().callsFake((file, args) => fakeChild(input => { sql.push({ args, input }) }))
+        const h = harness({
+            spawn,
+            getDefaultConfig: sinon.stub().resolves({
+                DECODER_DB_NAME: decoderDatabase,
+                DECODER_DB_USER: 'xchain_decoder_dogecoin_regtest'
+            }),
+            getModuleDatabaseName: sinon.stub().returns(decoderDatabase)
+        })
+        const file = makeFile(h.directory, `${decoderDatabase}.stamp.sql.gz`, body)
+        await expectRefusal(h.restoreDump(decoder, 'dogecoin', 'regtest', { file, yes: true }),
+            /no CREATE TABLE/)
+        expect(h.deps.stopModuleContainer.called, label).to.equal(false)
+        expect(h.deps.startContainer.called, label).to.equal(false)
+        expect(sql.some(call => /DROP|CREATE|GRANT/i.test(call.input)), label).to.equal(false)
+        expect(sql.some(call => call.args.includes(decoderDatabase)), label).to.equal(false)
+        expect(h.events, label).to.deep.equal([])
+    }
+}
+
 describe('DumpRestoreService', function executionTests() {
+    it('refuses a dump with no CREATE TABLE before stopping, dropping or importing anything', refusesASchemaLessDumpBeforeStoppingAnything)
     it('passes --one-database before the database name on the container import', importStaysInsideTheNamedDatabase)
     it('passes --one-database before the database name on the external import', externalImportStaysInsideTheNamedDatabase)
     it('refuses a dump with USE, CREATE or DROP DATABASE, or a foreign qualified name, before stopping anything', refusesADumpThatWritesOutsideItsDatabase)

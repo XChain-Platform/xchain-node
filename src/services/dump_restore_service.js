@@ -79,6 +79,10 @@ function dumpDatabasePart(filePath, deps) {
 const DATABASE_SWITCH = /^\s*(?:USE\b|(?:CREATE|DROP|ALTER)\s+(?:OR\s+REPLACE\s+)?(?:DATABASE|SCHEMA)\b)/i
 const ROW_DATA = /^\s*(?:INSERT|REPLACE)\b/i
 const QUALIFIED_NAME = /`([^`]+)`\s*\.\s*`/g
+// A restore replaces the live database, so a dump must prove it carries a
+// schema before anything is dropped: one that ends in the trailer but holds no
+// table definition would leave the service running over an empty database.
+const TABLE_DEFINITION = /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TABLE\b/i
 
 function foreignStatement(line, databaseName) {
     if (ROW_DATA.test(line)) return null
@@ -96,11 +100,13 @@ async function inspectGzip(filePath, deps, databaseName = null) {
     let tail = Buffer.alloc(0)
     let pending = ''
     let foreign = null
+    let hasTable = false
     const scan = text => {
         if (foreign) return
         const lines = (pending + text).split('\n')
         pending = lines.pop()
         for (const line of lines) {
+            if (!hasTable && TABLE_DEFINITION.test(line)) hasTable = true
             foreign = foreignStatement(line, databaseName)
             if (foreign) return
         }
@@ -132,6 +138,9 @@ async function inspectGzip(filePath, deps, databaseName = null) {
     }
     if (!/(?:^|\n)-- Dump completed(?: on .*)?\s*$/.test(tail.toString('utf8'))) {
         throw new Error("restore-dump: decompressed dump has no final '-- Dump completed' line")
+    }
+    if (!hasTable) {
+        throw new Error('restore-dump: dump has no CREATE TABLE statement; nothing was stopped or changed')
     }
 }
 
