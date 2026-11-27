@@ -39,6 +39,7 @@ const { sleep } = require('../utils/helpers')
 const { readKeyHolders, amountUnits, fromUnits } = require('./validator_stake_service/free_key')
 const { readSleepState } = require('./validator_stake_service/address_sleep')
 const { readTokenRow } = require('./validator_stake_service/token_balance_read')
+const { entity, nativeBalance } = require('./validator_stake_service/address_balance_read')
 const { readMintState, overAddressCap, supplyHeadroomReason } = require('./validator_stake_service/mint_rules')
 const STAKE_TICK = 'XCHAIN'
 // One stake that clears every capability floor at once. The highest is the hub's llm attestation
@@ -136,23 +137,6 @@ function resolveStakeWif(wallets) {
 function num(x) {
     const n = Number(x)
     return Number.isFinite(n) ? n : 0
-}
-
-// Unwrap an explorer entity read: some deployments answer a one-element array
-// of the record rather than the record itself (the SDK's findToken handles both).
-function entity(body) {
-    return Array.isArray(body) ? body[0] : body
-}
-
-// Read the address's native balance, or null when the explorer could not.
-// A tracker outage answers confirmed: null with tracker_available: false, and
-// Number(null) is 0, so reading it as a number would tell a funded operator to fund it.
-function nativeBalance(addr) {
-    const balances = addr && addr.balances
-    if (!balances || addr.tracker_available === false) return null
-    const confirmed = balances.confirmed
-    if (confirmed === null || confirmed === undefined || !Number.isFinite(Number(confirmed))) return null
-    return { confirmed: Number(confirmed), pending: num(balances.pending) }
 }
 
 // getToken() throws a raw HTTP error when the tick has no token record at

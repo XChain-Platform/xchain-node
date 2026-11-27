@@ -133,6 +133,7 @@ async function getDefaultConfig(module, coin, network) {
             }
         }
         networks.configureHubValidator(defaultValues)
+        networks.declareKeylessHubAccess(defaultValues)
     }
     const defaultConfig = {}
     if (coin && network && coin !== "" && network !== "") {

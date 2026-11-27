@@ -67,6 +67,7 @@
 let { COIN_NETWORKS } = require('./validator_paths')
 let { loadSdk } = require('./wallets')
 let { getActiveSignerFile, signerModuleExportsBroadcast } = require('./signer')
+const { entity, nativeBalance } = require('../validator_stake_service/address_balance_read')
 
 // ROLLCALL: every epoch (1008 BTC blocks, 30 on regtest) each validator signs
 // a message over that epoch's ledger_hash; the elected leader publishes the
@@ -144,14 +145,11 @@ async function getRollcallStatus(walletInfo, network, deps = {}) {
     if (walletInfo.dogeAddress) {
         try {
             const dogeSdk = makeSdk(coins.doge)
-            const addr = await dogeSdk.explorer.getAddress(walletInfo.dogeAddress)
-            const balance = Number(addr && addr.balances && addr.balances.confirmed)
-            const safeBalance = Number.isFinite(balance) ? balance : 0
-            out.doge = {
-                unavailable: false,
-                balance: safeBalance,
-                rollcalls: Math.floor(safeBalance / ROLLCALL_DOGE_COST_PER_CALL)
-            }
+            const balance = nativeBalance(entity(await dogeSdk.explorer.getAddress(walletInfo.dogeAddress)))
+            out.doge = balance ? {
+                unavailable: false, balance: balance.confirmed,
+                rollcalls: Math.floor(balance.confirmed / ROLLCALL_DOGE_COST_PER_CALL)
+            } : { unavailable: true, error: 'the explorer reports its DOGE balance tracker unavailable or not synced' }
         } catch (e) {
             out.doge = { unavailable: true, error: e.message }
         }

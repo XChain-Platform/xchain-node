@@ -72,11 +72,12 @@ function makeFs(overrides = {}) {
 // A fake SDK shaped like the parts the status command touches: the DOGE
 // network's address balance and the BTC network's absence read. Mirrors
 // ValidatorStakeService's test fakes (same sdk.explorer.* shape).
-function makeRollcallSdk({ dogeBalance, dogeThrows, absences, absencesThrows, noAbsencesMethod } = {}) {
+function makeRollcallSdk({ dogeBalance, dogeAddressBody, dogeThrows, absences, absencesThrows, noAbsencesMethod } = {}) {
     const explorerDoge = {
         getAddress: dogeThrows
             ? sinon.stub().rejects(new Error(dogeThrows))
-            : sinon.stub().resolves({ balances: { confirmed: dogeBalance !== undefined ? dogeBalance : '0' } })
+            : sinon.stub().resolves(dogeAddressBody !== undefined ? dogeAddressBody
+                : { balances: { confirmed: dogeBalance !== undefined ? dogeBalance : '0' } })
     }
     const explorerBtc = {}
     if (!noAbsencesMethod) {
@@ -352,6 +353,25 @@ describe('ValidatorService', function () {
                 })
                 expect(result.doge.unavailable).to.be.true
                 expect(result.doge).to.not.have.property('rollcalls')
+            })
+
+            it('treats a DOGE tracker outage as unavailable rather than zero', async function () {
+                const outage = { balances: { confirmed: null }, tracker_available: false }
+                const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeAddressBody: outage })
+                const result = await loadValidatorService(makeFs()).getRollcallStatus(WALLET, 'testnet', {
+                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+                })
+                expect(result.doge.unavailable).to.be.true
+                expect(result.doge).to.not.have.property('balance')
+            })
+
+            it('unwraps a one-record DOGE address response', async function () {
+                const body = [{ balances: { confirmed: '0.03' }, tracker_available: true }]
+                const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeAddressBody: body })
+                const result = await loadValidatorService(makeFs()).getRollcallStatus(WALLET, 'testnet', {
+                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+                })
+                expect(result.doge).to.deep.equal({ unavailable: false, balance: 0.03, rollcalls: 5 })
             })
 
             it('reports a signer with no broadcast export, naming the file, independent of wallet state', async function () {

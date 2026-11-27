@@ -128,20 +128,24 @@ function hubConfigurationTests() {
         expect(defaults.DOGE_INDEXER_URL).to.equal('http://xchain-indexer-dogecoin-testnet:3004')
     })
 
-    it('declares a keyless non-mainnet hub and consumes HUB_NETWORK after access checks', function () {
+    it('declares a keyless non-mainnet hub and consumes HUB_NETWORK after access checks', async function () {
         const { logger } = configure()
         const defaults = { HUB_NETWORK: 'REGTEST' }
         networks.configureHubAccess(defaults)
+        await networks.resolveDeploymentHubNetwork()
+        networks.declareKeylessHubAccess(defaults)
         expect(defaults).to.deep.equal({ HUB_ALLOW_UNAUTHENTICATED: 'true' })
         expect(logger.warn.calledOnce).to.equal(true)
     })
 
-    it('leaves a keyless mainnet hub fail-closed', function () {
+    it('leaves a keyless mainnet hub fail-closed', async function () {
         const { logger } = configure()
         const defaults = { HUB_NETWORK: 'mainnet' }
         networks.configureHubAccess(defaults)
+        await networks.resolveDeploymentHubNetwork()
+        networks.declareKeylessHubAccess(defaults)
         expect(defaults).to.deep.equal({})
-        expect(logger.warn.called).to.equal(false)
+        expect(logger.warn.calledOnce).to.equal(true)
     })
 
     it('injects validator environment and reports validator mode', function () {

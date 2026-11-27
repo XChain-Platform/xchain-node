@@ -23,13 +23,14 @@ const {
 let stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv
 let HUB_MODULE_NAME, getDockerContainerImageName
 let warnedHubConfigKeys = new Set()
-let hubDefaults = null, configuredHubNetwork = null
+let hubDefaults = null, configuredHubNetwork = null, deploymentHubNetworks = new Set()
 
 function configure(dependencies) {
     ({ stateModule, Coin, Network, XChainService, logger, config, peers, readSecretHostEnv,
         HUB_MODULE_NAME, getDockerContainerImageName } = dependencies)
     warnedHubConfigKeys = new Set()
     hubDefaults = configuredHubNetwork = null
+    deploymentHubNetworks = new Set()
 }
 
 // A command composes the shared hub's config many times, so each deploy-time warning
@@ -83,6 +84,7 @@ async function resolveDeploymentHubNetwork() {
     const networks = configuredHubNetwork ? new Set([configuredHubNetwork])
         : recorded ? new Set([recorded])
         : registered.size > 0 ? registered : new Set(getCommandCoinsAndNetworks().networks)
+    deploymentHubNetworks = new Set(networks)
     if (networks.size === 1) {
         const network = [...networks][0]
         await composeColocatedIndexerUrls(hubDefaults, network, registeredStacks)
@@ -265,27 +267,32 @@ function configureHubBeforeKey(defaultValues, module) {
     }
 }
 
-// A hub refuses to boot with HUB_API_KEY unset unless keyless is declared (HUB_ALLOW_UNAUTHENTICATED), so declare it for a
-// legitimate keyless posture (single-host regtest, private network) rather than crash-loop; the host env set to false keeps
-// the refusal, and `xchain-node go-live` still refuses a keyless mainnet hub (GoLiveGate).
-
-// MAINNET never gets the declaration (real funds, so fail closed); that only reaches a config-only hub, since validator
-// hubs already refuse keyless boots.
-
-// `validator init` leaves a generated key in the shared hub sidecar; read it here (host env wins) before the keyless
-// declaration, so a node holding a credential deploys authenticated.
+// Preserve the host network before resolution chooses among validator state, registered
+// stacks and command arguments. The keyless decision runs only after those sources and
+// the validator environment have been merged.
 function configureHubAccess(defaultValues) {
-    const hubNetworkIsMainnet = String(defaultValues["HUB_NETWORK"] || "").toLowerCase() === Network.MAINNET
-    if (!defaultValues["HUB_API_KEY"] && defaultValues["HUB_ALLOW_UNAUTHENTICATED"] === undefined
-        && !hubNetworkIsMainnet) {
-        defaultValues["HUB_ALLOW_UNAUTHENTICATED"] = "true"
-        logger.warn("WARNING: HUB_API_KEY is not set, so this hub is deployed with an UNAUTHENTICATED " +
-            "write surface (HUB_ALLOW_UNAUTHENTICATED=true). Anyone who can reach the hub port can drive " +
-            "updateconfig / registervalidator / reportreorg. Set HUB_API_KEY in the host env before " +
-            "exposing this hub beyond a trusted network.")
-    }
     configuredHubNetwork = String(defaultValues["HUB_NETWORK"] || "").toLowerCase() || null
     if (configuredHubNetwork) delete defaultValues["HUB_NETWORK"]
+}
+
+// Declare a legitimate keyless posture only after the deployment network is final.
+// Any mainnet candidate fails closed when resolution is ambiguous, while an explicit
+// HUB_ALLOW_UNAUTHENTICATED value remains the operator's decision.
+function declareKeylessHubAccess(defaultValues) {
+    if (defaultValues["HUB_API_KEY"] || defaultValues["HUB_ALLOW_UNAUTHENTICATED"] !== undefined) return
+    const network = String(defaultValues["HUB_NETWORK"] || "").toLowerCase()
+    if (network === Network.MAINNET || deploymentHubNetworks.has(Network.MAINNET)) {
+        warnHubConfigOnce("HUB_KEYLESS_MAINNET",
+            "WARNING: HUB_API_KEY is not set for a mainnet hub, so keyless access was not declared. " +
+            "The hub will refuse to boot until HUB_API_KEY is set in the host env, or the operator " +
+            "explicitly exports HUB_ALLOW_UNAUTHENTICATED=true for a truly private hub.")
+        return
+    }
+    defaultValues["HUB_ALLOW_UNAUTHENTICATED"] = "true"
+    logger.warn("WARNING: HUB_API_KEY is not set, so this hub is deployed with an UNAUTHENTICATED " +
+        "write surface (HUB_ALLOW_UNAUTHENTICATED=true). Anyone who can reach the hub port can drive " +
+        "updateconfig / registervalidator / reportreorg. Set HUB_API_KEY in the host env before " +
+        "exposing this hub beyond a trusted network.")
 }
 
 // Operator signer for the on-chain DOGE publishers: with XCHAIN_NODE_HUB_SIGNER_DIR set, ModuleService mounts it read-only at
@@ -333,5 +340,6 @@ module.exports = {
     composeColocatedIndexerUrls,
     configureHubBeforeKey,
     configureHubAccess,
-    configureHubValidator, HUB_PASSTHROUGH_VARS
+    configureHubValidator,
+    declareKeylessHubAccess, HUB_PASSTHROUGH_VARS
 }

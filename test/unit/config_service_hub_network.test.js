@@ -101,6 +101,7 @@ describe('ConfigService hub network and BTC indexer composition', function () {
             runningCommand('install', 'dogecoin', 'testnet')
             const cfg = await hubConfig()
             expect(cfg['HUB_NETWORK']).to.equal('testnet')
+            expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal('true')
         })
 
         it('prefers the registered stacks over the command tokens', async function () {
@@ -118,11 +119,12 @@ describe('ConfigService hub network and BTC indexer composition', function () {
         it('leaves HUB_NETWORK unset when the deployment spans two networks', async function () {
             registry.resolves([
                 stack(XChainService.XCHAIN_INDEXER, Coin.DOGECOIN, Network.TESTNET),
-                stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.REGTEST)
+                stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.MAINNET)
             ])
             runningCommand('install', 'dogecoin', 'testnet')
             const cfg = await hubConfig()
             expect(cfg['HUB_NETWORK']).to.equal(undefined)
+            expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
         })
 
         it('never overrides the operator host env', async function () {
@@ -132,13 +134,36 @@ describe('ConfigService hub network and BTC indexer composition', function () {
             expect(cfg['HUB_NETWORK']).to.equal(Network.MAINNET)
         })
 
-        // The keyless declaration reads HUB_NETWORK, and a derived mainnet must not turn a
-        // fresh mainnet install into a hub that refuses to boot for a missing key: that
-        // decision stays the operator's, exactly as it was before the derivation.
+        // The final deployment network controls the fail-closed mainnet posture even when
+        // the network came from the command rather than the host environment.
         it('does not change the keyless declaration a mainnet install already got', async function () {
             runningCommand('install', 'bitcoin', 'mainnet')
             const cfg = await hubConfig()
             expect(cfg['HUB_NETWORK']).to.equal(Network.MAINNET)
+            expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
+        })
+
+        it('withholds keyless access for a registered mainnet stack', async function () {
+            registry.resolves([stack(XChainService.XCHAIN_INDEXER, Coin.BITCOIN, Network.MAINNET)])
+            const cfg = await hubConfig()
+            expect(cfg['HUB_NETWORK']).to.equal(Network.MAINNET)
+            expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
+        })
+
+        it('withholds keyless access for a validator-recorded mainnet', async function () {
+            const validator = Object.assign({}, NO_VALIDATOR, {
+                getValidatorSettings: () => ({ network: Network.MAINNET }),
+                getValidatorEnv: () => ({ HUB_NETWORK: Network.MAINNET })
+            })
+            const cfg = await hubConfig(validator)
+            expect(cfg['HUB_NETWORK']).to.equal(Network.MAINNET)
+            expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal(undefined)
+        })
+
+        it('preserves an explicit keyless declaration on derived mainnet', async function () {
+            process.env.HUB_ALLOW_UNAUTHENTICATED = 'true'
+            runningCommand('install', 'bitcoin', 'mainnet')
+            const cfg = await hubConfig()
             expect(cfg['HUB_ALLOW_UNAUTHENTICATED']).to.equal('true')
         })
     })
