@@ -104,7 +104,7 @@ const {
 const { filterCommandParameters } = filters
 const { resolveArgs } = argumentsService
 
-async function getDefaultConfig(module, coin, network) {
+async function createDefaultValues(module, coin, network) {
     let defaultValues; if (coin && network) {
         defaultValues = defaults.createCoinDefaults(module, coin, network); applyPrefixedModuleDbUsers(defaultValues, coin, network); coins.applyCoinDefaults(defaultValues, module, coin, network)
         services.configureE2e(defaultValues, module, coin, network)
@@ -117,6 +117,10 @@ async function getDefaultConfig(module, coin, network) {
         await applyHubApiKeyFromSidecar(defaultValues)
         defaults.configureSharedAfterHubKey(defaultValues, module)
     }
+    return defaultValues
+}
+
+async function configureHubDefaults(defaultValues, module) {
     networks.configureHubBeforeKey(defaultValues, module)
     if (module === HUB_MODULE_NAME) {
         await applyHubApiKeyFromSidecar(defaultValues)
@@ -135,26 +139,33 @@ async function getDefaultConfig(module, coin, network) {
         networks.configureHubValidator(defaultValues)
         networks.declareKeylessHubAccess(defaultValues)
     }
-    const defaultConfig = {}
-    if (coin && network && coin !== "" && network !== "") {
-        const { configFilePath, localFilePath } = sidecars.coinConfigPaths(coin, network)
-        let mainFileHasCreds = false
-        if (!fs.existsSync(configFilePath)) logger.warn("Warning: config file not found: " + configFilePath + " (using defaults)")
-        else { const rl = readline.createInterface({ input: fs.createReadStream(configFilePath), crlfDelay: Infinity })
-            for await (const line of rl) mainFileHasCreds = sidecars.readMainConfigLine(defaultConfig, line) || mainFileHasCreds
-        }
-        sidecars.normalizeMainConfig(defaultConfig, configFilePath)
-        if (fs.existsSync(localFilePath)) {
-            const sidecarConfig = {}
-            const rlLocal = readline.createInterface({ input: fs.createReadStream(localFilePath), crlfDelay: Infinity })
-            for await (const line of rlLocal) sidecars.readSidecarConfigLine(sidecarConfig, line)
-            sidecars.mergeSidecarConfig(defaultConfig, sidecarConfig, localFilePath)
-        }
-        if (mainFileHasCreds) sidecars.migrateMainCredentials(defaultConfig, configFilePath, localFilePath)
-        sidecars.generateRpcCredentials(defaultConfig, localFilePath)
-        if (await database.dbPasswordCanRotate()) database.generateDatabaseCredentials(defaultConfig, localFilePath)
-        database.setIndexerHubPassword(defaultConfig, defaultValues, module)
+}
+
+async function readCoinConfig(defaultConfig, coin, network, defaultValues, module) {
+    const { configFilePath, localFilePath } = sidecars.coinConfigPaths(coin, network)
+    let mainFileHasCreds = false
+    if (!fs.existsSync(configFilePath)) logger.warn("Warning: config file not found: " + configFilePath + " (using defaults)")
+    else { const rl = readline.createInterface({ input: fs.createReadStream(configFilePath), crlfDelay: Infinity })
+        for await (const line of rl) mainFileHasCreds = sidecars.readMainConfigLine(defaultConfig, line) || mainFileHasCreds
     }
+    sidecars.normalizeMainConfig(defaultConfig, configFilePath)
+    if (fs.existsSync(localFilePath)) {
+        const sidecarConfig = {}
+        const rlLocal = readline.createInterface({ input: fs.createReadStream(localFilePath), crlfDelay: Infinity })
+        for await (const line of rlLocal) sidecars.readSidecarConfigLine(sidecarConfig, line)
+        sidecars.mergeSidecarConfig(defaultConfig, sidecarConfig, localFilePath)
+    }
+    if (mainFileHasCreds) sidecars.migrateMainCredentials(defaultConfig, configFilePath, localFilePath)
+    sidecars.generateRpcCredentials(defaultConfig, localFilePath)
+    if (await database.dbPasswordCanRotate()) database.generateDatabaseCredentials(defaultConfig, localFilePath)
+    database.setIndexerHubPassword(defaultConfig, defaultValues, module)
+}
+
+async function getDefaultConfig(module, coin, network) {
+    const defaultValues = await createDefaultValues(module, coin, network)
+    await configureHubDefaults(defaultValues, module)
+    const defaultConfig = {}
+    if (coin && network && coin !== "" && network !== "") await readCoinConfig(defaultConfig, coin, network, defaultValues, module)
     if (("HUB_DB_PASS" in defaultValues) && !("HUB_DB_PASS" in defaultConfig)) {
         defaultConfig["HUB_DB_PASS"] = await database.getOrCreateHubDbPass()
     }

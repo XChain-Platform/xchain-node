@@ -319,77 +319,80 @@ describe('ValidatorService', function () {
     })
 })
 
-describe('ValidatorService', function () {
-
-    describe('ROLLCALL status reporting', function () {
-
-        describe('getRollcallStatus()', function () {
-
-            it('degrades to unavailable, never a reassuring zero, when the absence read throws', async function () {
-                const vs = loadValidatorService(makeFs())
-                const { dogeSdk, btcSdk } = makeRollcallSdk({ absencesThrows: 'ECONNREFUSED' })
-                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
-                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
-                })
-                expect(result.absences.unavailable).to.be.true
-                expect(result.absences).to.not.have.property('streak')
-            })
-
-            it('degrades to unavailable, not "no absences", when the indexer predates this read', async function () {
-                const vs = loadValidatorService(makeFs())
-                const { dogeSdk, btcSdk } = makeRollcallSdk({ noAbsencesMethod: true })
-                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
-                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
-                })
-                expect(result.absences.unavailable).to.be.true
-                expect(result.absences.reason).to.match(/does not expose/)
-            })
-
-            it('degrades the DOGE runway to unavailable rather than reporting 0 roll calls', async function () {
-                const vs = loadValidatorService(makeFs())
-                const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeThrows: 'timeout', absences: [] })
-                const result = await vs.getRollcallStatus(WALLET, 'testnet', {
-                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
-                })
-                expect(result.doge.unavailable).to.be.true
-                expect(result.doge).to.not.have.property('rollcalls')
-            })
-
-            it('treats a DOGE tracker outage as unavailable rather than zero', async function () {
-                const outage = { balances: { confirmed: null }, tracker_available: false }
-                const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeAddressBody: outage })
-                const result = await loadValidatorService(makeFs()).getRollcallStatus(WALLET, 'testnet', {
-                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
-                })
-                expect(result.doge.unavailable).to.be.true
-                expect(result.doge).to.not.have.property('balance')
-            })
-
-            it('unwraps a one-record DOGE address response', async function () {
-                const body = [{ balances: { confirmed: '0.03' }, tracker_available: true }]
-                const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeAddressBody: body })
-                const result = await loadValidatorService(makeFs()).getRollcallStatus(WALLET, 'testnet', {
-                    makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
-                })
-                expect(result.doge).to.deep.equal({ unavailable: false, balance: 0.03, rollcalls: 5 })
-            })
-
-            it('reports a signer with no broadcast export, naming the file, independent of wallet state', async function () {
-                const OPERATOR_SIGNER = '/home/op/hub-signer/signer.js'
-                const fs = makeFs({
-                    lstatSync: fileLstat([OPERATOR_SIGNER]),
-                    readFileSync: sinon.stub().returns('module.exports = {\n  async walletSign(p) { return "s" }\n};')
-                })
-                const vs = loadValidatorService(fs)
-                const result = await vs.getRollcallStatus(null, 'testnet', {
-                    getActiveSignerFile: () => OPERATOR_SIGNER
-                })
-                // With no walletInfo, doge/absences stay null but broadcast is still computed:
-                // the check has nothing to do with whether wallets exist.
-                expect(result.doge).to.be.null
-                expect(result.absences).to.be.null
-                expect(result.broadcast).to.deep.equal({ file: OPERATOR_SIGNER, exportsBroadcast: false })
-            })
+function registerAbsenceUnavailableCases() {
+    it('degrades to unavailable, never a reassuring zero, when the absence read throws', async function () {
+        const vs = loadValidatorService(makeFs())
+        const { dogeSdk, btcSdk } = makeRollcallSdk({ absencesThrows: 'ECONNREFUSED' })
+        const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+            makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
         })
+        expect(result.absences.unavailable).to.be.true
+        expect(result.absences).to.not.have.property('streak')
     })
-})
+
+    it('degrades to unavailable, not "no absences", when the indexer predates this read', async function () {
+        const vs = loadValidatorService(makeFs())
+        const { dogeSdk, btcSdk } = makeRollcallSdk({ noAbsencesMethod: true })
+        const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+            makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+        })
+        expect(result.absences.unavailable).to.be.true
+        expect(result.absences.reason).to.match(/does not expose/)
+    })
+}
+function registerDogeUnavailableCases() {
+    it('degrades the DOGE runway to unavailable rather than reporting 0 roll calls', async function () {
+        const vs = loadValidatorService(makeFs())
+        const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeThrows: 'timeout', absences: [] })
+        const result = await vs.getRollcallStatus(WALLET, 'testnet', {
+            makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+        })
+        expect(result.doge.unavailable).to.be.true
+        expect(result.doge).to.not.have.property('rollcalls')
+    })
+
+    it('treats a DOGE tracker outage as unavailable rather than zero', async function () {
+        const outage = { balances: { confirmed: null }, tracker_available: false }
+        const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeAddressBody: outage })
+        const result = await loadValidatorService(makeFs()).getRollcallStatus(WALLET, 'testnet', {
+            makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+        })
+        expect(result.doge.unavailable).to.be.true
+        expect(result.doge).to.not.have.property('balance')
+    })
+
+    it('unwraps a one-record DOGE address response', async function () {
+        const body = [{ balances: { confirmed: '0.03' }, tracker_available: true }]
+        const { dogeSdk, btcSdk } = makeRollcallSdk({ dogeAddressBody: body })
+        const result = await loadValidatorService(makeFs()).getRollcallStatus(WALLET, 'testnet', {
+            makeSdk: routedMakeSdk(dogeSdk, btcSdk), getActiveSignerFile: () => null
+        })
+        expect(result.doge).to.deep.equal({ unavailable: false, balance: 0.03, rollcalls: 5 })
+    })
+}
+function registerSignerStatusCase() {
+    it('reports a signer with no broadcast export, naming the file, independent of wallet state', async function () {
+        const OPERATOR_SIGNER = '/home/op/hub-signer/signer.js'
+        const fs = makeFs({
+            lstatSync: fileLstat([OPERATOR_SIGNER]),
+            readFileSync: sinon.stub().returns('module.exports = {\n  async walletSign(p) { return "s" }\n};')
+        })
+        const vs = loadValidatorService(fs)
+        const result = await vs.getRollcallStatus(null, 'testnet', {
+            getActiveSignerFile: () => OPERATOR_SIGNER
+        })
+        // With no walletInfo, doge/absences stay null but broadcast is still computed:
+        // the check has nothing to do with whether wallets exist.
+        expect(result.doge).to.be.null
+        expect(result.absences).to.be.null
+        expect(result.broadcast).to.deep.equal({ file: OPERATOR_SIGNER, exportsBroadcast: false })
+    })
+}
+function registerUnavailableStatusCases() {
+    registerAbsenceUnavailableCases()
+    registerDogeUnavailableCases()
+    registerSignerStatusCase()
+}
+function registerUnavailableStatusGroup() { describe('getRollcallStatus()', registerUnavailableStatusCases) }
+function registerUnavailableStatusSuite() { describe('ROLLCALL status reporting', registerUnavailableStatusGroup) }
+describe('ValidatorService', registerUnavailableStatusSuite)
